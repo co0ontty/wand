@@ -1806,9 +1806,17 @@ export function renderApp(configPath: string): string {
         var height = container.clientHeight - paddingY;
         if (width <= 0 || height <= 0) return null;
 
-        var fontSize = 13;
-        var lineHeight = fontSize * 1.5;
-        var cellWidth = fontSize * 0.6;
+        var cellWidth = 8;
+        var lineHeight = 19.5;
+        var dimensions = state.terminal && state.terminal._core && state.terminal._core._renderService && state.terminal._core._renderService.dimensions;
+        if (dimensions && dimensions.css && dimensions.css.cell) {
+          if (dimensions.css.cell.width > 0) {
+            cellWidth = dimensions.css.cell.width;
+          }
+          if (dimensions.css.cell.height > 0) {
+            lineHeight = dimensions.css.cell.height;
+          }
+        }
         return {
           cols: Math.max(20, Math.floor(width / cellWidth)),
           rows: Math.max(10, Math.floor(height / lineHeight))
@@ -1834,9 +1842,19 @@ export function renderApp(configPath: string): string {
 
       function normalizeTerminalOutput(value) {
         var text = String(value || "");
-        text = text.split(String.fromCharCode(13, 10)).join(String.fromCharCode(10));
-        text = text.split(String.fromCharCode(13)).join(String.fromCharCode(10));
-        return text.split(String.fromCharCode(10)).join(String.fromCharCode(13, 10));
+        var normalized = "";
+        for (var i = 0; i < text.length; i += 1) {
+          var char = text.charAt(i);
+          if (char === String.fromCharCode(10)) {
+            if (i === 0 || text.charAt(i - 1) !== String.fromCharCode(13)) {
+              normalized += String.fromCharCode(13);
+            }
+            normalized += char;
+            continue;
+          }
+          normalized += char;
+        }
+        return normalized;
       }
 
       function showError(el, msg) {
