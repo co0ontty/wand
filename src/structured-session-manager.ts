@@ -1,0 +1,853 @@
+import { randomUUID } from "node:crypto";
+import { spawn, ChildProcess } from "node:child_process";
+
+import { WandStorage } from "./storage.js";
+import {
+  ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
+  ExecutionMode, ProcessEvent, SessionRunner, SessionSnapshot, StructuredSessionState,
+  WandConfig,
+} from "./types.js";
+
+interface CreateStructuredSessionOptions {
+  cwd: string;
+  mode: ExecutionMode;
+  prompt?: string;
+  runner?: SessionRunner;
+}
+
+/** Accumulated state while streaming a single claude -p response. */
+interface StreamingTurnState {
+  blocks: ContentBlock[];
+  result: string;
+  sessionId: string | null;
+  model?: string;
+  usage?: ConversationTurn["usage"];
+}
+
+const STREAM_EMIT_DEBOUNCE_MS = 16;
+
+function isRunningAsRoot(): boolean {
+  return process.getuid?.() === 0 || process.geteuid?.() === 0;
+}
+
+/** Enrich a snapshot with a derived summary from the first user message. */
+function withSummary(snapshot: SessionSnapshot): SessionSnapshot {
+  if (snapshot.summary) return snapshot;
+  const messages = snapshot.messages ?? [];
+  for (const msg of messages) {
+    if (msg.role !== "user") continue;
+    for (const block of msg.content) {
+      if (block.type === "text" && block.text.trim()) {
+        return { ...snapshot, summary: block.text.trim().slice(0, 120) };
+      }
+    }
+    break;
+  }
+  return snapshot;
+}
+
+/** Should we auto-approve permissions for this mode? */
+function shouldAutoApproveForMode(mode: ExecutionMode): boolean {
+  return mode === "full-access" || mode === "managed" || mode === "auto-edit";
+}
+
+export class StructuredSessionManager {
+  private readonly sessions = new Map<string, SessionSnapshot>();
+  private readonly pendingChildren = new Map<string, ChildProcess>();
+  private emitEvent: ((event: ProcessEvent) => void) | null = null;
+
+  constructor(private readonly storage: WandStorage, private readonly config: WandConfig) {
+    for (const snapshot of this.storage.loadSessions()) {
+      if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
+      const restoredStatus = snapshot.status === "running" ? "stopped" : snapshot.status;
+      const restored: SessionSnapshot = {
+        ...snapshot,
+        sessionKind: "structured",
+        runner: snapshot.runner ?? "claude-cli-print",
+        status: restoredStatus,
+        autoApprovePermissions: snapshot.autoApprovePermissions ?? shouldAutoApproveForMode(snapshot.mode),
+        approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
+        pendingEscalation: null,
+        permissionBlocked: false,
+        structuredState: {
+          runner: snapshot.runner ?? "claude-cli-print",
+          model: snapshot.structuredState?.model,
+          lastError: snapshot.structuredState?.lastError ?? null,
+          inFlight: false,
+          activeRequestId: null,
+        },
+      };
+      this.sessions.set(restored.id, restored);
+      this.storage.saveSession(restored);
+    }
+  }
+
+  setEventEmitter(emitEvent: (event: ProcessEvent) => void): void {
+    this.emitEvent = emitEvent;
+  }
+
+  list(): SessionSnapshot[] {
+    return Array.from(this.sessions.values())
+      .map(withSummary)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
+  get(id: string): SessionSnapshot | null {
+    const s = this.sessions.get(id);
+    return s ? withSummary(s) : null;
+  }
+
+  createSession(options: CreateStructuredSessionOptions): SessionSnapshot {
+    const id = randomUUID();
+    const startedAt = new Date().toISOString();
+    const prompt = options.prompt?.trim();
+    const snapshot: SessionSnapshot = {
+      id,
+      sessionKind: "structured",
+      runner: options.runner ?? "claude-cli-print",
+      command: "claude -p --output-format stream-json",
+      cwd: options.cwd,
+      mode: options.mode,
+      status: prompt ? "running" : "stopped",
+      exitCode: null,
+      startedAt,
+      endedAt: prompt ? null : startedAt,
+      output: "",
+      archived: false,
+      archivedAt: null,
+      claudeSessionId: null,
+      messages: [],
+      structuredState: {
+        runner: options.runner ?? "claude-cli-print",
+        inFlight: false,
+        activeRequestId: null,
+        lastError: null,
+      },
+      autoRecovered: false,
+      autoApprovePermissions: shouldAutoApproveForMode(options.mode),
+      approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
+    };
+
+    this.sessions.set(id, snapshot);
+    this.storage.saveSession(snapshot);
+    this.emit({ type: "started", sessionId: id, data: { sessionKind: "structured" } });
+
+    if (prompt) {
+      void this.sendMessage(id, prompt);
+    }
+
+    return snapshot;
+  }
+
+  async sendMessage(id: string, input: string): Promise<SessionSnapshot> {
+    let session = this.requireSession(id);
+    const prompt = input.trim();
+    if (!prompt) return session;
+    console.log("[WAND] StructuredSessionManager.sendMessage id:", id, "inFlight:", session.structuredState?.inFlight, "hasPendingChild:", this.pendingChildren.has(id), "status:", session.status);
+    if (session.structuredState?.inFlight) {
+      const child = this.pendingChildren.get(id);
+      const childAlive = child && !child.killed && child.exitCode === null;
+      if (!childAlive) {
+        // Auto-recover: inFlight is stuck but child process is gone or dead
+        if (child) this.pendingChildren.delete(id);
+        const recovered: SessionSnapshot = {
+          ...session,
+          status: "stopped",
+          endedAt: session.endedAt ?? new Date().toISOString(),
+          structuredState: {
+            ...(session.structuredState as StructuredSessionState),
+            inFlight: false,
+            activeRequestId: null,
+          },
+        };
+        this.sessions.set(id, recovered);
+        this.storage.saveSession(recovered);
+        session = recovered;
+      } else {
+        throw new Error("结构化会话正在处理中，请稍后再试。");
+      }
+    }
+
+    const userTurn: ConversationTurn = {
+      role: "user",
+      content: [{ type: "text", text: prompt }],
+    };
+    const requestId = randomUUID();
+    const updated: SessionSnapshot = {
+      ...session,
+        status: "running",
+        exitCode: null,
+        endedAt: null,
+      messages: [...(session.messages ?? []), userTurn],
+      structuredState: {
+        ...(session.structuredState ?? { runner: "claude-cli-print", lastError: null, inFlight: false, activeRequestId: null }),
+        inFlight: true,
+        activeRequestId: requestId,
+        lastError: null,
+      },
+    };
+    this.sessions.set(id, updated);
+    this.storage.saveSession(updated);
+    this.emit({
+      type: "output",
+      sessionId: id,
+      data: { output: updated.output, messages: updated.messages, sessionKind: "structured" },
+    });
+    this.emit({
+      type: "status",
+      sessionId: id,
+      data: { status: "running", sessionKind: "structured" },
+    });
+
+    try {
+      await this.runClaudeStreaming(id, updated, prompt);
+      const finished = this.requireSession(id);
+      return finished;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const current = this.sessions.get(id);
+      if (!current) throw error;
+      const failed: SessionSnapshot = {
+        ...current,
+        status: "failed",
+        exitCode: 1,
+        endedAt: new Date().toISOString(),
+        structuredState: {
+          ...(current.structuredState as StructuredSessionState),
+          inFlight: false,
+          activeRequestId: null,
+          lastError: message,
+        },
+      };
+      this.sessions.set(id, failed);
+      this.storage.saveSession(failed);
+      this.emit({
+        type: "status",
+        sessionId: id,
+        data: { status: failed.status, error: message, sessionKind: "structured" },
+      });
+      this.emit({
+        type: "ended",
+        sessionId: id,
+        data: { status: failed.status, exitCode: 1, messages: failed.messages, sessionKind: "structured", structuredState: failed.structuredState },
+      });
+      throw error;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Permission resolution (called from server routes)
+  // ---------------------------------------------------------------------------
+
+  /** Approve a pending permission request. */
+  approvePermission(sessionId: string): SessionSnapshot {
+    return this.resolvePermission(sessionId, true);
+  }
+
+  /** Deny a pending permission request. */
+  denyPermission(sessionId: string): SessionSnapshot {
+    return this.resolvePermission(sessionId, false);
+  }
+
+  /** Toggle auto-approve for the session. */
+  toggleAutoApprove(sessionId: string): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const newVal = !session.autoApprovePermissions;
+    const updated: SessionSnapshot = { ...session, autoApprovePermissions: newVal };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    return updated;
+  }
+
+  /** Resolve a specific escalation by requestId. */
+  resolveEscalation(sessionId: string, requestId: string, resolution?: "approve_once" | "approve_turn" | "deny"): SessionSnapshot {
+    const approved = resolution !== "deny";
+    const session = this.requireSession(sessionId);
+    const scope = session.pendingEscalation?.scope;
+    if (approved && scope) {
+      this.incrementApprovalStats(session, scope);
+    }
+    const updated: SessionSnapshot = {
+      ...session,
+      pendingEscalation: null,
+      permissionBlocked: false,
+      lastEscalationResult: session.pendingEscalation ? {
+        requestId: session.pendingEscalation.requestId,
+        resolution: approved ? "approve_once" : "deny",
+        reason: approved ? "user_approved" : "user_denied",
+      } : session.lastEscalationResult ?? null,
+    };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    this.emit({
+      type: "status",
+      sessionId,
+      data: { permissionBlocked: false, approvalStats: updated.approvalStats, sessionKind: "structured" },
+    });
+    return updated;
+  }
+
+  stop(id: string): SessionSnapshot {
+    const session = this.requireSession(id);
+    const child = this.pendingChildren.get(id);
+    if (child) {
+      child.kill();
+      this.pendingChildren.delete(id);
+    }
+    const stopped: SessionSnapshot = {
+      ...session,
+      status: "stopped",
+      endedAt: new Date().toISOString(),
+      pendingEscalation: null,
+      permissionBlocked: false,
+      structuredState: {
+        ...(session.structuredState ?? { runner: "claude-cli-print", lastError: null, inFlight: false, activeRequestId: null }),
+        inFlight: false,
+        activeRequestId: null,
+      },
+    };
+    this.sessions.set(id, stopped);
+    this.storage.saveSession(stopped);
+    this.emit({ type: "ended", sessionId: id, data: { status: stopped.status, exitCode: null, messages: stopped.messages, sessionKind: "structured" } });
+    return stopped;
+  }
+
+  delete(id: string): void {
+    const child = this.pendingChildren.get(id);
+    if (child) {
+      child.kill();
+      this.pendingChildren.delete(id);
+    }
+    this.sessions.delete(id);
+    this.storage.deleteSession(id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  private requireSession(id: string): SessionSnapshot {
+    const session = this.sessions.get(id);
+    if (!session) {
+      throw new Error("未找到该结构化会话。");
+    }
+    return session;
+  }
+
+  private emit(event: ProcessEvent): void {
+    if (this.emitEvent) {
+      this.emitEvent(event);
+    }
+  }
+
+  private resolvePermission(sessionId: string, approved: boolean): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const scope = session.pendingEscalation?.scope;
+    if (approved && scope) {
+      this.incrementApprovalStats(session, scope);
+    }
+    const updated: SessionSnapshot = {
+      ...session,
+      pendingEscalation: null,
+      permissionBlocked: false,
+      lastEscalationResult: session.pendingEscalation ? {
+        requestId: session.pendingEscalation.requestId,
+        resolution: approved ? "approve_once" : "deny",
+        reason: approved ? "user_approved" : "user_denied",
+      } : session.lastEscalationResult ?? null,
+    };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    this.emit({
+      type: "status",
+      sessionId,
+      data: { permissionBlocked: false, approvalStats: updated.approvalStats, sessionKind: "structured" },
+    });
+    return updated;
+  }
+
+  private incrementApprovalStats(session: SessionSnapshot, scope: EscalationScope): void {
+    const prev = session.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 };
+    const stats = { ...prev };
+    if (scope === "run_command" || scope === "dangerous_shell") {
+      stats.command++;
+    } else if (scope === "write_file") {
+      stats.file++;
+    } else {
+      stats.tool++;
+    }
+    stats.total++;
+    session.approvalStats = stats;
+  }
+
+  // ---------------------------------------------------------------------------
+  // CLI argument construction
+  // ---------------------------------------------------------------------------
+  private buildPermissionArgs(mode: ExecutionMode): string[] {
+    if (!isRunningAsRoot()) {
+      if (mode === "full-access" || mode === "managed") {
+        return ["--permission-mode", "bypassPermissions"];
+      }
+      if (mode === "auto-edit") {
+        return ["--permission-mode", "acceptEdits"];
+      }
+      return [];
+    }
+
+    // Root: Claude CLI refuses bypassPermissions.
+    // acceptEdits auto-approves within CWD; --allowedTools extends to all paths.
+    if (shouldAutoApproveForMode(mode)) {
+      return [
+        "--permission-mode", "acceptEdits",
+        "--allowedTools", "Bash", "Edit", "Write", "Read", "Glob", "Grep",
+        "NotebookEdit", "WebFetch", "WebSearch",
+      ];
+    }
+    return [];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Streaming claude -p execution
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Spawn `claude -p --output-format stream-json` and parse NDJSON lines as
+   * they arrive, emitting incremental WebSocket events so the UI can render
+   * text / thinking / tool_use blocks in real-time.
+   *
+   * Permission handling:
+   * - Non-root + full-access/managed: --permission-mode bypassPermissions
+   * - Non-root + auto-edit: --permission-mode acceptEdits
+   * - Root: --permission-mode acceptEdits + --allowedTools (extends approval
+   *   outside CWD). stdin is always "ignore" — no ACP bidirectional control.
+   */
+  private runClaudeStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const args = ["-p", "--verbose", "--output-format", "stream-json"];
+      console.log("[WAND] runClaudeStreaming sessionId:", sessionId, "mode:", session.mode, "claudeSessionId:", session.claudeSessionId);
+
+      // Add permission args based on mode
+      const permArgs = this.buildPermissionArgs(session.mode);
+      args.push(...permArgs);
+
+      // In managed mode, append autonomous system prompt
+      if (session.mode === "managed") {
+        args.push(
+          "--append-system-prompt",
+          "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.",
+        );
+      }
+
+      // Append language preference if configured
+      const language = this.config.language?.trim();
+      if (language) {
+        args.push(
+          "--append-system-prompt",
+          `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`,
+        );
+      }
+
+      if (session.claudeSessionId) {
+        args.push("--resume", session.claudeSessionId);
+      }
+      args.push(prompt);
+
+      const child = spawn("claude", args, {
+        cwd: session.cwd,
+        env: process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      console.log("[WAND] spawned claude -p pid:", child.pid, "args:", args.filter(a => a !== prompt).join(" "));
+      this.pendingChildren.set(sessionId, child);
+
+      const turnState: StreamingTurnState = {
+        blocks: [],
+        result: "",
+        sessionId: null,
+        model: undefined,
+        usage: undefined,
+      };
+
+      // Line buffer for NDJSON: chunks from stdout may split mid-line.
+      let lineBuf = "";
+
+      // Debounce output events to avoid flooding the WebSocket.
+      let emitTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const flushEmit = (): void => {
+        if (emitTimer) {
+          clearTimeout(emitTimer);
+          emitTimer = null;
+        }
+        const current = this.sessions.get(sessionId);
+        if (!current) return;
+        this.emit({
+          type: "output",
+          sessionId,
+          data: { output: current.output, messages: current.messages, sessionKind: "structured" },
+        });
+      };
+
+      const scheduleEmit = (): void => {
+        if (!emitTimer) {
+          emitTimer = setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS);
+        }
+      };
+
+      /** Update the session snapshot with the current in-progress assistant turn. */
+      const syncSnapshot = (): void => {
+        const current = this.sessions.get(sessionId);
+        if (!current) return;
+        const inProgressTurn: ConversationTurn = {
+          role: "assistant",
+          content: this.compactContentBlocks([...turnState.blocks], turnState.result),
+          usage: turnState.usage,
+        };
+        // Replace or append the in-progress assistant turn at the end of messages.
+        const msgs = [...(current.messages ?? [])];
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg && lastMsg.role === "assistant") {
+          msgs[msgs.length - 1] = inProgressTurn;
+        } else {
+          msgs.push(inProgressTurn);
+        }
+        const patched: SessionSnapshot = {
+          ...current,
+          claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+          messages: msgs,
+          structuredState: {
+            ...(current.structuredState as StructuredSessionState),
+            model: turnState.model ?? current.structuredState?.model,
+          },
+        };
+        this.sessions.set(sessionId, patched);
+      };
+
+      const processLine = (line: string): void => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        let parsed: any;
+        try {
+          parsed = JSON.parse(trimmed);
+        } catch {
+          return;
+        }
+
+        if (parsed && parsed.type === "assistant" && parsed.message) {
+          const extracted = this.extractAssistantMessage(parsed.message);
+          if (extracted.content.length > 0) {
+            turnState.blocks.push(...extracted.content);
+          }
+          // NOTE: usage from streaming "assistant" events contains partial/incremental
+          // token counts (e.g. output_tokens=1 during streaming) and is NOT accurate.
+          // We only use the authoritative usage from the final "result" event.
+          syncSnapshot();
+          scheduleEmit();
+          return;
+        }
+
+        if (parsed && parsed.type === "user" && parsed.message && Array.isArray(parsed.message.content)) {
+          for (const block of parsed.message.content) {
+            if (block && block.type === "tool_result") {
+              turnState.blocks.push({
+                type: "tool_result",
+                tool_use_id: typeof block.tool_use_id === "string" ? block.tool_use_id : "",
+                content: this.normalizeToolResultContent(block.content),
+                is_error: block.is_error === true,
+              });
+            }
+          }
+          syncSnapshot();
+          scheduleEmit();
+          return;
+        }
+
+        if (parsed && parsed.type === "result") {
+          if (typeof parsed.result === "string") {
+            turnState.result = parsed.result.trim();
+          }
+          if (typeof parsed.session_id === "string") {
+            turnState.sessionId = parsed.session_id;
+          }
+          turnState.model = this.extractModelName(parsed.modelUsage) ?? turnState.model;
+          turnState.usage = this.extractUsage(parsed) ?? turnState.usage;
+          syncSnapshot();
+          scheduleEmit();
+        }
+      };
+
+      let stderr = "";
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        lineBuf += chunk.toString();
+        const lines = lineBuf.split("\n");
+        // Keep the last (possibly incomplete) segment in the buffer.
+        lineBuf = lines.pop() ?? "";
+        for (const line of lines) {
+          processLine(line);
+        }
+      });
+
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      child.on("error", (error) => {
+        console.log("[WAND] claude -p child error:", error.message);
+        this.pendingChildren.delete(sessionId);
+        if (emitTimer) clearTimeout(emitTimer);
+        reject(error);
+      });
+
+      child.on("close", (code) => {
+        console.log("[WAND] claude -p child close code:", code, "stderr:", stderr.substring(0, 200));
+        this.pendingChildren.delete(sessionId);
+
+        // Process any remaining data in the line buffer.
+        if (lineBuf.trim()) {
+          processLine(lineBuf);
+          lineBuf = "";
+        }
+
+        // Flush any pending debounced emit before finalizing.
+        flushEmit();
+
+        // Finalize the session snapshot.
+        const current = this.sessions.get(sessionId);
+        if (!current) {
+          reject(new Error("Session removed during execution."));
+          return;
+        }
+
+        if (code !== 0 && code !== null) {
+          const errorText = stderr.trim() || `claude -p exited with code ${code}`;
+          const failureTurn: ConversationTurn = {
+            role: "assistant",
+            content: [{ type: "text", text: `结构化会话执行失败：${errorText}` }],
+          };
+          const msgs = [...(current.messages ?? [])];
+          const lastMsg = msgs[msgs.length - 1];
+          if (lastMsg && lastMsg.role === "assistant") {
+            msgs[msgs.length - 1] = failureTurn;
+          } else {
+            msgs.push(failureTurn);
+          }
+          const failed: SessionSnapshot = {
+            ...current,
+            status: "failed",
+            exitCode: code,
+            endedAt: new Date().toISOString(),
+            output: errorText,
+            claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+            messages: msgs,
+            pendingEscalation: null,
+            permissionBlocked: false,
+            structuredState: {
+              ...(current.structuredState as StructuredSessionState),
+              model: turnState.model ?? current.structuredState?.model,
+              inFlight: false,
+              activeRequestId: null,
+              lastError: errorText,
+            },
+          };
+          this.sessions.set(sessionId, failed);
+          this.storage.saveSession(failed);
+          this.emit({
+            type: "output",
+            sessionId,
+            data: { output: failed.output, messages: failed.messages, sessionKind: "structured" },
+          });
+          this.emit({
+            type: "ended",
+            sessionId,
+            data: { status: failed.status, exitCode: failed.exitCode, messages: failed.messages, sessionKind: "structured", structuredState: failed.structuredState },
+          });
+          reject(new Error(errorText));
+          return;
+        }
+
+        // Build the final assistant turn.
+        const finalContent = this.compactContentBlocks([...turnState.blocks], turnState.result);
+        const assistantTurn: ConversationTurn = {
+          role: "assistant",
+          content: finalContent,
+          usage: turnState.usage,
+        };
+
+        // Ensure the final messages list has the completed assistant turn.
+        const msgs = [...(current.messages ?? [])];
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg && lastMsg.role === "assistant") {
+          msgs[msgs.length - 1] = assistantTurn;
+        } else {
+          msgs.push(assistantTurn);
+        }
+
+        const finished: SessionSnapshot = {
+          ...current,
+          status: "stopped",
+          exitCode: 0,
+          endedAt: new Date().toISOString(),
+          output: turnState.result,
+          claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+          messages: msgs,
+          pendingEscalation: null,
+          permissionBlocked: false,
+          structuredState: {
+            ...(current.structuredState as StructuredSessionState),
+            model: turnState.model ?? current.structuredState?.model,
+            inFlight: false,
+            activeRequestId: null,
+            lastError: null,
+          },
+        };
+        this.sessions.set(sessionId, finished);
+        this.storage.saveSession(finished);
+
+        this.emit({
+          type: "output",
+          sessionId,
+          data: { output: finished.output, messages: finished.messages, sessionKind: "structured" },
+        });
+        this.emit({
+          type: "ended",
+          sessionId,
+          data: { status: finished.status, exitCode: 0, messages: finished.messages, sessionKind: "structured", structuredState: finished.structuredState },
+        });
+
+        // Auto-continue after plan mode exit: when Claude calls ExitPlanMode,
+        // the `-p` process exits because stdin is "ignore" and it cannot get
+        // user confirmation.  Detect this and automatically resume execution
+        // so the plan is actually carried out.
+        const lastToolUse = [...turnState.blocks].reverse().find(
+          (b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use",
+        );
+        if (lastToolUse && lastToolUse.name === "ExitPlanMode" && turnState.sessionId) {
+          console.log("[WAND] ExitPlanMode detected – auto-continuing plan execution for session:", sessionId);
+          resolve();
+          // Schedule the continuation outside the current promise chain so it
+          // does not block the close handler.
+          setImmediate(() => {
+            this.sendMessage(sessionId, "Plan approved. Proceed with the implementation.").catch((err) => {
+              console.error("[WAND] Auto-continue after ExitPlanMode failed:", err);
+            });
+          });
+          return;
+        }
+
+        resolve();
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Parsing helpers (unchanged logic, extracted from previous implementation)
+  // ---------------------------------------------------------------------------
+
+  private extractAssistantMessage(message: Record<string, unknown>): {
+    content: ContentBlock[];
+    usage?: ConversationTurn["usage"];
+  } {
+    const rawContent = Array.isArray(message.content) ? message.content : [];
+    const content: ContentBlock[] = [];
+    for (const block of rawContent) {
+      if (!block || typeof block !== "object") continue;
+      const typedBlock = block as Record<string, unknown>;
+      if (typedBlock.type === "text" && typeof typedBlock.text === "string") {
+        content.push({ type: "text", text: typedBlock.text });
+        continue;
+      }
+      if (typedBlock.type === "thinking" && typeof typedBlock.thinking === "string") {
+        content.push({ type: "thinking", thinking: typedBlock.thinking });
+        continue;
+      }
+      if (typedBlock.type === "tool_use" && typeof typedBlock.id === "string" && typeof typedBlock.name === "string") {
+        content.push({
+          type: "tool_use",
+          id: typedBlock.id,
+          name: typedBlock.name,
+          description: typeof typedBlock.description === "string" ? typedBlock.description : undefined,
+          input: this.normalizeToolInput(typedBlock.input),
+        });
+      }
+    }
+    return {
+      content,
+      usage: this.extractUsage({ usage: message.usage }),
+    };
+  }
+
+  private compactContentBlocks(blocks: ContentBlock[], fallbackResult: string): ContentBlock[] {
+    const compacted: ContentBlock[] = [];
+    for (const block of blocks) {
+      const previous = compacted[compacted.length - 1];
+      if (
+        previous
+        && previous.type === "text"
+        && block.type === "text"
+      ) {
+        previous.text = `${previous.text}${block.text}`;
+        continue;
+      }
+      compacted.push(block);
+    }
+
+    if (compacted.length === 0) {
+      return [{ type: "text", text: fallbackResult || "(无输出)" }];
+    }
+
+    const hasVisibleText = compacted.some((block) => block.type === "text" && block.text.trim().length > 0);
+    if (!hasVisibleText && fallbackResult) {
+      compacted.push({ type: "text", text: fallbackResult });
+    }
+    return compacted;
+  }
+
+  private normalizeToolInput(input: unknown): Record<string, unknown> {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      return {};
+    }
+    return input as Record<string, unknown>;
+  }
+
+  private normalizeToolResultContent(content: unknown): string | Array<{ type: string; [key: string]: unknown }> {
+    if (typeof content === "string") {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content.filter((item): item is { type: string; [key: string]: unknown } => !!item && typeof item === "object" && typeof (item as any).type === "string");
+    }
+    return typeof content === "undefined" || content === null ? "" : String(content);
+  }
+
+  private extractModelName(modelUsage: Record<string, unknown> | undefined): string | undefined {
+    if (!modelUsage) return undefined;
+    const names = Object.keys(modelUsage);
+    return names.length > 0 ? names[0] : undefined;
+  }
+
+  private extractUsage(source: Record<string, unknown> | undefined): ConversationTurn["usage"] {
+    if (!source || !source.usage || typeof source.usage !== "object") {
+      return undefined;
+    }
+    const usage = source.usage as Record<string, unknown>;
+    const value = {
+      inputTokens: typeof usage.input_tokens === "number" ? usage.input_tokens : undefined,
+      outputTokens: typeof usage.output_tokens === "number" ? usage.output_tokens : undefined,
+      cacheReadInputTokens: typeof usage.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : undefined,
+      cacheCreationInputTokens: typeof usage.cache_creation_input_tokens === "number" ? usage.cache_creation_input_tokens : undefined,
+      totalCostUsd: typeof source.total_cost_usd === "number" ? source.total_cost_usd : undefined,
+    };
+    if (
+      value.inputTokens === undefined
+      && value.outputTokens === undefined
+      && value.cacheReadInputTokens === undefined
+      && value.cacheCreationInputTokens === undefined
+      && value.totalCostUsd === undefined
+    ) {
+      return undefined;
+    }
+    return value;
+  }
+}

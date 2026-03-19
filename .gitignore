@@ -1,0 +1,9 @@
+node_modules
+dist
+.wand
+.tmp
+.codex
+output
+.playwright-cli
+debug-*.mjs
+*.png
