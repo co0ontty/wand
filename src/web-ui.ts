@@ -74,19 +74,21 @@ export function renderApp(configPath: string): string {
     }
 
     .topbar {
-      display: flex;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      justify-content: space-between;
-      padding: 0 16px;
-      min-height: 64px;
-      padding: 10px 18px;
+      gap: 14px;
+      min-height: 72px;
+      padding: 12px 18px;
       background: var(--bg-secondary);
       border-bottom: 1px solid var(--border-subtle);
       backdrop-filter: blur(18px);
       flex-shrink: 0;
     }
 
-    .topbar-left { display: flex; align-items: center; gap: 12px; }
+    .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .topbar-actions { display: flex; align-items: center; gap: 8px; }
+    .logo-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; }
     .logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1rem; }
     .logo-icon {
       width: 28px; height: 28px;
@@ -95,6 +97,27 @@ export function renderApp(configPath: string): string {
       display: flex; align-items: center; justify-content: center;
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
       font-size: 12px; color: white; font-weight: 700;
+    }
+
+    .brand-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .brand-name {
+      font-size: 0.98rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .brand-subtitle {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .status-badge {
@@ -110,7 +133,44 @@ export function renderApp(configPath: string): string {
     .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
     .status-dot.active { background: var(--success); box-shadow: 0 0 8px var(--success); }
 
-    .topbar-right { display: flex; align-items: center; gap: 8px; }
+    .topbar-center {
+      min-width: 0;
+      display: flex;
+      justify-content: center;
+    }
+
+    .session-summary {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      text-align: center;
+    }
+
+    .session-summary-label {
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .session-summary-value {
+      max-width: min(52vw, 560px);
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+    }
     .config-path {
       font-size: 0.6875rem;
       color: var(--text-muted);
@@ -133,15 +193,41 @@ export function renderApp(configPath: string): string {
 
     .main-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(42, 28, 18, 0.26);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--transition-normal);
+      z-index: 24;
+    }
+
+    .drawer-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
     .sidebar {
-      width: 312px;
-      background: rgba(255, 251, 245, 0.78);
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      z-index: 25;
+      width: min(320px, calc(100vw - 24px));
+      background: rgba(255, 251, 245, 0.94);
       border-right: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: column;
       min-height: 0;
-      flex-shrink: 0;
       backdrop-filter: blur(18px);
+      box-shadow: 20px 0 48px rgba(89, 58, 32, 0.12);
+      transform: translateX(-100%);
+      transition: transform var(--transition-normal);
+    }
+
+    .sidebar.open {
+      transform: translateX(0);
     }
 
     .sidebar-header {
@@ -150,6 +236,13 @@ export function renderApp(configPath: string): string {
       justify-content: space-between;
       padding: 16px 18px 12px;
       border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .sidebar-header-main {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
     }
 
     .sidebar-title {
@@ -166,6 +259,21 @@ export function renderApp(configPath: string): string {
       background: rgba(240, 229, 215, 0.9);
       padding: 4px 8px;
       border-radius: var(--radius-sm);
+    }
+
+    .sidebar-close { flex-shrink: 0; }
+
+    .sidebar-body {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .sidebar-intro {
+      padding: 14px 18px 0;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
     }
 
     .sessions-list { flex: 1; overflow-y: auto; padding: 12px; }
@@ -221,7 +329,19 @@ export function renderApp(configPath: string): string {
     .session-status.failed { background: var(--danger-muted); color: var(--danger); }
     .session-status.stopped { background: var(--warning-muted); color: var(--warning); }
 
-    .sidebar-footer { padding: 14px 12px 16px; border-top: 1px solid var(--border-subtle); }
+    .sidebar-footer {
+      padding: 14px 12px 16px;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .sidebar-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
 
     .btn {
       display: inline-flex;
@@ -269,10 +389,9 @@ export function renderApp(configPath: string): string {
       backdrop-filter: blur(12px);
     }
 
-    .terminal-title { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; }
+    .terminal-title { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; min-width: 0; }
     .terminal-title-text { font-family: var(--font-mono); color: var(--accent); font-weight: 500; }
     .terminal-info { font-size: 0.6875rem; color: var(--text-muted); }
-    .terminal-controls { display: flex; gap: 6px; flex-wrap: wrap; }
 
     .terminal-container {
       flex: 1;
@@ -319,8 +438,59 @@ export function renderApp(configPath: string): string {
 
     .input-textarea:focus { border-color: var(--accent); }
     .input-textarea::placeholder { color: var(--text-muted); }
-    .input-actions { display: flex; gap: 4px; flex-shrink: 0; }
-    .quick-actions { display: flex; gap: 4px; margin-top: 8px; }
+    .input-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .input-actions .btn { min-width: 92px; }
+
+    .floating-toggle {
+      position: fixed;
+      right: 16px;
+      bottom: 24px;
+      z-index: 40;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      box-shadow: 0 16px 28px rgba(89, 58, 32, 0.18);
+    }
+
+    .floating-pad {
+      position: fixed;
+      right: 16px;
+      bottom: 88px;
+      z-index: 39;
+      width: min(220px, calc(100vw - 32px));
+      background: rgba(255, 251, 245, 0.98);
+      border: 1px solid rgba(150, 118, 85, 0.18);
+      border-radius: 20px;
+      box-shadow: var(--shadow-soft);
+      padding: 12px;
+      backdrop-filter: blur(18px);
+    }
+
+    .floating-pad-title {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 10px;
+    }
+
+    .floating-pad-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      align-items: center;
+    }
+
+    .floating-pad-grid .btn {
+      width: 100%;
+      min-height: 42px;
+      padding: 8px 10px;
+    }
+
+    .floating-pad-spacer {
+      visibility: hidden;
+    }
 
     .login-container {
       display: flex;
@@ -490,10 +660,14 @@ export function renderApp(configPath: string): string {
     button:focus-visible { outline-offset: 0; }
 
     @media (max-width: 768px) {
-      .topbar { padding: 10px 14px; }
-      .sidebar { width: 264px; }
+      .topbar {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        padding: 10px 14px;
+      }
+      .sidebar { width: min(304px, calc(100vw - 28px)); }
       .config-path { display: none; }
       .terminal-container { min-height: 180px; }
+      .session-summary-value { max-width: 40vw; }
     }
 
     @media (max-width: 640px) {
@@ -514,13 +688,28 @@ export function renderApp(configPath: string): string {
         overflow: visible;
       }
 
-      .topbar { align-items: flex-start; gap: 10px; flex-wrap: wrap; }
-      .topbar-right { width: 100%; justify-content: space-between; }
       .topbar {
         position: sticky;
         top: 0;
         z-index: 30;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "left right"
+          "center center";
+        align-items: center;
+        gap: 10px 12px;
       }
+
+      .topbar-left { grid-area: left; }
+      .topbar-center { grid-area: center; justify-content: flex-start; }
+      .topbar-right { grid-area: right; width: auto; }
+      .brand-subtitle { display: none; }
+      .status-badge { display: none; }
+      .session-summary {
+        align-items: flex-start;
+        text-align: left;
+      }
+      .session-summary-value { max-width: calc(100vw - 32px); }
 
       .main-layout {
         flex-direction: column;
@@ -529,39 +718,23 @@ export function renderApp(configPath: string): string {
       }
 
       .sidebar {
-        width: 100%;
+        width: min(300px, calc(100vw - 20px));
         max-height: none;
-        border-right: none;
-        border-bottom: 1px solid var(--border-subtle);
+        border-bottom: none;
       }
-
-      .sidebar-header,
-      .sidebar-footer {
-        position: sticky;
-        background: rgba(255, 251, 245, 0.94);
-        z-index: 2;
-      }
-
-      .sidebar-header { top: 0; }
-      .sidebar-footer { bottom: 0; }
 
       .sessions-list {
-        display: flex;
-        flex-direction: row;
-        overflow-x: auto;
-        overflow-y: hidden;
-        padding: 10px 8px 12px;
-        gap: 8px;
+        display: block;
+        overflow-x: hidden;
+        overflow-y: auto;
+        padding: 12px;
         -webkit-overflow-scrolling: touch;
-        scroll-snap-type: x proximity;
       }
 
       .session-item {
-        flex-shrink: 0;
-        width: min(72vw, 240px);
-        max-width: 240px;
-        margin-bottom: 0;
-        scroll-snap-align: start;
+        width: 100%;
+        max-width: none;
+        margin-bottom: 8px;
       }
 
       .main-content {
@@ -572,8 +745,7 @@ export function renderApp(configPath: string): string {
 
       .terminal-header {
         align-items: flex-start;
-        gap: 10px;
-        flex-direction: column;
+        gap: 8px;
       }
 
       .terminal-title {
@@ -582,18 +754,10 @@ export function renderApp(configPath: string): string {
         align-items: flex-start;
       }
 
-      .terminal-controls {
-        width: 100%;
-      }
-
-      .terminal-controls .btn {
-        flex: 1 1 calc(33.333% - 4px);
-      }
-
       .terminal-container {
         flex: none;
-        min-height: 44vh;
-        max-height: 56vh;
+        min-height: 46vh;
+        max-height: 58vh;
         margin: 12px;
         padding: 14px;
         border-radius: 20px;
@@ -610,12 +774,30 @@ export function renderApp(configPath: string): string {
       }
 
       .input-row { flex-direction: column; align-items: stretch; }
-      .input-actions { width: 100%; }
-      .input-actions .btn { width: 100%; }
-      .quick-actions { flex-wrap: wrap; }
+      .input-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .input-actions .btn {
+        width: 100%;
+        min-width: 0;
+      }
 
-      .quick-actions .btn {
-        flex: 1 1 calc(50% - 4px);
+      .input-textarea,
+      .field-input {
+        font-size: 16px;
+      }
+
+      .floating-toggle {
+        right: 14px;
+        bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+      }
+
+      .floating-pad {
+        right: 14px;
+        bottom: calc(154px + env(safe-area-inset-bottom, 0px));
+        width: min(220px, calc(100vw - 28px));
       }
 
       .login-container {
@@ -631,20 +813,12 @@ export function renderApp(configPath: string): string {
 
     @media (max-width: 420px) {
       .topbar-left,
-      .topbar-right {
+      .topbar-center {
         width: 100%;
       }
 
       .topbar-right {
         gap: 6px;
-        flex-wrap: wrap;
-      }
-
-      .protocol-note,
-      .config-path,
-      .status-badge {
-        width: 100%;
-        justify-content: center;
       }
 
       .terminal-container {
@@ -652,9 +826,13 @@ export function renderApp(configPath: string): string {
         max-height: 50vh;
       }
 
-      .quick-actions .btn,
-      .terminal-controls .btn {
-        flex-basis: 100%;
+      .floating-pad {
+        width: calc(100vw - 24px);
+        right: 12px;
+      }
+
+      .floating-pad-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
     }
   </style>
@@ -683,6 +861,7 @@ export function renderApp(configPath: string): string {
         drafts: {},
         isSyncingInputBox: false,
         loginPending: false,
+        sessionsDrawerOpen: false,
         modalOpen: false,
         presetValue: "",
         commandValue: "",
@@ -752,34 +931,59 @@ export function renderApp(configPath: string): string {
         var currentDraft = state.selectedId ? (state.drafts[state.selectedId] || "") : "";
         var statusClass = state.config ? "status-dot active" : "status-dot";
         var statusText = state.config ? "Unlocked" : "Locked";
+        var drawerClass = state.sessionsDrawerOpen ? " open" : "";
 
         return '<div class="app-container">' +
           '<header class="topbar">' +
             '<div class="topbar-left">' +
-              '<div class="logo">' +
-                '<div class="logo-icon">W</div>' +
-                '<span>Wand</span>' +
+              '<div class="topbar-actions">' +
+                '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm">Menu</button>' +
+              '</div>' +
+              '<div class="logo-wrap">' +
+                '<div class="logo">' +
+                  '<div class="logo-icon">W</div>' +
+                '</div>' +
+                '<div class="brand-meta">' +
+                  '<span class="brand-name">Wand</span>' +
+                  '<span class="brand-subtitle">Local CLI Console</span>' +
+                '</div>' +
               '</div>' +
               '<div class="status-badge">' +
                 '<span class="' + statusClass + '" id="status-dot"></span>' +
                 '<span id="status-text">' + statusText + '</span>' +
               '</div>' +
             '</div>' +
+            '<div class="topbar-center">' +
+              '<div class="session-summary">' +
+                '<span class="session-summary-label">Current Session</span>' +
+                '<span class="session-summary-value">' + escapeHtml(terminalTitle) + '</span>' +
+              '</div>' +
+            '</div>' +
             '<div class="topbar-right">' +
-              '<span class="protocol-note">Use HTTP only</span>' +
-              '<span class="config-path">' + escapeHtml(configPath) + '</span>' +
+              '<button id="topbar-new-session-button" class="btn btn-primary btn-sm">+ New Session</button>' +
               '<button id="logout-button" class="btn btn-ghost btn-sm">Logout</button>' +
             '</div>' +
           '</header>' +
+          '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
           '<div class="main-layout">' +
-            '<aside class="sidebar">' +
+            '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
               '<div class="sidebar-header">' +
-                '<span class="sidebar-title">Sessions</span>' +
-                '<span class="session-count" id="session-count">' + state.sessions.length + '</span>' +
+                '<div class="sidebar-header-main">' +
+                  '<span class="sidebar-title">Sessions</span>' +
+                  '<span class="session-count" id="session-count">' + state.sessions.length + '</span>' +
+                '</div>' +
+                '<button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close" type="button">×</button>' +
               '</div>' +
-              '<div class="sessions-list" id="sessions-list">' + renderSessions() + '</div>' +
+              '<div class="sidebar-body">' +
+                '<p class="sidebar-intro">Recent sessions are tucked away here so the terminal stays in focus.</p>' +
+                '<div class="sessions-list" id="sessions-list">' + renderSessions() + '</div>' +
+              '</div>' +
               '<div class="sidebar-footer">' +
-                '<button id="new-session-button" class="btn btn-primary btn-block"><span>+</span> New Session</button>' +
+                '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> New Session</button>' +
+                '<div class="sidebar-meta">' +
+                  '<span class="protocol-note">Use HTTP only</span>' +
+                  '<span class="config-path">' + escapeHtml(configPath) + '</span>' +
+                '</div>' +
               '</div>' +
             '</aside>' +
             '<main class="main-content">' +
@@ -787,11 +991,6 @@ export function renderApp(configPath: string): string {
                 '<div class="terminal-title">' +
                   '<span class="terminal-title-text" id="terminal-title">' + terminalTitle + '</span>' +
                   '<span class="terminal-info" id="terminal-info">' + terminalInfo + '</span>' +
-                '</div>' +
-                '<div class="terminal-controls">' +
-                  '<button id="send-enter-button" class="btn btn-ghost btn-sm">Enter</button>' +
-                  '<button id="send-ctrlc-button" class="btn btn-ghost btn-sm">Ctrl+C</button>' +
-                  '<button id="stop-button" class="btn btn-danger btn-sm">Stop</button>' +
                 '</div>' +
               '</div>' +
               '<div id="output" class="terminal-container"></div>' +
@@ -803,13 +1002,23 @@ export function renderApp(configPath: string): string {
                   '</div>' +
                   '<div class="input-actions">' +
                     '<button id="send-input-button" class="btn btn-primary">Send</button>' +
+                    '<button id="stop-button" class="btn btn-danger">Stop</button>' +
                   '</div>' +
                 '</div>' +
-                '<div class="quick-actions">' +
-                  '<button data-input="y\\r" class="btn btn-secondary btn-sm quick-input">y</button>' +
-                  '<button data-input="n\\r" class="btn btn-secondary btn-sm quick-input">n</button>' +
-                  '<button data-input="\\u001b[A" class="btn btn-secondary btn-sm quick-input">↑</button>' +
-                  '<button data-input="\\u001b[B" class="btn btn-secondary btn-sm quick-input">↓</button>' +
+                '<button id="floating-controls-toggle" class="btn btn-secondary floating-toggle" type="button">+</button>' +
+                '<div id="floating-controls" class="floating-pad hidden">' +
+                  '<div class="floating-pad-title">Quick Controls</div>' +
+                  '<div class="floating-pad-grid">' +
+                    '<span class="floating-pad-spacer"></span>' +
+                    '<button data-input-key="up" class="btn btn-secondary btn-sm quick-input" type="button">↑</button>' +
+                    '<button data-input-key="enter" class="btn btn-secondary btn-sm quick-input" type="button">Enter</button>' +
+                    '<button data-input-key="left" class="btn btn-secondary btn-sm quick-input" type="button">←</button>' +
+                    '<button data-input-key="down" class="btn btn-secondary btn-sm quick-input" type="button">↓</button>' +
+                    '<button data-input-key="right" class="btn btn-secondary btn-sm quick-input" type="button">→</button>' +
+                    '<button data-input-key="yes" class="btn btn-secondary btn-sm quick-input" type="button">y</button>' +
+                    '<button data-input-key="no" class="btn btn-secondary btn-sm quick-input" type="button">n</button>' +
+                    '<button data-input-key="ctrl_c" class="btn btn-secondary btn-sm quick-input" type="button">Ctrl+C</button>' +
+                  '</div>' +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
               '</div>' +
@@ -894,6 +1103,7 @@ export function renderApp(configPath: string): string {
             var button = target.closest(".session-item");
             if (button && button.dataset.sessionId) {
               selectSession(button.dataset.sessionId);
+              closeSessionsDrawer();
             }
           });
         }
@@ -907,17 +1117,24 @@ export function renderApp(configPath: string): string {
         document.getElementById("cwd").addEventListener("change", function() {
           state.cwdValue = this.value;
         });
+        document.getElementById("sessions-toggle-button").addEventListener("click", toggleSessionsDrawer);
+        document.getElementById("sessions-drawer-backdrop").addEventListener("click", closeSessionsDrawer);
+        document.getElementById("close-drawer-button").addEventListener("click", closeSessionsDrawer);
         document.getElementById("logout-button").addEventListener("click", logout);
-        document.getElementById("new-session-button").addEventListener("click", openSessionModal);
+        document.getElementById("topbar-new-session-button").addEventListener("click", openSessionModal);
+        document.getElementById("drawer-new-session-button").addEventListener("click", openSessionModal);
         document.getElementById("close-modal-button").addEventListener("click", closeSessionModal);
         document.getElementById("run-button").addEventListener("click", runCommand);
         document.getElementById("send-input-button").addEventListener("click", function() { sendInputFromBox(false); });
-        document.getElementById("send-enter-button").addEventListener("click", function() { sendDirectInput("\\r"); });
-        document.getElementById("send-ctrlc-button").addEventListener("click", function() { sendDirectInput("\\u0003"); });
         document.getElementById("stop-button").addEventListener("click", stopSession);
 
+        document.getElementById("floating-controls-toggle").addEventListener("click", toggleFloatingControls);
+
         document.querySelectorAll(".quick-input").forEach(function(btn) {
-          btn.addEventListener("click", function() { sendDirectInput(btn.dataset.input || ""); });
+          btn.addEventListener("click", function() {
+            sendDirectInput(getControlInput(btn.dataset.inputKey || ""));
+            hideFloatingControls();
+          });
         });
 
         document.getElementById("session-modal").addEventListener("click", function(e) {
@@ -945,7 +1162,7 @@ export function renderApp(configPath: string): string {
         state.terminal = new Terminal({
           cols: 120,
           rows: 36,
-          convertEol: true,
+          convertEol: false,
           disableStdin: true,
           cursorBlink: false,
           fontFamily: '"Geist Mono", "SF Mono", monospace',
@@ -980,7 +1197,9 @@ export function renderApp(configPath: string): string {
         if (state.selectedId) {
           var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (session && session.output) {
-            state.terminal.write(session.output);
+            var normalizedOutput = normalizeTerminalOutput(session.output);
+            state.terminal.write(normalizedOutput);
+            state.terminalOutput = normalizedOutput;
           }
         } else {
           state.terminal.writeln("Select or start a session to begin.");
@@ -1048,6 +1267,7 @@ export function renderApp(configPath: string): string {
         state.config = null;
         state.selectedId = null;
         state.sessions = [];
+        state.sessionsDrawerOpen = false;
         render();
       }
 
@@ -1120,7 +1340,7 @@ export function renderApp(configPath: string): string {
                 state.terminal.reset();
                 state.terminalOutput = "";
               }
-              var newOutput = data.output || "";
+              var newOutput = normalizeTerminalOutput(data.output || "");
               if (newOutput.startsWith(state.terminalOutput)) {
                 state.terminal.write(newOutput.slice(state.terminalOutput.length));
               } else {
@@ -1140,8 +1360,20 @@ export function renderApp(configPath: string): string {
         loadOutput(id).then(focusInputBox);
       }
 
+      function toggleSessionsDrawer() {
+        state.sessionsDrawerOpen = !state.sessionsDrawerOpen;
+        render();
+      }
+
+      function closeSessionsDrawer() {
+        if (!state.sessionsDrawerOpen) return;
+        state.sessionsDrawerOpen = false;
+        render();
+      }
+
       function openSessionModal() {
         state.modalOpen = true;
+        state.sessionsDrawerOpen = false;
         var modal = document.getElementById("session-modal");
         if (modal) {
           modal.classList.remove("hidden");
@@ -1292,7 +1524,7 @@ export function renderApp(configPath: string): string {
             if (inputBox) {
               var start = inputBox.selectionStart || 0;
               var current = inputBox.value;
-              var newValue = current.slice(0, start) + "\\n" + current.slice(start);
+              var newValue = current.slice(0, start) + String.fromCharCode(10) + current.slice(start);
               inputBox.value = newValue;
               setDraftValue(newValue);
             }
@@ -1320,7 +1552,7 @@ export function renderApp(configPath: string): string {
           if (inputBox) {
             var start = inputBox.selectionStart || 0;
             var current = inputBox.value;
-            var newValue = current.slice(0, start) + "\\t" + current.slice(start);
+            var newValue = current.slice(0, start) + String.fromCharCode(9) + current.slice(start);
             inputBox.value = newValue;
             setDraftValue(newValue);
           }
@@ -1329,25 +1561,25 @@ export function renderApp(configPath: string): string {
 
         if (event.key === "Escape") {
           event.preventDefault();
-          queueDirectInput("\\u001b");
+          queueDirectInput(getControlInput("escape"));
           return;
         }
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
           event.preventDefault();
-          queueDirectInput("\\u0003");
+          queueDirectInput(getControlInput("ctrl_c"));
           return;
         }
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
           event.preventDefault();
-          queueDirectInput("\\u0004");
+          queueDirectInput(getControlInput("ctrl_d"));
           return;
         }
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
           event.preventDefault();
-          queueDirectInput("\\u000c");
+          queueDirectInput(getControlInput("ctrl_l"));
           return;
         }
 
@@ -1399,16 +1631,58 @@ export function renderApp(configPath: string): string {
         var value = inputBox ? inputBox.value : "";
         if (value) {
           queueDirectInput(value);
-          queueDirectInput("\\r");
+          queueDirectInput(getControlInput("enter"));
           inputBox.value = "";
           setDraftValue("");
         } else if (appendEnter) {
-          queueDirectInput("\\r");
+          queueDirectInput(getControlInput("enter"));
         }
       }
 
       function sendDirectInput(input) {
         return queueDirectInput(input);
+      }
+
+      function toggleFloatingControls() {
+        var panel = document.getElementById("floating-controls");
+        if (!panel) return;
+        panel.classList.toggle("hidden");
+      }
+
+      function hideFloatingControls() {
+        var panel = document.getElementById("floating-controls");
+        if (panel) {
+          panel.classList.add("hidden");
+        }
+      }
+
+      function getControlInput(key) {
+        switch (key) {
+          case "yes":
+            return "y" + String.fromCharCode(13);
+          case "no":
+            return "n" + String.fromCharCode(13);
+          case "up":
+            return String.fromCharCode(27) + "[A";
+          case "down":
+            return String.fromCharCode(27) + "[B";
+          case "left":
+            return String.fromCharCode(27) + "[D";
+          case "right":
+            return String.fromCharCode(27) + "[C";
+          case "enter":
+            return String.fromCharCode(13);
+          case "ctrl_c":
+            return String.fromCharCode(3);
+          case "ctrl_d":
+            return String.fromCharCode(4);
+          case "ctrl_l":
+            return String.fromCharCode(12);
+          case "escape":
+            return String.fromCharCode(27);
+          default:
+            return "";
+        }
       }
 
       function queueDirectInput(input) {
@@ -1530,6 +1804,13 @@ export function renderApp(configPath: string): string {
       function shortCommand(cmd) {
         var s = String(cmd || "").trim();
         return s.length <= 24 ? s || "Terminal" : s.slice(0, 21) + "...";
+      }
+
+      function normalizeTerminalOutput(value) {
+        var text = String(value || "");
+        text = text.split(String.fromCharCode(13, 10)).join(String.fromCharCode(10));
+        text = text.split(String.fromCharCode(13)).join(String.fromCharCode(10));
+        return text.split(String.fromCharCode(10)).join(String.fromCharCode(13, 10));
       }
 
       function showError(el, msg) {
