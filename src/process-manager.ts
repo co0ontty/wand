@@ -137,7 +137,7 @@ export class ProcessManager {
     this.cleanupOldSessions();
 
     child.onData((chunk: string) => {
-      this.appendOutput(id, chunk);
+      this.appendOutput(id, normalizePtyOutput(chunk));
       if (mode === "full-access") {
         this.autoConfirm(id, chunk, child);
       }
@@ -338,6 +338,10 @@ function normalizePromptText(value: string): string {
     .replace(/[ \t]+/g, " ")
     .replace(/\n+/g, "\n")
     .trim();
+}
+
+function normalizePtyOutput(value: string): string {
+  return value.replace(/\r\r\n/g, "\r\n");
 }
 
 function clampDimension(value: number, min: number, max: number): number {
