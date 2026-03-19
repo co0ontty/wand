@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { createSession, revokeSession, validateSession } from "./auth.js";
+import { isExecutionMode } from "./config.js";
 import { ProcessManager } from "./process-manager.js";
 import { renderApp } from "./web-ui.js";
 import {
@@ -14,9 +15,15 @@ import {
   WandConfig
 } from "./types.js";
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export async function startServer(config: WandConfig, configPath: string): Promise<void> {
   const app = express();
   const processes = new ProcessManager(config);
+  const accessHost = config.host === "0.0.0.0" ? "127.0.0.1" : config.host;
+  const accessUrl = `http://${accessHost}:${config.port}`;
 
   app.use(express.json({ limit: "1mb" }));
   app.use("/vendor/xterm", express.static(path.resolve(process.cwd(), "node_modules/xterm")));
@@ -71,9 +78,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       const suggestions = await listPathSuggestions(query, config.defaultCwd);
       res.json(suggestions);
     } catch (error) {
-      res.status(400).json({
-        error: error instanceof Error ? error.message : "Failed to load path suggestions."
-      });
+      res.status(400).json({ error: getErrorMessage(error, "Failed to load path suggestions.") });
     }
   });
 
@@ -101,9 +106,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       );
       res.status(201).json(snapshot);
     } catch (error) {
-      res.status(400).json({
-        error: error instanceof Error ? error.message : "Failed to start command."
-      });
+      res.status(400).json({ error: getErrorMessage(error, "Failed to start command.") });
     }
   });
 
@@ -113,9 +116,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       const snapshot = processes.sendInput(req.params.id, body.input ?? "");
       res.json(snapshot);
     } catch (error) {
-      res.status(400).json({
-        error: error instanceof Error ? error.message : "Failed to send input."
-      });
+      res.status(400).json({ error: getErrorMessage(error, "Failed to send input.") });
     }
   });
 
@@ -125,9 +126,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       const snapshot = processes.resize(req.params.id, body.cols ?? 0, body.rows ?? 0);
       res.json(snapshot);
     } catch (error) {
-      res.status(400).json({
-        error: error instanceof Error ? error.message : "Failed to resize session."
-      });
+      res.status(400).json({ error: getErrorMessage(error, "Failed to resize session.") });
     }
   });
 
@@ -136,9 +135,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       const snapshot = processes.stop(req.params.id);
       res.json(snapshot);
     } catch (error) {
-      res.status(400).json({
-        error: error instanceof Error ? error.message : "Failed to stop session."
-      });
+      res.status(400).json({ error: getErrorMessage(error, "Failed to stop session.") });
     }
   });
 
@@ -147,7 +144,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   await new Promise<void>((resolve, reject) => {
     const server = app.listen(config.port, config.host, () => {
       process.stdout.write(
-        `[wand] Web console listening on http://${config.host}:${config.port}\n`
+        `[wand] Web console listening on ${accessUrl}\n[wand] HTTP only. Do not open it with https://\n`
       );
       resolve();
     });
@@ -164,10 +161,7 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
 }
 
 function normalizeMode(input: string | undefined, fallback: ExecutionMode): ExecutionMode {
-  if (input === "auto-edit" || input === "default" || input === "full-access") {
-    return input;
-  }
-  return fallback;
+  return isExecutionMode(input) ? input : fallback;
 }
 
 function readSessionCookie(req: Request): string | undefined {
