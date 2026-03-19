@@ -1029,7 +1029,7 @@ export function renderApp(configPath: string): string {
 
       function renderSessions() {
         if (state.sessions.length === 0) {
-          return '<div class="empty-state"><strong>还没有会话</strong>从左下角启动一个新会话，终端输出会显示在右侧。</div>';
+          return '<div class="empty-state"><strong>还没有会话</strong>从左上角菜单或右上角按钮启动一个新会话，终端输出会显示在主区域。</div>';
         }
         return state.sessions.map(function(session) {
           var activeClass = session.id === state.selectedId ? " active" : "";
@@ -1297,6 +1297,8 @@ export function renderApp(configPath: string): string {
               if (!state.selectedId || !state.sessions.some(function(s) { return s.id === state.selectedId; })) {
                 state.selectedId = state.sessions[0].id;
               }
+            } else {
+              state.selectedId = null;
             }
             // Don't full re-render when modal is open to preserve form state
             if (state.modalOpen) {
@@ -1316,6 +1318,7 @@ export function renderApp(configPath: string): string {
                 if (countEl) countEl.textContent = String(state.sessions.length);
               }
             }
+            updateShellChrome();
           });
       }
 
@@ -1324,12 +1327,34 @@ export function renderApp(configPath: string): string {
         var countEl = document.getElementById("session-count");
         if (listEl) listEl.innerHTML = renderSessions();
         if (countEl) countEl.textContent = String(state.sessions.length);
+        updateShellChrome();
+      }
+
+      function updateShellChrome() {
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "No session";
+        var summaryEl = document.querySelector(".session-summary-value");
+        var titleEl = document.getElementById("terminal-title");
+        if (summaryEl) summaryEl.textContent = terminalTitle;
+        if (titleEl) titleEl.textContent = terminalTitle;
+      }
+
+      function updateDrawerState() {
+        var drawer = document.getElementById("sessions-drawer");
+        var backdrop = document.getElementById("sessions-drawer-backdrop");
+        if (drawer) {
+          drawer.classList.toggle("open", state.sessionsDrawerOpen);
+        }
+        if (backdrop) {
+          backdrop.classList.toggle("open", state.sessionsDrawerOpen);
+        }
       }
 
       function loadOutput(id) {
         return fetch("/api/sessions/" + id)
           .then(function(res) { return res.json(); })
           .then(function(data) {
+            updateShellChrome();
             var terminalInfo = document.getElementById("terminal-info");
             if (terminalInfo) {
               terminalInfo.textContent = data.cwd + " | " + data.mode + " | " + data.status + " | exit=" + (data.exitCode ?? "n/a");
@@ -1356,19 +1381,19 @@ export function renderApp(configPath: string): string {
 
       function selectSession(id) {
         state.selectedId = id;
-        render();
+        updateSessionsList();
         loadOutput(id).then(focusInputBox);
       }
 
       function toggleSessionsDrawer() {
         state.sessionsDrawerOpen = !state.sessionsDrawerOpen;
-        render();
+        updateDrawerState();
       }
 
       function closeSessionsDrawer() {
         if (!state.sessionsDrawerOpen) return;
         state.sessionsDrawerOpen = false;
-        render();
+        updateDrawerState();
       }
 
       function openSessionModal() {
@@ -1702,6 +1727,7 @@ export function renderApp(configPath: string): string {
 
       function stopSession() {
         if (!state.selectedId) return;
+        hideFloatingControls();
         fetch("/api/sessions/" + state.selectedId + "/stop", { method: "POST" })
           .then(refreshAll);
       }
