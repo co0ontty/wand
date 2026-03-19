@@ -1,0 +1,39 @@
+{
+  "name": "wand-cli",
+  "version": "0.1.0",
+  "description": "Remote web coding controller for local CLI tools.",
+  "type": "module",
+  "bin": {
+    "wand": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts web",
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "keywords": [
+    "cli",
+    "web",
+    "automation",
+    "developer-tools"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@types/cookie": "^0.6.0",
+    "express": "^4.21.2",
+    "node-pty": "^1.1.0",
+    "xterm": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.13.14",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
