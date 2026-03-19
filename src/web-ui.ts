@@ -43,7 +43,12 @@ export function renderApp(configPath: string): string {
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
-    html { font-size: 14px; -webkit-font-smoothing: antialiased; }
+    html {
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100%;
+      height: 100%;
+    }
 
     body {
       font-family: var(--font-sans);
@@ -53,11 +58,20 @@ export function renderApp(configPath: string): string {
         linear-gradient(180deg, #fbf7f1 0%, #f6f1e8 100%);
       color: var(--text-primary);
       min-height: 100vh;
+      min-height: 100dvh;
       line-height: 1.5;
       overflow: hidden;
     }
 
-    .app-container { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .app-container {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      min-height: 100dvh;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+    }
 
     .topbar {
       display: flex;
@@ -117,7 +131,7 @@ export function renderApp(configPath: string): string {
       white-space: nowrap;
     }
 
-    .main-layout { display: flex; flex: 1; overflow: hidden; }
+    .main-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 
     .sidebar {
       width: 312px;
@@ -125,6 +139,7 @@ export function renderApp(configPath: string): string {
       border-right: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: column;
+      min-height: 0;
       flex-shrink: 0;
       backdrop-filter: blur(18px);
     }
@@ -239,6 +254,7 @@ export function renderApp(configPath: string): string {
       flex: 1;
       display: flex;
       flex-direction: column;
+      min-height: 0;
       overflow: hidden;
       background: transparent;
     }
@@ -311,6 +327,7 @@ export function renderApp(configPath: string): string {
       align-items: center;
       justify-content: center;
       min-height: 100vh;
+      min-height: 100dvh;
       padding: 24px;
     }
 
@@ -480,20 +497,165 @@ export function renderApp(configPath: string): string {
     }
 
     @media (max-width: 640px) {
-      body { overflow: auto; }
-      .app-container { min-height: 100vh; height: auto; }
+      html, body {
+        min-height: 100dvh;
+        height: auto;
+      }
+
+      body {
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .app-container {
+        min-height: 100dvh;
+        height: auto;
+        overflow: visible;
+      }
+
       .topbar { align-items: flex-start; gap: 10px; flex-wrap: wrap; }
       .topbar-right { width: 100%; justify-content: space-between; }
-      .main-layout { flex-direction: column; }
-      .sidebar { width: 100%; max-height: 236px; }
-      .sessions-list { display: flex; flex-direction: row; overflow-x: auto; padding: 8px; gap: 8px; }
-      .session-item { flex-shrink: 0; width: auto; max-width: 200px; }
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+      }
+
+      .main-layout {
+        flex-direction: column;
+        flex: none;
+        overflow: visible;
+      }
+
+      .sidebar {
+        width: 100%;
+        max-height: none;
+        border-right: none;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .sidebar-header,
+      .sidebar-footer {
+        position: sticky;
+        background: rgba(255, 251, 245, 0.94);
+        z-index: 2;
+      }
+
+      .sidebar-header { top: 0; }
+      .sidebar-footer { bottom: 0; }
+
+      .sessions-list {
+        display: flex;
+        flex-direction: row;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 10px 8px 12px;
+        gap: 8px;
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x proximity;
+      }
+
+      .session-item {
+        flex-shrink: 0;
+        width: min(72vw, 240px);
+        max-width: 240px;
+        margin-bottom: 0;
+        scroll-snap-align: start;
+      }
+
+      .main-content {
+        overflow: visible;
+      }
+
       .terminal-header, .input-panel { padding-left: 14px; padding-right: 14px; }
-      .terminal-container { margin: 12px; padding: 14px; border-radius: 20px; }
+
+      .terminal-header {
+        align-items: flex-start;
+        gap: 10px;
+        flex-direction: column;
+      }
+
+      .terminal-title {
+        width: 100%;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .terminal-controls {
+        width: 100%;
+      }
+
+      .terminal-controls .btn {
+        flex: 1 1 calc(33.333% - 4px);
+      }
+
+      .terminal-container {
+        flex: none;
+        min-height: 44vh;
+        max-height: 56vh;
+        margin: 12px;
+        padding: 14px;
+        border-radius: 20px;
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .input-panel {
+        position: sticky;
+        bottom: 0;
+        z-index: 20;
+        padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+        box-shadow: 0 -10px 30px rgba(89, 58, 32, 0.08);
+      }
+
       .input-row { flex-direction: column; align-items: stretch; }
       .input-actions { width: 100%; }
       .input-actions .btn { width: 100%; }
       .quick-actions { flex-wrap: wrap; }
+
+      .quick-actions .btn {
+        flex: 1 1 calc(50% - 4px);
+      }
+
+      .login-container {
+        min-height: 100dvh;
+        align-items: flex-start;
+        padding: 18px 14px calc(18px + env(safe-area-inset-bottom, 0px));
+      }
+
+      .login-card {
+        margin-top: max(16px, env(safe-area-inset-top, 0px));
+      }
+    }
+
+    @media (max-width: 420px) {
+      .topbar-left,
+      .topbar-right {
+        width: 100%;
+      }
+
+      .topbar-right {
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .protocol-note,
+      .config-path,
+      .status-badge {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .terminal-container {
+        min-height: 38vh;
+        max-height: 50vh;
+      }
+
+      .quick-actions .btn,
+      .terminal-controls .btn {
+        flex-basis: 100%;
+      }
     }
   </style>
 </head>
@@ -1130,7 +1292,7 @@ export function renderApp(configPath: string): string {
             if (inputBox) {
               var start = inputBox.selectionStart || 0;
               var current = inputBox.value;
-              var newValue = current.slice(0, start) + "\n" + current.slice(start);
+              var newValue = current.slice(0, start) + "\\n" + current.slice(start);
               inputBox.value = newValue;
               setDraftValue(newValue);
             }
@@ -1158,7 +1320,7 @@ export function renderApp(configPath: string): string {
           if (inputBox) {
             var start = inputBox.selectionStart || 0;
             var current = inputBox.value;
-            var newValue = current.slice(0, start) + "\t" + current.slice(start);
+            var newValue = current.slice(0, start) + "\\t" + current.slice(start);
             inputBox.value = newValue;
             setDraftValue(newValue);
           }

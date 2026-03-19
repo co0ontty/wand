@@ -16,6 +16,7 @@
   - `full-access`
 - Optional startup commands launched with the web service
 - Mobile-friendly command presets, modal new-session flow, path suggestions, and quick input controls
+- Default config and SQLite data live under `~/.wand/`
 
 ## Quick start
 
@@ -31,15 +32,21 @@ node dist/cli.js web
 Default config path:
 
 ```text
-.wand/config.json
+~/.wand/config.json
+```
+
+Default SQLite database path:
+
+```text
+~/.wand/wand.db
 ```
 
 Example:
 
 ```json
 {
-  "host": "127.0.0.1",
-  "port": 3170,
+  "host": "0.0.0.0",
+  "port": 8443,
   "password": "change-me",
   "defaultMode": "default",
   "shell": "/bin/bash",
@@ -56,6 +63,16 @@ Example:
       "label": "Claude",
       "command": "claude",
       "mode": "default"
+    },
+    {
+      "label": "Claude Full Access",
+      "command": "claude",
+      "mode": "full-access"
+    },
+    {
+      "label": "Codex Full Access",
+      "command": "codex",
+      "mode": "full-access"
     }
   ]
 }
@@ -71,7 +88,7 @@ node dist/cli.js config:set password your-password
 node dist/cli.js web
 ```
 
-Then open `http://<your-machine-ip>:3170` on your phone.
+Then open `http://<your-machine-ip>:8443` on your phone.
 
 ## Publish
 

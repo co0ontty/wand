@@ -2,9 +2,10 @@ import express, { NextFunction, Request, Response } from "express";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { createSession, revokeSession, validateSession } from "./auth.js";
+import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
 import { isExecutionMode } from "./config.js";
 import { ProcessManager } from "./process-manager.js";
+import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { renderApp } from "./web-ui.js";
 import {
   CommandRequest,
@@ -21,7 +22,9 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 export async function startServer(config: WandConfig, configPath: string): Promise<void> {
   const app = express();
-  const processes = new ProcessManager(config);
+  const storage = new WandStorage(resolveDatabasePath(configPath));
+  setAuthStorage(storage);
+  const processes = new ProcessManager(config, storage);
   const accessHost = config.host === "0.0.0.0" ? "127.0.0.1" : config.host;
   const accessUrl = `http://${accessHost}:${config.port}`;
 

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -7,8 +8,8 @@ export const DEFAULT_CONFIG_DIR = ".wand";
 export const DEFAULT_CONFIG_FILE = "config.json";
 
 export const defaultConfig = (): WandConfig => ({
-  host: "127.0.0.1",
-  port: 3170,
+  host: "0.0.0.0",
+  port: 8443,
   password: "change-me",
   defaultMode: "default",
   shell: process.env.SHELL || "/bin/bash",
@@ -27,6 +28,16 @@ export const defaultConfig = (): WandConfig => ({
       mode: "default"
     },
     {
+      label: "Claude Full Access",
+      command: "claude",
+      mode: "full-access"
+    },
+    {
+      label: "Codex Full Access",
+      command: "codex",
+      mode: "full-access"
+    },
+    {
       label: "Cursor Agent",
       command: "cursor-agent",
       mode: "default"
@@ -39,7 +50,11 @@ export function resolveConfigPath(inputPath?: string): string {
     return path.resolve(process.cwd(), inputPath);
   }
 
-  return path.resolve(process.cwd(), DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_FILE);
+  return path.resolve(process.env.HOME || process.cwd(), DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_FILE);
+}
+
+export function hasConfigFile(configPath: string): boolean {
+  return existsSync(configPath);
 }
 
 export async function ensureConfig(configPath: string): Promise<WandConfig> {
@@ -99,7 +114,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
   };
 }
 
-function isExecutionMode(value: unknown): value is ExecutionMode {
+export function isExecutionMode(value: unknown): value is ExecutionMode {
   return value === "auto-edit" || value === "default" || value === "full-access";
 }
 
