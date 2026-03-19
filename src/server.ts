@@ -143,6 +143,15 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
+  app.delete("/api/sessions/:id", (req, res) => {
+    try {
+      processes.delete(req.params.id);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "Failed to delete session.") });
+    }
+  });
+
   await processes.runStartupCommands();
 
   await new Promise<void>((resolve, reject) => {

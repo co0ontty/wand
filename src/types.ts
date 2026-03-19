@@ -34,6 +34,8 @@ export interface SessionSnapshot {
   startedAt: string;
   endedAt: string | null;
   output: string;
+  archived: boolean;
+  archivedAt: string | null;
 }
 
 export interface InputRequest {

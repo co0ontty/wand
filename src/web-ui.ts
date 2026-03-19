@@ -18,8 +18,8 @@ export function renderApp(configPath: string): string {
       --bg-terminal: #1f1b17;
       --border-subtle: rgba(150, 118, 85, 0.14);
       --border-default: rgba(125, 91, 57, 0.3);
-      --text-primary: #2f241c;
-      --text-secondary: #5f4a39;
+      --text-primary: #2a1f16;
+      --text-secondary: #5a4535;
       --text-muted: #8c735f;
       --accent: #c5653d;
       --accent-hover: #af5330;
@@ -31,14 +31,15 @@ export function renderApp(configPath: string): string {
       --warning-muted: rgba(169, 106, 47, 0.14);
       --danger: #b24f45;
       --danger-muted: rgba(178, 79, 69, 0.14);
-      --shadow-soft: 0 24px 60px rgba(89, 58, 32, 0.10);
-      --radius-sm: 8px;
-      --radius-md: 14px;
-      --radius-lg: 22px;
+      --shadow-soft: 0 20px 50px rgba(89, 58, 32, 0.12);
+      --shadow-elevated: 0 8px 24px rgba(89, 58, 32, 0.08);
+      --radius-sm: 10px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
       --font-sans: "Inter", "Helvetica Neue", "PingFang SC", "Noto Sans SC", sans-serif;
       --font-mono: "Geist Mono", "SF Mono", "Fira Code", monospace;
-      --transition-fast: 0.1s ease;
-      --transition-normal: 0.2s ease;
+      --transition-fast: 0.15s ease;
+      --transition-normal: 0.25s ease;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -78,7 +79,7 @@ export function renderApp(configPath: string): string {
       grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
       gap: 14px;
-      min-height: 72px;
+      min-height: 68px;
       padding: 12px 18px;
       background: var(--bg-secondary);
       border-bottom: 1px solid var(--border-subtle);
@@ -221,7 +222,7 @@ export function renderApp(configPath: string): string {
       flex-direction: column;
       min-height: 0;
       backdrop-filter: blur(18px);
-      box-shadow: 20px 0 48px rgba(89, 58, 32, 0.12);
+      box-shadow: 24px 0 56px rgba(89, 58, 32, 0.14);
       transform: translateX(-100%);
       transition: transform var(--transition-normal);
     }
@@ -234,14 +235,15 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px 18px 12px;
+      padding: 14px 16px;
       border-bottom: 1px solid var(--border-subtle);
+      background: rgba(255, 251, 245, 0.6);
     }
 
     .sidebar-header-main {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       min-width: 0;
     }
 
@@ -257,7 +259,7 @@ export function renderApp(configPath: string): string {
       font-size: 0.6875rem;
       color: var(--text-muted);
       background: rgba(240, 229, 215, 0.9);
-      padding: 4px 8px;
+      padding: 3px 8px;
       border-radius: var(--radius-sm);
     }
 
@@ -277,23 +279,60 @@ export function renderApp(configPath: string): string {
     }
 
     .sessions-list { flex: 1; overflow-y: auto; padding: 12px; }
+    .session-group { margin-bottom: 18px; }
+    .session-group:last-child { margin-bottom: 0; }
+    .session-group-title {
+      padding: 4px 6px 10px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
 
     .session-item {
       width: 100%;
       text-align: left;
       background: rgba(255, 250, 244, 0.72);
       border: 1px solid rgba(150, 118, 85, 0.12);
-      border-radius: 18px;
+      border-radius: var(--radius-lg);
       color: var(--text-primary);
       padding: 12px 14px;
       cursor: pointer;
       transition: all var(--transition-fast);
       font-family: var(--font-sans);
       margin-bottom: 8px;
-      box-shadow: 0 6px 18px rgba(89, 58, 32, 0.04);
+      box-shadow: 0 4px 12px rgba(89, 58, 32, 0.04);
     }
 
-    .session-item:hover { background: rgba(255, 248, 240, 0.96); border-color: var(--accent-soft); transform: translateY(-1px); }
+    .session-item-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .session-main {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .session-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .session-action-btn {
+      width: 28px;
+      height: 28px;
+      min-height: 28px;
+      padding: 0;
+      border-radius: 999px;
+    }
+
+    .session-item:hover { background: rgba(255, 248, 240, 0.96); border-color: var(--accent-soft); transform: translateY(-2px); box-shadow: 0 8px 20px rgba(89, 58, 32, 0.08); }
     .session-item.active { background: linear-gradient(180deg, rgba(241, 214, 194, 0.66), rgba(255, 247, 239, 0.96)); border-color: rgba(197, 101, 61, 0.42); }
 
     .session-command {
@@ -328,19 +367,23 @@ export function renderApp(configPath: string): string {
     .session-status.exited { background: var(--bg-tertiary); color: var(--text-muted); }
     .session-status.failed { background: var(--danger-muted); color: var(--danger); }
     .session-status.stopped { background: var(--warning-muted); color: var(--warning); }
+    .session-status.archived { background: rgba(95, 74, 57, 0.1); color: var(--text-secondary); }
 
     .sidebar-footer {
-      padding: 14px 12px 16px;
+      padding: 12px 14px 14px;
       border-top: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: column;
       gap: 10px;
+      background: rgba(255, 251, 245, 0.6);
     }
 
     .sidebar-meta {
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
+      align-items: center;
       gap: 8px;
+      flex-wrap: wrap;
     }
 
     .btn {
@@ -351,15 +394,16 @@ export function renderApp(configPath: string): string {
       font-family: var(--font-sans);
       font-size: 0.8125rem;
       font-weight: 500;
-      padding: 8px 14px;
+      padding: 10px 16px;
       border-radius: var(--radius-md);
       border: 1px solid transparent;
       cursor: pointer;
       transition: all var(--transition-fast);
+      min-height: 38px;
     }
 
-    .btn-primary { background: linear-gradient(180deg, #cf754d 0%, #b85c37 100%); color: white; box-shadow: 0 10px 24px rgba(184, 92, 55, 0.22); }
-    .btn-primary:hover { background: linear-gradient(180deg, #c96b44 0%, #a94d2b 100%); }
+    .btn-primary { background: linear-gradient(180deg, #cf754d 0%, #b85c37 100%); color: white; box-shadow: 0 6px 18px rgba(184, 92, 55, 0.22); }
+    .btn-primary:hover { background: linear-gradient(180deg, #c96b44 0%, #a94d2b 100%); transform: translateY(-1px); box-shadow: 0 8px 22px rgba(184, 92, 55, 0.28); }
     .btn-secondary { background: rgba(255, 250, 244, 0.9); color: var(--text-secondary); border-color: var(--border-subtle); }
     .btn-secondary:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--accent-soft); }
     .btn-ghost { background: transparent; color: var(--text-secondary); }
@@ -367,8 +411,8 @@ export function renderApp(configPath: string): string {
     .btn-danger { background: var(--danger-muted); color: var(--danger); }
     .btn-danger:hover { background: var(--danger); color: white; }
     .btn-block { width: 100%; }
-    .btn-sm { font-size: 0.75rem; padding: 6px 10px; }
-    .btn-icon { padding: 6px; font-size: 1rem; }
+    .btn-sm { font-size: 0.75rem; padding: 8px 12px; min-height: 34px; }
+    .btn-icon { padding: 8px; font-size: 1rem; min-height: 38px; }
 
     .main-content {
       flex: 1;
@@ -401,8 +445,8 @@ export function renderApp(configPath: string): string {
       padding: 18px;
       overflow: hidden;
       min-height: 200px;
-      margin: 16px;
-      border-radius: 24px;
+      margin: 14px;
+      border-radius: var(--radius-lg);
       border: 1px solid rgba(122, 91, 64, 0.35);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-soft);
     }
@@ -415,6 +459,7 @@ export function renderApp(configPath: string): string {
       border-top: 1px solid var(--border-subtle);
       padding: 14px 18px 18px;
       backdrop-filter: blur(12px);
+      flex-shrink: 0;
     }
 
     .input-row { display: flex; gap: 8px; align-items: flex-end; }
@@ -444,23 +489,23 @@ export function renderApp(configPath: string): string {
     .floating-toggle {
       position: fixed;
       right: 16px;
-      bottom: 24px;
+      bottom: 22px;
       z-index: 40;
-      width: 52px;
-      height: 52px;
+      width: 50px;
+      height: 50px;
       border-radius: 50%;
-      box-shadow: 0 16px 28px rgba(89, 58, 32, 0.18);
+      box-shadow: 0 12px 24px rgba(89, 58, 32, 0.18);
     }
 
     .floating-pad {
       position: fixed;
       right: 16px;
-      bottom: 88px;
+      bottom: 82px;
       z-index: 39;
       width: min(220px, calc(100vw - 32px));
       background: rgba(255, 251, 245, 0.98);
       border: 1px solid rgba(150, 118, 85, 0.18);
-      border-radius: 20px;
+      border-radius: var(--radius-lg);
       box-shadow: var(--shadow-soft);
       padding: 12px;
       backdrop-filter: blur(18px);
@@ -484,8 +529,8 @@ export function renderApp(configPath: string): string {
 
     .floating-pad-grid .btn {
       width: 100%;
-      min-height: 42px;
-      padding: 8px 10px;
+      min-height: 44px;
+      padding: 10px;
     }
 
     .floating-pad-spacer {
@@ -506,7 +551,7 @@ export function renderApp(configPath: string): string {
       max-width: 380px;
       background: rgba(255, 251, 245, 0.92);
       border: 1px solid rgba(150, 118, 85, 0.16);
-      border-radius: 28px;
+      border-radius: var(--radius-lg);
       overflow: hidden;
       box-shadow: var(--shadow-soft);
     }
@@ -525,7 +570,7 @@ export function renderApp(configPath: string): string {
     .login-logo-icon {
       width: 42px; height: 42px;
       background: linear-gradient(135deg, #d67b52 0%, #ab522e 100%);
-      border-radius: 14px;
+      border-radius: var(--radius-md);
       display: flex; align-items: center; justify-content: center;
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
       font-size: 18px; color: white; font-weight: 700;
@@ -540,7 +585,7 @@ export function renderApp(configPath: string): string {
       color: var(--warning);
       background: rgba(255, 244, 230, 0.92);
       border: 1px solid rgba(169, 106, 47, 0.18);
-      border-radius: 16px;
+      border-radius: var(--radius-md);
       padding: 10px 12px;
       margin-bottom: 18px;
     }
@@ -581,7 +626,7 @@ export function renderApp(configPath: string): string {
       max-width: 440px;
       background: rgba(255, 251, 245, 0.96);
       border: 1px solid rgba(150, 118, 85, 0.18);
-      border-radius: 24px;
+      border-radius: var(--radius-lg);
       overflow: hidden;
       box-shadow: var(--shadow-soft);
     }
@@ -663,11 +708,14 @@ export function renderApp(configPath: string): string {
       .topbar {
         grid-template-columns: auto minmax(0, 1fr) auto;
         padding: 10px 14px;
+        min-height: 60px;
       }
       .sidebar { width: min(304px, calc(100vw - 28px)); }
       .config-path { display: none; }
       .terminal-container { min-height: 180px; }
       .session-summary-value { max-width: 40vw; }
+      .btn { min-height: 40px; }
+      .btn-sm { min-height: 36px; }
     }
 
     @media (max-width: 640px) {
@@ -697,7 +745,9 @@ export function renderApp(configPath: string): string {
           "left right"
           "center center";
         align-items: center;
-        gap: 10px 12px;
+        gap: 8px 10px;
+        min-height: auto;
+        padding: 10px 14px;
       }
 
       .topbar-left { grid-area: left; }
@@ -727,7 +777,7 @@ export function renderApp(configPath: string): string {
         display: block;
         overflow-x: hidden;
         overflow-y: auto;
-        padding: 12px;
+        padding: 10px;
         -webkit-overflow-scrolling: touch;
       }
 
@@ -735,6 +785,7 @@ export function renderApp(configPath: string): string {
         width: 100%;
         max-width: none;
         margin-bottom: 8px;
+        padding: 12px 14px;
       }
 
       .main-content {
@@ -745,7 +796,8 @@ export function renderApp(configPath: string): string {
 
       .terminal-header {
         align-items: flex-start;
-        gap: 8px;
+        gap: 6px;
+        padding: 12px 14px;
       }
 
       .terminal-title {
@@ -756,11 +808,11 @@ export function renderApp(configPath: string): string {
 
       .terminal-container {
         flex: none;
-        min-height: 46vh;
-        max-height: 58vh;
-        margin: 12px;
+        min-height: 44vh;
+        max-height: 56vh;
+        margin: 10px;
         padding: 14px;
-        border-radius: 20px;
+        border-radius: var(--radius-lg);
         overflow: auto;
         -webkit-overflow-scrolling: touch;
       }
@@ -769,8 +821,9 @@ export function renderApp(configPath: string): string {
         position: sticky;
         bottom: 0;
         z-index: 20;
-        padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
-        box-shadow: 0 -10px 30px rgba(89, 58, 32, 0.08);
+        padding: 12px 14px;
+        padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+        box-shadow: 0 -8px 24px rgba(89, 58, 32, 0.08);
       }
 
       .input-row { flex-direction: column; align-items: stretch; }
@@ -778,10 +831,12 @@ export function renderApp(configPath: string): string {
         width: 100%;
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
       }
       .input-actions .btn {
         width: 100%;
         min-width: 0;
+        min-height: 44px;
       }
 
       .input-textarea,
@@ -789,15 +844,25 @@ export function renderApp(configPath: string): string {
         font-size: 16px;
       }
 
+      .input-textarea {
+        min-height: 48px;
+      }
+
       .floating-toggle {
         right: 14px;
-        bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+        width: 48px;
+        height: 48px;
       }
 
       .floating-pad {
         right: 14px;
-        bottom: calc(154px + env(safe-area-inset-bottom, 0px));
+        bottom: calc(144px + env(safe-area-inset-bottom, 0px));
         width: min(220px, calc(100vw - 28px));
+      }
+
+      .floating-pad-grid .btn {
+        min-height: 48px;
       }
 
       .login-container {
@@ -809,6 +874,9 @@ export function renderApp(configPath: string): string {
       .login-card {
         margin-top: max(16px, env(safe-area-inset-top, 0px));
       }
+
+      .btn { min-height: 44px; }
+      .btn-sm { min-height: 40px; }
     }
 
     @media (max-width: 420px) {
@@ -822,8 +890,9 @@ export function renderApp(configPath: string): string {
       }
 
       .terminal-container {
-        min-height: 38vh;
-        max-height: 50vh;
+        min-height: 36vh;
+        max-height: 48vh;
+        margin: 8px;
       }
 
       .floating-pad {
@@ -833,6 +902,16 @@ export function renderApp(configPath: string): string {
 
       .floating-pad-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .sidebar-footer {
+        padding: 10px 12px 12px;
+      }
+
+      .sidebar-meta {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
       }
     }
   </style>
@@ -863,6 +942,7 @@ export function renderApp(configPath: string): string {
         drafts: {},
         isSyncingInputBox: false,
         loginPending: false,
+        loginChecked: false,
         sessionsDrawerOpen: false,
         modalOpen: false,
         presetValue: "",
@@ -871,6 +951,33 @@ export function renderApp(configPath: string): string {
         modeValue: "default",
         lastResize: { cols: 0, rows: 0 }
       };
+
+      restoreLoginSession();
+
+      function restoreLoginSession() {
+        fetch("/api/config", { credentials: "same-origin" })
+          .then(function(res) {
+            if (!res.ok) {
+              state.loginChecked = true;
+              render();
+              return null;
+            }
+            return res.json();
+          })
+          .then(function(config) {
+            if (!config) return;
+            state.config = config;
+            state.loginChecked = true;
+            return refreshAll().then(function() {
+              startPolling();
+              render();
+            });
+          })
+          .catch(function() {
+            state.loginChecked = true;
+            render();
+          });
+      }
 
       render();
 
@@ -903,6 +1010,22 @@ export function renderApp(configPath: string): string {
       }
 
       function renderLogin() {
+        if (!state.loginChecked) {
+          return '<div class="login-container">' +
+            '<div class="login-card">' +
+              '<div class="login-header">' +
+                '<div class="login-logo">' +
+                  '<div class="login-logo-icon">W</div>' +
+                  '<span class="login-logo-text">Wand</span>' +
+                '</div>' +
+                '<div class="login-subtitle">正在恢复登录状态</div>' +
+              '</div>' +
+              '<div class="login-body">' +
+                '<p class="login-hint">正在检查本地登录会话，请稍候。</p>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }
         return '<div class="login-container">' +
           '<div class="login-card">' +
             '<div class="login-header">' +
@@ -1033,16 +1156,41 @@ export function renderApp(configPath: string): string {
         if (state.sessions.length === 0) {
           return '<div class="empty-state"><strong>还没有会话</strong>从左上角菜单或右上角按钮启动一个新会话，终端输出会显示在主区域。</div>';
         }
-        return state.sessions.map(function(session) {
-          var activeClass = session.id === state.selectedId ? " active" : "";
-          return '<button class="session-item' + activeClass + '" data-session-id="' + session.id + '">' +
-            '<div class="session-command">' + escapeHtml(session.command) + '</div>' +
-            '<div class="session-meta">' +
-              '<span>' + escapeHtml(session.mode) + '</span>' +
-              '<span class="session-status ' + session.status + '">' + escapeHtml(session.status) + '</span>' +
+        var activeSessions = state.sessions.filter(function(session) { return !session.archived; });
+        var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
+        var groups = [];
+        if (activeSessions.length > 0) {
+          groups.push(renderSessionGroup("Recent", activeSessions));
+        }
+        if (archivedSessions.length > 0) {
+          groups.push(renderSessionGroup("Archived", archivedSessions));
+        }
+        return groups.join("");
+      }
+
+      function renderSessionGroup(title, sessions) {
+        return '<section class="session-group">' +
+          '<div class="session-group-title">' + escapeHtml(title) + '</div>' +
+          sessions.map(renderSessionItem).join("") +
+        '</section>';
+      }
+
+      function renderSessionItem(session) {
+        var activeClass = session.id === state.selectedId ? " active" : "";
+        var metaStatus = session.archived ? "archived" : session.status;
+        var archiveButton = '<button class="btn btn-ghost btn-sm session-action-btn" data-action="delete" data-session-id="' + session.id + '" type="button" aria-label="Delete session">×</button>';
+        return '<button class="session-item' + activeClass + '" data-session-id="' + session.id + '">' +
+          '<div class="session-item-row">' +
+            '<div class="session-main">' +
+              '<div class="session-command">' + escapeHtml(session.command) + '</div>' +
+              '<div class="session-meta">' +
+                '<span>' + escapeHtml(session.mode) + '</span>' +
+                '<span class="session-status ' + metaStatus + '">' + escapeHtml(metaStatus) + '</span>' +
+              '</div>' +
             '</div>' +
-          '</button>';
-        }).join("");
+            '<span class="session-actions">' + archiveButton + '</span>' +
+          '</div>' +
+        '</button>';
       }
 
       function renderSessionModal() {
@@ -1102,6 +1250,15 @@ export function renderApp(configPath: string): string {
           sessionsList.addEventListener("click", function(event) {
             var target = event.target;
             if (!target || !(target instanceof Element)) return;
+            var actionButton = target.closest("[data-action]");
+            if (actionButton && actionButton instanceof HTMLElement) {
+              event.preventDefault();
+              event.stopPropagation();
+              if (actionButton.dataset.action === "delete" && actionButton.dataset.sessionId) {
+                deleteSession(actionButton.dataset.sessionId);
+              }
+              return;
+            }
             var button = target.closest(".session-item");
             if (button && button.dataset.sessionId) {
               selectSession(button.dataset.sessionId);
@@ -1135,7 +1292,6 @@ export function renderApp(configPath: string): string {
         document.querySelectorAll(".quick-input").forEach(function(btn) {
           btn.addEventListener("click", function() {
             sendDirectInput(getControlInput(btn.dataset.inputKey || ""));
-            hideFloatingControls();
           });
         });
 
@@ -1733,9 +1889,26 @@ export function renderApp(configPath: string): string {
 
       function stopSession() {
         if (!state.selectedId) return;
-        hideFloatingControls();
         fetch("/api/sessions/" + state.selectedId + "/stop", { method: "POST" })
           .then(refreshAll);
+      }
+
+      function deleteSession(id) {
+        fetch("/api/sessions/" + id, { method: "DELETE" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && data.error) {
+              throw new Error(data.error);
+            }
+            if (state.selectedId === id) {
+              state.selectedId = null;
+            }
+            return refreshAll();
+          })
+          .catch(function() {
+            var errorEl = document.getElementById("action-error");
+            showError(errorEl, "Failed to delete session.");
+          });
       }
 
       function focusInputBox() {

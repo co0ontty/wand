@@ -33,9 +33,12 @@ export function ensureDatabaseFile(dbPath: string): boolean {
       exit_code INTEGER,
       started_at TEXT NOT NULL,
       ended_at TEXT,
-      output TEXT NOT NULL
+      output TEXT NOT NULL,
+      archived INTEGER NOT NULL DEFAULT 0,
+      archived_at TEXT
     );
   `);
+  ensureCommandSessionSchema(db);
   db.close();
   return created;
 }
@@ -61,9 +64,12 @@ export class WandStorage {
         exit_code INTEGER,
         started_at TEXT NOT NULL,
         ended_at TEXT,
-        output TEXT NOT NULL
+        output TEXT NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0,
+        archived_at TEXT
       );
     `);
+    ensureCommandSessionSchema(this.db);
   }
 
   close(): void {
@@ -108,7 +114,8 @@ export class WandStorage {
       .prepare(
         `INSERT INTO command_sessions (
            id, command, cwd, mode, status, exit_code, started_at, ended_at, output
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           , archived, archived_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            command = excluded.command,
            cwd = excluded.cwd,
@@ -117,7 +124,9 @@ export class WandStorage {
            exit_code = excluded.exit_code,
            started_at = excluded.started_at,
            ended_at = excluded.ended_at,
-           output = excluded.output`
+           output = excluded.output,
+           archived = excluded.archived,
+           archived_at = excluded.archived_at`
       )
       .run(
         snapshot.id,
@@ -128,14 +137,16 @@ export class WandStorage {
         snapshot.exitCode,
         snapshot.startedAt,
         snapshot.endedAt,
-        snapshot.output
+        snapshot.output,
+        snapshot.archived ? 1 : 0,
+        snapshot.archivedAt
       );
   }
 
   loadSessions(): SessionSnapshot[] {
     const rows = this.db
       .prepare(
-        `SELECT id, command, cwd, mode, status, exit_code, started_at, ended_at, output
+        `SELECT id, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at
          FROM command_sessions
          ORDER BY started_at DESC`
       )
@@ -149,6 +160,8 @@ export class WandStorage {
       started_at: string;
       ended_at: string | null;
       output: string;
+      archived: number;
+      archived_at: string | null;
     }>;
 
     return rows.map((row) => ({
@@ -160,11 +173,24 @@ export class WandStorage {
       exitCode: row.exit_code,
       startedAt: row.started_at,
       endedAt: row.ended_at,
-      output: row.output
+      output: row.output,
+      archived: Boolean(row.archived),
+      archivedAt: row.archived_at
     }));
   }
 
   deleteSession(id: string): void {
     this.db.prepare("DELETE FROM command_sessions WHERE id = ?").run(id);
+  }
+}
+
+function ensureCommandSessionSchema(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(command_sessions)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  if (!names.has("archived")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!names.has("archived_at")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN archived_at TEXT");
   }
 }

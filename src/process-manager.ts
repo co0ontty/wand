@@ -43,6 +43,7 @@ interface SessionRecord extends SessionSnapshot {
 }
 
 const MAX_SESSIONS = 50;
+const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
 
 export class ProcessManager {
   private readonly sessions = new Map<string, SessionRecord>();
@@ -61,6 +62,7 @@ export class ProcessManager {
         lastAutoConfirmAt: 0
       });
     }
+    this.archiveExpiredSessions();
   }
 
   private cleanupOldSessions(): void {
@@ -109,6 +111,8 @@ export class ProcessManager {
       startedAt: new Date().toISOString(),
       endedAt: null,
       output: "",
+      archived: false,
+      archivedAt: null,
       processId: null,
       ptyProcess: null,
       stopRequested: false,
@@ -159,12 +163,14 @@ export class ProcessManager {
   }
 
   list(): SessionSnapshot[] {
+    this.archiveExpiredSessions();
     return Array.from(this.sessions.values())
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
       .map((session) => this.snapshot(session));
   }
 
   get(id: string): SessionSnapshot | null {
+    this.archiveExpiredSessions();
     const record = this.sessions.get(id);
     return record ? this.snapshot(record) : null;
   }
@@ -210,6 +216,20 @@ export class ProcessManager {
     return this.snapshot(record);
   }
 
+  delete(id: string): void {
+    const record = this.mustGet(id);
+    if (record.ptyProcess && record.status === "running") {
+      try {
+        record.stopRequested = true;
+        record.ptyProcess.kill();
+      } catch {
+        // Ignore and continue deleting persisted state.
+      }
+    }
+    this.sessions.delete(id);
+    this.storage.deleteSession(id);
+  }
+
   async runStartupCommands(): Promise<SessionSnapshot[]> {
     return this.config.startupCommands.map((command) =>
       this.start(command, this.config.defaultCwd, this.config.defaultMode)
@@ -226,7 +246,9 @@ export class ProcessManager {
       exitCode: record.exitCode,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
-      output: record.output
+      output: record.output,
+      archived: record.archived,
+      archivedAt: record.archivedAt
     };
   }
 
@@ -243,6 +265,23 @@ export class ProcessManager {
 
   private persist(record: SessionRecord): void {
     this.storage.saveSession(this.snapshot(record));
+  }
+
+  private archiveExpiredSessions(): void {
+    const now = Date.now();
+    for (const record of this.sessions.values()) {
+      if (record.archived || record.status === "running") {
+        continue;
+      }
+      const referenceTime = record.endedAt ?? record.startedAt;
+      const endedAtMs = Date.parse(referenceTime);
+      if (!Number.isFinite(endedAtMs) || now - endedAtMs < ARCHIVE_AFTER_MS) {
+        continue;
+      }
+      record.archived = true;
+      record.archivedAt = new Date(now).toISOString();
+      this.persist(record);
+    }
   }
 
   private assertCommandAllowed(command: string): void {
