@@ -30,6 +30,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.use(express.json({ limit: "1mb" }));
   app.use("/vendor/xterm", express.static(path.resolve(process.cwd(), "node_modules/xterm")));
+  app.use("/vendor/xterm-addon-fit", express.static(path.resolve(process.cwd(), "node_modules/@xterm/addon-fit")));
 
   app.get("/", (_req, res) => {
     res.type("html").send(renderApp(configPath));

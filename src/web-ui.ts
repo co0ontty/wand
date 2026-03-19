@@ -841,6 +841,7 @@ export function renderApp(configPath: string): string {
   <div id="app"></div>
 
   <script src="/vendor/xterm/lib/xterm.js"></script>
+  <script src="/vendor/xterm-addon-fit/lib/addon-fit.js"></script>
   <script>
     (function() {
       var configPath = "${escapeHtml(configPath)}";
@@ -852,6 +853,7 @@ export function renderApp(configPath: string): string {
         sessions: [],
         suggestionTimer: null,
         terminal: null,
+        fitAddon: null,
         terminalSessionId: null,
         terminalOutput: "",
         resizeObserver: null,
@@ -1192,7 +1194,11 @@ export function renderApp(configPath: string): string {
           }
         });
 
+        state.fitAddon = new FitAddon.FitAddon();
+        state.terminal.loadAddon(state.fitAddon);
+
         state.terminal.open(container);
+        state.fitAddon.fit();
 
         if (state.selectedId) {
           var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
@@ -1766,6 +1772,7 @@ export function renderApp(configPath: string): string {
           state.terminal.dispose();
           state.terminal = null;
         }
+        state.fitAddon = null;
         state.terminalSessionId = null;
       }
 
@@ -1776,14 +1783,14 @@ export function renderApp(configPath: string): string {
 
       function syncTerminalSize() {
         var output = document.getElementById("output");
-        if (!state.terminal || !output) return;
+        if (!state.terminal || !state.fitAddon || !output) return;
 
-        var nextSize = measureTerminalSize(output);
-        if (!nextSize) return;
+        state.fitAddon.fit();
 
-        if (state.terminal.cols !== nextSize.cols || state.terminal.rows !== nextSize.rows) {
-          state.terminal.resize(nextSize.cols, nextSize.rows);
-        }
+        var nextSize = {
+          cols: state.terminal.cols,
+          rows: state.terminal.rows
+        };
 
         if (!state.selectedId) return;
 
@@ -1796,31 +1803,6 @@ export function renderApp(configPath: string): string {
             body: JSON.stringify(nextSize)
           }).catch(function() {});
         }
-      }
-
-      function measureTerminalSize(container) {
-        var style = window.getComputedStyle(container);
-        var paddingX = parseFloat(style.paddingLeft || "0") + parseFloat(style.paddingRight || "0");
-        var paddingY = parseFloat(style.paddingTop || "0") + parseFloat(style.paddingBottom || "0");
-        var width = container.clientWidth - paddingX;
-        var height = container.clientHeight - paddingY;
-        if (width <= 0 || height <= 0) return null;
-
-        var cellWidth = 8;
-        var lineHeight = 19.5;
-        var dimensions = state.terminal && state.terminal._core && state.terminal._core._renderService && state.terminal._core._renderService.dimensions;
-        if (dimensions && dimensions.css && dimensions.css.cell) {
-          if (dimensions.css.cell.width > 0) {
-            cellWidth = dimensions.css.cell.width;
-          }
-          if (dimensions.css.cell.height > 0) {
-            lineHeight = dimensions.css.cell.height;
-          }
-        }
-        return {
-          cols: Math.max(20, Math.floor(width / cellWidth)),
-          rows: Math.max(10, Math.floor(height / lineHeight))
-        };
       }
 
       function startPolling() {
