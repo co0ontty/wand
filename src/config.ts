@@ -10,6 +10,7 @@ export const DEFAULT_CONFIG_FILE = "config.json";
 export const defaultConfig = (): WandConfig => ({
   host: "0.0.0.0",
   port: 8443,
+  https: true,
   password: "change-me",
   defaultMode: "default",
   shell: process.env.SHELL || "/bin/bash",
@@ -53,6 +54,10 @@ export function resolveConfigPath(inputPath?: string): string {
   return path.resolve(process.env.HOME || process.cwd(), DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_FILE);
 }
 
+export function resolveConfigDir(configPath: string): string {
+  return path.dirname(configPath);
+}
+
 export function hasConfigFile(configPath: string): boolean {
   return existsSync(configPath);
 }
@@ -88,6 +93,8 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
   return {
     ...defaults,
     ...input,
+    // Ensure https is boolean
+    https: typeof input.https === "boolean" ? input.https : defaults.https,
     defaultCwd:
       typeof input.defaultCwd === "string" && input.defaultCwd.trim()
         ? input.defaultCwd

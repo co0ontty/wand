@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SessionSnapshot } from "./types.js";
+import { SessionSnapshot, WandConfig } from "./types.js";
 
 export const DEFAULT_DB_FILE = "wand.db";
 
@@ -38,6 +38,11 @@ export function ensureDatabaseFile(dbPath: string): boolean {
       archived_at TEXT,
       claude_session_id TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS app_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
   ensureCommandSessionSchema(db);
   db.close();
@@ -70,6 +75,11 @@ export class WandStorage {
         archived_at TEXT,
         claude_session_id TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS app_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
     ensureCommandSessionSchema(this.db);
   }
@@ -77,6 +87,48 @@ export class WandStorage {
   close(): void {
     this.db.close();
   }
+
+  // ============ Config Methods ============
+
+  /** Get a config value from database */
+  getConfigValue(key: string): string | null {
+    const row = this.db
+      .prepare("SELECT value FROM app_config WHERE key = ?")
+      .get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  /** Set a config value in database */
+  setConfigValue(key: string, value: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO app_config (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+      )
+      .run(key, value);
+  }
+
+  /** Delete a config value */
+  deleteConfigValue(key: string): void {
+    this.db.prepare("DELETE FROM app_config WHERE key = ?").run(key);
+  }
+
+  /** Get password from database */
+  getPassword(): string | null {
+    return this.getConfigValue("password");
+  }
+
+  /** Set password in database */
+  setPassword(password: string): void {
+    this.setConfigValue("password", password);
+  }
+
+  /** Check if password has been set (not default) */
+  hasCustomPassword(): boolean {
+    return this.getPassword() !== null;
+  }
+
+  // ============ Auth Session Methods ============
 
   saveAuthSession(token: string, expiresAt: number): void {
     this.db

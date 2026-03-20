@@ -1,10 +1,19 @@
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
+
+export interface ProcessEvent {
+  type: "output" | "status" | "started" | "ended";
+  sessionId: string;
+  data?: unknown;
+}
+
+export type ProcessEventHandler = (event: ProcessEvent) => void;
 
 const PROMPT_PATTERNS = [
   /(?:^|\b)(?:press\s+)?(?:y|yes)\s*(?:\/|\bor\b)\s*(?:n|no)(?:\b|$)/i,
@@ -59,13 +68,14 @@ function appendWindow(buffer: string, chunk: string, maxSize: number): string {
   return next.length > maxSize ? next.slice(-maxSize) : next;
 }
 
-export class ProcessManager {
+export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
 
   constructor(
     private readonly config: WandConfig,
     private readonly storage: WandStorage
   ) {
+    super();
     for (const snapshot of this.storage.loadSessions()) {
       this.sessions.set(snapshot.id, {
         ...snapshot,
@@ -78,6 +88,14 @@ export class ProcessManager {
       });
     }
     this.archiveExpiredSessions();
+  }
+
+  on(event: "process", listener: ProcessEventHandler): this {
+    return super.on("process", listener);
+  }
+
+  private emitEvent(event: ProcessEvent): void {
+    this.emit("process", event);
   }
 
   private cleanupOldSessions(): void {
@@ -157,6 +175,9 @@ export class ProcessManager {
     this.persist(record);
     this.cleanupOldSessions();
 
+    // Emit started event
+    this.emitEvent({ type: "started", sessionId: id, data: this.snapshot(record) });
+
     child.onData((chunk: string) => {
       const record = this.sessions.get(id);
       if (!record) return;
@@ -164,6 +185,9 @@ export class ProcessManager {
       // Update output buffer
       record.output = appendWindow(record.output, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
       this.persist(record);
+
+      // Emit output event for WebSocket clients
+      this.emitEvent({ type: "output", sessionId: id, data: { chunk, output: record.output } });
 
       // Extract Claude session ID (early exit if already found)
       if (!record.claudeSessionId) {
@@ -192,6 +216,9 @@ export class ProcessManager {
       current.endedAt = new Date().toISOString();
       current.ptyProcess = null;
       this.persist(current);
+
+      // Emit ended event
+      this.emitEvent({ type: "ended", sessionId: id, data: this.snapshot(current) });
     });
 
     return this.snapshot(record);

@@ -9,6 +9,8 @@ export interface CommandPreset {
 export interface WandConfig {
   host: string;
   port: number;
+  /** Enable HTTPS with self-signed certificate (default: true) */
+  https?: boolean;
   password: string;
   defaultMode: ExecutionMode;
   shell: string;

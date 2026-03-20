@@ -5,6 +5,14 @@ export function renderApp(configPath: string): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Wand Console</title>
+  <meta name="description" content="Local CLI Console for Vibe Coding - Manage terminal sessions from your browser" />
+  <meta name="theme-color" content="#f6f1e8" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1f1b17" media="(prefers-color-scheme: dark)" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Wand" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="manifest" href="/manifest.json" />
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -493,6 +501,23 @@ export function renderApp(configPath: string): string {
 
     .input-textarea:focus { border-color: var(--accent); }
     .input-textarea::placeholder { color: var(--text-muted); }
+
+    .keyboard-aware {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 20;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-subtle);
+      padding: 12px 14px;
+      padding-bottom: max(12px, env(keyboard-inset-bottom, 0px));
+      transform: translateY(0);
+      transition: transform 0.2s ease;
+    }
+
+    .keyboard-aware.hidden { transform: translateY(100%); }
+
     .input-actions {
       display: flex;
       gap: 6px;
@@ -769,6 +794,79 @@ export function renderApp(configPath: string): string {
     .empty-state strong { display: block; color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 6px; }
     .hidden { display: none !important; }
 
+    .offline-banner {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--warning);
+      color: white;
+      padding: 8px 16px;
+      border-radius: var(--radius-md);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      z-index: 100;
+      box-shadow: var(--shadow-elevated);
+      animation: slideUp 0.3s ease;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+      to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+
+    .pwa-install-prompt {
+      position: fixed;
+      bottom: 24px;
+      left: 24px;
+      right: 24px;
+      max-width: 400px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      box-shadow: var(--shadow-soft);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .pwa-install-prompt .prompt-icon {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, #d77a52 0%, #a95130 100%);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .pwa-install-prompt .prompt-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .pwa-install-prompt .prompt-title {
+      font-weight: 600;
+      font-size: 0.9375rem;
+      margin-bottom: 2px;
+    }
+
+    .pwa-install-prompt .prompt-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .pwa-install-prompt .prompt-actions {
+      display: flex;
+      gap: 8px;
+    }
+
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 4px; }
@@ -994,6 +1092,13 @@ export function renderApp(configPath: string): string {
   <script src="/vendor/xterm/lib/xterm.js"></script>
   <script src="/vendor/xterm-addon-fit/lib/addon-fit.js"></script>
   <script>
+    // Register Service Worker for PWA
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(function(e) {
+        console.log('SW registration failed:', e);
+      });
+    }
+
     (function() {
       var configPath = "${escapeHtml(configPath)}";
 
@@ -1021,8 +1126,76 @@ export function renderApp(configPath: string): string {
         commandValue: "",
         cwdValue: "",
         modeValue: "default",
-        lastResize: { cols: 0, rows: 0 }
+        lastResize: { cols: 0, rows: 0 },
+        isOnline: navigator.onLine,
+        deferredPrompt: null,
+        showInstallPrompt: false,
+        ws: null,
+        wsConnected: false
       };
+
+      // PWA install prompt handling
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        state.deferredPrompt = e;
+        state.showInstallPrompt = true;
+        updateInstallPrompt();
+      });
+
+      window.addEventListener('online', function() {
+        state.isOnline = true;
+        updateOfflineBanner();
+      });
+
+      window.addEventListener('offline', function() {
+        state.isOnline = false;
+        updateOfflineBanner();
+      });
+
+      function updateOfflineBanner() {
+        var banner = document.getElementById('offline-banner');
+        if (!state.isOnline && !banner) {
+          var el = document.createElement('div');
+          el.id = 'offline-banner';
+          el.className = 'offline-banner';
+          el.textContent = 'You are offline - some features may be limited';
+          document.body.appendChild(el);
+        } else if (state.isOnline && banner) {
+          banner.remove();
+        }
+      }
+
+      function updateInstallPrompt() {
+        var prompt = document.getElementById('pwa-install-prompt');
+        if (state.showInstallPrompt && state.deferredPrompt && !prompt) {
+          var el = document.createElement('div');
+          el.id = 'pwa-install-prompt';
+          el.className = 'pwa-install-prompt';
+          el.innerHTML =
+            '<div class="prompt-icon">W</div>' +
+            '<div class="prompt-content">' +
+              '<div class="prompt-title">Install Wand</div>' +
+              '<div class="prompt-desc">Add to home screen for quick access</div>' +
+            '</div>' +
+            '<div class="prompt-actions">' +
+              '<button id="pwa-install-dismiss" class="btn btn-ghost btn-sm">Later</button>' +
+              '<button id="pwa-install-accept" class="btn btn-primary btn-sm">Install</button>' +
+            '</div>';
+          document.body.appendChild(el);
+          document.getElementById('pwa-install-dismiss').addEventListener('click', function() {
+            el.remove();
+            state.showInstallPrompt = false;
+          });
+          document.getElementById('pwa-install-accept').addEventListener('click', function() {
+            state.deferredPrompt.prompt();
+            state.deferredPrompt.userChoice.then(function(result) {
+              state.deferredPrompt = null;
+              state.showInstallPrompt = false;
+              el.remove();
+            });
+          });
+        }
+      }
 
       restoreLoginSession();
 
@@ -1158,6 +1331,7 @@ export function renderApp(configPath: string): string {
             '</div>' +
             '<div class="topbar-right">' +
               '<button id="topbar-new-session-button" class="btn btn-primary btn-sm">+ New Session</button>' +
+              '<button id="settings-button" class="btn btn-ghost btn-sm">⚙ Settings</button>' +
               '<button id="logout-button" class="btn btn-ghost btn-sm">Logout</button>' +
             '</div>' +
           '</header>' +
@@ -1221,7 +1395,31 @@ export function renderApp(configPath: string): string {
               '</div>' +
             '</main>' +
           '</div>' +
-        '</div>' + renderSessionModal();
+        '</div>' + renderSessionModal() + renderSettingsModal();
+      }
+
+      function renderSettingsModal() {
+        return '<section id="settings-modal" class="modal-backdrop hidden">' +
+          '<div class="modal">' +
+            '<div class="modal-header">' +
+              '<h2 class="modal-title">Settings</h2>' +
+              '<button id="close-settings-button" class="btn btn-ghost btn-icon">×</button>' +
+            '</div>' +
+            '<div class="modal-body">' +
+              '<div class="field">' +
+                '<label class="field-label" for="new-password">New Password</label>' +
+                '<input id="new-password" type="password" class="field-input" placeholder="Enter new password (min 6 characters)" autocomplete="new-password" />' +
+              '</div>' +
+              '<div class="field">' +
+                '<label class="field-label" for="confirm-password">Confirm Password</label>' +
+                '<input id="confirm-password" type="password" class="field-input" placeholder="Confirm new password" autocomplete="new-password" />' +
+              '</div>' +
+              '<button id="save-password-button" class="btn btn-primary btn-block">Save Password</button>' +
+              '<p id="settings-error" class="error-message hidden"></p>' +
+              '<p id="settings-success" class="hint hidden" style="color: var(--success);"></p>' +
+            '</div>' +
+          '</div>' +
+        '</section>';
       }
 
       function renderSessions() {
@@ -1349,6 +1547,12 @@ export function renderApp(configPath: string): string {
         document.getElementById("sessions-drawer-backdrop").addEventListener("click", closeSessionsDrawer);
         document.getElementById("close-drawer-button").addEventListener("click", closeSessionsDrawer);
         document.getElementById("logout-button").addEventListener("click", logout);
+        document.getElementById("settings-button").addEventListener("click", openSettingsModal);
+        document.getElementById("close-settings-button").addEventListener("click", closeSettingsModal);
+        document.getElementById("settings-modal").addEventListener("click", function(e) {
+          if (e.target.id === "settings-modal") closeSettingsModal();
+        });
+        document.getElementById("save-password-button").addEventListener("click", savePassword);
         document.getElementById("topbar-new-session-button").addEventListener("click", openSessionModal);
         document.getElementById("drawer-new-session-button").addEventListener("click", openSessionModal);
         document.getElementById("close-modal-button").addEventListener("click", closeSessionModal);
@@ -1381,6 +1585,8 @@ export function renderApp(configPath: string): string {
         document.getElementById("input-box").addEventListener("paste", handleInputPaste);
 
         initTerminal();
+        setupMobileKeyboardHandlers();
+        setupVisualViewportHandlers();
       }
 
       function handleSessionItemClick(event) {
@@ -1678,6 +1884,72 @@ export function renderApp(configPath: string): string {
         hidePathSuggestions();
       }
 
+      function openSettingsModal() {
+        var modal = document.getElementById("settings-modal");
+        if (modal) {
+          modal.classList.remove("hidden");
+          document.getElementById("new-password").value = "";
+          document.getElementById("confirm-password").value = "";
+          hideSettingsMessages();
+        }
+      }
+
+      function closeSettingsModal() {
+        var modal = document.getElementById("settings-modal");
+        if (modal) modal.classList.add("hidden");
+      }
+
+      function hideSettingsMessages() {
+        var errorEl = document.getElementById("settings-error");
+        var successEl = document.getElementById("settings-success");
+        if (errorEl) errorEl.classList.add("hidden");
+        if (successEl) successEl.classList.add("hidden");
+      }
+
+      function savePassword() {
+        var newPass = document.getElementById("new-password").value;
+        var confirmPass = document.getElementById("confirm-password").value;
+        var errorEl = document.getElementById("settings-error");
+        var successEl = document.getElementById("settings-success");
+
+        hideSettingsMessages();
+
+        if (!newPass || newPass.length < 6) {
+          errorEl.textContent = "Password must be at least 6 characters.";
+          errorEl.classList.remove("hidden");
+          return;
+        }
+
+        if (newPass !== confirmPass) {
+          errorEl.textContent = "Passwords do not match.";
+          errorEl.classList.remove("hidden");
+          return;
+        }
+
+        fetch("/api/set-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: newPass }),
+          credentials: "same-origin"
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            errorEl.textContent = data.error;
+            errorEl.classList.remove("hidden");
+            return;
+          }
+          successEl.textContent = "Password saved successfully!";
+          successEl.classList.remove("hidden");
+          document.getElementById("new-password").value = "";
+          document.getElementById("confirm-password").value = "";
+        })
+        .catch(function() {
+          errorEl.textContent = "Failed to save password.";
+          errorEl.classList.remove("hidden");
+        });
+      }
+
       function populatePresets() {
         var select = document.getElementById("preset-select");
         if (!select || !state.config) return;
@@ -1742,6 +2014,7 @@ export function renderApp(configPath: string): string {
           state.selectedId = data.id;
           state.drafts[data.id] = "";
           closeSessionModal();
+          closeSessionsDrawer();
           commandEl.value = "";
           return refreshAll();
         })
@@ -2048,6 +2321,46 @@ export function renderApp(configPath: string): string {
         inputBox.setSelectionRange(inputBox.value.length, inputBox.value.length);
       }
 
+      // Mobile keyboard handling
+      function setupMobileKeyboardHandlers() {
+        if (!('virtualKeyboard' in navigator)) return;
+
+        var vk = navigator.virtualKeyboard;
+        var inputPanel = document.querySelector('.input-panel');
+
+        vk.addEventListener('geometrychange', function() {
+          if (inputPanel) {
+            var rect = vk.boundingRect;
+            inputPanel.style.paddingBottom = rect ? rect.height + 'px' : '';
+          }
+        });
+
+        // Show virtual keyboard on terminal tap
+        document.getElementById('output')?.addEventListener('click', function() {
+          if (state.selectedId) {
+            var inputBox = document.getElementById('input-box');
+            if (inputBox) inputBox.focus();
+          }
+        });
+      }
+
+      // Visual viewport handling for better mobile keyboard support
+      function setupVisualViewportHandlers() {
+        if (!('visualViewport' in window)) return;
+
+        var vv = window.visualViewport;
+        var inputPanel = document.querySelector('.input-panel');
+
+        function updateViewport() {
+          if (!inputPanel || !vv) return;
+          var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
+          inputPanel.style.transform = offsetBottom > 0 ? 'translateY(-' + offsetBottom + 'px)' : '';
+        }
+
+        vv.addEventListener('resize', updateViewport);
+        vv.addEventListener('scroll', updateViewport);
+      }
+
       function observeTerminalResize() {
         var output = document.getElementById("output");
         if (!output) return;
@@ -2109,7 +2422,111 @@ export function renderApp(configPath: string): string {
 
       function startPolling() {
         stopPolling();
+        // Use WebSocket if available, fallback to polling
+        if (initWebSocket()) {
+          // WebSocket connected, initial load
+          refreshAll();
+          return;
+        }
+        // Fallback to HTTP polling
         state.pollTimer = setInterval(refreshAll, 1600);
+      }
+
+      function initWebSocket() {
+        if (!window.WebSocket) return false;
+
+        var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var wsUrl = protocol + '//' + window.location.host + '/ws';
+
+        try {
+          var ws = new WebSocket(wsUrl);
+
+          ws.onopen = function() {
+            state.ws = ws;
+            state.wsConnected = true;
+            // Subscribe to current session if any
+            if (state.selectedId) {
+              ws.send(JSON.stringify({ type: 'subscribe', sessionId: state.selectedId }));
+            }
+          };
+
+          ws.onmessage = function(event) {
+            try {
+              var msg = JSON.parse(event.data);
+              handleWebSocketMessage(msg);
+            } catch (e) {
+              // Ignore parse errors
+            }
+          };
+
+          ws.onclose = function() {
+            state.ws = null;
+            state.wsConnected = false;
+            // Reconnect after 2 seconds
+            setTimeout(function() {
+              if (state.config && !state.ws) {
+                initWebSocket();
+              }
+            }, 2000);
+          };
+
+          ws.onerror = function() {
+            ws.close();
+          };
+
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      function handleWebSocketMessage(msg) {
+        switch (msg.type) {
+          case 'output':
+            // Real-time output update
+            if (msg.sessionId === state.selectedId && state.terminal) {
+              var newOutput = normalizeTerminalOutput(msg.data.output || "");
+              if (newOutput.startsWith(state.terminalOutput)) {
+                state.terminal.write(newOutput.slice(state.terminalOutput.length));
+              } else {
+                state.terminal.reset();
+                state.terminal.write(newOutput);
+              }
+              state.terminalOutput = newOutput;
+              state.terminal.scrollToBottom();
+            }
+            break;
+          case 'started':
+            // New session started
+            loadSessions();
+            break;
+          case 'ended':
+            // Session ended
+            loadSessions();
+            if (msg.sessionId === state.selectedId) {
+              loadOutput(msg.sessionId);
+            }
+            break;
+          case 'init':
+            // Initial state for subscribed session
+            if (msg.sessionId === state.selectedId && msg.data) {
+              updateTerminalOutput(msg.data.output || "");
+            }
+            break;
+        }
+      }
+
+      function updateTerminalOutput(output) {
+        if (!state.terminal) return;
+        var normalized = normalizeTerminalOutput(output);
+        if (normalized.startsWith(state.terminalOutput)) {
+          state.terminal.write(normalized.slice(state.terminalOutput.length));
+        } else {
+          state.terminal.reset();
+          state.terminal.write(normalized);
+        }
+        state.terminalOutput = normalized;
+        state.terminal.scrollToBottom();
       }
 
       function stopPolling() {
