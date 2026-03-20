@@ -40,10 +40,24 @@ interface SessionRecord extends SessionSnapshot {
   stopRequested: boolean;
   confirmWindow: string;
   lastAutoConfirmAt: number;
+  /** 用于解析会话 ID 的输出窗口 */
+  sessionIdWindow: string;
 }
 
 const MAX_SESSIONS = 50;
 const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
+const OUTPUT_WINDOW_SIZE = 4096;
+const CONFIRM_WINDOW_SIZE = 800;
+const OUTPUT_MAX_SIZE = 120000;
+
+// Claude 会话 ID 格式：UUID v4
+const CLAUDE_SESSION_ID_PATTERN = /"session_id"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i;
+
+/** Append text to a windowed buffer, trimming from start if over max size. */
+function appendWindow(buffer: string, chunk: string, maxSize: number): string {
+  const next = buffer + chunk;
+  return next.length > maxSize ? next.slice(-maxSize) : next;
+}
 
 export class ProcessManager {
   private readonly sessions = new Map<string, SessionRecord>();
@@ -59,7 +73,8 @@ export class ProcessManager {
         ptyProcess: null,
         stopRequested: false,
         confirmWindow: "",
-        lastAutoConfirmAt: 0
+        lastAutoConfirmAt: 0,
+        sessionIdWindow: ""
       });
     }
     this.archiveExpiredSessions();
@@ -113,11 +128,13 @@ export class ProcessManager {
       output: "",
       archived: false,
       archivedAt: null,
+      claudeSessionId: null,
       processId: null,
       ptyProcess: null,
       stopRequested: false,
       confirmWindow: "",
-      lastAutoConfirmAt: 0
+      lastAutoConfirmAt: 0,
+      sessionIdWindow: ""
     };
 
     const shellArgs = this.buildShellArgs(processedCommand);
@@ -141,9 +158,27 @@ export class ProcessManager {
     this.cleanupOldSessions();
 
     child.onData((chunk: string) => {
-      this.appendOutput(id, normalizePtyOutput(chunk));
+      const record = this.sessions.get(id);
+      if (!record) return;
+
+      // Update output buffer
+      record.output = appendWindow(record.output, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
+      this.persist(record);
+
+      // Extract Claude session ID (early exit if already found)
+      if (!record.claudeSessionId) {
+        record.sessionIdWindow = appendWindow(record.sessionIdWindow, chunk, OUTPUT_WINDOW_SIZE);
+        const match = CLAUDE_SESSION_ID_PATTERN.exec(record.sessionIdWindow);
+        if (match?.[1]) {
+          record.claudeSessionId = match[1];
+          process.stderr.write(`[wand] Captured Claude session ID: ${match[1]}\n`);
+          this.persist(record);
+        }
+      }
+
+      // Auto-confirm in full-access mode
       if (mode === "full-access") {
-        this.autoConfirm(id, chunk, child);
+        this.autoConfirmWithRecord(record, chunk, child);
       }
     });
 
@@ -248,19 +283,9 @@ export class ProcessManager {
       endedAt: record.endedAt,
       output: record.output,
       archived: record.archived,
-      archivedAt: record.archivedAt
+      archivedAt: record.archivedAt,
+      claudeSessionId: record.claudeSessionId
     };
-  }
-
-  private appendOutput(id: string, text: string): void {
-    const record = this.sessions.get(id);
-    if (!record) {
-      return;
-    }
-
-    const next = `${record.output}${text}`;
-    record.output = next.length > 120000 ? next.slice(-120000) : next;
-    this.persist(record);
   }
 
   private persist(record: SessionRecord): void {
@@ -295,13 +320,8 @@ export class ProcessManager {
     }
   }
 
-  private autoConfirm(id: string, output: string, ptyProcess: IPty): void {
-    const record = this.sessions.get(id);
-    if (!record) {
-      return;
-    }
-
-    record.confirmWindow = `${record.confirmWindow}${output}`.slice(-800);
+  private autoConfirmWithRecord(record: SessionRecord, output: string, ptyProcess: IPty): void {
+    record.confirmWindow = appendWindow(record.confirmWindow, output, CONFIRM_WINDOW_SIZE);
     const normalized = normalizePromptText(record.confirmWindow);
     const now = Date.now();
 

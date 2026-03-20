@@ -369,6 +369,15 @@ export function renderApp(configPath: string): string {
     .session-status.stopped { background: var(--warning-muted); color: var(--warning); }
     .session-status.archived { background: rgba(95, 74, 57, 0.1); color: var(--text-secondary); }
 
+    .session-id {
+      font-family: var(--font-mono);
+      font-size: 0.625rem;
+      color: var(--text-muted);
+      background: rgba(150, 118, 85, 0.1);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
     .sidebar-footer {
       padding: 12px 14px 14px;
       border-top: 1px solid var(--border-subtle);
@@ -460,6 +469,7 @@ export function renderApp(configPath: string): string {
       padding: 14px 18px 18px;
       backdrop-filter: blur(12px);
       flex-shrink: 0;
+      position: relative;
     }
 
     .input-row { display: flex; gap: 8px; align-items: flex-end; }
@@ -483,31 +493,67 @@ export function renderApp(configPath: string): string {
 
     .input-textarea:focus { border-color: var(--accent); }
     .input-textarea::placeholder { color: var(--text-muted); }
-    .input-actions { display: flex; gap: 8px; flex-shrink: 0; }
-    .input-actions .btn { min-width: 92px; }
+    .input-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+      align-items: center;
+    }
+    .input-actions .btn {
+      min-width: 72px;
+      padding: 10px 14px;
+    }
+    .btn-send {
+      background: linear-gradient(180deg, #5a8f5f 0%, #4a7a4f 100%);
+      color: white;
+      box-shadow: 0 4px 12px rgba(74, 122, 79, 0.25);
+    }
+    .btn-send:hover {
+      background: linear-gradient(180deg, #4f7f54 0%, #3f6a44 100%);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(74, 122, 79, 0.32);
+    }
+    .btn-stop {
+      background: rgba(178, 79, 69, 0.12);
+      color: var(--danger);
+      border: 1px solid rgba(178, 79, 69, 0.25);
+    }
+    .btn-stop:hover {
+      background: var(--danger);
+      color: white;
+      border-color: var(--danger);
+    }
+    .input-actions-spacer { flex: 1; }
 
     .floating-toggle {
+      width: 38px;
+      height: 38px;
+      min-width: 38px;
+      min-height: 38px;
+      border-radius: var(--radius-md);
+      box-shadow: 0 4px 12px rgba(89, 58, 32, 0.1);
+      padding: 0;
+      font-size: 1.1rem;
+      line-height: 1;
+    }
+
+    .floating-backdrop {
       position: fixed;
-      right: 16px;
-      bottom: 22px;
-      z-index: 40;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      box-shadow: 0 12px 24px rgba(89, 58, 32, 0.18);
+      inset: 0;
+      z-index: 38;
     }
 
     .floating-pad {
-      position: fixed;
-      right: 16px;
-      bottom: 82px;
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 8px);
       z-index: 39;
-      width: min(220px, calc(100vw - 32px));
+      width: min(240px, calc(100vw - 32px));
       background: rgba(255, 251, 245, 0.98);
       border: 1px solid rgba(150, 118, 85, 0.18);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-soft);
-      padding: 12px;
+      padding: 14px;
       backdrop-filter: blur(18px);
     }
 
@@ -517,20 +563,47 @@ export function renderApp(configPath: string): string {
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-bottom: 10px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-subtle);
     }
 
     .floating-pad-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 8px;
+      gap: 6px;
       align-items: center;
     }
 
     .floating-pad-grid .btn {
       width: 100%;
-      min-height: 44px;
-      padding: 10px;
+      min-height: 40px;
+      padding: 8px;
+      font-size: 0.875rem;
+      border-radius: var(--radius-sm);
+    }
+
+    .quick-input {
+      font-family: var(--font-mono);
+      font-weight: 500;
+    }
+
+    .btn-yes {
+      background: var(--success-muted);
+      color: var(--success);
+    }
+    .btn-yes:hover {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-no {
+      background: var(--danger-muted);
+      color: var(--danger);
+    }
+    .btn-no:hover {
+      background: var(--danger);
+      color: white;
     }
 
     .floating-pad-spacer {
@@ -829,14 +902,20 @@ export function renderApp(configPath: string): string {
       .input-row { flex-direction: column; align-items: stretch; }
       .input-actions {
         width: 100%;
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        display: flex;
+        flex-wrap: nowrap;
         gap: 8px;
       }
       .input-actions .btn {
-        width: 100%;
+        flex: 1;
         min-width: 0;
         min-height: 44px;
+      }
+      .floating-toggle {
+        flex: 0 0 auto;
+        min-width: 44px;
+        min-height: 44px;
+        border-radius: var(--radius-md);
       }
 
       .input-textarea,
@@ -848,17 +927,10 @@ export function renderApp(configPath: string): string {
         min-height: 48px;
       }
 
-      .floating-toggle {
-        right: 14px;
-        bottom: calc(86px + env(safe-area-inset-bottom, 0px));
-        width: 48px;
-        height: 48px;
-      }
-
       .floating-pad {
-        right: 14px;
-        bottom: calc(144px + env(safe-area-inset-bottom, 0px));
-        width: min(220px, calc(100vw - 28px));
+        right: 0;
+        bottom: calc(100% + 8px);
+        width: 100%;
       }
 
       .floating-pad-grid .btn {
@@ -1126,23 +1198,23 @@ export function renderApp(configPath: string): string {
                     '<textarea id="input-box" class="input-textarea" placeholder="Type here to send input to the session..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
                   '</div>' +
                   '<div class="input-actions">' +
-                    '<button id="send-input-button" class="btn btn-primary">Send</button>' +
-                    '<button id="stop-button" class="btn btn-danger">Stop</button>' +
+                    '<button id="send-input-button" class="btn btn-send">Send</button>' +
+                    '<button id="stop-button" class="btn btn-stop">Stop</button>' +
+                    '<button id="floating-controls-toggle" class="btn btn-secondary floating-toggle" type="button" aria-label="More controls">⋯</button>' +
                   '</div>' +
                 '</div>' +
-                '<button id="floating-controls-toggle" class="btn btn-secondary floating-toggle" type="button">+</button>' +
+                '<div id="floating-backdrop" class="floating-backdrop hidden"></div>' +
                 '<div id="floating-controls" class="floating-pad hidden">' +
                   '<div class="floating-pad-title">Quick Controls</div>' +
                   '<div class="floating-pad-grid">' +
-                    '<span class="floating-pad-spacer"></span>' +
-                    '<button data-input-key="up" class="btn btn-secondary btn-sm quick-input" type="button">↑</button>' +
-                    '<button data-input-key="enter" class="btn btn-secondary btn-sm quick-input" type="button">Enter</button>' +
-                    '<button data-input-key="left" class="btn btn-secondary btn-sm quick-input" type="button">←</button>' +
-                    '<button data-input-key="down" class="btn btn-secondary btn-sm quick-input" type="button">↓</button>' +
-                    '<button data-input-key="right" class="btn btn-secondary btn-sm quick-input" type="button">→</button>' +
-                    '<button data-input-key="yes" class="btn btn-secondary btn-sm quick-input" type="button">y</button>' +
-                    '<button data-input-key="no" class="btn btn-secondary btn-sm quick-input" type="button">n</button>' +
-                    '<button data-input-key="ctrl_c" class="btn btn-secondary btn-sm quick-input" type="button">Ctrl+C</button>' +
+                    '<button data-input-key="up" class="btn btn-secondary quick-input" type="button">↑</button>' +
+                    '<button data-input-key="enter" class="btn btn-secondary quick-input" type="button">↵</button>' +
+                    '<button data-input-key="down" class="btn btn-secondary quick-input" type="button">↓</button>' +
+                    '<button data-input-key="left" class="btn btn-secondary quick-input" type="button">←</button>' +
+                    '<button data-input-key="yes" class="btn btn-yes quick-input" type="button">Y</button>' +
+                    '<button data-input-key="right" class="btn btn-secondary quick-input" type="button">→</button>' +
+                    '<button data-input-key="no" class="btn btn-no quick-input" type="button">N</button>' +
+                    '<button data-input-key="ctrl_c" class="btn btn-secondary quick-input" type="button">^C</button>' +
                   '</div>' +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
@@ -1178,19 +1250,32 @@ export function renderApp(configPath: string): string {
       function renderSessionItem(session) {
         var activeClass = session.id === state.selectedId ? " active" : "";
         var metaStatus = session.archived ? "archived" : session.status;
-        var archiveButton = '<button class="btn btn-ghost btn-sm session-action-btn" data-action="delete" data-session-id="' + session.id + '" type="button" aria-label="Delete session">×</button>';
-        return '<button class="session-item' + activeClass + '" data-session-id="' + session.id + '">' +
+        var deleteButton = '<button class="btn btn-ghost btn-sm session-action-btn" data-action="delete" data-session-id="' + session.id + '" type="button" aria-label="Delete session">×</button>';
+        var resumeButton = "";
+        var sessionIdDisplay = "";
+
+        // 如果有 Claude 会话 ID，显示恢复按钮
+        if (session.claudeSessionId) {
+          var shortId = session.claudeSessionId.slice(0, 8);
+          sessionIdDisplay = '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>';
+          if (session.status !== "running") {
+            resumeButton = '<button class="btn btn-secondary btn-sm session-action-btn" data-action="resume" data-claude-session-id="' + escapeHtml(session.claudeSessionId) + '" data-cwd="' + escapeHtml(session.cwd) + '" type="button" aria-label="Resume session" title="Resume this Claude session">↻</button>';
+          }
+        }
+
+        return '<div class="session-item' + activeClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
           '<div class="session-item-row">' +
             '<div class="session-main">' +
               '<div class="session-command">' + escapeHtml(session.command) + '</div>' +
               '<div class="session-meta">' +
                 '<span>' + escapeHtml(session.mode) + '</span>' +
                 '<span class="session-status ' + metaStatus + '">' + escapeHtml(metaStatus) + '</span>' +
+                sessionIdDisplay +
               '</div>' +
             '</div>' +
-            '<span class="session-actions">' + archiveButton + '</span>' +
+            '<span class="session-actions">' + resumeButton + deleteButton + '</span>' +
           '</div>' +
-        '</button>';
+        '</div>';
       }
 
       function renderSessionModal() {
@@ -1247,24 +1332,8 @@ export function renderApp(configPath: string): string {
 
         var sessionsList = document.getElementById("sessions-list");
         if (sessionsList) {
-          sessionsList.addEventListener("click", function(event) {
-            var target = event.target;
-            if (!target || !(target instanceof Element)) return;
-            var actionButton = target.closest("[data-action]");
-            if (actionButton && actionButton instanceof HTMLElement) {
-              event.preventDefault();
-              event.stopPropagation();
-              if (actionButton.dataset.action === "delete" && actionButton.dataset.sessionId) {
-                deleteSession(actionButton.dataset.sessionId);
-              }
-              return;
-            }
-            var button = target.closest(".session-item");
-            if (button && button.dataset.sessionId) {
-              selectSession(button.dataset.sessionId);
-              closeSessionsDrawer();
-            }
-          });
+          sessionsList.addEventListener("click", handleSessionItemClick);
+          sessionsList.addEventListener("keydown", handleSessionItemKeydown);
         }
 
         document.getElementById("command").addEventListener("input", function() {
@@ -1288,6 +1357,7 @@ export function renderApp(configPath: string): string {
         document.getElementById("stop-button").addEventListener("click", stopSession);
 
         document.getElementById("floating-controls-toggle").addEventListener("click", toggleFloatingControls);
+        document.getElementById("floating-backdrop").addEventListener("click", hideFloatingControls);
 
         document.querySelectorAll(".quick-input").forEach(function(btn) {
           btn.addEventListener("click", function() {
@@ -1311,6 +1381,37 @@ export function renderApp(configPath: string): string {
         document.getElementById("input-box").addEventListener("paste", handleInputPaste);
 
         initTerminal();
+      }
+
+      function handleSessionItemClick(event) {
+        var target = event.target;
+        if (!target || !(target instanceof Element)) return;
+        var actionButton = target.closest("[data-action]");
+        if (actionButton && actionButton instanceof HTMLElement) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (actionButton.dataset.action === "delete" && actionButton.dataset.sessionId) {
+            deleteSession(actionButton.dataset.sessionId);
+          } else if (actionButton.dataset.action === "resume" && actionButton.dataset.claudeSessionId) {
+            startCommand("claude --resume " + actionButton.dataset.claudeSessionId, actionButton.dataset.cwd || "");
+          }
+          return;
+        }
+        var item = target.closest(".session-item");
+        if (item && item.dataset.sessionId) {
+          selectSession(item.dataset.sessionId);
+          closeSessionsDrawer();
+        }
+      }
+
+      function handleSessionItemKeydown(event) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        var item = event.target.closest(".session-item");
+        if (item && item.dataset.sessionId) {
+          event.preventDefault();
+          selectSession(item.dataset.sessionId);
+          closeSessionsDrawer();
+        }
       }
 
       function initTerminal() {
@@ -1620,13 +1721,16 @@ export function renderApp(configPath: string): string {
           return;
         }
 
+        // Override mode for this specific command
+        var mode = modeEl.value;
+
         fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             command: command,
             cwd: cwdEl.value.trim(),
-            mode: modeEl.value
+            mode: mode
           })
         })
         .then(function(res) { return res.json(); })
@@ -1642,7 +1746,7 @@ export function renderApp(configPath: string): string {
           return refreshAll();
         })
         .then(focusInputBox)
-        .catch(function(error) {
+        .catch(function() {
           showError(errorEl, "Failed to start command.");
         });
       }
@@ -1832,15 +1936,18 @@ export function renderApp(configPath: string): string {
 
       function toggleFloatingControls() {
         var panel = document.getElementById("floating-controls");
+        var backdrop = document.getElementById("floating-backdrop");
         if (!panel) return;
-        panel.classList.toggle("hidden");
+        var isHidden = panel.classList.contains("hidden");
+        panel.classList.toggle("hidden", !isHidden);
+        if (backdrop) backdrop.classList.toggle("hidden", !isHidden);
       }
 
       function hideFloatingControls() {
         var panel = document.getElementById("floating-controls");
-        if (panel) {
-          panel.classList.add("hidden");
-        }
+        var backdrop = document.getElementById("floating-backdrop");
+        if (panel) panel.classList.add("hidden");
+        if (backdrop) backdrop.classList.add("hidden");
       }
 
       function getControlInput(key) {
@@ -1909,6 +2016,28 @@ export function renderApp(configPath: string): string {
             var errorEl = document.getElementById("action-error");
             showError(errorEl, "Failed to delete session.");
           });
+      }
+
+      function startCommand(command, cwd, errorEl) {
+        return fetch("/api/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            command: command,
+            cwd: cwd || "",
+            mode: state.config.defaultMode || "default"
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            if (errorEl) showError(errorEl, data.error);
+            return null;
+          }
+          state.selectedId = data.id;
+          state.drafts[data.id] = "";
+          return data;
+        });
       }
 
       function focusInputBox() {

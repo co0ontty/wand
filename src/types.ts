@@ -36,6 +36,8 @@ export interface SessionSnapshot {
   output: string;
   archived: boolean;
   archivedAt: string | null;
+  /** Claude Code 会话 ID，用于 --resume 恢复会话 */
+  claudeSessionId: string | null;
 }
 
 export interface InputRequest {
