@@ -377,6 +377,67 @@ export function renderApp(configPath: string): string {
     .session-status.stopped { background: var(--warning-muted); color: var(--warning); }
     .session-status.archived { background: rgba(95, 74, 57, 0.1); color: var(--text-secondary); }
 
+    /* 可折叠顶栏 */
+    .topbar-collapsed .topbar-center,
+    .topbar-collapsed .brand-meta,
+    .topbar-collapsed .status-badge { display: none; }
+
+    .topbar-toggle {
+      display: none;
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      min-height: 28px;
+      padding: 0;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .topbar-toggle:hover { background: rgba(240, 229, 215, 0.72); }
+
+    @media (max-width: 640px) {
+      .topbar-toggle { display: flex; align-items: center; justify-content: center; }
+
+      .topbar.topbar-collapsed {
+        min-height: 36px;
+        padding: 4px 8px;
+      }
+
+      .topbar.topbar-collapsed .topbar-left,
+      .topbar.topbar-collapsed .topbar-right { gap: 4px; }
+
+      .topbar.topbar-collapsed .btn-sm {
+        padding: 4px 8px;
+        font-size: 0.6875rem;
+        min-height: 28px;
+      }
+
+      .topbar.topbar-collapsed .logo-icon {
+        width: 20px;
+        height: 20px;
+        font-size: 8px;
+      }
+
+      /* 展开状态时的顶栏 */
+      .topbar.topbar-expanded {
+        grid-template-columns: auto 1fr auto;
+        grid-template-areas:
+          "toggle close ."
+          "menu logo actions";
+        padding: 8px 10px;
+        min-height: auto;
+        row-gap: 8px;
+      }
+
+      .topbar.topbar-expanded .topbar-toggle { grid-area: toggle; }
+      .topbar.topbar-expanded .topbar-left { grid-area: menu; }
+      .topbar.topbar-expanded .topbar-right { grid-area: actions; }
+    }
+
     .session-id {
       font-family: var(--font-mono);
       font-size: 0.625rem;
@@ -411,16 +472,16 @@ export function renderApp(configPath: string): string {
       font-family: var(--font-sans);
       font-size: 0.8125rem;
       font-weight: 500;
-      padding: 10px 16px;
+      padding: 8px 14px;
       border-radius: var(--radius-md);
       border: 1px solid transparent;
       cursor: pointer;
       transition: all var(--transition-fast);
-      min-height: 38px;
+      min-height: 40px;
     }
 
-    .btn-primary { background: linear-gradient(180deg, #cf754d 0%, #b85c37 100%); color: white; box-shadow: 0 6px 18px rgba(184, 92, 55, 0.22); }
-    .btn-primary:hover { background: linear-gradient(180deg, #c96b44 0%, #a94d2b 100%); transform: translateY(-1px); box-shadow: 0 8px 22px rgba(184, 92, 55, 0.28); }
+    .btn-primary { background: linear-gradient(180deg, #cf754d 0%, #b85c37 100%); color: white; box-shadow: 0 4px 12px rgba(184, 92, 55, 0.22); }
+    .btn-primary:hover { background: linear-gradient(180deg, #c96b44 0%, #a94d2b 100%); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(184, 92, 55, 0.28); }
     .btn-secondary { background: rgba(255, 250, 244, 0.9); color: var(--text-secondary); border-color: var(--border-subtle); }
     .btn-secondary:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--accent-soft); }
     .btn-ghost { background: transparent; color: var(--text-secondary); }
@@ -428,8 +489,8 @@ export function renderApp(configPath: string): string {
     .btn-danger { background: var(--danger-muted); color: var(--danger); }
     .btn-danger:hover { background: var(--danger); color: white; }
     .btn-block { width: 100%; }
-    .btn-sm { font-size: 0.75rem; padding: 8px 12px; min-height: 34px; }
-    .btn-icon { padding: 8px; font-size: 1rem; min-height: 38px; }
+    .btn-sm { font-size: 0.75rem; padding: 6px 10px; min-height: 34px; }
+    .btn-icon { padding: 8px; font-size: 1rem; min-height: 40px; }
 
     .main-content {
       flex: 1;
@@ -877,16 +938,20 @@ export function renderApp(configPath: string): string {
 
     @media (max-width: 768px) {
       .topbar {
-        grid-template-columns: auto minmax(0, 1fr) auto;
-        padding: 10px 14px;
-        min-height: 60px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "left right";
+        padding: 8px 12px;
+        min-height: 52px;
+        gap: 8px;
       }
+      .topbar-center { display: none; }
       .sidebar { width: min(304px, calc(100vw - 28px)); }
       .config-path { display: none; }
-      .terminal-container { min-height: 180px; }
-      .session-summary-value { max-width: 40vw; }
+      .terminal-container { min-height: 180px; margin: 10px; }
       .btn { min-height: 40px; }
-      .btn-sm { min-height: 36px; }
+      .btn-sm { min-height: 36px; padding: 6px 10px; }
+      .status-badge { display: none; }
+      .brand-subtitle { display: none; }
     }
 
     @media (max-width: 640px) {
@@ -907,30 +972,34 @@ export function renderApp(configPath: string): string {
         overflow: visible;
       }
 
+      /* 简化顶栏：单行紧凑布局 */
       .topbar {
         position: sticky;
         top: 0;
         z-index: 30;
-        grid-template-columns: minmax(0, 1fr) auto;
-        grid-template-areas:
-          "left right"
-          "center center";
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas: "menu logo actions";
         align-items: center;
-        gap: 8px 10px;
-        min-height: auto;
-        padding: 10px 14px;
+        gap: 8px;
+        min-height: 48px;
+        padding: 6px 10px;
       }
 
-      .topbar-left { grid-area: left; }
-      .topbar-center { grid-area: center; justify-content: flex-start; }
-      .topbar-right { grid-area: right; width: auto; }
-      .brand-subtitle { display: none; }
+      .topbar-left { grid-area: menu; display: flex; gap: 6px; }
+      .topbar-center { display: none; }
+      .topbar-right { grid-area: actions; display: flex; gap: 6px; }
+      .topbar-actions { display: contents; }
+
+      /* 紧凑 logo */
+      .logo-wrap { display: flex; align-items: center; gap: 6px; grid-area: logo; justify-content: center; }
+      .logo { gap: 6px; font-size: 0.875rem; }
+      .logo-icon { width: 24px; height: 24px; font-size: 10px; border-radius: 8px; }
+      .brand-meta { display: none; }
       .status-badge { display: none; }
-      .session-summary {
-        align-items: flex-start;
-        text-align: left;
-      }
-      .session-summary-value { max-width: calc(100vw - 32px); }
+      .session-summary { display: none; }
+
+      /* 紧凑按钮 */
+      .topbar .btn-sm { padding: 6px 10px; font-size: 0.75rem; min-height: 36px; }
 
       .main-layout {
         flex-direction: column;
@@ -956,63 +1025,69 @@ export function renderApp(configPath: string): string {
         width: 100%;
         max-width: none;
         margin-bottom: 8px;
-        padding: 12px 14px;
+        padding: 10px 12px;
       }
 
       .main-content {
         overflow: visible;
       }
 
-      .terminal-header, .input-panel { padding-left: 14px; padding-right: 14px; }
-
+      /* 紧凑终端头部 */
       .terminal-header {
-        align-items: flex-start;
+        padding: 8px 12px;
+        align-items: center;
         gap: 6px;
-        padding: 12px 14px;
       }
-
       .terminal-title {
-        width: 100%;
-        flex-direction: column;
-        align-items: flex-start;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.75rem;
       }
+      .terminal-info { font-size: 0.625rem; }
 
+      /* 最大化终端区域 */
       .terminal-container {
         flex: none;
-        min-height: 44vh;
-        max-height: 56vh;
-        margin: 10px;
-        padding: 14px;
-        border-radius: var(--radius-lg);
+        min-height: 40vh;
+        max-height: 55vh;
+        margin: 8px;
+        padding: 12px;
+        border-radius: var(--radius-md);
         overflow: auto;
         -webkit-overflow-scrolling: touch;
       }
 
+      /* 紧凑输入面板 */
       .input-panel {
         position: sticky;
         bottom: 0;
         z-index: 20;
-        padding: 12px 14px;
-        padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+        padding: 10px 12px;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
         box-shadow: 0 -8px 24px rgba(89, 58, 32, 0.08);
       }
 
-      .input-row { flex-direction: column; align-items: stretch; }
+      .input-row { flex-direction: column; align-items: stretch; gap: 8px; }
+      .input-field { gap: 2px; }
+      .input-label { font-size: 0.625rem; }
+
       .input-actions {
         width: 100%;
         display: flex;
         flex-wrap: nowrap;
-        gap: 8px;
+        gap: 6px;
       }
       .input-actions .btn {
         flex: 1;
         min-width: 0;
-        min-height: 44px;
+        min-height: 40px;
+        font-size: 0.8125rem;
       }
       .floating-toggle {
         flex: 0 0 auto;
-        min-width: 44px;
-        min-height: 44px;
+        min-width: 40px;
+        min-height: 40px;
         border-radius: var(--radius-md);
       }
 
@@ -1022,67 +1097,99 @@ export function renderApp(configPath: string): string {
       }
 
       .input-textarea {
-        min-height: 48px;
+        min-height: 44px;
+        padding: 8px 10px;
       }
 
       .floating-pad {
         right: 0;
-        bottom: calc(100% + 8px);
+        bottom: calc(100% + 6px);
         width: 100%;
+        padding: 10px;
       }
 
       .floating-pad-grid .btn {
-        min-height: 48px;
+        min-height: 44px;
       }
 
       .login-container {
         min-height: 100dvh;
         align-items: flex-start;
-        padding: 18px 14px calc(18px + env(safe-area-inset-bottom, 0px));
+        padding: 16px 12px calc(16px + env(safe-area-inset-bottom, 0px));
       }
 
       .login-card {
-        margin-top: max(16px, env(safe-area-inset-top, 0px));
+        margin-top: max(12px, env(safe-area-inset-top, 0px));
       }
 
+      .login-header { padding: 20px 18px 16px; }
+      .login-body { padding: 18px; }
       .btn { min-height: 44px; }
-      .btn-sm { min-height: 40px; }
+      .btn-sm { min-height: 38px; }
     }
 
     @media (max-width: 420px) {
-      .topbar-left,
-      .topbar-center {
-        width: 100%;
-      }
-
-      .topbar-right {
+      .topbar {
+        padding: 4px 8px;
+        min-height: 44px;
         gap: 6px;
       }
 
-      .terminal-container {
-        min-height: 36vh;
-        max-height: 48vh;
-        margin: 8px;
+      .topbar-left,
+      .topbar-right {
+        gap: 4px;
       }
+
+      .logo-icon { width: 22px; height: 22px; font-size: 9px; }
+      .topbar .btn-sm { padding: 5px 8px; font-size: 0.6875rem; min-height: 32px; }
+
+      .terminal-header { padding: 6px 10px; }
+      .terminal-title-text { font-size: 0.75rem; }
+
+      .terminal-container {
+        min-height: 38vh;
+        max-height: 50vh;
+        margin: 6px;
+        padding: 10px;
+      }
+
+      .input-panel {
+        padding: 8px 10px;
+        padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+      }
+
+      .input-actions { gap: 4px; }
+      .input-actions .btn { min-height: 38px; font-size: 0.75rem; }
+      .floating-toggle { min-width: 38px; min-height: 38px; }
 
       .floating-pad {
-        width: calc(100vw - 24px);
-        right: 12px;
+        width: calc(100vw - 20px);
+        right: 10px;
+        padding: 8px;
       }
 
-      .floating-pad-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
+      .floating-pad-grid .btn { min-height: 40px; font-size: 0.8125rem; }
+
+      .session-item { padding: 8px 10px; }
+      .session-command { font-size: 0.75rem; }
+      .session-meta { font-size: 0.625rem; }
 
       .sidebar-footer {
-        padding: 10px 12px 12px;
+        padding: 8px 10px 10px;
       }
 
       .sidebar-meta {
         flex-direction: column;
         align-items: flex-start;
-        gap: 6px;
+        gap: 4px;
       }
+
+      .modal-body { padding: 16px; }
+      .modal-header { padding: 12px 16px; }
+      .modal-title { font-size: 0.9375rem; }
+
+      .btn { min-height: 42px; }
+      .btn-sm { min-height: 36px; }
     }
   </style>
 </head>
@@ -1122,6 +1229,7 @@ export function renderApp(configPath: string): string {
         loginChecked: false,
         sessionsDrawerOpen: false,
         modalOpen: false,
+        topbarCollapsed: true, // 默认折叠顶栏以最大化终端空间
         presetValue: "",
         commandValue: "",
         cwdValue: "",
@@ -1302,26 +1410,28 @@ export function renderApp(configPath: string): string {
         var statusClass = state.config ? "status-dot active" : "status-dot";
         var statusText = state.config ? "Unlocked" : "Locked";
         var drawerClass = state.sessionsDrawerOpen ? " open" : "";
+        var topbarClass = state.topbarCollapsed ? " topbar-collapsed" : " topbar-expanded";
 
         return '<div class="app-container">' +
-          '<header class="topbar">' +
+          '<header class="topbar' + topbarClass + '">' +
+            '<button id="topbar-toggle-button" class="topbar-toggle" type="button" aria-label="Toggle toolbar">' + (state.topbarCollapsed ? '▾' : '▴') + '</button>' +
             '<div class="topbar-left">' +
               '<div class="topbar-actions">' +
                 '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm">Menu</button>' +
               '</div>' +
-              '<div class="logo-wrap">' +
-                '<div class="logo">' +
-                  '<div class="logo-icon">W</div>' +
-                '</div>' +
-                '<div class="brand-meta">' +
-                  '<span class="brand-name">Wand</span>' +
-                  '<span class="brand-subtitle">Local CLI Console</span>' +
-                '</div>' +
+            '</div>' +
+            '<div class="logo-wrap">' +
+              '<div class="logo">' +
+                '<div class="logo-icon">W</div>' +
               '</div>' +
-              '<div class="status-badge">' +
-                '<span class="' + statusClass + '" id="status-dot"></span>' +
-                '<span id="status-text">' + statusText + '</span>' +
+              '<div class="brand-meta">' +
+                '<span class="brand-name">Wand</span>' +
+                '<span class="brand-subtitle">Local CLI Console</span>' +
               '</div>' +
+            '</div>' +
+            '<div class="status-badge">' +
+              '<span class="' + statusClass + '" id="status-dot"></span>' +
+              '<span id="status-text">' + statusText + '</span>' +
             '</div>' +
             '<div class="topbar-center">' +
               '<div class="session-summary">' +
@@ -1330,8 +1440,8 @@ export function renderApp(configPath: string): string {
               '</div>' +
             '</div>' +
             '<div class="topbar-right">' +
-              '<button id="topbar-new-session-button" class="btn btn-primary btn-sm">+ New Session</button>' +
-              '<button id="settings-button" class="btn btn-ghost btn-sm">⚙ Settings</button>' +
+              '<button id="topbar-new-session-button" class="btn btn-primary btn-sm">+ New</button>' +
+              '<button id="settings-button" class="btn btn-ghost btn-sm">⚙</button>' +
               '<button id="logout-button" class="btn btn-ghost btn-sm">Logout</button>' +
             '</div>' +
           '</header>' +
@@ -1546,6 +1656,7 @@ export function renderApp(configPath: string): string {
         document.getElementById("sessions-toggle-button").addEventListener("click", toggleSessionsDrawer);
         document.getElementById("sessions-drawer-backdrop").addEventListener("click", closeSessionsDrawer);
         document.getElementById("close-drawer-button").addEventListener("click", closeSessionsDrawer);
+        document.getElementById("topbar-toggle-button").addEventListener("click", toggleTopbar);
         document.getElementById("logout-button").addEventListener("click", logout);
         document.getElementById("settings-button").addEventListener("click", openSettingsModal);
         document.getElementById("close-settings-button").addEventListener("click", closeSettingsModal);
@@ -1863,6 +1974,25 @@ export function renderApp(configPath: string): string {
         if (!state.sessionsDrawerOpen) return;
         state.sessionsDrawerOpen = false;
         updateDrawerState();
+      }
+
+      function toggleTopbar() {
+        state.topbarCollapsed = !state.topbarCollapsed;
+        var topbar = document.querySelector('.topbar');
+        var toggleBtn = document.getElementById('topbar-toggle-button');
+        if (topbar) {
+          topbar.classList.toggle('topbar-collapsed', state.topbarCollapsed);
+          topbar.classList.toggle('topbar-expanded', !state.topbarCollapsed);
+        }
+        if (toggleBtn) {
+          toggleBtn.textContent = state.topbarCollapsed ? '▾' : '▴';
+        }
+        // 触发终端重新调整大小
+        setTimeout(function() {
+          if (state.terminal && state.fitAddon) {
+            state.fitAddon.fit();
+          }
+        }, 100);
       }
 
       function openSessionModal() {
