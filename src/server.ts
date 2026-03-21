@@ -58,6 +58,33 @@ function cleanupRateLimiter(): void {
 // Cleanup rate limiter every 5 minutes
 setInterval(cleanupRateLimiter, 5 * 60 * 1000);
 
+// Catch-all for unexpected startup errors
+process.on("uncaughtException", (err) => {
+  wandError("服务器异常", err.message, "请检查配置是否正确，或尝试重启服务。");
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  wandError("未处理的异步错误", msg);
+});
+
+// ── Friendly error / warn / info helpers ──────────────────────────────────
+function wandError(label: string, message: string, suggestion?: string): void {
+  process.stderr.write(`\n✗ [wand] ${label}：${message}\n`);
+  if (suggestion) process.stderr.write(`  解决方法：${suggestion}\n`);
+  process.stderr.write("\n");
+}
+
+function wandWarn(message: string, hint?: string): void {
+  process.stderr.write(`⚠️  [wand] 警告：${message}\n`);
+  if (hint) process.stderr.write(`  提示：${hint}\n`);
+}
+
+function wandInfo(message: string): void {
+  process.stdout.write(`ℹ️  [wand] ${message}\n`);
+}
+
 export async function startServer(config: WandConfig, configPath: string): Promise<void> {
   const app = express();
   const storage = new WandStorage(resolveDatabasePath(configPath));
@@ -160,7 +187,7 @@ self.addEventListener('fetch', (event) => {
     const clientIp = req.ip || req.socket.remoteAddress || "unknown";
 
     if (!checkRateLimit(clientIp)) {
-      res.status(429).json({ error: "Too many login attempts. Please try again later." });
+      res.status(429).json({ error: "登录尝试次数过多，请在 15 分钟后再试。" });
       return;
     }
 
@@ -171,7 +198,7 @@ self.addEventListener('fetch', (event) => {
     const effectivePassword = dbPassword ?? config.password;
 
     if (password !== effectivePassword) {
-      res.status(401).json({ error: "Invalid password." });
+      res.status(401).json({ error: "密码错误，请重试。" });
       return;
     }
 
@@ -195,7 +222,7 @@ self.addEventListener('fetch', (event) => {
   app.post("/api/set-password", requireAuth, (req, res) => {
     const { password } = req.body as { password?: string };
     if (!password || password.length < 6) {
-      res.status(400).json({ error: "Password must be at least 6 characters." });
+      res.status(400).json({ error: "密码长度至少为 6 个字符。" });
       return;
     }
     storage.setPassword(password);
@@ -225,7 +252,7 @@ self.addEventListener('fetch', (event) => {
       const suggestions = await listPathSuggestions(query, config.defaultCwd);
       res.json(suggestions);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "Failed to load path suggestions.") });
+      res.status(400).json({ error: getErrorMessage(error, "无法加载路径建议。") });
     }
   });
 
@@ -250,14 +277,14 @@ self.addEventListener('fetch', (event) => {
         }));
       res.json(items);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "Failed to read directory.") });
+      res.status(400).json({ error: getErrorMessage(error, "无法读取目录。可能原因：路径不存在或权限不足。") });
     }
   });
 
   app.get("/api/sessions/:id", (req, res) => {
     const snapshot = processes.get(req.params.id);
     if (!snapshot) {
-      res.status(404).json({ error: "Session not found." });
+      res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
     }
     res.json(snapshot);
@@ -266,7 +293,7 @@ self.addEventListener('fetch', (event) => {
   app.post("/api/commands", (req, res) => {
     const body = req.body as CommandRequest;
     if (!body.command?.trim()) {
-      res.status(400).json({ error: "Command is required." });
+      res.status(400).json({ error: "请输入要执行的命令。" });
       return;
     }
 
@@ -278,7 +305,7 @@ self.addEventListener('fetch', (event) => {
       );
       res.status(201).json(snapshot);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "Failed to start command.") });
+      res.status(400).json({ error: getErrorMessage(error, "无法启动命令。请检查命令是否正确安装。") });
     }
   });
 
@@ -288,7 +315,7 @@ self.addEventListener('fetch', (event) => {
       const snapshot = processes.sendInput(req.params.id, body.input ?? "");
       res.json(snapshot);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "Failed to send input.") });
+      res.status(400).json({ error: getErrorMessage(error, "会话已结束，请启动新会话。") });
     }
   });
 
@@ -298,7 +325,7 @@ self.addEventListener('fetch', (event) => {
       const snapshot = processes.resize(req.params.id, body.cols ?? 0, body.rows ?? 0);
       res.json(snapshot);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "Failed to resize session.") });
+      res.status(400).json({ error: getErrorMessage(error, "无法调整终端大小。") });
     }
   });
 
@@ -307,7 +334,7 @@ self.addEventListener('fetch', (event) => {
       const snapshot = processes.stop(req.params.id);
       res.json(snapshot);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "Failed to stop session.") });
+      res.status(400).json({ error: getErrorMessage(error, "无法停止会话。") });
     }
   });
 
@@ -316,7 +343,7 @@ self.addEventListener('fetch', (event) => {
       processes.delete(req.params.id);
       res.json({ ok: true });
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "Failed to delete session.") });
+      res.status(400).json({ error: getErrorMessage(error, "无法删除会话。") });
     }
   });
 
@@ -365,6 +392,10 @@ self.addEventListener('fetch', (event) => {
       wsClients.delete(ws);
     });
 
+    ws.on("error", () => {
+      // Already closed, ignore
+    });
+
     ws.on("message", (data) => {
       try {
         const msg = JSON.parse(data.toString());
@@ -390,21 +421,31 @@ self.addEventListener('fetch', (event) => {
       );
       resolve();
     });
-    server.on("error", reject);
+    server.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        wandError(
+          `端口 ${config.port} 已被占用`,
+          `可能有另一个 Wand 进程正在运行。`,
+          `解决方法（二选一）：\n1. 在浏览器中访问当前运行的 Wand\n2. 或者终止占用端口的进程：\n   kill $(lsof -ti :${config.port})\n\n如果你确定没有其他实例在运行，可能是有程序意外占用了端口。`
+        );
+        process.exit(1);
+      }
+      reject(err);
+    });
   });
 
   // Print security warnings
   if (!storage.hasCustomPassword() && config.password === "change-me") {
-    process.stderr.write(
-      "\x1b[33m[wand] WARNING: Using default password 'change-me'. Please update your password!\n" +
-      "[wand] Use the UI or API to set a new password, or set it in config.\x1b[0m\n"
+    wandWarn(
+      "正在使用默认密码（change-me），任何能访问本机的人都可以登录。",
+      "修改方法：在界面右上角「设置」中修改密码，或运行：node dist/cli.js config:set password <你的新密码>"
     );
   }
 }
 
 function requireAuth(req: Request, res: Response, next: NextFunction): void {
   if (!validateSession(readSessionCookie(req))) {
-    res.status(401).json({ error: "Unauthorized." });
+    res.status(401).json({ error: "未授权，请先登录。" });
     return;
   }
   next();

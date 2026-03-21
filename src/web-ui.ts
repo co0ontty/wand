@@ -1517,6 +1517,135 @@ export function renderApp(configPath: string): string {
       .btn { min-height: 42px; }
       .btn-sm { min-height: 36px; }
     }
+
+    .welcome-view-container {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 24px;
+      pointer-events: auto;
+    }
+    .welcome-view {
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+      background: var(--bg-primary);
+    }
+    .welcome-header {
+      margin-bottom: 36px;
+    }
+    .welcome-logo {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #d77a52, #a95130);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      font-weight: 700;
+      color: white;
+      margin: 0 auto 16px;
+    }
+    .welcome-title {
+      font-size: 2rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin: 0 0 8px;
+    }
+    .welcome-subtitle {
+      font-size: 0.9375rem;
+      color: var(--text-muted);
+      margin: 0;
+    }
+    .quick-start-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .quick-card {
+      background: var(--bg-secondary);
+      border: 1.5px solid var(--border-default);
+      border-radius: var(--radius-lg);
+      padding: 20px 16px;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+      text-align: left;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .quick-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(197, 101, 61, 0.12);
+    }
+    .quick-card-icon {
+      font-size: 1.5rem;
+      line-height: 1;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .quick-card-body { flex: 1; }
+    .quick-card-title {
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+    .quick-card-desc {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+    .welcome-custom-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+    .welcome-custom-input {
+      flex: 1;
+      height: 42px;
+      padding: 0 12px;
+      border: 1.5px solid var(--border-default);
+      border-radius: var(--radius-md);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .welcome-custom-input:focus {
+      border-color: var(--accent);
+    }
+    .welcome-custom-input::placeholder { color: var(--text-muted); }
+    .welcome-hint {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin: 0;
+    }
+    .toast-message {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      border-radius: var(--radius-md);
+      font-size: 0.875rem;
+      z-index: 9999;
+      animation: toast-in 0.2s ease;
+    }
+    .toast-error {
+      background: var(--danger);
+      color: white;
+    }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+      to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
   </style>
 </head>
 <body>
@@ -1715,16 +1844,16 @@ export function renderApp(configPath: string): string {
                 '<div class="login-logo-icon">W</div>' +
                 '<span class="login-logo-text">Wand</span>' +
               '</div>' +
-              '<div class="login-subtitle">Claude 风格的本地 CLI 控制台</div>' +
+              '<div class="login-subtitle">在浏览器中运行本机终端</div>' +
             '</div>' +
             '<div class="login-body">' +
-              '<p class="login-hint">输入配置文件中的访问密码，登录后即可管理本机 CLI 会话。</p>' +
-              '<p class="login-tip">访问地址请使用 <strong>http://</strong>。当前服务不是 HTTPS，像 <strong>https://127.0.0.1:8443</strong> 这种地址会直接打开失败。</p>' +
+              '<p class="login-hint">请输入访问密码</p>' +
+              '<p class="login-tip">访问地址请使用 <strong>http://</strong>，不要用 https://。</p>' +
               '<div class="field">' +
-                '<label class="field-label" for="password">Password</label>' +
-                '<input id="password" type="password" class="field-input" placeholder="Enter password" autocomplete="current-password" />' +
+                '<label class="field-label" for="password">密码</label>' +
+                '<input id="password" type="password" class="field-input" placeholder="输入密码" autocomplete="current-password" />' +
               '</div>' +
-              '<button id="login-button" class="btn btn-primary btn-block">Unlock Console</button>' +
+              '<button id="login-button" class="btn btn-primary btn-block">进入控制台</button>' +
               '<p id="login-error" class="error-message hidden"></p>' +
             '</div>' +
           '</div>' +
@@ -1734,11 +1863,11 @@ export function renderApp(configPath: string): string {
       function renderApp() {
         var scriptClose = String.fromCharCode(60) + String.fromCharCode(47) + "script>";
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "No session";
-        var terminalInfo = selectedSession ? (selectedSession.mode + " | " + selectedSession.status) : "Select or start a session";
+        var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "未选择会话";
+        var terminalInfo = selectedSession ? (selectedSession.mode + " | " + selectedSession.status) : "点击上方「新对话」开始";
         var currentDraft = state.selectedId ? (state.drafts[state.selectedId] || "") : "";
         var statusClass = state.config ? "status-dot active" : "status-dot";
-        var statusText = state.config ? "Unlocked" : "Locked";
+        var statusText = state.config ? "已登录" : "未登录";
         var drawerClass = state.sessionsDrawerOpen ? " open" : "";
         var topbarClass = state.topbarCollapsed ? " topbar-collapsed" : " topbar-expanded";
 
@@ -1747,7 +1876,7 @@ export function renderApp(configPath: string): string {
             '<button id="topbar-toggle-button" class="topbar-toggle" type="button" aria-label="Toggle toolbar">' + (state.topbarCollapsed ? '▾' : '▴') + '</button>' +
             '<div class="topbar-left">' +
               '<div class="topbar-actions">' +
-                '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm">Menu</button>' +
+                '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm">≡ 菜单</button>' +
               '</div>' +
             '</div>' +
             '<div class="logo-wrap">' +
@@ -1756,7 +1885,7 @@ export function renderApp(configPath: string): string {
               '</div>' +
               '<div class="brand-meta">' +
                 '<span class="brand-name">Wand</span>' +
-                '<span class="brand-subtitle">Local CLI Console</span>' +
+                '<span class="brand-subtitle">本地 AI 编程助手</span>' +
               '</div>' +
             '</div>' +
             '<div class="status-badge">' +
@@ -1765,26 +1894,26 @@ export function renderApp(configPath: string): string {
             '</div>' +
             '<div class="topbar-center">' +
               '<div class="session-summary">' +
-                '<span class="session-summary-label">Current Session</span>' +
+                '<span class="session-summary-label">当前会话</span>' +
                 '<span class="session-summary-value">' + escapeHtml(terminalTitle) + '</span>' +
               '</div>' +
             '</div>' +
             '<div class="topbar-right">' +
-              '<button id="topbar-new-session-button" class="btn btn-primary btn-sm">+ New</button>' +
+              '<button id="topbar-new-session-button" class="btn btn-primary btn-sm">+ 新对话</button>' +
               '<button id="settings-button" class="btn btn-ghost btn-sm">⚙</button>' +
-              '<button id="logout-button" class="btn btn-ghost btn-sm">Logout</button>' +
+              '<button id="logout-button" class="btn btn-ghost btn-sm">退出</button>' +
             '</div>' +
           '</header>' +
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
           '<div class="main-layout">' +
             '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
               '<div class="sidebar-tabs">' +
-                '<button class="sidebar-tab' + (state.sidebarTab !== "files" ? " active" : "") + '" id="tab-sessions" type="button">Sessions</button>' +
-                '<button class="sidebar-tab' + (state.sidebarTab === "files" ? " active" : "") + '" id="tab-files" type="button"><span class="sidebar-tab-icon">▤</span>Files</button>' +
+                '<button class="sidebar-tab' + (state.sidebarTab !== "files" ? " active" : "") + '" id="tab-sessions" type="button">会话</button>' +
+                '<button class="sidebar-tab' + (state.sidebarTab === "files" ? " active" : "") + '" id="tab-files" type="button"><span class="sidebar-tab-icon">▤</span>文件</button>' +
               '</div>' +
               '<div class="sidebar-body">' +
                 '<div id="sessions-panel"' + (state.sidebarTab === "files" ? ' class="hidden"' : "") + '>' +
-                  '<p class="sidebar-intro">Recent sessions are tucked away here so the terminal stays in focus.</p>' +
+                  '<p class="sidebar-intro">最近的会话记录会显示在这里，方便你随时切换或继续。</p>' +
                   '<div class="sessions-list" id="sessions-list">' + renderSessions() + '</div>' +
                 '</div>' +
                 '<div id="files-panel"' + (state.sidebarTab !== "files" ? ' class="hidden"' : "") + '>' +
@@ -1798,13 +1927,16 @@ export function renderApp(configPath: string): string {
                 '</div>' +
               '</div>' +
               '<div class="sidebar-footer">' +
-                '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> New Session</button>' +
+                '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
                 '<div class="sidebar-meta">' +
-                  '<span class="protocol-note">Use HTTP only</span>' +
+                  '<span class="protocol-note">请使用 HTTP 访问</span>' +
                   '<span class="config-path">' + escapeHtml(configPath) + '</span>' +
                 '</div>' +
               '</div>' +
             '</aside>' +
+            '<div id="welcome-view-container" class="welcome-view-container' + (state.selectedId ? " hidden" : "") + '">' +
+              renderWelcomeView() +
+            '</div>' +
             '<main class="main-content">' +
               '<div class="terminal-header">' +
                 '<div class="terminal-title">' +
@@ -1812,8 +1944,8 @@ export function renderApp(configPath: string): string {
                   '<span class="terminal-info" id="terminal-info">' + terminalInfo + '</span>' +
                 '</div>' +
                 '<div class="view-toggle" id="view-toggle">' +
-                  '<button class="view-toggle-btn active" data-view="terminal" id="view-terminal-btn">Terminal</button>' +
-                  '<button class="view-toggle-btn" data-view="chat" id="view-chat-btn">Chat</button>' +
+                  '<button class="view-toggle-btn active" data-view="terminal" id="view-terminal-btn">终端</button>' +
+                  '<button class="view-toggle-btn" data-view="chat" id="view-chat-btn">聊天</button>' +
                 '</div>' +
               '</div>' +
               '<div id="output" class="terminal-container"></div>' +
@@ -1821,12 +1953,12 @@ export function renderApp(configPath: string): string {
               '<div class="input-panel">' +
                 '<div class="input-row">' +
                   '<div class="input-field">' +
-                    '<label class="input-label" for="input-box">Send to session</label>' +
-                    '<textarea id="input-box" class="input-textarea" placeholder="Type here to send input to the session..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                    '<label class="input-label" for="input-box">输入</label>' +
+                    '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按发送..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
                   '</div>' +
                   '<div class="input-actions">' +
-                    '<button id="send-input-button" class="btn btn-send">Send</button>' +
-                    '<button id="stop-button" class="btn btn-stop">Stop</button>' +
+                    '<button id="send-input-button" class="btn btn-send">发送</button>' +
+                    '<button id="stop-button" class="btn btn-stop">停止</button>' +
                     '<button id="floating-controls-toggle" class="btn btn-secondary floating-toggle" type="button" aria-label="More controls">⋯</button>' +
                   '</div>' +
                 '</div>' +
@@ -1877,16 +2009,16 @@ export function renderApp(configPath: string): string {
 
       function renderSessions() {
         if (state.sessions.length === 0) {
-          return '<div class="empty-state"><strong>还没有会话</strong>从左上角菜单或右上角按钮启动一个新会话，终端输出会显示在主区域。</div>';
+          return '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
         }
         var activeSessions = state.sessions.filter(function(session) { return !session.archived; });
         var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
         var groups = [];
         if (activeSessions.length > 0) {
-          groups.push(renderSessionGroup("Recent", activeSessions));
+          groups.push(renderSessionGroup("最近", activeSessions));
         }
         if (archivedSessions.length > 0) {
-          groups.push(renderSessionGroup("Archived", archivedSessions));
+          groups.push(renderSessionGroup("已归档", archivedSessions));
         }
         return groups.join("");
       }
@@ -1992,7 +2124,7 @@ export function renderApp(configPath: string): string {
             var childrenDiv = document.createElement("div");
             childrenDiv.className = "tree-children open";
             if (!items || items.length === 0) {
-              childrenDiv.innerHTML = '<div class="tree-item" style="color:var(--text-muted);cursor:default;"><span class="tree-toggle empty">▸</span><span class="tree-name">(empty)</span></div>';
+              childrenDiv.innerHTML = '<div class="tree-item" style="color:var(--text-muted);cursor:default;"><span class="tree-toggle empty">▸</span><span class="tree-name">（空目录）</span></div>';
             } else {
               childrenDiv.innerHTML = items.map(function(child) {
                 return renderFileTreeItem(child);
@@ -2007,7 +2139,7 @@ export function renderApp(configPath: string): string {
       function renderSessionItem(session) {
         var activeClass = session.id === state.selectedId ? " active" : "";
         var metaStatus = session.archived ? "archived" : session.status;
-        var deleteButton = '<button class="btn btn-ghost btn-sm session-action-btn" data-action="delete" data-session-id="' + session.id + '" type="button" aria-label="Delete session">×</button>';
+        var deleteButton = '<button class="btn btn-ghost btn-sm session-action-btn" data-action="delete" data-session-id="' + session.id + '" type="button" aria-label="删除会话">×</button>';
         var resumeButton = "";
         var sessionIdDisplay = "";
 
@@ -2016,7 +2148,7 @@ export function renderApp(configPath: string): string {
           var shortId = session.claudeSessionId.slice(0, 8);
           sessionIdDisplay = '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>';
           if (session.status !== "running") {
-            resumeButton = '<button class="btn btn-secondary btn-sm session-action-btn" data-action="resume" data-claude-session-id="' + escapeHtml(session.claudeSessionId) + '" data-cwd="' + escapeHtml(session.cwd) + '" type="button" aria-label="Resume session" title="Resume this Claude session">↻</button>';
+            resumeButton = '<button class="btn btn-secondary btn-sm session-action-btn" data-action="resume" data-claude-session-id="' + escapeHtml(session.claudeSessionId) + '" data-cwd="' + escapeHtml(session.cwd) + '" type="button" aria-label="恢复会话" title="恢复 Claude 会话">↻</button>';
           }
         }
 
@@ -2039,49 +2171,60 @@ export function renderApp(configPath: string): string {
         return '<section id="session-modal" class="modal-backdrop hidden">' +
           '<div class="modal">' +
             '<div class="modal-header">' +
-              '<h2 class="modal-title">New Session</h2>' +
+              '<h2 class="modal-title">启动会话</h2>' +
               '<button id="close-modal-button" class="btn btn-ghost btn-icon">×</button>' +
             '</div>' +
             '<div class="modal-body">' +
               '<div class="field">' +
-                '<label class="field-label" for="preset-select">Preset</label>' +
-                '<select id="preset-select" class="field-input"><option value="">Custom command</option></select>' +
+                '<label class="field-label" for="command">命令</label>' +
+                '<textarea id="command" class="field-input" placeholder="claude&#10;codex&#10;任意 CLI 命令" rows="2"></textarea>' +
               '</div>' +
               '<div class="field">' +
-                '<label class="field-label" for="command">Command</label>' +
-                '<textarea id="command" class="field-input" placeholder="claude&#10;codex&#10;gemini" rows="3"></textarea>' +
-              '</div>' +
-              '<div class="field">' +
-                '<label class="field-label" for="model-select">Model</label>' +
-                '<select id="model-select" class="field-input">' +
-                  '<option value="">Default</option>' +
-                  '<option value="sonnet">Claude 3.5 Sonnet</option>' +
-                  '<option value="opus">Claude 3 Opus</option>' +
-                  '<option value="haiku">Claude 3 Haiku</option>' +
-                '</select>' +
-              '</div>' +
-              '<div class="field">' +
-                '<label class="field-label" for="cwd">Working Directory</label>' +
+                '<label class="field-label" for="cwd">工作目录</label>' +
                 '<div class="suggestions-wrap">' +
-                  '<input id="cwd" type="text" class="field-input" autocomplete="off" placeholder="Defaults to config defaultCwd" />' +
+                  '<input id="cwd" type="text" class="field-input" autocomplete="off" placeholder="留空则使用默认目录" />' +
                   '<div id="cwd-suggestions" class="suggestions hidden"></div>' +
                 '</div>' +
               '</div>' +
-              '<div class="field">' +
-                '<label class="field-label" for="mode">Mode</label>' +
-                '<select id="mode" class="field-input">' +
-                  '<option value="auto-edit">Auto Edit</option>' +
-                  '<option value="default">Default</option>' +
-                  '<option value="full-access">Full Access</option>' +
-                  '<option value="native">Native</option>' +
-                '</select>' +
-              '</div>' +
-              '<button id="run-button" class="btn btn-primary btn-block">Start Session</button>' +
+              '<button id="run-button" class="btn btn-primary btn-block">启动会话</button>' +
               '<p id="modal-error" class="error-message hidden"></p>' +
-              '<p class="hint">Use presets for quick access, or type any CLI command manually.</p>' +
             '</div>' +
           '</div>' +
         '</section>';
+      }
+
+      function renderWelcomeView() {
+        var defaultCmd = (state.config && state.config.commandPresets && state.config.commandPresets.length > 0)
+          ? state.config.commandPresets[0].command
+          : "claude";
+        var presets = state.config && state.config.commandPresets ? state.config.commandPresets : [];
+        var cards = presets.slice(0, 2).map(function(p) {
+          var icon = p.command.indexOf("claude") !== -1 ? "🤖" : (p.command.indexOf("codex") !== -1 ? "⚡" : "⌨");
+          var desc = p.command.indexOf("claude") !== -1 ? "Anthropic 编程助手" : (p.command.indexOf("codex") !== -1 ? "OpenAI 编程助手" : "CLI 工具");
+          return '<div class="quick-card" data-command="' + escapeHtml(p.command) + '">' +
+            '<div class="quick-card-icon">' + icon + '</div>' +
+            '<div class="quick-card-body">' +
+              '<div class="quick-card-title">' + escapeHtml(p.label || p.command) + '</div>' +
+              '<div class="quick-card-desc">' + desc + '</div>' +
+            '</div>' +
+          '</div>';
+        }).join("");
+
+        return '<div class="welcome-view">' +
+          '<div class="welcome-header">' +
+            '<div class="welcome-logo">W</div>' +
+            '<h1 class="welcome-title">Wand</h1>' +
+            '<p class="welcome-subtitle">你的本地 AI 编程助手</p>' +
+          '</div>' +
+          '<div class="quick-start-grid" id="quick-start-grid">' +
+            cards +
+          '</div>' +
+          '<div class="welcome-custom-row">' +
+            '<input id="welcome-custom-command" class="welcome-custom-input" placeholder="或输入任意命令..." />' +
+            '<button id="welcome-custom-start" class="btn btn-primary">启动</button>' +
+          '</div>' +
+          '<p class="welcome-hint">从右侧菜单可查看历史会话</p>' +
+        '</div>';
       }
 
       function attachEventListeners() {
@@ -2161,15 +2304,39 @@ export function renderApp(configPath: string): string {
         if (sessionModal) sessionModal.addEventListener("click", function(e) {
           if (e.target.id === "session-modal") closeSessionModal();
         });
-        var presetSelect = document.getElementById("preset-select");
-        if (presetSelect) presetSelect.addEventListener("change", function() {
-          state.presetValue = this.value;
-          applyPreset();
-        });
-        var modeEl = document.getElementById("mode");
-        if (modeEl) modeEl.addEventListener("change", function() { state.modeValue = this.value; });
-        var modelSelect = document.getElementById("model-select");
-        if (modelSelect) modelSelect.addEventListener("change", function() { applyModel(); });
+
+        // Welcome view quick-start cards
+        var quickGrid = document.getElementById("quick-start-grid");
+        if (quickGrid) {
+          quickGrid.addEventListener("click", function(e) {
+            var target = e.target;
+            var card = target.closest(".quick-card");
+            if (!card) return;
+            var cmd = card.dataset && card.dataset.command || "claude";
+            quickStartSession(cmd);
+          });
+        }
+
+        // Welcome view custom command button
+        var customStartBtn = document.getElementById("welcome-custom-start");
+        if (customStartBtn) {
+          customStartBtn.addEventListener("click", function() {
+            var inputEl = document.getElementById("welcome-custom-command");
+            if (inputEl && inputEl.value.trim()) {
+              quickStartSession(inputEl.value.trim());
+            }
+          });
+        }
+        var customInput = document.getElementById("welcome-custom-command");
+        if (customInput) {
+          customInput.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") {
+              var inputEl = e.target;
+              if (inputEl.value.trim()) quickStartSession(inputEl.value.trim());
+            }
+          });
+        }
+
         var inputBox = document.getElementById("input-box");
         if (inputBox) {
           inputBox.addEventListener("keydown", handleInputBoxKeydown);
@@ -2279,7 +2446,7 @@ export function renderApp(configPath: string): string {
             state.terminalOutput = normalizedOutput;
           }
         } else {
-          state.terminal.writeln("Select or start a session to begin.");
+          state.terminal.writeln("点击上方「新对话」开始你的第一次对话。");
         }
 
         state.terminal.onData(function(data) { queueDirectInput(data); });
@@ -2307,7 +2474,7 @@ export function renderApp(configPath: string): string {
         })
         .then(function(res) {
           if (!res.ok) {
-            showError(errorEl, "Password rejected.");
+            showError(errorEl, "密码错误，请重试。");
             return Promise.reject("Invalid password");
           }
           return fetch("/api/config");
@@ -2318,7 +2485,7 @@ export function renderApp(configPath: string): string {
           var statusDot = document.getElementById("status-dot");
           var statusText = document.getElementById("status-text");
           if (statusDot) statusDot.classList.add("active");
-          if (statusText) statusText.textContent = "Unlocked";
+          if (statusText) statusText.textContent = "已登录";
           return refreshAll();
         })
         .then(function() {
@@ -2327,7 +2494,7 @@ export function renderApp(configPath: string): string {
         })
         .catch(function(error) {
           if (error !== "Invalid password") {
-            showError(errorEl, "Login failed.");
+            showError(errorEl, "登录失败，请重试。");
           }
         })
         .finally(function() {
@@ -2396,6 +2563,11 @@ export function renderApp(configPath: string): string {
               }
             }
             updateShellChrome();
+            // Toggle welcome view
+            var welcomeEl = document.getElementById("welcome-view-container");
+            if (welcomeEl) {
+              welcomeEl.classList.toggle("hidden", !!state.selectedId);
+            }
           });
       }
 
@@ -2409,7 +2581,7 @@ export function renderApp(configPath: string): string {
 
       function updateShellChrome() {
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "No session";
+        var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "未选择会话";
         var summaryEl = document.querySelector(".session-summary-value");
         var titleEl = document.getElementById("terminal-title");
         if (summaryEl) summaryEl.textContent = terminalTitle;
@@ -2503,7 +2675,11 @@ export function renderApp(configPath: string): string {
         var modal = document.getElementById("session-modal");
         if (modal) {
           modal.classList.remove("hidden");
-          populatePresets();
+          // Pre-fill command with first preset
+          var commandEl = document.getElementById("command");
+          if (commandEl && state.config && state.config.commandPresets && state.config.commandPresets.length > 0) {
+            commandEl.value = state.config.commandPresets[0].command;
+          }
           schedulePathSuggestions();
           setTimeout(function() { document.getElementById("command").focus(); }, 20);
         }
@@ -2547,13 +2723,13 @@ export function renderApp(configPath: string): string {
         hideSettingsMessages();
 
         if (!newPass || newPass.length < 6) {
-          errorEl.textContent = "Password must be at least 6 characters.";
+          errorEl.textContent = "密码长度至少为 6 个字符。";
           errorEl.classList.remove("hidden");
           return;
         }
 
         if (newPass !== confirmPass) {
-          errorEl.textContent = "Passwords do not match.";
+          errorEl.textContent = "两次输入的密码不一致。";
           errorEl.classList.remove("hidden");
           return;
         }
@@ -2571,7 +2747,7 @@ export function renderApp(configPath: string): string {
             errorEl.classList.remove("hidden");
             return;
           }
-          successEl.textContent = "Password saved successfully!";
+          successEl.textContent = "密码修改成功！";
           successEl.classList.remove("hidden");
           document.getElementById("new-password").value = "";
           document.getElementById("confirm-password").value = "";
@@ -2599,7 +2775,6 @@ export function renderApp(configPath: string): string {
         var select = document.getElementById("preset-select");
         var commandEl = document.getElementById("command");
         var modeEl = document.getElementById("mode");
-        var modelSelect = document.getElementById("model-select");
 
         if (!select || !commandEl || !state.config || select.value === "") return;
 
@@ -2608,52 +2783,66 @@ export function renderApp(configPath: string): string {
 
         commandEl.value = preset.command;
         modeEl.value = preset.mode || state.config.defaultMode || "default";
-        if (modelSelect) modelSelect.value = "";
         state.commandValue = commandEl.value;
         state.modeValue = modeEl.value;
       }
 
-      function applyModel() {
-        var modelSelect = document.getElementById("model-select");
-        var commandEl = document.getElementById("command");
-        if (!modelSelect || !commandEl) return;
-        var model = modelSelect.value.trim();
-        var cmd = commandEl.value.trim();
-        if (!cmd) return;
-        // Remove existing --model flag
-        cmd = cmd.replace(/ --model \S+/g, "");
-        // Add new model flag if selected
-        if (model) {
-          cmd += " --model " + model;
-        }
-        commandEl.value = cmd;
-        state.commandValue = cmd;
+      function quickStartSession(command) {
+        var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+        var defaultMode = (state.config && state.config.defaultMode) ? state.config.defaultMode : "default";
+        fetch("/api/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command: command, cwd: defaultCwd, mode: defaultMode })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            // Show error in a toast
+            var errEl = document.createElement("div");
+            errEl.className = "toast-message toast-error";
+            errEl.textContent = data.error;
+            document.body.appendChild(errEl);
+            setTimeout(function() { errEl.remove(); }, 4000);
+            return;
+          }
+          state.selectedId = data.id;
+          state.drafts[data.id] = "";
+          return refreshAll();
+        })
+        .then(focusInputBox)
+        .catch(function() {
+          var errEl = document.createElement("div");
+          errEl.className = "toast-message toast-error";
+          errEl.textContent = "无法启动命令。";
+          document.body.appendChild(errEl);
+          setTimeout(function() { errEl.remove(); }, 4000);
+        });
       }
 
       function runCommand() {
         var commandEl = document.getElementById("command");
         var cwdEl = document.getElementById("cwd");
-        var modeEl = document.getElementById("mode");
         var errorEl = document.getElementById("modal-error");
 
         hideError(errorEl);
 
         var command = commandEl.value.trim();
         if (!command) {
-          showError(errorEl, "Command is required.");
+          showError(errorEl, "请输入要执行的命令。");
           return;
         }
 
-        // Override mode for this specific command
-        var mode = modeEl.value;
+        var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+        var defaultMode = (state.config && state.config.defaultMode) ? state.config.defaultMode : "default";
 
         fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             command: command,
-            cwd: cwdEl.value.trim(),
-            mode: mode
+            cwd: cwdEl.value.trim() || defaultCwd,
+            mode: defaultMode
           })
         })
         .then(function(res) { return res.json(); })
@@ -2671,7 +2860,7 @@ export function renderApp(configPath: string): string {
         })
         .then(focusInputBox)
         .catch(function() {
-          showError(errorEl, "Failed to start command.");
+          showError(errorEl, "无法启动命令。请检查命令是否正确安装。");
         });
       }
 
@@ -2938,7 +3127,7 @@ export function renderApp(configPath: string): string {
           })
           .catch(function() {
             var errorEl = document.getElementById("action-error");
-            showError(errorEl, "Failed to delete session.");
+            showError(errorEl, "无法删除会话。");
           });
       }
 
@@ -3224,7 +3413,7 @@ export function renderApp(configPath: string): string {
 
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!selectedSession) {
-          chatOutput.innerHTML = '<div class="empty-state"><strong>No session selected</strong>Select or start a session to begin.</div>';
+          chatOutput.innerHTML = '<div class="empty-state"><strong>未选择会话</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
           return;
         }
 
@@ -3232,7 +3421,7 @@ export function renderApp(configPath: string): string {
         state.parsedMessages = messages;
 
         if (messages.length === 0) {
-          chatOutput.innerHTML = '<div class="empty-state"><strong>Waiting for response</strong>Send a message to start the conversation.</div>';
+          chatOutput.innerHTML = '<div class="empty-state"><strong>等待回复中</strong><br>在下方输入框发送消息开始对话。</div>';
           return;
         }
 
@@ -3423,7 +3612,7 @@ export function renderApp(configPath: string): string {
 
       function shortCommand(cmd) {
         var s = String(cmd || "").trim();
-        return s.length <= 24 ? s || "Terminal" : s.slice(0, 21) + "...";
+        return s.length <= 24 ? s || "未选择会话" : s.slice(0, 21) + "...";
       }
 
       function normalizeTerminalOutput(value) {
