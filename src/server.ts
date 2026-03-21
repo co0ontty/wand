@@ -229,6 +229,31 @@ self.addEventListener('fetch', (event) => {
     }
   });
 
+  app.get("/api/directory", async (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    const targetPath = path.resolve(process.cwd(), q);
+
+    try {
+      const entries = await readdir(targetPath, { withFileTypes: true });
+      const items = entries
+        .sort((a, b) => {
+          // Directories first, then alphabetically
+          if (a.isDirectory() && !b.isDirectory()) return -1;
+          if (!a.isDirectory() && b.isDirectory()) return 1;
+          return a.name.localeCompare(b.name);
+        })
+        .slice(0, 100)
+        .map((entry) => ({
+          path: path.join(targetPath, entry.name),
+          name: entry.name,
+          type: entry.isDirectory() ? "dir" : "file"
+        }));
+      res.json(items);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "Failed to read directory.") });
+    }
+  });
+
   app.get("/api/sessions/:id", (req, res) => {
     const snapshot = processes.get(req.params.id);
     if (!snapshot) {

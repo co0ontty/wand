@@ -274,6 +274,115 @@ export function renderApp(configPath: string): string {
 
     .sidebar-close { flex-shrink: 0; }
 
+    .sidebar-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(255, 251, 245, 0.6);
+      padding: 0 16px;
+    }
+
+    .sidebar-tab {
+      padding: 10px 12px;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: color var(--transition-fast), border-color var(--transition-fast);
+      margin-bottom: -1px;
+    }
+
+    .sidebar-tab:hover { color: var(--text-secondary); }
+    .sidebar-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .sidebar-tab-icon { margin-right: 4px; }
+
+    .file-explorer { flex: 1; overflow-y: auto; padding: 8px 0; }
+    .file-explorer.empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      color: var(--text-muted);
+      font-size: 0.8125rem;
+      text-align: center;
+    }
+
+    .file-tree { font-size: 0.8125rem; }
+
+    .tree-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 12px;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: background var(--transition-fast);
+      user-select: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tree-item:hover { background: var(--bg-tertiary); }
+    .tree-item.active { background: var(--accent-muted); color: var(--accent); }
+
+    .tree-toggle {
+      flex-shrink: 0;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.625rem;
+      color: var(--text-muted);
+      transition: transform var(--transition-fast);
+    }
+
+    .tree-toggle.open { transform: rotate(90deg); }
+    .tree-toggle.empty { visibility: hidden; }
+
+    .tree-icon { flex-shrink: 0; font-size: 0.875rem; }
+    .tree-name { overflow: hidden; text-overflow: ellipsis; }
+
+    .tree-children { display: none; }
+    .tree-children.open { display: block; }
+
+    .file-explorer-header {
+      padding: 6px 12px 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .file-explorer-path {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-explorer-actions { display: flex; gap: 4px; margin-left: auto; }
+
+    .file-explorer-refresh {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.875rem;
+      padding: 2px 4px;
+      border-radius: 4px;
+      color: var(--text-muted);
+    }
+
+    .file-explorer-refresh:hover { background: var(--bg-tertiary); color: var(--text-secondary); }
+
     .sidebar-body {
       display: flex;
       flex-direction: column;
@@ -1458,7 +1567,8 @@ export function renderApp(configPath: string): string {
         ws: null,
         wsConnected: false,
         currentView: "terminal",
-        parsedMessages: []
+        parsedMessages: [],
+        sidebarTab: "sessions"
       };
 
       // PWA install prompt handling
@@ -1668,16 +1778,24 @@ export function renderApp(configPath: string): string {
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
           '<div class="main-layout">' +
             '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
-              '<div class="sidebar-header">' +
-                '<div class="sidebar-header-main">' +
-                  '<span class="sidebar-title">Sessions</span>' +
-                  '<span class="session-count" id="session-count">' + state.sessions.length + '</span>' +
-                '</div>' +
-                '<button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close" type="button">×</button>' +
+              '<div class="sidebar-tabs">' +
+                '<button class="sidebar-tab' + (state.sidebarTab !== "files" ? " active" : "") + '" id="tab-sessions" type="button">Sessions</button>' +
+                '<button class="sidebar-tab' + (state.sidebarTab === "files" ? " active" : "") + '" id="tab-files" type="button"><span class="sidebar-tab-icon">▤</span>Files</button>' +
               '</div>' +
               '<div class="sidebar-body">' +
-                '<p class="sidebar-intro">Recent sessions are tucked away here so the terminal stays in focus.</p>' +
-                '<div class="sessions-list" id="sessions-list">' + renderSessions() + '</div>' +
+                '<div id="sessions-panel"' + (state.sidebarTab === "files" ? ' class="hidden"' : "") + '>' +
+                  '<p class="sidebar-intro">Recent sessions are tucked away here so the terminal stays in focus.</p>' +
+                  '<div class="sessions-list" id="sessions-list">' + renderSessions() + '</div>' +
+                '</div>' +
+                '<div id="files-panel"' + (state.sidebarTab !== "files" ? ' class="hidden"' : "") + '>' +
+                  '<div class="file-explorer-header">' +
+                    '<span class="file-explorer-path" id="file-explorer-cwd">' + escapeHtml(state.config && state.config.defaultCwd ? state.config.defaultCwd : "") + '</span>' +
+                    '<div class="file-explorer-actions">' +
+                      '<button class="file-explorer-refresh" id="file-explorer-refresh" title="Refresh">↻</button>' +
+                    '</div>' +
+                  '</div>' +
+                  '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(state.config && state.config.defaultCwd ? state.config.defaultCwd : "") + '</div>' +
+                '</div>' +
               '</div>' +
               '<div class="sidebar-footer">' +
                 '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> New Session</button>' +
@@ -1780,6 +1898,112 @@ export function renderApp(configPath: string): string {
         '</section>';
       }
 
+      function setSidebarTab(tab) {
+        if (state.sidebarTab === tab) return;
+        state.sidebarTab = tab;
+        var tabSessions = document.getElementById("tab-sessions");
+        var tabFiles = document.getElementById("tab-files");
+        var sessionsPanel = document.getElementById("sessions-panel");
+        var filesPanel = document.getElementById("files-panel");
+        if (tabSessions) tabSessions.classList.toggle("active", tab !== "files");
+        if (tabFiles) tabFiles.classList.toggle("active", tab === "files");
+        if (sessionsPanel) sessionsPanel.classList.toggle("hidden", tab === "files");
+        if (filesPanel) filesPanel.classList.toggle("hidden", tab !== "files");
+        if (tab === "files") refreshFileExplorer();
+      }
+
+      function renderFileExplorer(cwd) {
+        var root = cwd || (state.config && state.config.defaultCwd) || "";
+        if (!root) {
+          return '<div class="file-explorer empty">No working directory configured.</div>';
+        }
+        return '<div class="file-tree" id="file-tree" data-cwd="' + escapeHtml(root) + '">' +
+          '<div class="tree-loading">Loading...</div>' +
+        '</div>';
+      }
+
+      function refreshFileExplorer() {
+        var explorer = document.getElementById("file-explorer");
+        var cwdEl = document.getElementById("file-explorer-cwd");
+        if (!explorer) return;
+        var cwd = cwdEl ? cwdEl.textContent : "";
+        if (!cwd) {
+          explorer.innerHTML = '<div class="file-explorer empty">No working directory.</div>';
+          return;
+        }
+        explorer.innerHTML = '<div class="file-explorer"><div class="tree-loading" style="padding:12px;color:var(--text-muted);font-size:0.8125rem;">Loading...</div></div>';
+        fetch("/api/directory?q=" + encodeURIComponent(cwd))
+          .then(function(res) { return res.json(); })
+          .then(function(items) {
+            if (!items || items.length === 0) {
+              explorer.innerHTML = '<div class="file-explorer empty">Empty directory or inaccessible.</div>';
+              return;
+            }
+            explorer.innerHTML = '<div class="file-tree" id="file-tree" data-cwd="' + escapeHtml(cwd) + '">' +
+              items.map(function(item) {
+                return renderFileTreeItem(item);
+              }).join("") +
+            '</div>';
+            attachFileTreeListeners();
+          })
+          .catch(function() {
+            explorer.innerHTML = '<div class="file-explorer empty">Failed to load files.</div>';
+          });
+      }
+
+      function renderFileTreeItem(item) {
+        var name = escapeHtml(item.name);
+        var isDir = item.type === "dir";
+        var icon = isDir ? "▸" : "📄";
+        var toggleClass = isDir ? "" : " empty";
+        return '<div class="tree-item" data-path="' + escapeHtml(item.path) + '" data-type="' + escapeHtml(item.type) + '">' +
+          '<span class="tree-toggle' + toggleClass + '">' + icon + '</span>' +
+          '<span class="tree-name">' + name + '</span>' +
+        '</div>';
+      }
+
+      function attachFileTreeListeners() {
+        var tree = document.getElementById("file-tree");
+        if (!tree) return;
+        tree.querySelectorAll(".tree-item[data-type='dir']").forEach(function(item) {
+          item.addEventListener("click", function() {
+            toggleTreeNode(item);
+          });
+        });
+      }
+
+      function toggleTreeNode(item) {
+        var path = item.dataset.path;
+        var toggle = item.querySelector(".tree-toggle");
+        var children = item.nextElementSibling;
+
+        if (children && children.classList.contains("tree-children")) {
+          var isOpen = children.classList.contains("open");
+          children.classList.toggle("open");
+          if (toggle) toggle.classList.toggle("open", !isOpen);
+          return;
+        }
+
+        // Load children
+        if (toggle) toggle.classList.add("open");
+        fetch("/api/directory?q=" + encodeURIComponent(path))
+          .then(function(res) { return res.json(); })
+          .then(function(items) {
+            var childrenDiv = document.createElement("div");
+            childrenDiv.className = "tree-children open";
+            if (!items || items.length === 0) {
+              childrenDiv.innerHTML = '<div class="tree-item" style="color:var(--text-muted);cursor:default;"><span class="tree-toggle empty">▸</span><span class="tree-name">(empty)</span></div>';
+            } else {
+              childrenDiv.innerHTML = items.map(function(child) {
+                return renderFileTreeItem(child);
+              }).join("");
+            }
+            item.parentNode.insertBefore(childrenDiv, item.nextSibling);
+            attachFileTreeListeners();
+          })
+          .catch(function() {});
+      }
+
       function renderSessionItem(session) {
         var activeClass = session.id === state.selectedId ? " active" : "";
         var metaStatus = session.archived ? "archived" : session.status;
@@ -1826,6 +2050,15 @@ export function renderApp(configPath: string): string {
               '<div class="field">' +
                 '<label class="field-label" for="command">Command</label>' +
                 '<textarea id="command" class="field-input" placeholder="claude&#10;codex&#10;gemini" rows="3"></textarea>' +
+              '</div>' +
+              '<div class="field">' +
+                '<label class="field-label" for="model-select">Model</label>' +
+                '<select id="model-select" class="field-input">' +
+                  '<option value="">Default</option>' +
+                  '<option value="sonnet">Claude 3.5 Sonnet</option>' +
+                  '<option value="opus">Claude 3 Opus</option>' +
+                  '<option value="haiku">Claude 3 Haiku</option>' +
+                '</select>' +
               '</div>' +
               '<div class="field">' +
                 '<label class="field-label" for="cwd">Working Directory</label>' +
@@ -1935,6 +2168,8 @@ export function renderApp(configPath: string): string {
         });
         var modeEl = document.getElementById("mode");
         if (modeEl) modeEl.addEventListener("change", function() { state.modeValue = this.value; });
+        var modelSelect = document.getElementById("model-select");
+        if (modelSelect) modelSelect.addEventListener("change", function() { applyModel(); });
         var inputBox = document.getElementById("input-box");
         if (inputBox) {
           inputBox.addEventListener("keydown", handleInputBoxKeydown);
@@ -1946,6 +2181,16 @@ export function renderApp(configPath: string): string {
         if (viewTermBtn) viewTermBtn.addEventListener("click", function() { setView("terminal"); });
         var viewChatBtn = document.getElementById("view-chat-btn");
         if (viewChatBtn) viewChatBtn.addEventListener("click", function() { setView("chat"); });
+
+        // Sidebar tabs
+        var tabSessions = document.getElementById("tab-sessions");
+        if (tabSessions) tabSessions.addEventListener("click", function() { setSidebarTab("sessions"); });
+        var tabFiles = document.getElementById("tab-files");
+        if (tabFiles) tabFiles.addEventListener("click", function() { setSidebarTab("files"); });
+
+        // File explorer
+        var fileRefresh = document.getElementById("file-explorer-refresh");
+        if (fileRefresh) fileRefresh.addEventListener("click", refreshFileExplorer);
 
         initTerminal();
         setupMobileKeyboardHandlers();
@@ -2354,6 +2599,7 @@ export function renderApp(configPath: string): string {
         var select = document.getElementById("preset-select");
         var commandEl = document.getElementById("command");
         var modeEl = document.getElementById("mode");
+        var modelSelect = document.getElementById("model-select");
 
         if (!select || !commandEl || !state.config || select.value === "") return;
 
@@ -2362,8 +2608,26 @@ export function renderApp(configPath: string): string {
 
         commandEl.value = preset.command;
         modeEl.value = preset.mode || state.config.defaultMode || "default";
+        if (modelSelect) modelSelect.value = "";
         state.commandValue = commandEl.value;
         state.modeValue = modeEl.value;
+      }
+
+      function applyModel() {
+        var modelSelect = document.getElementById("model-select");
+        var commandEl = document.getElementById("command");
+        if (!modelSelect || !commandEl) return;
+        var model = modelSelect.value.trim();
+        var cmd = commandEl.value.trim();
+        if (!cmd) return;
+        // Remove existing --model flag
+        cmd = cmd.replace(/ --model \S+/g, "");
+        // Add new model flag if selected
+        if (model) {
+          cmd += " --model " + model;
+        }
+        commandEl.value = cmd;
+        state.commandValue = cmd;
       }
 
       function runCommand() {
