@@ -3266,7 +3266,8 @@ export function renderApp(configPath: string): string {
 
         // Split output into user/assistant turns
         // Claude CLI format: human: ... assistant: ...
-        var turns = output.split(/(?=human:)/i);
+        var nl = String.fromCharCode(92) + "n";
+        var turns = output.split(new RegExp("(?=(human:|assistant:))", "i"));
 
         turns.forEach(function(turn) {
           turn = turn.trim();
@@ -3295,7 +3296,7 @@ export function renderApp(configPath: string): string {
           // If no prefix, try to detect based on content
           // User messages are usually shorter and don't have code blocks
           // Assistant messages tend to have more structure and code
-          var lines = turn.split(String.fromCharCode(92) + "n");
+          var lines = turn.split(nl);
           var backtick3 = String.fromCharCode(96) + String.fromCharCode(96) + String.fromCharCode(96);
           var hasCodeBlock = turn.indexOf(backtick3) >= 0;
 
