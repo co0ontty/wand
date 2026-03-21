@@ -1,4 +1,5 @@
 export function renderApp(configPath: string): string {
+  var scriptClose = String.fromCharCode(60) + String.fromCharCode(47) + "script>";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -517,6 +518,7 @@ export function renderApp(configPath: string): string {
 
     .terminal-container {
       flex: 1;
+      display: none;
       background:
         radial-gradient(circle at top right, rgba(91, 58, 34, 0.16), transparent 28%),
         linear-gradient(180deg, #221d18 0%, #1b1714 100%);
@@ -529,8 +531,217 @@ export function renderApp(configPath: string): string {
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-soft);
     }
 
+    .terminal-container.active { display: flex; }
+
     .terminal-container .xterm { height: 100%; }
     .terminal-container .xterm-viewport { background: transparent !important; }
+
+    /* Chat View */
+    .view-toggle {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(240, 229, 215, 0.7);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 3px;
+    }
+
+    .view-toggle-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      font-family: var(--font-sans);
+    }
+
+    .view-toggle-btn:hover { color: var(--text-secondary); background: rgba(255, 255, 255, 0.5); }
+    .view-toggle-btn.active { background: white; color: var(--text-primary); box-shadow: 0 2px 8px rgba(89, 58, 32, 0.08); }
+
+    .chat-container {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+      padding: 14px 18px;
+    }
+
+    .chat-container.active { display: flex; }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding-bottom: 16px;
+    }
+
+    .chat-message {
+      display: flex;
+      flex-direction: column;
+      max-width: 85%;
+      animation: messageSlide 0.3s ease;
+    }
+
+    @keyframes messageSlide {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .chat-message.user {
+      align-self: flex-end;
+    }
+
+    .chat-message.assistant {
+      align-self: flex-start;
+    }
+
+    .chat-message-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      margin-bottom: 6px;
+    }
+
+    .chat-message.user .chat-message-avatar {
+      display: none;
+    }
+
+    .chat-message.assistant .chat-message-avatar {
+      background: linear-gradient(135deg, #c5653d 0%, #a95130 100%);
+      color: white;
+    }
+
+    .chat-message.user .chat-message-bubble {
+      background: linear-gradient(135deg, #c5653d 0%, #a95130 100%);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .chat-message.assistant .chat-message-bubble {
+      background: rgba(255, 251, 245, 0.95);
+      border: 1px solid var(--border-subtle);
+      border-bottom-left-radius: 4px;
+    }
+
+    .chat-message-bubble {
+      padding: 12px 16px;
+      border-radius: var(--radius-md);
+      font-size: 0.875rem;
+      line-height: 1.6;
+      word-wrap: break-word;
+    }
+
+    .chat-message.user .chat-message-bubble {
+      font-family: var(--font-mono);
+    }
+
+    /* Markdown Content */
+    .markdown-content { color: inherit; }
+    .markdown-content p { margin: 0 0 8px 0; }
+    .markdown-content p:last-child { margin-bottom: 0; }
+    .markdown-content strong { font-weight: 600; }
+    .markdown-content em { font-style: italic; }
+    .markdown-content ul, .markdown-content ol { margin: 8px 0; padding-left: 20px; }
+    .markdown-content li { margin: 4px 0; }
+    .markdown-content h1, .markdown-content h2, .markdown-content h3 { margin: 16px 0 8px 0; font-weight: 600; }
+    .markdown-content h1 { font-size: 1.25rem; }
+    .markdown-content h2 { font-size: 1.1rem; }
+    .markdown-content h3 { font-size: 1rem; }
+    .markdown-content blockquote {
+      margin: 8px 0;
+      padding: 8px 12px;
+      border-left: 3px solid var(--accent);
+      background: rgba(197, 101, 61, 0.06);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+    .markdown-content code:not(.code-block):not(.code-inline) {
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      background: rgba(150, 118, 85, 0.12);
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+
+    .markdown-content code.code-inline {
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      background: rgba(150, 118, 85, 0.12);
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+    .markdown-content .code-block {
+      margin: 10px 0;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: #1f1b17;
+      border: 1px solid rgba(122, 91, 64, 0.35);
+    }
+    .markdown-content .code-block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: rgba(122, 91, 64, 0.2);
+      border-bottom: 1px solid rgba(122, 91, 64, 0.2);
+    }
+    .markdown-content .code-lang {
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: #8c735f;
+      text-transform: lowercase;
+    }
+    .markdown-content .code-copy {
+      font-family: var(--font-sans);
+      font-size: 0.6875rem;
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.08);
+      color: #c9b8a8;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .markdown-content .code-copy:hover { background: rgba(255, 255, 255, 0.15); color: white; }
+    .markdown-content .code-copy.copied { color: #7fa36f; border-color: rgba(127, 163, 111, 0.4); }
+    .markdown-content pre {
+      margin: 0;
+      padding: 12px;
+      overflow-x: auto;
+    }
+    .markdown-content pre code {
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      color: #f5eadc;
+      background: transparent;
+      padding: 0;
+    }
+
+    /* Syntax Highlighting */
+    .token-comment { color: #625347; }
+    .token-keyword { color: #c595c7; }
+    .token-string { color: #7fa36f; }
+    .token-number { color: #d5a35b; }
+    .token-function { color: #87a9d9; }
+    .token-operator { color: #d27766; }
+    .token-class { color: #7fb3b1; }
+    .token-variable { color: #f5eadc; }
+    .token-type { color: #d5a35b; }
 
     .input-panel {
       background: rgba(255, 251, 245, 0.78);
@@ -952,6 +1163,9 @@ export function renderApp(configPath: string): string {
       .btn-sm { min-height: 36px; padding: 6px 10px; }
       .status-badge { display: none; }
       .brand-subtitle { display: none; }
+      .view-toggle { display: none; }
+      .chat-container { padding: 10px; }
+      .chat-message { max-width: 95%; }
     }
 
     @media (max-width: 640px) {
@@ -1126,6 +1340,9 @@ export function renderApp(configPath: string): string {
       .login-body { padding: 18px; }
       .btn { min-height: 44px; }
       .btn-sm { min-height: 38px; }
+
+      .chat-message-bubble { padding: 10px 12px; font-size: 0.8125rem; }
+      .chat-message-avatar { width: 24px; height: 24px; font-size: 12px; }
     }
 
     @media (max-width: 420px) {
@@ -1239,7 +1456,9 @@ export function renderApp(configPath: string): string {
         deferredPrompt: null,
         showInstallPrompt: false,
         ws: null,
-        wsConnected: false
+        wsConnected: false,
+        currentView: "terminal",
+        parsedMessages: []
       };
 
       // PWA install prompt handling
@@ -1403,6 +1622,7 @@ export function renderApp(configPath: string): string {
       }
 
       function renderApp() {
+        var scriptClose = String.fromCharCode(60) + String.fromCharCode(47) + "script>";
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "No session";
         var terminalInfo = selectedSession ? (selectedSession.mode + " | " + selectedSession.status) : "Select or start a session";
@@ -1473,8 +1693,13 @@ export function renderApp(configPath: string): string {
                   '<span class="terminal-title-text" id="terminal-title">' + terminalTitle + '</span>' +
                   '<span class="terminal-info" id="terminal-info">' + terminalInfo + '</span>' +
                 '</div>' +
+                '<div class="view-toggle" id="view-toggle">' +
+                  '<button class="view-toggle-btn active" data-view="terminal" id="view-terminal-btn">Terminal</button>' +
+                  '<button class="view-toggle-btn" data-view="chat" id="view-chat-btn">Chat</button>' +
+                '</div>' +
               '</div>' +
               '<div id="output" class="terminal-container"></div>' +
+              '<div id="chat-output" class="chat-container"></div>' +
               '<div class="input-panel">' +
                 '<div class="input-row">' +
                   '<div class="input-field">' +
@@ -1615,6 +1840,7 @@ export function renderApp(configPath: string): string {
                   '<option value="auto-edit">Auto Edit</option>' +
                   '<option value="default">Default</option>' +
                   '<option value="full-access">Full Access</option>' +
+                  '<option value="native">Native</option>' +
                 '</select>' +
               '</div>' +
               '<button id="run-button" class="btn btn-primary btn-block">Start Session</button>' +
@@ -1626,15 +1852,16 @@ export function renderApp(configPath: string): string {
       }
 
       function attachEventListeners() {
-        var isLoggedIn = state.config !== null;
-
-        if (!isLoggedIn) {
-          document.getElementById("login-button").addEventListener("click", login);
+        var loginButton = document.getElementById("login-button");
+        if (loginButton) {
+          loginButton.addEventListener("click", login);
           var passwordEl = document.getElementById("password");
-          passwordEl.addEventListener("keydown", function(e) {
-            if (e.key === "Enter") login();
-          });
-          passwordEl.focus();
+          if (passwordEl) {
+            passwordEl.addEventListener("keydown", function(e) {
+              if (e.key === "Enter") login();
+            });
+            passwordEl.focus();
+          }
           return;
         }
 
@@ -1644,35 +1871,52 @@ export function renderApp(configPath: string): string {
           sessionsList.addEventListener("keydown", handleSessionItemKeydown);
         }
 
-        document.getElementById("command").addEventListener("input", function() {
-          state.commandValue = this.value;
-        });
-        document.getElementById("cwd").addEventListener("input", function() {
-          state.cwdValue = this.value;
-        });
-        document.getElementById("cwd").addEventListener("change", function() {
-          state.cwdValue = this.value;
-        });
-        document.getElementById("sessions-toggle-button").addEventListener("click", toggleSessionsDrawer);
-        document.getElementById("sessions-drawer-backdrop").addEventListener("click", closeSessionsDrawer);
-        document.getElementById("close-drawer-button").addEventListener("click", closeSessionsDrawer);
-        document.getElementById("topbar-toggle-button").addEventListener("click", toggleTopbar);
-        document.getElementById("logout-button").addEventListener("click", logout);
-        document.getElementById("settings-button").addEventListener("click", openSettingsModal);
-        document.getElementById("close-settings-button").addEventListener("click", closeSettingsModal);
-        document.getElementById("settings-modal").addEventListener("click", function(e) {
+        var commandEl = document.getElementById("command");
+        if (commandEl) commandEl.addEventListener("input", function() { state.commandValue = this.value; });
+        var cwdEl = document.getElementById("cwd");
+        if (cwdEl) {
+          cwdEl.addEventListener("input", function() { state.cwdValue = this.value; });
+          cwdEl.addEventListener("change", function() { state.cwdValue = this.value; });
+          cwdEl.addEventListener("input", schedulePathSuggestions);
+          cwdEl.addEventListener("focus", schedulePathSuggestions);
+          cwdEl.addEventListener("blur", function() { setTimeout(hidePathSuggestions, 120); });
+        }
+        var sessionsToggle = document.getElementById("sessions-toggle-button");
+        if (sessionsToggle) sessionsToggle.addEventListener("click", toggleSessionsDrawer);
+        var drawerBackdrop = document.getElementById("sessions-drawer-backdrop");
+        if (drawerBackdrop) drawerBackdrop.addEventListener("click", closeSessionsDrawer);
+        var closeDrawerBtn = document.getElementById("close-drawer-button");
+        if (closeDrawerBtn) closeDrawerBtn.addEventListener("click", closeSessionsDrawer);
+        var topbarToggle = document.getElementById("topbar-toggle-button");
+        if (topbarToggle) topbarToggle.addEventListener("click", toggleTopbar);
+        var logoutBtn = document.getElementById("logout-button");
+        if (logoutBtn) logoutBtn.addEventListener("click", logout);
+        var settingsBtn = document.getElementById("settings-button");
+        if (settingsBtn) settingsBtn.addEventListener("click", openSettingsModal);
+        var closeSettingsBtn = document.getElementById("close-settings-button");
+        if (closeSettingsBtn) closeSettingsBtn.addEventListener("click", closeSettingsModal);
+        var settingsModal = document.getElementById("settings-modal");
+        if (settingsModal) settingsModal.addEventListener("click", function(e) {
           if (e.target.id === "settings-modal") closeSettingsModal();
         });
-        document.getElementById("save-password-button").addEventListener("click", savePassword);
-        document.getElementById("topbar-new-session-button").addEventListener("click", openSessionModal);
-        document.getElementById("drawer-new-session-button").addEventListener("click", openSessionModal);
-        document.getElementById("close-modal-button").addEventListener("click", closeSessionModal);
-        document.getElementById("run-button").addEventListener("click", runCommand);
-        document.getElementById("send-input-button").addEventListener("click", function() { sendInputFromBox(false); });
-        document.getElementById("stop-button").addEventListener("click", stopSession);
-
-        document.getElementById("floating-controls-toggle").addEventListener("click", toggleFloatingControls);
-        document.getElementById("floating-backdrop").addEventListener("click", hideFloatingControls);
+        var savePassBtn = document.getElementById("save-password-button");
+        if (savePassBtn) savePassBtn.addEventListener("click", savePassword);
+        var newSessBtn = document.getElementById("topbar-new-session-button");
+        if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
+        var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
+        if (drawerNewSessBtn) drawerNewSessBtn.addEventListener("click", openSessionModal);
+        var closeModalBtn = document.getElementById("close-modal-button");
+        if (closeModalBtn) closeModalBtn.addEventListener("click", closeSessionModal);
+        var runBtn = document.getElementById("run-button");
+        if (runBtn) runBtn.addEventListener("click", runCommand);
+        var sendBtn = document.getElementById("send-input-button");
+        if (sendBtn) sendBtn.addEventListener("click", function() { sendInputFromBox(false); });
+        var stopBtn = document.getElementById("stop-button");
+        if (stopBtn) stopBtn.addEventListener("click", stopSession);
+        var floatToggle = document.getElementById("floating-controls-toggle");
+        if (floatToggle) floatToggle.addEventListener("click", toggleFloatingControls);
+        var floatBackdrop = document.getElementById("floating-backdrop");
+        if (floatBackdrop) floatBackdrop.addEventListener("click", hideFloatingControls);
 
         document.querySelectorAll(".quick-input").forEach(function(btn) {
           btn.addEventListener("click", function() {
@@ -1680,20 +1924,28 @@ export function renderApp(configPath: string): string {
           });
         });
 
-        document.getElementById("session-modal").addEventListener("click", function(e) {
+        var sessionModal = document.getElementById("session-modal");
+        if (sessionModal) sessionModal.addEventListener("click", function(e) {
           if (e.target.id === "session-modal") closeSessionModal();
         });
-
-        document.getElementById("preset-select").addEventListener("change", function() {
+        var presetSelect = document.getElementById("preset-select");
+        if (presetSelect) presetSelect.addEventListener("change", function() {
           state.presetValue = this.value;
           applyPreset();
         });
-        document.getElementById("mode").addEventListener("change", function() { state.modeValue = this.value; });
-        document.getElementById("cwd").addEventListener("input", schedulePathSuggestions);
-        document.getElementById("cwd").addEventListener("focus", schedulePathSuggestions);
-        document.getElementById("cwd").addEventListener("blur", function() { setTimeout(hidePathSuggestions, 120); });
-        document.getElementById("input-box").addEventListener("keydown", handleInputBoxKeydown);
-        document.getElementById("input-box").addEventListener("paste", handleInputPaste);
+        var modeEl = document.getElementById("mode");
+        if (modeEl) modeEl.addEventListener("change", function() { state.modeValue = this.value; });
+        var inputBox = document.getElementById("input-box");
+        if (inputBox) {
+          inputBox.addEventListener("keydown", handleInputBoxKeydown);
+          inputBox.addEventListener("paste", handleInputPaste);
+        }
+
+        // View toggle handlers
+        var viewTermBtn = document.getElementById("view-terminal-btn");
+        if (viewTermBtn) viewTermBtn.addEventListener("click", function() { setView("terminal"); });
+        var viewChatBtn = document.getElementById("view-chat-btn");
+        if (viewChatBtn) viewChatBtn.addEventListener("click", function() { setView("chat"); });
 
         initTerminal();
         setupMobileKeyboardHandlers();
@@ -1955,6 +2207,11 @@ export function renderApp(configPath: string): string {
               state.terminalSessionId = id;
               state.terminalOutput = newOutput;
               state.terminal.scrollToBottom();
+            }
+
+            // Update chat view if active
+            if (state.currentView === "chat") {
+              renderChat();
             }
           });
       }
@@ -2625,6 +2882,10 @@ export function renderApp(configPath: string): string {
               state.terminalOutput = newOutput;
               state.terminal.scrollToBottom();
             }
+            // Update chat view if active
+            if (state.currentView === "chat" && msg.sessionId === state.selectedId) {
+              renderChat();
+            }
             break;
           case 'started':
             // New session started
@@ -2636,11 +2897,18 @@ export function renderApp(configPath: string): string {
             if (msg.sessionId === state.selectedId) {
               loadOutput(msg.sessionId);
             }
+            // Update chat view
+            if (state.currentView === "chat" && msg.sessionId === state.selectedId) {
+              renderChat();
+            }
             break;
           case 'init':
             // Initial state for subscribed session
             if (msg.sessionId === state.selectedId && msg.data) {
               updateTerminalOutput(msg.data.output || "");
+              if (state.currentView === "chat") {
+                renderChat();
+              }
             }
             break;
         }
@@ -2664,6 +2932,228 @@ export function renderApp(configPath: string): string {
           clearInterval(state.pollTimer);
           state.pollTimer = null;
         }
+      }
+
+      function setView(view) {
+        if (state.currentView === view) return;
+        state.currentView = view;
+
+        // Update toggle buttons
+        document.getElementById("view-terminal-btn").classList.toggle("active", view === "terminal");
+        document.getElementById("view-chat-btn").classList.toggle("active", view === "chat");
+
+        // Toggle containers
+        var terminalContainer = document.getElementById("output");
+        var chatContainer = document.getElementById("chat-output");
+        if (terminalContainer) terminalContainer.classList.toggle("active", view === "terminal");
+        if (chatContainer) chatContainer.classList.toggle("active", view === "chat");
+
+        // Render chat if switching to chat view
+        if (view === "chat") {
+          renderChat();
+        }
+      }
+
+      function renderChat() {
+        var chatOutput = document.getElementById("chat-output");
+        if (!chatOutput) return;
+
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!selectedSession) {
+          chatOutput.innerHTML = '<div class="empty-state"><strong>No session selected</strong>Select or start a session to begin.</div>';
+          return;
+        }
+
+        var messages = parseMessages(selectedSession.output, selectedSession.command);
+        state.parsedMessages = messages;
+
+        if (messages.length === 0) {
+          chatOutput.innerHTML = '<div class="empty-state"><strong>Waiting for response</strong>Send a message to start the conversation.</div>';
+          return;
+        }
+
+        chatOutput.innerHTML = '<div class="chat-messages">' + messages.map(renderChatMessage).join("") + '</div>';
+
+        // Scroll to bottom
+        chatOutput.scrollTop = chatOutput.scrollHeight;
+
+        // Attach copy handlers
+        chatOutput.querySelectorAll(".code-copy").forEach(function(btn) {
+          btn.addEventListener("click", function() {
+            var codeBlock = btn.closest(".code-block");
+            var code = codeBlock ? codeBlock.querySelector("code") : null;
+            if (code) {
+              navigator.clipboard.writeText(code.textContent || "").then(function() {
+                btn.textContent = "Copied!";
+                btn.classList.add("copied");
+                setTimeout(function() {
+                  btn.textContent = "Copy";
+                  btn.classList.remove("copied");
+                }, 2000);
+              });
+            }
+          });
+        });
+      }
+
+      function parseMessages(output, command) {
+        var messages = [];
+        if (!output) return messages;
+
+        // Split output into user/assistant turns
+        // Claude CLI format: human: ... assistant: ...
+        var turns = output.split(/(?=human:)/i);
+
+        turns.forEach(function(turn) {
+          turn = turn.trim();
+          if (!turn) return;
+
+          // Check if this is a human turn
+          var humanMatch = turn.match(/^human:\s*/i);
+          if (humanMatch) {
+            var content = turn.slice(humanMatch[0].length).trim();
+            if (content) {
+              messages.push({ role: "user", content: content });
+            }
+            return;
+          }
+
+          // Check if this is an assistant turn
+          var assistantMatch = turn.match(/^assistant:\s*/i);
+          if (assistantMatch) {
+            var content = turn.slice(assistantMatch[0].length).trim();
+            if (content) {
+              messages.push({ role: "assistant", content: content });
+            }
+            return;
+          }
+
+          // If no prefix, try to detect based on content
+          // User messages are usually shorter and don't have code blocks
+          // Assistant messages tend to have more structure and code
+          var lines = turn.split(String.fromCharCode(92) + "n");
+          var backtick3 = String.fromCharCode(96) + String.fromCharCode(96) + String.fromCharCode(96);
+          var hasCodeBlock = turn.indexOf(backtick3) >= 0;
+
+          if (hasCodeBlock || lines.length > 3) {
+            messages.push({ role: "assistant", content: turn });
+          } else {
+            messages.push({ role: "user", content: turn });
+          }
+        });
+
+        return messages;
+      }
+
+      function renderChatMessage(msg) {
+        var avatar = msg.role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
+        var bubbleContent = msg.role === "assistant" ? renderMarkdown(msg.content) : escapeHtml(msg.content);
+        return '<div class="chat-message ' + msg.role + '">' +
+          avatar +
+          '<div class="chat-message-bubble">' + bubbleContent + '</div>' +
+        '</div>';
+      }
+
+      function renderMarkdown(text) {
+        if (!text) return "";
+
+        // Escape HTML first
+        var result = escapeHtml(text);
+
+        // Helper for newline
+        var nl = String.fromCharCode(92) + "n";
+
+        // Code blocks - use simple string replacement to avoid regex issues
+        var bt = String.fromCharCode(96);
+        var pos = 0;
+        while (true) {
+          var start = result.indexOf(bt + bt + bt, pos);
+          if (start === -1) break;
+          var endTag = result.indexOf(bt + bt + bt, start + 3);
+          if (endTag === -1) break;
+
+          var codeBlock = result.slice(start + 3, endTag);
+          // Extract language if present
+          var langEnd = codeBlock.indexOf(nl);
+          var lang = "";
+          var code = codeBlock;
+          if (langEnd !== -1 && langEnd < 30) {
+            var potentialLang = codeBlock.slice(0, langEnd).trim();
+            if (/^[a-zA-Z0-9]+$/.test(potentialLang)) {
+              lang = potentialLang;
+              code = codeBlock.slice(langEnd + 1);
+            }
+          }
+
+          var highlighted = highlightCode(code.trim(), lang);
+          var replacement = '<div class="code-block">' +
+            '<div class="code-block-header">' +
+              '<span class="code-lang">' + (lang || "code") + '</span>' +
+              '<button class="code-copy">Copy</button>' +
+            '</div>' +
+            '<pre><code>' + highlighted + '</code></pre>' +
+          '</div>';
+          result = result.slice(0, start) + replacement + result.slice(endTag + 3);
+          pos = start + replacement.length;
+        }
+
+        // Inline code - simple string replacement
+        pos = 0;
+        while (true) {
+          var inlineStart = result.indexOf(bt, pos);
+          if (inlineStart === -1) break;
+          var inlineEnd = result.indexOf(bt, inlineStart + 1);
+          if (inlineEnd === -1) break;
+          // Check if next char is also backtick (skip code blocks)
+          if (inlineEnd === inlineStart + 1) {
+            pos = inlineEnd + 1;
+            continue;
+          }
+          var inlineCode = result.slice(inlineStart + 1, inlineEnd);
+          var inlineReplacement = '<code class="code-inline">' + inlineCode + '</code>';
+          result = result.slice(0, inlineStart) + inlineReplacement + result.slice(inlineEnd + 1);
+          pos = inlineStart + inlineReplacement.length;
+        }
+
+        // Bold
+        result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+        // Italic
+        result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        result = result.replace(/_([^_]+)_/g, '<em>$1</em>');
+
+        // Headers
+        result = result.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        result = result.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        result = result.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+        // Blockquotes
+        result = result.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+        // Lists
+        result = result.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
+        var liClose = String.fromCharCode(60) + "/li" + String.fromCharCode(62);
+        result = result.replace(new RegExp("(<li>.*" + liClose + ")+", 'g'), '<ul>$&</ul>');
+        result = result.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+        // Paragraphs
+        var paragraphs = result.split(new RegExp(nl + nl + "+"));
+        result = paragraphs.map(function(p) {
+          p = p.trim();
+          if (!p) return "";
+          if (/<(div|h[1-6]|ul|ol|li|blockquote|code-block|pre)/.test(p)) {
+            return p;
+          }
+          return '<p>' + p.replace(new RegExp(nl, 'g'), '<br>') + '</p>';
+        }).join("");
+
+        return '<div class="markdown-content">' + result + '</div>';
+      }
+
+      function highlightCode(code, lang) {
+        // Syntax highlighting - escape HTML for display
+        code = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return code;
       }
 
       function shortCommand(cmd) {
@@ -2709,9 +3199,7 @@ export function renderApp(configPath: string): string {
           .replace(/'/g, "&#39;");
       }
     })();
-  </script>
-</body>
-</html>`;
+` + scriptClose + "\n</body>\n</html>";
 }
 
 function escapeHtml(value: string): string {

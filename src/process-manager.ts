@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
@@ -155,6 +156,18 @@ export class ProcessManager extends EventEmitter {
       sessionIdWindow: ""
     };
 
+    this.sessions.set(id, record);
+    this.persist(record);
+    this.cleanupOldSessions();
+
+    // Emit started event
+    this.emitEvent({ type: "started", sessionId: id, data: this.snapshot(record) });
+
+    // For native mode, skip PTY creation — sendInput() will spawn child processes directly
+    if (mode === "native") {
+      return this.snapshot(record);
+    }
+
     const shellArgs = this.buildShellArgs(processedCommand);
     const child = pty.spawn(this.config.shell, shellArgs, {
       cwd: resolvedCwd,
@@ -171,38 +184,32 @@ export class ProcessManager extends EventEmitter {
 
     record.processId = child.pid;
     record.ptyProcess = child;
-    this.sessions.set(id, record);
-    this.persist(record);
-    this.cleanupOldSessions();
-
-    // Emit started event
-    this.emitEvent({ type: "started", sessionId: id, data: this.snapshot(record) });
 
     child.onData((chunk: string) => {
-      const record = this.sessions.get(id);
-      if (!record) return;
+      const rec = this.sessions.get(id);
+      if (!rec) return;
 
       // Update output buffer
-      record.output = appendWindow(record.output, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
-      this.persist(record);
+      rec.output = appendWindow(rec.output, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
+      this.persist(rec);
 
       // Emit output event for WebSocket clients
-      this.emitEvent({ type: "output", sessionId: id, data: { chunk, output: record.output } });
+      this.emitEvent({ type: "output", sessionId: id, data: { chunk, output: rec.output } });
 
       // Extract Claude session ID (early exit if already found)
-      if (!record.claudeSessionId) {
-        record.sessionIdWindow = appendWindow(record.sessionIdWindow, chunk, OUTPUT_WINDOW_SIZE);
-        const match = CLAUDE_SESSION_ID_PATTERN.exec(record.sessionIdWindow);
+      if (!rec.claudeSessionId) {
+        rec.sessionIdWindow = appendWindow(rec.sessionIdWindow, chunk, OUTPUT_WINDOW_SIZE);
+        const match = CLAUDE_SESSION_ID_PATTERN.exec(rec.sessionIdWindow);
         if (match?.[1]) {
-          record.claudeSessionId = match[1];
+          rec.claudeSessionId = match[1];
           process.stderr.write(`[wand] Captured Claude session ID: ${match[1]}\n`);
-          this.persist(record);
+          this.persist(rec);
         }
       }
 
       // Auto-confirm in full-access mode
       if (mode === "full-access") {
-        this.autoConfirmWithRecord(record, chunk, child);
+        this.autoConfirmWithRecord(rec, chunk, child);
       }
     });
 
@@ -239,10 +246,72 @@ export class ProcessManager extends EventEmitter {
 
   sendInput(id: string, input: string): SessionSnapshot {
     const record = this.mustGet(id);
+
+    // Native mode: spawn claude -p "<input>" as a one-shot child process
+    if (record.mode === "native") {
+      return this.runNativeCommand(record, input);
+    }
+
     if (!record.ptyProcess || record.status !== "running") {
       throw new Error("Session is not running.");
     }
     record.ptyProcess.write(input);
+    this.persist(record);
+    return this.snapshot(record);
+  }
+
+  private runNativeCommand(record: SessionRecord, message: string): SessionSnapshot {
+    const baseCommand = record.command.trim();
+    // Build claude -p "message" command
+    // Escape quotes in message for shell safety
+    const escapedMessage = message.replace(/'/g, "'\\''");
+    const nativeCommand = `${baseCommand} -p '${escapedMessage}'`;
+
+    const child = spawn(nativeCommand, [], {
+      cwd: record.cwd,
+      env: {
+        ...process.env,
+        WAND_MODE: "native",
+        TERM: process.env.TERM || "xterm-256color"
+      },
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    const chunks: string[] = [];
+    child.stdout?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      chunks.push(text);
+      record.output = appendWindow(record.output, text, OUTPUT_MAX_SIZE);
+      this.persist(record);
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output } });
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      chunks.push(text);
+      record.output = appendWindow(record.output, text, OUTPUT_MAX_SIZE);
+      this.persist(record);
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output } });
+    });
+
+    child.on("close", (code: number | null) => {
+      record.status = record.stopRequested ? "stopped" : code === 0 ? "exited" : "failed";
+      record.exitCode = record.stopRequested ? null : code;
+      record.endedAt = new Date().toISOString();
+      this.persist(record);
+      this.emitEvent({ type: "ended", sessionId: record.id, data: this.snapshot(record) });
+    });
+
+    child.on("error", (err: Error) => {
+      const errMsg = `\n[wand] Error: ${err.message}\n`;
+      record.output = appendWindow(record.output, errMsg, OUTPUT_MAX_SIZE);
+      record.status = "failed";
+      record.exitCode = 1;
+      record.endedAt = new Date().toISOString();
+      this.persist(record);
+      this.emitEvent({ type: "ended", sessionId: record.id, data: this.snapshot(record) });
+    });
+
     this.persist(record);
     return this.snapshot(record);
   }

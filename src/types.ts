@@ -1,4 +1,4 @@
-export type ExecutionMode = "auto-edit" | "default" | "full-access";
+export type ExecutionMode = "auto-edit" | "default" | "full-access" | "native";
 
 export interface CommandPreset {
   label: string;

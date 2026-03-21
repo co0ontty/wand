@@ -42,6 +42,11 @@ export const defaultConfig = (): WandConfig => ({
       label: "Cursor Agent",
       command: "cursor-agent",
       mode: "default"
+    },
+    {
+      label: "Claude Native",
+      command: "claude",
+      mode: "native"
     }
   ]
 });
@@ -122,7 +127,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
 }
 
 export function isExecutionMode(value: unknown): value is ExecutionMode {
-  return value === "auto-edit" || value === "default" || value === "full-access";
+  return value === "auto-edit" || value === "default" || value === "full-access" || value === "native";
 }
 
 function normalizePresetCommand(command: string): string {

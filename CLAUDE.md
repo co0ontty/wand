@@ -5,13 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build and Development Commands
 
 ```bash
-npm install                # Install dependencies (Node 18+)
+npm install                # Install dependencies (Node 22.5.0+)
 npm run build              # Compile TypeScript to dist/
 npm run check              # Type check without emitting
 npm run dev                # Run web command directly with tsx
-node dist/cli.js init      # Create default config at .wand/config.json
+node dist/cli.js init      # Create default config at ~/.wand/config.json
 node dist/cli.js web       # Start the web console server
 ```
+
+**Requirements:**
+- Node.js >= 22.5.0 (uses `node:sqlite`)
+- OpenSSL or Node.js crypto for HTTPS certificate generation
 
 ## Architecture Overview
 
@@ -27,7 +31,7 @@ node dist/cli.js web       # Start the web console server
 - `types.ts` — Shared TypeScript types
 - `web-ui.ts` — Generates the browser HTML UI
 
-**Execution modes:** `auto-edit`, `default`, `full-access`. These are passed to child processes via environment variables (`WAND_MODE`, `WAND_AUTO_CONFIRM`, `WAND_AUTO_EDIT`). In `full-access` mode, the process manager auto-confirms prompts by detecting confirmation patterns and sending appropriate responses.
+**Execution modes:** `auto-edit`, `default`, `full-access`, `native`. These are passed to child processes via environment variables (`WAND_MODE`, `WAND_AUTO_CONFIRM`, `WAND_AUTO_EDIT`). In `full-access` mode, the process manager auto-confirms prompts by detecting confirmation patterns and sending appropriate responses. In `native` mode, Claude runs with `--print` flag to return structured code output instead of interactive terminal.
 
 **Config:** Stored at `.wand/config.json`. Includes host/port, password, shell, default working directory, startup commands, allowed command prefixes, and command presets for the web UI.
 
@@ -61,3 +65,13 @@ TypeScript with ES modules, 2-space indentation, double quotes, semicolons. Use 
 `web-ui.ts` generates a single HTML file with embedded CSS/JS. The design uses warm, earthy tones with cream/beige backgrounds (`#f6f1e8`) and burnt orange accent (`#c5653d`). Typography uses Inter for UI text and Geist Mono for code. CSS variables define the full theme in `:root`. The UI includes a sidebar drawer for session history, floating quick-input controls for mobile, and session resume functionality for Claude sessions.
 
 **Input box behavior:** The "Send to session" textarea maintains per-session draft state in `state.drafts`. Character input uses natural browser behavior with async state sync. Enter/Send transmits the full line to PTY and clears the draft.
+
+## Optimization Plan
+
+See `OPTIMIZATION_PLAN.md` for detailed roadmap to align with OpenCode Web UI.
+
+**Current focus areas:**
+- Phase 1: Chat-style conversation interface with Markdown rendering
+- Phase 2: File browser sidebar and code review panel
+- Phase 3: Project management and session navigation
+- Phase 4: Settings panel with theme/notification options
