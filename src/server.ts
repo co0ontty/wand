@@ -12,6 +12,7 @@ import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { renderApp } from "./web-ui.js";
 import {
+  ChatMessage,
   CommandRequest,
   ExecutionMode,
   InputRequest,
@@ -19,6 +20,7 @@ import {
   ResizeRequest,
   WandConfig
 } from "./types.js";
+import { parseMessages } from "./message-parser.js";
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -287,7 +289,12 @@ self.addEventListener('fetch', (event) => {
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
     }
-    res.json(snapshot);
+    if (req.query.format === "chat") {
+      const messages = parseMessages(snapshot.output);
+      res.json({ ...snapshot, messages });
+    } else {
+      res.json(snapshot);
+    }
   });
 
   app.post("/api/commands", (req, res) => {
@@ -376,13 +383,7 @@ self.addEventListener('fetch', (event) => {
   });
 
   wss.on("connection", (ws, req) => {
-    // Simple auth check via cookie header
-    const cookieHeader = req.headers.cookie || "";
-    const sessionMatch = cookieHeader
-      .split(";")
-      .map((part) => part.trim())
-      .find((part) => part.startsWith("wand_session="));
-    const sessionToken = sessionMatch?.slice("wand_session=".length);
+    const sessionToken = readSessionCookie(req);
 
     if (!sessionToken || !validateSession(sessionToken)) {
       ws.close(1008, "Unauthorized");
@@ -458,7 +459,7 @@ function normalizeMode(input: string | undefined, fallback: ExecutionMode): Exec
   return isExecutionMode(input) ? input : fallback;
 }
 
-function readSessionCookie(req: Request): string | undefined {
+function readSessionCookie(req: { headers: { cookie?: string } }): string | undefined {
   const cookie = req.headers.cookie;
   if (!cookie) {
     return undefined;

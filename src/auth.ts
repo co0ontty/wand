@@ -23,22 +23,20 @@ export function validateSession(token: string | undefined): boolean {
     return false;
   }
 
-  const expiresAt = sessions.get(token);
+  let expiresAt = sessions.get(token);
   if (typeof expiresAt === "undefined") {
     const persisted = storage?.getAuthSession(token);
     if (persisted) {
       sessions.set(token, persisted.expiresAt);
-      return validateSession(token);
+      expiresAt = persisted.expiresAt;
     }
   }
 
-  if (!expiresAt) {
-    return false;
-  }
-
-  if (expiresAt < Date.now()) {
-    sessions.delete(token);
-    storage?.deleteAuthSession(token);
+  if (!expiresAt || expiresAt < Date.now()) {
+    if (expiresAt) {
+      sessions.delete(token);
+      storage?.deleteAuthSession(token);
+    }
     return false;
   }
 

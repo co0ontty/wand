@@ -6,7 +6,8 @@ import process from "node:process";
 import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
-import { ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
+import { ChatMessage, ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
+import { parseMessages } from "./message-parser.js";
 
 export interface ProcessEvent {
   type: "output" | "status" | "started" | "ended";
@@ -200,7 +201,8 @@ export class ProcessManager extends EventEmitter {
       }
       process.stderr.write(`[wand] Sending initial input: ${initialInput}\n`);
       current.ptyProcess.write(initialInput);
-      current.ptyProcess.write(String.fromCharCode(13));
+      // \n advances to a new line so subsequent output doesn't overwrite this input
+      current.ptyProcess.write("\n");
     };
 
     child.onData((chunk: string) => {
@@ -209,7 +211,8 @@ export class ProcessManager extends EventEmitter {
 
       rec.output = appendWindow(rec.output, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
       this.persist(rec);
-      this.emitEvent({ type: "output", sessionId: id, data: { chunk, output: rec.output } });
+      const messages = parseMessages(rec.output);
+      this.emitEvent({ type: "output", sessionId: id, data: { chunk, output: rec.output, messages } });
 
       if (!rec.claudeSessionId) {
         rec.sessionIdWindow = appendWindow(rec.sessionIdWindow, chunk, OUTPUT_WINDOW_SIZE);
@@ -280,7 +283,11 @@ export class ProcessManager extends EventEmitter {
     if (!record.ptyProcess || record.status !== "running") {
       throw new Error("Session is not running.");
     }
+    // Ensure input advances to a new line so subsequent PTY output doesn't overwrite it
     record.ptyProcess.write(input);
+    if (!input.endsWith("\n")) {
+      record.ptyProcess.write("\n");
+    }
     this.persist(record);
     return this.snapshot(record);
   }
@@ -309,14 +316,16 @@ export class ProcessManager extends EventEmitter {
       chunks.push(text);
       record.output = appendWindow(record.output, text, OUTPUT_MAX_SIZE);
       this.persist(record);
-      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output } });
+      const messages = parseMessages(record.output);
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output, messages } });
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       chunks.push(text);
       record.output = appendWindow(record.output, text, OUTPUT_MAX_SIZE);
       this.persist(record);
-      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output } });
+      const messages = parseMessages(record.output);
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output, messages } });
     });
 
     child.on("close", (code: number | null) => {

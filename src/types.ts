@@ -57,3 +57,8 @@ export interface PathSuggestion {
   name: string;
   isDirectory: boolean;
 }
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}

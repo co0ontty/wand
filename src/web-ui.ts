@@ -1869,10 +1869,11 @@ export function renderApp(configPath: string): string {
         ws: null,
         wsConnected: false,
         currentView: "chat",
-        parsedMessages: [],
         sidebarTab: "sessions",
-        lastRenderedOutput: "",
+        currentMessages: [],
+        lastRenderedHash: 0,
         lastRenderedMsgCount: 0,
+        lastRenderedEmpty: null,
         renderPending: false
       };
 
@@ -3071,7 +3072,7 @@ export function renderApp(configPath: string): string {
       }
 
       function loadOutput(id) {
-        return fetch("/api/sessions/" + id)
+        return fetch("/api/sessions/" + id + "?format=chat")
           .then(function(res) { return res.json(); })
           .then(function(data) {
             updateSessionSnapshot(data);
@@ -3079,6 +3080,14 @@ export function renderApp(configPath: string): string {
             var terminalInfo = document.getElementById("terminal-info");
             if (terminalInfo) {
               terminalInfo.textContent = data.cwd + " | " + getModeLabel(data.mode) + " | " + data.status + " | exit=" + (data.exitCode ?? "n/a");
+            }
+
+            if (data.messages) {
+              state.currentMessages = data.messages;
+            } else {
+              // Fallback: parse locally from output
+              var selectedSession = state.sessions.find(function(s) { return s.id === id; });
+              state.currentMessages = parseMessages(selectedSession ? selectedSession.output : "", selectedSession ? selectedSession.command : "");
             }
 
             if (state.terminal) {
@@ -3104,8 +3113,10 @@ export function renderApp(configPath: string): string {
 
       function selectSession(id) {
         state.selectedId = id;
-        state.lastRenderedOutput = "";
+        state.lastRenderedHash = 0;
         state.lastRenderedMsgCount = 0;
+        state.lastRenderedEmpty = null;
+        state.currentMessages = [];
         var session = state.sessions.find(function(item) { return item.id === id; });
         var inferredTool = inferToolFromCommand(session && session.command ? session.command : "");
         if (inferredTool === "claude" || inferredTool === "codex") {
@@ -3300,8 +3311,9 @@ export function renderApp(configPath: string): string {
           }
           state.selectedId = data.id;
           state.drafts[data.id] = "";
-          state.lastRenderedOutput = "";
+          state.lastRenderedHash = 0;
           state.lastRenderedMsgCount = 0;
+          state.lastRenderedEmpty = null;
           return refreshAll();
         })
         .then(focusInputBox)
@@ -3350,8 +3362,9 @@ export function renderApp(configPath: string): string {
           }
           state.selectedId = data.id;
           state.drafts[data.id] = "";
-          state.lastRenderedOutput = "";
+          state.lastRenderedHash = 0;
           state.lastRenderedMsgCount = 0;
+          state.lastRenderedEmpty = null;
           closeSessionModal();
           closeSessionsDrawer();
           state.commandValue = command;
@@ -3566,8 +3579,9 @@ export function renderApp(configPath: string): string {
           }
           state.selectedId = data.id;
           state.drafts[data.id] = "";
-          state.lastRenderedOutput = "";
+          state.lastRenderedHash = 0;
           state.lastRenderedMsgCount = 0;
+          state.lastRenderedEmpty = null;
           switchToSessionView(data.id);
           updateSessionSnapshot(data);
           updateSessionsList();
@@ -3623,8 +3637,9 @@ export function renderApp(configPath: string): string {
           }
           state.selectedId = data.id;
           state.drafts[data.id] = "";
-          state.lastRenderedOutput = "";
+          state.lastRenderedHash = 0;
           state.lastRenderedMsgCount = 0;
+          state.lastRenderedEmpty = null;
           if (inputBox) inputBox.value = "";
           if (welcomeInput) welcomeInput.value = "";
           switchToSessionView(data.id);
@@ -3958,16 +3973,6 @@ export function renderApp(configPath: string): string {
             }
           };
 
-          ws.addEventListener('message', function(event) {
-            try {
-              var msg = JSON.parse(event.data);
-              if (msg.type === 'init' && msg.sessionId) {
-                updateSessionSnapshot(msg.data);
-                renderChat();
-              }
-            } catch (e) {}
-          });
-
           ws.onmessage = function(event) {
             try {
               var msg = JSON.parse(event.data);
@@ -4005,6 +4010,10 @@ export function renderApp(configPath: string): string {
             if (msg.data && msg.data.output && msg.sessionId) {
               var snapshot = { id: msg.sessionId, output: msg.data.output };
               updateSessionSnapshot(snapshot);
+              // Use parsed messages from server if available
+              if (msg.data.messages) {
+                state.currentMessages = msg.data.messages;
+              }
             }
             // Real-time output update for terminal
             if (msg.sessionId === state.selectedId && state.terminal && msg.data && msg.data.output) {
@@ -4098,21 +4107,20 @@ export function renderApp(configPath: string): string {
 
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!selectedSession) {
-          if (state.lastRenderedOutput !== "none") {
+          if (state.lastRenderedEmpty !== "none") {
             chatOutput.innerHTML = '<div class="empty-state"><strong>未选择会话</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
-            state.lastRenderedOutput = "none";
+            state.lastRenderedEmpty = "none";
             state.lastRenderedMsgCount = 0;
           }
           return;
         }
 
-        var messages = parseMessages(selectedSession.output, selectedSession.command);
-        state.parsedMessages = messages;
+        var messages = state.currentMessages;
 
         if (messages.length === 0) {
-          if (state.lastRenderedOutput !== "empty") {
+          if (state.lastRenderedEmpty !== "empty") {
             chatOutput.innerHTML = '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>';
-            state.lastRenderedOutput = "empty";
+            state.lastRenderedEmpty = "empty";
             state.lastRenderedMsgCount = 0;
           }
           return;
@@ -4121,11 +4129,11 @@ export function renderApp(configPath: string): string {
         // Check if messages actually changed
         var msgCount = messages.length;
         var outputHash = selectedSession.output ? selectedSession.output.length : 0;
-        if (msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedOutput) {
+        if (msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedHash) {
           return;
         }
         state.lastRenderedMsgCount = msgCount;
-        state.lastRenderedOutput = outputHash;
+        state.lastRenderedHash = outputHash;
 
         var chatMessages = chatOutput.querySelector(".chat-messages");
         if (!chatMessages) {
