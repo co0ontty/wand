@@ -52,6 +52,8 @@ interface SessionRecord extends SessionSnapshot {
   lastAutoConfirmAt: number;
   /** 用于解析会话 ID 的输出窗口 */
   sessionIdWindow: string;
+  /** 从存储加载的初始输出（用于重启后恢复） */
+  storedOutput: string;
 }
 
 const MAX_SESSIONS = 50;
@@ -85,7 +87,8 @@ export class ProcessManager extends EventEmitter {
         stopRequested: false,
         confirmWindow: "",
         lastAutoConfirmAt: 0,
-        sessionIdWindow: ""
+        sessionIdWindow: "",
+        storedOutput: snapshot.output
       });
     }
     this.archiveExpiredSessions();
@@ -153,7 +156,8 @@ export class ProcessManager extends EventEmitter {
       stopRequested: false,
       confirmWindow: "",
       lastAutoConfirmAt: 0,
-      sessionIdWindow: ""
+      sessionIdWindow: "",
+      storedOutput: ""
     };
 
     this.sessions.set(id, record);
@@ -256,7 +260,13 @@ export class ProcessManager extends EventEmitter {
   get(id: string): SessionSnapshot | null {
     this.archiveExpiredSessions();
     const record = this.sessions.get(id);
-    return record ? this.snapshot(record) : null;
+    if (!record) return null;
+    // For sessions loaded from storage on startup, in-memory output starts empty.
+    // Prefer in-memory output (live PTY data), fall back to stored output.
+    if (!record.output && record.storedOutput) {
+      record.output = record.storedOutput;
+    }
+    return this.snapshot(record);
   }
 
   sendInput(id: string, input: string): SessionSnapshot {

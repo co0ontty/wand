@@ -884,13 +884,15 @@ export function renderApp(configPath: string): string {
       border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
       color: var(--text-primary);
-      padding: 10px 12px;
+      padding: 10px 110px 10px 12px;
       outline: none;
       resize: none;
       min-height: 42px;
       max-height: 120px;
-      padding-right: 110px;
+      width: 100%;
+      flex: 1;
       transition: border-color var(--transition-fast);
+      box-sizing: border-box;
     }
 
     .input-textarea:focus { border-color: var(--accent); }
@@ -3310,7 +3312,7 @@ export function renderApp(configPath: string): string {
             return;
           }
           event.preventDefault();
-          sendOrStart();
+          sendInputFromBox(false);
           return;
         }
 
@@ -3415,51 +3417,49 @@ export function renderApp(configPath: string): string {
         var inputBox = document.getElementById("input-box");
         var value = inputBox ? inputBox.value.trim() : "";
 
-        if (!isSelectedSessionRunning()) {
-          state.selectedId = null;
-        }
-
-        if (!state.selectedId) {
-          var mode = state.chatMode || "full-access";
-          var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
-          var preferredTool = getPreferredTool();
-          fetch("/api/commands", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              command: preferredTool,
-              cwd: defaultCwd,
-              mode: mode,
-              initialInput: value || undefined
-            })
-          })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data.error) {
-              showToast(data.error, "error");
-              return null;
-            }
-            state.selectedId = data.id;
-            state.drafts[data.id] = "";
-            if (inputBox) inputBox.value = "";
-            switchToSessionView(data.id);
-            updateSessionSnapshot(data);
-            updateSessionsList();
-            // Subscribe to new session via WebSocket
-            if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-              state.ws.send(JSON.stringify({ type: 'subscribe', sessionId: data.id }));
-            }
-            return loadOutput(data.id);
-          })
-          .catch(function(error) {
-            showToast((error && error.message) || "无法启动会话。", "error");
-          });
+        // If we have a selected ID, try to send input to it
+        if (state.selectedId) {
+          if (value) {
+            sendInputFromBox(false);
+          }
           return;
         }
 
-        if (value) {
-          sendInputFromBox(false);
-        }
+        // No selected session, create a new one
+        var mode = state.chatMode || "full-access";
+        var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+        var preferredTool = getPreferredTool();
+        fetch("/api/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            command: preferredTool,
+            cwd: defaultCwd,
+            mode: mode,
+            initialInput: value || undefined
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            showToast(data.error, "error");
+            return null;
+          }
+          state.selectedId = data.id;
+          state.drafts[data.id] = "";
+          if (inputBox) inputBox.value = "";
+          switchToSessionView(data.id);
+          updateSessionSnapshot(data);
+          updateSessionsList();
+          // Subscribe to new session via WebSocket
+          if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({ type: 'subscribe', sessionId: data.id }));
+          }
+          return loadOutput(data.id);
+        })
+        .catch(function(error) {
+          showToast((error && error.message) || "无法启动会话。", "error");
+        });
       }
 
       function switchToSessionView(sessionId) {
@@ -3500,16 +3500,15 @@ export function renderApp(configPath: string): string {
         var inputBox = document.getElementById("input-box");
         var value = inputBox ? inputBox.value : "";
         if (value) {
-          return queueDirectInput(value)
-            .then(function() { return queueDirectInput(getControlInput("enter")); })
-            .then(function() {
-              if (inputBox) inputBox.value = "";
-              setDraftValue("");
-            })
-            .catch(function(err) {
-              showToast(err.message || "会话已结束，请重启会话。", "error");
-              throw err;
-            });
+          // Send text + Enter as a single call to avoid race conditions
+          var combinedInput = value + getControlInput("enter");
+          // Clear the input box immediately to prevent double-sending
+          if (inputBox) inputBox.value = "";
+          setDraftValue("");
+          return queueDirectInput(combinedInput).catch(function(err) {
+            showToast(err.message || "会话已结束，请重启会话。", "error");
+            throw err;
+          });
         }
         if (appendEnter) {
           return queueDirectInput(getControlInput("enter")).catch(function() {
@@ -3823,8 +3822,9 @@ export function renderApp(configPath: string): string {
         switch (msg.type) {
           case 'output':
             // Update session snapshot with latest output
-            if (msg.data && msg.data.output) {
-              updateSessionSnapshot(msg.data);
+            if (msg.data && msg.data.output && msg.sessionId) {
+              var snapshot = { id: msg.sessionId, output: msg.data.output };
+              updateSessionSnapshot(snapshot);
             }
             // Real-time output update for terminal
             if (msg.sessionId === state.selectedId && state.terminal && msg.data && msg.data.output) {
