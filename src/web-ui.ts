@@ -1640,41 +1640,111 @@ export function renderApp(configPath: string): string {
       align-items: center;
       justify-content: center;
       flex: 1;
+      padding: 24px 18px;
     }
     .blank-chat-inner {
+      width: 100%;
+      max-width: 600px;
       text-align: center;
     }
     .blank-chat-logo {
-      width: 72px;
-      height: 72px;
+      width: 64px;
+      height: 64px;
       background: linear-gradient(135deg, #d77a52, #a95130);
-      border-radius: 20px;
+      border-radius: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 36px;
+      font-size: 32px;
       font-weight: 700;
       color: white;
-      margin: 0 auto 20px;
+      margin: 0 auto 16px;
       box-shadow: 0 4px 20px rgba(197, 101, 61, 0.25);
     }
     .blank-chat-title {
-      font-size: 2rem;
+      font-size: 1.5rem;
       font-weight: 600;
       color: var(--text-primary);
-      margin: 0 0 10px;
+      margin: 0 0 6px;
     }
     .blank-chat-subtitle {
-      font-size: 1rem;
+      font-size: 0.875rem;
       color: var(--text-muted);
-      margin: 0;
+      margin: 0 0 24px;
+    }
+    .blank-chat-input-wrap {
+      position: relative;
+      margin-bottom: 16px;
+    }
+    .blank-chat-input {
+      width: 100%;
+      padding: 14px 80px 14px 18px;
+      border: 1.5px solid var(--border-default);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.8);
+      color: var(--text-primary);
+      font-size: 0.9375rem;
+      font-family: var(--font-sans);
+      outline: none;
+      box-shadow: 0 2px 12px rgba(89, 58, 32, 0.06);
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+      box-sizing: border-box;
+    }
+    .blank-chat-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-muted), 0 2px 12px rgba(89, 58, 32, 0.06);
+    }
+    .blank-chat-input::placeholder { color: var(--text-muted); }
+    .blank-chat-send-btn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      padding: 8px 18px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background var(--transition-fast);
+    }
+    .blank-chat-send-btn:hover { background: var(--accent-hover); }
+    .blank-chat-tools {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 12px;
+    }
+    .blank-chat-tool-btn {
+      padding: 8px 16px;
+      border: 1.5px solid var(--border-default);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.6);
+      color: var(--text-secondary);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .blank-chat-tool-btn:hover {
+      background: var(--accent-muted);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .blank-chat-tool-btn .tool-icon {
+      font-size: 1rem;
     }
     .blank-chat-hint {
-      font-size: 0.8125rem;
+      font-size: 0.75rem;
       color: var(--text-muted);
-      margin: 8px 0 0;
-      font-family: var(--font-mono);
-      opacity: 0.7;
+      margin: 0;
     }
     .mode-btn-group {
       display: flex;
@@ -2066,8 +2136,21 @@ export function renderApp(configPath: string): string {
                 '<div class="blank-chat-inner">' +
                   '<div class="blank-chat-logo">W</div>' +
                   '<h2 class="blank-chat-title">Wand</h2>' +
-                  '<p class="blank-chat-subtitle">你好，有什么可以帮助你的？</p>' +
-                  '<p class="blank-chat-hint">' + escapeHtml(state.config && state.config.defaultCwd ? state.config.defaultCwd : "") + '</p>' +
+                  '<p class="blank-chat-subtitle">你的本地 AI 编程助手</p>' +
+                  '<div class="blank-chat-input-wrap">' +
+                    '<input type="text" id="welcome-input" class="blank-chat-input" ' +
+                      'placeholder="输入你的问题，按 Enter 发送..." autocomplete="off" spellcheck="false" />' +
+                    '<button id="welcome-send-btn" class="blank-chat-send-btn" type="button">发送</button>' +
+                  '</div>' +
+                  '<div class="blank-chat-tools">' +
+                    '<button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button">' +
+                      '<span class="tool-icon">🤖</span>Claude' +
+                    '</button>' +
+                    '<button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button">' +
+                      '<span class="tool-icon">⚡</span>Codex' +
+                    '</button>' +
+                  '</div>' +
+                  '<p class="blank-chat-hint">按 Enter 发送消息，或点击上方按钮快速开始</p>' +
                 '</div>' +
               '</div>' +
               '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "terminal" ? " active" : "") + '"></div>' +
@@ -2076,7 +2159,7 @@ export function renderApp(configPath: string): string {
                 '<div class="input-row">' +
                   '<div class="input-field input-field-full">' +
                     '<div class="input-textarea-wrap">' +
-                      '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按发送开始对话..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                      '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按 Enter 发送..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
                       '<div class="input-inline-controls">' +
                         '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
                           renderModeOptions(preferredTool, composerMode) +
@@ -2378,6 +2461,36 @@ export function renderApp(configPath: string): string {
             passwordEl.focus();
           }
           return;
+        }
+
+        // Welcome screen event listeners
+        var welcomeInput = document.getElementById("welcome-input");
+        if (welcomeInput) {
+          welcomeInput.addEventListener("keydown", function(e) {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              welcomeInputSend();
+            }
+          });
+          welcomeInput.focus();
+        }
+        var welcomeSendBtn = document.getElementById("welcome-send-btn");
+        if (welcomeSendBtn) {
+          welcomeSendBtn.addEventListener("click", function() {
+            welcomeInputSend();
+          });
+        }
+        var welcomeClaudeBtn = document.getElementById("welcome-tool-claude");
+        if (welcomeClaudeBtn) {
+          welcomeClaudeBtn.addEventListener("click", function() {
+            quickStartSession("claude");
+          });
+        }
+        var welcomeCodexBtn = document.getElementById("welcome-tool-codex");
+        if (welcomeCodexBtn) {
+          welcomeCodexBtn.addEventListener("click", function() {
+            quickStartSession("codex");
+          });
         }
 
         var sessionsList = document.getElementById("sessions-list");
@@ -3413,9 +3526,61 @@ export function renderApp(configPath: string): string {
         return !!selectedSession && selectedSession.status === "running";
       }
 
+      // Send message from the welcome screen input
+      function welcomeInputSend() {
+        var welcomeInput = document.getElementById("welcome-input");
+        var value = welcomeInput ? welcomeInput.value.trim() : "";
+        if (!value) return;
+        welcomeInput.value = "";
+        welcomeInput.placeholder = "正在启动会话...";
+        welcomeInput.disabled = true;
+        var mode = state.chatMode || "full-access";
+        var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+        var preferredTool = getPreferredTool();
+        fetch("/api/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            command: preferredTool,
+            cwd: defaultCwd,
+            mode: mode,
+            initialInput: value
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            showToast(data.error, "error");
+            welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+            welcomeInput.disabled = false;
+            return;
+          }
+          state.selectedId = data.id;
+          state.drafts[data.id] = "";
+          switchToSessionView(data.id);
+          updateSessionSnapshot(data);
+          updateSessionsList();
+          if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({ type: "subscribe", sessionId: data.id }));
+          }
+          loadOutput(data.id).then(function() {
+            focusInputBox();
+          });
+        })
+        .catch(function(error) {
+          showToast((error && error.message) || "无法启动会话。", "error");
+          welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+          welcomeInput.disabled = false;
+        });
+      }
+
       function sendOrStart() {
+        // Support welcome input as well as the main input box
+        var welcomeInput = document.getElementById("welcome-input");
         var inputBox = document.getElementById("input-box");
-        var value = inputBox ? inputBox.value.trim() : "";
+        var value = (welcomeInput && welcomeInput.value.trim())
+          ? welcomeInput.value.trim()
+          : (inputBox ? inputBox.value.trim() : "");
 
         // If we have a selected ID, try to send input to it
         if (state.selectedId) {
@@ -3448,6 +3613,7 @@ export function renderApp(configPath: string): string {
           state.selectedId = data.id;
           state.drafts[data.id] = "";
           if (inputBox) inputBox.value = "";
+          if (welcomeInput) welcomeInput.value = "";
           switchToSessionView(data.id);
           updateSessionSnapshot(data);
           updateSessionsList();
@@ -3493,6 +3659,7 @@ export function renderApp(configPath: string): string {
           setTimeout(scheduleTerminalResize, 40);
         }
         renderChat();
+        focusInputBox();
       }
 
 
@@ -3916,7 +4083,7 @@ export function renderApp(configPath: string): string {
         state.parsedMessages = messages;
 
         if (messages.length === 0) {
-          chatOutput.innerHTML = '<div class="empty-state"><strong>等待回复中</strong><br>在下方输入框发送消息开始对话。</div>';
+          chatOutput.innerHTML = '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>';
           return;
         }
 
