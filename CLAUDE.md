@@ -77,7 +77,11 @@ TypeScript with ES modules, 2-space indentation, double quotes, semicolons. Use 
 
 **Input behavior:** The textarea maintains per-session draft state in `state.drafts`. Enter sends; Shift+Enter inserts a newline.
 
-**Recent additions:** Model selector (3.5 Sonnet / 3 Opus / 3 Haiku with `--model` flag), file browser sidebar tab (Sessions / Files tabs), welcome page.
+**Recent additions:**
+- Deep thinking card: Shows Claude's thinking state with rotating icon and pulse animation
+- Prompt suggestion card: Displays Claude Code "Try..." suggestions with pulsing effect
+- Improved ANSI escape sequence stripping for cleaner message parsing
+- Debounced chat rendering to reduce flicker during rapid output updates
 
 ## Optimization Roadmap
 
