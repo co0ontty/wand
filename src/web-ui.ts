@@ -201,21 +201,16 @@ export function renderApp(configPath: string): string {
       white-space: nowrap;
     }
 
-    .main-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
-
-    .drawer-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(42, 28, 18, 0.26);
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity var(--transition-normal);
-      z-index: 24;
+    .main-layout {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      padding-left: 320px;
+      transition: padding-left var(--transition-normal);
     }
-
-    .drawer-backdrop.open {
-      opacity: 1;
-      pointer-events: auto;
+    .main-layout:not(.sidebar-open) {
+      padding-left: 0;
     }
 
     .sidebar {
@@ -632,7 +627,7 @@ export function renderApp(configPath: string): string {
         radial-gradient(circle at top right, rgba(91, 58, 34, 0.16), transparent 28%),
         linear-gradient(180deg, #221d18 0%, #1b1714 100%);
       padding: 18px;
-      overflow: hidden;
+      overflow-y: auto;
       min-height: 200px;
       margin: 14px;
       border-radius: var(--radius-lg);
@@ -1518,114 +1513,96 @@ export function renderApp(configPath: string): string {
       .btn-sm { min-height: 36px; }
     }
 
-    .welcome-view-container {
-      position: absolute;
-      inset: 0;
-      z-index: 10;
+    .blank-chat {
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 32px 24px;
-      pointer-events: auto;
+      flex: 1;
     }
-    .welcome-view {
-      max-width: 480px;
-      width: 100%;
+    .blank-chat-inner {
       text-align: center;
-      background: var(--bg-primary);
     }
-    .welcome-header {
-      margin-bottom: 36px;
-    }
-    .welcome-logo {
-      width: 64px;
-      height: 64px;
+    .blank-chat-logo {
+      width: 72px;
+      height: 72px;
       background: linear-gradient(135deg, #d77a52, #a95130);
-      border-radius: 16px;
+      border-radius: 20px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 32px;
+      font-size: 36px;
       font-weight: 700;
       color: white;
-      margin: 0 auto 16px;
+      margin: 0 auto 20px;
+      box-shadow: 0 4px 20px rgba(197, 101, 61, 0.25);
     }
-    .welcome-title {
+    .blank-chat-title {
       font-size: 2rem;
       font-weight: 600;
       color: var(--text-primary);
-      margin: 0 0 8px;
+      margin: 0 0 10px;
     }
-    .welcome-subtitle {
-      font-size: 0.9375rem;
+    .blank-chat-subtitle {
+      font-size: 1rem;
       color: var(--text-muted);
       margin: 0;
     }
-    .quick-start-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 16px;
+    .blank-chat-hint {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin: 8px 0 0;
+      font-family: var(--font-mono);
+      opacity: 0.7;
     }
-    .quick-card {
-      background: var(--bg-secondary);
-      border: 1.5px solid var(--border-default);
-      border-radius: var(--radius-lg);
-      padding: 20px 16px;
+    .mode-btn-group {
+      display: flex;
+      gap: 4px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    .mode-btn {
+      padding: 5px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-default);
+      background: rgba(255, 255, 255, 0.5);
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+      font-family: inherit;
       cursor: pointer;
-      transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
-      text-align: left;
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
+      transition: all var(--transition-fast);
     }
-    .quick-card:hover {
+    .mode-btn:hover {
+      background: rgba(255, 255, 255, 0.8);
       border-color: var(--accent);
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(197, 101, 61, 0.12);
+      color: var(--accent);
     }
-    .quick-card-icon {
-      font-size: 1.5rem;
-      line-height: 1;
-      flex-shrink: 0;
-      margin-top: 2px;
+    .mode-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
     }
-    .quick-card-body { flex: 1; }
-    .quick-card-title {
-      font-size: 0.9375rem;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 4px;
-    }
-    .quick-card-desc {
-      font-size: 0.8125rem;
-      color: var(--text-muted);
-    }
-    .welcome-custom-row {
+    .mode-selector-wrap {
       display: flex;
-      gap: 8px;
-      margin-bottom: 24px;
+      align-items: center;
+      gap: 6px;
     }
-    .welcome-custom-input {
-      flex: 1;
-      height: 42px;
-      padding: 0 12px;
+    .chat-mode-select {
+      height: 28px;
+      padding: 0 8px;
       border: 1.5px solid var(--border-default);
-      border-radius: var(--radius-md);
+      border-radius: var(--radius-sm);
       background: var(--bg-secondary);
       color: var(--text-primary);
-      font-size: 0.875rem;
+      font-size: 0.75rem;
+      font-family: inherit;
+      cursor: pointer;
       outline: none;
-      transition: border-color 0.15s;
     }
-    .welcome-custom-input:focus {
+    .chat-mode-select:focus {
       border-color: var(--accent);
     }
-    .welcome-custom-input::placeholder { color: var(--text-muted); }
-    .welcome-hint {
-      font-size: 0.8125rem;
-      color: var(--text-muted);
-      margin: 0;
+    .input-field-full {
+      flex: 1;
     }
     .toast-message {
       position: fixed;
@@ -1682,20 +1659,21 @@ export function renderApp(configPath: string): string {
         isSyncingInputBox: false,
         loginPending: false,
         loginChecked: false,
-        sessionsDrawerOpen: false,
+        sessionsDrawerOpen: true,
         modalOpen: false,
-        topbarCollapsed: true, // 默认折叠顶栏以最大化终端空间
+        topbarCollapsed: false,
         presetValue: "",
         commandValue: "",
         cwdValue: "",
         modeValue: "default",
+        chatMode: "full-access",
         lastResize: { cols: 0, rows: 0 },
         isOnline: navigator.onLine,
         deferredPrompt: null,
         showInstallPrompt: false,
         ws: null,
         wsConnected: false,
-        currentView: "terminal",
+        currentView: "chat",
         parsedMessages: [],
         sidebarTab: "sessions"
       };
@@ -1799,7 +1777,7 @@ export function renderApp(configPath: string): string {
 
         teardownTerminal();
 
-        app.innerHTML = isLoggedIn ? renderApp() : renderLogin();
+        app.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
         attachEventListeners();
 
         // Restore modal state if it was open
@@ -1860,7 +1838,7 @@ export function renderApp(configPath: string): string {
         '</div>';
       }
 
-      function renderApp() {
+      function renderAppShell() {
         var scriptClose = String.fromCharCode(60) + String.fromCharCode(47) + "script>";
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "未选择会话";
@@ -1905,7 +1883,7 @@ export function renderApp(configPath: string): string {
             '</div>' +
           '</header>' +
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
-          '<div class="main-layout">' +
+          '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + '">' +
             '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
               '<div class="sidebar-tabs">' +
                 '<button class="sidebar-tab' + (state.sidebarTab !== "files" ? " active" : "") + '" id="tab-sessions" type="button">会话</button>' +
@@ -1934,47 +1912,40 @@ export function renderApp(configPath: string): string {
                 '</div>' +
               '</div>' +
             '</aside>' +
-            '<div id="welcome-view-container" class="welcome-view-container' + (state.selectedId ? " hidden" : "") + '">' +
-              renderWelcomeView() +
-            '</div>' +
             '<main class="main-content">' +
               '<div class="terminal-header">' +
                 '<div class="terminal-title">' +
-                  '<span class="terminal-title-text" id="terminal-title">' + terminalTitle + '</span>' +
-                  '<span class="terminal-info" id="terminal-info">' + terminalInfo + '</span>' +
-                '</div>' +
-                '<div class="view-toggle" id="view-toggle">' +
-                  '<button class="view-toggle-btn active" data-view="terminal" id="view-terminal-btn">终端</button>' +
-                  '<button class="view-toggle-btn" data-view="chat" id="view-chat-btn">聊天</button>' +
+                  '<span class="terminal-title-text" id="terminal-title">' + (selectedSession ? shortCommand(selectedSession.command) : "Wand") + '</span>' +
+                  '<span class="terminal-info" id="terminal-info">' + (selectedSession ? (((selectedSession.mode === "full-access" ? "全权限" : selectedSession.mode === "default" ? "默认" : selectedSession.mode === "native" ? "原生" : selectedSession.mode === "auto-edit" ? "自动编辑" : selectedSession.mode)) + " | " + selectedSession.status) : "开始对话") + '</span>' +
                 '</div>' +
               '</div>' +
-              '<div id="output" class="terminal-container"></div>' +
-              '<div id="chat-output" class="chat-container"></div>' +
+              // Blank chat state (when no session)
+              '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
+                '<div class="blank-chat-inner">' +
+                  '<div class="blank-chat-logo">W</div>' +
+                  '<h2 class="blank-chat-title">Wand</h2>' +
+                  '<p class="blank-chat-subtitle">你好，有什么可以帮助你的？</p>' +
+                  '<p class="blank-chat-hint">' + escapeHtml(state.config && state.config.defaultCwd ? state.config.defaultCwd : "") + '</p>' +
+                '</div>' +
+              '</div>' +
+              '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + '"></div>' +
+              '<div id="chat-output" class="chat-container' + (state.selectedId ? "" : " hidden") + '"></div>' +
               '<div class="input-panel">' +
                 '<div class="input-row">' +
-                  '<div class="input-field">' +
-                    '<label class="input-label" for="input-box">输入</label>' +
-                    '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按发送..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                  '<div class="input-field input-field-full">' +
+                    '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按发送开始对话..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
                   '</div>' +
                   '<div class="input-actions">' +
                     '<button id="send-input-button" class="btn btn-send">发送</button>' +
-                    '<button id="stop-button" class="btn btn-stop">停止</button>' +
-                    '<button id="floating-controls-toggle" class="btn btn-secondary floating-toggle" type="button" aria-label="More controls">⋯</button>' +
+                    '<button id="stop-button" class="btn btn-stop' + (state.selectedId ? "" : " hidden") + '">停止</button>' +
                   '</div>' +
                 '</div>' +
-                '<div id="floating-backdrop" class="floating-backdrop hidden"></div>' +
-                '<div id="floating-controls" class="floating-pad hidden">' +
-                  '<div class="floating-pad-title">Quick Controls</div>' +
-                  '<div class="floating-pad-grid">' +
-                    '<button data-input-key="up" class="btn btn-secondary quick-input" type="button">↑</button>' +
-                    '<button data-input-key="enter" class="btn btn-secondary quick-input" type="button">↵</button>' +
-                    '<button data-input-key="down" class="btn btn-secondary quick-input" type="button">↓</button>' +
-                    '<button data-input-key="left" class="btn btn-secondary quick-input" type="button">←</button>' +
-                    '<button data-input-key="yes" class="btn btn-yes quick-input" type="button">Y</button>' +
-                    '<button data-input-key="right" class="btn btn-secondary quick-input" type="button">→</button>' +
-                    '<button data-input-key="no" class="btn btn-no quick-input" type="button">N</button>' +
-                    '<button data-input-key="ctrl_c" class="btn btn-secondary quick-input" type="button">^C</button>' +
-                  '</div>' +
+                // Mode selector inside input panel
+                '<div id="mode-btn-group" class="mode-btn-group">' +
+                  '<button class="mode-btn' + (state.chatMode === "default" ? " active" : "") + '" data-mode="default">默认</button>' +
+                  '<button class="mode-btn' + (state.chatMode === "full-access" ? " active" : "") + '" data-mode="full-access">全权限</button>' +
+                  '<button class="mode-btn' + (state.chatMode === "auto-edit" ? " active" : "") + '" data-mode="auto-edit">自动编辑</button>' +
+                  '<button class="mode-btn' + (state.chatMode === "native" ? " active" : "") + '" data-mode="native">原生</button>' +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
               '</div>' +
@@ -1987,19 +1958,19 @@ export function renderApp(configPath: string): string {
         return '<section id="settings-modal" class="modal-backdrop hidden">' +
           '<div class="modal">' +
             '<div class="modal-header">' +
-              '<h2 class="modal-title">Settings</h2>' +
+              '<h2 class="modal-title">设置</h2>' +
               '<button id="close-settings-button" class="btn btn-ghost btn-icon">×</button>' +
             '</div>' +
             '<div class="modal-body">' +
               '<div class="field">' +
-                '<label class="field-label" for="new-password">New Password</label>' +
-                '<input id="new-password" type="password" class="field-input" placeholder="Enter new password (min 6 characters)" autocomplete="new-password" />' +
+                '<label class="field-label" for="new-password">新密码</label>' +
+                '<input id="new-password" type="password" class="field-input" placeholder="输入新密码（至少 6 个字符）" autocomplete="new-password" />' +
               '</div>' +
               '<div class="field">' +
-                '<label class="field-label" for="confirm-password">Confirm Password</label>' +
-                '<input id="confirm-password" type="password" class="field-input" placeholder="Confirm new password" autocomplete="new-password" />' +
+                '<label class="field-label" for="confirm-password">确认密码</label>' +
+                '<input id="confirm-password" type="password" class="field-input" placeholder="再次输入新密码" autocomplete="new-password" />' +
               '</div>' +
-              '<button id="save-password-button" class="btn btn-primary btn-block">Save Password</button>' +
+              '<button id="save-password-button" class="btn btn-primary btn-block">保存密码</button>' +
               '<p id="settings-error" class="error-message hidden"></p>' +
               '<p id="settings-success" class="hint hidden" style="color: var(--success);"></p>' +
             '</div>' +
@@ -2138,7 +2109,8 @@ export function renderApp(configPath: string): string {
 
       function renderSessionItem(session) {
         var activeClass = session.id === state.selectedId ? " active" : "";
-        var metaStatus = session.archived ? "archived" : session.status;
+        var metaStatus = session.archived ? "已归档" : session.status;
+        var modeName = session.mode === "full-access" ? "全权限" : session.mode === "default" ? "默认" : session.mode === "native" ? "原生" : session.mode === "auto-edit" ? "自动编辑" : session.mode;
         var deleteButton = '<button class="btn btn-ghost btn-sm session-action-btn" data-action="delete" data-session-id="' + session.id + '" type="button" aria-label="删除会话">×</button>';
         var resumeButton = "";
         var sessionIdDisplay = "";
@@ -2157,7 +2129,7 @@ export function renderApp(configPath: string): string {
             '<div class="session-main">' +
               '<div class="session-command">' + escapeHtml(session.command) + '</div>' +
               '<div class="session-meta">' +
-                '<span>' + escapeHtml(session.mode) + '</span>' +
+                '<span>' + escapeHtml(modeName) + '</span>' +
                 '<span class="session-status ' + metaStatus + '">' + escapeHtml(metaStatus) + '</span>' +
                 sessionIdDisplay +
               '</div>' +
@@ -2286,9 +2258,49 @@ export function renderApp(configPath: string): string {
         var runBtn = document.getElementById("run-button");
         if (runBtn) runBtn.addEventListener("click", runCommand);
         var sendBtn = document.getElementById("send-input-button");
-        if (sendBtn) sendBtn.addEventListener("click", function() { sendInputFromBox(false); });
+        if (sendBtn) sendBtn.addEventListener("click", function() {
+          closeSessionsDrawer();
+          sendOrStart();
+        });
         var stopBtn = document.getElementById("stop-button");
         if (stopBtn) stopBtn.addEventListener("click", stopSession);
+        var modeSelect = document.getElementById("chat-mode-select");
+        if (modeSelect) modeSelect.addEventListener("change", function() {
+          state.chatMode = this.value;
+          // If there's an active session, show toast to confirm
+          if (state.selectedId) {
+            var modeName = this.value === "full-access" ? "全权限" : this.value === "default" ? "默认" : this.value === "native" ? "原生" : this.value === "auto-edit" ? "自动编辑" : this.value;
+            var toast = document.createElement("div");
+            toast.className = "toast-message";
+            toast.style.background = "var(--accent)";
+            toast.style.color = "white";
+            toast.textContent = "模式已切换为：" + modeName;
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 2000);
+          }
+        });
+        // Mode button group inside input panel
+        var modeBtnGroup = document.getElementById("mode-btn-group");
+        if (modeBtnGroup) modeBtnGroup.addEventListener("click", function(e) {
+          var btn = e.target.closest(".mode-btn");
+          if (!btn) return;
+          var newMode = btn.dataset.mode;
+          if (!newMode || state.chatMode === newMode) return;
+          state.chatMode = newMode;
+          // Update button active states
+          document.querySelectorAll(".mode-btn").forEach(function(b) {
+            b.classList.toggle("active", b.dataset.mode === newMode);
+          });
+          // Show confirmation
+          var modeName = newMode === "full-access" ? "全权限" : newMode === "default" ? "默认" : newMode === "native" ? "原生" : newMode === "auto-edit" ? "自动编辑" : newMode;
+          var toast = document.createElement("div");
+          toast.className = "toast-message";
+          toast.style.background = "var(--accent)";
+          toast.style.color = "white";
+          toast.textContent = "模式已切换为：" + modeName;
+          document.body.appendChild(toast);
+          setTimeout(function() { toast.remove(); }, 2000);
+        });
         var floatToggle = document.getElementById("floating-controls-toggle");
         if (floatToggle) floatToggle.addEventListener("click", toggleFloatingControls);
         var floatBackdrop = document.getElementById("floating-backdrop");
@@ -2341,6 +2353,10 @@ export function renderApp(configPath: string): string {
         if (inputBox) {
           inputBox.addEventListener("keydown", handleInputBoxKeydown);
           inputBox.addEventListener("paste", handleInputPaste);
+          inputBox.addEventListener("focus", function() {
+            // Close drawer when user focuses input to avoid backdrop blocking clicks
+            closeSessionsDrawer();
+          });
         }
 
         // View toggle handlers
@@ -2464,7 +2480,7 @@ export function renderApp(configPath: string): string {
         hideError(errorEl);
         state.loginPending = true;
         loginButton.disabled = true;
-        loginButton.textContent = "Unlocking...";
+        loginButton.textContent = "登录中...";
 
         fetch("/api/login", {
           method: "POST",
@@ -2500,7 +2516,7 @@ export function renderApp(configPath: string): string {
         .finally(function() {
           state.loginPending = false;
           loginButton.disabled = false;
-          loginButton.textContent = "Unlock Console";
+          loginButton.textContent = "进入控制台";
         });
       }
 
@@ -2521,6 +2537,29 @@ export function renderApp(configPath: string): string {
         });
       }
 
+      function updateSessionSnapshot(snapshot) {
+        if (!snapshot || !snapshot.id) return;
+        var updated = false;
+        state.sessions = state.sessions.map(function(session) {
+          if (session.id !== snapshot.id) return session;
+          updated = true;
+          return snapshot;
+        });
+        if (!updated) {
+          state.sessions.unshift(snapshot);
+        }
+      }
+
+      function getPreferredSessionId(sessions) {
+        if (!sessions || !sessions.length) return null;
+        if (state.selectedId) {
+          var selected = sessions.find(function(session) { return session.id === state.selectedId; });
+          if (selected && selected.status === "running") return selected.id;
+        }
+        var runningSession = sessions.find(function(session) { return session.status === "running"; });
+        return runningSession ? runningSession.id : null;
+      }
+
       function loadSessions() {
         return fetch("/api/sessions")
           .then(function(res) {
@@ -2531,45 +2570,43 @@ export function renderApp(configPath: string): string {
             return res.json();
           })
           .then(function(sessions) {
-            state.sessions = sessions || [];
-            // Clean up drafts for removed sessions
-            var sessionIds = new Set(state.sessions.map(function(s) { return s.id; }));
+            var serverSessions = sessions || [];
+            var sessionIds = new Set(serverSessions.map(function(s) { return s.id; }));
+
             Object.keys(state.drafts).forEach(function(id) {
               if (!sessionIds.has(id)) delete state.drafts[id];
             });
-            if (state.sessions.length > 0) {
-              if (!state.selectedId || !state.sessions.some(function(s) { return s.id === state.selectedId; })) {
-                state.selectedId = state.sessions[0].id;
+
+            state.sessions = serverSessions.map(function(serverSession) {
+              var localSession = state.sessions.find(function(s) { return s.id === serverSession.id; });
+              if (localSession && localSession.output && localSession.output.length > (serverSession.output || '').length) {
+                return localSession;
               }
-            } else {
-              state.selectedId = null;
-            }
-            // Don't full re-render when modal is open to preserve form state
+              return serverSession;
+            });
+
+            state.selectedId = getPreferredSessionId(state.sessions);
             if (state.modalOpen) {
               updateSessionsList();
             } else {
-              // Check if sessions actually changed before re-rendering
               var listEl = document.getElementById("sessions-list");
               var rendered = renderSessions();
               if (listEl && listEl.innerHTML === rendered) {
-                // Sessions HTML didn't change, just update count
                 var countEl = document.getElementById("session-count");
                 if (countEl) countEl.textContent = String(state.sessions.length);
               } else {
-                // Sessions changed, update the list
                 if (listEl) listEl.innerHTML = rendered;
                 var countEl = document.getElementById("session-count");
                 if (countEl) countEl.textContent = String(state.sessions.length);
               }
             }
             updateShellChrome();
-            // Toggle welcome view
-            var welcomeEl = document.getElementById("welcome-view-container");
-            if (welcomeEl) {
-              welcomeEl.classList.toggle("hidden", !!state.selectedId);
+            if (state.selectedId) {
+              loadOutput(state.selectedId);
             }
           });
       }
+
 
       function updateSessionsList() {
         var listEl = document.getElementById("sessions-list");
@@ -2581,28 +2618,41 @@ export function renderApp(configPath: string): string {
 
       function updateShellChrome() {
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "未选择会话";
+        var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "Wand";
         var summaryEl = document.querySelector(".session-summary-value");
         var titleEl = document.getElementById("terminal-title");
+        var blankChat = document.getElementById("blank-chat");
+        var terminalContainer = document.getElementById("output");
+        var chatContainer = document.getElementById("chat-output");
+        var stopBtn = document.getElementById("stop-button");
+
         if (summaryEl) summaryEl.textContent = terminalTitle;
         if (titleEl) titleEl.textContent = terminalTitle;
+
+        if (selectedSession) {
+          if (blankChat) blankChat.classList.add("hidden");
+          if (terminalContainer) terminalContainer.classList.remove("hidden");
+          if (chatContainer) chatContainer.classList.remove("hidden");
+          if (stopBtn) stopBtn.classList.remove("hidden");
+        } else {
+          if (blankChat) blankChat.classList.remove("hidden");
+          if (terminalContainer) terminalContainer.classList.add("hidden");
+          if (chatContainer) chatContainer.classList.add("hidden");
+          if (stopBtn) stopBtn.classList.add("hidden");
+        }
       }
 
-      function updateDrawerState() {
-        var drawer = document.getElementById("sessions-drawer");
-        var backdrop = document.getElementById("sessions-drawer-backdrop");
-        if (drawer) {
-          drawer.classList.toggle("open", state.sessionsDrawerOpen);
-        }
-        if (backdrop) {
-          backdrop.classList.toggle("open", state.sessionsDrawerOpen);
-        }
+      function updateModeButtons() {
+        document.querySelectorAll(".mode-btn").forEach(function(btn) {
+          btn.classList.toggle("active", btn.dataset.mode === state.chatMode);
+        });
       }
 
       function loadOutput(id) {
         return fetch("/api/sessions/" + id)
           .then(function(res) { return res.json(); })
           .then(function(data) {
+            updateSessionSnapshot(data);
             updateShellChrome();
             var terminalInfo = document.getElementById("terminal-info");
             if (terminalInfo) {
@@ -2626,17 +2676,26 @@ export function renderApp(configPath: string): string {
               state.terminal.scrollToBottom();
             }
 
-            // Update chat view if active
-            if (state.currentView === "chat") {
-              renderChat();
-            }
+            renderChat();
           });
       }
 
       function selectSession(id) {
         state.selectedId = id;
         updateSessionsList();
+        switchToSessionView(id);
         loadOutput(id).then(focusInputBox);
+      }
+
+      function updateDrawerState() {
+        var drawer = document.getElementById("sessions-drawer");
+        var mainLayout = document.querySelector(".main-layout");
+        if (drawer) {
+          drawer.classList.toggle("open", state.sessionsDrawerOpen);
+        }
+        if (mainLayout) {
+          mainLayout.classList.toggle("sidebar-open", state.sessionsDrawerOpen);
+        }
       }
 
       function toggleSessionsDrawer() {
@@ -2935,7 +2994,7 @@ export function renderApp(configPath: string): string {
             return;
           }
           event.preventDefault();
-          sendInputFromBox(false);
+          sendOrStart();
           return;
         }
 
@@ -3030,17 +3089,117 @@ export function renderApp(configPath: string): string {
         if (inputBox) inputBox.value = value;
       }
 
+      function isSelectedSessionRunning() {
+        if (!state.selectedId) return false;
+        var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
+        return !!selectedSession && selectedSession.status === "running";
+      }
+
+      function sendOrStart() {
+        var inputBox = document.getElementById("input-box");
+        var value = inputBox ? inputBox.value.trim() : "";
+
+        if (!isSelectedSessionRunning()) {
+          state.selectedId = null;
+        }
+
+        if (!state.selectedId) {
+          var mode = state.chatMode || "full-access";
+          var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+          fetch("/api/commands", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              command: "claude",
+              cwd: defaultCwd,
+              mode: mode,
+              initialInput: value || undefined
+            })
+          })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data.error) {
+              showToast(data.error, "error");
+              return null;
+            }
+            state.selectedId = data.id;
+            state.drafts[data.id] = "";
+            if (inputBox) inputBox.value = "";
+            switchToSessionView(data.id);
+            updateSessionSnapshot(data);
+            updateSessionsList();
+            // Subscribe to new session via WebSocket
+            if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+              state.ws.send(JSON.stringify({ type: 'subscribe', sessionId: data.id }));
+            }
+            return loadOutput(data.id);
+          })
+          .catch(function(error) {
+            showToast((error && error.message) || "无法启动会话。", "error");
+          });
+          return;
+        }
+
+        if (value) {
+          sendInputFromBox(false);
+        }
+      }
+
+      function switchToSessionView(sessionId) {
+        var session = state.sessions.find(function(s) { return s.id === sessionId; });
+        var blankChat = document.getElementById("blank-chat");
+        var terminalContainer = document.getElementById("output");
+        var chatContainer = document.getElementById("chat-output");
+        var stopBtn = document.getElementById("stop-button");
+        var terminalTitle = document.getElementById("terminal-title");
+        var terminalInfo = document.getElementById("terminal-info");
+        var sessionSummary = document.querySelector(".session-summary-value");
+
+        if (blankChat) blankChat.classList.add("hidden");
+        if (terminalContainer) terminalContainer.classList.remove("hidden");
+        if (chatContainer) {
+          chatContainer.classList.remove("hidden");
+          chatContainer.classList.add("active");
+        }
+        if (terminalContainer) {
+          terminalContainer.classList.remove("active");
+        }
+        if (stopBtn) stopBtn.classList.remove("hidden");
+
+        var title = session ? shortCommand(session.command) : "Wand";
+        var modeName = session ? (session.mode === "full-access" ? "全权限" : session.mode === "default" ? "默认" : session.mode === "native" ? "原生" : session.mode === "auto-edit" ? "自动编辑" : session.mode) : "";
+        var info = session ? (modeName + " | " + session.status) : "";
+        if (terminalTitle) terminalTitle.textContent = title;
+        if (terminalInfo) terminalInfo.textContent = info;
+        if (sessionSummary) sessionSummary.textContent = title;
+
+        // Init terminal if not already done
+        if (!state.terminal) initTerminal();
+        renderChat();
+      }
+
+
       function sendInputFromBox(appendEnter) {
         var inputBox = document.getElementById("input-box");
         var value = inputBox ? inputBox.value : "";
         if (value) {
-          queueDirectInput(value);
-          queueDirectInput(getControlInput("enter"));
-          inputBox.value = "";
-          setDraftValue("");
-        } else if (appendEnter) {
-          queueDirectInput(getControlInput("enter"));
+          return queueDirectInput(value)
+            .then(function() { return queueDirectInput(getControlInput("enter")); })
+            .then(function() {
+              if (inputBox) inputBox.value = "";
+              setDraftValue("");
+            })
+            .catch(function(err) {
+              showToast(err.message || "会话已结束，请重启会话。", "error");
+              throw err;
+            });
         }
+        if (appendEnter) {
+          return queueDirectInput(getControlInput("enter")).catch(function() {
+            return Promise.resolve();
+          });
+        }
+        return Promise.resolve();
       }
 
       function sendDirectInput(input) {
@@ -3104,6 +3263,14 @@ export function renderApp(configPath: string): string {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ input: input })
+        })
+        .then(function(res) {
+          if (!res.ok) {
+            return res.json().then(function(data) {
+              throw new Error(data.error || "会话已结束。");
+            });
+          }
+          return res.json();
         });
       }
 
@@ -3290,6 +3457,16 @@ export function renderApp(configPath: string): string {
             }
           };
 
+          ws.addEventListener('message', function(event) {
+            try {
+              var msg = JSON.parse(event.data);
+              if (msg.type === 'init' && msg.sessionId) {
+                updateSessionSnapshot(msg.data);
+                renderChat();
+              }
+            } catch (e) {}
+          });
+
           ws.onmessage = function(event) {
             try {
               var msg = JSON.parse(event.data);
@@ -3323,8 +3500,12 @@ export function renderApp(configPath: string): string {
       function handleWebSocketMessage(msg) {
         switch (msg.type) {
           case 'output':
-            // Real-time output update
-            if (msg.sessionId === state.selectedId && state.terminal) {
+            // Update session snapshot with latest output
+            if (msg.data && msg.data.output) {
+              updateSessionSnapshot(msg.data);
+            }
+            // Real-time output update for terminal
+            if (msg.sessionId === state.selectedId && state.terminal && msg.data && msg.data.output) {
               var newOutput = normalizeTerminalOutput(msg.data.output || "");
               if (newOutput.startsWith(state.terminalOutput)) {
                 state.terminal.write(newOutput.slice(state.terminalOutput.length));
@@ -3335,10 +3516,8 @@ export function renderApp(configPath: string): string {
               state.terminalOutput = newOutput;
               state.terminal.scrollToBottom();
             }
-            // Update chat view if active
-            if (state.currentView === "chat" && msg.sessionId === state.selectedId) {
-              renderChat();
-            }
+            // Update chat view
+            renderChat();
             break;
           case 'started':
             // New session started
@@ -3417,6 +3596,15 @@ export function renderApp(configPath: string): string {
           return;
         }
 
+        var chatContainer = document.getElementById("chat-output");
+        if (chatContainer && !chatContainer.classList.contains("active")) {
+          chatContainer.classList.add("active");
+        }
+        var terminalContainer = document.getElementById("output");
+        if (terminalContainer && terminalContainer.classList.contains("active")) {
+          terminalContainer.classList.remove("active");
+        }
+
         var messages = parseMessages(selectedSession.output, selectedSession.command);
         state.parsedMessages = messages;
 
@@ -3453,48 +3641,87 @@ export function renderApp(configPath: string): string {
         var messages = [];
         if (!output) return messages;
 
-        // Split output into user/assistant turns
-        // Claude CLI format: human: ... assistant: ...
-        var nl = String.fromCharCode(92) + "n";
-        var turns = output.split(new RegExp("(?=(human:|assistant:))", "i"));
-
-        turns.forEach(function(turn) {
-          turn = turn.trim();
-          if (!turn) return;
-
-          // Check if this is a human turn
-          var humanMatch = turn.match(/^human:\s*/i);
-          if (humanMatch) {
-            var content = turn.slice(humanMatch[0].length).trim();
-            if (content) {
-              messages.push({ role: "user", content: content });
+        var text = String(output || "");
+        var ansiStripped = "";
+        for (var i = 0; i < text.length; i += 1) {
+          var ch = text.charCodeAt(i);
+          if (ch === 27) {
+            i += 1;
+            if (i >= text.length) break;
+            var next = text.charCodeAt(i);
+            if (next === 91) {
+              i += 1;
+              while (i < text.length) {
+                var c = text.charCodeAt(i);
+                if (c >= 64 && c <= 126) break;
+                i += 1;
+              }
+            } else if (next >= 64 && next <= 126) {
             }
-            return;
+            continue;
           }
+          ansiStripped += text.charAt(i);
+        }
+        var newline = String.fromCharCode(10);
+        var carriageReturn = String.fromCharCode(13);
+        ansiStripped = ansiStripped.split(carriageReturn).join(newline);
 
-          // Check if this is an assistant turn
-          var assistantMatch = turn.match(/^assistant:\s*/i);
-          if (assistantMatch) {
-            var content = turn.slice(assistantMatch[0].length).trim();
-            if (content) {
-              messages.push({ role: "assistant", content: content });
-            }
-            return;
-          }
-
-          // If no prefix, try to detect based on content
-          // User messages are usually shorter and don't have code blocks
-          // Assistant messages tend to have more structure and code
-          var lines = turn.split(nl);
-          var backtick3 = String.fromCharCode(96) + String.fromCharCode(96) + String.fromCharCode(96);
-          var hasCodeBlock = turn.indexOf(backtick3) >= 0;
-
-          if (hasCodeBlock || lines.length > 3) {
-            messages.push({ role: "assistant", content: turn });
-          } else {
-            messages.push({ role: "user", content: turn });
-          }
+        var lines = ansiStripped.split(newline).map(function(line) { return line.trim(); }).filter(Boolean);
+        var cleaned = lines.filter(function(line) {
+          if (!line) return false;
+          if (line.indexOf("────────────────") === 0) return false;
+          if (line === "❯") return false;
+          if (line.indexOf("esc to interrupt") !== -1) return false;
+          if (line.indexOf("Claude Code v") !== -1) return false;
+          if (line.indexOf("Sonnet") !== -1) return false;
+          if (line.indexOf("~/") === 0) return false;
+          if (line.indexOf("● high") !== -1) return false;
+          if (line.indexOf("Failed to install Anthropic marketplace") !== -1) return false;
+          if (line.indexOf("Claude Code has switched from npm to native installer") !== -1) return false;
+          if (line.indexOf("Fluttering") !== -1) return false;
+          if (line.indexOf("? for shortcuts") !== -1) return false;
+          if (line.indexOf("0;") === 0) return false;
+          if (line.indexOf("9;") === 0) return false;
+          if (line.indexOf("Claude is waiting") !== -1) return false;
+          if (line.indexOf("✢") !== -1 || line.indexOf("✳") !== -1 || line.indexOf("✶") !== -1 || line.indexOf("✻") !== -1 || line.indexOf("✽") !== -1) return false;
+          if (line.indexOf("▐") === 0 || line.indexOf("▝") === 0 || line.indexOf("▘") === 0) return false;
+          if ((line === "lu" || line === "ue" || line === "tr" || line === "ti" || line === "g" || line === "n" || line === "i…" || line === "…" || line === "uts" || line === "lt" || line === "rg" || line === "·") && line.length < 4) return false;
+          if (line.indexOf("✽F") === 0 || line.indexOf("✻F") === 0) return false;
+          return true;
         });
+
+        if (!cleaned.length) return messages;
+
+        var userCmdIndex = -1;
+        for (var i = 0; i < cleaned.length; i++) {
+          if (cleaned[i].indexOf("❯") === 0) {
+            userCmdIndex = i;
+            break;
+          }
+        }
+
+        if (userCmdIndex === -1) return messages;
+
+        var userText = cleaned[userCmdIndex].replace(/^❯\s*/, "").trim();
+        if (userText) {
+          messages.push({ role: "user", content: userText });
+        }
+
+        var assistantLines = cleaned.slice(userCmdIndex + 1).filter(function(line) {
+          if (line.indexOf("⏺") !== -1 && (line.indexOf("Hi!") !== -1 || line.indexOf("Hello") !== -1 || line.indexOf("What") !== -1 || line.indexOf("working") !== -1)) return true;
+          if (line.indexOf("⏺") === 0) return true;
+          if (line.length < 8) return false;
+          if (line.indexOf("✢") !== -1 || line.indexOf("✳") !== -1 || line.indexOf("✶") !== -1 || line.indexOf("✻") !== -1 || line.indexOf("✽") !== -1) return false;
+          if (line.indexOf("▐") === 0 || line.indexOf("▝") === 0 || line.indexOf("▘") === 0) return false;
+          if (line.indexOf("❯") === 0) return false;
+          if (line.indexOf("esctointerrupt") !== -1) return false;
+          if (line.indexOf("?for") === 0 || line.indexOf("? for") === 0) return false;
+          return true;
+        });
+
+        if (assistantLines.length) {
+          messages.push({ role: "assistant", content: assistantLines.join(newline) });
+        }
 
         return messages;
       }
@@ -3511,14 +3738,59 @@ export function renderApp(configPath: string): string {
       function renderMarkdown(text) {
         if (!text) return "";
 
-        // Escape HTML first
         var result = escapeHtml(text);
-
-        // Helper for newline
-        var nl = String.fromCharCode(92) + "n";
-
-        // Code blocks - use simple string replacement to avoid regex issues
         var bt = String.fromCharCode(96);
+        var newline = String.fromCharCode(10);
+
+        function replacePair(source, marker, openTag, closeTag) {
+          var cursor = 0;
+          while (true) {
+            var start = source.indexOf(marker, cursor);
+            if (start === -1) break;
+            var end = source.indexOf(marker, start + marker.length);
+            if (end === -1) break;
+            var inner = source.slice(start + marker.length, end);
+            if (!inner) {
+              cursor = end + marker.length;
+              continue;
+            }
+            var replacement = openTag + inner + closeTag;
+            source = source.slice(0, start) + replacement + source.slice(end + marker.length);
+            cursor = start + replacement.length;
+          }
+          return source;
+        }
+
+        function replaceLinePrefix(source, marker, openTag, closeTag) {
+          return source.split(newline).map(function(line) {
+            if (line.indexOf(marker) !== 0) return line;
+            return openTag + line.slice(marker.length) + closeTag;
+          }).join(newline);
+        }
+
+        function replaceOrderedList(source) {
+          return source.split(newline).map(function(line) {
+            var dotIndex = line.indexOf('. ');
+            if (dotIndex <= 0) return line;
+            for (var i = 0; i < dotIndex; i += 1) {
+              var code = line.charCodeAt(i);
+              if (code < 48 || code > 57) return line;
+            }
+            return '<li>' + line.slice(dotIndex + 2) + '</li>';
+          }).join(newline);
+        }
+
+        function wrapParagraphs(source) {
+          return source.split(newline + newline).map(function(part) {
+            var block = part.trim();
+            if (!block) return "";
+            if (block.indexOf("<div") === 0 || block.indexOf("<h1") === 0 || block.indexOf("<h2") === 0 || block.indexOf("<h3") === 0 || block.indexOf("<h4") === 0 || block.indexOf("<h5") === 0 || block.indexOf("<h6") === 0 || block.indexOf("<ul") === 0 || block.indexOf("<ol") === 0 || block.indexOf("<li") === 0 || block.indexOf("<blockquote") === 0 || block.indexOf("<pre") === 0) {
+              return block;
+            }
+            return '<p>' + block.split(newline).join('<br>') + '</p>';
+          }).join("");
+        }
+
         var pos = 0;
         while (true) {
           var start = result.indexOf(bt + bt + bt, pos);
@@ -3527,15 +3799,25 @@ export function renderApp(configPath: string): string {
           if (endTag === -1) break;
 
           var codeBlock = result.slice(start + 3, endTag);
-          // Extract language if present
-          var langEnd = codeBlock.indexOf(nl);
+          var langLineEnd = codeBlock.indexOf(newline);
           var lang = "";
           var code = codeBlock;
-          if (langEnd !== -1 && langEnd < 30) {
-            var potentialLang = codeBlock.slice(0, langEnd).trim();
-            if (/^[a-zA-Z0-9]+$/.test(potentialLang)) {
+          if (langLineEnd !== -1 && langLineEnd < 30) {
+            var potentialLang = codeBlock.slice(0, langLineEnd).trim();
+            var isSimpleLang = potentialLang.length > 0;
+            for (var j = 0; j < potentialLang.length; j += 1) {
+              var langCode = potentialLang.charCodeAt(j);
+              var isDigit = langCode >= 48 && langCode <= 57;
+              var isUpper = langCode >= 65 && langCode <= 90;
+              var isLower = langCode >= 97 && langCode <= 122;
+              if (!isDigit && !isUpper && !isLower) {
+                isSimpleLang = false;
+                break;
+              }
+            }
+            if (isSimpleLang) {
               lang = potentialLang;
-              code = codeBlock.slice(langEnd + 1);
+              code = codeBlock.slice(langLineEnd + 1);
             }
           }
 
@@ -3551,14 +3833,12 @@ export function renderApp(configPath: string): string {
           pos = start + replacement.length;
         }
 
-        // Inline code - simple string replacement
         pos = 0;
         while (true) {
           var inlineStart = result.indexOf(bt, pos);
           if (inlineStart === -1) break;
           var inlineEnd = result.indexOf(bt, inlineStart + 1);
           if (inlineEnd === -1) break;
-          // Check if next char is also backtick (skip code blocks)
           if (inlineEnd === inlineStart + 1) {
             pos = inlineEnd + 1;
             continue;
@@ -3569,38 +3849,38 @@ export function renderApp(configPath: string): string {
           pos = inlineStart + inlineReplacement.length;
         }
 
-        // Bold
-        result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        result = replacePair(result, "**", '<strong>', '</strong>');
+        result = replacePair(result, "*", '<em>', '</em>');
+        result = replacePair(result, "_", '<em>', '</em>');
+        result = replaceLinePrefix(result, "### ", '<h3>', '</h3>');
+        result = replaceLinePrefix(result, "## ", '<h2>', '</h2>');
+        result = replaceLinePrefix(result, "# ", '<h1>', '</h1>');
+        result = replaceLinePrefix(result, "&gt; ", '<blockquote>', '</blockquote>');
+        result = replaceLinePrefix(result, "- ", '<li>', '</li>');
+        result = replaceLinePrefix(result, "* ", '<li>', '</li>');
+        result = replaceOrderedList(result);
 
-        // Italic
-        result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-        result = result.replace(/_([^_]+)_/g, '<em>$1</em>');
+        var lines = result.split(newline);
+        var grouped = [];
+        var listBuffer = [];
 
-        // Headers
-        result = result.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-        result = result.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-        result = result.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        function flushListBuffer() {
+          if (!listBuffer.length) return;
+          grouped.push('<ul>' + listBuffer.join("") + '</ul>');
+          listBuffer = [];
+        }
 
-        // Blockquotes
-        result = result.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-
-        // Lists
-        result = result.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
-        var liClose = String.fromCharCode(60) + "/li" + String.fromCharCode(62);
-        result = result.replace(new RegExp("(<li>.*" + liClose + ")+", 'g'), '<ul>$&</ul>');
-        result = result.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-        // Paragraphs
-        var paragraphs = result.split(new RegExp(nl + nl + "+"));
-        result = paragraphs.map(function(p) {
-          p = p.trim();
-          if (!p) return "";
-          if (/<(div|h[1-6]|ul|ol|li|blockquote|code-block|pre)/.test(p)) {
-            return p;
+        lines.forEach(function(line) {
+          if (line.indexOf('<li>') === 0 && line.lastIndexOf('</li>') === line.length - 5) {
+            listBuffer.push(line);
+            return;
           }
-          return '<p>' + p.replace(new RegExp(nl, 'g'), '<br>') + '</p>';
-        }).join("");
+          flushListBuffer();
+          grouped.push(line);
+        });
+        flushListBuffer();
 
+        result = wrapParagraphs(grouped.join(newline));
         return '<div class="markdown-content">' + result + '</div>';
       }
 

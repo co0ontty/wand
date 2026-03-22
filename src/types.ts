@@ -24,6 +24,7 @@ export interface CommandRequest {
   command: string;
   cwd?: string;
   mode?: ExecutionMode;
+  initialInput?: string;
 }
 
 export interface SessionSnapshot {

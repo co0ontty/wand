@@ -124,7 +124,7 @@ export class ProcessManager extends EventEmitter {
       });
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string): SessionSnapshot {
     this.assertCommandAllowed(command);
 
     const resolvedCwd = cwd
@@ -185,18 +185,28 @@ export class ProcessManager extends EventEmitter {
     record.processId = child.pid;
     record.ptyProcess = child;
 
+    let initialInputSent = false;
+    const sendInitialInput = () => {
+      if (initialInputSent || !initialInput) return;
+      initialInputSent = true;
+      const current = this.sessions.get(id);
+      if (!current || !current.ptyProcess || current.status !== "running") {
+        process.stderr.write(`[wand] Cannot send initial input: session not ready\n`);
+        return;
+      }
+      process.stderr.write(`[wand] Sending initial input: ${initialInput}\n`);
+      current.ptyProcess.write(initialInput);
+      current.ptyProcess.write(String.fromCharCode(13));
+    };
+
     child.onData((chunk: string) => {
       const rec = this.sessions.get(id);
       if (!rec) return;
 
-      // Update output buffer
       rec.output = appendWindow(rec.output, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
       this.persist(rec);
-
-      // Emit output event for WebSocket clients
       this.emitEvent({ type: "output", sessionId: id, data: { chunk, output: rec.output } });
 
-      // Extract Claude session ID (early exit if already found)
       if (!rec.claudeSessionId) {
         rec.sessionIdWindow = appendWindow(rec.sessionIdWindow, chunk, OUTPUT_WINDOW_SIZE);
         const match = CLAUDE_SESSION_ID_PATTERN.exec(rec.sessionIdWindow);
@@ -207,26 +217,31 @@ export class ProcessManager extends EventEmitter {
         }
       }
 
-      // Auto-confirm in full-access mode
       if (mode === "full-access") {
         this.autoConfirmWithRecord(rec, chunk, child);
+      }
+
+      if (initialInput && !initialInputSent && chunk.includes("❯")) {
+        sendInitialInput();
       }
     });
 
     child.onExit(({ exitCode }) => {
       const current = this.sessions.get(id);
-      if (!current) {
-        return;
-      }
+      if (!current) return;
       current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
       current.exitCode = current.stopRequested ? null : exitCode;
       current.endedAt = new Date().toISOString();
       current.ptyProcess = null;
       this.persist(current);
-
-      // Emit ended event
       this.emitEvent({ type: "ended", sessionId: id, data: this.snapshot(current) });
     });
+
+    if (initialInput) {
+      setTimeout(() => {
+        if (!initialInputSent) sendInitialInput();
+      }, 3000);
+    }
 
     return this.snapshot(record);
   }

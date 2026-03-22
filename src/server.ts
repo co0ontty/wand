@@ -297,11 +297,14 @@ self.addEventListener('fetch', (event) => {
       return;
     }
 
+    const initialInput = body.initialInput?.trim();
+
     try {
       const snapshot = processes.start(
         body.command,
         body.cwd,
-        normalizeMode(body.mode, config.defaultMode)
+        normalizeMode(body.mode, config.defaultMode),
+        initialInput || undefined
       );
       res.status(201).json(snapshot);
     } catch (error) {
