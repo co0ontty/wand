@@ -213,6 +213,21 @@ export function renderApp(configPath: string): string {
       padding-left: 0;
     }
 
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 24;
+      background: rgba(42, 28, 18, 0.26);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--transition-normal);
+    }
+
+    .drawer-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
     .sidebar {
       position: fixed;
       top: 0;
@@ -619,6 +634,7 @@ export function renderApp(configPath: string): string {
     .terminal-title { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; min-width: 0; }
     .terminal-title-text { font-family: var(--font-mono); color: var(--accent); font-weight: 500; }
     .terminal-info { font-size: 0.6875rem; color: var(--text-muted); }
+    .terminal-header-actions { display: flex; align-items: center; gap: 8px; }
 
     .terminal-container {
       flex: 1;
@@ -859,6 +875,7 @@ export function renderApp(configPath: string): string {
     .input-row { display: flex; gap: 8px; align-items: flex-end; }
     .input-field { flex: 1; display: flex; flex-direction: column; gap: 4px; }
     .input-label { font-size: 0.6875rem; color: var(--text-muted); font-weight: 500; }
+    .input-textarea-wrap { position: relative; }
 
     .input-textarea {
       font-family: var(--font-mono);
@@ -872,11 +889,27 @@ export function renderApp(configPath: string): string {
       resize: none;
       min-height: 42px;
       max-height: 120px;
+      padding-right: 110px;
       transition: border-color var(--transition-fast);
     }
 
     .input-textarea:focus { border-color: var(--accent); }
     .input-textarea::placeholder { color: var(--text-muted); }
+
+    .input-inline-controls {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+    }
+
+    .input-inline-controls > * {
+      pointer-events: auto;
+    }
 
     .keyboard-aware {
       position: fixed;
@@ -1117,6 +1150,74 @@ export function renderApp(configPath: string): string {
     .modal-body { padding: 20px; }
     .modal-body .field { margin-bottom: 16px; }
     .modal-body .field:last-of-type { margin-bottom: 20px; }
+    .field-hint {
+      margin-top: 6px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .tool-picker {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .tool-card {
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.58);
+      padding: 14px;
+      cursor: pointer;
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+    }
+    .tool-card:hover {
+      border-color: var(--accent-soft);
+      transform: translateY(-1px);
+      box-shadow: 0 8px 20px rgba(89, 58, 32, 0.08);
+    }
+    .tool-card.active {
+      border-color: var(--accent);
+      background: rgba(255, 247, 239, 0.96);
+      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.12);
+    }
+    .tool-card-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text-primary);
+    }
+    .tool-card-desc {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+    .tool-chip {
+      flex-shrink: 0;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.6875rem;
+      color: var(--accent);
+      background: rgba(197, 101, 61, 0.1);
+    }
+    .command-preview {
+      display: block;
+      margin-top: 8px;
+      padding: 10px 12px;
+      border-radius: var(--radius-md);
+      border: 1px dashed var(--border-default);
+      background: rgba(255, 255, 255, 0.48);
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
     select.field-input {
       appearance: none;
@@ -1270,6 +1371,13 @@ export function renderApp(configPath: string): string {
       .view-toggle { display: none; }
       .chat-container { padding: 10px; }
       .chat-message { max-width: 95%; }
+      .tool-picker { grid-template-columns: 1fr; }
+    }
+
+    @media (min-width: 769px) {
+      .drawer-backdrop {
+        display: none;
+      }
     }
 
     @media (max-width: 640px) {
@@ -1416,7 +1524,19 @@ export function renderApp(configPath: string): string {
 
       .input-textarea {
         min-height: 44px;
-        padding: 8px 10px;
+        padding: 8px 84px 8px 10px;
+      }
+
+      .input-inline-controls {
+        top: 8px;
+        right: 8px;
+        transform: none;
+      }
+
+      .chat-mode-select {
+        max-width: 72px;
+        height: 26px;
+        font-size: 0.6875rem;
       }
 
       .floating-pad {
@@ -1597,6 +1717,7 @@ export function renderApp(configPath: string): string {
       font-family: inherit;
       cursor: pointer;
       outline: none;
+      max-width: 96px;
     }
     .chat-mode-select:focus {
       border-color: var(--accent);
@@ -1665,8 +1786,10 @@ export function renderApp(configPath: string): string {
         presetValue: "",
         commandValue: "",
         cwdValue: "",
-        modeValue: "default",
+        modeValue: "full-access",
         chatMode: "full-access",
+        sessionTool: "claude",
+        preferredCommand: "claude",
         lastResize: { cols: 0, rows: 0 },
         isOnline: navigator.onLine,
         deferredPrompt: null,
@@ -1779,21 +1902,23 @@ export function renderApp(configPath: string): string {
 
         app.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
         attachEventListeners();
+        updateDrawerState();
+        syncComposerModeSelect();
+        applyCurrentView();
+        updateShellChrome();
 
         // Restore modal state if it was open
         if (wasModalOpen && state.modalOpen) {
           var modal = document.getElementById("session-modal");
           if (modal) {
             modal.classList.remove("hidden");
-            // Restore form values
-            var presetEl = document.getElementById("preset-select");
             var commandEl = document.getElementById("command");
             var cwdEl = document.getElementById("cwd");
             var modeEl = document.getElementById("mode");
-            if (presetEl) presetEl.value = state.presetValue;
             if (commandEl) commandEl.value = state.commandValue;
             if (cwdEl) cwdEl.value = state.cwdValue;
             if (modeEl) modeEl.value = state.modeValue;
+            syncSessionModalUI();
           }
         }
       }
@@ -1848,6 +1973,8 @@ export function renderApp(configPath: string): string {
         var statusText = state.config ? "已登录" : "未登录";
         var drawerClass = state.sessionsDrawerOpen ? " open" : "";
         var topbarClass = state.topbarCollapsed ? " topbar-collapsed" : " topbar-expanded";
+        var preferredTool = getComposerTool();
+        var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
         return '<div class="app-container">' +
           '<header class="topbar' + topbarClass + '">' +
@@ -1885,6 +2012,13 @@ export function renderApp(configPath: string): string {
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
           '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + '">' +
             '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
+              '<div class="sidebar-header">' +
+                '<div class="sidebar-header-main">' +
+                  '<span class="sidebar-title">Menu</span>' +
+                  '<span class="session-count" id="session-count">' + String(state.sessions.length) + '</span>' +
+                '</div>' +
+                '<button id="close-drawer-button" class="btn btn-ghost btn-sm sidebar-close" type="button" aria-label="关闭菜单">×</button>' +
+              '</div>' +
               '<div class="sidebar-tabs">' +
                 '<button class="sidebar-tab' + (state.sidebarTab !== "files" ? " active" : "") + '" id="tab-sessions" type="button">会话</button>' +
                 '<button class="sidebar-tab' + (state.sidebarTab === "files" ? " active" : "") + '" id="tab-files" type="button"><span class="sidebar-tab-icon">▤</span>文件</button>' +
@@ -1916,7 +2050,13 @@ export function renderApp(configPath: string): string {
               '<div class="terminal-header">' +
                 '<div class="terminal-title">' +
                   '<span class="terminal-title-text" id="terminal-title">' + (selectedSession ? shortCommand(selectedSession.command) : "Wand") + '</span>' +
-                  '<span class="terminal-info" id="terminal-info">' + (selectedSession ? (((selectedSession.mode === "full-access" ? "全权限" : selectedSession.mode === "default" ? "默认" : selectedSession.mode === "native" ? "原生" : selectedSession.mode === "auto-edit" ? "自动编辑" : selectedSession.mode)) + " | " + selectedSession.status) : "开始对话") + '</span>' +
+                  '<span class="terminal-info" id="terminal-info">' + (selectedSession ? (getModeLabel(selectedSession.mode) + " | " + selectedSession.status) : "开始对话") + '</span>' +
+                '</div>' +
+                '<div class="terminal-header-actions">' +
+                  '<div class="view-toggle" aria-label="返回模式切换">' +
+                    '<button id="view-terminal-btn" class="view-toggle-btn' + (state.currentView === "terminal" ? " active" : "") + '" type="button">原生返回</button>' +
+                    '<button id="view-chat-btn" class="view-toggle-btn' + (state.currentView === "chat" ? " active" : "") + '" type="button">对话返回</button>' +
+                  '</div>' +
                 '</div>' +
               '</div>' +
               // Blank chat state (when no session)
@@ -1928,24 +2068,24 @@ export function renderApp(configPath: string): string {
                   '<p class="blank-chat-hint">' + escapeHtml(state.config && state.config.defaultCwd ? state.config.defaultCwd : "") + '</p>' +
                 '</div>' +
               '</div>' +
-              '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + '"></div>' +
-              '<div id="chat-output" class="chat-container' + (state.selectedId ? "" : " hidden") + '"></div>' +
+              '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "terminal" ? " active" : "") + '"></div>' +
+              '<div id="chat-output" class="chat-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "chat" ? " active" : "") + '"></div>' +
               '<div class="input-panel">' +
                 '<div class="input-row">' +
                   '<div class="input-field input-field-full">' +
-                    '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按发送开始对话..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                    '<div class="input-textarea-wrap">' +
+                      '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按发送开始对话..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                      '<div class="input-inline-controls">' +
+                        '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
+                          renderModeOptions(preferredTool, composerMode) +
+                        '</select>' +
+                      '</div>' +
+                    '</div>' +
                   '</div>' +
                   '<div class="input-actions">' +
                     '<button id="send-input-button" class="btn btn-send">发送</button>' +
                     '<button id="stop-button" class="btn btn-stop' + (state.selectedId ? "" : " hidden") + '">停止</button>' +
                   '</div>' +
-                '</div>' +
-                // Mode selector inside input panel
-                '<div id="mode-btn-group" class="mode-btn-group">' +
-                  '<button class="mode-btn' + (state.chatMode === "default" ? " active" : "") + '" data-mode="default">默认</button>' +
-                  '<button class="mode-btn' + (state.chatMode === "full-access" ? " active" : "") + '" data-mode="full-access">全权限</button>' +
-                  '<button class="mode-btn' + (state.chatMode === "auto-edit" ? " active" : "") + '" data-mode="auto-edit">自动编辑</button>' +
-                  '<button class="mode-btn' + (state.chatMode === "native" ? " active" : "") + '" data-mode="native">原生</button>' +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
               '</div>' +
@@ -2140,16 +2280,41 @@ export function renderApp(configPath: string): string {
       }
 
       function renderSessionModal() {
+        var modalTool = state.sessionTool === "codex" ? "codex" : "claude";
+        var modalMode = getSafeModeForTool(modalTool, state.modeValue || state.chatMode || "default");
+        var commandValue = state.commandValue || modalTool;
         return '<section id="session-modal" class="modal-backdrop hidden">' +
           '<div class="modal">' +
             '<div class="modal-header">' +
-              '<h2 class="modal-title">启动会话</h2>' +
+              '<h2 class="modal-title">新建 Session</h2>' +
               '<button id="close-modal-button" class="btn btn-ghost btn-icon">×</button>' +
             '</div>' +
             '<div class="modal-body">' +
               '<div class="field">' +
+                '<label class="field-label">工具</label>' +
+                '<div class="tool-picker" id="tool-picker">' +
+                  '<button class="tool-card' + (modalTool === "claude" ? " active" : "") + '" type="button" data-tool="claude">' +
+                    '<div class="tool-card-title"><span>Claude</span><span class="tool-chip">推荐</span></div>' +
+                    '<div class="tool-card-desc">适合长会话、恢复上下文，以及 Claude 原生单轮回复。</div>' +
+                  '</button>' +
+                  '<button class="tool-card' + (modalTool === "codex" ? " active" : "") + '" type="button" data-tool="codex">' +
+                    '<div class="tool-card-title"><span>Codex</span><span class="tool-chip">快速</span></div>' +
+                    '<div class="tool-card-desc">适合直接进入编码工作流，保留完整 CLI 交互。</div>' +
+                  '</button>' +
+                '</div>' +
+                '<p id="tool-description" class="field-hint">' + escapeHtml(getSessionToolDescription(modalTool)) + '</p>' +
+              '</div>' +
+              '<div class="field">' +
+                '<label class="field-label" for="mode">模式</label>' +
+                '<select id="mode" class="field-input">' +
+                  renderModeOptions(modalTool, modalMode) +
+                '</select>' +
+                '<p id="mode-description" class="field-hint">' + escapeHtml(getToolModeHint(modalTool, modalMode)) + '</p>' +
+              '</div>' +
+              '<div class="field">' +
                 '<label class="field-label" for="command">命令</label>' +
-                '<textarea id="command" class="field-input" placeholder="claude&#10;codex&#10;任意 CLI 命令" rows="2"></textarea>' +
+                '<textarea id="command" class="field-input" placeholder="claude&#10;codex&#10;任意 CLI 命令" rows="2">' + escapeHtml(commandValue) + '</textarea>' +
+                '<span id="session-command-preview" class="command-preview">' + escapeHtml(commandValue) + '</span>' +
               '</div>' +
               '<div class="field">' +
                 '<label class="field-label" for="cwd">工作目录</label>' +
@@ -2220,7 +2385,33 @@ export function renderApp(configPath: string): string {
         }
 
         var commandEl = document.getElementById("command");
-        if (commandEl) commandEl.addEventListener("input", function() { state.commandValue = this.value; });
+        if (commandEl) commandEl.addEventListener("input", function() {
+          state.commandValue = this.value;
+          var inferredTool = inferToolFromCommand(this.value);
+          if (inferredTool === "claude" || inferredTool === "codex") {
+            state.sessionTool = inferredTool;
+            state.modeValue = getSafeModeForTool(inferredTool, state.modeValue);
+          }
+          syncSessionModalUI();
+        });
+        var modalModeEl = document.getElementById("mode");
+        if (modalModeEl) modalModeEl.addEventListener("change", function() {
+          state.modeValue = this.value;
+          syncSessionModalUI();
+        });
+        var toolPicker = document.getElementById("tool-picker");
+        if (toolPicker) toolPicker.addEventListener("click", function(e) {
+          var target = e.target;
+          var card = target && target.closest ? target.closest(".tool-card") : null;
+          if (!card || !card.dataset.tool) return;
+          var nextTool = card.dataset.tool;
+          state.sessionTool = nextTool;
+          state.modeValue = getSafeModeForTool(nextTool, state.modeValue || state.chatMode);
+          state.commandValue = replaceCommandBase(state.commandValue || nextTool, nextTool);
+          var commandField = document.getElementById("command");
+          if (commandField) commandField.value = state.commandValue;
+          syncSessionModalUI();
+        });
         var cwdEl = document.getElementById("cwd");
         if (cwdEl) {
           cwdEl.addEventListener("input", function() { state.cwdValue = this.value; });
@@ -2267,39 +2458,7 @@ export function renderApp(configPath: string): string {
         var modeSelect = document.getElementById("chat-mode-select");
         if (modeSelect) modeSelect.addEventListener("change", function() {
           state.chatMode = this.value;
-          // If there's an active session, show toast to confirm
-          if (state.selectedId) {
-            var modeName = this.value === "full-access" ? "全权限" : this.value === "default" ? "默认" : this.value === "native" ? "原生" : this.value === "auto-edit" ? "自动编辑" : this.value;
-            var toast = document.createElement("div");
-            toast.className = "toast-message";
-            toast.style.background = "var(--accent)";
-            toast.style.color = "white";
-            toast.textContent = "模式已切换为：" + modeName;
-            document.body.appendChild(toast);
-            setTimeout(function() { toast.remove(); }, 2000);
-          }
-        });
-        // Mode button group inside input panel
-        var modeBtnGroup = document.getElementById("mode-btn-group");
-        if (modeBtnGroup) modeBtnGroup.addEventListener("click", function(e) {
-          var btn = e.target.closest(".mode-btn");
-          if (!btn) return;
-          var newMode = btn.dataset.mode;
-          if (!newMode || state.chatMode === newMode) return;
-          state.chatMode = newMode;
-          // Update button active states
-          document.querySelectorAll(".mode-btn").forEach(function(b) {
-            b.classList.toggle("active", b.dataset.mode === newMode);
-          });
-          // Show confirmation
-          var modeName = newMode === "full-access" ? "全权限" : newMode === "default" ? "默认" : newMode === "native" ? "原生" : newMode === "auto-edit" ? "自动编辑" : newMode;
-          var toast = document.createElement("div");
-          toast.className = "toast-message";
-          toast.style.background = "var(--accent)";
-          toast.style.color = "white";
-          toast.textContent = "模式已切换为：" + modeName;
-          document.body.appendChild(toast);
-          setTimeout(function() { toast.remove(); }, 2000);
+          showToast("新会话模式已切换为：" + getModeLabel(this.value), "info");
         });
         var floatToggle = document.getElementById("floating-controls-toggle");
         if (floatToggle) floatToggle.addEventListener("click", toggleFloatingControls);
@@ -2537,6 +2696,151 @@ export function renderApp(configPath: string): string {
         });
       }
 
+      function getModeLabel(mode) {
+        return mode === "full-access"
+          ? "全权限"
+          : mode === "default"
+            ? "默认"
+            : mode === "native"
+              ? "原生"
+              : mode === "auto-edit"
+                ? "自动编辑"
+                : mode;
+      }
+
+      function inferToolFromCommand(command) {
+        var base = String(command || "").trim().split(/\s+/)[0] || "";
+        if (base === "claude") return "claude";
+        if (base === "codex") return "codex";
+        return "custom";
+      }
+
+      function getPreferredTool() {
+        return inferToolFromCommand(state.preferredCommand) === "codex" ? "codex" : "claude";
+      }
+
+      function getComposerTool() {
+        var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
+        var selectedTool = inferToolFromCommand(selectedSession && selectedSession.command ? selectedSession.command : "");
+        if (selectedTool === "claude" || selectedTool === "codex") {
+          return selectedTool;
+        }
+        return getPreferredTool();
+      }
+
+      function getSessionToolDescription(tool) {
+        if (tool === "codex") {
+          return "适合快速启动编码会话；不提供 Claude 的原生单轮模式。";
+        }
+        return "适合持续对话、恢复上下文，也支持原生单轮回复模式。";
+      }
+
+      function getToolModeHint(tool, mode) {
+        if (mode === "full-access") {
+          return "自动确认高权限操作，适合你确认环境安全后的连续修改。";
+        }
+        if (mode === "auto-edit") {
+          return "保留交互式会话，同时更偏向直接编辑代码。";
+        }
+        if (mode === "native") {
+          return tool === "claude"
+            ? "按单轮消息调用 Claude 原生输出，适合快速问答或一次性生成。"
+            : "Codex 不支持这里的原生单轮模式。";
+        }
+        return "保留标准交互流程，适合手动确认每一步。";
+      }
+
+      function getSupportedModes(tool) {
+        return tool === "codex"
+          ? ["default", "full-access", "auto-edit"]
+          : ["default", "full-access", "auto-edit", "native"];
+      }
+
+      function getSafeModeForTool(tool, mode) {
+        var supported = getSupportedModes(tool);
+        if (supported.indexOf(mode) !== -1) return mode;
+        var fallback = state.config && state.config.defaultMode ? state.config.defaultMode : "default";
+        if (supported.indexOf(fallback) !== -1) return fallback;
+        return supported[0];
+      }
+
+      function renderModeOptions(tool, selectedMode) {
+        return getSupportedModes(tool).map(function(mode) {
+          return '<option value="' + escapeHtml(mode) + '"' + (mode === selectedMode ? " selected" : "") + '>' +
+            escapeHtml(getModeLabel(mode)) +
+          '</option>';
+        }).join("");
+      }
+
+      function replaceCommandBase(command, nextBase) {
+        var trimmed = String(command || "").trim();
+        if (!trimmed) return nextBase;
+        var parts = trimmed.split(/\s+/);
+        parts[0] = nextBase;
+        return parts.join(" ");
+      }
+
+      function syncComposerModeSelect() {
+        var select = document.getElementById("chat-mode-select");
+        if (!select) return;
+        var tool = getComposerTool();
+        state.chatMode = getSafeModeForTool(tool, state.chatMode);
+        select.innerHTML = renderModeOptions(tool, state.chatMode);
+        select.value = state.chatMode;
+      }
+
+      function applyCurrentView() {
+        var hasSession = !!state.selectedId;
+        var terminalBtn = document.getElementById("view-terminal-btn");
+        var chatBtn = document.getElementById("view-chat-btn");
+        var terminalContainer = document.getElementById("output");
+        var chatContainer = document.getElementById("chat-output");
+
+        if (terminalBtn) terminalBtn.classList.toggle("active", state.currentView === "terminal");
+        if (chatBtn) chatBtn.classList.toggle("active", state.currentView === "chat");
+        if (terminalContainer) terminalContainer.classList.toggle("active", hasSession && state.currentView === "terminal");
+        if (chatContainer) chatContainer.classList.toggle("active", hasSession && state.currentView === "chat");
+      }
+
+      function syncSessionModalUI() {
+        var commandEl = document.getElementById("command");
+        var modeEl = document.getElementById("mode");
+        var toolHint = document.getElementById("tool-description");
+        var modeHint = document.getElementById("mode-description");
+        var previewEl = document.getElementById("session-command-preview");
+        var tool = inferToolFromCommand(state.commandValue || state.preferredCommand || state.sessionTool || "claude");
+
+        if (tool === "custom") {
+          tool = state.sessionTool === "codex" ? "codex" : "claude";
+        }
+
+        state.sessionTool = tool;
+        state.modeValue = getSafeModeForTool(tool, state.modeValue || state.chatMode || "default");
+
+        document.querySelectorAll(".tool-card").forEach(function(card) {
+          card.classList.toggle("active", card.dataset.tool === tool);
+        });
+
+        if (commandEl) {
+          if (!commandEl.value.trim() && document.activeElement !== commandEl) {
+            commandEl.value = tool;
+            state.commandValue = tool;
+          }
+          commandEl.placeholder = tool === "codex"
+            ? "codex --model gpt-5"
+            : "claude --model sonnet";
+        }
+
+        if (modeEl) {
+          modeEl.innerHTML = renderModeOptions(tool, state.modeValue);
+          modeEl.value = state.modeValue;
+        }
+
+        if (toolHint) toolHint.textContent = getSessionToolDescription(tool);
+        if (modeHint) modeHint.textContent = getToolModeHint(tool, state.modeValue);
+        if (previewEl) previewEl.textContent = (commandEl && commandEl.value.trim()) || tool;
+      }
+
       function updateSessionSnapshot(snapshot) {
         if (!snapshot || !snapshot.id) return;
         var updated = false;
@@ -2621,6 +2925,7 @@ export function renderApp(configPath: string): string {
         var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "Wand";
         var summaryEl = document.querySelector(".session-summary-value");
         var titleEl = document.getElementById("terminal-title");
+        var infoEl = document.getElementById("terminal-info");
         var blankChat = document.getElementById("blank-chat");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
@@ -2628,6 +2933,9 @@ export function renderApp(configPath: string): string {
 
         if (summaryEl) summaryEl.textContent = terminalTitle;
         if (titleEl) titleEl.textContent = terminalTitle;
+        if (infoEl) {
+          infoEl.textContent = selectedSession ? (getModeLabel(selectedSession.mode) + " | " + selectedSession.status) : "开始对话";
+        }
 
         if (selectedSession) {
           if (blankChat) blankChat.classList.add("hidden");
@@ -2640,12 +2948,8 @@ export function renderApp(configPath: string): string {
           if (chatContainer) chatContainer.classList.add("hidden");
           if (stopBtn) stopBtn.classList.add("hidden");
         }
-      }
-
-      function updateModeButtons() {
-        document.querySelectorAll(".mode-btn").forEach(function(btn) {
-          btn.classList.toggle("active", btn.dataset.mode === state.chatMode);
-        });
+        syncComposerModeSelect();
+        applyCurrentView();
       }
 
       function loadOutput(id) {
@@ -2656,7 +2960,7 @@ export function renderApp(configPath: string): string {
             updateShellChrome();
             var terminalInfo = document.getElementById("terminal-info");
             if (terminalInfo) {
-              terminalInfo.textContent = data.cwd + " | " + data.mode + " | " + data.status + " | exit=" + (data.exitCode ?? "n/a");
+              terminalInfo.textContent = data.cwd + " | " + getModeLabel(data.mode) + " | " + data.status + " | exit=" + (data.exitCode ?? "n/a");
             }
 
             if (state.terminal) {
@@ -2682,6 +2986,12 @@ export function renderApp(configPath: string): string {
 
       function selectSession(id) {
         state.selectedId = id;
+        var session = state.sessions.find(function(item) { return item.id === id; });
+        var inferredTool = inferToolFromCommand(session && session.command ? session.command : "");
+        if (inferredTool === "claude" || inferredTool === "codex") {
+          state.preferredCommand = inferredTool;
+          state.chatMode = getSafeModeForTool(inferredTool, session && session.mode ? session.mode : state.chatMode);
+        }
         updateSessionsList();
         switchToSessionView(id);
         loadOutput(id).then(focusInputBox);
@@ -2731,15 +3041,18 @@ export function renderApp(configPath: string): string {
       function openSessionModal() {
         state.modalOpen = true;
         state.sessionsDrawerOpen = false;
+        updateDrawerState();
         var modal = document.getElementById("session-modal");
         if (modal) {
           modal.classList.remove("hidden");
-          // Pre-fill command with first preset
           var commandEl = document.getElementById("command");
-          if (commandEl && state.config && state.config.commandPresets && state.config.commandPresets.length > 0) {
-            commandEl.value = state.config.commandPresets[0].command;
-          }
-          schedulePathSuggestions();
+          var defaultTool = getPreferredTool();
+          var fallbackCommand = state.commandValue || state.preferredCommand || defaultTool;
+          state.sessionTool = inferToolFromCommand(fallbackCommand) === "codex" ? "codex" : defaultTool;
+          state.commandValue = fallbackCommand || state.sessionTool;
+          state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
+          if (commandEl) commandEl.value = state.commandValue;
+          syncSessionModalUI();
           setTimeout(function() { document.getElementById("command").focus(); }, 20);
         }
       }
@@ -2849,6 +3162,11 @@ export function renderApp(configPath: string): string {
       function quickStartSession(command) {
         var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
         var defaultMode = (state.config && state.config.defaultMode) ? state.config.defaultMode : "default";
+        var inferredTool = inferToolFromCommand(command);
+        if (inferredTool === "claude" || inferredTool === "codex") {
+          state.preferredCommand = inferredTool;
+          state.chatMode = getSafeModeForTool(inferredTool, state.chatMode);
+        }
         fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2857,12 +3175,7 @@ export function renderApp(configPath: string): string {
         .then(function(res) { return res.json(); })
         .then(function(data) {
           if (data.error) {
-            // Show error in a toast
-            var errEl = document.createElement("div");
-            errEl.className = "toast-message toast-error";
-            errEl.textContent = data.error;
-            document.body.appendChild(errEl);
-            setTimeout(function() { errEl.remove(); }, 4000);
+            showToast(data.error, "error");
             return;
           }
           state.selectedId = data.id;
@@ -2871,17 +3184,14 @@ export function renderApp(configPath: string): string {
         })
         .then(focusInputBox)
         .catch(function() {
-          var errEl = document.createElement("div");
-          errEl.className = "toast-message toast-error";
-          errEl.textContent = "无法启动命令。";
-          document.body.appendChild(errEl);
-          setTimeout(function() { errEl.remove(); }, 4000);
+          showToast("无法启动命令。", "error");
         });
       }
 
       function runCommand() {
         var commandEl = document.getElementById("command");
         var cwdEl = document.getElementById("cwd");
+        var modeEl = document.getElementById("mode");
         var errorEl = document.getElementById("modal-error");
 
         hideError(errorEl);
@@ -2893,7 +3203,13 @@ export function renderApp(configPath: string): string {
         }
 
         var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
-        var defaultMode = (state.config && state.config.defaultMode) ? state.config.defaultMode : "default";
+        var selectedTool = inferToolFromCommand(command) === "codex" ? "codex" : "claude";
+        var selectedMode = getSafeModeForTool(selectedTool, modeEl && modeEl.value ? modeEl.value : state.modeValue);
+        state.modeValue = selectedMode;
+        state.chatMode = selectedMode;
+        state.sessionTool = selectedTool;
+        state.preferredCommand = selectedTool;
+        syncComposerModeSelect();
 
         fetch("/api/commands", {
           method: "POST",
@@ -2901,7 +3217,7 @@ export function renderApp(configPath: string): string {
           body: JSON.stringify({
             command: command,
             cwd: cwdEl.value.trim() || defaultCwd,
-            mode: defaultMode
+            mode: selectedMode
           })
         })
         .then(function(res) { return res.json(); })
@@ -2914,7 +3230,7 @@ export function renderApp(configPath: string): string {
           state.drafts[data.id] = "";
           closeSessionModal();
           closeSessionsDrawer();
-          commandEl.value = "";
+          state.commandValue = command;
           return refreshAll();
         })
         .then(focusInputBox)
@@ -3106,11 +3422,12 @@ export function renderApp(configPath: string): string {
         if (!state.selectedId) {
           var mode = state.chatMode || "full-access";
           var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+          var preferredTool = getPreferredTool();
           fetch("/api/commands", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              command: "claude",
+              command: preferredTool,
               cwd: defaultCwd,
               mode: mode,
               initialInput: value || undefined
@@ -3159,15 +3476,11 @@ export function renderApp(configPath: string): string {
         if (terminalContainer) terminalContainer.classList.remove("hidden");
         if (chatContainer) {
           chatContainer.classList.remove("hidden");
-          chatContainer.classList.add("active");
-        }
-        if (terminalContainer) {
-          terminalContainer.classList.remove("active");
         }
         if (stopBtn) stopBtn.classList.remove("hidden");
 
         var title = session ? shortCommand(session.command) : "Wand";
-        var modeName = session ? (session.mode === "full-access" ? "全权限" : session.mode === "default" ? "默认" : session.mode === "native" ? "原生" : session.mode === "auto-edit" ? "自动编辑" : session.mode) : "";
+        var modeName = session ? getModeLabel(session.mode) : "";
         var info = session ? (modeName + " | " + session.status) : "";
         if (terminalTitle) terminalTitle.textContent = title;
         if (terminalInfo) terminalInfo.textContent = info;
@@ -3175,6 +3488,10 @@ export function renderApp(configPath: string): string {
 
         // Init terminal if not already done
         if (!state.terminal) initTerminal();
+        applyCurrentView();
+        if (state.currentView === "terminal") {
+          setTimeout(scheduleTerminalResize, 40);
+        }
         renderChat();
       }
 
@@ -3299,13 +3616,18 @@ export function renderApp(configPath: string): string {
       }
 
       function startCommand(command, cwd, errorEl) {
+        var inferredTool = inferToolFromCommand(command);
+        if (inferredTool === "claude" || inferredTool === "codex") {
+          state.preferredCommand = inferredTool;
+          state.chatMode = getSafeModeForTool(inferredTool, state.chatMode);
+        }
         return fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             command: command,
             cwd: cwd || "",
-            mode: state.config.defaultMode || "default"
+            mode: state.chatMode || state.config.defaultMode || "default"
           })
         })
         .then(function(res) { return res.json(); })
@@ -3569,16 +3891,10 @@ export function renderApp(configPath: string): string {
       function setView(view) {
         if (state.currentView === view) return;
         state.currentView = view;
-
-        // Update toggle buttons
-        document.getElementById("view-terminal-btn").classList.toggle("active", view === "terminal");
-        document.getElementById("view-chat-btn").classList.toggle("active", view === "chat");
-
-        // Toggle containers
-        var terminalContainer = document.getElementById("output");
-        var chatContainer = document.getElementById("chat-output");
-        if (terminalContainer) terminalContainer.classList.toggle("active", view === "terminal");
-        if (chatContainer) chatContainer.classList.toggle("active", view === "chat");
+        applyCurrentView();
+        if (view === "terminal") {
+          setTimeout(scheduleTerminalResize, 40);
+        }
 
         // Render chat if switching to chat view
         if (view === "chat") {
@@ -3594,15 +3910,6 @@ export function renderApp(configPath: string): string {
         if (!selectedSession) {
           chatOutput.innerHTML = '<div class="empty-state"><strong>未选择会话</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
           return;
-        }
-
-        var chatContainer = document.getElementById("chat-output");
-        if (chatContainer && !chatContainer.classList.contains("active")) {
-          chatContainer.classList.add("active");
-        }
-        var terminalContainer = document.getElementById("output");
-        if (terminalContainer && terminalContainer.classList.contains("active")) {
-          terminalContainer.classList.remove("active");
         }
 
         var messages = parseMessages(selectedSession.output, selectedSession.command);
@@ -3922,6 +4229,20 @@ export function renderApp(configPath: string): string {
         if (!el) return;
         el.textContent = "";
         el.classList.add("hidden");
+      }
+
+      function showToast(message, type) {
+        var toast = document.createElement("div");
+        toast.className = "toast-message" + (type === "error" ? " toast-error" : "");
+        if (type !== "error") {
+          toast.style.background = "var(--accent)";
+          toast.style.color = "white";
+        }
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(function() {
+          toast.remove();
+        }, type === "error" ? 4000 : 2200);
       }
 
       function escapeHtml(value) {
