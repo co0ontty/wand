@@ -6,8 +6,7 @@ import process from "node:process";
 import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
-import { ChatMessage, ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
-import { parseMessages } from "./message-parser.js";
+import { ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
 
 export interface ProcessEvent {
   type: "output" | "status" | "started" | "ended";
@@ -211,8 +210,7 @@ export class ProcessManager extends EventEmitter {
 
       rec.output = appendWindow(rec.output, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
       this.persist(rec);
-      const messages = parseMessages(rec.output);
-      this.emitEvent({ type: "output", sessionId: id, data: { chunk, output: rec.output, messages } });
+      this.emitEvent({ type: "output", sessionId: id, data: { chunk, output: rec.output } });
 
       if (!rec.claudeSessionId) {
         rec.sessionIdWindow = appendWindow(rec.sessionIdWindow, chunk, OUTPUT_WINDOW_SIZE);
@@ -316,16 +314,14 @@ export class ProcessManager extends EventEmitter {
       chunks.push(text);
       record.output = appendWindow(record.output, text, OUTPUT_MAX_SIZE);
       this.persist(record);
-      const messages = parseMessages(record.output);
-      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output, messages } });
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output } });
     });
     child.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       chunks.push(text);
       record.output = appendWindow(record.output, text, OUTPUT_MAX_SIZE);
       this.persist(record);
-      const messages = parseMessages(record.output);
-      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output, messages } });
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output } });
     });
 
     child.on("close", (code: number | null) => {

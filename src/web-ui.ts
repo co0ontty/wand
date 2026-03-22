@@ -770,6 +770,86 @@ export function renderApp(configPath: string): string {
       font-family: var(--font-mono);
     }
 
+    /* Thinking Card (Deep Thought) */
+    .chat-message.thinking {
+      align-self: center;
+      max-width: 90%;
+      margin: 8px 0;
+    }
+
+    .thinking-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      background: linear-gradient(135deg, rgba(99, 101, 103, 0.08) 0%, rgba(150, 152, 155, 0.06) 100%);
+      border: 1px solid rgba(150, 152, 155, 0.2);
+      border-radius: var(--radius-lg);
+      animation: thinkingPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes thinkingPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.02); }
+    }
+
+    .thinking-icon {
+      font-size: 1.25rem;
+      animation: thinkingSpin 3s linear infinite;
+    }
+
+    @keyframes thinkingSpin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .thinking-content {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      letter-spacing: 0.3px;
+    }
+
+    /* Prompt Suggestion Card (Pulsing) */
+    .chat-message.prompt {
+      align-self: center;
+      max-width: 85%;
+      margin: 4px 0;
+    }
+
+    .prompt-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: linear-gradient(135deg, rgba(197, 101, 61, 0.08) 0%, rgba(169, 81, 48, 0.04) 100%);
+      border: 1px dashed rgba(197, 101, 61, 0.3);
+      border-radius: var(--radius-md);
+      animation: promptPulse 1.5s ease-in-out infinite;
+      cursor: default;
+    }
+
+    @keyframes promptPulse {
+      0%, 100% { opacity: 0.7; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.03); }
+    }
+
+    .prompt-icon {
+      font-size: 1rem;
+      filter: grayscale(0.3);
+    }
+
+    .prompt-content {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .prompt-text {
+      font-family: var(--font-mono);
+      color: var(--accent);
+      font-weight: 500;
+    }
+
     /* Markdown Content */
     .markdown-content { color: inherit; }
     .markdown-content p { margin: 0 0 8px 0; }
@@ -1373,6 +1453,8 @@ export function renderApp(configPath: string): string {
       .view-toggle { display: none; }
       .chat-container { padding: 10px; }
       .chat-message { max-width: 95%; }
+      .thinking-card { padding: 8px 12px; }
+      .thinking-content { font-size: 0.75rem; }
       .tool-picker { grid-template-columns: 1fr; }
     }
 
@@ -2966,7 +3048,8 @@ export function renderApp(configPath: string): string {
         state.sessions = state.sessions.map(function(session) {
           if (session.id !== snapshot.id) return session;
           updated = true;
-          return snapshot;
+          // Merge snapshot fields into existing session to preserve all fields
+          return Object.assign({}, session, snapshot);
         });
         if (!updated) {
           state.sessions.unshift(snapshot);
@@ -3072,7 +3155,12 @@ export function renderApp(configPath: string): string {
       }
 
       function loadOutput(id) {
-        return fetch("/api/sessions/" + id + "?format=chat")
+        // Cancel any pending debounced chat render to avoid flicker
+        if (chatRenderTimer) {
+          clearTimeout(chatRenderTimer);
+          chatRenderTimer = null;
+        }
+        return fetch("/api/sessions/" + id)
           .then(function(res) { return res.json(); })
           .then(function(data) {
             updateSessionSnapshot(data);
@@ -3082,13 +3170,9 @@ export function renderApp(configPath: string): string {
               terminalInfo.textContent = data.cwd + " | " + getModeLabel(data.mode) + " | " + data.status + " | exit=" + (data.exitCode ?? "n/a");
             }
 
-            if (data.messages) {
-              state.currentMessages = data.messages;
-            } else {
-              // Fallback: parse locally from output
-              var selectedSession = state.sessions.find(function(s) { return s.id === id; });
-              state.currentMessages = parseMessages(selectedSession ? selectedSession.output : "", selectedSession ? selectedSession.command : "");
-            }
+            // Always parse locally to ensure consistency and avoid flicker
+            var selectedSession = state.sessions.find(function(s) { return s.id === id; });
+            state.currentMessages = parseMessages(selectedSession ? selectedSession.output : "", selectedSession ? selectedSession.command : "");
 
             if (state.terminal) {
               if (state.terminalSessionId !== id) {
@@ -3117,6 +3201,7 @@ export function renderApp(configPath: string): string {
         state.lastRenderedMsgCount = 0;
         state.lastRenderedEmpty = null;
         state.currentMessages = [];
+        if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
         var session = state.sessions.find(function(item) { return item.id === id; });
         var inferredTool = inferToolFromCommand(session && session.command ? session.command : "");
         if (inferredTool === "claude" || inferredTool === "codex") {
@@ -4006,16 +4091,14 @@ export function renderApp(configPath: string): string {
       function handleWebSocketMessage(msg) {
         switch (msg.type) {
           case 'output':
-            // Update session snapshot with latest output
+            // Update session output (for terminal display and local message parsing)
             if (msg.data && msg.data.output && msg.sessionId) {
               var snapshot = { id: msg.sessionId, output: msg.data.output };
               updateSessionSnapshot(snapshot);
-              // Use parsed messages from server if available
-              if (msg.data.messages) {
-                state.currentMessages = msg.data.messages;
-              }
+              // Schedule debounced chat update (don't parse on every chunk to avoid flicker)
+              scheduleChatRender();
             }
-            // Real-time output update for terminal
+            // Real-time terminal output
             if (msg.sessionId === state.selectedId && state.terminal && msg.data && msg.data.output) {
               var newOutput = normalizeTerminalOutput(msg.data.output || "");
               if (newOutput.startsWith(state.terminalOutput)) {
@@ -4027,8 +4110,6 @@ export function renderApp(configPath: string): string {
               state.terminalOutput = newOutput;
               state.terminal.scrollToBottom();
             }
-            // Update chat view
-            renderChat();
             break;
           case 'started':
             // New session started
@@ -4048,6 +4129,7 @@ export function renderApp(configPath: string): string {
           case 'init':
             // Initial state for subscribed session
             if (msg.sessionId === state.selectedId && msg.data) {
+              if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
               updateTerminalOutput(msg.data.output || "");
               if (state.currentView === "chat") {
                 renderChat();
@@ -4099,6 +4181,20 @@ export function renderApp(configPath: string): string {
           doRenderChat();
           state.renderPending = false;
         });
+      }
+
+      var chatRenderTimer = null;
+      function scheduleChatRender() {
+        if (chatRenderTimer) return;
+        chatRenderTimer = setTimeout(function() {
+          chatRenderTimer = null;
+          // Re-parse messages from the latest session output
+          var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+          if (selectedSession && selectedSession.output) {
+            state.currentMessages = parseMessages(selectedSession.output, selectedSession.command);
+          }
+          renderChat();
+        }, 300);
       }
 
       function doRenderChat() {
@@ -4239,47 +4335,111 @@ export function renderApp(configPath: string): string {
         ansiStripped = ansiStripped.split(carriageReturn).join(newline);
 
         var lines = ansiStripped.split(newline).map(function(line) { return line.trim(); }).filter(Boolean);
-        var cleaned = lines.filter(function(line) {
-          if (!line) return false;
-          if (line.indexOf("────────────────") === 0) return false;
-          if (line === "❯") return false;
-          if (line.indexOf("esc to interrupt") !== -1) return false;
-          if (line.indexOf("Claude Code v") !== -1) return false;
-          if (line.indexOf("Sonnet") !== -1) return false;
-          if (line.indexOf("~/") === 0) return false;
-          if (line.indexOf("● high") !== -1) return false;
-          if (line.indexOf("Failed to install Anthropic marketplace") !== -1) return false;
-          if (line.indexOf("Claude Code has switched from npm to native installer") !== -1) return false;
-          if (line.indexOf("Fluttering") !== -1) return false;
-          if (line.indexOf("? for shortcuts") !== -1) return false;
-          if (line.indexOf("0;") === 0) return false;
-          if (line.indexOf("9;") === 0) return false;
-          if (line.indexOf("Claude is waiting") !== -1) return false;
-          if (line.indexOf("✢") !== -1 || line.indexOf("✳") !== -1 || line.indexOf("✶") !== -1 || line.indexOf("✻") !== -1 || line.indexOf("✽") !== -1) return false;
-          if (line.indexOf("▐") === 0 || line.indexOf("▝") === 0 || line.indexOf("▘") === 0) return false;
-          if ((line === "lu" || line === "ue" || line === "tr" || line === "ti" || line === "g" || line === "n" || line === "i…" || line === "…" || line === "uts" || line === "lt" || line === "rg" || line === "·") && line.length < 4) return false;
-          if (line.indexOf("✽F") === 0 || line.indexOf("✻F") === 0) return false;
-          return true;
-        });
 
-        if (!cleaned.length) return messages;
+        // Extract thinking/deep thought content
+        var thinkingPatterns = [
+          /thinking with high effort/i,
+          /thinking with medium effort/i,
+          /thinking with low effort/i,
+          /thought for \d+s/i,
+          /Sauteed for \d+m/i,
+          /Germinating/i,
+          /Doodling/i,
+          /Brewing/i
+        ];
 
+        // Find the most recent thinking line (usually appears after user input)
+        var lastThinkingLine = null;
         var userCmdIndex = -1;
-        for (var i = 0; i < cleaned.length; i++) {
-          if (cleaned[i].indexOf("❯") === 0) {
-            userCmdIndex = i;
-            break;
+
+        // Separate different types of content
+        var promptLines = [];  // Try "..." suggestions
+        var contentLines = []; // Actual conversation content
+        var thinkingLines = [];
+
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+
+          // Check for prompt suggestions (Try "..." pattern, including after ❯)
+          var lineForPromptCheck = line.replace(/^❯\s*/, "");
+          if (lineForPromptCheck.indexOf('Try"') === 0 || lineForPromptCheck.indexOf('Try "') === 0) {
+            promptLines.push(lineForPromptCheck);
+            continue;
+          }
+
+          // Check for thinking content
+          var isThinking = false;
+          for (var p = 0; p < thinkingPatterns.length; p++) {
+            if (thinkingPatterns[p].test(line)) {
+              isThinking = true;
+              thinkingLines.push(line);
+              break;
+            }
+          }
+          if (isThinking) continue;
+
+          // Filter noise
+          if (!line) continue;
+          if (line.indexOf("────────────────") === 0) continue;
+          if (line === "❯") continue;
+          if (line.indexOf("esc to interrupt") !== -1) continue;
+          if (line.indexOf("Claude Code v") !== -1) continue;
+          if (line.indexOf("Sonnet") !== -1) continue;
+          if (line.indexOf("~/") === 0) continue;
+          if (line.indexOf("● high") !== -1) continue;
+          if (line.indexOf("Failed to install Anthropic marketplace") !== -1) continue;
+          if (line.indexOf("Claude Code has switched from npm to native installer") !== -1) continue;
+          if (line.indexOf("Fluttering") !== -1) continue;
+          if (line.indexOf("? for shortcuts") !== -1) continue;
+          if (line.indexOf("0;") === 0) continue;
+          if (line.indexOf("9;") === 0) continue;
+          if (line.indexOf("Claude is waiting") !== -1) continue;
+          if (line.indexOf("✢") !== -1 || line.indexOf("✳") !== -1 || line.indexOf("✶") !== -1 || line.indexOf("✻") !== -1 || line.indexOf("✽") !== -1) continue;
+          if (line.indexOf("▐") === 0 || line.indexOf("▝") === 0 || line.indexOf("▘") === 0) continue;
+          if ((line === "lu" || line === "ue" || line === "tr" || line === "ti" || line === "g" || line === "n" || line === "i…" || line === "…" || line === "uts" || line === "lt" || line === "rg" || line === "·") && line.length < 4) continue;
+          if (line.indexOf("✽F") === 0 || line.indexOf("✻F") === 0) continue;
+
+          contentLines.push(line);
+        }
+
+        // Add thinking message (most recent one, deduplicated)
+        if (thinkingLines.length > 0) {
+          var lastThinking = thinkingLines[thinkingLines.length - 1];
+          var durationMatch = lastThinking.match(/for (\d+[ms]+| \d+m \d+s)/i);
+          var thinkingText = durationMatch ? "深度思考 " + durationMatch[0].replace(/for /i, "") : "深度思考中...";
+          messages.push({ role: "thinking", content: thinkingText, type: "deep-thought" });
+        }
+
+        // Add prompt suggestion as a special message (pulsing display)
+        if (promptLines.length > 0) {
+          var promptText = promptLines[promptLines.length - 1].replace(/^Try\s*/, "").trim();
+          messages.push({ role: "prompt", content: promptText, type: "suggestion" });
+        }
+
+        if (!contentLines.length) return messages;
+
+        // Find user command in content lines (skip prompt suggestions like Try"...")
+        var userCmdIndex = -1;
+        for (var i = 0; i < contentLines.length; i++) {
+          var line = contentLines[i];
+          if (line.indexOf("❯") === 0) {
+            // Skip prompt suggestions (Try"..." pattern)
+            var afterPrompt = line.replace(/^❯\s*/, "");
+            if (afterPrompt.indexOf('Try"') !== 0 && afterPrompt.indexOf('Try "') !== 0) {
+              userCmdIndex = i;
+              break;
+            }
           }
         }
 
         if (userCmdIndex === -1) return messages;
 
-        var userText = cleaned[userCmdIndex].replace(/^❯\s*/, "").trim();
+        var userText = contentLines[userCmdIndex].replace(/^❯\s*/, "").trim();
         if (userText) {
           messages.push({ role: "user", content: userText });
         }
 
-        var assistantLines = cleaned.slice(userCmdIndex + 1).filter(function(line) {
+        var assistantLines = contentLines.slice(userCmdIndex + 1).filter(function(line) {
           if (line.indexOf("⏺") !== -1 && (line.indexOf("Hi!") !== -1 || line.indexOf("Hello") !== -1 || line.indexOf("What") !== -1 || line.indexOf("working") !== -1)) return true;
           if (line.indexOf("⏺") === 0) return true;
           if (line.length < 8) return false;
@@ -4299,6 +4459,26 @@ export function renderApp(configPath: string): string {
       }
 
       function renderChatMessage(msg) {
+        // Thinking card (deep thought)
+        if (msg.role === "thinking") {
+          return '<div class="chat-message thinking">' +
+            '<div class="thinking-card">' +
+              '<div class="thinking-icon">🤔</div>' +
+              '<div class="thinking-content">' + escapeHtml(msg.content) + '</div>' +
+            '</div>' +
+          '</div>';
+        }
+
+        // Prompt suggestion card (pulsing display)
+        if (msg.role === "prompt") {
+          return '<div class="chat-message prompt">' +
+            '<div class="prompt-card">' +
+              '<div class="prompt-icon">💡</div>' +
+              '<div class="prompt-content">试试：<span class="prompt-text">' + escapeHtml(msg.content) + '</span></div>' +
+            '</div>' +
+          '</div>';
+        }
+
         var avatar = msg.role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
         var bubbleContent = msg.role === "assistant" ? renderMarkdown(msg.content) : escapeHtml(msg.content);
         return '<div class="chat-message ' + msg.role + '">' +
