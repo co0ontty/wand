@@ -14,36 +14,38 @@ export function resolveDatabasePath(configPath: string): string {
   return path.resolve(path.dirname(configPath), DEFAULT_DB_FILE);
 }
 
+const INIT_SQL = `
+  CREATE TABLE IF NOT EXISTS auth_sessions (
+    token TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS command_sessions (
+    id TEXT PRIMARY KEY,
+    command TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    exit_code INTEGER,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    output TEXT NOT NULL,
+    archived INTEGER NOT NULL DEFAULT 0,
+    archived_at TEXT,
+    claude_session_id TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS app_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+`;
+
 export function ensureDatabaseFile(dbPath: string): boolean {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const created = !existsSync(dbPath);
   const db = new DatabaseSync(dbPath);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS auth_sessions (
-      token TEXT PRIMARY KEY,
-      expires_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS command_sessions (
-      id TEXT PRIMARY KEY,
-      command TEXT NOT NULL,
-      cwd TEXT NOT NULL,
-      mode TEXT NOT NULL,
-      status TEXT NOT NULL,
-      exit_code INTEGER,
-      started_at TEXT NOT NULL,
-      ended_at TEXT,
-      output TEXT NOT NULL,
-      archived INTEGER NOT NULL DEFAULT 0,
-      archived_at TEXT,
-      claude_session_id TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS app_config (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
+  db.exec(INIT_SQL);
   ensureCommandSessionSchema(db);
   db.close();
   return created;
@@ -55,32 +57,7 @@ export class WandStorage {
   constructor(dbPath: string) {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS auth_sessions (
-        token TEXT PRIMARY KEY,
-        expires_at INTEGER NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS command_sessions (
-        id TEXT PRIMARY KEY,
-        command TEXT NOT NULL,
-        cwd TEXT NOT NULL,
-        mode TEXT NOT NULL,
-        status TEXT NOT NULL,
-        exit_code INTEGER,
-        started_at TEXT NOT NULL,
-        ended_at TEXT,
-        output TEXT NOT NULL,
-        archived INTEGER NOT NULL DEFAULT 0,
-        archived_at TEXT,
-        claude_session_id TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS app_config (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-    `);
+    this.db.exec(INIT_SQL);
     ensureCommandSessionSchema(this.db);
   }
 

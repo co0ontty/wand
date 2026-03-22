@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build and Development Commands
 
 ```bash
-npm install                # Install dependencies (Node 22.5.0+)
+npm install                # Install dependencies (Node.js >= 22.5.0)
 npm run build              # Compile TypeScript to dist/
 npm run check              # Type check without emitting
 npm run dev                # Run web command directly with tsx
@@ -16,6 +16,13 @@ node dist/cli.js web       # Start the web console server
 **Requirements:**
 - Node.js >= 22.5.0 (uses `node:sqlite`)
 - OpenSSL or Node.js crypto for HTTPS certificate generation
+
+**Smoke test after changes:**
+```bash
+npm run build && node dist/cli.js init && node dist/cli.js web
+```
+
+**Testing:** No test framework is configured. Until one is added, treat `npm run check` and the smoke test above as the minimum gate.
 
 ## Architecture Overview
 
@@ -28,16 +35,17 @@ node dist/cli.js web       # Start the web console server
 - `storage.ts` — SQLite persistence for sessions and auth tokens; handles schema migrations
 - `config.ts` — Config loading with defaults and merge logic
 - `auth.ts` — In-memory session token store with 12-hour TTL
+- `cert.ts` — HTTPS certificate generation
 - `types.ts` — Shared TypeScript types
 - `web-ui.ts` — Generates the browser HTML UI
 
-**Execution modes:** `auto-edit`, `default`, `full-access`, `native`. These are passed to child processes via environment variables (`WAND_MODE`, `WAND_AUTO_CONFIRM`, `WAND_AUTO_EDIT`). In `full-access` mode, the process manager auto-confirms prompts by detecting confirmation patterns and sending appropriate responses. In `native` mode, Claude runs with `--print` flag to return structured code output instead of interactive terminal.
+**Execution modes:** `auto-edit`, `default`, `full-access`, `native`. Passed to child processes via environment variables (`WAND_MODE`, `WAND_AUTO_CONFIRM`, `WAND_AUTO_EDIT`). In `full-access` mode, the process manager auto-confirms prompts by detecting confirmation patterns and sending appropriate responses. In `native` mode, Claude runs with `--print` flag to return structured code output instead of interactive terminal.
 
-**Config:** Stored at `.wand/config.json`. Includes host/port, password, shell, default working directory, startup commands, allowed command prefixes, and command presets for the web UI.
+**Config:** Stored at `.wand/config.json` (or `~/.wand/config.json` by default). Includes host/port, password, shell, default working directory, startup commands, allowed command prefixes, and command presets for the web UI.
 
-**Session persistence:** Sessions are stored in SQLite at `.wand/wand.db`. The storage module handles schema migrations for new columns (e.g., `archived`, `archived_at`, `claude_session_id`). Session output is truncated to ~120KB to avoid memory issues.
+**Session persistence:** Sessions are stored in SQLite at `.wand/wand.db`. Schema migrations add columns as needed (e.g., `archived`, `archived_at`, `claude_session_id`). Session output is truncated to ~120KB.
 
-**Claude session tracking:** When running Claude Code, the process manager extracts the `session_id` from JSON output and stores it as `claudeSessionId`. This enables the "Resume" button in the UI which runs `claude --resume <session_id>`.
+**Claude session tracking:** When running Claude Code, the process manager extracts `session_id` from JSON output and stores it as `claudeSessionId`. This enables the "Resume" button in the UI which runs `claude --resume <session_id>`.
 
 ## API Endpoints
 
@@ -55,23 +63,37 @@ node dist/cli.js web       # Start the web console server
 | POST | `/api/sessions/:id/stop` | Kill PTY session |
 | DELETE | `/api/sessions/:id` | Delete session from storage |
 | GET | `/api/path-suggestions?q=` | Directory path autocomplete |
+| GET | `/api/directory` | Directory file listing (files tab) |
 
 ## Code Style
 
-TypeScript with ES modules, 2-space indentation, double quotes, semicolons. Use named imports from Node built-ins with `node:` prefix (e.g., `node:process`). Prefer small top-level functions with explicit return types on exports.
+TypeScript with ES modules, 2-space indentation, double quotes, semicolons. Use named imports from Node built-ins with `node:` prefix (e.g., `node:process`). Prefer small top-level functions with explicit return types on exports. Filenames are lowercase, single-purpose modules.
 
 ## Web UI Design
 
-`web-ui.ts` generates a single HTML file with embedded CSS/JS. The design uses warm, earthy tones with cream/beige backgrounds (`#f6f1e8`) and burnt orange accent (`#c5653d`). Typography uses Inter for UI text and Geist Mono for code. CSS variables define the full theme in `:root`. The UI includes a sidebar drawer for session history, floating quick-input controls for mobile, and session resume functionality for Claude sessions.
+`web-ui.ts` generates a single HTML file with embedded CSS/JS. The design uses warm, earthy tones with cream/beige backgrounds (`#f6f1e8`) and burnt orange accent (`#c5653d`). Typography uses Inter for UI text and Geist Mono for code. CSS variables define the full theme in `:root`.
 
-**Input box behavior:** The "Send to session" textarea maintains per-session draft state in `state.drafts`. Character input uses natural browser behavior with async state sync. Enter/Send transmits the full line to PTY and clears the draft.
+**UI modes:** The UI supports Terminal mode (xterm.js rendering) and Chat mode (Markdown message bubbles). A sidebar drawer provides session history. Floating quick-input controls are available for mobile.
 
-## Optimization Plan
+**Input behavior:** The textarea maintains per-session draft state in `state.drafts`. Enter sends; Shift+Enter inserts a newline.
 
-See `OPTIMIZATION_PLAN.md` for detailed roadmap to align with OpenCode Web UI.
+**Recent additions:** Model selector (3.5 Sonnet / 3 Opus / 3 Haiku with `--model` flag), file browser sidebar tab (Sessions / Files tabs), welcome page.
 
-**Current focus areas:**
-- Phase 1: Chat-style conversation interface with Markdown rendering
-- Phase 2: File browser sidebar and code review panel
-- Phase 3: Project management and session navigation
-- Phase 4: Settings panel with theme/notification options
+## Optimization Roadmap
+
+See `OPTIMIZATION_PLAN.md` for the full roadmap. Current focus:
+
+- **Phase 1** (mostly complete): Chat-style interface, Markdown rendering, code syntax highlighting, copy buttons
+- **Phase 2** (in progress): File browser, model selector, code review panel
+- **Phase 3** (planned): Project management, session management
+- **Phase 4** (planned): Settings panel, themes, notifications, MCP/LSP config
+
+## Commit Guidelines
+
+Use short, imperative commit subjects (e.g., `Add config path validation`). Keep each commit scoped to one change. For UI changes, include screenshots or screen recordings in the PR description.
+
+## Security Notes
+
+- Never commit real passwords or machine-specific paths from `~/.wand/config.json`
+- Keep `host` on `127.0.0.1` unless remote access is intentional
+- Document any new command execution permissions added to the config schema

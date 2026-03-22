@@ -1870,7 +1870,10 @@ export function renderApp(configPath: string): string {
         wsConnected: false,
         currentView: "chat",
         parsedMessages: [],
-        sidebarTab: "sessions"
+        sidebarTab: "sessions",
+        lastRenderedOutput: "",
+        lastRenderedMsgCount: 0,
+        renderPending: false
       };
 
       // PWA install prompt handling
@@ -3101,6 +3104,8 @@ export function renderApp(configPath: string): string {
 
       function selectSession(id) {
         state.selectedId = id;
+        state.lastRenderedOutput = "";
+        state.lastRenderedMsgCount = 0;
         var session = state.sessions.find(function(item) { return item.id === id; });
         var inferredTool = inferToolFromCommand(session && session.command ? session.command : "");
         if (inferredTool === "claude" || inferredTool === "codex") {
@@ -3295,6 +3300,8 @@ export function renderApp(configPath: string): string {
           }
           state.selectedId = data.id;
           state.drafts[data.id] = "";
+          state.lastRenderedOutput = "";
+          state.lastRenderedMsgCount = 0;
           return refreshAll();
         })
         .then(focusInputBox)
@@ -3343,6 +3350,8 @@ export function renderApp(configPath: string): string {
           }
           state.selectedId = data.id;
           state.drafts[data.id] = "";
+          state.lastRenderedOutput = "";
+          state.lastRenderedMsgCount = 0;
           closeSessionModal();
           closeSessionsDrawer();
           state.commandValue = command;
@@ -3557,6 +3566,8 @@ export function renderApp(configPath: string): string {
           }
           state.selectedId = data.id;
           state.drafts[data.id] = "";
+          state.lastRenderedOutput = "";
+          state.lastRenderedMsgCount = 0;
           switchToSessionView(data.id);
           updateSessionSnapshot(data);
           updateSessionsList();
@@ -3612,6 +3623,8 @@ export function renderApp(configPath: string): string {
           }
           state.selectedId = data.id;
           state.drafts[data.id] = "";
+          state.lastRenderedOutput = "";
+          state.lastRenderedMsgCount = 0;
           if (inputBox) inputBox.value = "";
           if (welcomeInput) welcomeInput.value = "";
           switchToSessionView(data.id);
@@ -4070,12 +4083,26 @@ export function renderApp(configPath: string): string {
       }
 
       function renderChat() {
+        if (state.renderPending) return;
+        state.renderPending = true;
+
+        requestAnimationFrame(function() {
+          doRenderChat();
+          state.renderPending = false;
+        });
+      }
+
+      function doRenderChat() {
         var chatOutput = document.getElementById("chat-output");
         if (!chatOutput) return;
 
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!selectedSession) {
-          chatOutput.innerHTML = '<div class="empty-state"><strong>未选择会话</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
+          if (state.lastRenderedOutput !== "none") {
+            chatOutput.innerHTML = '<div class="empty-state"><strong>未选择会话</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
+            state.lastRenderedOutput = "none";
+            state.lastRenderedMsgCount = 0;
+          }
           return;
         }
 
@@ -4083,17 +4110,58 @@ export function renderApp(configPath: string): string {
         state.parsedMessages = messages;
 
         if (messages.length === 0) {
-          chatOutput.innerHTML = '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>';
+          if (state.lastRenderedOutput !== "empty") {
+            chatOutput.innerHTML = '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>';
+            state.lastRenderedOutput = "empty";
+            state.lastRenderedMsgCount = 0;
+          }
           return;
         }
 
-        chatOutput.innerHTML = '<div class="chat-messages">' + messages.map(renderChatMessage).join("") + '</div>';
+        // Check if messages actually changed
+        var msgCount = messages.length;
+        var outputHash = selectedSession.output ? selectedSession.output.length : 0;
+        if (msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedOutput) {
+          return;
+        }
+        state.lastRenderedMsgCount = msgCount;
+        state.lastRenderedOutput = outputHash;
+
+        var chatMessages = chatOutput.querySelector(".chat-messages");
+        if (!chatMessages) {
+          // First render - create container
+          chatOutput.innerHTML = '<div class="chat-messages"></div>';
+          chatMessages = chatOutput.querySelector(".chat-messages");
+        }
+
+        var existingCount = chatMessages.querySelectorAll(".chat-message").length;
+
+        if (existingCount === 0) {
+          // Full render for first load
+          chatMessages.innerHTML = messages.map(renderChatMessage).join("");
+        } else if (msgCount > existingCount) {
+          // Incremental: only append new messages
+          for (var i = existingCount; i < messages.length; i++) {
+            var div = document.createElement("div");
+            div.innerHTML = renderChatMessage(messages[i]);
+            var el = div.firstElementChild;
+            if (el) {
+              chatMessages.appendChild(el);
+              attachCopyHandler(el);
+            }
+          }
+        } else {
+          // Message count decreased (session switched or output truncated) - full re-render
+          chatMessages.innerHTML = messages.map(renderChatMessage).join("");
+          attachAllCopyHandlers(chatMessages);
+        }
 
         // Scroll to bottom
         chatOutput.scrollTop = chatOutput.scrollHeight;
+      }
 
-        // Attach copy handlers
-        chatOutput.querySelectorAll(".code-copy").forEach(function(btn) {
+      function attachCopyHandler(el) {
+        el.querySelectorAll(".code-copy").forEach(function(btn) {
           btn.addEventListener("click", function() {
             var codeBlock = btn.closest(".code-block");
             var code = codeBlock ? codeBlock.querySelector("code") : null;
@@ -4104,6 +4172,28 @@ export function renderApp(configPath: string): string {
                 setTimeout(function() {
                   btn.textContent = "Copy";
                   btn.classList.remove("copied");
+                }, 2000);
+              });
+            }
+          });
+        });
+      }
+
+      function attachAllCopyHandlers(container) {
+        container.querySelectorAll(".code-copy").forEach(function(btn) {
+          // Remove existing listeners by cloning
+          var clone = btn.cloneNode(true);
+          btn.parentNode.replaceChild(clone, btn);
+          clone.addEventListener("click", function() {
+            var codeBlock = clone.closest(".code-block");
+            var code = codeBlock ? codeBlock.querySelector("code") : null;
+            if (code) {
+              navigator.clipboard.writeText(code.textContent || "").then(function() {
+                clone.textContent = "Copied!";
+                clone.classList.add("copied");
+                setTimeout(function() {
+                  clone.textContent = "Copy";
+                  clone.classList.remove("copied");
                 }, 2000);
               });
             }
