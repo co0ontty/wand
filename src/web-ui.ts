@@ -4310,26 +4310,14 @@ export function renderApp(configPath: string): string {
         if (!output) return messages;
 
         var text = String(output || "");
-        var ansiStripped = "";
-        for (var i = 0; i < text.length; i += 1) {
-          var ch = text.charCodeAt(i);
-          if (ch === 27) {
-            i += 1;
-            if (i >= text.length) break;
-            var next = text.charCodeAt(i);
-            if (next === 91) {
-              i += 1;
-              while (i < text.length) {
-                var c = text.charCodeAt(i);
-                if (c >= 64 && c <= 126) break;
-                i += 1;
-              }
-            } else if (next >= 64 && next <= 126) {
-            }
-            continue;
-          }
-          ansiStripped += text.charAt(i);
-        }
+        // Comprehensive ANSI/escape sequence stripping
+        var ansiStripped = text
+          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')  // CSI sequences
+          .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '')  // OSC sequences
+          .replace(/\x1b[><=eP_X^]/g, '')  // Single-char escapes
+          .replace(/[\x00-\x08\x0b-\x0c\x0e-\x1f]/g, '')  // Control chars (except \n \r \t)
+          .replace(/\xa0/g, ' ')  // NBSP to regular space
+          .replace(/\r/g, '\n');
         var newline = String.fromCharCode(10);
         var carriageReturn = String.fromCharCode(13);
         ansiStripped = ansiStripped.split(carriageReturn).join(newline);
@@ -4418,23 +4406,46 @@ export function renderApp(configPath: string): string {
 
         if (!contentLines.length) return messages;
 
-        // Find user command in content lines (skip prompt suggestions like Try"...")
+        // Find user command in content lines
         var userCmdIndex = -1;
+        var userText = "";
+
         for (var i = 0; i < contentLines.length; i++) {
           var line = contentLines[i];
+
+          // Check for ❯ prompt followed by actual user input (not Try"..." suggestion)
           if (line.indexOf("❯") === 0) {
-            // Skip prompt suggestions (Try"..." pattern)
             var afterPrompt = line.replace(/^❯\s*/, "");
-            if (afterPrompt.indexOf('Try"') !== 0 && afterPrompt.indexOf('Try "') !== 0) {
+            if (afterPrompt.indexOf('Try"') !== 0 && afterPrompt.indexOf('Try "') !== 0 && afterPrompt.trim()) {
+              userCmdIndex = i;
+              userText = afterPrompt.trim();
+              break;
+            }
+          }
+        }
+
+        // If no ❯ prompt found, look for standalone user input (lines that look like user commands)
+        // This handles cases where the user input appears without the ❯ prefix
+        if (!userText) {
+          for (var i = 0; i < contentLines.length; i++) {
+            var line = contentLines[i];
+            // Skip noise lines and system messages
+            if (line.indexOf('Try"') === 0 || line.indexOf('Try "') === 0) continue;
+            if (line.indexOf('Failed to install') !== -1) continue;
+            if (line.indexOf('ctrl+g') !== -1) continue;
+            if (line.indexOf('● ') === 0) continue;
+            if (line.indexOf('Claude Code has switched') !== -1) continue;
+            if (line.indexOf('esctointerrupt') !== -1) continue;
+            if (line.length < 2 || line.length > 100) continue;
+            // Looks like user input (starts with letter, reasonable length)
+            if (/^[a-zA-Z]/.test(line)) {
+              userText = line.trim();
               userCmdIndex = i;
               break;
             }
           }
         }
 
-        if (userCmdIndex === -1) return messages;
-
-        var userText = contentLines[userCmdIndex].replace(/^❯\s*/, "").trim();
         if (userText) {
           messages.push({ role: "user", content: userText });
         }
