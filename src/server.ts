@@ -187,7 +187,6 @@ self.addEventListener('fetch', (event) => {
 
   app.post("/api/login", (req, res) => {
     const clientIp = req.ip || req.socket.remoteAddress || "unknown";
-
     if (!checkRateLimit(clientIp)) {
       res.status(429).json({ error: "登录尝试次数过多，请在 15 分钟后再试。" });
       return;
@@ -262,6 +261,13 @@ self.addEventListener('fetch', (event) => {
     const q = typeof req.query.q === "string" ? req.query.q : "";
     const targetPath = path.resolve(process.cwd(), q);
 
+    // Security check: ensure the resolved path is within the current working directory
+    const allowedBase = process.cwd();
+    if (!targetPath.startsWith(allowedBase)) {
+      res.status(403).json({ error: "访问被拒绝：路径必须在项目目录内。" });
+      return;
+    }
+
     try {
       const entries = await readdir(targetPath, { withFileTypes: true });
       const items = entries
@@ -280,6 +286,76 @@ self.addEventListener('fetch', (event) => {
       res.json(items);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法读取目录。可能原因：路径不存在或权限不足。") });
+    }
+  });
+
+  // File search API - supports fuzzy matching across directory tree
+  app.get("/api/file-search", async (req, res) => {
+    const query = typeof req.query.q === "string" ? req.query.q : "";
+    const cwd = typeof req.query.cwd === "string" ? req.query.cwd : process.cwd();
+    const maxDepth = typeof req.query.depth === "string" ? parseInt(req.query.depth, 10) : 5;
+    const maxResults = typeof req.query.limit === "string" ? parseInt(req.query.limit, 10) : 50;
+
+    // Security check: ensure cwd is within allowed base
+    const allowedBase = process.cwd();
+    const resolvedCwd = path.resolve(allowedBase, cwd);
+    if (!resolvedCwd.startsWith(allowedBase)) {
+      res.status(403).json({ error: "访问被拒绝：路径必须在项目目录内。" });
+      return;
+    }
+
+    if (!query) {
+      res.json({ results: [], query: "", cwd: resolvedCwd });
+      return;
+    }
+
+    try {
+      const results: Array<{ path: string; name: string; type: "dir" | "file"; matchScore: number }> = [];
+      const queryLower = query.toLowerCase();
+
+      // Recursive search function
+      async function searchDir(dirPath: string, currentDepth: number): Promise<void> {
+        if (currentDepth > maxDepth || results.length >= maxResults) return;
+
+        const entries = await readdir(dirPath, { withFileTypes: true });
+        for (const entry of entries) {
+          if (results.length >= maxResults) break;
+
+          // Skip hidden files and node_modules
+          if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+
+          const entryPath = path.join(dirPath, entry.name);
+          const nameLower = entry.name.toLowerCase();
+
+          // Check if name matches query (fuzzy match)
+          const matchIndex = nameLower.indexOf(queryLower);
+          if (matchIndex !== -1) {
+            results.push({
+              path: entryPath,
+              name: entry.name,
+              type: entry.isDirectory() ? "dir" : "file",
+              matchScore: matchIndex // Lower score = better match (appears earlier in name)
+            });
+          }
+
+          // Recurse into directories
+          if (entry.isDirectory()) {
+            await searchDir(entryPath, currentDepth + 1);
+          }
+        }
+      }
+
+      await searchDir(resolvedCwd, 0);
+
+      // Sort by match score (earlier match = better) and then alphabetically
+      results.sort((a, b) => {
+        if (a.matchScore !== b.matchScore) return a.matchScore - b.matchScore;
+        return a.name.localeCompare(b.name);
+      });
+
+      res.json({ results: results.slice(0, maxResults), query, cwd: resolvedCwd });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "搜索失败。可能原因：路径不存在或权限不足。") });
     }
   });
 
@@ -372,18 +448,84 @@ self.addEventListener('fetch', (event) => {
 
   const wss = new WebSocketServer({ server, path: "/ws" });
 
-  // Track WebSocket clients with their subscriptions
-  const wsClients = new Set<WebSocket>();
+  // Track WebSocket clients with their subscriptions and send queues
+  interface WsClient {
+    ws: WebSocket;
+    sendQueue: string[];
+    sendInProgress: boolean;
+    backpressurePaused: boolean;
+    lastOutputBySession: Map<string, { output: string; messages?: string; timestamp: number }>;
+  }
+  const wsClients = new Set<WsClient>();
+  const MAX_QUEUE_SIZE = 500; // Max messages in queue before applying backpressure
+  const OUTPUT_DEBOUNCE_MS = 50; // Debounce PTY output updates to reduce flicker
 
-  // Broadcast process events to WebSocket clients
+  // Output debounce cache - batch rapid output events per session
+  const outputDebounceCache = new Map<string, { event: ProcessEvent; timer: NodeJS.Timeout }>();
+
+  // Process send queue for a WebSocket client
+  function processWsQueue(client: WsClient): void {
+    if (client.sendInProgress || client.sendQueue.length === 0 || client.backpressurePaused) {
+      return;
+    }
+    client.sendInProgress = true;
+    const message = client.sendQueue.shift()!;
+    if (client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(message, (err) => {
+        client.sendInProgress = false;
+        if (err) {
+          // Error sending, drop message
+          return;
+        }
+        // Check backpressure threshold
+        const threshold = MAX_QUEUE_SIZE * 0.8;
+        if (client.backpressurePaused && client.sendQueue.length < threshold) {
+          client.backpressurePaused = false;
+        }
+        // Continue processing queue
+        processWsQueue(client);
+      });
+    } else {
+      client.sendInProgress = false;
+    }
+  }
+
+  // Broadcast process events to WebSocket clients with debouncing and backpressure control
   processes.on("process", (event: ProcessEvent) => {
+    // Debounce output events to reduce flicker during rapid streaming
+    if (event.type === "output") {
+      const existing = outputDebounceCache.get(event.sessionId);
+      if (existing) {
+        clearTimeout(existing.timer);
+      }
+      const timer = setTimeout(() => {
+        outputDebounceCache.delete(event.sessionId);
+        broadcastEvent(event);
+      }, OUTPUT_DEBOUNCE_MS);
+      outputDebounceCache.set(event.sessionId, { event, timer });
+      return;
+    }
+
+    // Non-output events (started, ended, status) are sent immediately
+    broadcastEvent(event);
+  });
+
+  function broadcastEvent(event: ProcessEvent): void {
     const message = JSON.stringify(event);
-    for (const ws of wsClients) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(message);
+    for (const client of wsClients) {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        // Apply backpressure if queue is too large
+        if (client.sendQueue.length >= MAX_QUEUE_SIZE) {
+          client.backpressurePaused = true;
+          continue;
+        }
+        if (!client.backpressurePaused) {
+          client.sendQueue.push(message);
+          processWsQueue(client);
+        }
       }
     }
-  });
+  }
 
   wss.on("connection", (ws, req) => {
     const sessionToken = readSessionCookie(req);
@@ -393,10 +535,17 @@ self.addEventListener('fetch', (event) => {
       return;
     }
 
-    wsClients.add(ws);
+    const client: WsClient = {
+      ws,
+      sendQueue: [],
+      sendInProgress: false,
+      backpressurePaused: false,
+      lastOutputBySession: new Map()
+    };
+    wsClients.add(client);
 
     ws.on("close", () => {
-      wsClients.delete(ws);
+      wsClients.delete(client);
     });
 
     ws.on("error", () => {
@@ -411,7 +560,25 @@ self.addEventListener('fetch', (event) => {
           // Client wants updates for a specific session
           const snapshot = processes.get(msg.sessionId);
           if (snapshot) {
-            ws.send(JSON.stringify({ type: "init", sessionId: msg.sessionId, data: snapshot }));
+            // Send full session snapshot including messages for reconnection recovery
+            ws.send(JSON.stringify({
+              type: "init",
+              sessionId: msg.sessionId,
+              data: {
+                ...snapshot,
+                // Ensure messages are included for chat mode recovery
+                messages: snapshot.messages,
+                // Include full output for terminal mode recovery
+                output: snapshot.output
+              }
+            }));
+          } else {
+            // Session not found - might be deleted or never existed
+            ws.send(JSON.stringify({
+              type: "error",
+              sessionId: msg.sessionId,
+              error: "Session not found"
+            }));
           }
         }
       } catch {

@@ -58,6 +58,8 @@ interface SessionRecord extends SessionSnapshot {
   messages: ConversationTurn[];
   /** Whether a JSON chat turn is currently in progress */
   jsonChatBusy: boolean;
+  /** Child process reference for native mode (for cleanup) */
+  childProcess: import("node:child_process").ChildProcess | null;
 }
 
 const MAX_SESSIONS = 50;
@@ -94,7 +96,8 @@ export class ProcessManager extends EventEmitter {
         sessionIdWindow: "",
         storedOutput: snapshot.output,
         messages: snapshot.messages ?? [],
-        jsonChatBusy: false
+        jsonChatBusy: false,
+        childProcess: null
       });
     }
     this.archiveExpiredSessions();
@@ -165,7 +168,8 @@ export class ProcessManager extends EventEmitter {
       sessionIdWindow: "",
       storedOutput: "",
       messages: [],
-      jsonChatBusy: false
+      jsonChatBusy: false,
+      childProcess: null
     };
 
     this.sessions.set(id, record);
@@ -216,14 +220,17 @@ export class ProcessManager extends EventEmitter {
       current.ptyProcess.write("\n");
     };
 
+    // Debounce rapid PTY output events to reduce WebSocket flooding
+    let outputDebounceTimer: NodeJS.Timeout | null = null;
+    let pendingChunk = "";
+
     child.onData((chunk: string) => {
       const rec = this.sessions.get(id);
       if (!rec) return;
 
       rec.output = appendWindow(rec.output, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
-      this.persist(rec);
-      this.emitEvent({ type: "output", sessionId: id, data: { chunk, output: rec.output } });
 
+      // Capture Claude session ID from output
       if (!rec.claudeSessionId) {
         rec.sessionIdWindow = appendWindow(rec.sessionIdWindow, chunk, OUTPUT_WINDOW_SIZE);
         const match = CLAUDE_SESSION_ID_PATTERN.exec(rec.sessionIdWindow);
@@ -241,6 +248,19 @@ export class ProcessManager extends EventEmitter {
       if (initialInput && !initialInputSent && chunk.includes("❯")) {
         sendInitialInput();
       }
+
+      // Batch rapid output chunks to reduce WebSocket messages
+      pendingChunk += chunk;
+      if (outputDebounceTimer) {
+        clearTimeout(outputDebounceTimer);
+      }
+      outputDebounceTimer = setTimeout(() => {
+        const finalChunk = pendingChunk;
+        pendingChunk = "";
+        outputDebounceTimer = null;
+        this.persist(rec);
+        this.emitEvent({ type: "output", sessionId: id, data: { chunk: finalChunk, output: rec.output } });
+      }, 30); // 30ms debounce for PTY mode
     });
 
     child.onExit(({ exitCode }) => {
@@ -351,6 +371,9 @@ export class ProcessManager extends EventEmitter {
       stdio: ["ignore", "pipe", "pipe"]
     });
 
+    // Store child process reference for cleanup
+    record.childProcess = child;
+
     // Collect NDJSON lines from stdout
     let stdoutBuffer = "";
     const assistantBlocks: Array<{ type: string; [key: string]: unknown }> = [];
@@ -364,6 +387,7 @@ export class ProcessManager extends EventEmitter {
       const lines = stdoutBuffer.split("\n");
       stdoutBuffer = lines.pop() || ""; // Keep incomplete last line in buffer
 
+      let hasNewContent = false;
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
@@ -376,14 +400,19 @@ export class ProcessManager extends EventEmitter {
           if (event.session_id && !turnSessionId) {
             turnSessionId = event.session_id;
           }
+          hasNewContent = true;
         } catch {
           // Not valid JSON — might be debug output, append to raw output
           record.output = appendWindow(record.output, trimmed + "\n", OUTPUT_MAX_SIZE);
+          hasNewContent = true;
         }
       }
 
       this.persist(record);
-      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output, messages: record.messages } });
+      // Only emit output event if there's actual new content
+      if (hasNewContent) {
+        this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output, messages: record.messages } });
+      }
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -590,13 +619,21 @@ export class ProcessManager extends EventEmitter {
 
   stop(id: string): SessionSnapshot {
     const record = this.mustGet(id);
-    if (!record.ptyProcess || record.status !== "running") {
+    if (record.status !== "running") {
       return this.snapshot(record);
     }
 
     try {
       record.stopRequested = true;
-      record.ptyProcess.kill();
+      // For native mode, kill the child process
+      if (record.mode === "native" && record.childProcess) {
+        record.childProcess.kill();
+        record.childProcess = null;
+      }
+      // For PTY mode, kill the pty process
+      if (record.ptyProcess) {
+        record.ptyProcess.kill();
+      }
     } catch {
       record.status = "failed";
       record.endedAt = new Date().toISOString();
@@ -609,10 +646,18 @@ export class ProcessManager extends EventEmitter {
 
   delete(id: string): void {
     const record = this.mustGet(id);
-    if (record.ptyProcess && record.status === "running") {
+    if (record.status === "running") {
       try {
         record.stopRequested = true;
-        record.ptyProcess.kill();
+        // For native mode, kill the child process
+        if (record.mode === "native" && record.childProcess) {
+          record.childProcess.kill();
+          record.childProcess = null;
+        }
+        // For PTY mode, kill the pty process
+        if (record.ptyProcess) {
+          record.ptyProcess.kill();
+        }
       } catch {
         // Ignore and continue deleting persisted state.
       }

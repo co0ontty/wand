@@ -133,3 +133,10 @@
   - 模型选择器：新增下拉框选择 Claude 模型（3.5 Sonnet / 3 Opus / 3 Haiku），自动追加 `--model` 参数
   - 文件浏览器：侧边栏新增 Files tab，支持目录树展示、展开/折叠、异步加载子目录
   - 新增 `/api/directory` 接口返回目录文件列表（目录优先，字母排序）
+
+### 2026-03-23
+- UX 问题修复
+  - 修复语言属性错误：`<html lang="en">` → `<html lang="zh-CN">`
+  - 修复图标按钮无障碍标签：文件浏览器刷新按钮添加 `aria-label="刷新文件列表"`
+  - 修复 HTTPS 提示误导：根据 `config.https` 动态显示正确的协议提示信息
+- 更新 UI_REVIEW.md 文档，记录已修复问题

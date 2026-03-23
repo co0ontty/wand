@@ -1,7 +1,7 @@
 export function renderApp(configPath: string): string {
   var scriptClose = String.fromCharCode(60) + String.fromCharCode(47) + "script>";
   return `<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -393,6 +393,58 @@ export function renderApp(configPath: string): string {
 
     .file-explorer-refresh:hover { background: var(--bg-tertiary); color: var(--text-secondary); }
 
+    .file-search-box {
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .file-search-input {
+      flex: 1;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.8125rem;
+      font-family: var(--font-sans);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+
+    .file-search-input:focus {
+      border-color: var(--accent);
+      background: var(--bg-primary);
+    }
+
+    .file-search-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .file-search-clear {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 4px;
+      border-radius: 4px;
+      color: var(--text-muted);
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .file-search-clear.visible {
+      display: flex;
+    }
+
+    .file-search-clear:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+    }
+
     .sidebar-body {
       display: flex;
       flex-direction: column;
@@ -706,19 +758,16 @@ export function renderApp(configPath: string): string {
       padding-top: 16px;
     }
 
+    @keyframes messageSlide {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
     .chat-message {
       display: flex;
       flex-direction: column;
       max-width: 85%;
-    }
-
-    .chat-message.animate-in {
-      animation: messageSlide 0.3s ease;
-    }
-
-    @keyframes messageSlide {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
+      margin: 4px 0;
     }
 
     .chat-message.user {
@@ -729,6 +778,10 @@ export function renderApp(configPath: string): string {
       align-self: flex-start;
     }
 
+    .chat-message.animate-in {
+      animation: messageSlide 0.3s ease;
+    }
+
     .chat-message-avatar {
       width: 28px;
       height: 28px;
@@ -736,8 +789,10 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 14px;
+      font-size: 13px;
+      font-weight: 600;
       margin-bottom: 6px;
+      flex-shrink: 0;
     }
 
     .chat-message.user .chat-message-avatar {
@@ -749,28 +804,28 @@ export function renderApp(configPath: string): string {
       color: white;
     }
 
+    .chat-message-bubble {
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      font-size: 0.875rem;
+      line-height: 1.6;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+
     .chat-message.user .chat-message-bubble {
       background: linear-gradient(135deg, #c5653d 0%, #a95130 100%);
       color: white;
       border-bottom-right-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
     }
 
     .chat-message.assistant .chat-message-bubble {
       background: rgba(255, 251, 245, 0.95);
       border: 1px solid var(--border-subtle);
       border-bottom-left-radius: 4px;
-    }
-
-    .chat-message-bubble {
-      padding: 12px 16px;
-      border-radius: var(--radius-md);
-      font-size: 0.875rem;
-      line-height: 1.6;
-      word-wrap: break-word;
-    }
-
-    .chat-message.user .chat-message-bubble {
-      font-family: var(--font-mono);
+      color: var(--text-primary);
     }
 
     /* Thinking Card (Deep Thought) */
@@ -982,39 +1037,54 @@ export function renderApp(configPath: string): string {
       border-radius: 4px;
     }
     .markdown-content .code-block {
-      margin: 10px 0;
+      margin: 12px 0;
       border-radius: var(--radius-md);
       overflow: hidden;
       background: #1f1b17;
       border: 1px solid rgba(122, 91, 64, 0.35);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     }
     .markdown-content .code-block-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 12px;
+      padding: 6px 12px;
       background: rgba(122, 91, 64, 0.2);
       border-bottom: 1px solid rgba(122, 91, 64, 0.2);
+      gap: 8px;
     }
     .markdown-content .code-lang {
       font-family: var(--font-mono);
-      font-size: 0.6875rem;
+      font-size: 0.7rem;
       color: #8c735f;
       text-transform: lowercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .markdown-content .code-copy {
       font-family: var(--font-sans);
-      font-size: 0.6875rem;
-      padding: 4px 8px;
-      border-radius: 4px;
+      font-size: 0.7rem;
+      padding: 4px 10px;
+      border-radius: 6px;
       border: 1px solid rgba(255, 255, 255, 0.15);
-      background: rgba(255, 255, 255, 0.08);
-      color: #c9b8a8;
+      background: rgba(255, 255, 255, 0.1);
+      color: #d9c4b0;
       cursor: pointer;
       transition: all var(--transition-fast);
+      white-space: nowrap;
+      flex-shrink: 0;
     }
-    .markdown-content .code-copy:hover { background: rgba(255, 255, 255, 0.15); color: white; }
-    .markdown-content .code-copy.copied { color: #7fa36f; border-color: rgba(127, 163, 111, 0.4); }
+    .markdown-content .code-copy:hover {
+      background: rgba(255, 255, 255, 0.18);
+      color: white;
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+    .markdown-content .code-copy.copied {
+      color: #7fa36f;
+      border-color: rgba(127, 163, 111, 0.5);
+      background: rgba(127, 163, 111, 0.15);
+    }
     .markdown-content pre {
       margin: 0;
       padding: 12px;
@@ -1443,6 +1513,18 @@ export function renderApp(configPath: string): string {
       background: var(--danger-muted);
       border-radius: var(--radius-md);
       margin-top: 12px;
+      animation: shake 0.3s ease;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-4px); }
+      75% { transform: translateX(4px); }
+    }
+
+    .field-input[data-error="true"] {
+      border-color: var(--danger);
+      box-shadow: 0 0 0 3px var(--danger-muted);
     }
 
     .hint { font-size: 0.6875rem; color: var(--text-muted); margin-top: 12px; }
@@ -2054,7 +2136,9 @@ export function renderApp(configPath: string): string {
         lastRenderedHash: 0,
         lastRenderedMsgCount: 0,
         lastRenderedEmpty: null,
-        renderPending: false
+        renderPending: false,
+        fileSearchQuery: "",
+        allFiles: []
       };
 
       // PWA install prompt handling
@@ -2215,7 +2299,8 @@ export function renderApp(configPath: string): string {
               '<p class="login-tip">访问地址请使用 <strong>http://</strong>，不要用 https://。</p>' +
               '<div class="field">' +
                 '<label class="field-label" for="password">密码</label>' +
-                '<input id="password" type="password" class="field-input" placeholder="输入密码" autocomplete="current-password" />' +
+                '<input id="password" type="password" class="field-input" placeholder="输入密码" autocomplete="current-password" data-error="false" />' +
+                '<p class="hint">密码至少需要 6 个字符</p>' +
               '</div>' +
               '<button id="login-button" class="btn btn-primary btn-block">进入控制台</button>' +
               '<p id="login-error" class="error-message hidden"></p>' +
@@ -2293,8 +2378,12 @@ export function renderApp(configPath: string): string {
                   '<div class="file-explorer-header">' +
                     '<span class="file-explorer-path" id="file-explorer-cwd">' + escapeHtml(state.config && state.config.defaultCwd ? state.config.defaultCwd : "") + '</span>' +
                     '<div class="file-explorer-actions">' +
-                      '<button class="file-explorer-refresh" id="file-explorer-refresh" title="Refresh">↻</button>' +
+                      '<button class="file-explorer-refresh" id="file-explorer-refresh" title="刷新" aria-label="刷新文件列表">↻</button>' +
                     '</div>' +
+                  '</div>' +
+                  '<div class="file-search-box">' +
+                    '<input type="text" id="file-search-input" class="file-search-input" placeholder="搜索文件..." autocomplete="off" />' +
+                    '<button class="file-search-clear" id="file-search-clear" type="button" aria-label="清除搜索">×</button>' +
                   '</div>' +
                   '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(state.config && state.config.defaultCwd ? state.config.defaultCwd : "") + '</div>' +
                 '</div>' +
@@ -2302,7 +2391,7 @@ export function renderApp(configPath: string): string {
               '<div class="sidebar-footer">' +
                 '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
                 '<div class="sidebar-meta">' +
-                  '<span class="protocol-note">请使用 HTTP 访问</span>' +
+                  '<span class="protocol-note">' + ((state.config && state.config.https) ? '当前使用 HTTPS 安全连接' : '请使用 HTTP 访问') + '</span>' +
                   '<span class="config-path">' + escapeHtml(configPath) + '</span>' +
                 '</div>' +
               '</div>' +
@@ -2354,6 +2443,7 @@ export function renderApp(configPath: string): string {
                           renderModeOptions(preferredTool, composerMode) +
                         '</select>' +
                       '</div>' +
+                      '<p class="hint" id="mode-hint" style="margin-top: 8px; font-size: 0.75rem; color: var(--text-muted);">' + getModeHint(composerMode) + '</p>' +
                     '</div>' +
                   '</div>' +
                   '<div class="input-actions">' +
@@ -2473,16 +2563,52 @@ export function renderApp(configPath: string): string {
               explorer.innerHTML = '<div class="file-explorer empty">Empty directory or inaccessible.</div>';
               return;
             }
-            explorer.innerHTML = '<div class="file-tree" id="file-tree" data-cwd="' + escapeHtml(cwd) + '">' +
-              items.map(function(item) {
-                return renderFileTreeItem(item);
-              }).join("") +
-            '</div>';
-            attachFileTreeListeners();
+            state.allFiles = items;
+            filterFileTree();
           })
           .catch(function() {
             explorer.innerHTML = '<div class="file-explorer empty">Failed to load files.</div>';
           });
+      }
+
+      function filterFileTree() {
+        var explorer = document.getElementById("file-explorer");
+        var cwdEl = document.getElementById("file-explorer-cwd");
+        if (!explorer) return;
+        var cwd = cwdEl ? cwdEl.textContent : "";
+        if (!cwd) return;
+
+        var query = state.fileSearchQuery;
+        var items = state.allFiles || [];
+
+        // 如果没有搜索词，显示所有文件
+        if (!query) {
+          explorer.innerHTML = '<div class="file-tree" id="file-tree" data-cwd="' + escapeHtml(cwd) + '">' +
+            items.map(function(item) {
+              return renderFileTreeItem(item);
+            }).join("") +
+          '</div>';
+          attachFileTreeListeners();
+          return;
+        }
+
+        // 模糊匹配文件名（大小写不敏感）
+        var lowerQuery = query.toLowerCase();
+        var filtered = items.filter(function(item) {
+          return item.name.toLowerCase().indexOf(lowerQuery) !== -1;
+        });
+
+        if (filtered.length === 0) {
+          explorer.innerHTML = '<div class="file-explorer empty">没有找到匹配的文件</div>';
+          return;
+        }
+
+        explorer.innerHTML = '<div class="file-tree" id="file-tree" data-cwd="' + escapeHtml(cwd) + '">' +
+          filtered.map(function(item) {
+            return renderFileTreeItem(item);
+          }).join("") +
+        '</div>';
+        attachFileTreeListeners();
       }
 
       function renderFileTreeItem(item) {
@@ -2855,6 +2981,29 @@ export function renderApp(configPath: string): string {
         var fileRefresh = document.getElementById("file-explorer-refresh");
         if (fileRefresh) fileRefresh.addEventListener("click", refreshFileExplorer);
 
+        // File search
+        var fileSearchInput = document.getElementById("file-search-input");
+        var fileSearchClear = document.getElementById("file-search-clear");
+        if (fileSearchInput) {
+          fileSearchInput.addEventListener("input", function(e) {
+            state.fileSearchQuery = e.target.value.trim();
+            if (fileSearchClear) {
+              fileSearchClear.classList.toggle("visible", state.fileSearchQuery.length > 0);
+            }
+            filterFileTree();
+          });
+        }
+        if (fileSearchClear) {
+          fileSearchClear.addEventListener("click", function() {
+            state.fileSearchQuery = "";
+            if (fileSearchInput) {
+              fileSearchInput.value = "";
+            }
+            fileSearchClear.classList.remove("visible");
+            filterFileTree();
+          });
+        }
+
         initTerminal();
         setupMobileKeyboardHandlers();
         setupVisualViewportHandlers();
@@ -3087,10 +3236,21 @@ export function renderApp(configPath: string): string {
 
       function renderModeOptions(tool, selectedMode) {
         return getSupportedModes(tool).map(function(mode) {
-          return '<option value="' + escapeHtml(mode) + '"' + (mode === selectedMode ? " selected" : "") + '>' +
+          var hint = getModeHint(mode);
+          return '<option value="' + escapeHtml(mode) + '"' + (mode === selectedMode ? " selected" : "") + ' title="' + hint + '">' +
             escapeHtml(getModeLabel(mode)) +
           '</option>';
         }).join("");
+      }
+
+      function getModeHint(mode) {
+        var hints = {
+          'default': '标准模式 - 需要确认文件修改',
+          'full-access': '完全访问 - 自动确认所有操作',
+          'auto-edit': '自动编辑 - 自动确认文件修改',
+          'native': '原生模式 - 返回结构化输出'
+        };
+        return hints[mode] || '';
       }
 
       function replaceCommandBase(command, nextBase) {
@@ -3108,6 +3268,9 @@ export function renderApp(configPath: string): string {
         state.chatMode = getSafeModeForTool(tool, state.chatMode);
         select.innerHTML = renderModeOptions(tool, state.chatMode);
         select.value = state.chatMode;
+        // 更新模式提示
+        var modeHint = document.getElementById("mode-hint");
+        if (modeHint) modeHint.textContent = getModeHint(state.chatMode);
       }
 
       function applyCurrentView() {
@@ -3382,6 +3545,10 @@ export function renderApp(configPath: string): string {
         }, 100);
       }
 
+      // Store last focused element for focus trap
+      var lastFocusedElement = null;
+      var focusTrapHandler = null;
+
       function openSessionModal() {
         state.modalOpen = true;
         state.sessionsDrawerOpen = false;
@@ -3389,6 +3556,8 @@ export function renderApp(configPath: string): string {
         var modal = document.getElementById("session-modal");
         if (modal) {
           modal.classList.remove("hidden");
+          // Store last focused element to restore on close
+          lastFocusedElement = document.activeElement;
           var commandEl = document.getElementById("command");
           var defaultTool = getPreferredTool();
           var fallbackCommand = state.commandValue || state.preferredCommand || defaultTool;
@@ -3398,29 +3567,86 @@ export function renderApp(configPath: string): string {
           if (commandEl) commandEl.value = state.commandValue;
           syncSessionModalUI();
           setTimeout(function() { document.getElementById("command").focus(); }, 20);
+          // Setup focus trap
+          setupFocusTrap(modal);
         }
       }
 
       function closeSessionModal() {
         state.modalOpen = false;
         var modal = document.getElementById("session-modal");
-        if (modal) modal.classList.add("hidden");
+        if (modal) {
+          modal.classList.add("hidden");
+          // Remove focus trap
+          if (focusTrapHandler) {
+            document.removeEventListener("keydown", focusTrapHandler);
+            focusTrapHandler = null;
+          }
+          // Restore focus to last focused element
+          if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+            lastFocusedElement.focus();
+          }
+        }
         hidePathSuggestions();
+      }
+
+      function setupFocusTrap(modal) {
+        // Focusable elements selector
+        var focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+        focusTrapHandler = function(e) {
+          if (e.key !== "Tab") return;
+
+          var focusableElements = modal.querySelectorAll(focusableSelector);
+          var firstEl = focusableElements[0];
+          var lastEl = focusableElements[focusableElements.length - 1];
+
+          if (!firstEl || !lastEl) return;
+
+          // Shift + Tab
+          if (e.shiftKey) {
+            if (document.activeElement === firstEl) {
+              e.preventDefault();
+              lastEl.focus();
+            }
+          } else {
+            // Tab
+            if (document.activeElement === lastEl) {
+              e.preventDefault();
+              firstEl.focus();
+            }
+          }
+        };
+
+        document.addEventListener("keydown", focusTrapHandler);
       }
 
       function openSettingsModal() {
         var modal = document.getElementById("settings-modal");
         if (modal) {
           modal.classList.remove("hidden");
+          lastFocusedElement = document.activeElement;
           document.getElementById("new-password").value = "";
           document.getElementById("confirm-password").value = "";
           hideSettingsMessages();
+          setupFocusTrap(modal);
         }
       }
 
       function closeSettingsModal() {
         var modal = document.getElementById("settings-modal");
-        if (modal) modal.classList.add("hidden");
+        if (modal) {
+          modal.classList.add("hidden");
+          // Remove focus trap
+          if (focusTrapHandler) {
+            document.removeEventListener("keydown", focusTrapHandler);
+            focusTrapHandler = null;
+          }
+          // Restore focus to last focused element
+          if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+            lastFocusedElement.focus();
+          }
+        }
       }
 
       function hideSettingsMessages() {
@@ -4089,6 +4315,10 @@ export function renderApp(configPath: string): string {
       }
 
       function deleteSession(id) {
+        // 二次确认
+        if (!confirm("确定要删除这个会话吗？此操作无法撤销。")) {
+          return;
+        }
         fetch("/api/sessions/" + id, { method: "DELETE" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
@@ -4497,28 +4727,51 @@ export function renderApp(configPath: string): string {
           }
           chatMessages.insertBefore(fragment, chatMessages.firstChild);
           attachAllCopyHandlers(chatMessages);
-          // Scroll to bottom after adding new messages
-          chatOutput.scrollTop = chatOutput.scrollHeight;
+          // Smart scroll: only auto-scroll if user is near bottom
+          smartScrollToBottom(chatOutput);
         } else if (msgCount === existingCount && outputHash !== prevHash) {
           // Same message count but content changed (streaming update) — update first message only (which is newest in column-reverse)
+          // Optimized: only update if content actually changed to avoid flicker
           var firstEl = chatMessages.querySelector(".chat-message");
-          if (firstEl) {
-            var tmpDiv = document.createElement("div");
-            tmpDiv.innerHTML = renderChatMessage(messages[0]);
-            var newEl = tmpDiv.firstElementChild;
-            if (newEl) {
-              chatMessages.replaceChild(newEl, firstEl);
-              attachCopyHandler(newEl);
+          if (firstEl && messages[0]) {
+            // Check if the message content actually changed
+            var currentContent = firstEl.querySelector(".chat-message-bubble");
+            if (currentContent) {
+              var newContent = messages[0].role === "assistant"
+                ? renderMarkdown(messages[0].content || "")
+                : escapeHtml(messages[0].content || "");
+              // Only update if HTML content is different
+              if (currentContent.innerHTML !== newContent) {
+                var tmpDiv = document.createElement("div");
+                tmpDiv.innerHTML = renderChatMessage(messages[0]);
+                var newEl = tmpDiv.firstElementChild;
+                if (newEl) {
+                  chatMessages.replaceChild(newEl, firstEl);
+                  attachCopyHandler(newEl);
+                }
+              }
             }
           }
         } else if (msgCount < existingCount) {
           // Message count decreased (session switched or output truncated) - full re-render without animation
           chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
           attachAllCopyHandlers(chatMessages);
+          // For session switch, scroll to bottom; otherwise preserve position
+          if (state.lastRenderedEmpty === "none" || state.lastRenderedEmpty === "empty") {
+            chatOutput.scrollTop = chatOutput.scrollHeight;
+          } else {
+            smartScrollToBottom(chatOutput);
+          }
         }
+      }
 
-        // Scroll to bottom
-        chatOutput.scrollTop = chatOutput.scrollHeight;
+      // Smart scroll: only auto-scroll if user is near bottom
+      function smartScrollToBottom(container) {
+        var threshold = 100; // pixels from bottom
+        var isNearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < threshold;
+        if (isNearBottom) {
+          container.scrollTop = container.scrollHeight;
+        }
       }
 
       function attachCopyHandler(el) {
@@ -5043,12 +5296,30 @@ export function renderApp(configPath: string): string {
         if (!el) return;
         el.textContent = msg;
         el.classList.remove("hidden");
+        // Add error state to associated input field
+        var inputEl = el.previousElementSibling;
+        while (inputEl) {
+          if (inputEl.tagName === "INPUT") {
+            inputEl.setAttribute("data-error", "true");
+            break;
+          }
+          inputEl = inputEl.previousElementSibling;
+        }
       }
 
       function hideError(el) {
         if (!el) return;
         el.textContent = "";
         el.classList.add("hidden");
+        // Remove error state from associated input field
+        var inputEl = el.previousElementSibling;
+        while (inputEl) {
+          if (inputEl.tagName === "INPUT") {
+            inputEl.setAttribute("data-error", "false");
+            break;
+          }
+          inputEl = inputEl.previousElementSibling;
+        }
       }
 
       function showToast(message, type) {
@@ -5085,3 +5356,4 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
+// Trigger reload

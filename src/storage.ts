@@ -141,41 +141,48 @@ export class WandStorage {
   }
 
   saveSession(snapshot: SessionSnapshot): void {
-    this.db
-      .prepare(
-        `INSERT INTO command_sessions (
-           id, command, cwd, mode, status, exit_code, started_at, ended_at, output
-           , archived, archived_at, claude_session_id, messages
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           command = excluded.command,
-           cwd = excluded.cwd,
-           mode = excluded.mode,
-           status = excluded.status,
-           exit_code = excluded.exit_code,
-           started_at = excluded.started_at,
-           ended_at = excluded.ended_at,
-           output = excluded.output,
-           archived = excluded.archived,
-           archived_at = excluded.archived_at,
-           claude_session_id = excluded.claude_session_id,
-           messages = excluded.messages`
-      )
-      .run(
-        snapshot.id,
-        snapshot.command,
-        snapshot.cwd,
-        snapshot.mode,
-        snapshot.status,
-        snapshot.exitCode,
-        snapshot.startedAt,
-        snapshot.endedAt,
-        snapshot.output,
-        snapshot.archived ? 1 : 0,
-        snapshot.archivedAt,
-        snapshot.claudeSessionId,
-        snapshot.messages ? JSON.stringify(snapshot.messages) : null
-      );
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO command_sessions (
+             id, command, cwd, mode, status, exit_code, started_at, ended_at, output
+             , archived, archived_at, claude_session_id, messages
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             command = excluded.command,
+             cwd = excluded.cwd,
+             mode = excluded.mode,
+             status = excluded.status,
+             exit_code = excluded.exit_code,
+             started_at = excluded.started_at,
+             ended_at = excluded.ended_at,
+             output = excluded.output,
+             archived = excluded.archived,
+             archived_at = excluded.archived_at,
+             claude_session_id = excluded.claude_session_id,
+             messages = excluded.messages`
+        )
+        .run(
+          snapshot.id,
+          snapshot.command,
+          snapshot.cwd,
+          snapshot.mode,
+          snapshot.status,
+          snapshot.exitCode,
+          snapshot.startedAt,
+          snapshot.endedAt,
+          snapshot.output,
+          snapshot.archived ? 1 : 0,
+          snapshot.archivedAt,
+          snapshot.claudeSessionId,
+          snapshot.messages ? JSON.stringify(snapshot.messages) : null
+        );
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   loadSessions(): SessionSnapshot[] {
