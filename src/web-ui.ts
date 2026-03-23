@@ -2027,6 +2027,7 @@ export function renderApp(configPath: string): string {
         resizeHandler: null,
         resizeTimer: null,
         inputQueue: Promise.resolve(),
+        pendingMessages: [], // WebSocket 断线期间的消息队列
         drafts: {},
         isSyncingInputBox: false,
         loginPending: false,
@@ -3952,7 +3953,8 @@ export function renderApp(configPath: string): string {
             throw err;
           });
         }
-        if (appendEnter) {
+        // Don't send empty Enter — avoids accidental terminal behavior
+        if (appendEnter && value) {
           return queueDirectInput(getControlInput("enter")).catch(function() {
             return Promise.resolve();
           });
@@ -4017,6 +4019,17 @@ export function renderApp(configPath: string): string {
 
       function postInput(input) {
         if (!state.selectedId) return Promise.resolve();
+
+        // If WebSocket is disconnected, queue the message
+        if (!state.wsConnected) {
+          // Limit queue size to 100 messages
+          if (state.pendingMessages.length >= 100) {
+            state.pendingMessages.shift(); // Remove oldest
+          }
+          state.pendingMessages.push(input);
+          // Still try HTTP fallback
+        }
+
         return fetch("/api/sessions/" + state.selectedId + "/input", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -4029,6 +4042,20 @@ export function renderApp(configPath: string): string {
             });
           }
           return res.json();
+        });
+      }
+
+      function flushPendingMessages() {
+        if (state.pendingMessages.length === 0) return;
+
+        // Send queued messages in order
+        var queue = state.pendingMessages.slice();
+        state.pendingMessages = [];
+
+        queue.forEach(function(input) {
+          postInput(input).catch(function() {
+            // Ignore errors during flush
+          });
         });
       }
 
@@ -4218,6 +4245,8 @@ export function renderApp(configPath: string): string {
             if (state.selectedId) {
               ws.send(JSON.stringify({ type: 'subscribe', sessionId: state.selectedId }));
             }
+            // Flush pending messages after reconnection
+            flushPendingMessages();
           };
 
           ws.onmessage = function(event) {
@@ -4699,9 +4728,22 @@ export function renderApp(configPath: string): string {
         var avatar = role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
         var blocksHtml = "";
 
-        for (var i = 0; i < msg.content.length; i++) {
-          var block = msg.content[i];
-          blocksHtml += renderContentBlock(block, role);
+        try {
+          for (var i = 0; i < msg.content.length; i++) {
+            var block = msg.content[i];
+            try {
+              blocksHtml += renderContentBlock(block, role);
+            } catch (e) {
+              // Render error for individual block
+              blocksHtml += '<div class="render-error">消息块渲染失败</div>';
+            }
+          }
+        } catch (e) {
+          // Render error for entire message
+          return '<div class="chat-message ' + role + '">' +
+            avatar +
+            '<div class="chat-message-bubble"><div class="render-error">消息渲染失败</div></div>' +
+          '</div>';
         }
 
         return '<div class="chat-message ' + role + '">' +
