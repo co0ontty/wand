@@ -87,13 +87,15 @@ export function renderApp(configPath: string): string {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      gap: 14px;
-      min-height: 68px;
-      padding: 12px 18px;
+      gap: 12px;
+      min-height: 64px;
+      padding: 10px 18px;
       background: var(--bg-secondary);
       border-bottom: 1px solid var(--border-subtle);
       backdrop-filter: blur(18px);
       flex-shrink: 0;
+      position: relative;
+      z-index: 20;
     }
 
     .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -206,7 +208,7 @@ export function renderApp(configPath: string): string {
       flex: 1;
       min-height: 0;
       overflow: hidden;
-      padding-left: 320px;
+      padding-left: 300px;
       transition: padding-left var(--transition-normal);
     }
     .main-layout:not(.sidebar-open) {
@@ -234,7 +236,7 @@ export function renderApp(configPath: string): string {
       left: 0;
       bottom: 0;
       z-index: 25;
-      width: min(320px, calc(100vw - 24px));
+      width: min(300px, calc(100vw - 20px));
       background: rgba(255, 251, 245, 0.94);
       border-right: 1px solid var(--border-subtle);
       display: flex;
@@ -254,9 +256,10 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 16px;
+      padding: 12px 14px;
       border-bottom: 1px solid var(--border-subtle);
       background: rgba(255, 251, 245, 0.6);
+      flex-shrink: 0;
     }
 
     .sidebar-header-main {
@@ -288,7 +291,8 @@ export function renderApp(configPath: string): string {
       display: flex;
       border-bottom: 1px solid var(--border-subtle);
       background: rgba(255, 251, 245, 0.6);
-      padding: 0 16px;
+      padding: 0 14px;
+      flex-shrink: 0;
     }
 
     .sidebar-tab {
@@ -312,7 +316,7 @@ export function renderApp(configPath: string): string {
 
     .sidebar-tab-icon { margin-right: 4px; }
 
-    .file-explorer { flex: 1; overflow-y: auto; padding: 8px 0; }
+    .file-explorer { flex: 1; overflow-y: auto; padding: 8px 0; min-height: 0; }
     .file-explorer.empty {
       display: flex;
       align-items: center;
@@ -364,10 +368,11 @@ export function renderApp(configPath: string): string {
     .tree-children.open { display: block; }
 
     .file-explorer-header {
-      padding: 6px 12px 4px;
+      padding: 8px 12px 6px;
       display: flex;
       align-items: center;
       gap: 6px;
+      flex-shrink: 0;
     }
 
     .file-explorer-path {
@@ -377,9 +382,11 @@ export function renderApp(configPath: string): string {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      flex: 1;
+      min-width: 0;
     }
 
-    .file-explorer-actions { display: flex; gap: 4px; margin-left: auto; }
+    .file-explorer-actions { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
 
     .file-explorer-refresh {
       background: none;
@@ -389,6 +396,9 @@ export function renderApp(configPath: string): string {
       padding: 2px 4px;
       border-radius: 4px;
       color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
     .file-explorer-refresh:hover { background: var(--bg-tertiary); color: var(--text-secondary); }
@@ -398,7 +408,8 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       gap: 8px;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
     }
 
     .file-search-input {
@@ -450,15 +461,17 @@ export function renderApp(configPath: string): string {
       flex-direction: column;
       flex: 1;
       min-height: 0;
+      overflow: hidden;
     }
 
     .sidebar-intro {
-      padding: 14px 18px 0;
+      padding: 12px 14px 0;
       font-size: 0.75rem;
       color: var(--text-secondary);
+      flex-shrink: 0;
     }
 
-    .sessions-list { flex: 1; overflow-y: auto; padding: 12px; }
+    .sessions-list { flex: 1; overflow-y: auto; padding: 10px; }
     .session-group { margin-bottom: 18px; }
     .session-group:last-child { margin-bottom: 0; }
     .session-group-title {
@@ -671,16 +684,18 @@ export function renderApp(configPath: string): string {
       min-height: 0;
       overflow: hidden;
       background: transparent;
+      position: relative;
     }
 
     .terminal-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 18px 12px;
+      padding: 12px 18px;
       background: rgba(255, 251, 245, 0.72);
       border-bottom: 1px solid var(--border-subtle);
       backdrop-filter: blur(12px);
+      flex-shrink: 0;
     }
 
     .terminal-title { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; min-width: 0; }
@@ -694,18 +709,18 @@ export function renderApp(configPath: string): string {
       background:
         radial-gradient(circle at top right, rgba(91, 58, 34, 0.16), transparent 28%),
         linear-gradient(180deg, #221d18 0%, #1b1714 100%);
-      padding: 18px;
-      overflow-y: auto;
-      min-height: 200px;
-      margin: 14px;
+      padding: 14px;
+      overflow: hidden;
+      min-height: 0;
+      margin: 0 14px 14px;
       border-radius: var(--radius-lg);
       border: 1px solid rgba(122, 91, 64, 0.35);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-soft);
+      position: relative;
     }
 
     .terminal-container.active { display: flex; }
-
-    .terminal-container .xterm { height: 100%; }
+    .terminal-container .xterm { position: absolute; top: 0; left: 0; right: 0; bottom: 0; padding: 4px; }
     .terminal-container .xterm-viewport { background: transparent !important; }
 
     /* Chat View */
@@ -717,6 +732,7 @@ export function renderApp(configPath: string): string {
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
       padding: 3px;
+      flex-shrink: 0;
     }
 
     .view-toggle-btn {
@@ -744,7 +760,8 @@ export function renderApp(configPath: string): string {
       flex-direction: column;
       min-height: 0;
       overflow: hidden;
-      padding: 14px 18px;
+      padding: 0 18px 14px;
+      position: relative;
     }
 
     .chat-container.active { display: flex; }
@@ -754,8 +771,9 @@ export function renderApp(configPath: string): string {
       overflow-y: auto;
       display: flex;
       flex-direction: column-reverse;
-      gap: 16px;
-      padding-top: 16px;
+      gap: 12px;
+      padding: 16px 0 8px;
+      min-height: 0;
     }
 
     @keyframes messageSlide {
@@ -766,8 +784,8 @@ export function renderApp(configPath: string): string {
     .chat-message {
       display: flex;
       flex-direction: column;
-      max-width: 85%;
-      margin: 4px 0;
+      max-width: 80%;
+      margin: 2px 0;
     }
 
     .chat-message.user {
@@ -791,7 +809,7 @@ export function renderApp(configPath: string): string {
       justify-content: center;
       font-size: 13px;
       font-weight: 600;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       flex-shrink: 0;
     }
 
@@ -805,12 +823,13 @@ export function renderApp(configPath: string): string {
     }
 
     .chat-message-bubble {
-      padding: 10px 14px;
+      padding: 8px 12px;
       border-radius: var(--radius-md);
       font-size: 0.875rem;
-      line-height: 1.6;
+      line-height: 1.5;
       word-wrap: break-word;
       white-space: pre-wrap;
+      box-shadow: 0 1px 3px rgba(89, 58, 32, 0.06);
     }
 
     .chat-message.user .chat-message-bubble {
@@ -1113,16 +1132,17 @@ export function renderApp(configPath: string): string {
     .input-panel {
       background: rgba(255, 251, 245, 0.78);
       border-top: 1px solid var(--border-subtle);
-      padding: 14px 18px 18px;
+      padding: 12px 18px;
       backdrop-filter: blur(12px);
       flex-shrink: 0;
       position: relative;
+      z-index: 10;
     }
 
     .input-row { display: flex; gap: 8px; align-items: flex-end; }
-    .input-field { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .input-field { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
     .input-label { font-size: 0.6875rem; color: var(--text-muted); font-weight: 500; }
-    .input-textarea-wrap { position: relative; }
+    .input-textarea-wrap { position: relative; display: flex; flex-direction: column; }
 
     .input-textarea {
       font-family: var(--font-mono);
@@ -1131,15 +1151,16 @@ export function renderApp(configPath: string): string {
       border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
       color: var(--text-primary);
-      padding: 10px 110px 10px 12px;
+      padding: 10px 100px 10px 12px;
       outline: none;
       resize: none;
-      min-height: 42px;
+      min-height: 44px;
       max-height: 120px;
       width: 100%;
       flex: 1;
       transition: border-color var(--transition-fast);
       box-sizing: border-box;
+      line-height: 1.5;
     }
 
     .input-textarea:focus { border-color: var(--accent); }
@@ -1147,9 +1168,8 @@ export function renderApp(configPath: string): string {
 
     .input-inline-controls {
       position: absolute;
-      right: 10px;
-      top: 50%;
-      transform: translateY(-50%);
+      right: 8px;
+      top: 6px;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -1158,6 +1178,7 @@ export function renderApp(configPath: string): string {
 
     .input-inline-controls > * {
       pointer-events: auto;
+      flex-shrink: 0;
     }
 
     .keyboard-aware {
@@ -1229,14 +1250,14 @@ export function renderApp(configPath: string): string {
     .floating-pad {
       position: absolute;
       right: 0;
-      bottom: calc(100% + 8px);
+      bottom: calc(100% + 6px);
       z-index: 39;
-      width: min(240px, calc(100vw - 32px));
+      width: min(220px, calc(100vw - 28px));
       background: rgba(255, 251, 245, 0.98);
       border: 1px solid rgba(150, 118, 85, 0.18);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-soft);
-      padding: 14px;
+      padding: 12px;
       backdrop-filter: blur(18px);
     }
 
@@ -1246,7 +1267,7 @@ export function renderApp(configPath: string): string {
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
       padding-bottom: 8px;
       border-bottom: 1px solid var(--border-subtle);
     }
@@ -1260,9 +1281,9 @@ export function renderApp(configPath: string): string {
 
     .floating-pad-grid .btn {
       width: 100%;
-      min-height: 40px;
-      padding: 8px;
-      font-size: 0.875rem;
+      min-height: 38px;
+      padding: 6px 4px;
+      font-size: 0.75rem;
       border-radius: var(--radius-sm);
     }
 
@@ -1391,12 +1412,13 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px 20px;
+      padding: 14px 18px;
       border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
     }
 
     .modal-title { font-size: 1rem; font-weight: 600; }
-    .modal-body { padding: 20px; }
+    .modal-body { padding: 18px; overflow: hidden; }
     .modal-body .field { margin-bottom: 16px; }
     .modal-body .field:last-of-type { margin-bottom: 20px; }
     .field-hint {
@@ -1622,15 +1644,15 @@ export function renderApp(configPath: string): string {
         gap: 8px;
       }
       .topbar-center { display: none; }
-      .sidebar { width: min(304px, calc(100vw - 28px)); }
+      .sidebar { width: min(280px, calc(100vw - 24px)); }
       .config-path { display: none; }
-      .terminal-container { min-height: 180px; margin: 10px; }
+      .terminal-container { margin: 0 10px 10px; min-height: 0; }
       .btn { min-height: 40px; }
       .btn-sm { min-height: 36px; padding: 6px 10px; }
       .status-badge { display: none; }
       .brand-subtitle { display: none; }
       .view-toggle { display: none; }
-      .chat-container { padding: 10px; }
+      .chat-container { padding: 0 10px 10px; }
       .chat-message { max-width: 95%; }
       .thinking-card { padding: 8px 12px; }
       .thinking-content { font-size: 0.75rem; }
@@ -1669,12 +1691,12 @@ export function renderApp(configPath: string): string {
         grid-template-columns: auto minmax(0, 1fr) auto;
         grid-template-areas: "menu logo actions";
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         min-height: 48px;
-        padding: 6px 10px;
+        padding: 6px 8px;
       }
 
-      .topbar-left { grid-area: menu; display: flex; gap: 6px; }
+      .topbar-left { grid-area: menu; display: flex; gap: 4px; }
       .topbar-center { display: none; }
       .topbar-right { grid-area: actions; display: flex; gap: 6px; }
       .topbar-actions { display: contents; }
@@ -1688,7 +1710,7 @@ export function renderApp(configPath: string): string {
       .session-summary { display: none; }
 
       /* 紧凑按钮 */
-      .topbar .btn-sm { padding: 6px 10px; font-size: 0.75rem; min-height: 36px; }
+      .topbar .btn-sm { padding: 6px 8px; font-size: 0.75rem; min-height: 34px; }
 
       .main-layout {
         flex-direction: column;
@@ -1697,7 +1719,7 @@ export function renderApp(configPath: string): string {
       }
 
       .sidebar {
-        width: min(300px, calc(100vw - 20px));
+        width: min(280px, calc(100vw - 16px));
         max-height: none;
         border-bottom: none;
       }
@@ -1706,59 +1728,60 @@ export function renderApp(configPath: string): string {
         display: block;
         overflow-x: hidden;
         overflow-y: auto;
-        padding: 10px;
+        padding: 8px;
         -webkit-overflow-scrolling: touch;
       }
 
       .session-item {
         width: 100%;
         max-width: none;
-        margin-bottom: 8px;
-        padding: 10px 12px;
+        margin-bottom: 6px;
+        padding: 8px 10px;
       }
 
       .main-content {
-        overflow: visible;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
       }
 
       /* 紧凑终端头部 */
       .terminal-header {
-        padding: 8px 12px;
+        padding: 8px 10px;
         align-items: center;
         gap: 6px;
+        flex-shrink: 0;
       }
       .terminal-title {
         flex-direction: row;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         font-size: 0.75rem;
       }
       .terminal-info { font-size: 0.625rem; }
 
       /* 最大化终端区域 */
       .terminal-container {
-        flex: none;
-        min-height: 40vh;
-        max-height: 55vh;
-        margin: 8px;
-        padding: 12px;
+        flex: 1;
+        min-height: 0;
+        margin: 0 8px 8px;
+        padding: 10px;
         border-radius: var(--radius-md);
-        overflow: auto;
-        -webkit-overflow-scrolling: touch;
+        overflow: hidden;
       }
 
       /* 紧凑输入面板 */
       .input-panel {
-        position: sticky;
-        bottom: 0;
+        position: relative;
         z-index: 20;
-        padding: 10px 12px;
+        padding: 10px;
         padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-        box-shadow: 0 -8px 24px rgba(89, 58, 32, 0.08);
+        box-shadow: 0 -4px 16px rgba(89, 58, 32, 0.06);
+        flex-shrink: 0;
       }
 
       .input-row { flex-direction: column; align-items: stretch; gap: 8px; }
-      .input-field { gap: 2px; }
+      .input-field { gap: 4px; min-width: 0; }
       .input-label { font-size: 0.625rem; }
 
       .input-actions {
@@ -1786,8 +1809,8 @@ export function renderApp(configPath: string): string {
       }
 
       .input-textarea {
-        min-height: 44px;
-        padding: 8px 84px 8px 10px;
+        min-height: 48px;
+        padding: 10px 90px 10px 10px;
       }
 
       .input-inline-controls {
@@ -1798,19 +1821,35 @@ export function renderApp(configPath: string): string {
 
       .chat-mode-select {
         max-width: 72px;
-        height: 26px;
+        height: 28px;
         font-size: 0.6875rem;
       }
 
       .floating-pad {
         right: 0;
         bottom: calc(100% + 6px);
-        width: 100%;
+        width: min(200px, calc(100vw - 24px));
         padding: 10px;
       }
 
       .floating-pad-grid .btn {
-        min-height: 44px;
+        min-height: 40px;
+        font-size: 0.75rem;
+      }
+
+      /* 修复移动端聊天容器高度 */
+      .chat-container {
+        min-height: 0;
+        flex: 1;
+        display: none;
+        flex-direction: column;
+      }
+      .chat-container.active { display: flex; }
+
+      /* 修复移动端终端容器 */
+      .terminal-container {
+        flex: 1;
+        min-height: 0;
       }
 
       .login-container {
@@ -1901,71 +1940,73 @@ export function renderApp(configPath: string): string {
       align-items: center;
       justify-content: center;
       flex: 1;
-      padding: 24px 18px;
+      padding: 20px 16px;
+      min-height: 0;
+      overflow: auto;
     }
     .blank-chat-inner {
       width: 100%;
-      max-width: 600px;
+      max-width: 560px;
       text-align: center;
     }
     .blank-chat-logo {
-      width: 64px;
-      height: 64px;
+      width: 56px;
+      height: 56px;
       background: linear-gradient(135deg, #d77a52, #a95130);
-      border-radius: 18px;
+      border-radius: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 32px;
+      font-size: 28px;
       font-weight: 700;
       color: white;
-      margin: 0 auto 16px;
-      box-shadow: 0 4px 20px rgba(197, 101, 61, 0.25);
+      margin: 0 auto 14px;
+      box-shadow: 0 4px 16px rgba(197, 101, 61, 0.22);
     }
     .blank-chat-title {
-      font-size: 1.5rem;
+      font-size: 1.375rem;
       font-weight: 600;
       color: var(--text-primary);
       margin: 0 0 6px;
     }
     .blank-chat-subtitle {
-      font-size: 0.875rem;
+      font-size: 0.8125rem;
       color: var(--text-muted);
-      margin: 0 0 24px;
+      margin: 0 0 20px;
     }
     .blank-chat-input-wrap {
       position: relative;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }
     .blank-chat-input {
       width: 100%;
-      padding: 14px 80px 14px 18px;
+      padding: 12px 70px 12px 16px;
       border: 1.5px solid var(--border-default);
-      border-radius: 14px;
+      border-radius: 12px;
       background: rgba(255, 255, 255, 0.8);
       color: var(--text-primary);
       font-size: 0.9375rem;
       font-family: var(--font-sans);
       outline: none;
-      box-shadow: 0 2px 12px rgba(89, 58, 32, 0.06);
+      box-shadow: 0 2px 8px rgba(89, 58, 32, 0.04);
       transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
       box-sizing: border-box;
     }
     .blank-chat-input:focus {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-muted), 0 2px 12px rgba(89, 58, 32, 0.06);
+      box-shadow: 0 0 0 3px var(--accent-muted), 0 2px 8px rgba(89, 58, 32, 0.04);
     }
     .blank-chat-input::placeholder { color: var(--text-muted); }
     .blank-chat-send-btn {
       position: absolute;
-      right: 8px;
+      right: 6px;
       top: 50%;
       transform: translateY(-50%);
-      padding: 8px 18px;
+      padding: 6px 14px;
       background: var(--accent);
       color: white;
       border: none;
-      border-radius: 10px;
+      border-radius: 8px;
       font-size: 0.8125rem;
       font-weight: 500;
       font-family: inherit;
@@ -1975,14 +2016,15 @@ export function renderApp(configPath: string): string {
     .blank-chat-send-btn:hover { background: var(--accent-hover); }
     .blank-chat-tools {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       justify-content: center;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
     }
     .blank-chat-tool-btn {
-      padding: 8px 16px;
+      padding: 6px 12px;
       border: 1.5px solid var(--border-default);
-      border-radius: 10px;
+      border-radius: 8px;
       background: rgba(255, 255, 255, 0.6);
       color: var(--text-secondary);
       font-size: 0.8125rem;
@@ -2057,6 +2099,7 @@ export function renderApp(configPath: string): string {
     }
     .input-field-full {
       flex: 1;
+      min-width: 0;
     }
     .toast-message {
       position: fixed;
