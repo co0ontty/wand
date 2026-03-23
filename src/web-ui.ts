@@ -701,9 +701,9 @@ export function renderApp(configPath: string): string {
       flex: 1;
       overflow-y: auto;
       display: flex;
-      flex-direction: column;
+      flex-direction: column-reverse;
       gap: 16px;
-      padding-bottom: 16px;
+      padding-top: 16px;
     }
 
     .chat-message {
@@ -2364,6 +2364,23 @@ export function renderApp(configPath: string): string {
                 '<p id="action-error" class="error-message hidden"></p>' +
               '</div>' +
             '</main>' +
+            // Floating controls for keyboard shortcuts
+            '<button id="floating-controls-toggle" class="floating-toggle" type="button" aria-label="快捷键" title="快捷键">⌨</button>' +
+            '<div id="floating-controls" class="floating-pad hidden">' +
+              '<div class="floating-pad-title">Claude 快捷键</div>' +
+              '<div class="floating-pad-grid">' +
+                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_c" type="button" title="中断当前操作">Ctrl+C</button>' +
+                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_d" type="button" title="发送 EOF">Ctrl+D</button>' +
+                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_l" type="button" title="清屏">Ctrl+L</button>' +
+                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_u" type="button" title="删除到行首">Ctrl+U</button>' +
+                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_k" type="button" title="删除到行尾">Ctrl+K</button>' +
+                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_w" type="button" title="删除前一个单词">Ctrl+W</button>' +
+                '<button class="btn btn-secondary quick-input" data-input-key="up" type="button" title="上一条命令">↑</button>' +
+                '<button class="btn btn-secondary quick-input" data-input-key="down" type="button" title="下一条命令">↓</button>' +
+                '<button class="btn btn-primary quick-input" data-input-key="enter" type="button" title="发送/确认">Enter</button>' +
+              '</div>' +
+            '</div>' +
+            '<div id="floating-backdrop" class="floating-backdrop hidden"></div>' +
           '</div>' +
         '</div>' + renderSessionModal() + renderSettingsModal();
       }
@@ -4004,6 +4021,28 @@ export function renderApp(configPath: string): string {
             return String.fromCharCode(4);
           case "ctrl_l":
             return String.fromCharCode(12);
+          case "ctrl_u":
+            return String.fromCharCode(21);
+          case "ctrl_k":
+            return String.fromCharCode(11);
+          case "ctrl_w":
+            return String.fromCharCode(23);
+          case "escape":
+            return String.fromCharCode(27);
+          default:
+            return "";
+        }
+      }
+          case "right":
+            return String.fromCharCode(27) + "[C";
+          case "enter":
+            return String.fromCharCode(13);
+          case "ctrl_c":
+            return String.fromCharCode(3);
+          case "ctrl_d":
+            return String.fromCharCode(4);
+          case "ctrl_l":
+            return String.fromCharCode(12);
           case "escape":
             return String.fromCharCode(27);
           default:
@@ -4452,35 +4491,45 @@ export function renderApp(configPath: string): string {
 
         if (existingCount === 0) {
           // Full render for first load / restore — no animation to avoid flicker
-          chatMessages.innerHTML = messages.map(renderChatMessage).join("");
+          // With column-reverse, render messages in reverse order (newest first)
+          chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
           attachAllCopyHandlers(chatMessages);
+          // Scroll to bottom (which shows newest messages at the bottom visually)
+          chatOutput.scrollTop = chatOutput.scrollHeight;
         } else if (msgCount > existingCount) {
-          // Incremental: only append new messages (with animation)
-          for (var i = existingCount; i < messages.length; i++) {
+          // New messages added — prepend them (column-reverse means prepend = visual append)
+          var newMessages = messages.slice(existingCount);
+          // Reverse so the newest ends up at the bottom
+          newMessages.reverse();
+          var fragment = document.createDocumentFragment();
+          for (var i = 0; i < newMessages.length; i++) {
             var div = document.createElement("div");
-            div.innerHTML = renderChatMessage(messages[i]);
+            div.innerHTML = renderChatMessage(newMessages[i]);
             var el = div.firstElementChild;
             if (el) {
               el.classList.add("animate-in");
-              chatMessages.appendChild(el);
-              attachCopyHandler(el);
+              fragment.appendChild(el);
             }
           }
+          chatMessages.insertBefore(fragment, chatMessages.firstChild);
+          attachAllCopyHandlers(chatMessages);
+          // Scroll to bottom after adding new messages
+          chatOutput.scrollTop = chatOutput.scrollHeight;
         } else if (msgCount === existingCount && outputHash !== prevHash) {
-          // Same message count but content changed (streaming update) — update last message only
-          var lastEl = chatMessages.querySelectorAll(".chat-message")[msgCount - 1];
-          if (lastEl) {
+          // Same message count but content changed (streaming update) — update first message only (which is newest in column-reverse)
+          var firstEl = chatMessages.querySelector(".chat-message");
+          if (firstEl) {
             var tmpDiv = document.createElement("div");
-            tmpDiv.innerHTML = renderChatMessage(messages[msgCount - 1]);
+            tmpDiv.innerHTML = renderChatMessage(messages[0]);
             var newEl = tmpDiv.firstElementChild;
             if (newEl) {
-              chatMessages.replaceChild(newEl, lastEl);
+              chatMessages.replaceChild(newEl, firstEl);
               attachCopyHandler(newEl);
             }
           }
         } else if (msgCount < existingCount) {
           // Message count decreased (session switched or output truncated) - full re-render without animation
-          chatMessages.innerHTML = messages.map(renderChatMessage).join("");
+          chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
           attachAllCopyHandlers(chatMessages);
         }
 
@@ -4605,6 +4654,21 @@ export function renderApp(configPath: string): string {
           if (line.indexOf("▐") === 0 || line.indexOf("▝") === 0 || line.indexOf("▘") === 0) continue;
           if ((line === "lu" || line === "ue" || line === "tr" || line === "ti" || line === "g" || line === "n" || line === "i…" || line === "…" || line === "uts" || line === "lt" || line === "rg" || line === "·") && line.length < 4) continue;
           if (line.indexOf("✽F") === 0 || line.indexOf("✻F") === 0) continue;
+          // Additional noise filters
+          if (line.indexOf("npm WARN") !== -1) continue;
+          if (line.indexOf("npm notice") !== -1) continue;
+          if (line.indexOf("added ") !== -1 && line.indexOf(" packages") !== -1) continue;
+          if (line.indexOf("audited ") !== -1) continue;
+          if (line.indexOf("found ") !== -1 && line.indexOf(" vulnerabilities") !== -1) continue;
+          if (line.indexOf("Using ") !== -1 && line.indexOf(" for ") !== -1 && line.indexOf("session") !== -1) continue;
+          if (line.indexOf("Permissions") !== -1 && line.indexOf("mode") !== -1) continue;
+          if (line.indexOf("You can use") !== -1) continue;
+          if (line.indexOf("Press ") !== -1 && line.indexOf(" for") !== -1) continue;
+          if (line.indexOf("type ") === 0 && line.indexOf(" to ") !== -1) continue;
+          if (line.indexOf("[wand]") === 0) continue;
+          if (line.indexOf("Captured Claude session ID") !== -1) continue;
+          // Filter partial/fragmented lines (likely from streaming)
+          if (line.length < 3 && !/^[a-zA-Z]{3}$/.test(line)) continue;
 
           contentLines.push(line);
         }
@@ -4682,7 +4746,9 @@ export function renderApp(configPath: string): string {
         });
 
         if (assistantLines.length) {
-          messages.push({ role: "assistant", content: assistantLines.join(newline) });
+          // Format and clean up assistant response
+          var formattedContent = formatAssistantResponse(assistantLines.join(newline));
+          messages.push({ role: "assistant", content: formattedContent });
         }
 
         return messages;
