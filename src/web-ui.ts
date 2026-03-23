@@ -844,6 +844,10 @@ export function renderApp(configPath: string): string {
       border-radius: var(--radius-sm);
       overflow: hidden;
     }
+    .tool-use-card.enhanced {
+      border-radius: var(--radius-md);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
     .tool-use-header {
       display: flex;
       align-items: center;
@@ -856,8 +860,55 @@ export function renderApp(configPath: string): string {
       color: var(--text-secondary);
       user-select: none;
     }
+    .tool-use-card.enhanced .tool-use-header {
+      padding: 10px 14px;
+      background: linear-gradient(135deg, rgba(79, 122, 88, 0.1) 0%, rgba(79, 122, 88, 0.05) 100%);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .tool-use-card.enhanced .tool-use-header:hover {
+      background: linear-gradient(135deg, rgba(79, 122, 88, 0.15) 0%, rgba(79, 122, 88, 0.08) 100%);
+    }
+    .tool-icon-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      background: rgba(79, 122, 88, 0.15);
+      border-radius: 6px;
+    }
+    .tool-emoji {
+      font-size: 1rem;
+    }
     .tool-icon { font-size: 0.875rem; }
-    .tool-name { font-family: var(--font-mono); }
+    .tool-name {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .tool-file-path {
+      flex: 1;
+      text-align: right;
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tool-toggle {
+      font-size: 0.625rem;
+      color: var(--text-muted);
+      transition: transform var(--transition-fast);
+    }
+    .tool-use-card.enhanced .tool-use-body {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+    .tool-use-card.enhanced .tool-use-body.open {
+      max-height: 500px;
+    }
     .tool-use-body {
       padding: 8px 12px;
       background: var(--bg-elevated);
@@ -881,6 +932,16 @@ export function renderApp(configPath: string): string {
       border-radius: var(--radius-sm);
       overflow: hidden;
     }
+    .tool-result-card.enhanced {
+      border-radius: var(--radius-md);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+    .tool-result-card.enhanced.success {
+      border-color: rgba(79, 122, 88, 0.3);
+    }
+    .tool-result-card.enhanced.error {
+      border-color: rgba(178, 79, 69, 0.3);
+    }
     .tool-result-header {
       display: flex;
       align-items: center;
@@ -891,6 +952,127 @@ export function renderApp(configPath: string): string {
       font-size: 0.75rem;
       color: var(--text-muted);
       user-select: none;
+    }
+    .tool-result-card.enhanced .tool-result-header {
+      padding: 8px 14px;
+      cursor: default;
+    }
+    .tool-result-card.enhanced.success .tool-result-header {
+      background: linear-gradient(135deg, rgba(79, 122, 88, 0.1) 0%, rgba(79, 122, 88, 0.05) 100%);
+    }
+    .tool-result-card.enhanced.error .tool-result-header {
+      background: linear-gradient(135deg, rgba(178, 79, 69, 0.1) 0%, rgba(178, 79, 69, 0.05) 100%);
+    }
+    .result-status {
+      font-size: 1rem;
+    }
+    .result-label {
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+    .result-status-text {
+      font-size: 0.6875rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(79, 122, 88, 0.1);
+      color: var(--success);
+    }
+    .tool-result-card.enhanced.error .result-status-text {
+      background: rgba(178, 79, 69, 0.1);
+      color: var(--danger);
+    }
+    .tool-result-body {
+      padding: 8px 12px;
+      background: var(--bg-elevated);
+    }
+    .tool-result-content {
+      margin: 0;
+      font-size: 0.7rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .tool-result-content code {
+      font-family: var(--font-mono);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .tool-result-expand {
+      display: block;
+      margin-top: 8px;
+      padding: 4px 8px;
+      font-size: 0.6875rem;
+      color: var(--accent);
+      background: transparent;
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .tool-result-expand:hover {
+      background: var(--accent-muted);
+    }
+
+    /* Enhanced Thinking Card */
+    .thinking-card.enhanced {
+      margin: 12px 0;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(138, 108, 178, 0.2);
+      background: linear-gradient(135deg, rgba(138, 108, 178, 0.08) 0%, rgba(138, 108, 178, 0.04) 100%);
+      overflow: hidden;
+    }
+    .thinking-card.enhanced[open] {
+      background: linear-gradient(135deg, rgba(138, 108, 178, 0.12) 0%, rgba(138, 108, 178, 0.06) 100%);
+    }
+    .thinking-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .thinking-header::-webkit-details-marker {
+      display: none;
+    }
+    .thinking-icon-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      background: rgba(138, 108, 178, 0.15);
+      border-radius: 8px;
+    }
+    .thinking-spin {
+      display: inline-block;
+      animation: thinkingSpin 3s linear infinite;
+    }
+    @keyframes thinkingSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .thinking-label {
+      font-weight: 600;
+      color: rgba(138, 108, 178, 0.9);
+    }
+    .thinking-toggle {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+    .thinking-card.enhanced[open] .thinking-toggle {
+      display: none;
+    }
+    .thinking-body {
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.3);
+      border-top: 1px solid rgba(138, 108, 178, 0.1);
+    }
+    .thinking-card.enhanced .thinking-text {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
     }
     .tool-result-error .tool-result-header {
       background: rgba(178, 79, 69, 0.08);
@@ -4116,6 +4298,38 @@ export function renderApp(configPath: string): string {
           });
         }
 
+        // Event delegation for tool-use-card toggle and tool-result-expand
+        document.addEventListener("click", function(e) {
+          var target = e.target;
+          if (!target || !(target instanceof Element)) return;
+
+          // Tool use card toggle
+          var header = target.closest("[data-tool-toggle]");
+          if (header) {
+            var body = header.parentElement.querySelector(".tool-use-body");
+            if (body) {
+              body.classList.toggle("open");
+            }
+            return;
+          }
+
+          // Tool result expand button
+          var expandBtn = target.closest(".tool-result-expand");
+          if (expandBtn && expandBtn instanceof HTMLElement) {
+            var fullContent = expandBtn.dataset.fullContent;
+            if (fullContent) {
+              var pre = expandBtn.previousElementSibling;
+              if (pre) {
+                var code = pre.querySelector("code");
+                if (code) {
+                  code.textContent = fullContent;
+                }
+              }
+              expandBtn.remove();
+            }
+          }
+        });
+
         initTerminal();
         setupMobileKeyboardHandlers();
         setupVisualViewportHandlers();
@@ -6236,56 +6450,112 @@ export function renderApp(configPath: string): string {
             return role === "assistant" ? renderMarkdown(block.text || "") : escapeHtml(block.text || "");
 
           case "thinking":
-            return '<div class="thinking-card inline-thinking">' +
-              '<div class="thinking-icon">🤔</div>' +
-              '<div class="thinking-content">' +
-                '<details><summary>深度思考</summary>' +
-                '<div class="thinking-text">' + escapeHtml(block.thinking || "") + '</div>' +
-                '</details>' +
+            var thinkingText = block.thinking || "";
+            return '<details class="thinking-card enhanced">' +
+              '<summary class="thinking-header">' +
+                '<span class="thinking-icon-wrap"><span class="thinking-spin">🧠</span></span>' +
+                '<span class="thinking-label">深度思考</span>' +
+                '<span class="thinking-toggle">点击展开</span>' +
+              '</summary>' +
+              '<div class="thinking-body">' +
+                '<div class="thinking-text">' + escapeHtml(thinkingText) + '</div>' +
               '</div>' +
-            '</div>';
+            '</details>';
 
           case "tool_use":
-            var toolName = escapeHtml(block.name || "unknown");
-            var inputStr = "";
-            try {
-              inputStr = JSON.stringify(block.input || {}, null, 2);
-            } catch (e) {
-              inputStr = String(block.input || "");
-            }
-            return '<div class="tool-use-card">' +
-              '<details>' +
-                '<summary class="tool-use-header">' +
-                  '<span class="tool-icon">🔧</span> ' +
-                  '<span class="tool-name">' + toolName + '</span>' +
-                '</summary>' +
-                '<div class="tool-use-body">' +
-                  '<pre class="tool-input"><code>' + escapeHtml(inputStr) + '</code></pre>' +
-                '</div>' +
-              '</details>' +
-            '</div>';
+            return renderToolUseCard(block);
 
           case "tool_result":
-            var content = block.content || "";
-            var isError = block.is_error;
-            var statusClass = isError ? "tool-result-error" : "tool-result-success";
-            var statusIcon = isError ? "❌" : "✅";
-            // Truncate long results
-            var displayContent = content.length > 500 ? content.slice(0, 500) + "..." : content;
-            return '<div class="tool-result-card ' + statusClass + '">' +
-              '<details>' +
-                '<summary class="tool-result-header">' +
-                  statusIcon + ' 工具结果' +
-                '</summary>' +
-                '<div class="tool-result-body">' +
-                  '<pre class="tool-result-content"><code>' + escapeHtml(displayContent) + '</code></pre>' +
-                '</div>' +
-              '</details>' +
-            '</div>';
+            return renderToolResultCard(block);
 
           default:
             return '<div class="unknown-block">' + escapeHtml(JSON.stringify(block)) + '</div>';
         }
+      }
+
+      function renderToolUseCard(block) {
+        var toolName = block.name || "unknown";
+        var toolIcon = getToolIcon(toolName);
+        var inputStr = "";
+        try {
+          inputStr = JSON.stringify(block.input || {}, null, 2);
+        } catch (e) {
+          inputStr = String(block.input || "");
+        }
+
+        // 检测是否是文件操作
+        var fileInfo = extractFileInfo(toolName, block.input);
+        var headerExtra = fileInfo ? '<span class="tool-file-path">' + escapeHtml(fileInfo) + '</span>' : "";
+
+        return '<div class="tool-use-card enhanced">' +
+          '<div class="tool-use-header" data-tool-toggle>' +
+            '<span class="tool-icon-wrap">' + toolIcon + '</span>' +
+            '<span class="tool-name">' + escapeHtml(toolName) + '</span>' +
+            headerExtra +
+            '<span class="tool-toggle">▼</span>' +
+          '</div>' +
+          '<div class="tool-use-body">' +
+            '<pre class="tool-input"><code>' + escapeHtml(inputStr) + '</code></pre>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function renderToolResultCard(block) {
+        var content = block.content || "";
+        var isError = block.is_error;
+        var statusClass = isError ? "error" : "success";
+        var statusIcon = isError ? "❌" : "✅";
+        var statusText = isError ? "失败" : "成功";
+
+        // 对于长内容，默认折叠
+        var isLong = content.length > 300;
+        var displayContent = isLong ? content.slice(0, 300) + "..." : content;
+        var expandBtn = isLong ? '<button class="tool-result-expand" data-full-content="' + escapeHtml(content) + '">显示全部</button>' : "";
+
+        return '<div class="tool-result-card enhanced ' + statusClass + '">' +
+          '<div class="tool-result-header">' +
+            '<span class="result-status">' + statusIcon + '</span>' +
+            '<span class="result-label">工具结果</span>' +
+            '<span class="result-status-text">' + statusText + '</span>' +
+          '</div>' +
+          '<div class="tool-result-body">' +
+            '<pre class="tool-result-content"><code>' + escapeHtml(displayContent) + '</code></pre>' +
+            expandBtn +
+          '</div>' +
+        '</div>';
+      }
+
+      function getToolIcon(toolName) {
+        var icons = {
+          "Read": "📄",
+          "Write": "✏️",
+          "Edit": "📝",
+          "MultiEdit": "📝",
+          "Bash": "💻",
+          "Grep": "🔍",
+          "Glob": "📂",
+          "WebFetch": "🌐",
+          "WebSearch": "🔎",
+          "Task": "📋",
+          "TodoWrite": "📝",
+          "TodoRead": "📋",
+          "NotebookEdit": "📓",
+          "Agent": "🤖"
+        };
+        return '<span class="tool-emoji">' + (icons[toolName] || "🔧") + '</span>';
+      }
+
+      function extractFileInfo(toolName, input) {
+        if (!input) return null;
+        var path = input.file_path || input.path || input.cwd;
+        if (path) {
+          // 截断长路径
+          if (path.length > 50) {
+            return "..." + path.slice(-47);
+          }
+          return path;
+        }
+        return null;
       }
 
       // Format assistant response with Markdown rendering and cleanup
