@@ -15,6 +15,8 @@ export function renderApp(configPath: string): string {
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -49,6 +51,30 @@ export function renderApp(configPath: string): string {
       --font-mono: "Geist Mono", "SF Mono", "Fira Code", monospace;
       --transition-fast: 0.15s ease;
       --transition-normal: 0.25s ease;
+      --chat-user-bg: linear-gradient(135deg, #c5653d 0%, #a95130 100%);
+      --chat-assistant-bg: rgba(255, 251, 245, 0.95);
+      --chat-assistant-border: var(--border-subtle);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary: #1f1b17;
+        --bg-secondary: rgba(35, 30, 25, 0.88);
+        --bg-tertiary: #2a2420;
+        --bg-elevated: #352f28;
+        --bg-terminal: #0f0d0b;
+        --border-subtle: rgba(150, 118, 85, 0.18);
+        --border-default: rgba(150, 118, 85, 0.35);
+        --text-primary: #f5eadc;
+        --text-secondary: #c9b8a8;
+        --text-muted: #8c735f;
+        --accent: #d4785a;
+        --accent-hover: #e08a6a;
+        --accent-soft: rgba(212, 120, 90, 0.2);
+        --accent-muted: rgba(212, 120, 90, 0.15);
+        --chat-assistant-bg: rgba(45, 40, 35, 0.95);
+        --chat-assistant-border: rgba(150, 118, 85, 0.25);
+      }
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -742,19 +768,20 @@ export function renderApp(configPath: string): string {
     }
 
     .chat-message.assistant .chat-message-avatar {
-      background: linear-gradient(135deg, #c5653d 0%, #a95130 100%);
+      background: var(--chat-user-bg);
       color: white;
     }
 
     .chat-message.user .chat-message-bubble {
-      background: linear-gradient(135deg, #c5653d 0%, #a95130 100%);
+      background: var(--chat-user-bg);
       color: white;
       border-bottom-right-radius: 4px;
+      font-family: var(--font-sans);
     }
 
     .chat-message.assistant .chat-message-bubble {
-      background: rgba(255, 251, 245, 0.95);
-      border: 1px solid var(--border-subtle);
+      background: var(--chat-assistant-bg);
+      border: 1px solid var(--chat-assistant-border);
       border-bottom-left-radius: 4px;
     }
 
@@ -764,10 +791,6 @@ export function renderApp(configPath: string): string {
       font-size: 0.875rem;
       line-height: 1.6;
       word-wrap: break-word;
-    }
-
-    .chat-message.user .chat-message-bubble {
-      font-family: var(--font-mono);
     }
 
     /* Thinking Card (Deep Thought) */
@@ -850,6 +873,57 @@ export function renderApp(configPath: string): string {
       font-weight: 500;
     }
 
+    /* Message Status */
+    .chat-message-time {
+      display: block;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      margin-top: 6px;
+      opacity: 0.7;
+    }
+
+    .message-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+
+    .message-status.sending .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      animation: statusPulse 1s ease-in-out infinite;
+    }
+
+    @keyframes statusPulse {
+      0%, 100% { opacity: 0.4; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1); }
+    }
+
+    .message-status.error .status-icon {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--danger);
+      color: white;
+      font-size: 10px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .chat-message.error .chat-message-bubble {
+      border-color: var(--danger);
+    }
+
+    .chat-message.sending .chat-message-bubble {
+      opacity: 0.7;
+    }
+
     /* Markdown Content */
     .markdown-content { color: inherit; }
     .markdown-content p { margin: 0 0 8px 0; }
@@ -868,6 +942,14 @@ export function renderApp(configPath: string): string {
       border-left: 3px solid var(--accent);
       background: rgba(197, 101, 61, 0.06);
       border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+    .markdown-content a {
+      color: var(--accent);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .markdown-content a:hover {
+      color: var(--accent-hover);
     }
     .markdown-content code:not(.code-block):not(.code-inline) {
       font-family: var(--font-mono);
@@ -4470,39 +4552,136 @@ export function renderApp(configPath: string): string {
       }
 
       function renderChatMessage(msg) {
-        // Thinking card (deep thought)
+        var timestamp = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : "";
+        var statusIcon = "";
+        var statusClass = "";
+
+        if (msg.status === "sending") {
+          statusIcon = '<span class="message-status sending" aria-label="发送中"><span class="status-dot"></span></span>';
+          statusClass = " sending";
+        } else if (msg.status === "error") {
+          statusIcon = '<span class="message-status error" aria-label="发送失败"><span class="status-icon">!</span></span>';
+          statusClass = " error";
+        }
+
         if (msg.role === "thinking") {
-          return '<div class="chat-message thinking">' +
+          return '<article class="chat-message thinking" role="status" aria-live="polite">' +
             '<div class="thinking-card">' +
-              '<div class="thinking-icon">🤔</div>' +
-              '<div class="thinking-content">' + escapeHtml(msg.content) + '</div>' +
+              '<div class="thinking-icon" aria-hidden="true">' +
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>' +
+              '</div>' +
+              '<p class="thinking-content">' + escapeHtml(msg.content) + '</p>' +
             '</div>' +
-          '</div>';
+          '</article>';
         }
 
-        // Prompt suggestion card (pulsing display)
         if (msg.role === "prompt") {
-          return '<div class="chat-message prompt">' +
+          return '<aside class="chat-message prompt" role="complementary">' +
             '<div class="prompt-card">' +
-              '<div class="prompt-icon">💡</div>' +
-              '<div class="prompt-content">试试：<span class="prompt-text">' + escapeHtml(msg.content) + '</span></div>' +
+              '<div class="prompt-icon" aria-hidden="true">' +
+                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>' +
+              '</div>' +
+              '<p class="prompt-content">试试：<span class="prompt-text">' + escapeHtml(msg.content) + '</span></p>' +
             '</div>' +
-          '</div>';
+          '</aside>';
         }
 
-        var avatar = msg.role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
+        var roleLabel = msg.role === "assistant" ? "AI 助手" : "用户";
+        var avatar = msg.role === "assistant" ?
+          '<div class="chat-message-avatar" role="img" aria-label="AI 助手">' +
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 015 5v1h1a3 3 0 010 6h-1v1a5 5 0 01-10 0v-1H6a3 3 0 010-6h1V7a5 5 0 015-5zm0 2a3 3 0 00-3 3v1h6V7a3 3 0 00-3-3z"/></svg>' +
+          '</div>' : "";
         var bubbleContent = msg.role === "assistant" ? renderMarkdown(msg.content) : escapeHtml(msg.content);
-        return '<div class="chat-message ' + msg.role + '">' +
+        var metaInfo = timestamp ? '<span class="chat-message-time">' + timestamp + '</span>' : "";
+
+        return '<article class="chat-message ' + msg.role + statusClass + '" role="article" aria-label="' + roleLabel + '的消息">' +
           avatar +
-          '<div class="chat-message-bubble">' + bubbleContent + '</div>' +
-        '</div>';
+          '<div class="chat-message-bubble">' +
+            bubbleContent +
+            metaInfo +
+            statusIcon +
+          '</div>' +
+        '</article>';
       }
 
       function renderMarkdown(text) {
         if (!text) return "";
 
-        var result = escapeHtml(text);
         var bt = String.fromCharCode(96);
+        var newline = String.fromCharCode(10);
+        var codeBlockStart = bt + bt + bt;
+        var codeBlockEnd = bt + bt + bt;
+
+        var parts = [];
+        var lastIndex = 0;
+        var searchStart = 0;
+
+        while (true) {
+          var start = text.indexOf(codeBlockStart, searchStart);
+          if (start === -1) break;
+          var endTag = text.indexOf(codeBlockEnd, start + 3);
+          if (endTag === -1) break;
+
+          if (start > lastIndex) {
+            parts.push({ type: "text", content: text.slice(lastIndex, start) });
+          }
+
+          var codeBlock = text.slice(start + 3, endTag);
+          var langLineEnd = codeBlock.indexOf(newline);
+          var lang = "";
+          var code = codeBlock;
+          if (langLineEnd !== -1 && langLineEnd < 30) {
+            var potentialLang = codeBlock.slice(0, langLineEnd).trim();
+            var isSimpleLang = potentialLang.length > 0;
+            for (var j = 0; j < potentialLang.length; j += 1) {
+              var langCode = potentialLang.charCodeAt(j);
+              var isDigit = langCode >= 48 && langCode <= 57;
+              var isUpper = langCode >= 65 && langCode <= 90;
+              var isLower = langCode >= 97 && langCode <= 122;
+              if (!isDigit && !isUpper && !isLower) {
+                isSimpleLang = false;
+                break;
+              }
+            }
+            if (isSimpleLang) {
+              lang = potentialLang;
+              code = codeBlock.slice(langLineEnd + 1);
+            }
+          }
+
+          var highlighted = highlightCode(code.trim(), lang);
+          parts.push({
+            type: "code",
+            lang: lang,
+            content: highlighted
+          });
+
+          lastIndex = endTag + 3;
+          searchStart = lastIndex;
+        }
+
+        if (lastIndex < text.length) {
+          parts.push({ type: "text", content: text.slice(lastIndex) });
+        }
+
+        return '<div class="markdown-content">' + parts.map(function(part) {
+          if (part.type === "code") {
+            return '<div class="code-block">' +
+              '<div class="code-block-header">' +
+                '<span class="code-lang">' + (part.lang || "code") + '</span>' +
+                '<button class="code-copy" aria-label="Copy code to clipboard">Copy</button>' +
+              '</div>' +
+              '<pre><code class="language-' + escapeHtml(part.lang || "") + '">' + part.content + '</code></pre>' +
+            '</div>';
+          }
+          return parseInlineMarkdown(part.content);
+        }).join("") + '</div>';
+      }
+
+      function parseInlineMarkdown(text) {
+        if (!text) return "";
+
+        var result = escapeHtml(text);
         var newline = String.fromCharCode(10);
 
         function replacePair(source, marker, openTag, closeTag) {
@@ -4531,97 +4710,18 @@ export function renderApp(configPath: string): string {
           }).join(newline);
         }
 
-        function replaceOrderedList(source) {
-          return source.split(newline).map(function(line) {
-            var dotIndex = line.indexOf('. ');
-            if (dotIndex <= 0) return line;
-            for (var i = 0; i < dotIndex; i += 1) {
-              var code = line.charCodeAt(i);
-              if (code < 48 || code > 57) return line;
-            }
-            return '<li>' + line.slice(dotIndex + 2) + '</li>';
-          }).join(newline);
-        }
-
-        function wrapParagraphs(source) {
-          return source.split(newline + newline).map(function(part) {
-            var block = part.trim();
-            if (!block) return "";
-            if (block.indexOf("<div") === 0 || block.indexOf("<h1") === 0 || block.indexOf("<h2") === 0 || block.indexOf("<h3") === 0 || block.indexOf("<h4") === 0 || block.indexOf("<h5") === 0 || block.indexOf("<h6") === 0 || block.indexOf("<ul") === 0 || block.indexOf("<ol") === 0 || block.indexOf("<li") === 0 || block.indexOf("<blockquote") === 0 || block.indexOf("<pre") === 0) {
-              return block;
-            }
-            return '<p>' + block.split(newline).join('<br>') + '</p>';
-          }).join("");
-        }
-
-        var pos = 0;
-        while (true) {
-          var start = result.indexOf(bt + bt + bt, pos);
-          if (start === -1) break;
-          var endTag = result.indexOf(bt + bt + bt, start + 3);
-          if (endTag === -1) break;
-
-          var codeBlock = result.slice(start + 3, endTag);
-          var langLineEnd = codeBlock.indexOf(newline);
-          var lang = "";
-          var code = codeBlock;
-          if (langLineEnd !== -1 && langLineEnd < 30) {
-            var potentialLang = codeBlock.slice(0, langLineEnd).trim();
-            var isSimpleLang = potentialLang.length > 0;
-            for (var j = 0; j < potentialLang.length; j += 1) {
-              var langCode = potentialLang.charCodeAt(j);
-              var isDigit = langCode >= 48 && langCode <= 57;
-              var isUpper = langCode >= 65 && langCode <= 90;
-              var isLower = langCode >= 97 && langCode <= 122;
-              if (!isDigit && !isUpper && !isLower) {
-                isSimpleLang = false;
-                break;
-              }
-            }
-            if (isSimpleLang) {
-              lang = potentialLang;
-              code = codeBlock.slice(langLineEnd + 1);
-            }
-          }
-
-          var highlighted = highlightCode(code.trim(), lang);
-          var replacement = '<div class="code-block">' +
-            '<div class="code-block-header">' +
-              '<span class="code-lang">' + (lang || "code") + '</span>' +
-              '<button class="code-copy">Copy</button>' +
-            '</div>' +
-            '<pre><code>' + highlighted + '</code></pre>' +
-          '</div>';
-          result = result.slice(0, start) + replacement + result.slice(endTag + 3);
-          pos = start + replacement.length;
-        }
-
-        pos = 0;
-        while (true) {
-          var inlineStart = result.indexOf(bt, pos);
-          if (inlineStart === -1) break;
-          var inlineEnd = result.indexOf(bt, inlineStart + 1);
-          if (inlineEnd === -1) break;
-          if (inlineEnd === inlineStart + 1) {
-            pos = inlineEnd + 1;
-            continue;
-          }
-          var inlineCode = result.slice(inlineStart + 1, inlineEnd);
-          var inlineReplacement = '<code class="code-inline">' + inlineCode + '</code>';
-          result = result.slice(0, inlineStart) + inlineReplacement + result.slice(inlineEnd + 1);
-          pos = inlineStart + inlineReplacement.length;
-        }
-
         result = replacePair(result, "**", '<strong>', '</strong>');
         result = replacePair(result, "*", '<em>', '</em>');
         result = replacePair(result, "_", '<em>', '</em>');
+
         result = replaceLinePrefix(result, "### ", '<h3>', '</h3>');
         result = replaceLinePrefix(result, "## ", '<h2>', '</h2>');
         result = replaceLinePrefix(result, "# ", '<h1>', '</h1>');
         result = replaceLinePrefix(result, "&gt; ", '<blockquote>', '</blockquote>');
         result = replaceLinePrefix(result, "- ", '<li>', '</li>');
         result = replaceLinePrefix(result, "* ", '<li>', '</li>');
-        result = replaceOrderedList(result);
+
+        result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 
         var lines = result.split(newline);
         var grouped = [];
@@ -4643,8 +4743,18 @@ export function renderApp(configPath: string): string {
         });
         flushListBuffer();
 
-        result = wrapParagraphs(grouped.join(newline));
-        return '<div class="markdown-content">' + result + '</div>';
+        function wrapParagraphs(source) {
+          return source.split(newline + newline).map(function(part) {
+            var block = part.trim();
+            if (!block) return "";
+            if (block.indexOf("<div") === 0 || block.indexOf("<h1") === 0 || block.indexOf("<h2") === 0 || block.indexOf("<h3") === 0 || block.indexOf("<h4") === 0 || block.indexOf("<h5") === 0 || block.indexOf("<h6") === 0 || block.indexOf("<ul") === 0 || block.indexOf("<ol") === 0 || block.indexOf("<li") === 0 || block.indexOf("<blockquote") === 0 || block.indexOf("<pre") === 0) {
+              return block;
+            }
+            return '<p>' + block.split(newline).join('<br>') + '</p>';
+          }).join("");
+        }
+
+        return wrapParagraphs(grouped.join(newline));
       }
 
       function highlightCode(code, lang) {

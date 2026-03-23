@@ -58,7 +58,11 @@ export interface PathSuggestion {
   isDirectory: boolean;
 }
 
+export type MessageRole = "user" | "assistant" | "thinking" | "prompt";
+
 export interface ChatMessage {
-  role: "user" | "assistant";
+  role: MessageRole;
   content: string;
+  status?: "sending" | "sent" | "error";
+  timestamp?: number;
 }
