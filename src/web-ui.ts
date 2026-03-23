@@ -850,6 +850,100 @@ export function renderApp(configPath: string): string {
       font-weight: 500;
     }
 
+    /* Inline Thinking (inside structured messages) */
+    .inline-thinking {
+      margin: 8px 0;
+      animation: none;
+    }
+    .inline-thinking details summary {
+      cursor: pointer;
+      user-select: none;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+    .thinking-text {
+      margin-top: 8px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    /* Tool Use Card */
+    .tool-use-card {
+      margin: 8px 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .tool-use-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      background: rgba(79, 122, 88, 0.08);
+      cursor: pointer;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      user-select: none;
+    }
+    .tool-icon { font-size: 0.875rem; }
+    .tool-name { font-family: var(--font-mono); }
+    .tool-use-body {
+      padding: 8px 12px;
+      background: var(--bg-elevated);
+    }
+    .tool-input {
+      margin: 0;
+      font-size: 0.75rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .tool-input code {
+      font-family: var(--font-mono);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Tool Result Card */
+    .tool-result-card {
+      margin: 8px 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .tool-result-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: rgba(79, 122, 88, 0.06);
+      cursor: pointer;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      user-select: none;
+    }
+    .tool-result-error .tool-result-header {
+      background: rgba(178, 79, 69, 0.08);
+    }
+    .tool-result-body {
+      padding: 8px 12px;
+      background: var(--bg-elevated);
+    }
+    .tool-result-content {
+      margin: 0;
+      font-size: 0.7rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .tool-result-content code {
+      font-family: var(--font-mono);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
     /* Markdown Content */
     .markdown-content { color: inherit; }
     .markdown-content p { margin: 0 0 8px 0; }
@@ -3170,9 +3264,13 @@ export function renderApp(configPath: string): string {
               terminalInfo.textContent = data.cwd + " | " + getModeLabel(data.mode) + " | " + data.status + " | exit=" + (data.exitCode ?? "n/a");
             }
 
-            // Always parse locally to ensure consistency and avoid flicker
+            // Use structured messages if available (JSON chat mode), otherwise parse from PTY output
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
-            state.currentMessages = parseMessages(selectedSession ? selectedSession.output : "", selectedSession ? selectedSession.command : "");
+            if (selectedSession && selectedSession.messages && selectedSession.messages.length > 0) {
+              state.currentMessages = selectedSession.messages;
+            } else {
+              state.currentMessages = parseMessages(selectedSession ? selectedSession.output : "", selectedSession ? selectedSession.command : "");
+            }
 
             if (state.terminal) {
               if (state.terminalSessionId !== id) {
@@ -3215,9 +3313,13 @@ export function renderApp(configPath: string): string {
 
       function updateDrawerState() {
         var drawer = document.getElementById("sessions-drawer");
+        var backdrop = document.getElementById("sessions-drawer-backdrop");
         var mainLayout = document.querySelector(".main-layout");
         if (drawer) {
           drawer.classList.toggle("open", state.sessionsDrawerOpen);
+        }
+        if (backdrop) {
+          backdrop.classList.toggle("open", state.sessionsDrawerOpen);
         }
         if (mainLayout) {
           mainLayout.classList.toggle("sidebar-open", state.sessionsDrawerOpen);
@@ -4094,6 +4196,10 @@ export function renderApp(configPath: string): string {
             // Update session output (for terminal display and local message parsing)
             if (msg.data && msg.data.output && msg.sessionId) {
               var snapshot = { id: msg.sessionId, output: msg.data.output };
+              // Pass structured messages if available from JSON chat mode
+              if (msg.data.messages) {
+                snapshot.messages = msg.data.messages;
+              }
               updateSessionSnapshot(snapshot);
               // Schedule debounced chat update (don't parse on every chunk to avoid flicker)
               scheduleChatRender();
@@ -4190,8 +4296,13 @@ export function renderApp(configPath: string): string {
           chatRenderTimer = null;
           // Re-parse messages from the latest session output
           var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
-          if (selectedSession && selectedSession.output) {
-            state.currentMessages = parseMessages(selectedSession.output, selectedSession.command);
+          if (selectedSession) {
+            // Prefer structured messages from JSON chat mode
+            if (selectedSession.messages && selectedSession.messages.length > 0) {
+              state.currentMessages = selectedSession.messages;
+            } else if (selectedSession.output) {
+              state.currentMessages = parseMessages(selectedSession.output, selectedSession.command);
+            }
           }
           renderChat();
         }, 300);
@@ -4225,6 +4336,14 @@ export function renderApp(configPath: string): string {
         // Check if messages actually changed
         var msgCount = messages.length;
         var outputHash = selectedSession.output ? selectedSession.output.length : 0;
+        // For structured messages, also hash the total content blocks count
+        if (selectedSession.messages && selectedSession.messages.length > 0) {
+          var totalBlocks = 0;
+          for (var bi = 0; bi < selectedSession.messages.length; bi++) {
+            totalBlocks += (selectedSession.messages[bi].content ? selectedSession.messages[bi].content.length : 0);
+          }
+          outputHash = msgCount * 1000 + totalBlocks;
+        }
         if (msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedHash) {
           return;
         }
@@ -4310,17 +4429,12 @@ export function renderApp(configPath: string): string {
         if (!output) return messages;
 
         var text = String(output || "");
-        // Comprehensive ANSI/escape sequence stripping
-        var ansiStripped = text
-          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')  // CSI sequences
-          .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '')  // OSC sequences
-          .replace(/\x1b[><=eP_X^]/g, '')  // Single-char escapes
-          .replace(/[\x00-\x08\x0b-\x0c\x0e-\x1f]/g, '')  // Control chars (except \n \r \t)
-          .replace(/\xa0/g, ' ')  // NBSP to regular space
-          .replace(/\r/g, '\n');
         var newline = String.fromCharCode(10);
         var carriageReturn = String.fromCharCode(13);
-        ansiStripped = ansiStripped.split(carriageReturn).join(newline);
+        var ansiStripped = text.replace(
+          /\\x1b\[[0-9;?]*[a-zA-Z]|\\x1b\][^\\x07]*(\\x07|\\x1b\\\\)|\\x1b[><=eP_X^]|[\\x00-\\x08\\x0b-\\x0c\\x0e-\\x1f]|\\xa0|\\r/g,
+          function(m) { return m === '\\xa0' ? ' ' : m === '\\r' ? newline : ''; }
+        ).split(carriageReturn).join(newline);
 
         var lines = ansiStripped.split(newline).map(function(line) { return line.trim(); }).filter(Boolean);
 
@@ -4470,7 +4584,7 @@ export function renderApp(configPath: string): string {
       }
 
       function renderChatMessage(msg) {
-        // Thinking card (deep thought)
+        // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
           return '<div class="chat-message thinking">' +
             '<div class="thinking-card">' +
@@ -4480,7 +4594,7 @@ export function renderApp(configPath: string): string {
           '</div>';
         }
 
-        // Prompt suggestion card (pulsing display)
+        // Prompt suggestion card (pulsing display) — from PTY parsing
         if (msg.role === "prompt") {
           return '<div class="chat-message prompt">' +
             '<div class="prompt-card">' +
@@ -4490,12 +4604,94 @@ export function renderApp(configPath: string): string {
           '</div>';
         }
 
+        // Structured content blocks (from JSON chat mode)
+        if (Array.isArray(msg.content)) {
+          return renderStructuredMessage(msg);
+        }
+
+        // Legacy string content (from PTY parsing)
         var avatar = msg.role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
         var bubbleContent = msg.role === "assistant" ? renderMarkdown(msg.content) : escapeHtml(msg.content);
         return '<div class="chat-message ' + msg.role + '">' +
           avatar +
           '<div class="chat-message-bubble">' + bubbleContent + '</div>' +
         '</div>';
+      }
+
+      function renderStructuredMessage(msg) {
+        var role = msg.role;
+        var avatar = role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
+        var blocksHtml = "";
+
+        for (var i = 0; i < msg.content.length; i++) {
+          var block = msg.content[i];
+          blocksHtml += renderContentBlock(block, role);
+        }
+
+        return '<div class="chat-message ' + role + '">' +
+          avatar +
+          '<div class="chat-message-bubble">' + blocksHtml + '</div>' +
+        '</div>';
+      }
+
+      function renderContentBlock(block, role) {
+        if (!block || !block.type) return "";
+
+        switch (block.type) {
+          case "text":
+            return role === "assistant" ? renderMarkdown(block.text || "") : escapeHtml(block.text || "");
+
+          case "thinking":
+            return '<div class="thinking-card inline-thinking">' +
+              '<div class="thinking-icon">🤔</div>' +
+              '<div class="thinking-content">' +
+                '<details><summary>深度思考</summary>' +
+                '<div class="thinking-text">' + escapeHtml(block.thinking || "") + '</div>' +
+                '</details>' +
+              '</div>' +
+            '</div>';
+
+          case "tool_use":
+            var toolName = escapeHtml(block.name || "unknown");
+            var inputStr = "";
+            try {
+              inputStr = JSON.stringify(block.input || {}, null, 2);
+            } catch (e) {
+              inputStr = String(block.input || "");
+            }
+            return '<div class="tool-use-card">' +
+              '<details>' +
+                '<summary class="tool-use-header">' +
+                  '<span class="tool-icon">🔧</span> ' +
+                  '<span class="tool-name">' + toolName + '</span>' +
+                '</summary>' +
+                '<div class="tool-use-body">' +
+                  '<pre class="tool-input"><code>' + escapeHtml(inputStr) + '</code></pre>' +
+                '</div>' +
+              '</details>' +
+            '</div>';
+
+          case "tool_result":
+            var content = block.content || "";
+            var isError = block.is_error;
+            var statusClass = isError ? "tool-result-error" : "tool-result-success";
+            var statusIcon = isError ? "❌" : "✅";
+            // Truncate long results
+            var displayContent = content.length > 500 ? content.slice(0, 500) + "..." : content;
+            return '<div class="tool-result-card ' + statusClass + '">' +
+              '<details>' +
+                '<summary class="tool-result-header">' +
+                  statusIcon + ' 工具结果' +
+                '</summary>' +
+                '<div class="tool-result-body">' +
+                  '<pre class="tool-result-content"><code>' + escapeHtml(displayContent) + '</code></pre>' +
+                '</div>' +
+              '</details>' +
+            '</div>';
+
+          default:
+            return '<div class="unknown-block">' + escapeHtml(JSON.stringify(block)) + '</div>';
+        }
       }
 
       function renderMarkdown(text) {

@@ -6,7 +6,7 @@ import process from "node:process";
 import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
-import { ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
+import { ConversationTurn, ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
 
 export interface ProcessEvent {
   type: "output" | "status" | "started" | "ended";
@@ -54,6 +54,10 @@ interface SessionRecord extends SessionSnapshot {
   sessionIdWindow: string;
   /** 从存储加载的初始输出（用于重启后恢复） */
   storedOutput: string;
+  /** Structured conversation messages (JSON chat mode) */
+  messages: ConversationTurn[];
+  /** Whether a JSON chat turn is currently in progress */
+  jsonChatBusy: boolean;
 }
 
 const MAX_SESSIONS = 50;
@@ -88,7 +92,9 @@ export class ProcessManager extends EventEmitter {
         confirmWindow: "",
         lastAutoConfirmAt: 0,
         sessionIdWindow: "",
-        storedOutput: snapshot.output
+        storedOutput: snapshot.output,
+        messages: snapshot.messages ?? [],
+        jsonChatBusy: false
       });
     }
     this.archiveExpiredSessions();
@@ -157,7 +163,9 @@ export class ProcessManager extends EventEmitter {
       confirmWindow: "",
       lastAutoConfirmAt: 0,
       sessionIdWindow: "",
-      storedOutput: ""
+      storedOutput: "",
+      messages: [],
+      jsonChatBusy: false
     };
 
     this.sessions.set(id, record);
@@ -169,6 +177,10 @@ export class ProcessManager extends EventEmitter {
 
     // For native mode, skip PTY creation — sendInput() will spawn child processes directly
     if (mode === "native") {
+      // If there's an initial input, kick off the first JSON chat turn
+      if (initialInput) {
+        this.runJsonChatTurn(record, initialInput);
+      }
       return this.snapshot(record);
     }
 
@@ -273,9 +285,9 @@ export class ProcessManager extends EventEmitter {
   sendInput(id: string, input: string): SessionSnapshot {
     const record = this.mustGet(id);
 
-    // Native mode: spawn claude -p "<input>" as a one-shot child process
+    // Native mode: use JSON chat turn (claude -p --output-format stream-json)
     if (record.mode === "native") {
-      return this.runNativeCommand(record, input);
+      return this.runJsonChatTurn(record, input);
     }
 
     if (!record.ptyProcess || record.status !== "running") {
@@ -290,12 +302,43 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
-  private runNativeCommand(record: SessionRecord, message: string): SessionSnapshot {
+  private runJsonChatTurn(record: SessionRecord, message: string): SessionSnapshot {
+    if (record.jsonChatBusy) {
+      // Queue or reject — for now just ignore until previous turn finishes
+      process.stderr.write(`[wand] JSON chat turn already in progress for ${record.id}, ignoring\n`);
+      return this.snapshot(record);
+    }
+    record.jsonChatBusy = true;
+    record.status = "running";
+
     const baseCommand = record.command.trim();
-    // Build claude -p "message" command
-    // Escape quotes in message for shell safety
     const escapedMessage = message.replace(/'/g, "'\\''");
-    const nativeCommand = `${baseCommand} -p '${escapedMessage}'`;
+
+    // Build command: claude -p 'message' --output-format stream-json [--resume sessionId] [--permission-mode acceptEdits]
+    const parts = [baseCommand, "-p", `'${escapedMessage}'`, "--output-format", "stream-json"];
+
+    if (record.claudeSessionId) {
+      parts.push("--resume", record.claudeSessionId);
+    }
+
+    // Add permission mode for full-access
+    if (/^claude\s/.test(baseCommand) && !/--permission-mode\b/.test(baseCommand)) {
+      parts.push("--permission-mode", "acceptEdits");
+    }
+
+    const nativeCommand = parts.join(" ");
+    process.stderr.write(`[wand] Running JSON chat turn: ${nativeCommand}\n`);
+
+    // Add user message to conversation
+    record.messages.push({
+      role: "user",
+      content: [{ type: "text", text: message }]
+    });
+
+    // Also append to raw output for terminal view
+    record.output = appendWindow(record.output, `\n❯ ${message}\n`, OUTPUT_MAX_SIZE);
+    this.persist(record);
+    this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: `\n❯ ${message}\n`, output: record.output, messages: record.messages } });
 
     const child = spawn(nativeCommand, [], {
       cwd: record.cwd,
@@ -308,42 +351,229 @@ export class ProcessManager extends EventEmitter {
       stdio: ["ignore", "pipe", "pipe"]
     });
 
-    const chunks: string[] = [];
+    // Collect NDJSON lines from stdout
+    let stdoutBuffer = "";
+    const assistantBlocks: Array<{ type: string; [key: string]: unknown }> = [];
+    let turnSessionId: string | null = null;
+
     child.stdout?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
-      chunks.push(text);
-      record.output = appendWindow(record.output, text, OUTPUT_MAX_SIZE);
+      stdoutBuffer += text;
+
+      // Process complete NDJSON lines
+      const lines = stdoutBuffer.split("\n");
+      stdoutBuffer = lines.pop() || ""; // Keep incomplete last line in buffer
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const event = JSON.parse(trimmed);
+          this.processJsonEvent(record, event, assistantBlocks);
+
+          // Extract session_id from any event that has it
+          if (event.session_id && !turnSessionId) {
+            turnSessionId = event.session_id;
+          }
+        } catch {
+          // Not valid JSON — might be debug output, append to raw output
+          record.output = appendWindow(record.output, trimmed + "\n", OUTPUT_MAX_SIZE);
+        }
+      }
+
       this.persist(record);
-      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output } });
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output, messages: record.messages } });
     });
+
     child.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
-      chunks.push(text);
       record.output = appendWindow(record.output, text, OUTPUT_MAX_SIZE);
       this.persist(record);
-      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output } });
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output, messages: record.messages } });
     });
 
     child.on("close", (code: number | null) => {
-      record.status = record.stopRequested ? "stopped" : code === 0 ? "exited" : "failed";
-      record.exitCode = record.stopRequested ? null : code;
-      record.endedAt = new Date().toISOString();
+      // Process any remaining buffer
+      if (stdoutBuffer.trim()) {
+        try {
+          const event = JSON.parse(stdoutBuffer.trim());
+          this.processJsonEvent(record, event, assistantBlocks);
+          if (event.session_id && !turnSessionId) {
+            turnSessionId = event.session_id;
+          }
+        } catch {
+          record.output = appendWindow(record.output, stdoutBuffer, OUTPUT_MAX_SIZE);
+        }
+      }
+
+      // Finalize assistant turn if we collected any blocks
+      if (assistantBlocks.length > 0) {
+        // Build the assistant turn from collected blocks
+        const turn = this.buildAssistantTurn(assistantBlocks);
+        record.messages.push(turn);
+      }
+
+      // Update session ID for multi-turn resume
+      if (turnSessionId) {
+        record.claudeSessionId = turnSessionId;
+        process.stderr.write(`[wand] Captured Claude session ID: ${turnSessionId}\n`);
+      }
+
+      record.jsonChatBusy = false;
+      // Native mode: session stays "running" to accept more turns, unless stop was requested
+      if (record.stopRequested) {
+        record.status = "stopped";
+        record.endedAt = new Date().toISOString();
+      } else if (code !== 0 && code !== null) {
+        // Non-zero exit but don't end the session — just log it
+        process.stderr.write(`[wand] JSON chat turn exited with code ${code}\n`);
+      }
+      // Session stays running for more turns
+
       this.persist(record);
-      this.emitEvent({ type: "ended", sessionId: record.id, data: this.snapshot(record) });
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: "", output: record.output, messages: record.messages } });
     });
 
     child.on("error", (err: Error) => {
       const errMsg = `\n[wand] Error: ${err.message}\n`;
       record.output = appendWindow(record.output, errMsg, OUTPUT_MAX_SIZE);
-      record.status = "failed";
-      record.exitCode = 1;
-      record.endedAt = new Date().toISOString();
+      record.jsonChatBusy = false;
       this.persist(record);
-      this.emitEvent({ type: "ended", sessionId: record.id, data: this.snapshot(record) });
+      this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: errMsg, output: record.output, messages: record.messages } });
     });
 
     this.persist(record);
     return this.snapshot(record);
+  }
+
+  private processJsonEvent(
+    record: SessionRecord,
+    event: { type?: string; message?: { role?: string; content?: unknown[] }; content_block?: { type?: string; [key: string]: unknown }; delta?: { type?: string; text?: string; partial_json?: string; thinking?: string }; [key: string]: unknown },
+    assistantBlocks: Array<{ type: string; [key: string]: unknown }>
+  ): void {
+    switch (event.type) {
+      case "assistant": {
+        // Full assistant message — contains all content blocks
+        const msg = event.message;
+        if (msg?.content && Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block && typeof block === "object" && "type" in block) {
+              assistantBlocks.push(block as { type: string; [key: string]: unknown });
+              this.appendBlockToOutput(record, block as { type: string; [key: string]: unknown });
+            }
+          }
+        }
+        break;
+      }
+      case "content_block_start": {
+        // Streaming: new content block starting
+        if (event.content_block) {
+          assistantBlocks.push({ ...event.content_block } as { type: string; [key: string]: unknown });
+        }
+        break;
+      }
+      case "content_block_delta": {
+        // Streaming: delta for the current block
+        if (event.delta) {
+          const lastBlock = assistantBlocks[assistantBlocks.length - 1];
+          if (lastBlock) {
+            if (event.delta.text) {
+              lastBlock.text = (lastBlock.text as string || "") + event.delta.text;
+              record.output = appendWindow(record.output, event.delta.text, OUTPUT_MAX_SIZE);
+            }
+            if (event.delta.partial_json) {
+              lastBlock._partialJson = (lastBlock._partialJson as string || "") + event.delta.partial_json;
+            }
+            if (event.delta.thinking) {
+              lastBlock.thinking = (lastBlock.thinking as string || "") + event.delta.thinking;
+            }
+          }
+        }
+        break;
+      }
+      case "result": {
+        // Final result event — may contain full message and session_id
+        if (event.result && typeof event.result === "object") {
+          const result = event.result as { content?: unknown[] };
+          if (result.content && Array.isArray(result.content)) {
+            // If we haven't collected blocks from streaming, use the result
+            if (assistantBlocks.length === 0) {
+              for (const block of result.content) {
+                if (block && typeof block === "object" && "type" in block) {
+                  assistantBlocks.push(block as { type: string; [key: string]: unknown });
+                  this.appendBlockToOutput(record, block as { type: string; [key: string]: unknown });
+                }
+              }
+            }
+          }
+        }
+        break;
+      }
+      // system, error, etc. — just log
+      default:
+        break;
+    }
+  }
+
+  private appendBlockToOutput(record: SessionRecord, block: { type: string; [key: string]: unknown }): void {
+    switch (block.type) {
+      case "text":
+        record.output = appendWindow(record.output, (block.text as string) + "\n", OUTPUT_MAX_SIZE);
+        break;
+      case "thinking":
+        record.output = appendWindow(record.output, "[thinking...]\n", OUTPUT_MAX_SIZE);
+        break;
+      case "tool_use":
+        record.output = appendWindow(
+          record.output,
+          `[tool: ${block.name as string}]\n`,
+          OUTPUT_MAX_SIZE
+        );
+        break;
+      case "tool_result":
+        record.output = appendWindow(
+          record.output,
+          `[tool result: ${(block.content as string || "").slice(0, 200)}]\n`,
+          OUTPUT_MAX_SIZE
+        );
+        break;
+    }
+  }
+
+  private buildAssistantTurn(blocks: Array<{ type: string; [key: string]: unknown }>): ConversationTurn {
+    const contentBlocks = blocks.map((b) => {
+      switch (b.type) {
+        case "text":
+          return { type: "text" as const, text: (b.text as string) || "" };
+        case "thinking":
+          return { type: "thinking" as const, thinking: (b.thinking as string) || "" };
+        case "tool_use": {
+          let input = b.input as Record<string, unknown> || {};
+          // If we accumulated partial JSON, parse it
+          if (b._partialJson && typeof b._partialJson === "string") {
+            try { input = JSON.parse(b._partialJson); } catch { /* keep original */ }
+          }
+          return {
+            type: "tool_use" as const,
+            id: (b.id as string) || "",
+            name: (b.name as string) || "",
+            input
+          };
+        }
+        case "tool_result":
+          return {
+            type: "tool_result" as const,
+            tool_use_id: (b.tool_use_id as string) || "",
+            content: (b.content as string) || "",
+            is_error: (b.is_error as boolean) || false
+          };
+        default:
+          return { type: "text" as const, text: JSON.stringify(b) };
+      }
+    });
+
+    return { role: "assistant", content: contentBlocks };
   }
 
   resize(id: string, cols: number, rows: number): SessionSnapshot {
@@ -410,7 +640,8 @@ export class ProcessManager extends EventEmitter {
       output: record.output,
       archived: record.archived,
       archivedAt: record.archivedAt,
-      claudeSessionId: record.claudeSessionId
+      claudeSessionId: record.claudeSessionId,
+      messages: record.messages.length > 0 ? record.messages : undefined
     };
   }
 

@@ -290,7 +290,10 @@ self.addEventListener('fetch', (event) => {
       return;
     }
     if (req.query.format === "chat") {
-      const messages = parseMessages(snapshot.output);
+      // Prefer structured messages from JSON chat mode, fall back to PTY parsing
+      const messages = snapshot.messages && snapshot.messages.length > 0
+        ? snapshot.messages
+        : parseMessages(snapshot.output);
       res.json({ ...snapshot, messages });
     } else {
       res.json(snapshot);
