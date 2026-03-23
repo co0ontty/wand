@@ -454,9 +454,9 @@ export class ProcessManager extends EventEmitter {
   ): void {
     switch (event.type) {
       case "assistant": {
-        // Full assistant message — contains all content blocks
+        // Full assistant message — only use if we haven't collected blocks from streaming
         const msg = event.message;
-        if (msg?.content && Array.isArray(msg.content)) {
+        if (msg?.content && Array.isArray(msg.content) && assistantBlocks.length === 0) {
           for (const block of msg.content) {
             if (block && typeof block === "object" && "type" in block) {
               assistantBlocks.push(block as { type: string; [key: string]: unknown });

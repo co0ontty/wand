@@ -3765,12 +3765,26 @@ export function renderApp(configPath: string): string {
       }
 
       function getDraftValue() {
-        return state.selectedId ? (state.drafts[state.selectedId] || "") : "";
+        if (state.selectedId) {
+          if (state.drafts[state.selectedId] !== undefined) {
+            return state.drafts[state.selectedId];
+          }
+          // Try to load from localStorage
+          try {
+            var saved = localStorage.getItem("wand-draft-" + state.selectedId);
+            if (saved) return saved;
+          } catch (e) { /* ignore */ }
+        }
+        return "";
       }
 
       function setDraftValue(value) {
         if (!state.selectedId) return;
         state.drafts[state.selectedId] = value;
+        // Persist to localStorage
+        try {
+          localStorage.setItem("wand-draft-" + state.selectedId, value);
+        } catch (e) { /* ignore */ }
         var inputBox = document.getElementById("input-box");
         if (inputBox) inputBox.value = value;
       }
