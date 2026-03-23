@@ -6,7 +6,7 @@ import process from "node:process";
 import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
-import { ConversationTurn, ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
+import { ContentBlock, ConversationTurn, ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
 
 export interface ProcessEvent {
   type: "output" | "status" | "started" | "ended";
@@ -379,6 +379,17 @@ export class ProcessManager extends EventEmitter {
     const assistantBlocks: Array<{ type: string; [key: string]: unknown }> = [];
     let turnSessionId: string | null = null;
 
+    // Add assistant placeholder immediately so frontend has both messages during streaming
+    const assistantIndex = record.messages.length;
+    record.messages.push({
+      role: "assistant",
+      content: []
+    });
+
+    // Debounce rapid output to reduce flicker during streaming
+    let outputDebounceTimer: NodeJS.Timeout | null = null;
+    let pendingOutput = false;
+
     child.stdout?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stdoutBuffer += text;
@@ -408,10 +419,25 @@ export class ProcessManager extends EventEmitter {
         }
       }
 
-      this.persist(record);
-      // Only emit output event if there's actual new content
       if (hasNewContent) {
-        this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: text, output: record.output, messages: record.messages } });
+        // Update assistant message content from collected blocks during streaming
+        if (assistantBlocks.length > 0) {
+          record.messages[assistantIndex].content = this.buildContentBlocks(assistantBlocks);
+        }
+        this.persist(record);
+        pendingOutput = true;
+
+        // Debounce output events to reduce WebSocket flooding
+        if (outputDebounceTimer) {
+          clearTimeout(outputDebounceTimer);
+        }
+        outputDebounceTimer = setTimeout(() => {
+          outputDebounceTimer = null;
+          if (pendingOutput) {
+            pendingOutput = false;
+            this.emitEvent({ type: "output", sessionId: record.id, data: { chunk: "", output: record.output, messages: record.messages } });
+          }
+        }, 50); // 50ms debounce for native mode
       }
     });
 
@@ -436,11 +462,9 @@ export class ProcessManager extends EventEmitter {
         }
       }
 
-      // Finalize assistant turn if we collected any blocks
+      // Finalize assistant message - update the placeholder we created
       if (assistantBlocks.length > 0) {
-        // Build the assistant turn from collected blocks
-        const turn = this.buildAssistantTurn(assistantBlocks);
-        record.messages.push(turn);
+        record.messages[assistantIndex].content = this.buildContentBlocks(assistantBlocks);
       }
 
       // Update session ID for multi-turn resume
@@ -570,8 +594,8 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  private buildAssistantTurn(blocks: Array<{ type: string; [key: string]: unknown }>): ConversationTurn {
-    const contentBlocks = blocks.map((b) => {
+  private buildContentBlocks(blocks: Array<{ type: string; [key: string]: unknown }>): ContentBlock[] {
+    return blocks.map((b) => {
       switch (b.type) {
         case "text":
           return { type: "text" as const, text: (b.text as string) || "" };
@@ -579,7 +603,6 @@ export class ProcessManager extends EventEmitter {
           return { type: "thinking" as const, thinking: (b.thinking as string) || "" };
         case "tool_use": {
           let input = b.input as Record<string, unknown> || {};
-          // If we accumulated partial JSON, parse it
           if (b._partialJson && typeof b._partialJson === "string") {
             try { input = JSON.parse(b._partialJson); } catch { /* keep original */ }
           }
@@ -601,8 +624,10 @@ export class ProcessManager extends EventEmitter {
           return { type: "text" as const, text: JSON.stringify(b) };
       }
     });
+  }
 
-    return { role: "assistant", content: contentBlocks };
+  private buildAssistantTurn(blocks: Array<{ type: string; [key: string]: unknown }>): ConversationTurn {
+    return { role: "assistant", content: this.buildContentBlocks(blocks) };
   }
 
   resize(id: string, cols: number, rows: number): SessionSnapshot {
