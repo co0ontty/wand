@@ -17,7 +17,7 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 
-const BASE_URL = 'https://localhost:8444';
+const BASE_URL = 'https://localhost:8443';
 
 // 测试结果统计
 const results = {
@@ -272,6 +272,85 @@ async function runTests() {
       recordTest('控制序列正确', !!allValid, controlSequencesSource ? JSON.stringify(controlSequencesSource) : '未找到函数定义');
     } catch (e) {
       recordTest('控制序列正确', false, e.message);
+    }
+
+    // 测试 11: 文件搜索 API
+    log('测试 11: 文件搜索 API');
+    try {
+      const searchResult = await page.evaluate(async () => {
+        const res = await fetch('/api/file-search?q=src&limit=5');
+        const data = await res.json();
+        return { ok: res.ok, status: res.status, count: data.results ? data.results.length : 0 };
+      });
+      recordTest('文件搜索 API 可用', searchResult.ok, searchResult.ok ? `找到 ${searchResult.count} 个结果` : `状态: ${searchResult.status}`);
+    } catch (e) {
+      recordTest('文件搜索 API 可用', false, e.message);
+    }
+
+    // 测试 12: 文件搜索 UI 组件
+    log('测试 12: 文件搜索 UI');
+    try {
+      const searchUI = await page.evaluate(() => {
+        const searchInput = document.getElementById('file-search-input');
+        const searchClear = document.getElementById('file-search-clear');
+        const fileExplorer = document.getElementById('file-explorer');
+        return {
+          searchInputExists: !!searchInput,
+          searchClearExists: !!searchClear,
+          fileExplorerExists: !!fileExplorer
+        };
+      });
+      recordTest('文件搜索 UI 存在', searchUI.searchInputExists && searchUI.fileExplorerExists,
+        !searchUI.searchInputExists ? '缺少搜索输入框' : (!searchUI.fileExplorerExists ? '缺少文件浏览器' : null));
+    } catch (e) {
+      recordTest('文件搜索 UI 存在', false, e.message);
+    }
+
+    // 测试 13: 路径建议 API
+    log('测试 13: 路径建议 API');
+    try {
+      const pathSuggestion = await page.evaluate(async () => {
+        const res = await fetch('/api/path-suggestions?q=/');
+        const data = await res.json();
+        return { ok: res.ok, status: res.status, count: data.length || 0 };
+      });
+      recordTest('路径建议 API 可用', pathSuggestion.ok, pathSuggestion.ok ? `返回 ${pathSuggestion.count} 条建议` : `状态: ${pathSuggestion.status}`);
+    } catch (e) {
+      recordTest('路径建议 API 可用', false, e.message);
+    }
+
+    // 测试 14: 目录列表 API
+    log('测试 14: 目录列表 API');
+    try {
+      const dirResult = await page.evaluate(async () => {
+        const res = await fetch('/api/directory?path=');
+        const data = await res.json();
+        // API returns an array directly, not { files: [...] }
+        const isArray = Array.isArray(data);
+        return { ok: res.ok, status: res.status, hasFiles: isArray && data.length >= 0 };
+      });
+      recordTest('目录列表 API 可用', dirResult.ok && dirResult.hasFiles, dirResult.ok ? null : `状态: ${dirResult.status}`);
+    } catch (e) {
+      recordTest('目录列表 API 可用', false, e.message);
+    }
+
+    // 测试 15: Sidebar 文件标签
+    log('测试 15: Sidebar 文件标签');
+    try {
+      const tabsUI = await page.evaluate(() => {
+        const tabs = document.querySelectorAll('.sidebar-tab');
+        const filesTab = Array.from(tabs).find(t => t.textContent.includes('文件'));
+        const sessionsTab = Array.from(tabs).find(t => t.textContent.includes('会话'));
+        return {
+          tabsCount: tabs.length,
+          hasFilesTab: !!filesTab,
+          hasSessionsTab: !!sessionsTab
+        };
+      });
+      recordTest('Sidebar 标签正确', tabsUI.tabsCount >= 2 && tabsUI.hasFilesTab && tabsUI.hasSessionsTab,
+        `tabs: ${tabsUI.tabsCount}, files: ${tabsUI.hasFilesTab}, sessions: ${tabsUI.hasSessionsTab}`);
+    } catch (e) {
+      recordTest('Sidebar 标签正确', false, e.message);
     }
 
     // 输出测试报告

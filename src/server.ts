@@ -92,10 +92,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const storage = new WandStorage(resolveDatabasePath(configPath));
   setAuthStorage(storage);
   const processes = new ProcessManager(config, storage);
-  const accessHost = config.host === "0.0.0.0" ? "127.0.0.1" : config.host;
   const useHttps = config.https !== false; // Default to true
   const protocol = useHttps ? "https" : "http";
-  const accessUrl = `${protocol}://${accessHost}:${config.port}`;
 
   app.use(express.json({ limit: "1mb" }));
   app.use("/vendor/xterm", express.static(path.resolve(process.cwd(), "node_modules/xterm")));
@@ -356,6 +354,152 @@ self.addEventListener('fetch', (event) => {
       { path: "/", name: "根目录", icon: "📁" }
     ];
     res.json(quickPaths);
+  });
+
+  // ============ Favorite Paths API ============
+
+  interface FavoritePath {
+    path: string;
+    name: string;
+    icon?: string;
+    addedAt: string;
+  }
+
+  app.get("/api/favorite-paths", (_req, res) => {
+    const stored = storage.getConfigValue("favorite_paths");
+    const favorites: FavoritePath[] = stored ? JSON.parse(stored) : [];
+    res.json(favorites);
+  });
+
+  app.post("/api/favorite-paths", (req, res) => {
+    const { path: favPath, name, icon } = req.body as { path?: string; name?: string; icon?: string };
+    if (!favPath) {
+      res.status(400).json({ error: "路径不能为空。" });
+      return;
+    }
+
+    const stored = storage.getConfigValue("favorite_paths");
+    const favorites: FavoritePath[] = stored ? JSON.parse(stored) : [];
+
+    // Check if already exists
+    if (favorites.some((f) => f.path === favPath)) {
+      res.status(400).json({ error: "该路径已在收藏列表中。" });
+      return;
+    }
+
+    const newFavorite: FavoritePath = {
+      path: favPath,
+      name: name || path.basename(favPath),
+      icon: icon || "⭐",
+      addedAt: new Date().toISOString()
+    };
+
+    favorites.push(newFavorite);
+    storage.setConfigValue("favorite_paths", JSON.stringify(favorites));
+    res.status(201).json(newFavorite);
+  });
+
+  app.delete("/api/favorite-paths", (req, res) => {
+    const { path: delPath } = req.body as { path?: string };
+    if (!delPath) {
+      res.status(400).json({ error: "路径不能为空。" });
+      return;
+    }
+
+    const stored = storage.getConfigValue("favorite_paths");
+    const favorites: FavoritePath[] = stored ? JSON.parse(stored) : [];
+
+    const index = favorites.findIndex((f) => f.path === delPath);
+    if (index === -1) {
+      res.status(404).json({ error: "未找到该收藏路径。" });
+      return;
+    }
+
+    favorites.splice(index, 1);
+    storage.setConfigValue("favorite_paths", JSON.stringify(favorites));
+    res.json({ ok: true });
+  });
+
+  // ============ Recent Paths API ============
+
+  interface RecentPath {
+    path: string;
+    name: string;
+    lastUsedAt: string;
+  }
+
+  const MAX_RECENT_PATHS = 10;
+
+  app.get("/api/recent-paths", (_req, res) => {
+    const stored = storage.getConfigValue("recent_paths");
+    const recent: RecentPath[] = stored ? JSON.parse(stored) : [];
+    res.json(recent);
+  });
+
+  app.post("/api/recent-paths", (req, res) => {
+    const { path: usedPath } = req.body as { path?: string };
+    if (!usedPath) {
+      res.status(400).json({ error: "路径不能为空。" });
+      return;
+    }
+
+    const stored = storage.getConfigValue("recent_paths");
+    let recent: RecentPath[] = stored ? JSON.parse(stored) : [];
+
+    // Remove existing entry for this path (to update position)
+    recent = recent.filter((r) => r.path !== usedPath);
+
+    // Add to front
+    const newRecent: RecentPath = {
+      path: usedPath,
+      name: path.basename(usedPath),
+      lastUsedAt: new Date().toISOString()
+    };
+    recent.unshift(newRecent);
+
+    // Keep only last N entries
+    recent = recent.slice(0, MAX_RECENT_PATHS);
+
+    storage.setConfigValue("recent_paths", JSON.stringify(recent));
+    res.json(newRecent);
+  });
+
+  // ============ Path Validation API ============
+
+  app.get("/api/validate-path", async (req, res) => {
+    const inputPath = typeof req.query.path === "string" ? req.query.path : "";
+
+    if (!inputPath.trim()) {
+      res.json({ valid: false, error: "路径不能为空" });
+      return;
+    }
+
+    try {
+      const resolvedPath = path.resolve(inputPath);
+      const stats = await import("node:fs/promises").then(fs => fs.stat(resolvedPath));
+
+      if (!stats.isDirectory()) {
+        res.json({ valid: false, error: "路径不是目录", resolvedPath });
+        return;
+      }
+
+      // Check read permission
+      try {
+        await readdir(resolvedPath);
+        res.json({ valid: true, resolvedPath, name: path.basename(resolvedPath) });
+      } catch (permError) {
+        res.json({ valid: false, error: "没有读取权限", resolvedPath });
+      }
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
+        res.json({ valid: false, error: "路径不存在" });
+      } else if (err.code === "EACCES") {
+        res.json({ valid: false, error: "没有访问权限" });
+      } else {
+        res.json({ valid: false, error: `无效路径: ${err.message}` });
+      }
+    }
   });
 
   // File search API - supports fuzzy matching across directory tree
@@ -659,8 +803,10 @@ self.addEventListener('fetch', (event) => {
   // Start server
   await new Promise<void>((resolve, reject) => {
     server.listen(config.port, config.host, () => {
+      const listenAddr = config.host === "0.0.0.0" ? "0.0.0.0 (所有接口)" : config.host;
       process.stdout.write(
-        `[wand] Web console listening on ${protocol}://${accessHost}:${config.port}\n`
+        `[wand] Web console listening on ${listenAddr}:${config.port}\n` +
+        `[wand] 本地访问: ${protocol}://127.0.0.1:${config.port}\n`
       );
       resolve();
     });

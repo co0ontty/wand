@@ -83,13 +83,14 @@ export function renderApp(configPath: string): string {
       overflow: hidden;
     }
 
+    /* 顶栏优化：简洁三列布局 */
     .topbar {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: auto 1fr auto;
       align-items: center;
-      gap: 12px;
-      min-height: 64px;
-      padding: 10px 18px;
+      gap: 8px;
+      min-height: 52px;
+      padding: 8px 12px;
       background: var(--bg-secondary);
       border-bottom: 1px solid var(--border-subtle);
       backdrop-filter: blur(18px);
@@ -98,49 +99,21 @@ export function renderApp(configPath: string): string {
       z-index: 20;
     }
 
-    .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
-    .topbar-actions { display: flex; align-items: center; gap: 8px; }
-    .logo-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; }
-    .logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1rem; }
+    .topbar-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .topbar-actions { display: flex; align-items: center; gap: 4px; }
+    .logo-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; justify-content: center; }
+    .logo { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 0.875rem; }
     .logo-icon {
-      width: 28px; height: 28px;
+      width: 24px; height: 24px;
       background: linear-gradient(135deg, #d77a52 0%, #a95130 100%);
-      border-radius: 10px;
+      border-radius: 8px;
       display: flex; align-items: center; justify-content: center;
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
-      font-size: 12px; color: white; font-weight: 700;
+      font-size: 10px; color: white; font-weight: 700;
     }
 
-    .brand-meta {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-      min-width: 0;
-    }
-
-    .brand-name {
-      font-size: 0.98rem;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-    }
-
-    .brand-subtitle {
-      font-size: 0.6875rem;
-      color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .status-badge {
-      display: flex; align-items: center; gap: 6px;
-      padding: 6px 12px;
-      background: rgba(255, 247, 239, 0.95);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-    }
+    .brand-meta { display: none; }
+    .status-badge { display: none; }
 
     .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
     .status-dot.active { background: var(--success); box-shadow: 0 0 8px var(--success); }
@@ -149,28 +122,23 @@ export function renderApp(configPath: string): string {
       min-width: 0;
       display: flex;
       justify-content: center;
+      overflow: hidden;
     }
 
     .session-summary {
       min-width: 0;
       display: flex;
-      flex-direction: column;
       align-items: center;
-      gap: 2px;
+      gap: 4px;
       text-align: center;
     }
 
-    .session-summary-label {
-      font-size: 0.6875rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-    }
+    .session-summary-label { display: none; }
 
     .session-summary-value {
-      max-width: min(52vw, 560px);
+      max-width: 180px;
       font-family: var(--font-mono);
-      font-size: 0.8125rem;
+      font-size: 0.75rem;
       color: var(--text-secondary);
       white-space: nowrap;
       overflow: hidden;
@@ -181,27 +149,10 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 8px;
+      gap: 4px;
     }
-    .config-path {
-      font-size: 0.6875rem;
-      color: var(--text-muted);
-      font-family: var(--font-mono);
-      padding: 6px 10px;
-      background: rgba(255, 247, 239, 0.95);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-sm);
-    }
-
-    .protocol-note {
-      font-size: 0.6875rem;
-      color: var(--warning);
-      background: rgba(255, 244, 230, 0.92);
-      border: 1px solid rgba(169, 106, 47, 0.18);
-      border-radius: 999px;
-      padding: 6px 10px;
-      white-space: nowrap;
-    }
+    .config-path { display: none; }
+    .protocol-note { display: none; }
 
     .main-layout {
       display: flex;
@@ -252,11 +203,12 @@ export function renderApp(configPath: string): string {
       transform: translateX(0);
     }
 
+    /* 侧边栏头部优化 */
     .sidebar-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 14px;
+      padding: 10px 12px;
       border-bottom: 1px solid var(--border-subtle);
       background: rgba(255, 251, 245, 0.6);
       flex-shrink: 0;
@@ -265,39 +217,38 @@ export function renderApp(configPath: string): string {
     .sidebar-header-main {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       min-width: 0;
     }
 
     .sidebar-title {
-      font-size: 0.6875rem;
+      font-size: 0.75rem;
       font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
+      color: var(--text-secondary);
     }
 
     .session-count {
-      font-size: 0.6875rem;
+      font-size: 0.625rem;
       color: var(--text-muted);
       background: rgba(240, 229, 215, 0.9);
-      padding: 3px 8px;
-      border-radius: var(--radius-sm);
+      padding: 2px 6px;
+      border-radius: 8px;
     }
 
     .sidebar-close { flex-shrink: 0; }
 
+    /* 标签切换优化 */
     .sidebar-tabs {
       display: flex;
       border-bottom: 1px solid var(--border-subtle);
       background: rgba(255, 251, 245, 0.6);
-      padding: 0 14px;
+      padding: 0 12px;
       flex-shrink: 0;
     }
 
     .sidebar-tab {
-      padding: 10px 12px;
-      font-size: 0.8125rem;
+      padding: 8px 10px;
+      font-size: 0.75rem;
       font-weight: 500;
       color: var(--text-muted);
       background: none;
@@ -561,67 +512,6 @@ export function renderApp(configPath: string): string {
     .session-status.failed { background: var(--danger-muted); color: var(--danger); }
     .session-status.stopped { background: var(--warning-muted); color: var(--warning); }
     .session-status.archived { background: rgba(95, 74, 57, 0.1); color: var(--text-secondary); }
-
-    /* 可折叠顶栏 */
-    .topbar-collapsed .topbar-center,
-    .topbar-collapsed .brand-meta,
-    .topbar-collapsed .status-badge { display: none; }
-
-    .topbar-toggle {
-      display: none;
-      width: 28px;
-      height: 28px;
-      min-width: 28px;
-      min-height: 28px;
-      padding: 0;
-      border-radius: 6px;
-      font-size: 0.875rem;
-      background: transparent;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-    }
-
-    .topbar-toggle:hover { background: rgba(240, 229, 215, 0.72); }
-
-    @media (max-width: 640px) {
-      .topbar-toggle { display: flex; align-items: center; justify-content: center; }
-
-      .topbar.topbar-collapsed {
-        min-height: 36px;
-        padding: 4px 8px;
-      }
-
-      .topbar.topbar-collapsed .topbar-left,
-      .topbar.topbar-collapsed .topbar-right { gap: 4px; }
-
-      .topbar.topbar-collapsed .btn-sm {
-        padding: 4px 8px;
-        font-size: 0.6875rem;
-        min-height: 28px;
-      }
-
-      .topbar.topbar-collapsed .logo-icon {
-        width: 20px;
-        height: 20px;
-        font-size: 8px;
-      }
-
-      /* 展开状态时的顶栏 */
-      .topbar.topbar-expanded {
-        grid-template-columns: auto 1fr auto;
-        grid-template-areas:
-          "toggle close ."
-          "menu logo actions";
-        padding: 8px 10px;
-        min-height: auto;
-        row-gap: 8px;
-      }
-
-      .topbar.topbar-expanded .topbar-toggle { grid-area: toggle; }
-      .topbar.topbar-expanded .topbar-left { grid-area: menu; }
-      .topbar.topbar-expanded .topbar-right { grid-area: actions; }
-    }
 
     .session-id {
       font-family: var(--font-mono);
@@ -1172,6 +1062,40 @@ export function renderApp(configPath: string): string {
       border-color: var(--accent);
       color: var(--accent);
     }
+    .folder-breadcrumb {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 2px;
+      padding: 4px 8px;
+      background: rgba(255, 255, 255, 0.4);
+      border-radius: 6px;
+      font-size: 0.6875rem;
+      font-family: var(--font-mono);
+      margin-bottom: 4px;
+    }
+    .folder-breadcrumb-item {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 3px;
+      transition: all var(--transition-fast);
+    }
+    .folder-breadcrumb-item:hover {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+    .folder-breadcrumb-item.current {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+    .folder-breadcrumb-separator {
+      color: var(--text-muted);
+      margin: 0 1px;
+    }
     .folder-picker {
       display: flex;
       align-items: center;
@@ -1247,6 +1171,165 @@ export function renderApp(configPath: string): string {
       border-radius: 4px;
       margin: 4px 8px;
     }
+    .folder-picker-container.drag-over {
+      background: var(--accent-muted);
+      border-radius: var(--radius-sm);
+    }
+    .folder-picker-container.drag-over .folder-picker {
+      border-color: var(--accent);
+    }
+    .folder-recent-section {
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 4px;
+    }
+    .folder-recent-title {
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .folder-recent-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      border-radius: 4px;
+      transition: background var(--transition-fast);
+    }
+    .folder-recent-item:hover {
+      background: var(--bg-tertiary);
+    }
+    .folder-recent-item-icon {
+      color: var(--text-muted);
+    }
+    .folder-recent-item-path {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--font-mono);
+    }
+    .folder-picker-input.invalid {
+      border-color: var(--danger);
+      background: rgba(178, 79, 69, 0.08);
+    }
+    .folder-picker-input.invalid:focus {
+      box-shadow: 0 0 0 2px rgba(178, 79, 69, 0.2);
+    }
+    .folder-picker-validation {
+      font-size: 0.6875rem;
+      color: var(--danger);
+      padding: 2px 4px;
+      margin-top: 2px;
+      display: none;
+    }
+    .folder-picker-validation.visible {
+      display: block;
+    }
+
+    /* Simplified compact folder picker for new sessions */
+    .folder-picker-compact {
+      position: relative;
+      margin-bottom: 8px;
+    }
+    .folder-picker-compact-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      transition: all var(--transition-fast);
+    }
+    .folder-picker-compact-row:focus-within {
+      background: rgba(255, 255, 255, 0.8);
+      border-color: var(--accent);
+    }
+    .folder-picker-compact-icon {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+    .folder-picker-compact-input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      color: var(--text-primary);
+      outline: none;
+      padding: 2px 0;
+      min-width: 0;
+    }
+    .folder-picker-compact-input::placeholder {
+      color: var(--text-muted);
+    }
+    .folder-picker-toggle {
+      background: none;
+      border: none;
+      padding: 4px 6px;
+      font-size: 0.625rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all var(--transition-fast);
+    }
+    .folder-picker-toggle:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+    }
+    .folder-picker-toggle.open {
+      transform: rotate(180deg);
+    }
+    .folder-picker-quick-row {
+      display: flex;
+      gap: 6px;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .folder-picker-quick-row .folder-picker-quick-btn {
+      flex: 1;
+      padding: 4px 8px;
+      font-size: 0.6875rem;
+    }
+
+    /* Working directory indicator embedded in input box */
+    .working-dir-indicator {
+      position: absolute;
+      left: 12px;
+      bottom: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      background: rgba(197, 101, 61, 0.08);
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      max-width: 200px;
+      z-index: 2;
+    }
+    .working-dir-indicator:hover {
+      background: var(--accent-muted);
+      color: var(--accent);
+    }
+    .working-dir-indicator-icon {
+      font-size: 0.75rem;
+      flex-shrink: 0;
+    }
+    .working-dir-indicator-path {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
 
     .input-textarea {
       font-family: var(--font-mono);
@@ -1267,8 +1350,15 @@ export function renderApp(configPath: string): string {
       line-height: 1.5;
     }
 
-    .input-textarea:focus { border-color: var(--accent); }
+    .input-textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-muted);
+    }
     .input-textarea::placeholder { color: var(--text-muted); }
+    .input-textarea.has-dir-indicator {
+      padding-bottom: 28px;
+      min-height: 60px;
+    }
 
     .input-inline-controls {
       position: absolute;
@@ -1300,6 +1390,40 @@ export function renderApp(configPath: string): string {
     }
 
     .keyboard-aware.hidden { transform: translateY(100%); }
+
+    /* Folder icon button in input row */
+    .folder-icon-btn {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      font-size: 1.25rem;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      align-self: flex-end;
+    }
+    .folder-icon-btn:hover {
+      background: var(--accent-muted);
+      border-color: var(--accent);
+      transform: scale(1.05);
+    }
+    .folder-icon-btn:active {
+      transform: scale(0.95);
+    }
+
+    /* Folder picker modal */
+    .folder-picker-modal {
+      max-width: 480px;
+    }
+    .folder-picker-modal .modal-body {
+      padding: 16px;
+    }
 
     .input-actions {
       display: flex;
@@ -1502,7 +1626,10 @@ export function renderApp(configPath: string): string {
       transition: border-color var(--transition-fast);
     }
 
-    .field-input:focus { border-color: var(--accent); }
+    .field-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-muted);
+    }
     .field-input::placeholder { color: var(--text-muted); }
 
     .modal-backdrop {
@@ -1754,28 +1881,38 @@ export function renderApp(configPath: string): string {
     :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     button:focus-visible { outline-offset: 0; }
 
+    /* 平板适配 */
     @media (max-width: 768px) {
       .topbar {
-        grid-template-columns: minmax(0, 1fr) auto;
-        grid-template-areas: "left right";
-        padding: 8px 12px;
-        min-height: 52px;
-        gap: 8px;
+        grid-template-columns: auto 1fr auto;
+        padding: 6px 10px;
+        min-height: 48px;
+        gap: 6px;
       }
       .topbar-center { display: none; }
       .sidebar { width: min(280px, calc(100vw - 24px)); }
-      .config-path { display: none; }
       .terminal-container { margin: 0 10px 10px; min-height: 0; }
-      .btn { min-height: 40px; }
-      .btn-sm { min-height: 36px; padding: 6px 10px; }
-      .status-badge { display: none; }
-      .brand-subtitle { display: none; }
-      .view-toggle { display: none; }
+      .btn { min-height: 38px; }
+      .btn-sm { min-height: 32px; padding: 5px 8px; font-size: 0.75rem; }
+      .view-toggle {
+        display: flex;
+        padding: 2px;
+        gap: 2px;
+      }
+      .view-toggle-btn {
+        padding: 4px 8px;
+        font-size: 0.6875rem;
+      }
       .chat-container { padding: 0 10px 10px; }
       .chat-message { max-width: 95%; }
       .thinking-card { padding: 8px 12px; }
       .thinking-content { font-size: 0.75rem; }
       .tool-picker { grid-template-columns: 1fr; }
+      /* 平板触摸优化 - 44px触摸区域 */
+      .session-item { min-height: 48px; }
+      .tree-item { min-height: 44px; padding: 8px 12px; }
+      .folder-picker-item { min-height: 44px; }
+      .btn { min-height: 44px; }
     }
 
     @media (min-width: 769px) {
@@ -1784,6 +1921,7 @@ export function renderApp(configPath: string): string {
       }
     }
 
+    /* 移动端适配 */
     @media (max-width: 640px) {
       html, body {
         min-height: 100dvh;
@@ -1802,39 +1940,40 @@ export function renderApp(configPath: string): string {
         overflow: visible;
       }
 
-      /* 简化顶栏：单行紧凑布局 */
+      /* 移动端顶栏 */
       .topbar {
         position: sticky;
         top: 0;
         z-index: 30;
-        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-columns: auto 1fr auto;
         grid-template-areas: "menu logo actions";
         align-items: center;
-        gap: 6px;
-        min-height: 48px;
+        gap: 4px;
+        min-height: 44px;
         padding: 6px 8px;
+        padding-top: max(6px, env(safe-area-inset-top, 0px));
       }
 
       .topbar-left { grid-area: menu; display: flex; gap: 4px; }
       .topbar-center { display: none; }
-      .topbar-right { grid-area: actions; display: flex; gap: 6px; }
+      .topbar-right { grid-area: actions; display: flex; gap: 4px; }
       .topbar-actions { display: contents; }
 
-      /* 紧凑 logo */
-      .logo-wrap { display: flex; align-items: center; gap: 6px; grid-area: logo; justify-content: center; }
-      .logo { gap: 6px; font-size: 0.875rem; }
-      .logo-icon { width: 24px; height: 24px; font-size: 10px; border-radius: 8px; }
-      .brand-meta { display: none; }
-      .status-badge { display: none; }
+      /* 移动端logo */
+      .logo-wrap { display: flex; align-items: center; gap: 4px; grid-area: logo; justify-content: center; }
+      .logo { gap: 4px; font-size: 0.8125rem; }
+      .logo-icon { width: 22px; height: 22px; font-size: 9px; border-radius: 6px; }
       .session-summary { display: none; }
 
-      /* 紧凑按钮 */
-      .topbar .btn-sm { padding: 6px 8px; font-size: 0.75rem; min-height: 34px; }
+      /* 移动端按钮 - 44px触摸区域 */
+      .topbar .btn-sm { padding: 6px 10px; font-size: 0.6875rem; min-height: 36px; min-width: 44px; }
+      .topbar .btn-icon { min-width: 44px; min-height: 44px; }
 
       .main-layout {
         flex-direction: column;
         flex: none;
         overflow: visible;
+        padding-left: 0;
       }
 
       .sidebar {
@@ -1847,15 +1986,23 @@ export function renderApp(configPath: string): string {
         display: block;
         overflow-x: hidden;
         overflow-y: auto;
-        padding: 8px;
+        padding: 6px;
         -webkit-overflow-scrolling: touch;
       }
 
+      /* 移动端会话项 - 触摸优化 */
       .session-item {
         width: 100%;
         max-width: none;
-        margin-bottom: 6px;
-        padding: 8px 10px;
+        margin-bottom: 4px;
+        padding: 10px 12px;
+        min-height: 48px;
+      }
+
+      .session-action-btn {
+        width: 36px;
+        height: 36px;
+        min-height: 36px;
       }
 
       .main-content {
@@ -1864,45 +2011,46 @@ export function renderApp(configPath: string): string {
         overflow: hidden;
       }
 
-      /* 紧凑终端头部 */
+      /* 移动端终端 */
       .terminal-header {
-        padding: 8px 10px;
+        padding: 6px 8px;
         align-items: center;
-        gap: 6px;
+        gap: 4px;
         flex-shrink: 0;
       }
       .terminal-title {
         flex-direction: row;
         align-items: center;
-        gap: 6px;
-        font-size: 0.75rem;
+        gap: 4px;
+        font-size: 0.6875rem;
       }
-      .terminal-info { font-size: 0.625rem; }
+      .terminal-info { font-size: 0.5625rem; }
+      .terminal-header-actions .btn-sm { min-height: 36px; min-width: 44px; }
 
-      /* 最大化终端区域 */
       .terminal-container {
         flex: 1;
         min-height: 0;
-        margin: 0 8px 8px;
-        padding: 10px;
+        margin: 0 6px 6px;
+        padding: 8px;
         border-radius: var(--radius-md);
         overflow: hidden;
       }
 
-      /* 紧凑输入面板 */
+      /* 移动端输入面板 - 虚拟键盘优化 */
       .input-panel {
         position: relative;
         z-index: 20;
-        padding: 10px;
-        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+        padding: 8px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
         box-shadow: 0 -4px 16px rgba(89, 58, 32, 0.06);
         flex-shrink: 0;
       }
 
-      .input-row { flex-direction: column; align-items: stretch; gap: 8px; }
+      .input-row { flex-direction: column; align-items: stretch; gap: 6px; }
       .input-field { gap: 4px; min-width: 0; }
-      .input-label { font-size: 0.625rem; }
+      .input-label { font-size: 0.5625rem; }
 
+      /* 移动端输入按钮 - 44px触摸区域 */
       .input-actions {
         width: 100%;
         display: flex;
@@ -1912,24 +2060,25 @@ export function renderApp(configPath: string): string {
       .input-actions .btn {
         flex: 1;
         min-width: 0;
-        min-height: 40px;
-        font-size: 0.8125rem;
+        min-height: 44px;
+        font-size: 0.75rem;
       }
       .floating-toggle {
         flex: 0 0 auto;
-        min-width: 40px;
-        min-height: 40px;
+        min-width: 44px;
+        min-height: 44px;
         border-radius: var(--radius-md);
       }
 
+      /* 防止iOS自动缩放 */
       .input-textarea,
       .field-input {
         font-size: 16px;
       }
 
       .input-textarea {
-        min-height: 48px;
-        padding: 10px 90px 10px 10px;
+        min-height: 44px;
+        padding: 10px 80px 10px 10px;
       }
 
       .input-inline-controls {
@@ -1939,24 +2088,25 @@ export function renderApp(configPath: string): string {
       }
 
       .chat-mode-select {
-        max-width: 72px;
-        height: 28px;
+        max-width: 80px;
+        height: 32px;
         font-size: 0.6875rem;
+        min-height: 32px;
       }
 
       .floating-pad {
         right: 0;
-        bottom: calc(100% + 6px);
-        width: min(200px, calc(100vw - 24px));
+        bottom: calc(100% + 8px);
+        width: min(200px, calc(100vw - 20px));
         padding: 10px;
       }
 
+      /* 浮动面板按钮 - 触摸优化 */
       .floating-pad-grid .btn {
-        min-height: 40px;
+        min-height: 44px;
         font-size: 0.75rem;
       }
 
-      /* 修复移动端聊天容器高度 */
       .chat-container {
         min-height: 0;
         flex: 1;
@@ -1965,32 +2115,123 @@ export function renderApp(configPath: string): string {
       }
       .chat-container.active { display: flex; }
 
-      /* 修复移动端终端容器 */
       .terminal-container {
         flex: 1;
         min-height: 0;
       }
 
+      /* 目录选择器移动端优化 */
+      .folder-picker-container {
+        margin-bottom: 6px;
+      }
+
+      .folder-picker-quick-paths {
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .folder-picker-quick-btn {
+        min-height: 36px;
+        padding: 6px 10px;
+        font-size: 0.75rem;
+      }
+
+      .folder-breadcrumb {
+        padding: 6px 8px;
+        font-size: 0.625rem;
+        margin-bottom: 4px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+        flex-wrap: nowrap;
+      }
+
+      .folder-breadcrumb-item {
+        padding: 4px 6px;
+        min-height: 32px;
+        display: inline-flex;
+      }
+
+      .folder-picker {
+        padding: 8px 10px;
+        min-height: 44px;
+      }
+
+      .folder-picker-input {
+        font-size: 16px;
+        padding: 6px;
+      }
+
+      .folder-picker-dropdown {
+        max-height: 200px;
+      }
+
+      .folder-picker-item {
+        padding: 10px 12px;
+        min-height: 44px;
+      }
+
+      .folder-recent-item {
+        padding: 8px 10px;
+        min-height: 44px;
+      }
+
+      .folder-picker-compact-row {
+        padding: 8px;
+      }
+      .folder-picker-compact-input {
+        font-size: 0.75rem;
+      }
+
+      .working-dir-indicator {
+        font-size: 0.625rem;
+        padding: 2px 6px;
+        max-width: 150px;
+      }
+      .input-textarea.has-dir-indicator {
+        padding-bottom: 26px;
+        min-height: 56px;
+      }
+
       .login-container {
         min-height: 100dvh;
         align-items: flex-start;
-        padding: 16px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+        padding: 12px 10px calc(12px + env(safe-area-inset-bottom, 0px));
       }
 
       .login-card {
-        margin-top: max(12px, env(safe-area-inset-top, 0px));
+        margin-top: max(10px, env(safe-area-inset-top, 0px));
       }
 
-      .login-header { padding: 20px 18px 16px; }
-      .login-body { padding: 18px; }
+      .login-header { padding: 16px 14px 12px; }
+      .login-body { padding: 14px; }
       .btn { min-height: 44px; }
-      .btn-sm { min-height: 38px; }
+      .btn-sm { min-height: 36px; }
 
-      .chat-message-bubble { padding: 10px 12px; font-size: 0.8125rem; }
-      .chat-message-avatar { width: 24px; height: 24px; font-size: 12px; }
+      .chat-message-bubble { padding: 8px 10px; font-size: 0.75rem; }
+      .chat-message-avatar { width: 22px; height: 22px; font-size: 11px; }
+
+      /* 模态框移动端优化 */
+      .modal-backdrop {
+        padding: 12px;
+        align-items: flex-end;
+      }
+
+      .modal {
+        max-width: 100%;
+        max-height: 90vh;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        margin-bottom: env(safe-area-inset-bottom, 0px);
+      }
+
+      .tool-card {
+        padding: 12px;
+        min-height: 44px;
+      }
     }
 
-    @media (max-width: 420px) {
+    /* iPhone 14/15 等标准屏幕 (390px - 420px) */
+    @media (min-width: 391px) and (max-width: 420px) {
       .topbar {
         padding: 4px 8px;
         min-height: 44px;
@@ -2003,7 +2244,7 @@ export function renderApp(configPath: string): string {
       }
 
       .logo-icon { width: 22px; height: 22px; font-size: 9px; }
-      .topbar .btn-sm { padding: 5px 8px; font-size: 0.6875rem; min-height: 32px; }
+      .topbar .btn-sm { padding: 6px 8px; font-size: 0.6875rem; min-height: 36px; min-width: 44px; }
 
       .terminal-header { padding: 6px 10px; }
       .terminal-title-text { font-size: 0.75rem; }
@@ -2017,12 +2258,12 @@ export function renderApp(configPath: string): string {
 
       .input-panel {
         padding: 8px 10px;
-        padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
       }
 
-      .input-actions { gap: 4px; }
-      .input-actions .btn { min-height: 38px; font-size: 0.75rem; }
-      .floating-toggle { min-width: 38px; min-height: 38px; }
+      .input-actions { gap: 6px; }
+      .input-actions .btn { min-height: 44px; font-size: 0.75rem; }
+      .floating-toggle { min-width: 44px; min-height: 44px; }
 
       .floating-pad {
         width: calc(100vw - 20px);
@@ -2030,9 +2271,9 @@ export function renderApp(configPath: string): string {
         padding: 8px;
       }
 
-      .floating-pad-grid .btn { min-height: 40px; font-size: 0.8125rem; }
+      .floating-pad-grid .btn { min-height: 44px; font-size: 0.75rem; }
 
-      .session-item { padding: 8px 10px; }
+      .session-item { padding: 10px 12px; min-height: 48px; }
       .session-command { font-size: 0.75rem; }
       .session-meta { font-size: 0.625rem; }
 
@@ -2050,8 +2291,268 @@ export function renderApp(configPath: string): string {
       .modal-header { padding: 12px 16px; }
       .modal-title { font-size: 0.9375rem; }
 
-      .btn { min-height: 42px; }
+      .btn { min-height: 44px; }
       .btn-sm { min-height: 36px; }
+    }
+
+    /* iPhone SE 等小屏幕 (<= 390px) */
+    @media (max-width: 390px) {
+      .topbar {
+        padding: 4px 6px;
+        min-height: 44px;
+        gap: 4px;
+      }
+
+      .topbar-left,
+      .topbar-right {
+        gap: 3px;
+      }
+
+      .logo-icon { width: 20px; height: 20px; font-size: 8px; border-radius: 5px; }
+      .logo { font-size: 0.75rem; gap: 3px; }
+      .topbar .btn-sm {
+        padding: 5px 7px;
+        font-size: 0.625rem;
+        min-height: 32px;
+        min-width: 40px;
+      }
+
+      .terminal-header { padding: 4px 6px; }
+      .terminal-title-text { font-size: 0.6875rem; }
+      .terminal-info { display: none; }
+
+      .terminal-container {
+        min-height: 35vh;
+        max-height: 45vh;
+        margin: 4px;
+        padding: 6px;
+        border-radius: var(--radius-sm);
+      }
+
+      .input-panel {
+        padding: 6px;
+        padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+      }
+
+      .input-row { gap: 4px; }
+
+      .input-actions { gap: 4px; }
+      .input-actions .btn {
+        min-height: 40px;
+        font-size: 0.6875rem;
+        padding: 8px 10px;
+      }
+      .floating-toggle {
+        min-width: 40px;
+        min-height: 40px;
+        font-size: 1rem;
+      }
+
+      .floating-pad {
+        width: calc(100vw - 16px);
+        right: 8px;
+        padding: 8px;
+        bottom: calc(100% + 4px);
+      }
+
+      .floating-pad-grid .btn {
+        min-height: 40px;
+        font-size: 0.6875rem;
+      }
+
+      .session-item {
+        padding: 8px 10px;
+        min-height: 44px;
+      }
+      .session-command { font-size: 0.6875rem; }
+      .session-meta { font-size: 0.5625rem; gap: 4px; }
+      .session-status { padding: 2px 5px; font-size: 0.5625rem; }
+
+      .sidebar-header { padding: 8px 10px; }
+      .sidebar-footer { padding: 8px 10px; }
+      .sidebar-title { font-size: 0.6875rem; }
+
+      .sidebar-meta {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+
+      .modal-body { padding: 12px; }
+      .modal-header { padding: 10px 12px; }
+      .modal-title { font-size: 0.875rem; }
+
+      .btn { min-height: 40px; padding: 8px 12px; }
+      .btn-sm { min-height: 32px; padding: 5px 8px; }
+
+      .tool-picker { gap: 6px; }
+      .tool-card { padding: 10px; }
+      .tool-card-title { font-size: 0.8125rem; }
+      .tool-card-desc { font-size: 0.6875rem; }
+
+      /* 目录选择器小屏幕适配 */
+      .folder-picker-quick-btn {
+        padding: 5px 8px;
+        font-size: 0.6875rem;
+        min-height: 32px;
+      }
+
+      .folder-breadcrumb {
+        font-size: 0.5625rem;
+        padding: 4px 6px;
+      }
+
+      .folder-picker-compact-row {
+        padding: 6px 8px;
+      }
+      .folder-picker-compact-input {
+        font-size: 0.6875rem;
+      }
+
+      .working-dir-indicator {
+        font-size: 0.5625rem;
+        padding: 1px 5px;
+        max-width: 120px;
+      }
+      .input-textarea.has-dir-indicator {
+        padding-bottom: 24px;
+        min-height: 52px;
+      }
+
+      /* Chat 模式优化 */
+      .chat-message { max-width: 92%; }
+      .chat-message-bubble { padding: 6px 8px; font-size: 0.6875rem; }
+      .thinking-card { padding: 6px 10px; gap: 8px; }
+      .thinking-content { font-size: 0.6875rem; }
+      .prompt-card { padding: 5px 10px; }
+      .prompt-content { font-size: 0.6875rem; }
+    }
+
+    /* iPad Mini 等平板 (641px - 768px) */
+    @media (min-width: 641px) and (max-width: 768px) {
+      .topbar {
+        min-height: 48px;
+        padding: 8px 12px;
+      }
+
+      .sidebar {
+        width: min(300px, calc(100vw - 40px));
+      }
+
+      .session-item {
+        min-height: 52px;
+      }
+
+      .btn { min-height: 40px; }
+      .btn-sm { min-height: 34px; }
+
+      .input-actions .btn { min-height: 40px; }
+      .floating-toggle { min-width: 44px; min-height: 44px; }
+    }
+
+    /* 横屏模式优化 */
+    @media (max-height: 420px) and (orientation: landscape) {
+      .topbar {
+        min-height: 36px;
+        padding: 4px 8px;
+      }
+
+      .logo-icon { width: 18px; height: 18px; font-size: 8px; }
+      .logo { font-size: 0.75rem; }
+
+      .terminal-container {
+        min-height: 50vh;
+        margin: 4px;
+        padding: 6px;
+      }
+
+      .chat-container {
+        padding: 0 8px 6px;
+      }
+
+      .input-panel {
+        padding: 6px;
+        padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+      }
+
+      .input-row { flex-direction: row; gap: 6px; }
+      .input-actions { width: auto; }
+
+      .floating-pad {
+        bottom: 60px;
+        width: min(160px, calc(100vw - 24px));
+      }
+    }
+
+    /* Blank chat mobile optimization */
+    @media (max-width: 640px) {
+      .blank-chat {
+        padding: 16px 12px;
+        align-items: flex-start;
+      }
+
+      .blank-chat-inner {
+        max-width: 100%;
+      }
+
+      .blank-chat-logo {
+        width: 48px;
+        height: 48px;
+        font-size: 24px;
+        border-radius: 12px;
+        margin-bottom: 10px;
+      }
+
+      .blank-chat-title {
+        font-size: 1.125rem;
+      }
+
+      .blank-chat-subtitle {
+        font-size: 0.75rem;
+        margin-bottom: 16px;
+      }
+
+      .blank-chat-input-wrap {
+        margin-bottom: 12px;
+      }
+
+      .blank-chat-input {
+        padding: 10px 60px 10px 12px;
+        font-size: 16px; /* Prevent iOS zoom */
+        border-radius: 10px;
+      }
+
+      .blank-chat-send-btn {
+        padding: 6px 12px;
+        font-size: 0.75rem;
+        right: 5px;
+      }
+
+      .blank-chat-tools {
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+
+      .blank-chat-tool-btn {
+        padding: 6px 10px;
+        font-size: 0.75rem;
+        min-height: 44px;
+      }
+
+      .blank-chat-hint {
+        font-size: 0.6875rem;
+      }
+
+      .mode-btn-group {
+        gap: 4px;
+        margin-top: 8px;
+      }
+
+      .mode-btn {
+        padding: 5px 10px;
+        font-size: 0.6875rem;
+        min-height: 36px;
+      }
     }
 
     .blank-chat {
@@ -2278,7 +2779,6 @@ export function renderApp(configPath: string): string {
         loginChecked: false,
         sessionsDrawerOpen: true,
         modalOpen: false,
-        topbarCollapsed: false,
         presetValue: "",
         commandValue: "",
         cwdValue: "",
@@ -2300,7 +2800,16 @@ export function renderApp(configPath: string): string {
         lastRenderedEmpty: null,
         renderPending: false,
         fileSearchQuery: "",
-        allFiles: []
+        allFiles: [],
+        // Load last used working directory from localStorage
+        workingDir: (function() {
+          try {
+            var saved = localStorage.getItem("wand-working-dir");
+            return saved || "";
+          } catch (e) {
+            return "";
+          }
+        })()
       };
 
       // PWA install prompt handling
@@ -2477,43 +2986,27 @@ export function renderApp(configPath: string): string {
         var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "未选择会话";
         var terminalInfo = selectedSession ? (selectedSession.mode + " | " + selectedSession.status) : "点击上方「新对话」开始";
         var currentDraft = state.selectedId ? (state.drafts[state.selectedId] || "") : "";
-        var statusClass = state.config ? "status-dot active" : "status-dot";
-        var statusText = state.config ? "已登录" : "未登录";
         var drawerClass = state.sessionsDrawerOpen ? " open" : "";
-        var topbarClass = state.topbarCollapsed ? " topbar-collapsed" : " topbar-expanded";
         var preferredTool = getComposerTool();
         var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
         return '<div class="app-container">' +
-          '<header class="topbar' + topbarClass + '">' +
-            '<button id="topbar-toggle-button" class="topbar-toggle" type="button" aria-label="Toggle toolbar">' + (state.topbarCollapsed ? '▾' : '▴') + '</button>' +
+          '<header class="topbar">' +
             '<div class="topbar-left">' +
-              '<div class="topbar-actions">' +
-                '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm">≡ 菜单</button>' +
-              '</div>' +
+              '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm">≡</button>' +
             '</div>' +
             '<div class="logo-wrap">' +
               '<div class="logo">' +
                 '<div class="logo-icon">W</div>' +
               '</div>' +
-              '<div class="brand-meta">' +
-                '<span class="brand-name">Wand</span>' +
-                '<span class="brand-subtitle">本地 AI 编程助手</span>' +
-              '</div>' +
-            '</div>' +
-            '<div class="status-badge">' +
-              '<span class="' + statusClass + '" id="status-dot"></span>' +
-              '<span id="status-text">' + statusText + '</span>' +
             '</div>' +
             '<div class="topbar-center">' +
               '<div class="session-summary">' +
-                '<span class="session-summary-label">当前会话</span>' +
                 '<span class="session-summary-value">' + escapeHtml(terminalTitle) + '</span>' +
               '</div>' +
             '</div>' +
             '<div class="topbar-right">' +
               '<button id="topbar-new-session-button" class="btn btn-primary btn-sm">+ 新对话</button>' +
-              '<button id="settings-button" class="btn btn-ghost btn-sm">⚙</button>' +
               '<button id="logout-button" class="btn btn-ghost btn-sm">退出</button>' +
             '</div>' +
           '</header>' +
@@ -2522,18 +3015,18 @@ export function renderApp(configPath: string): string {
             '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
               '<div class="sidebar-header">' +
                 '<div class="sidebar-header-main">' +
-                  '<span class="sidebar-title">Menu</span>' +
+                  '<span class="sidebar-title">会话</span>' +
                   '<span class="session-count" id="session-count">' + String(state.sessions.length) + '</span>' +
                 '</div>' +
                 '<button id="close-drawer-button" class="btn btn-ghost btn-sm sidebar-close" type="button" aria-label="关闭菜单">×</button>' +
               '</div>' +
               '<div class="sidebar-tabs">' +
                 '<button class="sidebar-tab' + (state.sidebarTab !== "files" ? " active" : "") + '" id="tab-sessions" type="button">会话</button>' +
-                '<button class="sidebar-tab' + (state.sidebarTab === "files" ? " active" : "") + '" id="tab-files" type="button"><span class="sidebar-tab-icon">▤</span>文件</button>' +
+                '<button class="sidebar-tab' + (state.sidebarTab === "files" ? " active" : "") + '" id="tab-files" type="button">文件</button>' +
               '</div>' +
               '<div class="sidebar-body">' +
                 '<div id="sessions-panel"' + (state.sidebarTab === "files" ? ' class="hidden"' : "") + '>' +
-                  '<p class="sidebar-intro">最近的会话记录会显示在这里，方便你随时切换或继续。</p>' +
+                  '<p class="sidebar-intro">最近的会话记录会显示在这里</p>' +
                   '<div class="sessions-list" id="sessions-list">' + renderSessions() + '</div>' +
                 '</div>' +
                 '<div id="files-panel"' + (state.sidebarTab !== "files" ? ' class="hidden"' : "") + '>' +
@@ -2552,10 +3045,6 @@ export function renderApp(configPath: string): string {
               '</div>' +
               '<div class="sidebar-footer">' +
                 '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
-                '<div class="sidebar-meta">' +
-                  '<span class="protocol-note">' + ((state.config && state.config.https) ? '当前使用 HTTPS 安全连接' : '请使用 HTTP 访问') + '</span>' +
-                  '<span class="config-path">' + escapeHtml(configPath) + '</span>' +
-                '</div>' +
               '</div>' +
             '</aside>' +
             '<main class="main-content">' +
@@ -2596,19 +3085,9 @@ export function renderApp(configPath: string): string {
               '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "terminal" ? " active" : "") + '"></div>' +
               '<div id="chat-output" class="chat-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "chat" ? " active" : "") + '"></div>' +
               '<div class="input-panel">' +
-                // Folder picker with quick paths and breadcrumb
-                '<div class="folder-picker-container" style="position: relative;">' +
-                  '<div class="folder-picker-quick-paths" id="folder-picker-quick-paths">' +
-                    '<button class="folder-picker-quick-btn" data-path="/tmp">🗑️ 临时目录</button>' +
-                    '<button class="folder-picker-quick-btn" data-path="/">📁 根目录</button>' +
-                  '</div>' +
-                  '<div class="folder-picker">' +
-                    '<span class="folder-picker-icon">📁</span>' +
-                    '<input type="text" id="folder-picker-input" class="folder-picker-input" value="/tmp" placeholder="选择工作目录..." autocomplete="off" />' +
-                  '</div>' +
-                  '<div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div>' +
-                '</div>' +
                 '<div class="input-row">' +
+                  // Folder icon button (only for new sessions)
+                  (!state.selectedId ? '<button id="folder-picker-btn" class="folder-icon-btn" type="button" title="选择工作目录">📁</button>' : '') +
                   '<div class="input-field input-field-full">' +
                     '<div class="input-textarea-wrap">' +
                       '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按 Enter 发送..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
@@ -2617,7 +3096,6 @@ export function renderApp(configPath: string): string {
                           renderModeOptions(preferredTool, composerMode) +
                         '</select>' +
                       '</div>' +
-                      '<p class="hint" id="mode-hint" style="margin-top: 8px; font-size: 0.75rem; color: var(--text-muted);">' + getModeHint(composerMode) + '</p>' +
                     '</div>' +
                   '</div>' +
                   '<div class="input-actions">' +
@@ -2627,6 +3105,28 @@ export function renderApp(configPath: string): string {
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
               '</div>' +
+              // Folder picker modal (hidden by default)
+              '<section id="folder-picker-modal" class="modal-backdrop hidden">' +
+                '<div class="modal folder-picker-modal">' +
+                  '<div class="modal-header">' +
+                    '<h2 class="modal-title">选择工作目录</h2>' +
+                    '<button id="close-folder-picker" class="btn btn-ghost btn-icon">×</button>' +
+                  '</div>' +
+                  '<div class="modal-body">' +
+                    '<div class="folder-picker-quick-row">' +
+                      '<button class="folder-picker-quick-btn" data-path="/tmp">🗑️ 临时目录</button>' +
+                      '<button class="folder-picker-quick-btn" data-path="/">📁 根目录</button>' +
+                    '</div>' +
+                    '<div id="folder-breadcrumb" class="folder-breadcrumb"></div>' +
+                    '<div class="folder-picker">' +
+                      '<span class="folder-picker-icon">📁</span>' +
+                      '<input type="text" id="folder-picker-input" class="folder-picker-input" value="" placeholder="输入或选择工作目录..." autocomplete="off" />' +
+                    '</div>' +
+                    '<div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div>' +
+                    '<div id="folder-picker-validation" class="folder-picker-validation"></div>' +
+                  '</div>' +
+                '</div>' +
+              '</section>' +
             '</main>' +
             // Floating controls for keyboard shortcuts
             '<button id="floating-controls-toggle" class="floating-toggle" type="button" aria-label="快捷键" title="快捷键">⌨</button>' +
@@ -2838,6 +3338,54 @@ export function renderApp(configPath: string): string {
           .catch(function() {});
       }
 
+      function renderFolderPicker(state) {
+        var currentDir = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+
+        // 如果有选中的会话，不显示单独的工作目录标签（已嵌入输入框内部）
+        if (state.selectedId) {
+          return '';
+        }
+
+        // 新建会话时显示简化的目录选择器（单行紧凑设计）
+        return '<div class="folder-picker-compact" id="folder-picker-container">' +
+          '<div class="folder-picker-compact-row">' +
+            '<span class="folder-picker-compact-icon">📁</span>' +
+            '<input type="text" id="folder-picker-input" class="folder-picker-compact-input" value="' + escapeHtml(currentDir) + '" placeholder="工作目录" autocomplete="off" />' +
+            '<button type="button" id="folder-picker-toggle" class="folder-picker-toggle" title="选择目录">▼</button>' +
+          '</div>' +
+          '<div id="folder-picker-dropdown" class="folder-picker-dropdown hidden">' +
+            '<div class="folder-picker-quick-row">' +
+              '<button class="folder-picker-quick-btn" data-path="/tmp">临时</button>' +
+              '<button class="folder-picker-quick-btn" data-path="/">根目录</button>' +
+            '</div>' +
+          '</div>' +
+          '<div id="folder-picker-validation" class="folder-picker-validation"></div>' +
+        '</div>';
+      }
+
+      // 渲染内嵌到输入框的工作目录指示器
+      function renderWorkingDirIndicator(state) {
+        var currentDir = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+        var displayDir = currentDir;
+
+        // 如果有选中的会话，使用会话的工作目录
+        if (state.selectedId) {
+          var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+          displayDir = selectedSession && selectedSession.cwd ? selectedSession.cwd : currentDir;
+        }
+
+        // 截断显示的路径
+        var displayPath = displayDir;
+        if (displayPath.length > 28) {
+          displayPath = "..." + displayPath.slice(-25);
+        }
+
+        return '<div class="working-dir-indicator" id="working-dir-indicator" title="' + escapeHtml(displayDir) + '" data-path="' + escapeHtml(displayDir) + '">' +
+          '<span class="working-dir-indicator-icon">📁</span>' +
+          '<span class="working-dir-indicator-path">' + escapeHtml(displayPath) + '</span>' +
+        '</div>';
+      }
+
       function renderSessionItem(session) {
         var activeClass = session.id === state.selectedId ? " active" : "";
         var metaStatus = session.archived ? "已归档" : session.status;
@@ -3047,8 +3595,6 @@ export function renderApp(configPath: string): string {
         if (drawerBackdrop) drawerBackdrop.addEventListener("click", closeSessionsDrawer);
         var closeDrawerBtn = document.getElementById("close-drawer-button");
         if (closeDrawerBtn) closeDrawerBtn.addEventListener("click", closeSessionsDrawer);
-        var topbarToggle = document.getElementById("topbar-toggle-button");
-        if (topbarToggle) topbarToggle.addEventListener("click", toggleTopbar);
         var logoutBtn = document.getElementById("logout-button");
         if (logoutBtn) logoutBtn.addEventListener("click", logout);
         var settingsBtn = document.getElementById("settings-button");
@@ -3177,32 +3723,210 @@ export function renderApp(configPath: string): string {
           });
         }
 
-        // Folder picker functionality with quick paths and keyboard navigation
+        // Folder picker functionality with keyboard navigation
         var folderPickerInput = document.getElementById("folder-picker-input");
         var folderPickerDropdown = document.getElementById("folder-picker-dropdown");
-        var folderPickerQuickPaths = document.getElementById("folder-picker-quick-paths");
         var folderPickerDebounceTimer = null;
         var selectedIndex = -1;
         var folderItems = [];
 
-        // Load quick paths
-        if (folderPickerQuickPaths) {
-          folderPickerQuickPaths.addEventListener("click", function(e) {
+        // Helper function to save working directory to localStorage
+        function saveWorkingDir(path) {
+          state.workingDir = path;
+          try {
+            localStorage.setItem("wand-working-dir", path);
+          } catch (e) {
+            // Ignore localStorage errors
+          }
+          // Also add to recent paths (defined later, will be called after function is available)
+          if (typeof addRecentPath === "function") {
+            addRecentPath(path);
+          }
+        }
+
+        // Helper functions for path validation feedback
+        function showValidationError(message) {
+          if (folderPickerInput) {
+            folderPickerInput.classList.add("invalid");
+          }
+          var validationEl = document.getElementById("folder-picker-validation");
+          if (validationEl) {
+            validationEl.textContent = message;
+            validationEl.classList.add("visible");
+          }
+        }
+
+        function clearValidationError() {
+          if (folderPickerInput) {
+            folderPickerInput.classList.remove("invalid");
+          }
+          var validationEl = document.getElementById("folder-picker-validation");
+          if (validationEl) {
+            validationEl.textContent = "";
+            validationEl.classList.remove("visible");
+          }
+        }
+
+        // Helper functions for recent paths
+        function getRecentPaths() {
+          try {
+            var saved = localStorage.getItem("wand-recent-paths");
+            return saved ? JSON.parse(saved) : [];
+          } catch (e) {
+            return [];
+          }
+        }
+
+        function addRecentPath(path) {
+          var recent = getRecentPaths();
+          // Remove if already exists
+          recent = recent.filter(function(p) { return p !== path; });
+          // Add to front
+          recent.unshift(path);
+          // Keep only last 5
+          recent = recent.slice(0, 5);
+          try {
+            localStorage.setItem("wand-recent-paths", JSON.stringify(recent));
+          } catch (e) {
+            // Ignore localStorage errors
+          }
+        }
+
+        function renderRecentPaths() {
+          var recent = getRecentPaths();
+          if (recent.length === 0) return "";
+
+          var html = '<div class="folder-recent-section">' +
+            '<div class="folder-recent-title">最近使用</div>';
+
+          recent.forEach(function(path) {
+            html += '<div class="folder-recent-item" data-path="' + escapeHtml(path) + '">' +
+              '<span class="folder-recent-item-icon">📁</span>' +
+              '<span class="folder-recent-item-path">' + escapeHtml(path) + '</span>' +
+            '</div>';
+          });
+
+          html += '</div>';
+          return html;
+        }
+
+        function showRecentPathsDropdown() {
+          if (!folderPickerDropdown) return;
+          var recentHtml = renderRecentPaths();
+          if (recentHtml) {
+            folderPickerDropdown.innerHTML = recentHtml;
+            folderPickerDropdown.classList.remove("hidden");
+            // Add click handlers for recent paths
+            folderPickerDropdown.querySelectorAll(".folder-recent-item").forEach(function(item) {
+              item.addEventListener("click", function() {
+                var path = this.dataset.path;
+                if (folderPickerInput) {
+                  folderPickerInput.value = path;
+                  saveWorkingDir(path);
+                  loadFolderSuggestions(path);
+                }
+              });
+            });
+          } else {
+            hideFolderDropdown();
+          }
+        }
+
+        // Working directory indicator click handler for active sessions
+        var workingDirIndicator = document.getElementById("working-dir-indicator");
+        if (workingDirIndicator) {
+          workingDirIndicator.addEventListener("click", function() {
+            // 点击指示器时，取消当前会话选择，显示完整的目录选择器
+            state.selectedId = null;
+            state.drafts = {};
+            renderApp();
+            // 聚焦到目录输入框
+            setTimeout(function() {
+              var folderInput = document.getElementById("folder-picker-input");
+              if (folderInput) folderInput.focus();
+            }, 50);
+          });
+        }
+
+        // Compact folder picker toggle
+        var folderPickerToggle = document.getElementById("folder-picker-toggle");
+        var folderPickerDropdown = document.getElementById("folder-picker-dropdown");
+        if (folderPickerToggle && folderPickerDropdown) {
+          folderPickerToggle.addEventListener("click", function() {
+            folderPickerDropdown.classList.toggle("hidden");
+            folderPickerToggle.classList.toggle("open");
+          });
+        }
+
+        // Drag and drop support
+        var folderPickerContainer = document.querySelector(".folder-picker-compact");
+        if (folderPickerContainer) {
+          folderPickerContainer.addEventListener("dragover", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.classList.add("drag-over");
+          });
+
+          folderPickerContainer.addEventListener("dragleave", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.classList.remove("drag-over");
+          });
+
+          folderPickerContainer.addEventListener("drop", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.classList.remove("drag-over");
+
+            var items = e.dataTransfer && e.dataTransfer.items;
+            if (items) {
+              for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                if (item.kind === "file" && item.webkitGetAsEntry) {
+                  var entry = item.webkitGetAsEntry();
+                  if (entry && entry.isDirectory && folderPickerInput) {
+                    var path = entry.fullPath;
+                    folderPickerInput.value = path;
+                    saveWorkingDir(path);
+                    addRecentPath(path);
+                    loadFolderSuggestions(path);
+                    break;
+                  }
+                }
+              }
+            }
+          });
+        }
+
+        // Quick path buttons (now inside dropdown)
+        if (folderPickerDropdown) {
+          folderPickerDropdown.addEventListener("click", function(e) {
             var btn = e.target.closest(".folder-picker-quick-btn");
             if (btn && folderPickerInput) {
               var path = btn.dataset.path;
               folderPickerInput.value = path;
+              saveWorkingDir(path);
               loadFolderSuggestions(path);
+              folderPickerDropdown.classList.add("hidden");
+              var toggle = document.getElementById("folder-picker-toggle");
+              if (toggle) toggle.classList.remove("open");
             }
           });
         }
 
         if (folderPickerInput) {
-          // Load initial folders from /tmp
-          loadFolderSuggestions("/tmp");
+          // Load initial folders from saved or default path
+          var initialPath = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+          loadFolderSuggestions(initialPath);
 
           folderPickerInput.addEventListener("focus", function() {
-            loadFolderSuggestions(this.value || "/tmp");
+            var path = this.value.trim();
+            if (path) {
+              loadFolderSuggestions(path);
+            } else {
+              // Show recent paths when input is empty
+              showRecentPathsDropdown();
+            }
           });
 
           folderPickerInput.addEventListener("input", function(e) {
@@ -3246,10 +3970,12 @@ export function renderApp(configPath: string): string {
                   var parentPath = currentPath.substring(0, currentPath.lastIndexOf("/"));
                   if (parentPath) {
                     folderPickerInput.value = parentPath || "/";
+                    saveWorkingDir(folderPickerInput.value);
                     loadFolderSuggestions(parentPath || "/");
                   }
                 } else {
                   folderPickerInput.value = selectedPath;
+                  saveWorkingDir(selectedPath);
                   hideFolderDropdown();
                 }
               }
@@ -3280,8 +4006,27 @@ export function renderApp(configPath: string): string {
           folderItems = [];
 
           fetch("/api/folders?q=" + encodeURIComponent(query))
-            .then(function(res) { return res.json(); })
-            .then(function(data) {
+            .then(function(res) {
+              return res.json().then(function(data) {
+                return { ok: res.ok, status: res.status, data: data };
+              });
+            })
+            .then(function(result) {
+              var data = result.data;
+
+              // Handle error responses
+              if (!result.ok || data.error) {
+                showValidationError(data.error || "路径无效");
+                folderPickerDropdown.innerHTML = '<div class="folder-picker-error">' + escapeHtml(data.error || "路径无效") + '</div>';
+                return;
+              }
+
+              // Clear validation error on success
+              clearValidationError();
+
+              // Update breadcrumb navigation
+              renderBreadcrumb(data.currentPath || query);
+
               var items = data.items || [];
               var currentPath = data.currentPath || query;
 
@@ -3312,9 +4057,12 @@ export function renderApp(configPath: string): string {
                       var currentPath = folderPickerInput.value.trim();
                       var parentPath = currentPath.substring(0, currentPath.lastIndexOf("/"));
                       folderPickerInput.value = parentPath || "/";
+                      saveWorkingDir(folderPickerInput.value);
                       loadFolderSuggestions(parentPath || "/");
                     } else {
                       folderPickerInput.value = selectedPath;
+                      saveWorkingDir(selectedPath);
+                      clearValidationError();
                       hideFolderDropdown();
                     }
                   }
@@ -3322,6 +4070,7 @@ export function renderApp(configPath: string): string {
               });
             })
             .catch(function(err) {
+              showValidationError("加载失败");
               folderPickerDropdown.innerHTML = '<div class="folder-picker-error">加载失败</div>';
             });
         }
@@ -3333,7 +4082,37 @@ export function renderApp(configPath: string): string {
           selectedIndex = -1;
           folderItems = [];
         }
-            filterFileTree();
+
+        // Folder picker modal functionality
+        var folderPickerBtn = document.getElementById("folder-picker-btn");
+        var folderPickerModal = document.getElementById("folder-picker-modal");
+        var closeFolderPicker = document.getElementById("close-folder-picker");
+
+        if (folderPickerBtn && folderPickerModal) {
+          folderPickerBtn.addEventListener("click", function() {
+            folderPickerModal.classList.remove("hidden");
+            // Set initial path in input
+            if (folderPickerInput) {
+              folderPickerInput.value = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+            }
+            // Load initial folders
+            var initialPath = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+            loadFolderSuggestions(initialPath);
+            renderBreadcrumb(initialPath);
+          });
+        }
+
+        if (closeFolderPicker && folderPickerModal) {
+          closeFolderPicker.addEventListener("click", function() {
+            folderPickerModal.classList.add("hidden");
+          });
+        }
+
+        if (folderPickerModal) {
+          folderPickerModal.addEventListener("click", function(e) {
+            if (e.target === folderPickerModal) {
+              folderPickerModal.classList.add("hidden");
+            }
           });
         }
 
@@ -3862,25 +4641,6 @@ export function renderApp(configPath: string): string {
         updateDrawerState();
       }
 
-      function toggleTopbar() {
-        state.topbarCollapsed = !state.topbarCollapsed;
-        var topbar = document.querySelector('.topbar');
-        var toggleBtn = document.getElementById('topbar-toggle-button');
-        if (topbar) {
-          topbar.classList.toggle('topbar-collapsed', state.topbarCollapsed);
-          topbar.classList.toggle('topbar-expanded', !state.topbarCollapsed);
-        }
-        if (toggleBtn) {
-          toggleBtn.textContent = state.topbarCollapsed ? '▾' : '▴';
-        }
-        // 触发终端重新调整大小
-        setTimeout(function() {
-          if (state.terminal && state.fitAddon) {
-            state.fitAddon.fit();
-          }
-        }, 100);
-      }
-
       // Store last focused element for focus trap
       var lastFocusedElement = null;
       var focusTrapHandler = null;
@@ -4066,7 +4826,7 @@ export function renderApp(configPath: string): string {
       }
 
       function quickStartSession(command) {
-        var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
         var defaultMode = (state.config && state.config.defaultMode) ? state.config.defaultMode : "default";
         var inferredTool = inferToolFromCommand(command);
         if (inferredTool === "claude" || inferredTool === "codex") {
@@ -4111,7 +4871,7 @@ export function renderApp(configPath: string): string {
           return;
         }
 
-        var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
         var selectedTool = inferToolFromCommand(command) === "codex" ? "codex" : "claude";
         var selectedMode = getSafeModeForTool(selectedTool, modeEl && modeEl.value ? modeEl.value : state.modeValue);
         state.modeValue = selectedMode;
@@ -4384,7 +5144,7 @@ export function renderApp(configPath: string): string {
         welcomeInput.placeholder = "正在启动会话...";
         welcomeInput.disabled = true;
         var mode = state.chatMode || "full-access";
-        var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
           method: "POST",
@@ -4444,7 +5204,7 @@ export function renderApp(configPath: string): string {
 
         // No selected session, create a new one
         var mode = state.chatMode || "full-access";
-        var defaultCwd = (state.config && state.config.defaultCwd) ? state.config.defaultCwd : "";
+        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
           method: "POST",
@@ -4709,25 +5469,48 @@ export function renderApp(configPath: string): string {
 
       // Mobile keyboard handling
       function setupMobileKeyboardHandlers() {
-        if (!('virtualKeyboard' in navigator)) return;
-
-        var vk = navigator.virtualKeyboard;
         var inputPanel = document.querySelector('.input-panel');
+        var chatMessages = document.querySelector('.chat-messages');
+        var terminalContainer = document.querySelector('.terminal-container');
 
-        vk.addEventListener('geometrychange', function() {
-          if (inputPanel) {
-            var rect = vk.boundingRect;
-            inputPanel.style.paddingBottom = rect ? rect.height + 'px' : '';
-          }
-        });
+        // Virtual Keyboard API (Chrome/Edge)
+        if ('virtualKeyboard' in navigator) {
+          var vk = navigator.virtualKeyboard;
 
-        // Show virtual keyboard on terminal tap
-        document.getElementById('output')?.addEventListener('click', function() {
-          if (state.selectedId) {
-            var inputBox = document.getElementById('input-box');
-            if (inputBox) inputBox.focus();
-          }
-        });
+          vk.addEventListener('geometrychange', function() {
+            if (inputPanel) {
+              var rect = vk.boundingRect;
+              var kbHeight = rect ? rect.height : 0;
+              inputPanel.style.paddingBottom = kbHeight > 0 ? kbHeight + 'px' : '';
+              // Scroll chat into view when keyboard opens
+              if (kbHeight > 0 && chatMessages) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+              }
+            }
+          });
+        }
+
+        // Show virtual keyboard on terminal/chat tap
+        var output = document.getElementById('output');
+        if (output) {
+          output.addEventListener('click', function() {
+            if (state.selectedId) {
+              var inputBox = document.getElementById('input-box');
+              if (inputBox) inputBox.focus();
+            }
+          });
+        }
+
+        // Also focus on chat messages tap
+        if (chatMessages) {
+          chatMessages.addEventListener('click', function(e) {
+            // Only focus if not clicking on a link or button
+            if (e.target.tagName !== 'A' && e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
+              var inputBox = document.getElementById('input-box');
+              if (inputBox && state.selectedId) inputBox.focus();
+            }
+          });
+        }
       }
 
       // Visual viewport handling for better mobile keyboard support
@@ -4736,15 +5519,49 @@ export function renderApp(configPath: string): string {
 
         var vv = window.visualViewport;
         var inputPanel = document.querySelector('.input-panel');
+        var appContainer = document.querySelector('.app-container');
+        var lastHeight = vv.height;
 
         function updateViewport() {
           if (!inputPanel || !vv) return;
+
           var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
-          inputPanel.style.transform = offsetBottom > 0 ? 'translateY(-' + offsetBottom + 'px)' : '';
+          var isKeyboardOpen = offsetBottom > 50;
+
+          if (isKeyboardOpen) {
+            // Keyboard is open - adjust layout
+            inputPanel.style.transform = 'translateY(-' + offsetBottom + 'px)';
+            inputPanel.style.position = 'relative';
+            inputPanel.style.zIndex = '100';
+
+            // Add padding to main content to prevent overlap
+            if (appContainer) {
+              appContainer.style.paddingBottom = offsetBottom + 'px';
+            }
+          } else {
+            // Keyboard is closed - reset layout
+            inputPanel.style.transform = '';
+            inputPanel.style.zIndex = '';
+            if (appContainer) {
+              appContainer.style.paddingBottom = '';
+            }
+          }
+
+          lastHeight = vv.height;
         }
 
-        vv.addEventListener('resize', updateViewport);
-        vv.addEventListener('scroll', updateViewport);
+        // Debounce viewport updates for smoother experience
+        var viewportTimer = null;
+        function debouncedUpdate() {
+          if (viewportTimer) clearTimeout(viewportTimer);
+          viewportTimer = setTimeout(updateViewport, 50);
+        }
+
+        vv.addEventListener('resize', debouncedUpdate);
+        vv.addEventListener('scroll', debouncedUpdate);
+
+        // Initial update
+        updateViewport();
       }
 
       function observeTerminalResize() {
@@ -5158,9 +5975,29 @@ export function renderApp(configPath: string): string {
         var text = String(output || "");
         var newline = String.fromCharCode(10);
         var carriageReturn = String.fromCharCode(13);
+        var esc = String.fromCharCode(27);
+
+        // Optimized ANSI escape sequence stripping
+        // Handles: CSI sequences, OSC sequences, single-character escapes, control chars
+        var nul = String.fromCharCode(0);
+        var bs = String.fromCharCode(8);
+        var vt = String.fromCharCode(11);
+        var ff = String.fromCharCode(12);
+        var so = String.fromCharCode(14);
+        var us = String.fromCharCode(31);
+        var nbsp = String.fromCharCode(160);
+        var bel = String.fromCharCode(7);
+        var ansiRegex = new RegExp(
+          esc + '\\[[0-9;?]*[a-zA-Z]|' +  // CSI sequences
+          esc + '\\][^' + bel + ']*(' + bel + '|' + esc + '\\\\\\\\)|' +  // OSC sequences - matches ESC ] ... (BEL or ESC \)
+          esc + '[><=eP_X^]|' +  // Single-character escapes
+          '[' + nul + '-' + bs + vt + ff + so + '-' + us + ']|' +  // Control chars: 0-8, 11, 12, 14-31
+          nbsp + '|' + carriageReturn,
+          'g'
+        );
         var ansiStripped = text.replace(
-          /\\x1b\[[0-9;?]*[a-zA-Z]|\\x1b\][^\\x07]*(\\x07|\\x1b\\\\)|\\x1b[><=eP_X^]|[\\x00-\\x08\\x0b-\\x0c\\x0e-\\x1f]|\\xa0|\\r/g,
-          function(m) { return m === '\\xa0' ? ' ' : m === '\\r' ? newline : ''; }
+          ansiRegex,
+          function(m) { return m === nbsp ? ' ' : m === carriageReturn ? newline : ''; }
         ).split(carriageReturn).join(newline);
 
         var lines = ansiStripped.split(newline).map(function(line) { return line.trim(); }).filter(Boolean);
@@ -5449,6 +6286,43 @@ export function renderApp(configPath: string): string {
           default:
             return '<div class="unknown-block">' + escapeHtml(JSON.stringify(block)) + '</div>';
         }
+      }
+
+      // Format assistant response with Markdown rendering and cleanup
+      function formatAssistantResponse(text) {
+        if (!text) return "";
+
+        // Clean up the text
+        var newline = String.fromCharCode(10);
+        var lines = text.split(newline);
+        var cleanLines = [];
+
+        // Remove leading/trailing empty lines and common noise
+        var started = false;
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+          var trimmed = line.trim();
+
+          // Skip leading empty lines
+          if (!started && !trimmed) continue;
+          started = true;
+
+          // Filter out noise patterns
+          if (trimmed.indexOf("⏺") === 0 && trimmed.length > 2) {
+            cleanLines.push(trimmed.slice(1).trim());
+            continue;
+          }
+
+          cleanLines.push(line);
+        }
+
+        // Remove trailing empty lines
+        while (cleanLines.length > 0 && !cleanLines[cleanLines.length - 1].trim()) {
+          cleanLines.pop();
+        }
+
+        // Render as Markdown
+        return renderMarkdown(cleanLines.join(newline));
       }
 
       function renderMarkdown(text) {
