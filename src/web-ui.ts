@@ -1144,6 +1144,110 @@ export function renderApp(configPath: string): string {
     .input-label { font-size: 0.6875rem; color: var(--text-muted); font-weight: 500; }
     .input-textarea-wrap { position: relative; display: flex; flex-direction: column; }
 
+    /* Folder picker styles */
+    .folder-picker-container {
+      margin-bottom: 8px;
+    }
+    .folder-picker-quick-paths {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+    .folder-picker-quick-btn {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .folder-picker-quick-btn:hover {
+      background: rgba(255, 255, 255, 0.9);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .folder-picker {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+    }
+    .folder-picker-icon {
+      font-size: 1rem;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+    .folder-picker-input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      color: var(--text-primary);
+      outline: none;
+      padding: 4px;
+    }
+    .folder-picker-input:focus {
+      background: rgba(255, 255, 255, 0.8);
+      border-radius: 4px;
+    }
+    .folder-picker-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-elevated);
+      z-index: 50;
+      max-height: 240px;
+      overflow-y: auto;
+      margin-top: 4px;
+    }
+    .folder-picker-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-size: 0.8125rem;
+      transition: background var(--transition-fast);
+    }
+    .folder-picker-item:hover {
+      background: var(--bg-tertiary);
+    }
+    .folder-picker-item.active {
+      background: var(--accent-muted);
+    }
+    .folder-picker-item-icon {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+    .folder-picker-loading {
+      padding: 8px 10px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+    }
+    .folder-picker-error {
+      padding: 8px 10px;
+      color: var(--danger);
+      font-size: 0.75rem;
+      background: var(--danger-muted);
+      border-radius: 4px;
+      margin: 4px 8px;
+    }
+
     .input-textarea {
       font-family: var(--font-mono);
       font-size: 0.875rem;
@@ -1230,15 +1334,29 @@ export function renderApp(configPath: string): string {
     .input-actions-spacer { flex: 1; }
 
     .floating-toggle {
-      width: 38px;
-      height: 38px;
-      min-width: 38px;
-      min-height: 38px;
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      min-height: 44px;
       border-radius: var(--radius-md);
-      box-shadow: 0 4px 12px rgba(89, 58, 32, 0.1);
+      box-shadow: 0 4px 16px rgba(89, 58, 32, 0.15);
       padding: 0;
-      font-size: 1.1rem;
+      font-size: 1.2rem;
       line-height: 1;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      z-index: 40;
+    }
+    .floating-toggle:hover {
+      transform: scale(1.05);
+      box-shadow: 0 6px 20px rgba(89, 58, 32, 0.2);
+    }
+    .floating-toggle:active {
+      transform: scale(0.95);
+    }
+    /* Hide floating toggle in Chat mode */
+    .floating-toggle.hidden-in-chat {
+      display: none;
     }
 
     .floating-backdrop {
@@ -1248,10 +1366,10 @@ export function renderApp(configPath: string): string {
     }
 
     .floating-pad {
-      position: absolute;
-      right: 0;
-      bottom: calc(100% + 6px);
-      z-index: 39;
+      position: fixed;
+      right: 16px;
+      bottom: 80px;
+      z-index: 41;
       width: min(220px, calc(100vw - 28px));
       background: rgba(255, 251, 245, 0.98);
       border: 1px solid rgba(150, 118, 85, 0.18);
@@ -1259,6 +1377,7 @@ export function renderApp(configPath: string): string {
       box-shadow: var(--shadow-soft);
       padding: 12px;
       backdrop-filter: blur(18px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
     }
 
     .floating-pad-title {
@@ -2477,6 +2596,18 @@ export function renderApp(configPath: string): string {
               '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "terminal" ? " active" : "") + '"></div>' +
               '<div id="chat-output" class="chat-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "chat" ? " active" : "") + '"></div>' +
               '<div class="input-panel">' +
+                // Folder picker with quick paths and breadcrumb
+                '<div class="folder-picker-container" style="position: relative;">' +
+                  '<div class="folder-picker-quick-paths" id="folder-picker-quick-paths">' +
+                    '<button class="folder-picker-quick-btn" data-path="/tmp">🗑️ 临时目录</button>' +
+                    '<button class="folder-picker-quick-btn" data-path="/">📁 根目录</button>' +
+                  '</div>' +
+                  '<div class="folder-picker">' +
+                    '<span class="folder-picker-icon">📁</span>' +
+                    '<input type="text" id="folder-picker-input" class="folder-picker-input" value="/tmp" placeholder="选择工作目录..." autocomplete="off" />' +
+                  '</div>' +
+                  '<div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div>' +
+                '</div>' +
                 '<div class="input-row">' +
                   '<div class="input-field input-field-full">' +
                     '<div class="input-textarea-wrap">' +
@@ -3043,6 +3174,165 @@ export function renderApp(configPath: string): string {
               fileSearchInput.value = "";
             }
             fileSearchClear.classList.remove("visible");
+          });
+        }
+
+        // Folder picker functionality with quick paths and keyboard navigation
+        var folderPickerInput = document.getElementById("folder-picker-input");
+        var folderPickerDropdown = document.getElementById("folder-picker-dropdown");
+        var folderPickerQuickPaths = document.getElementById("folder-picker-quick-paths");
+        var folderPickerDebounceTimer = null;
+        var selectedIndex = -1;
+        var folderItems = [];
+
+        // Load quick paths
+        if (folderPickerQuickPaths) {
+          folderPickerQuickPaths.addEventListener("click", function(e) {
+            var btn = e.target.closest(".folder-picker-quick-btn");
+            if (btn && folderPickerInput) {
+              var path = btn.dataset.path;
+              folderPickerInput.value = path;
+              loadFolderSuggestions(path);
+            }
+          });
+        }
+
+        if (folderPickerInput) {
+          // Load initial folders from /tmp
+          loadFolderSuggestions("/tmp");
+
+          folderPickerInput.addEventListener("focus", function() {
+            loadFolderSuggestions(this.value || "/tmp");
+          });
+
+          folderPickerInput.addEventListener("input", function(e) {
+            var query = e.target.value.trim();
+            selectedIndex = -1;
+            if (folderPickerDebounceTimer) clearTimeout(folderPickerDebounceTimer);
+            folderPickerDebounceTimer = setTimeout(function() {
+              if (query) {
+                loadFolderSuggestions(query);
+              } else {
+                hideFolderDropdown();
+              }
+            }, 150);
+          });
+
+          // Keyboard navigation
+          folderPickerInput.addEventListener("keydown", function(e) {
+            if (e.key === "Escape") {
+              hideFolderDropdown();
+              this.blur();
+            } else if (e.key === "ArrowDown") {
+              e.preventDefault();
+              if (folderItems.length > 0) {
+                selectedIndex = Math.min(selectedIndex + 1, folderItems.length - 1);
+                updateSelectedIndex();
+              }
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              if (selectedIndex > 0) {
+                selectedIndex--;
+                updateSelectedIndex();
+              }
+            } else if (e.key === "Enter" && selectedIndex >= 0) {
+              e.preventDefault();
+              var selectedItem = folderItems[selectedIndex];
+              if (selectedItem) {
+                var selectedPath = selectedItem.dataset.path;
+                if (selectedPath === "..") {
+                  // Navigate to parent
+                  var currentPath = folderPickerInput.value.trim();
+                  var parentPath = currentPath.substring(0, currentPath.lastIndexOf("/"));
+                  if (parentPath) {
+                    folderPickerInput.value = parentPath || "/";
+                    loadFolderSuggestions(parentPath || "/");
+                  }
+                } else {
+                  folderPickerInput.value = selectedPath;
+                  hideFolderDropdown();
+                }
+              }
+            }
+          });
+
+          // Close dropdown when clicking outside
+          document.addEventListener("click", function(e) {
+            if (!e.target.closest(".folder-picker-container")) {
+              hideFolderDropdown();
+            }
+          });
+        }
+
+        function updateSelectedIndex() {
+          folderItems.forEach(function(item, index) {
+            item.classList.toggle("active", index === selectedIndex);
+          });
+        }
+
+        function loadFolderSuggestions(query) {
+          if (!folderPickerDropdown) return;
+
+          // Show loading state
+          folderPickerDropdown.innerHTML = '<div class="folder-picker-loading">加载中...</div>';
+          folderPickerDropdown.classList.remove("hidden");
+          selectedIndex = -1;
+          folderItems = [];
+
+          fetch("/api/folders?q=" + encodeURIComponent(query))
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+              var items = data.items || [];
+              var currentPath = data.currentPath || query;
+
+              if (items.length === 0) {
+                folderPickerDropdown.innerHTML = '<div class="folder-picker-loading">空目录</div>';
+                return;
+              }
+
+              folderPickerDropdown.innerHTML = items.map(function(item) {
+                var icon = item.type === "parent" ? "↩️" : "📁";
+                var name = item.type === "parent" ? ".. (返回上级)" : item.name;
+                return '<div class="folder-picker-item" data-path="' + escapeHtml(item.path) + '" data-type="' + item.type + '">' +
+                  '<span class="folder-picker-item-icon">' + icon + '</span>' +
+                  '<span>' + escapeHtml(name) + '</span>' +
+                '</div>';
+              }).join("");
+
+              folderItems = Array.from(folderPickerDropdown.querySelectorAll(".folder-picker-item"));
+
+              // Add click handlers
+              folderItems.forEach(function(item) {
+                item.addEventListener("click", function() {
+                  var selectedPath = this.dataset.path;
+                  var type = this.dataset.type;
+                  if (folderPickerInput) {
+                    if (type === "parent") {
+                      // Navigate to parent directory
+                      var currentPath = folderPickerInput.value.trim();
+                      var parentPath = currentPath.substring(0, currentPath.lastIndexOf("/"));
+                      folderPickerInput.value = parentPath || "/";
+                      loadFolderSuggestions(parentPath || "/");
+                    } else {
+                      folderPickerInput.value = selectedPath;
+                      hideFolderDropdown();
+                    }
+                  }
+                });
+              });
+            })
+            .catch(function(err) {
+              folderPickerDropdown.innerHTML = '<div class="folder-picker-error">加载失败</div>';
+            });
+        }
+
+        function hideFolderDropdown() {
+          if (folderPickerDropdown) {
+            folderPickerDropdown.classList.add("hidden");
+          }
+          selectedIndex = -1;
+          folderItems = [];
+        }
             filterFileTree();
           });
         }
@@ -3322,11 +3612,14 @@ export function renderApp(configPath: string): string {
         var chatBtn = document.getElementById("view-chat-btn");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
+        var floatingToggle = document.getElementById("floating-controls-toggle");
 
         if (terminalBtn) terminalBtn.classList.toggle("active", state.currentView === "terminal");
         if (chatBtn) chatBtn.classList.toggle("active", state.currentView === "chat");
         if (terminalContainer) terminalContainer.classList.toggle("active", hasSession && state.currentView === "terminal");
         if (chatContainer) chatContainer.classList.toggle("active", hasSession && state.currentView === "chat");
+        // Hide floating shortcut in Chat mode - only useful in Terminal mode
+        if (floatingToggle) floatingToggle.classList.toggle("hidden-in-chat", state.currentView === "chat");
       }
 
       function syncSessionModalUI() {

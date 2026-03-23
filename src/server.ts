@@ -289,6 +289,75 @@ self.addEventListener('fetch', (event) => {
     }
   });
 
+  // Folder picker API - starts from /tmp by default, supports navigation
+  app.get("/api/folders", async (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q : "/tmp";
+    const targetPath = path.resolve(q);
+
+    // Security check: prevent accessing sensitive system paths
+    const blockedPaths = ['/etc', '/root', '/boot'];
+    for (const blocked of blockedPaths) {
+      if (targetPath.startsWith(blocked)) {
+        res.status(403).json({ error: "访问被拒绝：无法访问系统敏感目录。" });
+        return;
+      }
+    }
+
+    try {
+      const entries = await readdir(targetPath, { withFileTypes: true });
+      const items: any[] = [];
+
+      // Add parent directory navigation (..)
+      const parentPath = path.dirname(targetPath);
+      if (parentPath !== targetPath) {
+        items.push({
+          path: parentPath,
+          name: "..",
+          type: "parent",
+          isParent: true
+        });
+      }
+
+      // Add subdirectories
+      entries
+        .filter((entry) => entry.isDirectory())
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .slice(0, 100)
+        .forEach((entry) => {
+          items.push({
+            path: path.join(targetPath, entry.name),
+            name: entry.name,
+            type: "dir"
+          });
+        });
+
+      res.json({
+        currentPath: targetPath,
+        items: items
+      });
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        res.status(404).json({ error: "路径不存在：" + q, currentPath: q, items: [] });
+      } else if (error.code === 'EACCES') {
+        res.status(403).json({ error: "权限不足，无法访问：" + q, currentPath: q, items: [] });
+      } else {
+        res.status(400).json({ error: "无法读取目录：" + getErrorMessage(error, "未知错误"), currentPath: q, items: [] });
+      }
+    }
+  });
+
+  // Quick paths API - returns common paths for quick access
+  app.get("/api/quick-paths", async (req, res) => {
+    const home = process.env.HOME || process.env.USERPROFILE || '/home';
+    const quickPaths = [
+      { path: "/tmp", name: "临时目录", icon: "🗑️" },
+      { path: home, name: "主目录", icon: "🏠" },
+      { path: process.cwd(), name: "当前目录", icon: "📂" },
+      { path: "/", name: "根目录", icon: "📁" }
+    ];
+    res.json(quickPaths);
+  });
+
   // File search API - supports fuzzy matching across directory tree
   app.get("/api/file-search", async (req, res) => {
     const query = typeof req.query.q === "string" ? req.query.q : "";
