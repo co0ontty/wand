@@ -126,7 +126,7 @@ TypeScript with ES modules, 2-space indentation, double quotes, semicolons. Use 
 
 ## Optimization Roadmap
 
-See `OPTIMIZATION_PLAN.md` for the full roadmap. Current focus:
+Current focus:
 
 - **Phase 1** (mostly complete): Chat-style interface, Markdown rendering, code syntax highlighting, copy buttons
 - **Phase 2** (in progress): File browser, model selector, code review panel
