@@ -26,8 +26,14 @@ npm run build && node dist/cli.js init && node dist/cli.js web
 
 ```bash
 npm run check              # Type check
-npm run test               # Pre-release browser tests (requires Puppeteer)
+npm run test               # Pre-release tests (scripts/pre-release-test.js)
+npm run test:e2e           # Playwright E2E tests (starts server automatically)
+npm run test:e2e:ui        # Playwright tests with UI inspector
+npm run test:e2e:debug     # Playwright tests in debug mode
+npm run test:e2e:report    # Show last Playwright test report
 ```
+
+Playwright tests are in `tests/` and cover auth, sessions, chat, WebSocket, file explorer, and UI interactions. The test config (`playwright.config.ts`) auto-starts the web server and uses self-signed HTTPS certificates.
 
 **Pre-release Checklist:**
 
@@ -50,16 +56,19 @@ Required manual tests:
 
 **Module responsibilities:**
 - `cli.ts` — CLI entrypoint; parses commands (`init`, `web`, `config:*`)
-- `server.ts` — Express server with REST API for sessions, auth, and commands
+- `server.ts` — Express server with REST API, WebSocket, and PWA support
 - `process-manager.ts` — Manages PTY sessions; handles spawn, input, stop, output buffering, and auto-confirm logic
 - `storage.ts` — SQLite persistence for sessions and auth tokens; handles schema migrations
 - `config.ts` — Config loading with defaults and merge logic
 - `auth.ts` — In-memory session token store with 12-hour TTL
 - `cert.ts` — HTTPS certificate generation
 - `types.ts` — Shared TypeScript types
+- `message-parser.ts` — Parses PTY output into structured chat messages (strips ANSI, filters noise)
 - `web-ui.ts` — Generates the browser HTML UI
 
-**Execution modes:** `auto-edit`, `default`, `full-access`, `native`. Passed to child processes via environment variables (`WAND_MODE`, `WAND_AUTO_CONFIRM`, `WAND_AUTO_EDIT`). In `full-access` mode, the process manager auto-confirms prompts by detecting confirmation patterns and sending appropriate responses. In `native` mode, Claude runs with `--print` flag to return structured code output instead of interactive terminal.
+**Execution modes:** `auto-edit`, `default`, `full-access`, `native`. Passed to child processes via environment variables (`WAND_MODE`, `WAND_AUTO_CONFIRM`, `WAND_AUTO_EDIT`).
+- `full-access`: Auto-confirms prompts by detecting confirmation patterns and sending appropriate responses. Adds `--permission-mode acceptEdits` for Claude commands.
+- `native`: Uses `claude -p --output-format stream-json` for structured JSON output instead of interactive PTY. Parses NDJSON events into `ConversationTurn` objects for the chat UI. No PTY involved — uses Node's `spawn` directly.
 
 **Config:** Stored at `.wand/config.json` (or `~/.wand/config.json` by default). Includes host/port, password, shell, default working directory, startup commands, allowed command prefixes, and command presets for the web UI.
 
@@ -67,13 +76,18 @@ Required manual tests:
 
 **Claude session tracking:** When running Claude Code, the process manager extracts `session_id` from JSON output and stores it as `claudeSessionId`. This enables the "Resume" button in the UI which runs `claude --resume <session_id>`.
 
+**WebSocket protocol:** Real-time updates are pushed via WebSocket at `/ws`. Clients send `{type: "subscribe", sessionId}` to receive updates. Server broadcasts `ProcessEvent` objects with types: `started`, `output`, `ended`, `status`. Output events are debounced (50ms) to reduce flicker. Backpressure control drops messages if client queue exceeds 500.
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/` | Serve web UI HTML |
+| GET | `/manifest.json` | PWA manifest |
+| GET | `/sw.js` | Service worker for offline support |
 | POST | `/api/login` | Password auth, sets session cookie |
 | POST | `/api/logout` | Revoke session |
+| POST | `/api/set-password` | Set new password (requires auth) |
 | GET | `/api/config` | Get config (presets, defaults) |
 | GET | `/api/sessions` | List all session snapshots |
 | GET | `/api/sessions/:id` | Get single session with output |
@@ -84,6 +98,13 @@ Required manual tests:
 | DELETE | `/api/sessions/:id` | Delete session from storage |
 | GET | `/api/path-suggestions?q=` | Directory path autocomplete |
 | GET | `/api/directory` | Directory file listing (files tab) |
+| GET | `/api/folders?q=` | Folder picker with parent navigation |
+| GET | `/api/quick-paths` | Common paths (home, temp, cwd) |
+| GET/POST/DELETE | `/api/favorite-paths` | User's saved favorite paths |
+| GET/POST | `/api/recent-paths` | Recently used paths (max 10) |
+| GET | `/api/validate-path?path=` | Validate path exists and is readable |
+| GET | `/api/file-search?q=&cwd=` | Search files by name (recursive) |
+| GET | `/ws` | WebSocket for real-time session updates |
 
 ## Code Style
 
