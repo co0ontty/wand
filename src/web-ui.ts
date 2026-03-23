@@ -4033,22 +4033,6 @@ export function renderApp(configPath: string): string {
             return "";
         }
       }
-          case "right":
-            return String.fromCharCode(27) + "[C";
-          case "enter":
-            return String.fromCharCode(13);
-          case "ctrl_c":
-            return String.fromCharCode(3);
-          case "ctrl_d":
-            return String.fromCharCode(4);
-          case "ctrl_l":
-            return String.fromCharCode(12);
-          case "escape":
-            return String.fromCharCode(27);
-          default:
-            return "";
-        }
-      }
 
       function queueDirectInput(input) {
         if (!input || !state.selectedId) return Promise.resolve();
