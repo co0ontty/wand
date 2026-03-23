@@ -22,7 +22,27 @@ node dist/cli.js web       # Start the web console server
 npm run build && node dist/cli.js init && node dist/cli.js web
 ```
 
-**Testing:** No test framework is configured. Until one is added, treat `npm run check` and the smoke test above as the minimum gate.
+**Testing:**
+
+```bash
+npm run check              # Type check
+npm run test               # Pre-release browser tests (requires Puppeteer)
+```
+
+**Pre-release Checklist:**
+
+⚠️ **IMPORTANT:** Before any release, all tests must pass and manual browser testing is required. See `RELEASE_CHECKLIST.md` for the full checklist.
+
+Required manual tests:
+1. Page loads without errors
+2. Login works correctly
+3. New session creation works
+4. Chat mode displays messages bottom-to-top
+5. No message flickering during streaming
+6. Keyboard shortcuts work (Ctrl+C, Ctrl+D, etc.)
+7. Floating control panel works
+8. Session resume works (if claudeSessionId exists)
+9. Draft persistence works after refresh
 
 ## Architecture Overview
 
