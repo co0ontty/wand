@@ -710,6 +710,9 @@ export function renderApp(configPath: string): string {
       display: flex;
       flex-direction: column;
       max-width: 85%;
+    }
+
+    .chat-message.animate-in {
       animation: messageSlide 0.3s ease;
     }
 
@@ -2132,10 +2135,11 @@ export function renderApp(configPath: string): string {
             if (!config) return;
             state.config = config;
             state.loginChecked = true;
-            return refreshAll().then(function() {
-              startPolling();
-              render();
-            });
+            // Render the app shell first, THEN load session data into it.
+            // This avoids refreshAll() rendering chat content that render() immediately destroys.
+            render();
+            startPolling();
+            return refreshAll();
           })
           .catch(function() {
             state.loginChecked = true;
@@ -2153,6 +2157,10 @@ export function renderApp(configPath: string): string {
         teardownTerminal();
 
         app.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
+        // Reset chat render tracking since DOM was fully replaced
+        state.lastRenderedHash = 0;
+        state.lastRenderedMsgCount = 0;
+        state.lastRenderedEmpty = null;
         attachEventListeners();
         updateDrawerState();
         syncComposerModeSelect();
@@ -3669,12 +3677,24 @@ export function renderApp(configPath: string): string {
         }
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
+          // Allow copy when text is selected; otherwise send SIGINT to terminal
+          var inputBox = document.getElementById("input-box");
+          var hasSelection = inputBox && (inputBox.selectionStart !== inputBox.selectionEnd);
+          if (hasSelection) {
+            return; // Let browser handle copy
+          }
           event.preventDefault();
           queueDirectInput(getControlInput("ctrl_c"));
           return;
         }
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
+          // Allow copy when text is selected; otherwise send EOF to terminal
+          var inputBox2 = document.getElementById("input-box");
+          var hasSelection2 = inputBox2 && (inputBox2.selectionStart !== inputBox2.selectionEnd);
+          if (hasSelection2) {
+            return; // Let browser handle copy
+          }
           event.preventDefault();
           queueDirectInput(getControlInput("ctrl_d"));
           return;
@@ -3683,6 +3703,32 @@ export function renderApp(configPath: string): string {
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
           event.preventDefault();
           queueDirectInput(getControlInput("ctrl_l"));
+          return;
+        }
+
+        // Cmd+A / Ctrl+A: Select all (let browser handle)
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
+          // Let browser handle select-all
+          return;
+        }
+
+        // Cmd+V / Ctrl+V: Paste (let browser handle)
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") {
+          // Let browser handle paste
+          return;
+        }
+
+        // Cmd+X / Ctrl+X: Cut (let browser handle when text selected)
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "x") {
+          var inputBox = document.getElementById("input-box");
+          var hasSelection = inputBox && (inputBox.selectionStart !== inputBox.selectionEnd);
+          if (hasSelection) {
+            // Let browser handle cut
+            return;
+          }
+          // No selection: send Ctrl+X to terminal (rare case)
+          event.preventDefault();
+          queueDirectInput(String.fromCharCode(24)); // Ctrl+X = 0x18
           return;
         }
 
@@ -4134,8 +4180,8 @@ export function renderApp(configPath: string): string {
         stopPolling();
         // Use WebSocket if available, fallback to polling
         if (initWebSocket()) {
-          // WebSocket connected, initial load
-          refreshAll();
+          // WebSocket will deliver updates; no need for initial refreshAll()
+          // since the caller (restoreLoginSession) already called refreshAll()
           return;
         }
         // Fallback to HTTP polling
@@ -4347,6 +4393,8 @@ export function renderApp(configPath: string): string {
         if (msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedHash) {
           return;
         }
+        var prevHash = state.lastRenderedHash;
+        var prevMsgCount = state.lastRenderedMsgCount;
         state.lastRenderedMsgCount = msgCount;
         state.lastRenderedHash = outputHash;
 
@@ -4360,21 +4408,35 @@ export function renderApp(configPath: string): string {
         var existingCount = chatMessages.querySelectorAll(".chat-message").length;
 
         if (existingCount === 0) {
-          // Full render for first load
+          // Full render for first load / restore — no animation to avoid flicker
           chatMessages.innerHTML = messages.map(renderChatMessage).join("");
+          attachAllCopyHandlers(chatMessages);
         } else if (msgCount > existingCount) {
-          // Incremental: only append new messages
+          // Incremental: only append new messages (with animation)
           for (var i = existingCount; i < messages.length; i++) {
             var div = document.createElement("div");
             div.innerHTML = renderChatMessage(messages[i]);
             var el = div.firstElementChild;
             if (el) {
+              el.classList.add("animate-in");
               chatMessages.appendChild(el);
               attachCopyHandler(el);
             }
           }
-        } else {
-          // Message count decreased (session switched or output truncated) - full re-render
+        } else if (msgCount === existingCount && outputHash !== prevHash) {
+          // Same message count but content changed (streaming update) — update last message only
+          var lastEl = chatMessages.querySelectorAll(".chat-message")[msgCount - 1];
+          if (lastEl) {
+            var tmpDiv = document.createElement("div");
+            tmpDiv.innerHTML = renderChatMessage(messages[msgCount - 1]);
+            var newEl = tmpDiv.firstElementChild;
+            if (newEl) {
+              chatMessages.replaceChild(newEl, lastEl);
+              attachCopyHandler(newEl);
+            }
+          }
+        } else if (msgCount < existingCount) {
+          // Message count decreased (session switched or output truncated) - full re-render without animation
           chatMessages.innerHTML = messages.map(renderChatMessage).join("");
           attachAllCopyHandlers(chatMessages);
         }
