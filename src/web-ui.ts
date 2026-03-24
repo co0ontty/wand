@@ -5079,7 +5079,7 @@ export function renderApp(configPath: string): string {
               state.terminal.scrollToBottom();
             }
 
-            renderChat();
+            renderChat(true);
           });
       }
 
@@ -5908,7 +5908,8 @@ export function renderApp(configPath: string): string {
             if (snapshot.messages && snapshot.messages.length > 0) {
               state.currentMessages = snapshot.messages;
             }
-            renderChat();
+            // Immediate render to show user message quickly
+            renderChat(true);
           }
           return snapshot;
         });
@@ -6210,8 +6211,11 @@ export function renderApp(configPath: string): string {
                 snapshot.messages = msg.data.messages;
               }
               updateSessionSnapshot(snapshot);
-              // Schedule debounced chat update (don't parse on every chunk to avoid flicker)
-              scheduleChatRender();
+              // Check if this is a new message (not just streaming update)
+              var prevMsgCount = state.lastRenderedMsgCount;
+              var currMsgCount = snapshot.messages ? snapshot.messages.length : 0;
+              // Immediate render for new messages, debounced for streaming updates
+              scheduleChatRender(currMsgCount > prevMsgCount);
             }
             // Real-time terminal output
             if (msg.sessionId === state.selectedId && state.terminal && msg.data && msg.data.output) {
@@ -6236,18 +6240,19 @@ export function renderApp(configPath: string): string {
             if (msg.sessionId === state.selectedId) {
               loadOutput(msg.sessionId);
             }
-            // Update chat view
+            // Update chat view with full render
             if (state.currentView === "chat" && msg.sessionId === state.selectedId) {
-              renderChat();
+              renderChat(true);
             }
             break;
           case 'init':
-            // Initial state for subscribed session
+            // Initial state for subscribed session (after reconnect or subscription)
             if (msg.sessionId === state.selectedId && msg.data) {
               if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
               updateTerminalOutput(msg.data.output || "");
               if (state.currentView === "chat") {
-                renderChat();
+                // Force full render to show all messages
+                renderChat(true);
               }
             }
             break;
@@ -6282,25 +6287,32 @@ export function renderApp(configPath: string): string {
           setTimeout(scheduleTerminalResize, 40);
         }
 
-        // Render chat if switching to chat view
+        // Render chat if switching to chat view - force full render
         if (view === "chat") {
-          renderChat();
+          renderChat(true);
         }
       }
 
-      function renderChat() {
-        if (state.renderPending) return;
+      function renderChat(forceFullRender) {
+        if (state.renderPending && !forceFullRender) return;
         state.renderPending = true;
 
-        requestAnimationFrame(function() {
-          doRenderChat();
+        if (forceFullRender) {
+          // Immediate render for page refresh / session switch
+          doRenderChat(true);
           state.renderPending = false;
-        });
+        } else {
+          requestAnimationFrame(function() {
+            doRenderChat(false);
+            state.renderPending = false;
+          });
+        }
       }
 
       var chatRenderTimer = null;
-      function scheduleChatRender() {
-        if (chatRenderTimer) return;
+      function scheduleChatRender(immediate) {
+        if (chatRenderTimer && !immediate) return;
+        if (chatRenderTimer) clearTimeout(chatRenderTimer);
         chatRenderTimer = setTimeout(function() {
           chatRenderTimer = null;
           // Re-parse messages from the latest session output
@@ -6314,10 +6326,10 @@ export function renderApp(configPath: string): string {
             }
           }
           renderChat();
-        }, 300);
+        }, immediate ? 0 : 150);
       }
 
-      function doRenderChat() {
+      function doRenderChat(forceFullRender) {
         var chatOutput = document.getElementById("chat-output");
         if (!chatOutput) return;
 
@@ -6370,7 +6382,10 @@ export function renderApp(configPath: string): string {
           }
           outputHash = msgCount * 10000 + totalBlocks * 100 + (lastContentLen % 100);
         }
-        if (msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedHash) {
+
+        // Force full render if message count changed or explicitly requested
+        var forceRender = forceFullRender || msgCount !== state.lastRenderedMsgCount;
+        if (!forceRender && msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedHash) {
           return;
         }
         var prevHash = state.lastRenderedHash;
@@ -6386,9 +6401,11 @@ export function renderApp(configPath: string): string {
         }
 
         var existingCount = chatMessages.querySelectorAll(".chat-message").length;
+        // Full render when: forced, no existing messages, or message count decreased/changed
+        var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
 
-        if (existingCount === 0) {
-          // Full render for first load / restore — no animation to avoid flicker
+        if (needsFullRender) {
+          // Full render for first load / restore / session switch — no animation to avoid flicker
           // With column-reverse, render messages in reverse order (newest first)
           chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
           attachAllCopyHandlers(chatMessages);
