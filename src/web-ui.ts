@@ -97,6 +97,11 @@ export function renderApp(configPath: string): string {
       flex-shrink: 0;
       position: relative;
       z-index: 20;
+      padding-left: 0;
+      transition: padding-left var(--transition-normal);
+    }
+    .topbar.sidebar-open {
+      padding-left: 300px;
     }
 
     .topbar-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -688,6 +693,7 @@ export function renderApp(configPath: string): string {
 
     .chat-message.animate-in {
       animation: messageSlide 0.3s ease;
+      will-change: opacity, transform;
     }
 
     .chat-message-avatar {
@@ -713,10 +719,10 @@ export function renderApp(configPath: string): string {
     }
 
     .chat-message-bubble {
-      padding: 8px 12px;
+      padding: 10px 14px;
       border-radius: var(--radius-md);
       font-size: 0.875rem;
-      line-height: 1.5;
+      line-height: 1.6;
       word-wrap: break-word;
       white-space: pre-wrap;
       box-shadow: 0 1px 3px rgba(89, 58, 32, 0.06);
@@ -815,6 +821,28 @@ export function renderApp(configPath: string): string {
       font-family: var(--font-mono);
       color: var(--accent);
       font-weight: 500;
+    }
+
+    /* Typing indicator for empty assistant messages (streaming placeholder) */
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 0;
+    }
+    .typing-indicator span {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      animation: typingBounce 1.2s ease-in-out infinite;
+    }
+    .typing-indicator span:nth-child(2) { animation-delay: 0.15s; }
+    .typing-indicator span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes typingBounce {
+      0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+      30% { opacity: 1; transform: translateY(-4px); }
     }
 
     /* Inline Thinking (inside structured messages) */
@@ -1214,7 +1242,7 @@ export function renderApp(configPath: string): string {
     .input-row { display: flex; gap: 8px; align-items: flex-end; }
     .input-field { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
     .input-label { font-size: 0.6875rem; color: var(--text-muted); font-weight: 500; }
-    .input-textarea-wrap { position: relative; display: flex; flex-direction: column; }
+    .input-textarea-wrap { position: relative; }
 
     /* Folder picker styles */
     .folder-picker-container {
@@ -1524,10 +1552,10 @@ export function renderApp(configPath: string): string {
       outline: none;
       resize: none;
       min-height: 44px;
-      max-height: 120px;
+      max-height: 160px;
       width: 100%;
-      flex: 1;
-      transition: border-color var(--transition-fast);
+      overflow-y: hidden;
+      transition: border-color var(--transition-fast), height 0.1s ease;
       box-sizing: border-box;
       line-height: 1.5;
     }
@@ -2157,6 +2185,9 @@ export function renderApp(configPath: string): string {
         overflow: visible;
         padding-left: 0;
       }
+      .topbar.sidebar-open {
+        padding-left: 0;
+      }
 
       .sidebar {
         width: min(280px, calc(100vw - 16px));
@@ -2390,7 +2421,7 @@ export function renderApp(configPath: string): string {
       .btn { min-height: 44px; }
       .btn-sm { min-height: 36px; }
 
-      .chat-message-bubble { padding: 8px 10px; font-size: 0.75rem; }
+      .chat-message-bubble { padding: 8px 12px; font-size: 0.75rem; }
       .chat-message-avatar { width: 22px; height: 22px; font-size: 11px; }
 
       /* 模态框移动端优化 */
@@ -3173,7 +3204,7 @@ export function renderApp(configPath: string): string {
         var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
         return '<div class="app-container">' +
-          '<header class="topbar">' +
+          '<header class="topbar' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + '">' +
             '<div class="topbar-left">' +
               '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm">≡</button>' +
             '</div>' +
@@ -3236,9 +3267,9 @@ export function renderApp(configPath: string): string {
                   '<span class="terminal-info" id="terminal-info">' + (selectedSession ? (getModeLabel(selectedSession.mode) + " | " + selectedSession.status) : "开始对话") + '</span>' +
                 '</div>' +
                 '<div class="terminal-header-actions">' +
-                  '<div class="view-toggle" aria-label="返回模式切换">' +
-                    '<button id="view-terminal-btn" class="view-toggle-btn' + (state.currentView === "terminal" ? " active" : "") + '" type="button">原生返回</button>' +
-                    '<button id="view-chat-btn" class="view-toggle-btn' + (state.currentView === "chat" ? " active" : "") + '" type="button">对话返回</button>' +
+                  '<div class="view-toggle" aria-label="视图切换">' +
+                    '<button id="view-terminal-btn" class="view-toggle-btn' + (state.currentView === "terminal" ? " active" : "") + '" type="button">终端</button>' +
+                    '<button id="view-chat-btn" class="view-toggle-btn' + (state.currentView === "chat" ? " active" : "") + '" type="button">对话</button>' +
                   '</div>' +
                 '</div>' +
               '</div>' +
@@ -3861,6 +3892,9 @@ export function renderApp(configPath: string): string {
         if (inputBox) {
           inputBox.addEventListener("keydown", handleInputBoxKeydown);
           inputBox.addEventListener("paste", handleInputPaste);
+          inputBox.addEventListener("input", function() {
+            autoResizeInput(inputBox);
+          });
           inputBox.addEventListener("focus", function() {
             // Close drawer when user focuses input to avoid backdrop blocking clicks
             closeSessionsDrawer();
@@ -4842,6 +4876,10 @@ export function renderApp(configPath: string): string {
         if (mainLayout) {
           mainLayout.classList.toggle("sidebar-open", state.sessionsDrawerOpen);
         }
+        var topbar = document.querySelector(".topbar");
+        if (topbar) {
+          topbar.classList.toggle("sidebar-open", state.sessionsDrawerOpen);
+        }
       }
 
       function toggleSessionsDrawer() {
@@ -5191,7 +5229,11 @@ export function renderApp(configPath: string): string {
               var current = inputBox.value;
               var newValue = current.slice(0, start) + String.fromCharCode(10) + current.slice(start);
               inputBox.value = newValue;
+              // Move cursor to after the inserted newline
+              inputBox.selectionStart = start + 1;
+              inputBox.selectionEnd = start + 1;
               setDraftValue(newValue);
+              autoResizeInput(inputBox);
             }
             return;
           }
@@ -5343,6 +5385,20 @@ export function renderApp(configPath: string): string {
         if (inputBox) inputBox.value = value;
       }
 
+      function autoResizeInput(el) {
+        if (!el) return;
+        // Temporarily remove min-height and collapse to measure true content height
+        el.style.minHeight = "0";
+        el.style.height = "0";
+        var maxHeight = 160;
+        var minHeight = 44;
+        var contentHeight = el.scrollHeight;
+        var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
+        el.style.height = newHeight + "px";
+        el.style.minHeight = "";
+        el.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
+      }
+
       function isSelectedSessionRunning() {
         if (!state.selectedId) return false;
         var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
@@ -5487,7 +5543,8 @@ export function renderApp(configPath: string): string {
         if (state.currentView === "terminal") {
           setTimeout(scheduleTerminalResize, 40);
         }
-        renderChat();
+        // Don't call renderChat() here — loadOutput() always calls renderChat() after it resolves.
+        // Calling renderChat() prematurely would render with stale/empty messages.
         focusInputBox();
       }
 
@@ -5499,7 +5556,10 @@ export function renderApp(configPath: string): string {
           // Send text + Enter as a single call to avoid race conditions
           var combinedInput = value + getControlInput("enter");
           // Clear the input box immediately to prevent double-sending
-          if (inputBox) inputBox.value = "";
+          if (inputBox) {
+            inputBox.value = "";
+            autoResizeInput(inputBox);
+          }
           setDraftValue("");
           return queueDirectInput(combinedInput).catch(function(err) {
             showToast(err.message || "会话已结束，请重启会话。", "error");
@@ -5592,7 +5652,7 @@ export function renderApp(configPath: string): string {
         return fetch("/api/sessions/" + state.selectedId + "/input", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: input })
+          body: JSON.stringify({ input: input, view: state.currentView })
         })
         .then(function(res) {
           if (!res.ok) {
@@ -5601,6 +5661,18 @@ export function renderApp(configPath: string): string {
             });
           }
           return res.json();
+        })
+        .then(function(snapshot) {
+          // Use the response snapshot to immediately update session state
+          // This ensures user messages appear in chat without waiting for WebSocket echo
+          if (snapshot && snapshot.id) {
+            updateSessionSnapshot(snapshot);
+            if (snapshot.messages && snapshot.messages.length > 0) {
+              state.currentMessages = snapshot.messages;
+            }
+            renderChat();
+          }
+          return snapshot;
         });
       }
 
@@ -6045,13 +6117,30 @@ export function renderApp(configPath: string): string {
         // Check if messages actually changed
         var msgCount = messages.length;
         var outputHash = selectedSession.output ? selectedSession.output.length : 0;
-        // For structured messages, also hash the total content blocks count
+        // For structured messages, hash block count + last message content length for streaming detection
         if (selectedSession.messages && selectedSession.messages.length > 0) {
           var totalBlocks = 0;
+          var lastContentLen = 0;
           for (var bi = 0; bi < selectedSession.messages.length; bi++) {
-            totalBlocks += (selectedSession.messages[bi].content ? selectedSession.messages[bi].content.length : 0);
+            var msgContent = selectedSession.messages[bi].content;
+            if (msgContent) {
+              if (Array.isArray(msgContent)) {
+                totalBlocks += msgContent.length;
+                // Include text length of last block for streaming change detection
+                if (bi === selectedSession.messages.length - 1) {
+                  for (var bj = 0; bj < msgContent.length; bj++) {
+                    var block = msgContent[bj];
+                    if (block.text) lastContentLen += block.text.length;
+                    if (block.thinking) lastContentLen += block.thinking.length;
+                  }
+                }
+              } else {
+                totalBlocks += 1;
+                lastContentLen = String(msgContent).length;
+              }
+            }
           }
-          outputHash = msgCount * 1000 + totalBlocks;
+          outputHash = msgCount * 10000 + totalBlocks * 100 + (lastContentLen % 100);
         }
         if (msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedHash) {
           return;
@@ -6097,22 +6186,22 @@ export function renderApp(configPath: string): string {
           // Smart scroll: only auto-scroll if user is near bottom
           smartScrollToBottom(chatOutput);
         } else if (msgCount === existingCount && outputHash !== prevHash) {
-          // Same message count but content changed (streaming update) — update first message only (which is newest in column-reverse)
-          // Optimized: only update if content actually changed to avoid flicker
+          // Same message count but content changed (streaming update) — update last message (newest visually)
+          // With column-reverse, first DOM child = newest message
           var firstEl = chatMessages.querySelector(".chat-message");
-          if (firstEl && messages[0]) {
-            // Check if the message content actually changed
+          if (firstEl && messages.length > 0) {
+            // The newest message is the last in the array (first in DOM due to reverse)
+            var newestMsg = messages[messages.length - 1];
             var currentContent = firstEl.querySelector(".chat-message-bubble");
-            if (currentContent) {
-              var newContent = messages[0].role === "assistant"
-                ? renderMarkdown(messages[0].content || "")
-                : escapeHtml(messages[0].content || "");
-              // Only update if HTML content is different
-              if (currentContent.innerHTML !== newContent) {
-                var tmpDiv = document.createElement("div");
-                tmpDiv.innerHTML = renderChatMessage(messages[0]);
-                var newEl = tmpDiv.firstElementChild;
-                if (newEl) {
+            if (currentContent && newestMsg) {
+              // Re-render the full message element to handle both structured and string content
+              var tmpDiv = document.createElement("div");
+              tmpDiv.innerHTML = renderChatMessage(newestMsg);
+              var newEl = tmpDiv.firstElementChild;
+              if (newEl && newEl.querySelector(".chat-message-bubble")) {
+                var newBubble = newEl.querySelector(".chat-message-bubble");
+                // Only update if bubble content actually changed
+                if (newBubble && currentContent.innerHTML !== newBubble.innerHTML) {
                   chatMessages.replaceChild(newEl, firstEl);
                   attachCopyHandler(newEl);
                 }
@@ -6221,8 +6310,8 @@ export function renderApp(configPath: string): string {
           /thinking with high effort/i,
           /thinking with medium effort/i,
           /thinking with low effort/i,
-          /thought for \d+s/i,
-          /Sauteed for \d+m/i,
+          new RegExp("thought for [0-9]+s", "i"),
+          new RegExp("Sauteed for [0-9]+m", "i"),
           /Germinating/i,
           /Doodling/i,
           /Brewing/i
@@ -6291,6 +6380,26 @@ export function renderApp(configPath: string): string {
           if (line.indexOf("type ") === 0 && line.indexOf(" to ") !== -1) continue;
           if (line.indexOf("[wand]") === 0) continue;
           if (line.indexOf("Captured Claude session ID") !== -1) continue;
+          // Filter Claude TUI noise patterns
+          if (line.indexOf("⏵") !== -1) continue;
+          if (line.indexOf("acceptedit") !== -1) continue;
+          if (line.indexOf("shift+tab") !== -1) continue;
+          if (line.indexOf("tabtocycle") !== -1) continue;
+          if (line.indexOf("ctrl+g") !== -1) continue;
+          if (line.indexOf("/effort") !== -1) continue;
+          if (line.indexOf("Opus") !== -1 && line.indexOf("model") !== -1) continue;
+          if (line.indexOf("Haiku") !== -1) continue;
+          if (line.indexOf("to cycle") !== -1) continue;
+          if (line.indexOf("high ·") !== -1 || line.indexOf("high·") !== -1) continue;
+          if (line.indexOf("medium ·") !== -1 || line.indexOf("medium·") !== -1) continue;
+          if (line.indexOf("low ·") !== -1 || line.indexOf("low·") !== -1) continue;
+          // Strip bullet prefix from Claude TUI output lines (keep the content)
+          if (line.indexOf("●") === 0) {
+            line = line.slice(1).trim();
+            if (!line) continue;
+            contentLines.push(line);
+            continue;
+          }
           // Filter partial/fragmented lines (likely from streaming)
           if (line.length < 3 && !/^[a-zA-Z]{3}$/.test(line)) continue;
 
@@ -6300,7 +6409,7 @@ export function renderApp(configPath: string): string {
         // Add thinking message (most recent one, deduplicated)
         if (thinkingLines.length > 0) {
           var lastThinking = thinkingLines[thinkingLines.length - 1];
-          var durationMatch = lastThinking.match(/for (\d+[ms]+| \d+m \d+s)/i);
+          var durationMatch = lastThinking.match(new RegExp("for ([0-9]+[ms]+| [0-9]+m [0-9]+s)", "i"));
           var thinkingText = durationMatch ? "深度思考 " + durationMatch[0].replace(/for /i, "") : "深度思考中...";
           messages.push({ role: "thinking", content: thinkingText, type: "deep-thought" });
         }
@@ -6313,66 +6422,92 @@ export function renderApp(configPath: string): string {
 
         if (!contentLines.length) return messages;
 
-        // Find user command in content lines
-        var userCmdIndex = -1;
-        var userText = "";
+        // ── Multi-turn conversation parsing ──
+        // Find ALL ❯ markers to build multiple user/assistant turn pairs
+        var turns = [];
+        var currentUserText = null;
+        var currentAssistantLines = [];
 
         for (var i = 0; i < contentLines.length; i++) {
           var line = contentLines[i];
 
-          // Check for ❯ prompt followed by actual user input (not Try"..." suggestion)
           if (line.indexOf("❯") === 0) {
-            var afterPrompt = line.replace(/^❯\s*/, "");
-            if (afterPrompt.indexOf('Try"') !== 0 && afterPrompt.indexOf('Try "') !== 0 && afterPrompt.trim()) {
-              userCmdIndex = i;
-              userText = afterPrompt.trim();
-              break;
+            var afterPrompt = line.replace(/^❯\s*/, "").trim();
+
+            // Skip prompt suggestions
+            if (afterPrompt.indexOf('Try"') === 0 || afterPrompt.indexOf('Try "') === 0) continue;
+
+            // Finalize previous turn if we had a user message
+            if (currentUserText !== null && currentAssistantLines.length > 0) {
+              turns.push({ user: currentUserText, assistantLines: currentAssistantLines });
+              currentAssistantLines = [];
+            }
+
+            if (afterPrompt) {
+              currentUserText = afterPrompt;
+            } else {
+              // Standalone ❯ — just a prompt, no user text
+              if (currentUserText !== null && currentAssistantLines.length > 0) {
+                turns.push({ user: currentUserText, assistantLines: currentAssistantLines });
+                currentAssistantLines = [];
+              }
+              currentUserText = null;
+            }
+          } else if (currentUserText !== null) {
+            // Filter assistant content lines
+            if (line.indexOf("⏺") !== -1 && (line.indexOf("Hi!") !== -1 || line.indexOf("Hello") !== -1 || line.indexOf("What") !== -1 || line.indexOf("working") !== -1)) {
+              currentAssistantLines.push(line);
+            } else if (line.indexOf("⏺") === 0) {
+              currentAssistantLines.push(line.slice(1).trim() || line);
+            } else if (line.length >= 8) {
+              if (line.indexOf("✢") === -1 && line.indexOf("✳") === -1 && line.indexOf("✶") === -1 && line.indexOf("✻") === -1 && line.indexOf("✽") === -1 &&
+                  line.indexOf("▐") !== 0 && line.indexOf("▝") !== 0 && line.indexOf("▘") !== 0 &&
+                  line.indexOf("esctointerrupt") === -1 && line.indexOf("?for") !== 0 && line.indexOf("? for") !== 0) {
+                currentAssistantLines.push(line);
+              }
             }
           }
         }
 
-        // If no ❯ prompt found, look for standalone user input (lines that look like user commands)
-        // This handles cases where the user input appears without the ❯ prefix
-        if (!userText) {
+        // Finalize the last turn
+        if (currentUserText !== null && currentAssistantLines.length > 0) {
+          turns.push({ user: currentUserText, assistantLines: currentAssistantLines });
+        }
+
+        // If no ❯-based turns found, try fallback heuristic (first message without ❯)
+        if (turns.length === 0) {
+          var fallbackUserText = "";
+          var fallbackUserIdx = -1;
           for (var i = 0; i < contentLines.length; i++) {
             var line = contentLines[i];
-            // Skip noise lines and system messages
             if (line.indexOf('Try"') === 0 || line.indexOf('Try "') === 0) continue;
             if (line.indexOf('Failed to install') !== -1) continue;
             if (line.indexOf('ctrl+g') !== -1) continue;
             if (line.indexOf('● ') === 0) continue;
-            if (line.indexOf('Claude Code has switched') !== -1) continue;
-            if (line.indexOf('esctointerrupt') !== -1) continue;
             if (line.length < 2 || line.length > 100) continue;
-            // Looks like user input (starts with letter, reasonable length)
             if (/^[a-zA-Z]/.test(line)) {
-              userText = line.trim();
-              userCmdIndex = i;
+              fallbackUserText = line.trim();
+              fallbackUserIdx = i;
               break;
+            }
+          }
+          if (fallbackUserText && fallbackUserIdx >= 0) {
+            var fallbackAssistant = contentLines.slice(fallbackUserIdx + 1).filter(function(l) {
+              return l.length >= 8;
+            });
+            if (fallbackAssistant.length > 0) {
+              turns.push({ user: fallbackUserText, assistantLines: fallbackAssistant });
             }
           }
         }
 
-        if (userText) {
-          messages.push({ role: "user", content: userText });
-        }
-
-        var assistantLines = contentLines.slice(userCmdIndex + 1).filter(function(line) {
-          if (line.indexOf("⏺") !== -1 && (line.indexOf("Hi!") !== -1 || line.indexOf("Hello") !== -1 || line.indexOf("What") !== -1 || line.indexOf("working") !== -1)) return true;
-          if (line.indexOf("⏺") === 0) return true;
-          if (line.length < 8) return false;
-          if (line.indexOf("✢") !== -1 || line.indexOf("✳") !== -1 || line.indexOf("✶") !== -1 || line.indexOf("✻") !== -1 || line.indexOf("✽") !== -1) return false;
-          if (line.indexOf("▐") === 0 || line.indexOf("▝") === 0 || line.indexOf("▘") === 0) return false;
-          if (line.indexOf("❯") === 0) return false;
-          if (line.indexOf("esctointerrupt") !== -1) return false;
-          if (line.indexOf("?for") === 0 || line.indexOf("? for") === 0) return false;
-          return true;
-        });
-
-        if (assistantLines.length) {
-          // Format and clean up assistant response
-          var formattedContent = formatAssistantResponse(assistantLines.join(newline));
-          messages.push({ role: "assistant", content: formattedContent });
+        // Convert turns to messages
+        for (var t = 0; t < turns.length; t++) {
+          messages.push({ role: "user", content: turns[t].user });
+          if (turns[t].assistantLines.length > 0) {
+            var formattedContent = formatAssistantResponse(turns[t].assistantLines.join(newline));
+            messages.push({ role: "assistant", content: formattedContent });
+          }
         }
 
         return messages;
@@ -6416,6 +6551,18 @@ export function renderApp(configPath: string): string {
       function renderStructuredMessage(msg) {
         var role = msg.role;
         var avatar = role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
+
+        // Empty content array — streaming placeholder, show typing indicator
+        if (!msg.content || msg.content.length === 0) {
+          if (role === "assistant") {
+            return '<div class="chat-message ' + role + '">' +
+              avatar +
+              '<div class="chat-message-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>' +
+            '</div>';
+          }
+          return "";
+        }
+
         var blocksHtml = "";
 
         try {
@@ -6582,6 +6729,12 @@ export function renderApp(configPath: string): string {
             cleanLines.push(trimmed.slice(1).trim());
             continue;
           }
+          // Strip leading ● bullet from Claude TUI output
+          if (trimmed.indexOf("●") === 0) {
+            trimmed = trimmed.slice(1).trim();
+            if (!trimmed) continue;
+            line = trimmed;
+          }
 
           cleanLines.push(line);
         }
@@ -6591,8 +6744,18 @@ export function renderApp(configPath: string): string {
           cleanLines.pop();
         }
 
-        // Render as Markdown
-        return renderMarkdown(cleanLines.join(newline));
+        // Deduplicate lines (PTY can echo same content multiple times with/without spaces)
+        var deduped = [];
+        var seenNorm = {};
+        for (var j = 0; j < cleanLines.length; j++) {
+          var normalized = cleanLines[j].replace(/\s+/g, "");
+          if (normalized.length > 5 && seenNorm[normalized]) continue;
+          if (normalized.length > 5) seenNorm[normalized] = true;
+          deduped.push(cleanLines[j]);
+        }
+
+        // Return plain text — renderChatMessage will handle markdown rendering
+        return deduped.join(newline);
       }
 
       function renderMarkdown(text) {

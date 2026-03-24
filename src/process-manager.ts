@@ -6,6 +6,7 @@ import process from "node:process";
 import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
+import { SessionLogger } from "./session-logger.js";
 import { ContentBlock, ConversationTurn, ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
 
 export interface ProcessEvent {
@@ -60,6 +61,14 @@ interface SessionRecord extends SessionSnapshot {
   jsonChatBusy: boolean;
   /** Child process reference for native mode (for cleanup) */
   childProcess: import("node:child_process").ChildProcess | null;
+  /** PTY chat tracking state: idle = waiting for input, responding = assistant is generating */
+  ptyChatState: "idle" | "responding";
+  /** Accumulated raw PTY output for current assistant response */
+  ptyAssistantBuffer: string;
+  /** The user input text that was last sent (for skipping echo) */
+  ptyLastUserInput: string;
+  /** Whether the user input echo has been detected and skipped */
+  ptyEchoSkipped: boolean;
 }
 
 const MAX_SESSIONS = 50;
@@ -79,12 +88,15 @@ function appendWindow(buffer: string, chunk: string, maxSize: number): string {
 
 export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
+  private readonly logger: SessionLogger;
 
   constructor(
     private readonly config: WandConfig,
-    private readonly storage: WandStorage
+    private readonly storage: WandStorage,
+    configDir?: string
   ) {
     super();
+    this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"));
     for (const snapshot of this.storage.loadSessions()) {
       this.sessions.set(snapshot.id, {
         ...snapshot,
@@ -97,7 +109,11 @@ export class ProcessManager extends EventEmitter {
         storedOutput: snapshot.output,
         messages: snapshot.messages ?? [],
         jsonChatBusy: false,
-        childProcess: null
+        childProcess: null,
+        ptyChatState: "idle",
+        ptyAssistantBuffer: "",
+        ptyLastUserInput: "",
+        ptyEchoSkipped: false
       });
     }
     this.archiveExpiredSessions();
@@ -169,7 +185,11 @@ export class ProcessManager extends EventEmitter {
       storedOutput: "",
       messages: [],
       jsonChatBusy: false,
-      childProcess: null
+      childProcess: null,
+      ptyChatState: "idle",
+      ptyAssistantBuffer: "",
+      ptyLastUserInput: "",
+      ptyEchoSkipped: false
     };
 
     this.sessions.set(id, record);
@@ -215,6 +235,24 @@ export class ProcessManager extends EventEmitter {
         return;
       }
       process.stderr.write(`[wand] Sending initial input: ${initialInput}\n`);
+
+      // Track initial input as a user message for Chat mode
+      if (this.isRealChatInput(initialInput)) {
+        const cleanInput = initialInput.replace(/[\r\n]+$/, "").trim();
+        current.messages.push({
+          role: "user",
+          content: [{ type: "text", text: cleanInput }]
+        });
+        current.messages.push({
+          role: "assistant",
+          content: []
+        });
+        current.ptyChatState = "responding";
+        current.ptyAssistantBuffer = "";
+        current.ptyLastUserInput = cleanInput;
+        current.ptyEchoSkipped = false;
+      }
+
       current.ptyProcess.write(initialInput);
       // \n advances to a new line so subsequent output doesn't overwrite this input
       current.ptyProcess.write("\n");
@@ -229,6 +267,9 @@ export class ProcessManager extends EventEmitter {
       if (!rec) return;
 
       rec.output = appendWindow(rec.output, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
+
+      // Log raw PTY output for analysis
+      this.logger.appendPtyOutput(id, chunk);
 
       // Capture Claude session ID from output
       if (!rec.claudeSessionId) {
@@ -249,6 +290,12 @@ export class ProcessManager extends EventEmitter {
         sendInitialInput();
       }
 
+      // Track assistant response for Chat mode (PTY sessions)
+      if (rec.ptyChatState === "responding") {
+        rec.ptyAssistantBuffer += chunk;
+        this.trackPtyAssistantResponse(rec);
+      }
+
       // Batch rapid output chunks to reduce WebSocket messages
       pendingChunk += chunk;
       if (outputDebounceTimer) {
@@ -259,13 +306,26 @@ export class ProcessManager extends EventEmitter {
         pendingChunk = "";
         outputDebounceTimer = null;
         this.persist(rec);
-        this.emitEvent({ type: "output", sessionId: id, data: { chunk: finalChunk, output: rec.output } });
+        this.emitEvent({
+          type: "output",
+          sessionId: id,
+          data: {
+            chunk: finalChunk,
+            output: rec.output,
+            messages: rec.messages.length > 0 ? rec.messages : undefined
+          }
+        });
       }, 30); // 30ms debounce for PTY mode
     });
 
     child.onExit(({ exitCode }) => {
       const current = this.sessions.get(id);
       if (!current) return;
+      // Finalize any pending assistant response before ending
+      if (current.ptyChatState === "responding") {
+        current.ptyEchoSkipped = true; // Force skip echo on exit
+        this.finalizePtyAssistantMessage(current);
+      }
       current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
       current.exitCode = current.stopRequested ? null : exitCode;
       current.endedAt = new Date().toISOString();
@@ -302,17 +362,47 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
-  sendInput(id: string, input: string): SessionSnapshot {
+  sendInput(id: string, input: string, view?: "chat" | "terminal"): SessionSnapshot {
     const record = this.mustGet(id);
 
-    // Native mode: use JSON chat turn (claude -p --output-format stream-json)
+    // Native mode: always use JSON chat turn
+    // Strip trailing newlines — input from chat UI includes Enter key as "\n"
     if (record.mode === "native") {
-      return this.runJsonChatTurn(record, input);
+      const cleanInput = input.replace(/[\r\n]+$/, "").trim();
+      if (cleanInput) {
+        return this.runJsonChatTurn(record, cleanInput);
+      }
+      return this.snapshot(record);
+    }
+
+    // Chat view + Claude command → route through native pipeline for structured output
+    // This gives Chat mode the same structured messages as native mode, regardless of session mode
+    if (view === "chat" && this.isClaudeCommand(record.command) && this.isRealChatInput(input)) {
+      return this.runJsonChatTurn(record, input.replace(/[\r\n]+$/, "").trim());
     }
 
     if (!record.ptyProcess || record.status !== "running") {
       throw new Error("Session is not running.");
     }
+
+    // Track user input as a structured message for Chat mode display (PTY fallback)
+    if (this.isRealChatInput(input)) {
+      const cleanInput = input.replace(/[\r\n]+$/, "").trim();
+      record.messages.push({
+        role: "user",
+        content: [{ type: "text", text: cleanInput }]
+      });
+      // Add assistant placeholder for streaming updates
+      record.messages.push({
+        role: "assistant",
+        content: []
+      });
+      record.ptyChatState = "responding";
+      record.ptyAssistantBuffer = "";
+      record.ptyLastUserInput = cleanInput;
+      record.ptyEchoSkipped = false;
+    }
+
     // Ensure input advances to a new line so subsequent PTY output doesn't overwrite it
     record.ptyProcess.write(input);
     if (!input.endsWith("\n")) {
@@ -334,8 +424,11 @@ export class ProcessManager extends EventEmitter {
     const baseCommand = record.command.trim();
     const escapedMessage = message.replace(/'/g, "'\\''");
 
-    // Build command: claude -p 'message' --output-format stream-json [--resume sessionId] [--permission-mode acceptEdits]
+    // Build command: claude -p 'message' --output-format stream-json --verbose [--resume sessionId] [--permission-mode acceptEdits]
+    // Note: --verbose is required when using --output-format stream-json with --print (Claude CLI only)
+    const isClaude = /^claude\b/.test(baseCommand);
     const parts = [baseCommand, "-p", `'${escapedMessage}'`, "--output-format", "stream-json"];
+    if (isClaude) parts.push("--verbose");
 
     if (record.claudeSessionId) {
       parts.push("--resume", record.claudeSessionId);
@@ -406,6 +499,9 @@ export class ProcessManager extends EventEmitter {
         try {
           const event = JSON.parse(trimmed);
           this.processJsonEvent(record, event, assistantBlocks);
+
+          // Log native mode event for analysis
+          this.logger.appendStreamEvent(record.id, event);
 
           // Extract session_id from any event that has it
           if (event.session_id && !turnSessionId) {
@@ -507,13 +603,23 @@ export class ProcessManager extends EventEmitter {
   ): void {
     switch (event.type) {
       case "assistant": {
-        // Full assistant message — only use if we haven't collected blocks from streaming
+        // Assistant message — may arrive as multiple separate events (e.g. thinking block first, text block second)
+        // Merge new blocks that aren't yet in assistantBlocks
         const msg = event.message;
-        if (msg?.content && Array.isArray(msg.content) && assistantBlocks.length === 0) {
+        if (msg?.content && Array.isArray(msg.content)) {
           for (const block of msg.content) {
             if (block && typeof block === "object" && "type" in block) {
-              assistantBlocks.push(block as { type: string; [key: string]: unknown });
-              this.appendBlockToOutput(record, block as { type: string; [key: string]: unknown });
+              const blockType = (block as { type: string }).type;
+              // Check if this block type already exists in assistantBlocks
+              const existing = assistantBlocks.findIndex((b) => b.type === blockType);
+              if (existing >= 0) {
+                // Update existing block — merge fields (e.g. thinking → text transition)
+                Object.assign(assistantBlocks[existing], block);
+              } else {
+                // New block type — add it
+                assistantBlocks.push(block as { type: string; [key: string]: unknown });
+                this.appendBlockToOutput(record, block as { type: string; [key: string]: unknown });
+              }
             }
           }
         }
@@ -546,18 +652,39 @@ export class ProcessManager extends EventEmitter {
         break;
       }
       case "result": {
-        // Final result event — may contain full message and session_id
-        if (event.result && typeof event.result === "object") {
+        // Final result event — `event.result` can be a string or an object with `result` + `content`
+        const resultStr = typeof event.result === "string" ? event.result : (event.result as Record<string, unknown>)?.result as string | undefined;
+
+        if (typeof event.result === "object" && event.result !== null) {
           const result = event.result as { content?: unknown[] };
           if (result.content && Array.isArray(result.content)) {
-            // If we haven't collected blocks from streaming, use the result
-            if (assistantBlocks.length === 0) {
-              for (const block of result.content) {
-                if (block && typeof block === "object" && "type" in block) {
+            for (const block of result.content) {
+              if (block && typeof block === "object" && "type" in block) {
+                const blockType = (block as { type: string }).type;
+                const existing = assistantBlocks.findIndex((b) => b.type === blockType);
+                if (existing >= 0) {
+                  Object.assign(assistantBlocks[existing], block);
+                } else {
                   assistantBlocks.push(block as { type: string; [key: string]: unknown });
                   this.appendBlockToOutput(record, block as { type: string; [key: string]: unknown });
                 }
               }
+            }
+          }
+        }
+
+        // Use the result string as text if no text block exists yet
+        if (resultStr) {
+          const hasTextBlock = assistantBlocks.some((b) => b.type === "text");
+          if (!hasTextBlock) {
+            const textBlock = { type: "text", text: resultStr };
+            assistantBlocks.push(textBlock);
+            this.appendBlockToOutput(record, textBlock);
+          } else {
+            // Update existing text block with final result
+            const textBlock = assistantBlocks.find((b) => b.type === "text");
+            if (textBlock) {
+              textBlock.text = resultStr;
             }
           }
         }
@@ -628,6 +755,172 @@ export class ProcessManager extends EventEmitter {
 
   private buildAssistantTurn(blocks: Array<{ type: string; [key: string]: unknown }>): ConversationTurn {
     return { role: "assistant", content: this.buildContentBlocks(blocks) };
+  }
+
+  // ── PTY Chat Tracking helpers ──
+
+  /** Determine if input looks like a real chat message (not control characters) */
+  private isRealChatInput(input: string): boolean {
+    const trimmed = input.replace(/[\r\n]+$/, "").trim();
+    // Empty or whitespace-only
+    if (!trimmed) return false;
+    // Single control character (Ctrl+C, Ctrl+D, etc.)
+    if (trimmed.length === 1 && trimmed.charCodeAt(0) < 32) return false;
+    // ANSI escape sequences (arrow keys, etc.)
+    if (trimmed.startsWith("\x1b")) return false;
+    // Single "y" or "n" — likely auto-confirm response
+    if (/^[yn]$/i.test(trimmed)) return false;
+    // Just Enter/CR
+    if (trimmed === "\r" || trimmed === "\n") return false;
+    return true;
+  }
+
+  /** Check if a command is a Claude CLI command */
+  private isClaudeCommand(command: string): boolean {
+    const trimmed = command.trim();
+    return /^claude\b/.test(trimmed);
+  }
+
+  /** Strip ANSI escape sequences from raw PTY output */
+  private stripAnsiSequences(text: string): string {
+    // eslint-disable-next-line no-control-regex
+    return text
+      .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")   // CSI sequences
+      .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "") // OSC sequences
+      .replace(/\x1b[><=ePX^_]/g, "")              // Single-char escapes
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "") // Control chars (keep \t \n \r)
+      .replace(/\r\n?/g, "\n");
+  }
+
+  /** Track and update assistant response from PTY output */
+  private trackPtyAssistantResponse(record: SessionRecord): void {
+    const clean = this.stripAnsiSequences(record.ptyAssistantBuffer);
+
+    // Phase 1: Skip user input echo
+    if (!record.ptyEchoSkipped) {
+      // Look for the user's input text in the cleaned output (it's the PTY echo)
+      const echoIdx = clean.indexOf(record.ptyLastUserInput);
+      if (echoIdx !== -1) {
+        record.ptyEchoSkipped = true;
+        // Don't try to trim the raw buffer — cleanPtyOutputForChat will filter the echo line.
+        // The echo line starts with ❯ which is already filtered by cleanPtyOutputForChat.
+      }
+      // Don't update assistant content until echo is skipped
+      return;
+    }
+
+    // Phase 2: Check if assistant is done (❯ prompt reappeared)
+    const lines = clean.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const trimmed = lines[i].trim();
+      if (trimmed.startsWith("❯")) {
+        const afterPrompt = trimmed.slice(1).trim();
+        // Standalone ❯ or ❯ with prompt suggestions = assistant done
+        if (!afterPrompt || afterPrompt.startsWith("Try")) {
+          this.finalizePtyAssistantMessage(record);
+          return;
+        }
+        break;
+      }
+    }
+
+    // Phase 3: Update assistant content progressively during streaming
+    this.updatePtyAssistantContent(record);
+  }
+
+  /** Update the assistant placeholder message with cleaned PTY content */
+  private updatePtyAssistantContent(record: SessionRecord): void {
+    const lastMsg = record.messages[record.messages.length - 1];
+    if (!lastMsg || lastMsg.role !== "assistant") return;
+
+    const text = this.cleanPtyOutputForChat(record.ptyAssistantBuffer);
+    if (text) {
+      lastMsg.content = [{ type: "text", text }];
+    }
+  }
+
+  /** Finalize the assistant message when ❯ prompt is detected */
+  private finalizePtyAssistantMessage(record: SessionRecord): void {
+    const lastMsg = record.messages[record.messages.length - 1];
+    if (!lastMsg || lastMsg.role !== "assistant") return;
+
+    const text = this.cleanPtyOutputForChat(record.ptyAssistantBuffer);
+    if (text) {
+      lastMsg.content = [{ type: "text", text }];
+    } else if (lastMsg.content.length === 0) {
+      // Remove empty assistant placeholder if no content was captured
+      record.messages.pop();
+    }
+
+    record.ptyChatState = "idle";
+    record.ptyAssistantBuffer = "";
+    record.ptyLastUserInput = "";
+    record.ptyEchoSkipped = false;
+    process.stderr.write(`[wand] PTY assistant response finalized (${record.messages.length} messages)\n`);
+  }
+
+  /** Clean raw PTY output into readable chat content */
+  private cleanPtyOutputForChat(raw: string): string {
+    const text = this.stripAnsiSequences(raw);
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+    const cleanLines = lines.filter(line => {
+      // Noise filters (same as frontend parseMessages but server-side)
+      if (line.startsWith("────")) return false;
+      if (line === "❯") return false;
+      if (line.startsWith("❯")) return false;
+      if (line.includes("esc to interrupt")) return false;
+      if (line.includes("Claude Code v")) return false;
+      if (/^Sonnet\b/.test(line)) return false;
+      if (line.startsWith("~/")) return false;
+      if (line.includes("● high")) return false;
+      if (line.includes("Failed to install Anthropic")) return false;
+      if (line.includes("Claude Code has switched")) return false;
+      if (line.includes("Fluttering")) return false;
+      if (line.includes("? for shortcuts")) return false;
+      if (line.startsWith("0;") || line.startsWith("9;")) return false;
+      if (line.includes("Claude is waiting")) return false;
+      if (/[✢✳✶✻✽]/.test(line)) return false;
+      if (/^[▐▝▘]/.test(line)) return false;
+      if (["lu", "ue", "tr", "ti", "g", "n", "i…", "…", "uts", "lt", "rg", "·"].includes(line) && line.length < 4) return false;
+      if (line.startsWith("✽F") || line.startsWith("✻F")) return false;
+      if (line.includes("[wand]")) return false;
+      if (line.includes("Captured Claude session ID")) return false;
+      if (line.includes("⏵")) return false;
+      if (line.includes("acceptedit")) return false;
+      if (line.includes("shift+tab")) return false;
+      if (line.includes("tabtocycle")) return false;
+      if (line.includes("ctrl+g")) return false;
+      if (line.includes("/effort")) return false;
+      if (line.includes("Opus") && line.includes("model")) return false;
+      if (line.includes("Haiku")) return false;
+      if (line.includes("to cycle")) return false;
+      if (/\bhigh\s*·/.test(line) || /\bmedium\s*·/.test(line) || /\blow\s*·/.test(line)) return false;
+      if (line.includes("thinking with")) return false;
+      if (/^thought for \d+/.test(line)) return false;
+      if (line.includes("Germinating") || line.includes("Doodling") || line.includes("Brewing")) return false;
+      if (line.includes("npm WARN") || line.includes("npm notice")) return false;
+      if (/^Using .* for .* session/.test(line)) return false;
+      if (line.includes("Permissions") && line.includes("mode")) return false;
+      if (line.includes("You can use")) return false;
+      if (line.startsWith("Press ") && line.includes(" for")) return false;
+      if (line.startsWith("type ") && line.includes(" to ")) return false;
+      if (line.length < 3 && !/^[a-zA-Z]{3}$/.test(line)) return false;
+      // Strip bullet prefix and keep content
+      if (line.startsWith("●")) {
+        return line.slice(1).trim().length > 0;
+      }
+      return true;
+    }).map(line => {
+      // Clean bullet prefix
+      if (line.startsWith("●")) return line.slice(1).trim();
+      // Clean ⏺ prefix (Claude TUI response marker)
+      if (line.startsWith("⏺")) return line.slice(1).trim();
+      return line;
+    });
+
+    return cleanLines.join("\n").trim();
   }
 
   resize(id: string, cols: number, rows: number): SessionSnapshot {
@@ -717,6 +1010,10 @@ export class ProcessManager extends EventEmitter {
 
   private persist(record: SessionRecord): void {
     this.storage.saveSession(this.snapshot(record));
+    // Save structured messages to file for analysis
+    if (record.messages.length > 0) {
+      this.logger.saveMessages(record.id, record.messages);
+    }
   }
 
   private archiveExpiredSessions(): void {

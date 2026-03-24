@@ -29,6 +29,8 @@ export interface CommandRequest {
 
 export interface InputRequest {
   input?: string;
+  /** Current UI view: "chat" or "terminal". Used to route via native pipeline in chat mode. */
+  view?: "chat" | "terminal";
 }
 
 export interface ResizeRequest {

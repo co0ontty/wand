@@ -1,6 +1,6 @@
 {
   "name": "wand-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Remote web coding controller for local CLI tools.",
   "type": "module",
   "bin": {
@@ -14,7 +14,11 @@
     "dev": "tsx src/cli.ts web",
     "check": "tsc --noEmit -p tsconfig.json",
     "pre-release-test": "node scripts/pre-release-test.js",
-    "test": "npm run pre-release-test"
+    "test": "npm run pre-release-test",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report"
   },
   "keywords": [
     "cli",
@@ -39,6 +43,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.13.14",
     "@types/ws": "^8.18.1",
+    "playwright": "^1.58.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }

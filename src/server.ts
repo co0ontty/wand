@@ -36,16 +36,26 @@ function checkRateLimit(ip: string): boolean {
   const record = loginAttempts.get(ip);
 
   if (!record || now > record.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW });
     return true;
   }
 
-  if (record.count >= RATE_LIMIT_MAX) {
-    return false;
+  return record.count < RATE_LIMIT_MAX;
+}
+
+function recordFailedLogin(ip: string): void {
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+
+  if (!record || now > record.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW });
+    return;
   }
 
   record.count++;
-  return true;
+}
+
+function resetRateLimit(ip: string): void {
+  loginAttempts.delete(ip);
 }
 
 function cleanupRateLimiter(): void {
@@ -91,7 +101,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const app = express();
   const storage = new WandStorage(resolveDatabasePath(configPath));
   setAuthStorage(storage);
-  const processes = new ProcessManager(config, storage);
+  const processes = new ProcessManager(config, storage, resolveConfigDir(configPath));
   const useHttps = config.https !== false; // Default to true
   const protocol = useHttps ? "https" : "http";
 
@@ -197,10 +207,12 @@ self.addEventListener('fetch', (event) => {
     const effectivePassword = dbPassword ?? config.password;
 
     if (password !== effectivePassword) {
+      recordFailedLogin(clientIp);
       res.status(401).json({ error: "密码错误，请重试。" });
       return;
     }
 
+    resetRateLimit(clientIp);
     const token = createSession();
     res.cookie("wand_session", token, {
       httpOnly: true,
@@ -614,7 +626,7 @@ self.addEventListener('fetch', (event) => {
   app.post("/api/sessions/:id/input", (req, res) => {
     const body = req.body as InputRequest;
     try {
-      const snapshot = processes.sendInput(req.params.id, body.input ?? "");
+      const snapshot = processes.sendInput(req.params.id, body.input ?? "", body.view);
       res.json(snapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "会话已结束，请启动新会话。") });

@@ -1,0 +1,23 @@
+{
+  "host": "127.0.0.1",
+  "port": 8544,
+  "https": true,
+  "password": "test-change-me",
+  "defaultMode": "default",
+  "shell": "/bin/bash",
+  "defaultCwd": "/tmp",
+  "startupCommands": [],
+  "allowedCommandPrefixes": [],
+  "commandPresets": [
+    {
+      "label": "Echo",
+      "command": "echo",
+      "mode": "default"
+    },
+    {
+      "label": "Claude",
+      "command": "claude",
+      "mode": "default"
+    }
+  ]
+}
