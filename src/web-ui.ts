@@ -925,6 +925,15 @@ export function renderApp(configPath: string): string {
     .tool-use-card:hover {
       border-color: rgba(79, 122, 88, 0.3);
     }
+    .tool-use-card.loading {
+      border-color: rgba(79, 122, 88, 0.4);
+    }
+    .tool-use-card.success {
+      border-color: rgba(79, 122, 88, 0.5);
+    }
+    .tool-use-card.error {
+      border-color: rgba(178, 79, 69, 0.5);
+    }
     .tool-use-header {
       display: flex;
       align-items: center;
@@ -941,6 +950,15 @@ export function renderApp(configPath: string): string {
     .tool-use-header:hover {
       background: rgba(79, 122, 88, 0.1);
     }
+    .tool-use-card.loading .tool-use-header {
+      background: rgba(79, 122, 88, 0.08);
+    }
+    .tool-use-card.success .tool-use-header {
+      background: rgba(79, 122, 88, 0.12);
+    }
+    .tool-use-card.error .tool-use-header {
+      background: rgba(178, 79, 69, 0.1);
+    }
     .tool-use-icon {
       font-size: 1.1rem;
       flex-shrink: 0;
@@ -948,6 +966,18 @@ export function renderApp(configPath: string): string {
       align-items: center;
       justify-content: center;
       min-width: 20px;
+    }
+    .tool-use-spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(79, 122, 88, 0.2);
+      border-top-color: var(--success);
+      border-radius: 50%;
+      animation: tool-spin 0.8s linear infinite;
+    }
+    @keyframes tool-spin {
+      to { transform: rotate(360deg); }
     }
     .tool-use-name {
       font-family: var(--font-mono);
@@ -976,6 +1006,21 @@ export function renderApp(configPath: string): string {
       text-overflow: ellipsis;
       white-space: nowrap;
       margin-left: 4px;
+    }
+    .tool-use-status {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      margin-left: 4px;
+    }
+    .tool-use-card.success .tool-use-status {
+      background: rgba(79, 122, 88, 0.15);
+      color: var(--success);
+    }
+    .tool-use-card.error .tool-use-status {
+      background: rgba(178, 79, 69, 0.15);
+      color: var(--danger);
     }
     .tool-use-toggle {
       font-size: 0.75rem;
@@ -1006,6 +1051,27 @@ export function renderApp(configPath: string): string {
       max-height: 400px;
       overflow-y: auto;
       line-height: 1.5;
+    }
+    .tool-use-result {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border-subtle);
+    }
+    .tool-use-result-content {
+      margin: 0;
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      max-height: 300px;
+      overflow-y: auto;
+      line-height: 1.5;
+    }
+    .tool-use-result-empty {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-style: italic;
     }
     /* AskUserQuestion - simplified */
     .tool-use-card.ask-user {
@@ -1058,83 +1124,7 @@ export function renderApp(configPath: string): string {
       font-size: 0.8125rem;
     }
 
-    /* Tool Result Card - Simplified */
-    .tool-result-card {
-      margin: 6px 0;
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-sm);
-      overflow: hidden;
-      width: 100%;
-      box-sizing: border-box;
-      background: var(--bg-secondary);
-    }
-    .tool-result-card.success {
-      border-color: rgba(79, 122, 88, 0.3);
-    }
-    .tool-result-card.error {
-      border-color: rgba(178, 79, 69, 0.3);
-    }
-    .tool-result-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      font-size: 0.8125rem;
-      cursor: pointer;
-      user-select: none;
-    }
-    .tool-result-card.success .tool-result-header {
-      background: rgba(79, 122, 88, 0.06);
-    }
-    .tool-result-card.error .tool-result-header {
-      background: rgba(178, 79, 69, 0.06);
-    }
-    .tool-result-icon {
-      font-size: 1.1rem;
-      flex-shrink: 0;
-    }
-    .tool-result-label {
-      flex: 1;
-      font-weight: 500;
-      color: var(--text-secondary);
-    }
-    .tool-result-status {
-      font-size: 0.75rem;
-      padding: 2px 8px;
-      border-radius: 4px;
-    }
-    .tool-result-card.success .tool-result-status {
-      background: rgba(79, 122, 88, 0.1);
-      color: var(--success);
-    }
-    .tool-result-card.error .tool-result-status {
-      background: rgba(178, 79, 69, 0.1);
-      color: var(--danger);
-    }
-    .tool-result-toggle {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      transition: transform var(--transition-fast);
-    }
-    .tool-result-card.collapsed .tool-result-toggle {
-      transform: rotate(-90deg);
-    }
-    .tool-result-body {
-      padding: 10px 12px;
-      background: var(--bg-elevated);
-      border-top: 1px solid var(--border-subtle);
-    }
-    .tool-result-card.collapsed .tool-result-body {
-      display: none;
-    }
-    .tool-result-content {
-      margin: 0;
-      font-size: 0.75rem;
-      font-family: var(--font-mono);
-      color: var(--text-secondary);
-      white-space: pre-wrap;
-      overflow-wrap: break-word;
-      max-height: 400px;
+    /* Enhanced Thinking Card */
       overflow-y: auto;
     }
     .tool-result-empty {
@@ -4515,16 +4505,6 @@ export function renderApp(configPath: string): string {
             return;
           }
 
-          // Tool result card toggle
-          var resultHeader = target.closest(".tool-result-header");
-          if (resultHeader) {
-            var resultCard = resultHeader.closest(".tool-result-card");
-            if (resultCard) {
-              resultCard.classList.toggle("collapsed");
-            }
-            return;
-          }
-
           // AskUserQuestion option click
           var questionOption = target.closest(".ask-user-option");
           if (questionOption && questionOption instanceof HTMLElement) {
@@ -6844,6 +6824,7 @@ export function renderApp(configPath: string): string {
 
       function renderToolUseCard(block) {
         var toolName = block.name || "unknown";
+        var toolId = block.id || "";
         var toolIcon = getToolIcon(toolName);
 
         // 检测是否是文件操作
@@ -6868,7 +6849,7 @@ export function renderApp(configPath: string): string {
               });
               optionsHtml += '</div>';
             }
-            return '<div class="tool-use-card ask-user" data-tool-block-id="' + escapeHtml(block.id || "") + '">' +
+            return '<div class="tool-use-card ask-user" data-tool-use-id="' + escapeHtml(toolId) + '">' +
               '<div class="tool-use-header">' +
                 '<span class="tool-use-icon">❓</span>' +
                 '<span class="tool-use-name">AskUserQuestion</span>' +
@@ -6886,44 +6867,67 @@ export function renderApp(configPath: string): string {
         // 完整 JSON 内容用于展开后显示
         var fullJson = JSON.stringify(block.input, null, 2);
 
-        // 默认展开，让用户可以直接看到工具信息
-        return '<div class="tool-use-card">' +
+        // 默认显示 loading 状态，等待 tool_result 更新
+        return '<div class="tool-use-card loading" data-tool-use-id="' + escapeHtml(toolId) + '">' +
           '<div class="tool-use-header" data-tool-toggle>' +
-            '<span class="tool-use-icon">' + toolIcon + '</span>' +
+            '<span class="tool-use-icon"><span class="tool-use-spinner"></span></span>' +
             '<span class="tool-use-name">' + escapeHtml(toolName) + '</span>' +
             fileHtml +
             (inputSummary ? '<span class="tool-use-summary">· ' + escapeHtml(inputSummary) + '</span>' : '') +
+            '<span class="tool-use-status">执行中</span>' +
             toggleHtml +
           '</div>' +
           '<div class="tool-use-body">' +
             '<pre class="tool-use-content">' + escapeHtml(fullJson) + '</pre>' +
+            '<div class="tool-use-result" style="display:none;"></div>' +
           '</div>' +
         '</div>';
       }
 
       function renderToolResultCard(block) {
+        var toolUseId = block.tool_use_id || "";
         var content = block.content || "";
         var isError = block.is_error;
         var statusClass = isError ? "error" : "success";
         var statusIcon = isError ? "❌" : "✅";
         var statusText = isError ? "失败" : "成功";
-        var toggleHtml = '<span class="tool-result-toggle">▼</span>';
 
-        // 有内容才显示折叠按钮，默认展开
+        // 有内容才显示结果
         var hasContent = content && content.trim().length > 0;
-        var collapsedClass = "";
 
-        return '<div class="tool-result-card ' + statusClass + collapsedClass + '">' +
-          '<div class="tool-result-header" data-tool-toggle>' +
-            '<span class="tool-result-icon">' + statusIcon + '</span>' +
-            '<span class="tool-result-label">工具结果</span>' +
-            '<span class="tool-result-status">' + statusText + '</span>' +
-            (hasContent ? toggleHtml : '') +
-          '</div>' +
-          '<div class="tool-result-body">' +
-            (hasContent ? '<pre class="tool-result-content">' + escapeHtml(content) + '</pre>' : '<span class="tool-result-empty">无输出</span>') +
-          '</div>' +
-        '</div>';
+        // 使用 JSON.stringify 来安全地转义 toolUseId
+        var toolUseIdJson = JSON.stringify(toolUseId);
+
+        // 生成结果内容的 HTML
+        var resultContentJs;
+        if (hasContent) {
+          resultContentJs = 'var pre = document.createElement("pre");' +
+            'pre.className = "tool-use-result-content";' +
+            'pre.textContent = ' + JSON.stringify(content) + ';' +
+            'resultEl.appendChild(pre);';
+        } else {
+          resultContentJs = 'resultEl.innerHTML = "<span class=\\"tool-use-result-empty\\">无输出</span>";';
+        }
+
+        // 返回一个 script 标签，用于更新对应的 tool-use-card
+        return '<script data-tool-result-for="' + escapeHtml(toolUseId) + '">' +
+          '(function() {' +
+            'var card = document.querySelector("[data-tool-use-id=\\"" + ' + toolUseIdJson + ' + "\\"]");' +
+            'if (card) {' +
+              'card.classList.remove("loading");' +
+              'card.classList.add("' + statusClass + '");' +
+              'var iconEl = card.querySelector(".tool-use-icon");' +
+              'if (iconEl) { iconEl.textContent = "' + statusIcon + '"; }' +
+              'var statusEl = card.querySelector(".tool-use-status");' +
+              'if (statusEl) { statusEl.textContent = "' + statusText + '"; }' +
+              'var resultEl = card.querySelector(".tool-use-result");' +
+              'if (resultEl) {' +
+                'resultEl.style.display = "block";' +
+                resultContentJs +
+              '}' +
+            '}' +
+          '})();' +
+        '</script>';
       }
 
       function getToolIcon(toolName) {
