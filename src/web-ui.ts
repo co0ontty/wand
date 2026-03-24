@@ -1343,7 +1343,7 @@ export function renderApp(configPath: string): string {
     .input-panel {
       background: rgba(255, 251, 245, 0.92);
       border-top: 1px solid var(--border-subtle);
-      padding: 12px 16px;
+      padding: 10px 16px;
       backdrop-filter: blur(16px);
       flex-shrink: 0;
       position: sticky;
@@ -1351,12 +1351,164 @@ export function renderApp(configPath: string): string {
       z-index: 30;
     }
 
+    .input-composer {
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid var(--border-default);
+      border-radius: 20px;
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+      overflow: hidden;
+    }
+    .input-composer:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-muted);
+      background: rgba(255, 255, 255, 0.98);
+    }
+    .input-composer-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 6px 6px 10px;
+      gap: 8px;
+    }
+    .input-composer-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .input-composer-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .input-hint {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      user-select: none;
+    }
+
     .input-row { display: flex; gap: 10px; align-items: flex-end; max-width: 100%; }
     .input-field { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; }
     .input-label { font-size: 0.6875rem; color: var(--text-muted); font-weight: 500; }
     .input-textarea-wrap { position: relative; width: 100%; }
 
-    /* Folder picker styles */
+    /* Todo progress bar */
+    .todo-progress {
+      margin-bottom: 8px;
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      overflow: hidden;
+      transition: all var(--transition-fast);
+    }
+    .todo-progress.hidden { display: none; }
+    .todo-progress-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 12px;
+      cursor: pointer;
+      user-select: none;
+      gap: 8px;
+      transition: background var(--transition-fast);
+    }
+    .todo-progress-header:hover {
+      background: rgba(246, 241, 232, 0.5);
+    }
+    .todo-progress-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+    .todo-progress-spinner {
+      width: 14px;
+      height: 14px;
+      min-width: 14px;
+      border: 2px solid var(--accent-muted);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .todo-progress.all-done .todo-progress-spinner {
+      display: none;
+    }
+    .todo-progress.all-done .todo-progress-left::before {
+      content: "✓";
+      font-size: 0.8125rem;
+      font-weight: 700;
+      color: #4a7a4f;
+      width: 14px;
+      text-align: center;
+    }
+    .todo-progress-counter {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+    }
+    .todo-progress-task {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .todo-progress-chevron {
+      color: var(--text-muted);
+      flex-shrink: 0;
+      transition: transform 0.2s ease;
+    }
+    .todo-progress.expanded .todo-progress-chevron {
+      transform: rotate(180deg);
+    }
+    .todo-progress-body {
+      border-top: 1px solid var(--border-subtle);
+      padding: 6px 10px 8px;
+    }
+    .todo-progress-body.hidden { display: none; }
+    .todo-progress-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .todo-progress-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 4px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      transition: background var(--transition-fast);
+    }
+    .todo-progress-item.active {
+      color: var(--text-primary);
+      font-weight: 500;
+      background: rgba(197, 101, 61, 0.06);
+    }
+    .todo-progress-item.done {
+      color: var(--text-muted);
+      text-decoration: line-through;
+      text-decoration-color: var(--text-muted);
+    }
+    .todo-item-icon {
+      width: 16px;
+      min-width: 16px;
+      text-align: center;
+      font-size: 0.6875rem;
+    }
+    .todo-item-icon.pending { color: var(--text-muted); }
+    .todo-item-icon.active { color: var(--accent); }
+    .todo-item-icon.done { color: #4a7a4f; }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
     .folder-picker-container {
       margin-bottom: 8px;
     }
@@ -1657,26 +1809,23 @@ export function renderApp(configPath: string): string {
     .input-textarea {
       font-family: var(--font-mono);
       font-size: 0.875rem;
-      background: rgba(255, 255, 255, 0.8);
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-md);
+      background: transparent;
+      border: none;
       color: var(--text-primary);
-      padding: 10px 12px;
+      padding: 12px 14px 4px;
       outline: none;
       resize: none;
-      min-height: 44px;
+      min-height: 40px;
       max-height: 140px;
       width: 100%;
       overflow-y: hidden;
-      transition: border-color var(--transition-fast), height 0.1s ease, box-shadow var(--transition-fast), background var(--transition-fast);
+      transition: height 0.1s ease;
       box-sizing: border-box;
       line-height: 1.45;
     }
 
     .input-textarea:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px var(--accent-muted);
-      background: rgba(255, 255, 255, 0.95);
+      outline: none;
     }
     .input-textarea::placeholder { color: var(--text-muted); }
     .input-textarea.has-dir-indicator {
@@ -1687,32 +1836,78 @@ export function renderApp(configPath: string): string {
     .input-inline-controls {
     }
 
-    /* Chat mode select in input */
+    /* Chat mode select pill */
     .chat-mode-select {
       font-family: var(--font-sans);
-      font-size: 0.725rem;
+      font-size: 0.6875rem;
       font-weight: 500;
-      padding: 3px 6px;
-      border-radius: var(--radius-sm);
+      padding: 2px 8px;
+      border-radius: 12px;
       border: 1px solid var(--border-subtle);
-      background: rgba(255, 255, 255, 0.85);
+      background: rgba(246, 241, 232, 0.7);
       color: var(--text-secondary);
       cursor: pointer;
       transition: all var(--transition-fast);
-      min-height: 26px;
+      min-height: 24px;
       max-width: 100px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      appearance: none;
+      -webkit-appearance: none;
+      padding-right: 18px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239a8e82' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 5px center;
     }
     .chat-mode-select:hover {
       border-color: var(--accent);
-      background: white;
+      background-color: rgba(246, 241, 232, 1);
     }
     .chat-mode-select:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 2px var(--accent-muted);
       outline: none;
+    }
+
+    /* Circular action buttons */
+    .btn-circle {
+      width: 34px;
+      height: 34px;
+      min-width: 34px;
+      border-radius: 50%;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      flex-shrink: 0;
+      padding: 0;
+    }
+    .btn-circle-send {
+      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
+      color: white;
+      box-shadow: 0 2px 8px rgba(197, 101, 61, 0.3);
+    }
+    .btn-circle-send:hover {
+      transform: scale(1.08);
+      box-shadow: 0 4px 12px rgba(197, 101, 61, 0.4);
+    }
+    .btn-circle-send:active {
+      transform: scale(0.95);
+    }
+    .btn-circle-stop {
+      background: rgba(178, 79, 69, 0.12);
+      color: var(--danger);
+    }
+    .btn-circle-stop:hover {
+      background: var(--danger);
+      color: white;
+      transform: scale(1.08);
+    }
+    .btn-circle-stop:active {
+      transform: scale(0.95);
     }
 
     .keyboard-aware {
@@ -1781,27 +1976,6 @@ export function renderApp(configPath: string): string {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-    }
-    .btn-send {
-      background: linear-gradient(180deg, #5a8f5f 0%, #4a7a4f 100%);
-      color: white;
-      box-shadow: 0 4px 12px rgba(74, 122, 79, 0.25);
-    }
-    .btn-send:hover {
-      background: linear-gradient(180deg, #4f7f54 0%, #3f6a44 100%);
-      transform: translateY(-1px);
-      box-shadow: 0 6px 16px rgba(74, 122, 79, 0.32);
-    }
-    .btn-stop {
-      background: rgba(178, 79, 69, 0.12);
-      color: var(--danger);
-      border: 1px solid rgba(178, 79, 69, 0.25);
-      height: 42px;
-    }
-    .btn-stop:hover {
-      background: var(--danger);
-      color: white;
-      border-color: var(--danger);
     }
     .input-actions-spacer { flex: 1; }
 
@@ -2419,10 +2593,7 @@ export function renderApp(configPath: string): string {
       .input-actions .chat-mode-select {
         flex-shrink: 0;
         width: 90px;
-        min-height: 44px;
-        height: auto;
-        font-size: 0.8125rem;
-        padding: 0 8px;
+        font-size: 0.75rem;
       }
       .input-actions .btn {
         flex: 1;
@@ -2455,9 +2626,10 @@ export function renderApp(configPath: string): string {
 
       .chat-mode-select {
         max-width: 90px;
-        height: 36px;
-        font-size: 0.75rem;
-        min-height: 36px;
+        font-size: 0.6875rem;
+      }
+      .input-hint {
+        display: none;
       }
 
       .floating-pad {
@@ -3074,13 +3246,7 @@ export function renderApp(configPath: string): string {
       gap: 6px;
     }
     .chat-mode-select {
-      height: 28px;
-      padding: 0 8px;
-      border: 1.5px solid var(--border-default);
-      border-radius: var(--radius-sm);
-      background: var(--bg-secondary);
-      color: var(--text-primary);
-      font-size: 0.75rem;
+      font-size: 0.6875rem;
       font-family: inherit;
       cursor: pointer;
       outline: none;
@@ -3460,18 +3626,36 @@ export function renderApp(configPath: string): string {
               '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "terminal" ? " active" : "") + '"></div>' +
               '<div id="chat-output" class="chat-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "chat" ? " active" : "") + '"></div>' +
               '<div class="input-panel">' +
-                '<div class="input-row">' +
-                  '<div class="input-field input-field-full">' +
-                    '<div class="input-textarea-wrap">' +
-                      '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按 Enter 发送..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                '<div id="todo-progress" class="todo-progress hidden">' +
+                  '<div class="todo-progress-header" id="todo-progress-toggle">' +
+                    '<div class="todo-progress-left">' +
+                      '<span class="todo-progress-spinner"></span>' +
+                      '<span class="todo-progress-counter" id="todo-progress-counter">0/0</span>' +
+                      '<span class="todo-progress-task" id="todo-progress-task"></span>' +
                     '</div>' +
+                    '<svg class="todo-progress-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
                   '</div>' +
-                  '<div class="input-actions">' +
-                    '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
-                      renderModeOptions(preferredTool, composerMode) +
-                    '</select>' +
-                    '<button id="send-input-button" class="btn btn-send">发送</button>' +
-                    '<button id="stop-button" class="btn btn-stop' + (state.selectedId ? "" : " hidden") + '">停止</button>' +
+                  '<div class="todo-progress-body hidden" id="todo-progress-body">' +
+                    '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
+                  '</div>' +
+                '</div>' +
+                '<div class="input-composer">' +
+                  '<textarea id="input-box" class="input-textarea" placeholder="输入消息..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                  '<div class="input-composer-bar">' +
+                    '<div class="input-composer-left">' +
+                      '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
+                        renderModeOptions(preferredTool, composerMode) +
+                      '</select>' +
+                    '</div>' +
+                    '<div class="input-composer-right">' +
+                      '<span class="input-hint">Enter 发送 · Shift+Enter 换行</span>' +
+                      '<button id="stop-button" class="btn-circle btn-circle-stop' + (state.selectedId ? "" : " hidden") + '" title="停止">' +
+                        '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
+                      '</button>' +
+                      '<button id="send-input-button" class="btn-circle btn-circle-send" title="发送">' +
+                        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
+                      '</button>' +
+                    '</div>' +
                   '</div>' +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
@@ -5040,6 +5224,9 @@ export function renderApp(configPath: string): string {
         state.lastRenderedEmpty = null;
         state.currentMessages = [];
         if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
+        // Reset todo progress bar
+        var todoEl = document.getElementById("todo-progress");
+        if (todoEl) todoEl.classList.add("hidden");
         var session = state.sessions.find(function(item) { return item.id === id; });
         var inferredTool = inferToolFromCommand(session && session.command ? session.command : "");
         if (inferredTool === "claude" || inferredTool === "codex") {
@@ -6415,6 +6602,9 @@ export function renderApp(configPath: string): string {
             smartScrollToBottom(chatOutput);
           }
         }
+
+        // Update todo progress bar from latest messages
+        updateTodoProgress(messages);
       }
 
       // Smart scroll: only auto-scroll if user is near bottom
@@ -6423,6 +6613,96 @@ export function renderApp(configPath: string): string {
         var isNearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < threshold;
         if (isNearBottom) {
           container.scrollTop = container.scrollHeight;
+        }
+      }
+
+      // --- Todo progress bar ---
+      var todoExpanded = false;
+      (function() {
+        var toggle = document.getElementById("todo-progress-toggle");
+        if (toggle) {
+          toggle.addEventListener("click", function() {
+            todoExpanded = !todoExpanded;
+            var prog = document.getElementById("todo-progress");
+            var body = document.getElementById("todo-progress-body");
+            if (prog && body) {
+              if (todoExpanded) {
+                prog.classList.add("expanded");
+                body.classList.remove("hidden");
+              } else {
+                prog.classList.remove("expanded");
+                body.classList.add("hidden");
+              }
+            }
+          });
+        }
+      })();
+
+      function updateTodoProgress(messages) {
+        var todos = null;
+        // Scan all messages for latest TodoWrite tool_use
+        for (var i = messages.length - 1; i >= 0; i--) {
+          var msg = messages[i];
+          if (!msg.content || !Array.isArray(msg.content)) continue;
+          for (var j = msg.content.length - 1; j >= 0; j--) {
+            var block = msg.content[j];
+            if (block.type === "tool_use" && block.name === "TodoWrite" && block.input && block.input.todos) {
+              todos = block.input.todos;
+              break;
+            }
+          }
+          if (todos) break;
+        }
+
+        var container = document.getElementById("todo-progress");
+        if (!container) return;
+
+        if (!todos || todos.length === 0) {
+          container.classList.add("hidden");
+          return;
+        }
+
+        container.classList.remove("hidden");
+
+        var completed = 0;
+        var activeTask = "";
+        for (var k = 0; k < todos.length; k++) {
+          if (todos[k].status === "completed") completed++;
+          if (todos[k].status === "in_progress" && !activeTask) {
+            activeTask = todos[k].activeForm || todos[k].content || "";
+          }
+        }
+
+        var allDone = completed === todos.length;
+        if (allDone) {
+          container.classList.add("all-done");
+          activeTask = "全部完成";
+        } else {
+          container.classList.remove("all-done");
+        }
+
+        var counter = document.getElementById("todo-progress-counter");
+        if (counter) counter.textContent = completed + "/" + todos.length;
+
+        var task = document.getElementById("todo-progress-task");
+        if (task) task.textContent = activeTask;
+
+        // Render expanded list
+        var list = document.getElementById("todo-progress-list");
+        if (list) {
+          var html = "";
+          for (var m = 0; m < todos.length; m++) {
+            var t = todos[m];
+            var st = t.status || "pending";
+            var itemClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "";
+            var iconClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "pending";
+            var icon = st === "completed" ? "✓" : st === "in_progress" ? "›" : "○";
+            html += '<li class="todo-progress-item ' + itemClass + '">' +
+              '<span class="todo-item-icon ' + iconClass + '">' + icon + '</span>' +
+              '<span>' + escapeHtml(t.content || "") + '</span>' +
+            '</li>';
+          }
+          list.innerHTML = html;
         }
       }
 
