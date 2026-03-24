@@ -807,26 +807,40 @@ export function renderApp(configPath: string): string {
 
     /* Thinking Card (Deep Thought) */
     .chat-message.thinking {
-      align-self: center;
-      max-width: 90%;
-      margin: 8px 0;
+      align-self: flex-start;
+      max-width: 85%;
+      margin: 4px 0;
+    }
+
+    .thinking-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: linear-gradient(135deg, rgba(138, 108, 178, 0.08) 0%, rgba(138, 108, 178, 0.03) 100%);
+      border: 1px solid rgba(138, 108, 178, 0.15);
+      border-radius: var(--radius-md);
     }
 
     .thinking-icon {
-      font-size: 1.25rem;
-      animation: thinkingSpin 3s linear infinite;
+      font-size: 1.125rem;
+      opacity: 0.85;
     }
 
-    @keyframes thinkingSpin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+    .thinking-icon.spinning {
+      display: inline-block;
+      animation: iconPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes iconPulse {
+      0%, 100% { transform: scale(1); opacity: 0.7; }
+      50% { transform: scale(1.1); opacity: 1; }
     }
 
     .thinking-content {
       font-size: 0.8125rem;
-      color: var(--text-muted);
-      font-family: var(--font-mono);
-      letter-spacing: 0.3px;
+      color: rgba(138, 108, 178, 0.85);
+      font-weight: 500;
     }
 
     /* Prompt Suggestion Card (Pulsing) */
@@ -1135,24 +1149,22 @@ export function renderApp(configPath: string): string {
 
     /* Enhanced Thinking Card */
     .thinking-card.enhanced {
-      margin: 12px 0;
+      margin: 10px 0;
       border-radius: var(--radius-md);
-      border: 1px solid rgba(138, 108, 178, 0.2);
-      background: linear-gradient(135deg, rgba(138, 108, 178, 0.08) 0%, rgba(138, 108, 178, 0.04) 100%);
-      /* Don't use overflow:hidden — <details> manages visibility, and
-         overflow:hidden on a flex container clips children like thinking-body */
+      border: 1px solid rgba(138, 108, 178, 0.15);
+      background: linear-gradient(135deg, rgba(138, 108, 178, 0.06) 0%, rgba(138, 108, 178, 0.02) 100%);
       display: block;
       width: 100%;
       box-sizing: border-box;
     }
     .thinking-card.enhanced[open] {
-      background: linear-gradient(135deg, rgba(138, 108, 178, 0.12) 0%, rgba(138, 108, 178, 0.06) 100%);
+      background: linear-gradient(135deg, rgba(138, 108, 178, 0.1) 0%, rgba(138, 108, 178, 0.04) 100%);
     }
     .thinking-header {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 12px 16px;
+      padding: 10px 14px;
       cursor: pointer;
       list-style: none;
       width: 100%;
@@ -1165,35 +1177,31 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 32px;
-      height: 32px;
-      background: rgba(138, 108, 178, 0.15);
-      border-radius: 8px;
+      width: 28px;
+      height: 28px;
+      background: rgba(138, 108, 178, 0.12);
+      border-radius: 6px;
     }
     .thinking-spin {
-      display: inline-block;
-      animation: thinkingSpin 3s linear infinite;
-    }
-    @keyframes thinkingSpin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
+      font-size: 0.875rem;
     }
     .thinking-label {
+      font-size: 0.8125rem;
       font-weight: 600;
-      color: rgba(138, 108, 178, 0.9);
+      color: rgba(138, 108, 178, 0.85);
     }
     .thinking-toggle {
       font-size: 0.6875rem;
-      color: var(--text-muted);
+      color: rgba(138, 108, 178, 0.5);
       margin-left: auto;
     }
     .thinking-card.enhanced[open] .thinking-toggle {
       display: none;
     }
     .thinking-body {
-      padding: 12px 16px;
-      background: rgba(255, 255, 255, 0.3);
-      border-top: 1px solid rgba(138, 108, 178, 0.1);
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.25);
+      border-top: 1px solid rgba(138, 108, 178, 0.08);
       width: 100%;
       box-sizing: border-box;
     }
@@ -6705,8 +6713,8 @@ export function renderApp(configPath: string): string {
         if (msg.role === "thinking") {
           return '<div class="chat-message thinking">' +
             '<div class="thinking-card">' +
-              '<div class="thinking-icon">🤔</div>' +
-              '<div class="thinking-content">' + escapeHtml(msg.content) + '</div>' +
+              '<span class="thinking-icon spinning">💭</span>' +
+              '<span class="thinking-content">' + escapeHtml(msg.content) + '</span>' +
             '</div>' +
           '</div>';
         }
@@ -6802,7 +6810,7 @@ export function renderApp(configPath: string): string {
             var thinkingText = block.thinking || "";
             return '<details class="thinking-card enhanced">' +
               '<summary class="thinking-header">' +
-                '<span class="thinking-icon-wrap"><span class="thinking-spin">🧠</span></span>' +
+                '<span class="thinking-icon-wrap"><span class="thinking-spin">💭</span></span>' +
                 '<span class="thinking-label">深度思考</span>' +
                 '<span class="thinking-toggle">点击展开</span>' +
               '</summary>' +
