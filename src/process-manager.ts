@@ -630,8 +630,14 @@ export class ProcessManager extends EventEmitter {
           for (const block of msg.content) {
             if (block && typeof block === "object" && "type" in block) {
               const blockType = (block as { type: string }).type;
-              // Check if this block type already exists in assistantBlocks
-              const existing = assistantBlocks.findIndex((b) => b.type === blockType);
+              const blockId = (block as { id?: string }).id;
+              // For tool_use/tool_result, match by ID; for others, match by type
+              let existing = -1;
+              if (blockId) {
+                existing = assistantBlocks.findIndex((b) => (b as { id?: string }).id === blockId);
+              } else {
+                existing = assistantBlocks.findIndex((b) => b.type === blockType);
+              }
               if (existing >= 0) {
                 // Update existing block — merge fields (e.g. thinking → text transition)
                 Object.assign(assistantBlocks[existing], block);
@@ -681,7 +687,14 @@ export class ProcessManager extends EventEmitter {
             for (const block of result.content) {
               if (block && typeof block === "object" && "type" in block) {
                 const blockType = (block as { type: string }).type;
-                const existing = assistantBlocks.findIndex((b) => b.type === blockType);
+                const blockId = (block as { id?: string }).id;
+                // For tool_use/tool_result, match by ID; for others, match by type
+                let existing = -1;
+                if (blockId) {
+                  existing = assistantBlocks.findIndex((b) => (b as { id?: string }).id === blockId);
+                } else {
+                  existing = assistantBlocks.findIndex((b) => b.type === blockType);
+                }
                 if (existing >= 0) {
                   Object.assign(assistantBlocks[existing], block);
                 } else {

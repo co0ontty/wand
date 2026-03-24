@@ -6307,30 +6307,31 @@ export function renderApp(configPath: string): string {
         // Check if messages actually changed
         var msgCount = messages.length;
         var outputHash = selectedSession.output ? selectedSession.output.length : 0;
-        // For structured messages, hash block count + last message content length for streaming detection
+        // For structured messages, hash block count + content lengths for change detection
         if (selectedSession.messages && selectedSession.messages.length > 0) {
           var totalBlocks = 0;
-          var lastContentLen = 0;
+          var contentLen = 0;
           for (var bi = 0; bi < selectedSession.messages.length; bi++) {
             var msgContent = selectedSession.messages[bi].content;
             if (msgContent) {
               if (Array.isArray(msgContent)) {
                 totalBlocks += msgContent.length;
-                // Include text length of last block for streaming change detection
-                if (bi === selectedSession.messages.length - 1) {
-                  for (var bj = 0; bj < msgContent.length; bj++) {
-                    var block = msgContent[bj];
-                    if (block.text) lastContentLen += block.text.length;
-                    if (block.thinking) lastContentLen += block.thinking.length;
-                  }
+                // Include all block content lengths for change detection
+                for (var bj = 0; bj < msgContent.length; bj++) {
+                  var block = msgContent[bj];
+                  if (block.text) contentLen += block.text.length;
+                  if (block.thinking) contentLen += block.thinking.length;
+                  if (block.content) contentLen += block.content.length; // tool_result content
+                  if (block.id) contentLen += block.id.length; // tool_use id
+                  if (block.tool_use_id) contentLen += block.tool_use_id.length; // tool_result id
                 }
               } else {
                 totalBlocks += 1;
-                lastContentLen = String(msgContent).length;
+                contentLen = String(msgContent).length;
               }
             }
           }
-          outputHash = msgCount * 10000 + totalBlocks * 100 + (lastContentLen % 100);
+          outputHash = msgCount * 10000 + totalBlocks * 100 + (contentLen % 100);
         }
 
         // Force full render if message count changed or explicitly requested
