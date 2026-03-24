@@ -86,11 +86,11 @@ export function renderApp(configPath: string): string {
     /* 顶栏优化：简洁三列布局 */
     .topbar {
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: auto auto 1fr auto;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       min-height: 52px;
-      padding: 8px 12px;
+      padding: 8px 16px;
       background: var(--bg-secondary);
       border-bottom: 1px solid var(--border-subtle);
       backdrop-filter: blur(18px);
@@ -104,10 +104,10 @@ export function renderApp(configPath: string): string {
       padding-left: 300px;
     }
 
-    .topbar-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
-    .topbar-actions { display: flex; align-items: center; gap: 4px; }
-    .logo-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; justify-content: center; }
-    .logo { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 0.875rem; }
+    .topbar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .topbar-actions { display: flex; align-items: center; gap: 6px; }
+    .logo-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: center; }
+    .logo { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.875rem; }
     .logo-icon {
       width: 24px; height: 24px;
       background: linear-gradient(135deg, #d77a52 0%, #a95130 100%);
@@ -128,33 +128,39 @@ export function renderApp(configPath: string): string {
       display: flex;
       justify-content: center;
       overflow: hidden;
+      padding: 0 8px;
     }
 
     .session-summary {
       min-width: 0;
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
       text-align: center;
+      background: rgba(150, 118, 85, 0.08);
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      max-width: 400px;
     }
 
     .session-summary-label { display: none; }
 
     .session-summary-value {
-      max-width: 180px;
+      max-width: 350px;
       font-family: var(--font-mono);
       font-size: 0.75rem;
       color: var(--text-secondary);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      font-weight: 500;
     }
 
     .topbar-right {
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 4px;
+      gap: 6px;
     }
     .config-path { display: none; }
     .protocol-note { display: none; }
@@ -213,31 +219,33 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 10px 12px;
+      padding: 12px 14px;
       border-bottom: 1px solid var(--border-subtle);
-      background: rgba(255, 251, 245, 0.6);
+      background: rgba(255, 251, 245, 0.7);
       flex-shrink: 0;
+      min-height: 52px;
     }
 
     .sidebar-header-main {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       min-width: 0;
     }
 
     .sidebar-title {
-      font-size: 0.75rem;
+      font-size: 0.8125rem;
       font-weight: 600;
       color: var(--text-secondary);
     }
 
     .session-count {
-      font-size: 0.625rem;
+      font-size: 0.6875rem;
       color: var(--text-muted);
       background: rgba(240, 229, 215, 0.9);
-      padding: 2px 6px;
-      border-radius: 8px;
+      padding: 3px 8px;
+      border-radius: 10px;
+      font-weight: 600;
     }
 
     .sidebar-close { flex-shrink: 0; }
@@ -246,28 +254,32 @@ export function renderApp(configPath: string): string {
     .sidebar-tabs {
       display: flex;
       border-bottom: 1px solid var(--border-subtle);
-      background: rgba(255, 251, 245, 0.6);
-      padding: 0 12px;
+      background: rgba(255, 251, 245, 0.7);
+      padding: 0 14px;
       flex-shrink: 0;
+      gap: 4px;
     }
 
     .sidebar-tab {
-      padding: 8px 10px;
-      font-size: 0.75rem;
+      padding: 10px 14px;
+      font-size: 0.8125rem;
       font-weight: 500;
       color: var(--text-muted);
       background: none;
       border: none;
       border-bottom: 2px solid transparent;
       cursor: pointer;
-      transition: color var(--transition-fast), border-color var(--transition-fast);
+      transition: all var(--transition-fast);
       margin-bottom: -1px;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     }
 
-    .sidebar-tab:hover { color: var(--text-secondary); }
+    .sidebar-tab:hover { color: var(--text-secondary); background: rgba(255, 255, 255, 0.5); }
     .sidebar-tab.active {
       color: var(--accent);
       border-bottom-color: var(--accent);
+      background: rgba(255, 255, 255, 0.8);
+      font-weight: 600;
     }
 
     .sidebar-tab-icon { margin-right: 4px; }
@@ -324,10 +336,10 @@ export function renderApp(configPath: string): string {
     .tree-children.open { display: block; }
 
     .file-explorer-header {
-      padding: 8px 12px 6px;
+      padding: 10px 14px 8px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       flex-shrink: 0;
     }
 
@@ -340,6 +352,7 @@ export function renderApp(configPath: string): string {
       white-space: nowrap;
       flex: 1;
       min-width: 0;
+      font-weight: 500;
     }
 
     .file-explorer-actions { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
@@ -348,16 +361,17 @@ export function renderApp(configPath: string): string {
       background: none;
       border: none;
       cursor: pointer;
-      font-size: 0.875rem;
-      padding: 2px 4px;
+      font-size: 1rem;
+      padding: 4px;
       border-radius: 4px;
       color: var(--text-muted);
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: all var(--transition-fast);
     }
 
-    .file-explorer-refresh:hover { background: var(--bg-tertiary); color: var(--text-secondary); }
+    .file-explorer-refresh:hover { background: var(--bg-tertiary); color: var(--text-secondary); transform: rotate(90deg); }
 
     .file-search-box {
       padding: 8px 12px;
@@ -442,7 +456,7 @@ export function renderApp(configPath: string): string {
     .session-item {
       width: 100%;
       text-align: left;
-      background: rgba(255, 250, 244, 0.72);
+      background: rgba(255, 250, 244, 0.8);
       border: 1px solid rgba(150, 118, 85, 0.12);
       border-radius: var(--radius-lg);
       color: var(--text-primary);
@@ -456,7 +470,7 @@ export function renderApp(configPath: string): string {
 
     .session-item-row {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
       gap: 10px;
     }
@@ -464,6 +478,9 @@ export function renderApp(configPath: string): string {
     .session-main {
       min-width: 0;
       flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
     }
 
     .session-actions {
@@ -474,30 +491,43 @@ export function renderApp(configPath: string): string {
     }
 
     .session-action-btn {
-      width: 28px;
-      height: 28px;
-      min-height: 28px;
+      width: 30px;
+      height: 30px;
+      min-height: 30px;
+      min-width: 30px;
       padding: 0;
-      border-radius: 999px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.875rem;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid var(--border-subtle);
+      transition: all var(--transition-fast);
+    }
+    .session-action-btn:hover {
+      background: var(--accent-muted);
+      border-color: var(--accent);
+      transform: scale(1.05);
     }
 
     .session-item:hover { background: rgba(255, 248, 240, 0.96); border-color: var(--accent-soft); transform: translateY(-2px); box-shadow: 0 8px 20px rgba(89, 58, 32, 0.08); }
-    .session-item.active { background: linear-gradient(180deg, rgba(241, 214, 194, 0.66), rgba(255, 247, 239, 0.96)); border-color: rgba(197, 101, 61, 0.42); }
+    .session-item.active { background: linear-gradient(180deg, rgba(241, 214, 194, 0.7), rgba(255, 247, 239, 0.96)); border-color: rgba(197, 101, 61, 0.42); }
 
     .session-command {
-      font-weight: 500;
+      font-weight: 600;
       font-size: 0.8125rem;
-      margin-bottom: 4px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       font-family: var(--font-mono);
+      color: var(--text-primary);
     }
 
     .session-meta {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       font-size: 0.6875rem;
       color: var(--text-muted);
       flex-wrap: wrap;
@@ -506,14 +536,26 @@ export function renderApp(configPath: string): string {
     .session-status {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      padding: 2px 6px;
-      border-radius: var(--radius-sm);
-      font-weight: 500;
+      gap: 3px;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.6875rem;
     }
 
+    .session-status-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .session-status.running .session-status-dot { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .session-status.exited .session-status-dot { background: var(--text-muted); }
+    .session-status.failed .session-status-dot { background: var(--danger); }
+    .session-status.stopped .session-status-dot { background: var(--warning); }
+
     .session-status.running { background: var(--success-muted); color: var(--success); }
-    .session-status.exited { background: var(--bg-tertiary); color: var(--text-muted); }
+    .session-status.exited { background: rgba(150, 118, 85, 0.12); color: var(--text-muted); }
     .session-status.failed { background: var(--danger-muted); color: var(--danger); }
     .session-status.stopped { background: var(--warning-muted); color: var(--warning); }
     .session-status.archived { background: rgba(95, 74, 57, 0.1); color: var(--text-secondary); }
@@ -522,18 +564,19 @@ export function renderApp(configPath: string): string {
       font-family: var(--font-mono);
       font-size: 0.625rem;
       color: var(--text-muted);
-      background: rgba(150, 118, 85, 0.1);
-      padding: 1px 5px;
+      background: rgba(150, 118, 85, 0.12);
+      padding: 2px 6px;
       border-radius: 4px;
+      font-weight: 500;
     }
 
     .sidebar-footer {
-      padding: 12px 14px 14px;
+      padding: 14px;
       border-top: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: column;
       gap: 10px;
-      background: rgba(255, 251, 245, 0.6);
+      background: rgba(255, 251, 245, 0.7);
     }
 
     .sidebar-meta {
@@ -557,20 +600,21 @@ export function renderApp(configPath: string): string {
       border: 1px solid transparent;
       cursor: pointer;
       transition: all var(--transition-fast);
-      min-height: 40px;
+      min-height: 38px;
+      white-space: nowrap;
     }
 
     .btn-primary { background: linear-gradient(180deg, #cf754d 0%, #b85c37 100%); color: white; box-shadow: 0 4px 12px rgba(184, 92, 55, 0.22); }
     .btn-primary:hover { background: linear-gradient(180deg, #c96b44 0%, #a94d2b 100%); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(184, 92, 55, 0.28); }
-    .btn-secondary { background: rgba(255, 250, 244, 0.9); color: var(--text-secondary); border-color: var(--border-subtle); }
+    .btn-secondary { background: rgba(255, 250, 244, 0.95); color: var(--text-secondary); border-color: var(--border-subtle); }
     .btn-secondary:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--accent-soft); }
     .btn-ghost { background: transparent; color: var(--text-secondary); }
     .btn-ghost:hover { background: rgba(240, 229, 215, 0.72); color: var(--text-primary); }
     .btn-danger { background: var(--danger-muted); color: var(--danger); }
     .btn-danger:hover { background: var(--danger); color: white; }
     .btn-block { width: 100%; }
-    .btn-sm { font-size: 0.75rem; padding: 6px 10px; min-height: 34px; }
-    .btn-icon { padding: 8px; font-size: 1rem; min-height: 40px; }
+    .btn-sm { font-size: 0.75rem; padding: 5px 10px; min-height: 32px; }
+    .btn-icon { padding: 7px; font-size: 1rem; min-height: 38px; }
 
     .main-content {
       flex: 1;
@@ -586,17 +630,18 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 18px;
+      padding: 10px 18px;
       background: rgba(255, 251, 245, 0.72);
       border-bottom: 1px solid var(--border-subtle);
       backdrop-filter: blur(12px);
       flex-shrink: 0;
+      min-height: 50px;
     }
 
-    .terminal-title { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; min-width: 0; }
-    .terminal-title-text { font-family: var(--font-mono); color: var(--accent); font-weight: 500; }
-    .terminal-info { font-size: 0.6875rem; color: var(--text-muted); }
-    .terminal-header-actions { display: flex; align-items: center; gap: 8px; }
+    .terminal-title { display: flex; align-items: center; gap: 10px; font-size: 0.8125rem; min-width: 0; }
+    .terminal-title-text { font-family: var(--font-mono); color: var(--accent); font-weight: 600; font-size: 0.875rem; }
+    .terminal-info { font-size: 0.7rem; color: var(--text-muted); font-weight: 500; }
+    .terminal-header-actions { display: flex; align-items: center; gap: 10px; }
 
     .terminal-container {
       flex: 1;
@@ -622,32 +667,36 @@ export function renderApp(configPath: string): string {
     .view-toggle {
       display: flex;
       align-items: center;
-      gap: 4px;
-      background: rgba(240, 229, 215, 0.7);
+      gap: 3px;
+      background: rgba(240, 229, 215, 0.6);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
-      padding: 3px;
+      padding: 4px;
       flex-shrink: 0;
+      height: 36px;
     }
 
     .view-toggle-btn {
       display: flex;
       align-items: center;
+      justify-content: center;
       gap: 6px;
-      padding: 6px 12px;
+      padding: 4px 14px;
       border-radius: var(--radius-sm);
       border: none;
       background: transparent;
       color: var(--text-muted);
-      font-size: 0.75rem;
+      font-size: 0.8125rem;
       font-weight: 500;
       cursor: pointer;
       transition: all var(--transition-fast);
       font-family: var(--font-sans);
+      min-height: 28px;
+      white-space: nowrap;
     }
 
-    .view-toggle-btn:hover { color: var(--text-secondary); background: rgba(255, 255, 255, 0.5); }
-    .view-toggle-btn.active { background: white; color: var(--text-primary); box-shadow: 0 2px 8px rgba(89, 58, 32, 0.08); }
+    .view-toggle-btn:hover { color: var(--text-secondary); background: rgba(255, 255, 255, 0.6); }
+    .view-toggle-btn.active { background: white; color: var(--text-primary); box-shadow: 0 1px 4px rgba(89, 58, 32, 0.12); font-weight: 600; }
 
     .chat-container {
       flex: 1;
@@ -719,19 +768,19 @@ export function renderApp(configPath: string): string {
     }
 
     .chat-message-bubble {
-      padding: 10px 14px;
+      padding: 11px 15px;
       border-radius: var(--radius-md);
       font-size: 0.875rem;
       line-height: 1.6;
       word-wrap: break-word;
       white-space: pre-wrap;
-      box-shadow: 0 1px 3px rgba(89, 58, 32, 0.06);
+      box-shadow: 0 1px 4px rgba(89, 58, 32, 0.08);
     }
 
     .chat-message.user .chat-message-bubble {
       background: linear-gradient(135deg, #c5653d 0%, #a95130 100%);
       color: white;
-      border-bottom-right-radius: 4px;
+      border-bottom-right-radius: 6px;
       font-family: var(--font-mono);
       font-size: 0.8125rem;
     }
@@ -739,20 +788,21 @@ export function renderApp(configPath: string): string {
     .chat-message.assistant .chat-message-bubble {
       background: rgba(255, 251, 245, 0.95);
       border: 1px solid var(--border-subtle);
-      border-bottom-left-radius: 4px;
+      border-bottom-left-radius: 6px;
       color: var(--text-primary);
     }
 
     .message-usage {
-      margin-top: 8px;
-      padding-top: 6px;
+      margin-top: 10px;
+      padding-top: 8px;
       border-top: 1px solid var(--border-subtle);
       font-family: var(--font-mono);
       font-size: 0.6875rem;
       color: var(--text-muted);
       display: flex;
-      gap: 8px;
+      gap: 10px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     /* Thinking Card (Deep Thought) */
@@ -937,6 +987,83 @@ export function renderApp(configPath: string): string {
     .tool-use-card.enhanced .tool-use-body.collapsed {
       max-height: 0;
       overflow: hidden;
+    }
+    /* AskUserQuestion interactive card */
+    .tool-use-card.ask-user-question {
+      border-color: rgba(197, 101, 61, 0.3);
+      background: linear-gradient(135deg, rgba(197, 101, 61, 0.05) 0%, rgba(197, 101, 61, 0.02) 100%);
+    }
+    .tool-use-card.ask-user-question .tool-use-header {
+      background: linear-gradient(135deg, rgba(197, 101, 61, 0.12) 0%, rgba(197, 101, 61, 0.06) 100%);
+    }
+    .ask-question-card {
+      padding: 12px;
+    }
+    .ask-question-title {
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
+    .ask-question-header {
+      font-size: 0.6875rem;
+      color: var(--accent);
+      background: rgba(197, 101, 61, 0.1);
+      padding: 2px 8px;
+      border-radius: 999px;
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+    .ask-question-options {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .ask-question-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      background: var(--bg-elevated);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      text-align: left;
+    }
+    .ask-question-option:hover {
+      border-color: var(--accent);
+      background: rgba(197, 101, 61, 0.08);
+    }
+    .ask-question-option:active {
+      transform: scale(0.99);
+    }
+    .ask-question-option.selected {
+      border-color: var(--accent);
+      background: rgba(197, 101, 61, 0.12);
+    }
+    .ask-question-option-label {
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+    .ask-question-option-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .ask-question-answer-sent {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      background: rgba(79, 122, 88, 0.1);
+      border: 1px solid rgba(79, 122, 88, 0.2);
+      border-radius: var(--radius-md);
+      color: var(--success, #4a7a58);
+      font-size: 0.8125rem;
     }
     .tool-use-body {
       padding: 8px 12px;
@@ -1245,14 +1372,14 @@ export function renderApp(configPath: string): string {
     .input-panel {
       background: rgba(255, 251, 245, 0.78);
       border-top: 1px solid var(--border-subtle);
-      padding: 12px 18px;
+      padding: 14px 18px;
       backdrop-filter: blur(12px);
       flex-shrink: 0;
       position: relative;
       z-index: 10;
     }
 
-    .input-row { display: flex; gap: 8px; align-items: flex-end; }
+    .input-row { display: flex; gap: 10px; align-items: flex-end; }
     .input-field { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
     .input-label { font-size: 0.6875rem; color: var(--text-muted); font-weight: 500; }
     .input-textarea-wrap { position: relative; }
@@ -1557,18 +1684,18 @@ export function renderApp(configPath: string): string {
     .input-textarea {
       font-family: var(--font-mono);
       font-size: 0.875rem;
-      background: rgba(255, 255, 255, 0.65);
+      background: rgba(255, 255, 255, 0.7);
       border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
       color: var(--text-primary);
-      padding: 10px 100px 10px 12px;
+      padding: 11px 110px 11px 14px;
       outline: none;
       resize: none;
-      min-height: 44px;
+      min-height: 48px;
       max-height: 160px;
       width: 100%;
       overflow-y: hidden;
-      transition: border-color var(--transition-fast), height 0.1s ease;
+      transition: border-color var(--transition-fast), height 0.1s ease, box-shadow var(--transition-fast);
       box-sizing: border-box;
       line-height: 1.5;
     }
@@ -1576,26 +1703,51 @@ export function renderApp(configPath: string): string {
     .input-textarea:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--accent-muted);
+      background: rgba(255, 255, 255, 0.85);
     }
     .input-textarea::placeholder { color: var(--text-muted); }
     .input-textarea.has-dir-indicator {
-      padding-bottom: 28px;
-      min-height: 60px;
+      padding-bottom: 30px;
+      min-height: 64px;
     }
 
     .input-inline-controls {
       position: absolute;
-      right: 8px;
-      top: 6px;
+      right: 10px;
+      top: 8px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       pointer-events: none;
     }
 
     .input-inline-controls > * {
       pointer-events: auto;
       flex-shrink: 0;
+    }
+
+    /* Chat mode select in input */
+    .chat-mode-select {
+      font-family: var(--font-sans);
+      font-size: 0.75rem;
+      font-weight: 500;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.8);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      min-height: 28px;
+    }
+    .chat-mode-select:hover {
+      border-color: var(--accent);
+      background: white;
+    }
+    .chat-mode-select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-muted);
+      outline: none;
     }
 
     .keyboard-aware {
@@ -1616,14 +1768,14 @@ export function renderApp(configPath: string): string {
 
     /* Folder icon button in input row */
     .folder-icon-btn {
-      width: 44px;
-      height: 44px;
-      min-width: 44px;
+      width: 46px;
+      height: 46px;
+      min-width: 46px;
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: rgba(255, 255, 255, 0.6);
+      background: rgba(255, 255, 255, 0.65);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-sm);
       font-size: 1.25rem;
@@ -1650,13 +1802,15 @@ export function renderApp(configPath: string): string {
 
     .input-actions {
       display: flex;
-      gap: 6px;
+      gap: 8px;
       flex-shrink: 0;
       align-items: center;
+      margin-bottom: 2px;
     }
     .input-actions .btn {
-      min-width: 72px;
-      padding: 10px 14px;
+      min-width: 76px;
+      padding: 11px 16px;
+      font-weight: 600;
     }
     .btn-send {
       background: linear-gradient(180deg, #5a8f5f 0%, #4a7a4f 100%);
@@ -1833,25 +1987,27 @@ export function renderApp(configPath: string): string {
       margin-bottom: 18px;
     }
 
-    .field { margin-bottom: 16px; }
-    .field-label { display: block; font-size: 0.75rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
+    .field { margin-bottom: 18px; }
+    .field-label { display: block; font-size: 0.8125rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
 
     .field-input {
       width: 100%;
       font-family: var(--font-mono);
       font-size: 0.875rem;
-      background: rgba(255, 255, 255, 0.66);
+      background: rgba(255, 255, 255, 0.7);
       border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
       color: var(--text-primary);
-      padding: 10px 12px;
+      padding: 11px 12px;
       outline: none;
-      transition: border-color var(--transition-fast);
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+      min-height: 44px;
     }
 
     .field-input:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--accent-muted);
+      background: rgba(255, 255, 255, 0.85);
     }
     .field-input::placeholder { color: var(--text-muted); }
 
@@ -1869,7 +2025,7 @@ export function renderApp(configPath: string): string {
 
     .modal {
       width: 100%;
-      max-width: 440px;
+      max-width: 460px;
       background: rgba(255, 251, 245, 0.96);
       border: 1px solid rgba(150, 118, 85, 0.18);
       border-radius: var(--radius-lg);
@@ -1881,14 +2037,15 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 18px;
+      padding: 16px 20px;
       border-bottom: 1px solid var(--border-subtle);
       flex-shrink: 0;
+      min-height: 56px;
     }
 
-    .modal-title { font-size: 1rem; font-weight: 600; }
-    .modal-body { padding: 18px; overflow: hidden; }
-    .modal-body .field { margin-bottom: 16px; }
+    .modal-title { font-size: 1.0625rem; font-weight: 600; color: var(--text-primary); }
+    .modal-body { padding: 20px; overflow: hidden; }
+    .modal-body .field { margin-bottom: 18px; }
     .modal-body .field:last-of-type { margin-bottom: 20px; }
     .field-hint {
       margin-top: 6px;
@@ -2108,34 +2265,36 @@ export function renderApp(configPath: string): string {
     @media (max-width: 768px) {
       .topbar {
         grid-template-columns: auto 1fr auto;
-        padding: 6px 10px;
-        min-height: 48px;
-        gap: 6px;
+        padding: 6px 12px;
+        min-height: 50px;
+        gap: 8px;
       }
       .topbar-center { display: none; }
-      .sidebar { width: min(280px, calc(100vw - 24px)); }
-      .terminal-container { margin: 0 10px 10px; min-height: 0; }
-      .btn { min-height: 38px; }
-      .btn-sm { min-height: 32px; padding: 5px 8px; font-size: 0.75rem; }
+      .sidebar { width: min(300px, calc(100vw - 20px)); }
+      .terminal-container { margin: 0 12px 12px; min-height: 0; }
+      .btn { min-height: 40px; }
+      .btn-sm { min-height: 36px; padding: 6px 10px; font-size: 0.75rem; }
       .view-toggle {
         display: flex;
-        padding: 2px;
-        gap: 2px;
+        padding: 3px;
+        gap: 3px;
+        height: 38px;
       }
       .view-toggle-btn {
-        padding: 4px 8px;
-        font-size: 0.6875rem;
+        padding: 6px 12px;
+        font-size: 0.75rem;
+        min-height: 32px;
       }
-      .chat-container { padding: 0 10px 10px; }
-      .chat-message { max-width: 95%; }
-      .thinking-card { padding: 8px 12px; }
-      .thinking-content { font-size: 0.75rem; }
+      .chat-container { padding: 0 12px 12px; }
+      .chat-message { max-width: 90%; }
+      .thinking-card { padding: 10px 14px; }
+      .thinking-content { font-size: 0.8125rem; }
       .tool-picker { grid-template-columns: 1fr; }
       /* 平板触摸优化 - 44px触摸区域 */
-      .session-item { min-height: 48px; }
+      .session-item { min-height: 52px; padding: 11px 12px; }
+      .session-action-btn { width: 34px; height: 34px; min-width: 34px; min-height: 34px; }
       .tree-item { min-height: 44px; padding: 8px 12px; }
       .folder-picker-item { min-height: 44px; }
-      .btn { min-height: 44px; }
     }
 
     @media (min-width: 769px) {
@@ -2171,25 +2330,25 @@ export function renderApp(configPath: string): string {
         grid-template-columns: auto 1fr auto;
         grid-template-areas: "menu logo actions";
         align-items: center;
-        gap: 4px;
-        min-height: 44px;
-        padding: 6px 8px;
+        gap: 6px;
+        min-height: 48px;
+        padding: 6px 10px;
         padding-top: max(6px, env(safe-area-inset-top, 0px));
       }
 
-      .topbar-left { grid-area: menu; display: flex; gap: 4px; }
+      .topbar-left { grid-area: menu; display: flex; gap: 6px; }
       .topbar-center { display: none; }
-      .topbar-right { grid-area: actions; display: flex; gap: 4px; }
+      .topbar-right { grid-area: actions; display: flex; gap: 6px; }
       .topbar-actions { display: contents; }
 
       /* 移动端logo */
-      .logo-wrap { display: flex; align-items: center; gap: 4px; grid-area: logo; justify-content: center; }
-      .logo { gap: 4px; font-size: 0.8125rem; }
-      .logo-icon { width: 22px; height: 22px; font-size: 9px; border-radius: 6px; }
+      .logo-wrap { display: flex; align-items: center; gap: 6px; grid-area: logo; justify-content: center; }
+      .logo { gap: 6px; font-size: 0.8125rem; }
+      .logo-icon { width: 24px; height: 24px; font-size: 10px; border-radius: 7px; }
       .session-summary { display: none; }
 
       /* 移动端按钮 - 44px触摸区域 */
-      .topbar .btn-sm { padding: 6px 10px; font-size: 0.6875rem; min-height: 36px; min-width: 44px; }
+      .topbar .btn-sm { padding: 6px 12px; font-size: 0.75rem; min-height: 40px; min-width: 44px; }
       .topbar .btn-icon { min-width: 44px; min-height: 44px; }
 
       .main-layout {
@@ -2220,15 +2379,16 @@ export function renderApp(configPath: string): string {
       .session-item {
         width: 100%;
         max-width: none;
-        margin-bottom: 4px;
-        padding: 10px 12px;
-        min-height: 48px;
+        margin-bottom: 6px;
+        padding: 12px;
+        min-height: 56px;
       }
 
       .session-action-btn {
-        width: 36px;
-        height: 36px;
-        min-height: 36px;
+        width: 40px;
+        height: 40px;
+        min-height: 40px;
+        min-width: 40px;
       }
 
       .main-content {
@@ -2239,19 +2399,20 @@ export function renderApp(configPath: string): string {
 
       /* 移动端终端 */
       .terminal-header {
-        padding: 6px 8px;
+        padding: 8px 10px;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         flex-shrink: 0;
+        min-height: 48px;
       }
       .terminal-title {
         flex-direction: row;
         align-items: center;
-        gap: 4px;
-        font-size: 0.6875rem;
+        gap: 6px;
+        font-size: 0.75rem;
       }
-      .terminal-info { font-size: 0.5625rem; }
-      .terminal-header-actions .btn-sm { min-height: 36px; min-width: 44px; }
+      .terminal-info { font-size: 0.625rem; }
+      .terminal-header-actions .btn-sm { min-height: 40px; min-width: 44px; }
 
       .terminal-container {
         flex: 1;
@@ -2266,28 +2427,29 @@ export function renderApp(configPath: string): string {
       .input-panel {
         position: relative;
         z-index: 20;
-        padding: 8px;
+        padding: 10px;
         padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
         box-shadow: 0 -4px 16px rgba(89, 58, 32, 0.06);
         flex-shrink: 0;
       }
 
-      .input-row { flex-direction: column; align-items: stretch; gap: 6px; }
-      .input-field { gap: 4px; min-width: 0; }
-      .input-label { font-size: 0.5625rem; }
+      .input-row { flex-direction: column; align-items: stretch; gap: 8px; }
+      .input-field { gap: 6px; min-width: 0; }
+      .input-label { font-size: 0.625rem; }
 
       /* 移动端输入按钮 - 44px触摸区域 */
       .input-actions {
         width: 100%;
         display: flex;
         flex-wrap: nowrap;
-        gap: 6px;
+        gap: 8px;
       }
       .input-actions .btn {
         flex: 1;
         min-width: 0;
-        min-height: 44px;
-        font-size: 0.75rem;
+        min-height: 48px;
+        font-size: 0.8125rem;
+        font-weight: 600;
       }
       .floating-toggle {
         flex: 0 0 auto;
@@ -2303,21 +2465,22 @@ export function renderApp(configPath: string): string {
       }
 
       .input-textarea {
-        min-height: 44px;
-        padding: 10px 80px 10px 10px;
+        min-height: 48px;
+        padding: 12px 90px 12px 12px;
+        font-size: 16px;
       }
 
       .input-inline-controls {
-        top: 8px;
-        right: 8px;
+        top: 10px;
+        right: 10px;
         transform: none;
       }
 
       .chat-mode-select {
-        max-width: 80px;
-        height: 32px;
-        font-size: 0.6875rem;
-        min-height: 32px;
+        max-width: 90px;
+        height: 36px;
+        font-size: 0.75rem;
+        min-height: 36px;
       }
 
       .floating-pad {
@@ -2329,8 +2492,8 @@ export function renderApp(configPath: string): string {
 
       /* 浮动面板按钮 - 触摸优化 */
       .floating-pad-grid .btn {
-        min-height: 44px;
-        font-size: 0.75rem;
+        min-height: 48px;
+        font-size: 0.8125rem;
       }
 
       .chat-container {
@@ -2353,13 +2516,13 @@ export function renderApp(configPath: string): string {
 
       .folder-picker-quick-paths {
         flex-wrap: wrap;
-        gap: 4px;
+        gap: 6px;
       }
 
       .folder-picker-quick-btn {
-        min-height: 36px;
-        padding: 6px 10px;
-        font-size: 0.75rem;
+        min-height: 40px;
+        padding: 8px 12px;
+        font-size: 0.8125rem;
       }
 
       .folder-breadcrumb {
@@ -2373,33 +2536,33 @@ export function renderApp(configPath: string): string {
       }
 
       .folder-breadcrumb-item {
-        padding: 4px 6px;
-        min-height: 32px;
+        padding: 6px 8px;
+        min-height: 36px;
         display: inline-flex;
       }
 
       .folder-picker {
-        padding: 8px 10px;
-        min-height: 44px;
+        padding: 10px 12px;
+        min-height: 48px;
       }
 
       .folder-picker-input {
         font-size: 16px;
-        padding: 6px;
+        padding: 8px;
       }
 
       .folder-picker-dropdown {
-        max-height: 200px;
+        max-height: 220px;
       }
 
       .folder-picker-item {
-        padding: 10px 12px;
-        min-height: 44px;
+        padding: 12px;
+        min-height: 48px;
       }
 
       .folder-recent-item {
-        padding: 8px 10px;
-        min-height: 44px;
+        padding: 10px 12px;
+        min-height: 48px;
       }
 
       .folder-picker-compact-row {
@@ -2429,13 +2592,13 @@ export function renderApp(configPath: string): string {
         margin-top: max(10px, env(safe-area-inset-top, 0px));
       }
 
-      .login-header { padding: 16px 14px 12px; }
-      .login-body { padding: 14px; }
-      .btn { min-height: 44px; }
-      .btn-sm { min-height: 36px; }
+      .login-header { padding: 18px 16px 14px; }
+      .login-body { padding: 16px; }
+      .btn { min-height: 48px; }
+      .btn-sm { min-height: 40px; }
 
-      .chat-message-bubble { padding: 8px 12px; font-size: 0.75rem; }
-      .chat-message-avatar { width: 22px; height: 22px; font-size: 11px; }
+      .chat-message-bubble { padding: 10px 14px; font-size: 0.8125rem; }
+      .chat-message-avatar { width: 28px; height: 28px; font-size: 13px; }
 
       /* 模态框移动端优化 */
       .modal-backdrop {
@@ -2451,165 +2614,165 @@ export function renderApp(configPath: string): string {
       }
 
       .tool-card {
-        padding: 12px;
-        min-height: 44px;
+        padding: 14px;
+        min-height: 48px;
       }
     }
 
     /* iPhone 14/15 等标准屏幕 (390px - 420px) */
     @media (min-width: 391px) and (max-width: 420px) {
       .topbar {
-        padding: 4px 8px;
-        min-height: 44px;
+        padding: 6px 10px;
+        min-height: 48px;
         gap: 6px;
       }
 
       .topbar-left,
       .topbar-right {
-        gap: 4px;
+        gap: 6px;
       }
 
-      .logo-icon { width: 22px; height: 22px; font-size: 9px; }
-      .topbar .btn-sm { padding: 6px 8px; font-size: 0.6875rem; min-height: 36px; min-width: 44px; }
+      .logo-icon { width: 24px; height: 24px; font-size: 10px; }
+      .topbar .btn-sm { padding: 6px 10px; font-size: 0.75rem; min-height: 40px; min-width: 44px; }
 
-      .terminal-header { padding: 6px 10px; }
-      .terminal-title-text { font-size: 0.75rem; }
+      .terminal-header { padding: 8px 10px; }
+      .terminal-title-text { font-size: 0.8125rem; }
 
       .terminal-container {
-        min-height: 38vh;
-        max-height: 50vh;
-        margin: 6px;
+        min-height: 40vh;
+        max-height: 55vh;
+        margin: 8px;
         padding: 10px;
       }
 
       .input-panel {
-        padding: 8px 10px;
-        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+        padding: 10px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
       }
 
-      .input-actions { gap: 6px; }
-      .input-actions .btn { min-height: 44px; font-size: 0.75rem; }
-      .floating-toggle { min-width: 44px; min-height: 44px; }
+      .input-actions { gap: 8px; }
+      .input-actions .btn { min-height: 48px; font-size: 0.8125rem; }
+      .floating-toggle { min-width: 48px; min-height: 48px; }
 
       .floating-pad {
         width: calc(100vw - 20px);
         right: 10px;
-        padding: 8px;
+        padding: 10px;
       }
 
-      .floating-pad-grid .btn { min-height: 44px; font-size: 0.75rem; }
+      .floating-pad-grid .btn { min-height: 48px; font-size: 0.8125rem; }
 
-      .session-item { padding: 10px 12px; min-height: 48px; }
-      .session-command { font-size: 0.75rem; }
-      .session-meta { font-size: 0.625rem; }
+      .session-item { padding: 12px; min-height: 56px; }
+      .session-command { font-size: 0.8125rem; }
+      .session-meta { font-size: 0.6875rem; }
 
       .sidebar-footer {
-        padding: 8px 10px 10px;
+        padding: 12px 14px 14px;
       }
 
       .sidebar-meta {
         flex-direction: column;
         align-items: flex-start;
-        gap: 4px;
+        gap: 6px;
       }
 
-      .modal-body { padding: 16px; }
-      .modal-header { padding: 12px 16px; }
-      .modal-title { font-size: 0.9375rem; }
+      .modal-body { padding: 18px; }
+      .modal-header { padding: 14px 18px; }
+      .modal-title { font-size: 1rem; }
 
-      .btn { min-height: 44px; }
-      .btn-sm { min-height: 36px; }
+      .btn { min-height: 48px; }
+      .btn-sm { min-height: 40px; }
     }
 
     /* iPhone SE 等小屏幕 (<= 390px) */
     @media (max-width: 390px) {
       .topbar {
-        padding: 4px 6px;
-        min-height: 44px;
+        padding: 4px 8px;
+        min-height: 46px;
         gap: 4px;
       }
 
       .topbar-left,
       .topbar-right {
-        gap: 3px;
+        gap: 4px;
       }
 
-      .logo-icon { width: 20px; height: 20px; font-size: 8px; border-radius: 5px; }
-      .logo { font-size: 0.75rem; gap: 3px; }
+      .logo-icon { width: 22px; height: 22px; font-size: 9px; border-radius: 6px; }
+      .logo { font-size: 0.75rem; gap: 4px; }
       .topbar .btn-sm {
-        padding: 5px 7px;
-        font-size: 0.625rem;
-        min-height: 32px;
+        padding: 6px 8px;
+        font-size: 0.6875rem;
+        min-height: 36px;
         min-width: 40px;
       }
 
-      .terminal-header { padding: 4px 6px; }
-      .terminal-title-text { font-size: 0.6875rem; }
+      .terminal-header { padding: 6px 8px; }
+      .terminal-title-text { font-size: 0.75rem; }
       .terminal-info { display: none; }
 
       .terminal-container {
         min-height: 35vh;
         max-height: 45vh;
-        margin: 4px;
-        padding: 6px;
+        margin: 6px;
+        padding: 8px;
         border-radius: var(--radius-sm);
       }
 
       .input-panel {
-        padding: 6px;
-        padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+        padding: 8px;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
       }
 
-      .input-row { gap: 4px; }
+      .input-row { gap: 6px; }
 
-      .input-actions { gap: 4px; }
+      .input-actions { gap: 6px; }
       .input-actions .btn {
-        min-height: 40px;
-        font-size: 0.6875rem;
-        padding: 8px 10px;
+        min-height: 44px;
+        font-size: 0.75rem;
+        padding: 10px 12px;
       }
       .floating-toggle {
-        min-width: 40px;
-        min-height: 40px;
-        font-size: 1rem;
+        min-width: 44px;
+        min-height: 44px;
+        font-size: 1.1rem;
       }
 
       .floating-pad {
         width: calc(100vw - 16px);
         right: 8px;
-        padding: 8px;
-        bottom: calc(100% + 4px);
+        padding: 10px;
+        bottom: calc(100% + 6px);
       }
 
       .floating-pad-grid .btn {
-        min-height: 40px;
-        font-size: 0.6875rem;
+        min-height: 44px;
+        font-size: 0.75rem;
       }
 
       .session-item {
-        padding: 8px 10px;
-        min-height: 44px;
+        padding: 10px 12px;
+        min-height: 52px;
       }
-      .session-command { font-size: 0.6875rem; }
-      .session-meta { font-size: 0.5625rem; gap: 4px; }
-      .session-status { padding: 2px 5px; font-size: 0.5625rem; }
+      .session-command { font-size: 0.75rem; }
+      .session-meta { font-size: 0.625rem; gap: 4px; }
+      .session-status { padding: 2px 6px; font-size: 0.625rem; }
 
-      .sidebar-header { padding: 8px 10px; }
-      .sidebar-footer { padding: 8px 10px; }
-      .sidebar-title { font-size: 0.6875rem; }
+      .sidebar-header { padding: 10px 12px; }
+      .sidebar-footer { padding: 10px 12px; }
+      .sidebar-title { font-size: 0.75rem; }
 
       .sidebar-meta {
         flex-direction: column;
         align-items: flex-start;
-        gap: 4px;
+        gap: 6px;
       }
 
-      .modal-body { padding: 12px; }
-      .modal-header { padding: 10px 12px; }
-      .modal-title { font-size: 0.875rem; }
+      .modal-body { padding: 14px; }
+      .modal-header { padding: 12px 14px; }
+      .modal-title { font-size: 0.9375rem; }
 
-      .btn { min-height: 40px; padding: 8px 12px; }
-      .btn-sm { min-height: 32px; padding: 5px 8px; }
+      .btn { min-height: 44px; padding: 10px 14px; }
+      .btn-sm { min-height: 36px; padding: 6px 10px; }
 
       .tool-picker { gap: 6px; }
       .tool-card { padding: 10px; }
@@ -2657,56 +2820,58 @@ export function renderApp(configPath: string): string {
     /* iPad Mini 等平板 (641px - 768px) */
     @media (min-width: 641px) and (max-width: 768px) {
       .topbar {
-        min-height: 48px;
-        padding: 8px 12px;
+        min-height: 52px;
+        padding: 8px 14px;
       }
 
       .sidebar {
-        width: min(300px, calc(100vw - 40px));
+        width: min(320px, calc(100vw - 40px));
       }
 
       .session-item {
-        min-height: 52px;
+        min-height: 56px;
+        padding: 12px;
       }
+      .session-action-btn { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
 
-      .btn { min-height: 40px; }
-      .btn-sm { min-height: 34px; }
+      .btn { min-height: 42px; }
+      .btn-sm { min-height: 36px; }
 
-      .input-actions .btn { min-height: 40px; }
-      .floating-toggle { min-width: 44px; min-height: 44px; }
+      .input-actions .btn { min-height: 44px; }
+      .floating-toggle { min-width: 48px; min-height: 48px; }
     }
 
     /* 横屏模式优化 */
     @media (max-height: 420px) and (orientation: landscape) {
       .topbar {
-        min-height: 36px;
-        padding: 4px 8px;
+        min-height: 40px;
+        padding: 6px 10px;
       }
 
-      .logo-icon { width: 18px; height: 18px; font-size: 8px; }
-      .logo { font-size: 0.75rem; }
+      .logo-icon { width: 20px; height: 20px; font-size: 9px; }
+      .logo { font-size: 0.8125rem; }
 
       .terminal-container {
-        min-height: 50vh;
-        margin: 4px;
-        padding: 6px;
+        min-height: 55vh;
+        margin: 6px;
+        padding: 8px;
       }
 
       .chat-container {
-        padding: 0 8px 6px;
+        padding: 0 10px 8px;
       }
 
       .input-panel {
-        padding: 6px;
-        padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+        padding: 8px;
+        padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
       }
 
-      .input-row { flex-direction: row; gap: 6px; }
+      .input-row { flex-direction: row; gap: 8px; }
       .input-actions { width: auto; }
 
       .floating-pad {
-        bottom: 60px;
-        width: min(160px, calc(100vw - 24px));
+        bottom: 70px;
+        width: min(180px, calc(100vw - 24px));
       }
     }
 
@@ -2862,18 +3027,18 @@ export function renderApp(configPath: string): string {
     .blank-chat-send-btn:hover { background: var(--accent-hover); }
     .blank-chat-tools {
       display: flex;
-      gap: 6px;
+      gap: 8px;
       justify-content: center;
-      margin-bottom: 10px;
+      margin-bottom: 12px;
       flex-wrap: wrap;
     }
     .blank-chat-tool-btn {
-      padding: 6px 12px;
+      padding: 8px 14px;
       border: 1.5px solid var(--border-default);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.6);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.7);
       color: var(--text-secondary);
-      font-size: 0.8125rem;
+      font-size: 0.875rem;
       font-weight: 500;
       font-family: inherit;
       cursor: pointer;
@@ -2881,19 +3046,23 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       gap: 6px;
+      min-height: 40px;
     }
     .blank-chat-tool-btn:hover {
       background: var(--accent-muted);
       border-color: var(--accent);
       color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(89, 58, 32, 0.08);
     }
     .blank-chat-tool-btn .tool-icon {
-      font-size: 1rem;
+      font-size: 1.125rem;
     }
     .blank-chat-hint {
-      font-size: 0.75rem;
+      font-size: 0.8125rem;
       color: var(--text-muted);
       margin: 0;
+      font-weight: 500;
     }
     .mode-btn-group {
       display: flex;
@@ -4373,6 +4542,44 @@ export function renderApp(configPath: string): string {
                 }
               }
               expandBtn.remove();
+            }
+          }
+
+          // AskUserQuestion option click
+          var questionOption = target.closest(".ask-question-option");
+          if (questionOption && questionOption instanceof HTMLElement) {
+            var optionLabel = questionOption.dataset.optionLabel;
+            if (optionLabel && state.selectedId) {
+              // Mark as selected
+              questionOption.classList.add("selected");
+              // Disable all options
+              var allOptions = document.querySelectorAll(".ask-question-option");
+              allOptions.forEach(function(opt) {
+                opt.classList.add("selected");
+                opt.style.pointerEvents = "none";
+              });
+              // Show sent indicator
+              var cardBody = questionOption.closest(".ask-question-card");
+              if (cardBody) {
+                var sentDiv = document.createElement("div");
+                sentDiv.className = "ask-question-answer-sent";
+                sentDiv.innerHTML = "✓ 已发送: " + escapeHtml(optionLabel);
+                cardBody.appendChild(sentDiv);
+              }
+              // Send answer via input API
+              fetch("/api/sessions/" + state.selectedId + "/input", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ input: optionLabel + "\\n", view: state.currentView })
+              })
+              .then(function(res) {
+                if (!res.ok) {
+                  console.error("[wand] Failed to send answer:", res.status);
+                }
+              })
+              .catch(function(err) {
+                console.error("[wand] Error sending answer:", err);
+              });
             }
           }
         });
@@ -6661,6 +6868,42 @@ export function renderApp(configPath: string): string {
         // 检测是否是文件操作
         var fileInfo = extractFileInfo(toolName, block.input);
         var headerExtra = fileInfo ? '<span class="tool-file-path">' + escapeHtml(fileInfo) + '</span>' : "";
+
+        // Special rendering for AskUserQuestion tool
+        if (toolName === "AskUserQuestion" && block.input && block.input.questions) {
+          var questions = block.input.questions;
+          if (questions && questions.length > 0) {
+            var question = questions[0];
+            var header = question.header ? '<span class="ask-question-header">' + escapeHtml(question.header) + '</span>' : "";
+            var questionText = question.question ? '<div class="ask-question-title">' + escapeHtml(question.question) + '</div>' : "";
+            var multiSelect = question.multiSelect;
+            var optionsHtml = "";
+            if (question.options && question.options.length > 0) {
+              optionsHtml = '<div class="ask-question-options">';
+              question.options.forEach(function(opt, idx) {
+                var label = opt.label ? escapeHtml(opt.label) : "选项 " + (idx + 1);
+                var desc = opt.description ? '<div class="ask-question-option-desc">' + escapeHtml(opt.description) + '</div>' : "";
+                optionsHtml += '<button class="ask-question-option" data-option-index="' + idx + '" data-option-label="' + escapeHtml(label) + '">' +
+                  '<div class="ask-question-option-label">' + label + '</div>' +
+                  desc +
+                '</button>';
+              });
+              optionsHtml += '</div>';
+            }
+            return '<div class="tool-use-card enhanced ask-user-question" data-tool-block-id="' + escapeHtml(block.id || "") + '">' +
+              '<div class="tool-use-header">' +
+                '<span class="tool-icon-wrap">❓</span>' +
+                '<span class="tool-name">AskUserQuestion</span>' +
+                '<span class="tool-toggle"></span>' +
+              '</div>' +
+              '<div class="tool-use-body ask-question-card">' +
+                header +
+                questionText +
+                optionsHtml +
+              '</div>' +
+            '</div>';
+          }
+        }
 
         return '<div class="tool-use-card enhanced">' +
           '<div class="tool-use-header" data-tool-toggle>' +
