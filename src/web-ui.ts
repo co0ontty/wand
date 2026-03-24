@@ -6758,13 +6758,25 @@ export function renderApp(configPath: string): string {
           return "";
         }
 
+        // 先建立 tool_use_id -> tool_result 的映射
+        var toolResults = {};
+        for (var i = 0; i < msg.content.length; i++) {
+          var block = msg.content[i];
+          if (block && block.type === "tool_result") {
+            var toolUseId = block.tool_use_id;
+            if (toolUseId) {
+              toolResults[toolUseId] = block;
+            }
+          }
+        }
+
         var blocksHtml = "";
 
         try {
           for (var i = 0; i < msg.content.length; i++) {
             var block = msg.content[i];
             try {
-              blocksHtml += renderContentBlock(block, role);
+              blocksHtml += renderContentBlock(block, role, toolResults);
             } catch (e) {
               // Render error for individual block
               blocksHtml += '<div class="render-error">消息块渲染失败</div>';
@@ -6799,7 +6811,7 @@ export function renderApp(configPath: string): string {
         '</div>';
       }
 
-      function renderContentBlock(block, role) {
+      function renderContentBlock(block, role, toolResults) {
         if (!block || !block.type) return "";
 
         switch (block.type) {
@@ -6820,17 +6832,19 @@ export function renderApp(configPath: string): string {
             '</details>';
 
           case "tool_use":
-            return renderToolUseCard(block);
+            var toolResult = toolResults[block.id];
+            return renderToolUseCard(block, toolResult);
 
           case "tool_result":
-            return renderToolResultCard(block);
+            // tool_result 已经在 tool_use 渲染时处理了，不再单独渲染
+            return "";
 
           default:
             return '<div class="unknown-block">' + escapeHtml(JSON.stringify(block)) + '</div>';
         }
       }
 
-      function renderToolUseCard(block) {
+      function renderToolUseCard(block, toolResult) {
         var toolName = block.name || "unknown";
         var toolId = block.id || "";
         var toolIcon = getToolIcon(toolName);
@@ -6875,68 +6889,42 @@ export function renderApp(configPath: string): string {
         // 完整 JSON 内容用于展开后显示
         var fullJson = JSON.stringify(block.input, null, 2);
 
-        // 默认显示 loading 状态，等待 tool_result 更新
-        return '<div class="tool-use-card loading" data-tool-use-id="' + escapeHtml(toolId) + '">' +
+        // 根据 toolResult 决定状态
+        var statusClass = "loading";
+        var statusIcon = '<span class="tool-use-spinner"></span>';
+        var statusText = "执行中";
+        var resultHtml = "";
+
+        if (toolResult) {
+          var isError = toolResult.is_error;
+          var content = toolResult.content || "";
+          statusClass = isError ? "error" : "success";
+          statusIcon = isError ? "❌" : "✅";
+          statusText = isError ? "失败" : "成功";
+
+          // 有内容才显示结果
+          var hasContent = content && content.trim().length > 0;
+          if (hasContent) {
+            resultHtml = '<pre class="tool-use-result-content">' + escapeHtml(content) + '</pre>';
+          } else {
+            resultHtml = '<span class="tool-use-result-empty">无输出</span>';
+          }
+        }
+
+        return '<div class="tool-use-card ' + statusClass + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +
           '<div class="tool-use-header" data-tool-toggle>' +
-            '<span class="tool-use-icon"><span class="tool-use-spinner"></span></span>' +
+            '<span class="tool-use-icon">' + statusIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(toolName) + '</span>' +
             fileHtml +
             (inputSummary ? '<span class="tool-use-summary">· ' + escapeHtml(inputSummary) + '</span>' : '') +
-            '<span class="tool-use-status">执行中</span>' +
+            '<span class="tool-use-status">' + statusText + '</span>' +
             toggleHtml +
           '</div>' +
           '<div class="tool-use-body">' +
             '<pre class="tool-use-content">' + escapeHtml(fullJson) + '</pre>' +
-            '<div class="tool-use-result" style="display:none;"></div>' +
+            (resultHtml ? '<div class="tool-use-result">' + resultHtml + '</div>' : '') +
           '</div>' +
         '</div>';
-      }
-
-      function renderToolResultCard(block) {
-        var toolUseId = block.tool_use_id || "";
-        var content = block.content || "";
-        var isError = block.is_error;
-        var statusClass = isError ? "error" : "success";
-        var statusIcon = isError ? "❌" : "✅";
-        var statusText = isError ? "失败" : "成功";
-
-        // 有内容才显示结果
-        var hasContent = content && content.trim().length > 0;
-
-        // 使用 JSON.stringify 来安全地转义 toolUseId
-        var toolUseIdJson = JSON.stringify(toolUseId);
-
-        // 生成结果内容的 HTML
-        var resultContentJs;
-        if (hasContent) {
-          resultContentJs = 'var pre = document.createElement("pre");' +
-            'pre.className = "tool-use-result-content";' +
-            'pre.textContent = ' + JSON.stringify(content) + ';' +
-            'resultEl.appendChild(pre);';
-        } else {
-          resultContentJs = 'resultEl.innerHTML = "<span class=\\"tool-use-result-empty\\">无输出</span>";';
-        }
-
-        // 返回一个 script 标签，用于更新对应的 tool-use-card
-        // 注意：使用 Unicode 转义 \x3C 避免浏览器误认为外部 script 标签结束
-        return '<script data-tool-result-for="' + escapeHtml(toolUseId) + '">' +
-          '(function() {' +
-            'var card = document.querySelector("[data-tool-use-id=\\"" + ' + toolUseIdJson + ' + "\\"]");' +
-            'if (card) {' +
-              'card.classList.remove("loading");' +
-              'card.classList.add("' + statusClass + '");' +
-              'var iconEl = card.querySelector(".tool-use-icon");' +
-              'if (iconEl) { iconEl.textContent = "' + statusIcon + '"; }' +
-              'var statusEl = card.querySelector(".tool-use-status");' +
-              'if (statusEl) { statusEl.textContent = "' + statusText + '"; }' +
-              'var resultEl = card.querySelector(".tool-use-result");' +
-              'if (resultEl) {' +
-                'resultEl.style.display = "block";' +
-                resultContentJs +
-              '}' +
-            '}' +
-          '})();' +
-        '\\x3C/script>';
       }
 
       function getToolIcon(toolName) {
