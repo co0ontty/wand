@@ -30,7 +30,7 @@ export default defineConfig({
   webServer: {
     command: `npm run build && node dist/cli.js web --config ${TEST_CONFIG_PATH}`,
     url: BASE_URL,
-    reuseExistingServer: false,
+    reuseExistingServer: true,
     timeout: 120 * 1000,
     ignoreHTTPSErrors: true,
   },

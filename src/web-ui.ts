@@ -911,7 +911,7 @@ export function renderApp(configPath: string): string {
       overflow-y: auto;
     }
 
-    /* Tool Use Card - Simplified */
+    /* Tool Use Card */
     .tool-use-card {
       margin: 6px 0;
       border: 1px solid var(--border-subtle);
@@ -920,17 +920,23 @@ export function renderApp(configPath: string): string {
       width: 100%;
       box-sizing: border-box;
       background: var(--bg-secondary);
+      transition: border-color var(--transition-fast);
+    }
+    .tool-use-card:hover {
+      border-color: rgba(79, 122, 88, 0.3);
     }
     .tool-use-header {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 12px;
+      padding: 10px 12px;
       background: rgba(79, 122, 88, 0.06);
       cursor: pointer;
       font-size: 0.8125rem;
       user-select: none;
       transition: background var(--transition-fast);
+      min-height: 44px;
+      flex-wrap: nowrap;
     }
     .tool-use-header:hover {
       background: rgba(79, 122, 88, 0.1);
@@ -938,12 +944,17 @@ export function renderApp(configPath: string): string {
     .tool-use-icon {
       font-size: 1.1rem;
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
     }
     .tool-use-name {
       font-family: var(--font-mono);
       font-weight: 600;
       color: var(--text-primary);
-      flex: 1;
+      flex: 0 0 auto;
+      white-space: nowrap;
     }
     .tool-use-file {
       font-size: 0.75rem;
@@ -953,11 +964,26 @@ export function renderApp(configPath: string): string {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .tool-use-summary {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-left: 4px;
     }
     .tool-use-toggle {
       font-size: 0.75rem;
       color: var(--text-muted);
       transition: transform var(--transition-fast);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
     }
     .tool-use-card.collapsed .tool-use-toggle {
       transform: rotate(-90deg);
@@ -979,6 +1005,7 @@ export function renderApp(configPath: string): string {
       overflow-wrap: break-word;
       max-height: 400px;
       overflow-y: auto;
+      line-height: 1.5;
     }
     /* AskUserQuestion - simplified */
     .tool-use-card.ask-user {
@@ -1109,6 +1136,11 @@ export function renderApp(configPath: string): string {
       overflow-wrap: break-word;
       max-height: 400px;
       overflow-y: auto;
+    }
+    .tool-result-empty {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      font-style: italic;
     }
 
     /* Enhanced Thinking Card */
@@ -1631,7 +1663,7 @@ export function renderApp(configPath: string): string {
       border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
       color: var(--text-primary);
-      padding: 10px 120px 10px 12px;
+      padding: 10px 12px;
       outline: none;
       resize: none;
       min-height: 44px;
@@ -1655,20 +1687,6 @@ export function renderApp(configPath: string): string {
     }
 
     .input-inline-controls {
-      position: absolute;
-      right: 8px;
-      top: 50%;
-      transform: translateY(-50%);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      pointer-events: none;
-      max-width: calc(100% - 100px);
-    }
-
-    .input-inline-controls > * {
-      pointer-events: auto;
-      flex-shrink: 0;
     }
 
     /* Chat mode select in input */
@@ -1758,9 +1776,13 @@ export function renderApp(configPath: string): string {
     }
     .input-actions .btn {
       min-width: 70px;
-      padding: 9px 14px;
+      padding: 10px 16px;
       font-weight: 600;
       white-space: nowrap;
+      height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
     .btn-send {
       background: linear-gradient(180deg, #5a8f5f 0%, #4a7a4f 100%);
@@ -1776,6 +1798,7 @@ export function renderApp(configPath: string): string {
       background: rgba(178, 79, 69, 0.12);
       color: var(--danger);
       border: 1px solid rgba(178, 79, 69, 0.25);
+      height: 42px;
     }
     .btn-stop:hover {
       background: var(--danger);
@@ -2393,6 +2416,15 @@ export function renderApp(configPath: string): string {
         display: flex;
         flex-wrap: nowrap;
         gap: 8px;
+        align-items: stretch;
+      }
+      .input-actions .chat-mode-select {
+        flex-shrink: 0;
+        width: 90px;
+        min-height: 44px;
+        height: auto;
+        font-size: 0.8125rem;
+        padding: 0 8px;
       }
       .input-actions .btn {
         flex: 1;
@@ -2416,14 +2448,11 @@ export function renderApp(configPath: string): string {
 
       .input-textarea {
         min-height: 44px;
-        padding: 10px 85px 10px 10px;
+        padding: 10px;
         font-size: 16px;
       }
 
       .input-inline-controls {
-        top: 50%;
-        right: 6px;
-        transform: translateY(-50%);
       }
 
       .chat-mode-select {
@@ -3437,14 +3466,12 @@ export function renderApp(configPath: string): string {
                   '<div class="input-field input-field-full">' +
                     '<div class="input-textarea-wrap">' +
                       '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按 Enter 发送..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
-                      '<div class="input-inline-controls">' +
-                        '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
-                          renderModeOptions(preferredTool, composerMode) +
-                        '</select>' +
-                      '</div>' +
                     '</div>' +
                   '</div>' +
                   '<div class="input-actions">' +
+                    '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
+                      renderModeOptions(preferredTool, composerMode) +
+                    '</select>' +
                     '<button id="send-input-button" class="btn btn-send">发送</button>' +
                     '<button id="stop-button" class="btn btn-stop' + (state.selectedId ? "" : " hidden") + '">停止</button>' +
                   '</div>' +
@@ -4499,23 +4526,23 @@ export function renderApp(configPath: string): string {
           }
 
           // AskUserQuestion option click
-          var questionOption = target.closest(".ask-question-option");
+          var questionOption = target.closest(".ask-user-option");
           if (questionOption && questionOption instanceof HTMLElement) {
             var optionLabel = questionOption.dataset.optionLabel;
             if (optionLabel && state.selectedId) {
               // Mark as selected
               questionOption.classList.add("selected");
               // Disable all options
-              var allOptions = document.querySelectorAll(".ask-question-option");
+              var allOptions = document.querySelectorAll(".ask-user-option");
               allOptions.forEach(function(opt) {
                 opt.classList.add("selected");
                 opt.style.pointerEvents = "none";
               });
               // Show sent indicator
-              var cardBody = questionOption.closest(".ask-question-card");
+              var cardBody = questionOption.closest(".tool-use-card.ask-user");
               if (cardBody) {
                 var sentDiv = document.createElement("div");
-                sentDiv.className = "ask-question-answer-sent";
+                sentDiv.className = "ask-user-answer-sent";
                 sentDiv.innerHTML = "✓ 已发送: " + escapeHtml(optionLabel);
                 cardBody.appendChild(sentDiv);
               }
@@ -6856,16 +6883,20 @@ export function renderApp(configPath: string): string {
 
         // 生成输入内容摘要（不显示完整 JSON）
         var inputSummary = generateInputSummary(block.name, block.input);
+        // 完整 JSON 内容用于展开后显示
+        var fullJson = JSON.stringify(block.input, null, 2);
 
-        return '<div class="tool-use-card collapsed">' +
+        // 默认展开，让用户可以直接看到工具信息
+        return '<div class="tool-use-card">' +
           '<div class="tool-use-header" data-tool-toggle>' +
             '<span class="tool-use-icon">' + toolIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(toolName) + '</span>' +
             fileHtml +
+            (inputSummary ? '<span class="tool-use-summary">· ' + escapeHtml(inputSummary) + '</span>' : '') +
             toggleHtml +
           '</div>' +
           '<div class="tool-use-body">' +
-            '<pre class="tool-use-content">' + escapeHtml(inputSummary) + '</pre>' +
+            '<pre class="tool-use-content">' + escapeHtml(fullJson) + '</pre>' +
           '</div>' +
         '</div>';
       }
@@ -6878,19 +6909,19 @@ export function renderApp(configPath: string): string {
         var statusText = isError ? "失败" : "成功";
         var toggleHtml = '<span class="tool-result-toggle">▼</span>';
 
-        // 长内容默认折叠
-        var isLong = content.length > 500;
-        var collapsedClass = isLong ? " collapsed" : "";
+        // 有内容才显示折叠按钮，默认展开
+        var hasContent = content && content.trim().length > 0;
+        var collapsedClass = "";
 
         return '<div class="tool-result-card ' + statusClass + collapsedClass + '">' +
-          '<div class="tool-result-header">' +
+          '<div class="tool-result-header" data-tool-toggle>' +
             '<span class="tool-result-icon">' + statusIcon + '</span>' +
             '<span class="tool-result-label">工具结果</span>' +
             '<span class="tool-result-status">' + statusText + '</span>' +
-            toggleHtml +
+            (hasContent ? toggleHtml : '') +
           '</div>' +
           '<div class="tool-result-body">' +
-            '<pre class="tool-result-content">' + escapeHtml(content) + '</pre>' +
+            (hasContent ? '<pre class="tool-result-content">' + escapeHtml(content) + '</pre>' : '<span class="tool-result-empty">无输出</span>') +
           '</div>' +
         '</div>';
       }
@@ -6910,9 +6941,10 @@ export function renderApp(configPath: string): string {
           "TodoWrite": "📝",
           "TodoRead": "📋",
           "NotebookEdit": "📓",
-          "Agent": "🤖"
+          "Agent": "🤖",
+          "Exit": "🚪"
         };
-        return '<span class="tool-emoji">' + (icons[toolName] || "🔧") + '</span>';
+        return icons[toolName] || "🔧";
       }
 
       function generateInputSummary(toolName, input) {
@@ -6922,10 +6954,16 @@ export function renderApp(configPath: string): string {
         var keys = Object.keys(input);
         if (keys.length === 0) return "{}";
 
-        // 文件操作：显示文件路径
-        if (toolName === "Read" || toolName === "Write" || toolName === "Edit") {
-          var path = input.file_path || input.path || "";
-          if (path) return "文件：" + path;
+        // 文件操作：只显示操作类型和修改数量，路径已在 header 中显示
+        if (toolName === "Read") {
+          return "读取文件";
+        }
+        if (toolName === "Write") {
+          return "写入文件";
+        }
+        if (toolName === "Edit") {
+          var edits = input.edits ? input.edits.length : 0;
+          return "编辑 (" + edits + " 处修改)";
         }
 
         // Bash：显示命令
@@ -6950,6 +6988,36 @@ export function renderApp(configPath: string): string {
         if (toolName === "Glob") {
           var pattern = input.pattern || "";
           if (pattern) return "查找：" + pattern;
+        }
+
+        // Agent：显示任务
+        if (toolName === "Agent") {
+          var task = input.prompt || input.task || "";
+          if (task) {
+            var taskPreview = task.length > 40 ? task.slice(0, 40) + "..." : task;
+            return "任务：" + taskPreview;
+          }
+        }
+
+        // Task：显示任务描述
+        if (toolName === "Task") {
+          var task = input.task || input.description || "";
+          if (task) {
+            var taskPreview = task.length > 40 ? task.slice(0, 40) + "..." : task;
+            return "任务：" + taskPreview;
+          }
+        }
+
+        // TodoWrite：显示操作类型
+        if (toolName === "TodoWrite") {
+          var todos = input.todos || [];
+          return "更新待办 (" + todos.length + " 项)";
+        }
+
+        // WebSearch：显示查询
+        if (toolName === "WebSearch") {
+          var query = input.query || "";
+          if (query) return "搜索：" + query;
         }
 
         // 默认：显示第一个 key 和简短值

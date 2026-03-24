@@ -9,6 +9,11 @@ import { WandStorage } from "./storage.js";
 import { SessionLogger } from "./session-logger.js";
 import { ContentBlock, ConversationTurn, ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
 
+/** Check if running as root (uid 0) */
+function isRunningAsRoot(): boolean {
+  return process.getuid?.() === 0 || process.geteuid?.() === 0;
+}
+
 export interface ProcessEvent {
   type: "output" | "status" | "started" | "ended";
   sessionId: string;
@@ -424,7 +429,7 @@ export class ProcessManager extends EventEmitter {
     const baseCommand = record.command.trim();
     const escapedMessage = message.replace(/'/g, "'\\''");
 
-    // Build command: claude -p 'message' --output-format stream-json --verbose [--resume sessionId] [--permission-mode acceptEdits]
+    // Build command: claude -p 'message' --output-format stream-json --verbose [--resume sessionId] [--permission-mode bypassPermissions]
     // Note: --verbose is required when using --output-format stream-json with --print (Claude CLI only)
     const isClaude = /^claude\b/.test(baseCommand);
     const parts = [baseCommand, "-p", `'${escapedMessage}'`, "--output-format", "stream-json"];
@@ -434,9 +439,9 @@ export class ProcessManager extends EventEmitter {
       parts.push("--resume", record.claudeSessionId);
     }
 
-    // Add permission mode for full-access
-    if (/^claude\s/.test(baseCommand) && !/--permission-mode\b/.test(baseCommand)) {
-      parts.push("--permission-mode", "acceptEdits");
+    // Add permission mode for full-access (skip for root users who have all permissions)
+    if (/^claude(?:\s|$)/.test(baseCommand) && !/--permission-mode\b/.test(baseCommand) && !isRunningAsRoot()) {
+      parts.push("--permission-mode", "bypassPermissions");
     }
 
     const nativeCommand = parts.join(" ");
@@ -1144,12 +1149,15 @@ export class ProcessManager extends EventEmitter {
   }
 
   private processCommandForMode(command: string, mode: ExecutionMode): string {
-    // For full-access mode with claude commands, add permission flags
-    if (mode === "full-access" && /^claude\s/.test(command)) {
+    // For full-access mode with claude commands, add permission flags (skip for root)
+    if (mode === "full-access" && /^claude(?:\s|$)/.test(command) && !isRunningAsRoot()) {
       // Check if permission-mode is already specified
       if (!/--permission-mode\b/.test(command)) {
-        // Add --permission-mode acceptEdits for full-access mode
-        return command.replace(/^claude\s/, "claude --permission-mode acceptEdits ");
+        // Add --permission-mode bypassPermissions for full-access mode
+        if (command === "claude") {
+          return "claude --permission-mode bypassPermissions";
+        }
+        return command.replace(/^claude\s/, "claude --permission-mode bypassPermissions ");
       }
     }
     return command;
