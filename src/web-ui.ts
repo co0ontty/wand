@@ -1509,6 +1509,42 @@ export function renderApp(configPath: string): string {
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
+
+    /* Session status indicator in chat */
+    .chat-status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 8px 12px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      user-select: none;
+      flex-shrink: 0;
+      order: -1;
+    }
+    .chat-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .chat-status-bar.running .chat-status-dot {
+      background: var(--success);
+      box-shadow: 0 0 6px var(--success);
+      animation: status-pulse 1.5s ease-in-out infinite;
+    }
+    .chat-status-bar.running {
+      color: var(--text-secondary);
+    }
+    .chat-status-bar.ended .chat-status-dot {
+      background: var(--text-muted);
+    }
+    @keyframes status-pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--success); }
+      50% { opacity: 0.5; box-shadow: 0 0 2px var(--success); }
+    }
+
     .folder-picker-container {
       margin-bottom: 8px;
     }
@@ -3625,7 +3661,7 @@ export function renderApp(configPath: string): string {
               '</div>' +
               '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "terminal" ? " active" : "") + '"></div>' +
               '<div id="chat-output" class="chat-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "chat" ? " active" : "") + '"></div>' +
-              '<div class="input-panel">' +
+              '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
                 '<div id="todo-progress" class="todo-progress hidden">' +
                   '<div class="todo-progress-header" id="todo-progress-toggle">' +
                     '<div class="todo-progress-left">' +
@@ -4690,6 +4726,7 @@ export function renderApp(configPath: string): string {
           // Tool use card toggle
           var header = target.closest("[data-tool-toggle]");
           if (header) {
+            e.stopPropagation();
             var card = header.closest(".tool-use-card");
             if (card) {
               card.classList.toggle("collapsed");
@@ -5157,16 +5194,19 @@ export function renderApp(configPath: string): string {
           infoEl.textContent = selectedSession ? (getModeLabel(selectedSession.mode) + " | " + selectedSession.status) : "开始对话";
         }
 
+        var inputPanel = document.querySelector(".input-panel");
         if (selectedSession) {
           if (blankChat) blankChat.classList.add("hidden");
           if (terminalContainer) terminalContainer.classList.remove("hidden");
           if (chatContainer) chatContainer.classList.remove("hidden");
           if (stopBtn) stopBtn.classList.remove("hidden");
+          if (inputPanel) inputPanel.classList.remove("hidden");
         } else {
           if (blankChat) blankChat.classList.remove("hidden");
           if (terminalContainer) terminalContainer.classList.add("hidden");
           if (chatContainer) chatContainer.classList.add("hidden");
           if (stopBtn) stopBtn.classList.add("hidden");
+          if (inputPanel) inputPanel.classList.add("hidden");
         }
         syncComposerModeSelect();
         applyCurrentView();
@@ -5227,6 +5267,10 @@ export function renderApp(configPath: string): string {
         // Reset todo progress bar
         var todoEl = document.getElementById("todo-progress");
         if (todoEl) todoEl.classList.add("hidden");
+        // Reset chat status bar
+        var chatOutput = document.getElementById("chat-output");
+        var oldStatusBar = chatOutput && chatOutput.querySelector(".chat-status-bar");
+        if (oldStatusBar) oldStatusBar.remove();
         var session = state.sessions.find(function(item) { return item.id === id; });
         var inferredTool = inferToolFromCommand(session && session.command ? session.command : "");
         if (inferredTool === "claude" || inferredTool === "codex") {
@@ -6372,13 +6416,15 @@ export function renderApp(configPath: string): string {
             loadSessions();
             break;
           case 'ended':
-            // Session ended
+            // Session ended - update status immediately before async loadSessions
+            var endedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+            if (endedSession) endedSession.status = msg.data && msg.data.status ? msg.data.status : "exited";
             loadSessions();
             if (msg.sessionId === state.selectedId) {
               loadOutput(msg.sessionId);
             }
-            // Update chat view with full render
-            if (state.currentView === "chat" && msg.sessionId === state.selectedId) {
+            // Update chat view with full render to show ended status
+            if (msg.sessionId === state.selectedId) {
               renderChat(true);
             }
             break;
@@ -6450,6 +6496,20 @@ export function renderApp(configPath: string): string {
       function scheduleChatRender(immediate) {
         if (chatRenderTimer && !immediate) return;
         if (chatRenderTimer) clearTimeout(chatRenderTimer);
+        if (immediate) {
+          chatRenderTimer = null;
+          // Re-parse messages from the latest session output
+          var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+          if (selectedSession) {
+            if (selectedSession.messages && selectedSession.messages.length > 0) {
+              state.currentMessages = selectedSession.messages;
+            } else if (selectedSession.output) {
+              state.currentMessages = parseMessages(selectedSession.output, selectedSession.command);
+            }
+          }
+          renderChat();
+          return;
+        }
         chatRenderTimer = setTimeout(function() {
           chatRenderTimer = null;
           // Re-parse messages from the latest session output
@@ -6463,7 +6523,7 @@ export function renderApp(configPath: string): string {
             }
           }
           renderChat();
-        }, immediate ? 0 : 150);
+        }, 80);
       }
 
       function doRenderChat(forceFullRender) {
@@ -6484,10 +6544,15 @@ export function renderApp(configPath: string): string {
 
         if (messages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
-            chatOutput.innerHTML = '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>';
+            var emptyStatusHtml = selectedSession.status === "running"
+              ? '<div class="chat-status-bar running"><span class="chat-status-dot"></span>运行中…</div>'
+              : "";
+            chatOutput.innerHTML = '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>' + emptyStatusHtml;
             state.lastRenderedEmpty = "empty";
             state.lastRenderedMsgCount = 0;
           }
+          // Always update status even if empty state is cached
+          updateChatStatusBar(chatOutput, selectedSession);
           return;
         }
 
@@ -6547,8 +6612,8 @@ export function renderApp(configPath: string): string {
           // With column-reverse, render messages in reverse order (newest first)
           chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
           attachAllCopyHandlers(chatMessages);
-          // Scroll to bottom (which shows newest messages at the bottom visually)
-          chatOutput.scrollTop = chatOutput.scrollHeight;
+          // column-reverse: scrollTop=0 shows newest messages at the visual bottom
+          chatMessages.scrollTop = 0;
         } else if (msgCount > existingCount) {
           // New messages added — prepend them (column-reverse means prepend = visual append)
           var newMessages = messages.slice(existingCount);
@@ -6585,7 +6650,23 @@ export function renderApp(configPath: string): string {
                 var newBubble = newEl.querySelector(".chat-message-bubble");
                 // Only update if bubble content actually changed
                 if (newBubble && currentContent.innerHTML !== newBubble.innerHTML) {
+                  // Preserve user-toggled collapsed state on tool cards
+                  var oldCards = firstEl.querySelectorAll(".tool-use-card[data-tool-use-id]");
+                  var toggledState = {};
+                  oldCards.forEach(function(c) {
+                    var tid = c.getAttribute("data-tool-use-id");
+                    if (tid) toggledState[tid] = c.classList.contains("collapsed");
+                  });
                   chatMessages.replaceChild(newEl, firstEl);
+                  // Restore toggled states
+                  var newCards = newEl.querySelectorAll(".tool-use-card[data-tool-use-id]");
+                  newCards.forEach(function(c) {
+                    var tid = c.getAttribute("data-tool-use-id");
+                    if (tid && tid in toggledState) {
+                      if (toggledState[tid]) c.classList.add("collapsed");
+                      else c.classList.remove("collapsed");
+                    }
+                  });
                   attachCopyHandler(newEl);
                 }
               }
@@ -6595,48 +6676,70 @@ export function renderApp(configPath: string): string {
           // Message count decreased (session switched or output truncated) - full re-render without animation
           chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
           attachAllCopyHandlers(chatMessages);
-          // For session switch, scroll to bottom; otherwise preserve position
-          if (state.lastRenderedEmpty === "none" || state.lastRenderedEmpty === "empty") {
-            chatOutput.scrollTop = chatOutput.scrollHeight;
-          } else {
-            smartScrollToBottom(chatOutput);
-          }
+          // column-reverse: scrollTop=0 shows newest
+          chatMessages.scrollTop = 0;
         }
 
         // Update todo progress bar from latest messages
         updateTodoProgress(messages);
+
+        // Update session status indicator
+        updateChatStatusBar(chatOutput, selectedSession);
       }
 
       // Smart scroll: only auto-scroll if user is near bottom
+      // column-reverse: scrollTop near 0 = visual bottom (newest messages)
       function smartScrollToBottom(container) {
-        var threshold = 100; // pixels from bottom
-        var isNearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < threshold;
+        var chatMsgs = container.querySelector ? container.querySelector(".chat-messages") : container;
+        if (!chatMsgs) chatMsgs = container;
+        var threshold = 100;
+        // column-reverse: scrollTop=0 is the visual bottom; positive = scrolled up
+        var isNearBottom = chatMsgs.scrollTop < threshold;
         if (isNearBottom) {
-          container.scrollTop = container.scrollHeight;
+          chatMsgs.scrollTop = 0;
         }
       }
 
       // --- Todo progress bar ---
       var todoExpanded = false;
-      (function() {
-        var toggle = document.getElementById("todo-progress-toggle");
-        if (toggle) {
-          toggle.addEventListener("click", function() {
-            todoExpanded = !todoExpanded;
-            var prog = document.getElementById("todo-progress");
-            var body = document.getElementById("todo-progress-body");
-            if (prog && body) {
-              if (todoExpanded) {
-                prog.classList.add("expanded");
-                body.classList.remove("hidden");
-              } else {
-                prog.classList.remove("expanded");
-                body.classList.add("hidden");
-              }
-            }
-          });
+      // Use event delegation for todo toggle (more robust than binding to specific element)
+      document.addEventListener("click", function(e) {
+        var target = e.target;
+        if (!target || !(target instanceof Element)) return;
+        var toggle = target.closest("#todo-progress-toggle");
+        if (!toggle) return;
+        e.preventDefault();
+        e.stopPropagation();
+        todoExpanded = !todoExpanded;
+        var prog = document.getElementById("todo-progress");
+        var body = document.getElementById("todo-progress-body");
+        if (prog && body) {
+          if (todoExpanded) {
+            prog.classList.add("expanded");
+            body.classList.remove("hidden");
+          } else {
+            prog.classList.remove("expanded");
+            body.classList.add("hidden");
+          }
         }
-      })();
+      });
+
+      function updateChatStatusBar(chatOutput, session) {
+        if (!chatOutput || !session) return;
+        var existing = chatOutput.querySelector(".chat-status-bar");
+        var isRunning = session.status === "running";
+        var statusClass = isRunning ? "running" : "ended";
+        var statusText = isRunning ? "运行中…" : "已结束";
+        var html = '<div class="chat-status-bar ' + statusClass + '"><span class="chat-status-dot"></span>' + statusText + '</div>';
+        if (existing) {
+          var wasRunning = existing.classList.contains("running");
+          if (wasRunning !== isRunning) {
+            existing.outerHTML = html;
+          }
+        } else {
+          chatOutput.insertAdjacentHTML("beforeend", html);
+        }
+      }
 
       function updateTodoProgress(messages) {
         var todos = null;
@@ -7192,7 +7295,9 @@ export function renderApp(configPath: string): string {
           }
         }
 
-        return '<div class="tool-use-card ' + statusClass + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +
+        // Default to collapsed state (except when loading/executing)
+        var collapsedClass = statusClass !== "loading" ? " collapsed" : "";
+        return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +
           '<div class="tool-use-header" data-tool-toggle>' +
             '<span class="tool-use-icon">' + statusIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(toolName) + '</span>' +
