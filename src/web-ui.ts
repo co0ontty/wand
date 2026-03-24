@@ -95,8 +95,8 @@ export function renderApp(configPath: string): string {
       border-bottom: 1px solid var(--border-subtle);
       backdrop-filter: blur(18px);
       flex-shrink: 0;
-      position: relative;
-      z-index: 20;
+      position: sticky;
+      z-index: 30;
       padding-left: 0;
       transition: padding-left var(--transition-normal);
     }
@@ -656,7 +656,7 @@ export function renderApp(configPath: string): string {
       border-radius: var(--radius-lg);
       border: 1px solid rgba(122, 91, 64, 0.35);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-soft);
-      position: relative;
+      position: sticky;
     }
 
     .terminal-container.active { display: flex; }
@@ -705,7 +705,7 @@ export function renderApp(configPath: string): string {
       min-height: 0;
       overflow: hidden;
       padding: 0 18px 14px;
-      position: relative;
+      position: sticky;
     }
 
     .chat-container.active { display: flex; }
@@ -1370,19 +1370,20 @@ export function renderApp(configPath: string): string {
     .token-type { color: #d5a35b; }
 
     .input-panel {
-      background: rgba(255, 251, 245, 0.78);
+      background: rgba(255, 251, 245, 0.92);
       border-top: 1px solid var(--border-subtle);
-      padding: 14px 18px;
-      backdrop-filter: blur(12px);
+      padding: 12px 16px;
+      backdrop-filter: blur(16px);
       flex-shrink: 0;
-      position: relative;
-      z-index: 10;
+      position: sticky;
+      bottom: 0;
+      z-index: 30;
     }
 
-    .input-row { display: flex; gap: 10px; align-items: flex-end; }
-    .input-field { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .input-row { display: flex; gap: 10px; align-items: flex-end; max-width: 100%; }
+    .input-field { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; }
     .input-label { font-size: 0.6875rem; color: var(--text-muted); font-weight: 500; }
-    .input-textarea-wrap { position: relative; }
+    .input-textarea-wrap { position: relative; width: 100%; }
 
     /* Folder picker styles */
     .folder-picker-container {
@@ -1583,7 +1584,7 @@ export function renderApp(configPath: string): string {
 
     /* Simplified compact folder picker for new sessions */
     .folder-picker-compact {
-      position: relative;
+      position: sticky;
       margin-bottom: 8px;
     }
     .folder-picker-compact-row {
@@ -1651,21 +1652,22 @@ export function renderApp(configPath: string): string {
     /* Working directory indicator embedded in input box */
     .working-dir-indicator {
       position: absolute;
-      left: 12px;
-      bottom: 6px;
+      left: 10px;
+      bottom: 5px;
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      padding: 2px 8px;
+      padding: 2px 6px;
       background: rgba(197, 101, 61, 0.08);
       border-radius: 4px;
-      font-size: 0.6875rem;
+      font-size: 0.65rem;
       font-family: var(--font-mono);
       color: var(--text-muted);
       cursor: pointer;
       transition: all var(--transition-fast);
-      max-width: 200px;
+      max-width: 180px;
       z-index: 2;
+      pointer-events: auto;
     }
     .working-dir-indicator:hover {
       background: var(--accent-muted);
@@ -1684,41 +1686,43 @@ export function renderApp(configPath: string): string {
     .input-textarea {
       font-family: var(--font-mono);
       font-size: 0.875rem;
-      background: rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.8);
       border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
       color: var(--text-primary);
-      padding: 11px 110px 11px 14px;
+      padding: 10px 120px 10px 12px;
       outline: none;
       resize: none;
-      min-height: 48px;
-      max-height: 160px;
+      min-height: 44px;
+      max-height: 140px;
       width: 100%;
       overflow-y: hidden;
-      transition: border-color var(--transition-fast), height 0.1s ease, box-shadow var(--transition-fast);
+      transition: border-color var(--transition-fast), height 0.1s ease, box-shadow var(--transition-fast), background var(--transition-fast);
       box-sizing: border-box;
-      line-height: 1.5;
+      line-height: 1.45;
     }
 
     .input-textarea:focus {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-muted);
-      background: rgba(255, 255, 255, 0.85);
+      box-shadow: 0 0 0 2px var(--accent-muted);
+      background: rgba(255, 255, 255, 0.95);
     }
     .input-textarea::placeholder { color: var(--text-muted); }
     .input-textarea.has-dir-indicator {
-      padding-bottom: 30px;
-      min-height: 64px;
+      padding-bottom: 28px;
+      min-height: 60px;
     }
 
     .input-inline-controls {
       position: absolute;
-      right: 10px;
-      top: 8px;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       pointer-events: none;
+      max-width: calc(100% - 100px);
     }
 
     .input-inline-controls > * {
@@ -1729,16 +1733,20 @@ export function renderApp(configPath: string): string {
     /* Chat mode select in input */
     .chat-mode-select {
       font-family: var(--font-sans);
-      font-size: 0.75rem;
+      font-size: 0.725rem;
       font-weight: 500;
-      padding: 4px 8px;
+      padding: 3px 6px;
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-subtle);
-      background: rgba(255, 255, 255, 0.8);
+      background: rgba(255, 255, 255, 0.85);
       color: var(--text-secondary);
       cursor: pointer;
       transition: all var(--transition-fast);
-      min-height: 28px;
+      min-height: 26px;
+      max-width: 100px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .chat-mode-select:hover {
       border-color: var(--accent);
@@ -1755,7 +1763,7 @@ export function renderApp(configPath: string): string {
       bottom: 0;
       left: 0;
       right: 0;
-      z-index: 20;
+      z-index: 30;
       background: var(--bg-secondary);
       border-top: 1px solid var(--border-subtle);
       padding: 12px 14px;
@@ -1805,12 +1813,13 @@ export function renderApp(configPath: string): string {
       gap: 8px;
       flex-shrink: 0;
       align-items: center;
-      margin-bottom: 2px;
+      margin-bottom: 0;
     }
     .input-actions .btn {
-      min-width: 76px;
-      padding: 11px 16px;
+      min-width: 70px;
+      padding: 9px 14px;
       font-weight: 600;
+      white-space: nowrap;
     }
     .btn-send {
       background: linear-gradient(180deg, #5a8f5f 0%, #4a7a4f 100%);
@@ -2124,7 +2133,7 @@ export function renderApp(configPath: string): string {
       padding-right: 36px;
     }
 
-    .suggestions-wrap { position: relative; }
+    .suggestions-wrap { position: sticky; }
 
     .suggestions {
       position: absolute;
@@ -2331,7 +2340,7 @@ export function renderApp(configPath: string): string {
         grid-template-areas: "menu logo actions";
         align-items: center;
         gap: 6px;
-        min-height: 48px;
+        min-height: 44px;
         padding: 6px 10px;
         padding-top: max(6px, env(safe-area-inset-top, 0px));
       }
@@ -2403,7 +2412,7 @@ export function renderApp(configPath: string): string {
         align-items: center;
         gap: 6px;
         flex-shrink: 0;
-        min-height: 48px;
+        min-height: 44px;
       }
       .terminal-title {
         flex-direction: row;
@@ -2425,16 +2434,16 @@ export function renderApp(configPath: string): string {
 
       /* 移动端输入面板 - 虚拟键盘优化 */
       .input-panel {
-        position: relative;
-        z-index: 20;
-        padding: 10px;
-        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-        box-shadow: 0 -4px 16px rgba(89, 58, 32, 0.06);
+        position: sticky;
+        z-index: 30;
+        padding: 8px 10px;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+        box-shadow: 0 -2px 12px rgba(89, 58, 32, 0.08);
         flex-shrink: 0;
       }
 
-      .input-row { flex-direction: column; align-items: stretch; gap: 8px; }
-      .input-field { gap: 6px; min-width: 0; }
+      .input-row { flex-direction: column; align-items: stretch; gap: 8px; max-width: 100%; }
+      .input-field { gap: 6px; min-width: 0; max-width: 100%; }
       .input-label { font-size: 0.625rem; }
 
       /* 移动端输入按钮 - 44px触摸区域 */
@@ -2447,7 +2456,7 @@ export function renderApp(configPath: string): string {
       .input-actions .btn {
         flex: 1;
         min-width: 0;
-        min-height: 48px;
+        min-height: 44px;
         font-size: 0.8125rem;
         font-weight: 600;
       }
@@ -2465,15 +2474,15 @@ export function renderApp(configPath: string): string {
       }
 
       .input-textarea {
-        min-height: 48px;
-        padding: 12px 90px 12px 12px;
+        min-height: 44px;
+        padding: 10px 85px 10px 10px;
         font-size: 16px;
       }
 
       .input-inline-controls {
-        top: 10px;
-        right: 10px;
-        transform: none;
+        top: 50%;
+        right: 6px;
+        transform: translateY(-50%);
       }
 
       .chat-mode-select {
@@ -2487,12 +2496,12 @@ export function renderApp(configPath: string): string {
         right: 0;
         bottom: calc(100% + 8px);
         width: min(200px, calc(100vw - 20px));
-        padding: 10px;
+        padding: 8px 10px;
       }
 
       /* 浮动面板按钮 - 触摸优化 */
       .floating-pad-grid .btn {
-        min-height: 48px;
+        min-height: 44px;
         font-size: 0.8125rem;
       }
 
@@ -2543,7 +2552,7 @@ export function renderApp(configPath: string): string {
 
       .folder-picker {
         padding: 10px 12px;
-        min-height: 48px;
+        min-height: 44px;
       }
 
       .folder-picker-input {
@@ -2557,12 +2566,12 @@ export function renderApp(configPath: string): string {
 
       .folder-picker-item {
         padding: 12px;
-        min-height: 48px;
+        min-height: 44px;
       }
 
       .folder-recent-item {
         padding: 10px 12px;
-        min-height: 48px;
+        min-height: 44px;
       }
 
       .folder-picker-compact-row {
@@ -2615,7 +2624,7 @@ export function renderApp(configPath: string): string {
 
       .tool-card {
         padding: 14px;
-        min-height: 48px;
+        min-height: 44px;
       }
     }
 
@@ -2623,7 +2632,7 @@ export function renderApp(configPath: string): string {
     @media (min-width: 391px) and (max-width: 420px) {
       .topbar {
         padding: 6px 10px;
-        min-height: 48px;
+        min-height: 44px;
         gap: 6px;
       }
 
@@ -2642,12 +2651,12 @@ export function renderApp(configPath: string): string {
         min-height: 40vh;
         max-height: 55vh;
         margin: 8px;
-        padding: 10px;
+        padding: 8px 10px;
       }
 
       .input-panel {
-        padding: 10px;
-        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        padding: 8px 10px;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
       }
 
       .input-actions { gap: 8px; }
@@ -2657,7 +2666,7 @@ export function renderApp(configPath: string): string {
       .floating-pad {
         width: calc(100vw - 20px);
         right: 10px;
-        padding: 10px;
+        padding: 8px 10px;
       }
 
       .floating-pad-grid .btn { min-height: 48px; font-size: 0.8125rem; }
@@ -2740,7 +2749,7 @@ export function renderApp(configPath: string): string {
       .floating-pad {
         width: calc(100vw - 16px);
         right: 8px;
-        padding: 10px;
+        padding: 8px 10px;
         bottom: calc(100% + 6px);
       }
 
@@ -2986,7 +2995,7 @@ export function renderApp(configPath: string): string {
       margin: 0 0 20px;
     }
     .blank-chat-input-wrap {
-      position: relative;
+      position: sticky;
       margin-bottom: 14px;
     }
     .blank-chat-input {
@@ -3473,6 +3482,9 @@ export function renderApp(configPath: string): string {
                     '<button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button">' +
                       '<span class="tool-icon">⚡</span>Codex' +
                     '</button>' +
+                    '<button class="blank-chat-tool-btn" id="welcome-tool-folder" type="button" title="选择工作目录">' +
+                      '<span class="tool-icon">📎</span>目录' +
+                    '</button>' +
                   '</div>' +
                   '<p class="blank-chat-hint">按 Enter 发送消息，或点击上方按钮快速开始</p>' +
                 '</div>' +
@@ -3481,8 +3493,6 @@ export function renderApp(configPath: string): string {
               '<div id="chat-output" class="chat-container' + (state.selectedId ? "" : " hidden") + (state.selectedId && state.currentView === "chat" ? " active" : "") + '"></div>' +
               '<div class="input-panel">' +
                 '<div class="input-row">' +
-                  // Folder icon button (only for new sessions)
-                  (!state.selectedId ? '<button id="folder-picker-btn" class="folder-icon-btn" type="button" title="选择工作目录">📁</button>' : '') +
                   '<div class="input-field input-field-full">' +
                     '<div class="input-textarea-wrap">' +
                       '<textarea id="input-box" class="input-textarea" placeholder="输入你的问题，按 Enter 发送..." rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
@@ -3940,6 +3950,10 @@ export function renderApp(configPath: string): string {
           welcomeCodexBtn.addEventListener("click", function() {
             quickStartSession("codex");
           });
+        }
+        var welcomeFolderBtn = document.getElementById("welcome-tool-folder");
+        if (welcomeFolderBtn) {
+          welcomeFolderBtn.addEventListener("click", openFolderPickerWithInitialPath);
         }
 
         var sessionsList = document.getElementById("sessions-list");
@@ -4482,22 +4496,26 @@ export function renderApp(configPath: string): string {
         }
 
         // Folder picker modal functionality
-        var folderPickerBtn = document.getElementById("folder-picker-btn");
         var folderPickerModal = document.getElementById("folder-picker-modal");
         var closeFolderPicker = document.getElementById("close-folder-picker");
 
-        if (folderPickerBtn && folderPickerModal) {
-          folderPickerBtn.addEventListener("click", function() {
-            folderPickerModal.classList.remove("hidden");
-            // Set initial path in input
-            if (folderPickerInput) {
-              folderPickerInput.value = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
-            }
-            // Load initial folders
-            var initialPath = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
-            loadFolderSuggestions(initialPath);
-            renderBreadcrumb(initialPath);
-          });
+        function openFolderPickerWithInitialPath() {
+          if (!folderPickerModal) return;
+          folderPickerModal.classList.remove("hidden");
+          // Set initial path in input
+          if (folderPickerInput) {
+            folderPickerInput.value = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+          }
+          // Load initial folders
+          var initialPath = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+          loadFolderSuggestions(initialPath);
+          renderBreadcrumb(initialPath);
+        }
+
+        // Welcome screen folder button
+        var welcomeFolderBtn = document.getElementById("welcome-tool-folder");
+        if (welcomeFolderBtn) {
+          welcomeFolderBtn.addEventListener("click", openFolderPickerWithInitialPath);
         }
 
         if (closeFolderPicker && folderPickerModal) {
@@ -6025,7 +6043,7 @@ export function renderApp(configPath: string): string {
 
         var vv = window.visualViewport;
         var inputPanel = document.querySelector('.input-panel');
-        var appContainer = document.querySelector('.app-container');
+        var chatMessages = document.querySelector('.chat-messages');
         var lastHeight = vv.height;
 
         function updateViewport() {
@@ -6035,21 +6053,11 @@ export function renderApp(configPath: string): string {
           var isKeyboardOpen = offsetBottom > 50;
 
           if (isKeyboardOpen) {
-            // Keyboard is open - adjust layout
-            inputPanel.style.transform = 'translateY(-' + offsetBottom + 'px)';
-            inputPanel.style.position = 'relative';
-            inputPanel.style.zIndex = '100';
-
-            // Add padding to main content to prevent overlap
-            if (appContainer) {
-              appContainer.style.paddingBottom = offsetBottom + 'px';
-            }
-          } else {
-            // Keyboard is closed - reset layout
-            inputPanel.style.transform = '';
-            inputPanel.style.zIndex = '';
-            if (appContainer) {
-              appContainer.style.paddingBottom = '';
+            // Keyboard is open - scroll chat to bottom
+            if (chatMessages) {
+              setTimeout(function() {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+              }, 100);
             }
           }
 
