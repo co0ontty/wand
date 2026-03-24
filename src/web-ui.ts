@@ -750,22 +750,6 @@ export function renderApp(configPath: string): string {
       margin: 8px 0;
     }
 
-    .thinking-card {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 16px;
-      background: linear-gradient(135deg, rgba(99, 101, 103, 0.08) 0%, rgba(150, 152, 155, 0.06) 100%);
-      border: 1px solid rgba(150, 152, 155, 0.2);
-      border-radius: var(--radius-lg);
-      animation: thinkingPulse 2s ease-in-out infinite;
-    }
-
-    @keyframes thinkingPulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.85; transform: scale(1.02); }
-    }
-
     .thinking-icon {
       font-size: 1.25rem;
       animation: thinkingSpin 3s linear infinite;
@@ -1046,7 +1030,11 @@ export function renderApp(configPath: string): string {
       border-radius: var(--radius-md);
       border: 1px solid rgba(138, 108, 178, 0.2);
       background: linear-gradient(135deg, rgba(138, 108, 178, 0.08) 0%, rgba(138, 108, 178, 0.04) 100%);
-      overflow: hidden;
+      /* Don't use overflow:hidden — <details> manages visibility, and
+         overflow:hidden on a flex container clips children like thinking-body */
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
     }
     .thinking-card.enhanced[open] {
       background: linear-gradient(135deg, rgba(138, 108, 178, 0.12) 0%, rgba(138, 108, 178, 0.06) 100%);
@@ -1058,6 +1046,8 @@ export function renderApp(configPath: string): string {
       padding: 12px 16px;
       cursor: pointer;
       list-style: none;
+      width: 100%;
+      box-sizing: border-box;
     }
     .thinking-header::-webkit-details-marker {
       display: none;
@@ -1095,12 +1085,16 @@ export function renderApp(configPath: string): string {
       padding: 12px 16px;
       background: rgba(255, 255, 255, 0.3);
       border-top: 1px solid rgba(138, 108, 178, 0.1);
+      width: 100%;
+      box-sizing: border-box;
     }
     .thinking-card.enhanced .thinking-text {
       font-size: 0.8125rem;
       line-height: 1.6;
       color: var(--text-secondary);
       white-space: pre-wrap;
+      overflow-wrap: break-word;
+      word-break: break-word;
     }
     .tool-result-error .tool-result-header {
       background: rgba(178, 79, 69, 0.08);
