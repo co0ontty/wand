@@ -715,6 +715,24 @@ export class ProcessManager extends EventEmitter {
         }
         break;
       }
+      case "user": {
+        // User message — contains tool_result blocks from tool execution
+        // These should be appended to the assistant message's content
+        const msg = event.message;
+        if (msg?.content && Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block && typeof block === "object" && "type" in block) {
+              const blockType = (block as { type: string }).type;
+              // Tool results come as user messages with type "tool_result"
+              if (blockType === "tool_result") {
+                assistantBlocks.push(block as { type: string; [key: string]: unknown });
+                this.appendBlockToOutput(record, block as { type: string; [key: string]: unknown });
+              }
+            }
+          }
+        }
+        break;
+      }
       // system, error, etc. — just log
       default:
         break;

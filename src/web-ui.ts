@@ -867,6 +867,8 @@ export function renderApp(configPath: string): string {
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-sm);
       overflow: hidden;
+      width: 100%;
+      box-sizing: border-box;
     }
     .tool-use-card.enhanced {
       border-radius: var(--radius-md);
@@ -883,6 +885,8 @@ export function renderApp(configPath: string): string {
       font-weight: 500;
       color: var(--text-secondary);
       user-select: none;
+      width: 100%;
+      box-sizing: border-box;
     }
     .tool-use-card.enhanced .tool-use-header {
       padding: 10px 14px;
@@ -925,14 +929,14 @@ export function renderApp(configPath: string): string {
       color: var(--text-muted);
       transition: transform var(--transition-fast);
     }
+    /* Tool use body - expanded by default for better visibility */
     .tool-use-card.enhanced .tool-use-body {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.3s ease;
-    }
-    .tool-use-card.enhanced .tool-use-body.open {
       max-height: 3000px;
       overflow-y: auto;
+    }
+    .tool-use-card.enhanced .tool-use-body.collapsed {
+      max-height: 0;
+      overflow: hidden;
     }
     .tool-use-body {
       padding: 8px 12px;
@@ -956,6 +960,8 @@ export function renderApp(configPath: string): string {
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-sm);
       overflow: hidden;
+      width: 100%;
+      box-sizing: border-box;
     }
     .tool-result-card.enhanced {
       border-radius: var(--radius-md);
@@ -4349,7 +4355,7 @@ export function renderApp(configPath: string): string {
           if (header) {
             var body = header.parentElement.querySelector(".tool-use-body");
             if (body) {
-              body.classList.toggle("open");
+              body.classList.toggle("collapsed");
             }
             return;
           }
