@@ -743,6 +743,18 @@ export function renderApp(configPath: string): string {
       color: var(--text-primary);
     }
 
+    .message-usage {
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid var(--border-subtle);
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
     /* Thinking Card (Deep Thought) */
     .chat-message.thinking {
       align-self: center;
@@ -919,7 +931,8 @@ export function renderApp(configPath: string): string {
       transition: max-height 0.3s ease;
     }
     .tool-use-card.enhanced .tool-use-body.open {
-      max-height: 500px;
+      max-height: 3000px;
+      overflow-y: auto;
     }
     .tool-use-body {
       padding: 8px 12px;
@@ -928,7 +941,7 @@ export function renderApp(configPath: string): string {
     .tool-input {
       margin: 0;
       font-size: 0.75rem;
-      max-height: 200px;
+      max-height: 600px;
       overflow-y: auto;
     }
     .tool-input code {
@@ -1000,7 +1013,7 @@ export function renderApp(configPath: string): string {
     .tool-result-content {
       margin: 0;
       font-size: 0.7rem;
-      max-height: 200px;
+      max-height: 600px;
       overflow-y: auto;
     }
     .tool-result-content code {
@@ -1106,7 +1119,7 @@ export function renderApp(configPath: string): string {
     .tool-result-content {
       margin: 0;
       font-size: 0.7rem;
-      max-height: 200px;
+      max-height: 600px;
       overflow-y: auto;
     }
     .tool-result-content code {
@@ -6577,9 +6590,24 @@ export function renderApp(configPath: string): string {
           '</div>';
         }
 
+        // Build usage indicator for assistant messages
+        var usageHtml = "";
+        if (role === "assistant" && msg.usage) {
+          var u = msg.usage;
+          var parts = [];
+          if (u.inputTokens !== undefined) parts.push("输入 " + u.inputTokens);
+          if (u.outputTokens !== undefined) parts.push("输出 " + u.outputTokens);
+          if (u.cacheReadInputTokens !== undefined && u.cacheReadInputTokens > 0) parts.push("缓存 " + u.cacheReadInputTokens);
+          if (u.totalCostUsd !== undefined) parts.push("$" + u.totalCostUsd.toFixed(4));
+          if (parts.length > 0) {
+            usageHtml = '<div class="message-usage">' + parts.join(" · ") + '</div>';
+          }
+        }
+
         return '<div class="chat-message ' + role + '">' +
           avatar +
           '<div class="chat-message-bubble">' + blocksHtml + '</div>' +
+          usageHtml +
         '</div>';
       }
 

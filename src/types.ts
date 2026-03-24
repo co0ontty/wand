@@ -80,6 +80,14 @@ export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResult
 export interface ConversationTurn {
   role: "user" | "assistant";
   content: ContentBlock[];
+  /** Token usage for this turn (native mode only) */
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    totalCostUsd?: number;
+  };
 }
 
 export interface SessionSnapshot {

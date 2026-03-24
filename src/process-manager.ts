@@ -471,6 +471,8 @@ export class ProcessManager extends EventEmitter {
     let stdoutBuffer = "";
     const assistantBlocks: Array<{ type: string; [key: string]: unknown }> = [];
     let turnSessionId: string | null = null;
+    // Store usage data from result event (attached as a property on the blocks array)
+    (assistantBlocks as unknown as Record<string, unknown>)._lastUsage = null;
 
     // Add assistant placeholder immediately so frontend has both messages during streaming
     const assistantIndex = record.messages.length;
@@ -563,6 +565,19 @@ export class ProcessManager extends EventEmitter {
         record.messages[assistantIndex].content = this.buildContentBlocks(assistantBlocks);
       }
 
+      // Extract and apply token usage from result event
+      const blocksMeta = assistantBlocks as unknown as Record<string, unknown>;
+      const lastUsage = blocksMeta._lastUsage as Record<string, unknown> | null;
+      if (lastUsage) {
+        record.messages[assistantIndex].usage = {
+          inputTokens: lastUsage.input_tokens as number | undefined,
+          outputTokens: lastUsage.output_tokens as number | undefined,
+          cacheReadInputTokens: lastUsage.cache_read_input_tokens as number | undefined,
+          cacheCreationInputTokens: lastUsage.cache_creation_input_tokens as number | undefined,
+          totalCostUsd: lastUsage._totalCostUsd as number | undefined,
+        };
+      }
+
       // Update session ID for multi-turn resume
       if (turnSessionId) {
         record.claudeSessionId = turnSessionId;
@@ -598,7 +613,7 @@ export class ProcessManager extends EventEmitter {
 
   private processJsonEvent(
     record: SessionRecord,
-    event: { type?: string; message?: { role?: string; content?: unknown[] }; content_block?: { type?: string; [key: string]: unknown }; delta?: { type?: string; text?: string; partial_json?: string; thinking?: string }; [key: string]: unknown },
+    event: { type?: string; message?: { role?: string; content?: unknown[] }; content_block?: { type?: string; [key: string]: unknown }; delta?: { type?: string; text?: string; partial_json?: string; thinking?: string }; result?: unknown; usage?: Record<string, unknown>; total_cost_usd?: number; modelUsage?: Record<string, Record<string, unknown>>; [key: string]: unknown },
     assistantBlocks: Array<{ type: string; [key: string]: unknown }>
   ): void {
     switch (event.type) {
@@ -687,6 +702,16 @@ export class ProcessManager extends EventEmitter {
               textBlock.text = resultStr;
             }
           }
+        }
+
+        // Capture token usage from result event (store in assistantBlocks metadata)
+        if (event.usage || event.total_cost_usd) {
+          const usage: Record<string, unknown> = {};
+          if (event.usage) Object.assign(usage, event.usage);
+          if (event.total_cost_usd !== undefined) {
+            usage._totalCostUsd = event.total_cost_usd;
+          }
+          (assistantBlocks as unknown as Record<string, unknown>)._lastUsage = usage;
         }
         break;
       }
