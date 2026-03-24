@@ -6910,6 +6910,7 @@ export function renderApp(configPath: string): string {
         }
 
         // 返回一个 script 标签，用于更新对应的 tool-use-card
+        // 注意：使用 Unicode 转义 \x3C 避免浏览器误认为外部 script 标签结束
         return '<script data-tool-result-for="' + escapeHtml(toolUseId) + '">' +
           '(function() {' +
             'var card = document.querySelector("[data-tool-use-id=\\"" + ' + toolUseIdJson + ' + "\\"]");' +
@@ -6927,7 +6928,7 @@ export function renderApp(configPath: string): string {
               '}' +
             '}' +
           '})();' +
-        '</script>';
+        '\\x3C/script>';
       }
 
       function getToolIcon(toolName) {
