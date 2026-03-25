@@ -705,7 +705,6 @@ export function renderApp(configPath: string): string {
       min-height: 0;
       overflow: hidden;
       padding: 0 18px 14px;
-      position: sticky;
     }
 
     .chat-container.active { display: flex; }
@@ -768,28 +767,32 @@ export function renderApp(configPath: string): string {
     }
 
     .chat-message-bubble {
-      padding: 11px 15px;
+      padding: 8px 12px;
       border-radius: var(--radius-md);
       font-size: 0.875rem;
       line-height: 1.6;
       word-wrap: break-word;
       white-space: pre-wrap;
-      box-shadow: 0 1px 4px rgba(89, 58, 32, 0.08);
     }
 
     .chat-message.user .chat-message-bubble {
       background: linear-gradient(135deg, #c5653d 0%, #a95130 100%);
       color: white;
-      border-bottom-right-radius: 6px;
+      border-radius: 14px 14px 4px 14px;
       font-family: var(--font-mono);
       font-size: 0.8125rem;
+      max-width: 85%;
+      overflow-wrap: break-word;
+      word-break: break-word;
     }
 
     .chat-message.assistant .chat-message-bubble {
-      background: rgba(255, 251, 245, 0.95);
-      border: 1px solid var(--border-subtle);
-      border-bottom-left-radius: 6px;
+      background: transparent;
       color: var(--text-primary);
+      padding: 0;
+      max-width: 100%;
+      white-space: pre-wrap;
+      word-wrap: break-word;
     }
 
     .message-usage {
@@ -1341,13 +1344,8 @@ export function renderApp(configPath: string): string {
     .token-type { color: #d5a35b; }
 
     .input-panel {
-      background: rgba(255, 251, 245, 0.92);
-      border-top: 1px solid var(--border-subtle);
       padding: 10px 16px;
-      backdrop-filter: blur(16px);
       flex-shrink: 0;
-      position: sticky;
-      bottom: 0;
       z-index: 30;
     }
 
@@ -1380,6 +1378,22 @@ export function renderApp(configPath: string): string {
       align-items: center;
       gap: 8px;
     }
+    .queue-counter {
+      font-size: 0.6875rem;
+      color: var(--accent);
+      background: var(--accent-muted);
+      padding: 2px 8px;
+      border-radius: 10px;
+      white-space: nowrap;
+      font-weight: 600;
+      animation: queuePulse 1.5s ease-in-out infinite;
+    }
+    .queue-counter.hidden { display: none; }
+    @keyframes queuePulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
     .input-hint {
       font-size: 0.6875rem;
       color: var(--text-muted);
@@ -1394,10 +1408,8 @@ export function renderApp(configPath: string): string {
 
     /* Todo progress bar */
     .todo-progress {
-      margin-bottom: 8px;
-      background: rgba(255, 255, 255, 0.75);
-      border: 1px solid var(--border-subtle);
-      border-radius: 14px;
+      margin-bottom: 6px;
+      background: transparent;
       overflow: hidden;
       transition: all var(--transition-fast);
     }
@@ -1406,14 +1418,15 @@ export function renderApp(configPath: string): string {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 7px 12px;
+      padding: 4px 8px;
       cursor: pointer;
       user-select: none;
       gap: 8px;
+      border-radius: 10px;
       transition: background var(--transition-fast);
     }
     .todo-progress-header:hover {
-      background: rgba(246, 241, 232, 0.5);
+      background: rgba(197, 101, 61, 0.08);
     }
     .todo-progress-left {
       display: flex;
@@ -2606,11 +2619,9 @@ export function renderApp(configPath: string): string {
 
       /* 移动端输入面板 - 虚拟键盘优化 */
       .input-panel {
-        position: sticky;
         z-index: 30;
         padding: 8px 10px;
         padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-        box-shadow: 0 -2px 12px rgba(89, 58, 32, 0.08);
         flex-shrink: 0;
       }
 
@@ -3347,6 +3358,7 @@ export function renderApp(configPath: string): string {
         resizeTimer: null,
         inputQueue: Promise.resolve(),
         pendingMessages: [], // WebSocket 断线期间的消息队列
+        messageQueue: [], // 用户消息排队等待发送
         drafts: {},
         isSyncingInputBox: false,
         loginPending: false,
@@ -3684,6 +3696,7 @@ export function renderApp(configPath: string): string {
                       '</select>' +
                     '</div>' +
                     '<div class="input-composer-right">' +
+                      '<span id="queue-counter" class="queue-counter hidden">队列: 0</span>' +
                       '<span class="input-hint">Enter 发送 · Shift+Enter 换行</span>' +
                       '<button id="stop-button" class="btn-circle btn-circle-stop' + (state.selectedId ? "" : " hidden") + '" title="停止">' +
                         '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
@@ -6051,7 +6064,17 @@ export function renderApp(configPath: string): string {
 
       function queueDirectInput(input) {
         if (!input || !state.selectedId) return Promise.resolve();
-        state.inputQueue = state.inputQueue.then(function() { return postInput(input); });
+        // Add to message queue for visual feedback
+        state.messageQueue.push(input);
+        updateQueueCounter();
+        state.inputQueue = state.inputQueue.then(function() {
+          return postInput(input).finally(function() {
+            // Remove from queue after sent
+            var idx = state.messageQueue.indexOf(input);
+            if (idx > -1) state.messageQueue.splice(idx, 1);
+            updateQueueCounter();
+          });
+        });
         return state.inputQueue;
       }
 
@@ -6809,6 +6832,18 @@ export function renderApp(configPath: string): string {
         }
       }
 
+      function updateQueueCounter() {
+        var counter = document.getElementById("queue-counter");
+        if (!counter) return;
+        var count = state.messageQueue.length;
+        if (count > 0) {
+          counter.textContent = "队列: " + count;
+          counter.classList.remove("hidden");
+        } else {
+          counter.classList.add("hidden");
+        }
+      }
+
       function attachCopyHandler(el) {
         el.querySelectorAll(".code-copy").forEach(function(btn) {
           btn.addEventListener("click", function() {
@@ -7160,7 +7195,7 @@ export function renderApp(configPath: string): string {
           for (var i = 0; i < msg.content.length; i++) {
             var block = msg.content[i];
             try {
-              blocksHtml += renderContentBlock(block, role, toolResults);
+              blocksHtml += renderContentBlock(block, role, toolResults, i);
             } catch (e) {
               // Render error for individual block
               blocksHtml += '<div class="render-error">消息块渲染失败</div>';
@@ -7195,7 +7230,7 @@ export function renderApp(configPath: string): string {
         '</div>';
       }
 
-      function renderContentBlock(block, role, toolResults) {
+      function renderContentBlock(block, role, toolResults, index) {
         if (!block || !block.type) return "";
 
         switch (block.type) {
@@ -7217,7 +7252,7 @@ export function renderApp(configPath: string): string {
 
           case "tool_use":
             var toolResult = toolResults[block.id];
-            return renderToolUseCard(block, toolResult);
+            return renderToolUseCard(block, toolResult, index);
 
           case "tool_result":
             // tool_result 已经在 tool_use 渲染时处理了，不再单独渲染
@@ -7228,9 +7263,9 @@ export function renderApp(configPath: string): string {
         }
       }
 
-      function renderToolUseCard(block, toolResult) {
+      function renderToolUseCard(block, toolResult, index) {
         var toolName = block.name || "unknown";
-        var toolId = block.id || "";
+        var toolId = block.id || "tool-" + toolName + "-" + (typeof index === "number" ? index : 0);
         var toolIcon = getToolIcon(toolName);
 
         // 检测是否是文件操作

@@ -213,6 +213,14 @@ export class ProcessManager extends EventEmitter {
       return this.snapshot(record);
     }
 
+    // For default mode with Claude commands and initial input, also use JSON chat turn
+    // This ensures chat view works correctly from the first message
+    if (initialInput && this.isClaudeCommand(command) && this.isRealChatInput(initialInput)) {
+      const cleanInput = initialInput.replace(/[\r\n]+$/, "").trim();
+      this.runJsonChatTurn(record, cleanInput);
+      return this.snapshot(record);
+    }
+
     const shellArgs = this.buildShellArgs(processedCommand);
     const child = pty.spawn(this.config.shell, shellArgs, {
       cwd: resolvedCwd,
