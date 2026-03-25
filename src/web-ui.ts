@@ -4172,8 +4172,40 @@ export function renderApp(configPath: string): string {
         '</div>';
       }
 
-      var _docClickBound = false;
+      // Global toggle function for tool card headers — called via onclick attribute
+      window.__tcToggle = function(e, headerEl) {
+        var card = headerEl.closest(".tool-use-card");
+        if (card) card.classList.toggle("collapsed");
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+      };
+      // Global handler for ask-user option buttons — called via onclick
+      window.__askOption = function(btnEl) {
+        var optionLabel = btnEl.dataset.optionLabel;
+        if (optionLabel && state.selectedId) {
+          btnEl.classList.add("selected");
+          var allOptions = document.querySelectorAll(".ask-user-option");
+          allOptions.forEach(function(opt) {
+            opt.classList.add("selected");
+            opt.style.pointerEvents = "none";
+          });
+          var cardBody = btnEl.closest(".tool-use-card.ask-user");
+          if (cardBody) {
+            var sentDiv = document.createElement("div");
+            sentDiv.className = "ask-user-answer-sent";
+            sentDiv.innerHTML = "\\u2713 \\u5df2\\u53d1\\u9001: " + escapeHtml(optionLabel);
+            cardBody.appendChild(sentDiv);
+          }
+          fetch("/api/sessions/" + state.selectedId + "/input", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ input: optionLabel + "\\n", view: state.currentView })
+          }).catch(function(err) {
+            console.error("[wand] Error sending answer:", err);
+          });
+        }
+      };
       function attachEventListeners() {
+
         var loginButton = document.getElementById("login-button");
         if (loginButton) {
           loginButton.addEventListener("click", login);
@@ -4663,62 +4695,6 @@ export function renderApp(configPath: string): string {
           document.addEventListener("click", function(e) {
             if (!e.target.closest(".folder-picker-container")) {
               hideFolderDropdown();
-            }
-          });
-        }
-
-        // Event delegation for tool card toggle and AskUserQuestion
-        // Guard: register document-level handlers only once (attachEventListeners runs on each render())
-        if (!_docClickBound) {
-          _docClickBound = true;
-          document.addEventListener("click", function(e) {
-            var target = e.target;
-            if (!target || !(target instanceof Element)) return;
-
-            // Tool use card toggle — match header or any child of header
-            var header = target.closest("[data-tool-toggle]");
-            if (header) {
-              e.preventDefault();
-              e.stopPropagation();
-              var card = header.closest(".tool-use-card");
-              if (card) {
-                card.classList.toggle("collapsed");
-              }
-              return;
-            }
-
-            // AskUserQuestion option click
-            var questionOption = target.closest(".ask-user-option");
-            if (questionOption && questionOption instanceof HTMLElement) {
-              var optionLabel = questionOption.dataset.optionLabel;
-              if (optionLabel && state.selectedId) {
-                questionOption.classList.add("selected");
-                var allOptions = document.querySelectorAll(".ask-user-option");
-                allOptions.forEach(function(opt) {
-                  opt.classList.add("selected");
-                  opt.style.pointerEvents = "none";
-                });
-                var cardBody = questionOption.closest(".tool-use-card.ask-user");
-                if (cardBody) {
-                  var sentDiv = document.createElement("div");
-                  sentDiv.className = "ask-user-answer-sent";
-                  sentDiv.innerHTML = "\\u2713 \\u5df2\\u53d1\\u9001: " + escapeHtml(optionLabel);
-                  cardBody.appendChild(sentDiv);
-                }
-                fetch("/api/sessions/" + state.selectedId + "/input", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ input: optionLabel + "\\n", view: state.currentView })
-                })
-                .then(function(res) {
-                  if (!res.ok) {
-                    console.error("[wand] Failed to send answer:", res.status);
-                  }
-                })
-                .catch(function(err) {
-                  console.error("[wand] Error sending answer:", err);
-                });
-              }
             }
           });
         }
@@ -7356,14 +7332,14 @@ export function renderApp(configPath: string): string {
               optionsHtml = '<div class="ask-user-options">';
               question.options.forEach(function(opt, idx) {
                 var label = opt.label ? escapeHtml(opt.label) : "选项 " + (idx + 1);
-                optionsHtml += '<button class="ask-user-option" data-option-index="' + idx + '" data-option-label="' + escapeHtml(label) + '">' +
+                optionsHtml += '<button class="ask-user-option" data-option-index="' + idx + '" data-option-label="' + escapeHtml(label) + '" onclick="__askOption(this)">' +
                   '<div class="ask-user-option-label">' + label + '</div>' +
                 '</button>';
               });
               optionsHtml += '</div>';
             }
             return '<div class="tool-use-card ask-user" data-tool-use-id="' + escapeHtml(toolId) + '">' +
-              '<div class="tool-use-header" data-tool-toggle>' +
+              '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
                 '<span class="tool-use-icon">❓</span>' +
                 '<span class="tool-use-name">提问</span>' +
               '</div>' +
@@ -7429,7 +7405,7 @@ export function renderApp(configPath: string): string {
         // Default to collapsed state (except when loading/executing)
         var collapsedClass = statusClass !== "loading" ? " collapsed" : "";
         return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +
-          '<div class="tool-use-header" data-tool-toggle>' +
+          '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
             '<span class="tool-use-icon">' + statusIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(titleText) + '</span>' +
             subtitleHtml +

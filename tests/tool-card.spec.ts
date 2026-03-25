@@ -22,7 +22,7 @@ test.describe("Tool Card — Click Toggle", () => {
         <div class="chat-message assistant">
           <div class="chat-message-bubble">
             <div class="tool-use-card success collapsed" data-tool-use-id="test-tool-1">
-              <div class="tool-use-header" data-tool-toggle>
+              <div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">
                 <span class="tool-use-icon">✅</span>
                 <span class="tool-use-name">Test Tool</span>
                 <span class="tool-use-toggle">▼</span>
@@ -73,7 +73,7 @@ test.describe("Tool Card — Click Toggle", () => {
           <div class="chat-message assistant">
             <div class="chat-message-bubble">
               <div class="tool-use-card success collapsed" data-tool-use-id="test-tool-2">
-                <div class="tool-use-header" data-tool-toggle>
+                <div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">
                   <span class="tool-use-icon">✅</span>
                   <span class="tool-use-name">Test Tool</span>
                   <span class="tool-use-toggle">▼</span>
