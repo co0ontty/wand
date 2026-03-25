@@ -4172,6 +4172,7 @@ export function renderApp(configPath: string): string {
         '</div>';
       }
 
+      var _docClickBound = false;
       function attachEventListeners() {
         var loginButton = document.getElementById("login-button");
         if (loginButton) {
@@ -4666,6 +4667,62 @@ export function renderApp(configPath: string): string {
           });
         }
 
+        // Event delegation for tool card toggle and AskUserQuestion
+        // Guard: register document-level handlers only once (attachEventListeners runs on each render())
+        if (!_docClickBound) {
+          _docClickBound = true;
+          document.addEventListener("click", function(e) {
+            var target = e.target;
+            if (!target || !(target instanceof Element)) return;
+
+            // Tool use card toggle — match header or any child of header
+            var header = target.closest("[data-tool-toggle]");
+            if (header) {
+              e.preventDefault();
+              e.stopPropagation();
+              var card = header.closest(".tool-use-card");
+              if (card) {
+                card.classList.toggle("collapsed");
+              }
+              return;
+            }
+
+            // AskUserQuestion option click
+            var questionOption = target.closest(".ask-user-option");
+            if (questionOption && questionOption instanceof HTMLElement) {
+              var optionLabel = questionOption.dataset.optionLabel;
+              if (optionLabel && state.selectedId) {
+                questionOption.classList.add("selected");
+                var allOptions = document.querySelectorAll(".ask-user-option");
+                allOptions.forEach(function(opt) {
+                  opt.classList.add("selected");
+                  opt.style.pointerEvents = "none";
+                });
+                var cardBody = questionOption.closest(".tool-use-card.ask-user");
+                if (cardBody) {
+                  var sentDiv = document.createElement("div");
+                  sentDiv.className = "ask-user-answer-sent";
+                  sentDiv.innerHTML = "\\u2713 \\u5df2\\u53d1\\u9001: " + escapeHtml(optionLabel);
+                  cardBody.appendChild(sentDiv);
+                }
+                fetch("/api/sessions/" + state.selectedId + "/input", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ input: optionLabel + "\\n", view: state.currentView })
+                })
+                .then(function(res) {
+                  if (!res.ok) {
+                    console.error("[wand] Failed to send answer:", res.status);
+                  }
+                })
+                .catch(function(err) {
+                  console.error("[wand] Error sending answer:", err);
+                });
+              }
+            }
+          });
+        }
+
         function updateSelectedIndex() {
           folderItems.forEach(function(item, index) {
             item.classList.toggle("active", index === selectedIndex);
@@ -4795,62 +4852,6 @@ export function renderApp(configPath: string): string {
             }
           });
         }
-
-        // Event delegation for tool card toggle
-        document.addEventListener("click", function(e) {
-          var target = e.target;
-          if (!target || !(target instanceof Element)) return;
-
-          // Tool use card toggle — match header or any child of header
-          var header = target.closest("[data-tool-toggle]");
-          if (header) {
-            e.preventDefault();
-            e.stopPropagation();
-            var card = header.closest(".tool-use-card");
-            if (card) {
-              card.classList.toggle("collapsed");
-            }
-            return;
-          }
-
-          // AskUserQuestion option click
-          var questionOption = target.closest(".ask-user-option");
-          if (questionOption && questionOption instanceof HTMLElement) {
-            var optionLabel = questionOption.dataset.optionLabel;
-            if (optionLabel && state.selectedId) {
-              // Mark as selected
-              questionOption.classList.add("selected");
-              // Disable all options
-              var allOptions = document.querySelectorAll(".ask-user-option");
-              allOptions.forEach(function(opt) {
-                opt.classList.add("selected");
-                opt.style.pointerEvents = "none";
-              });
-              // Show sent indicator
-              var cardBody = questionOption.closest(".tool-use-card.ask-user");
-              if (cardBody) {
-                var sentDiv = document.createElement("div");
-                sentDiv.className = "ask-user-answer-sent";
-                sentDiv.innerHTML = "✓ 已发送: " + escapeHtml(optionLabel);
-                cardBody.appendChild(sentDiv);
-              }
-              // Send answer via input API
-              fetch("/api/sessions/" + state.selectedId + "/input", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ input: optionLabel + "\\n", view: state.currentView })
-              })
-              .then(function(res) {
-                if (!res.ok) {
-                  console.error("[wand] Failed to send answer:", res.status);
-                }
-              })
-              .catch(function(err) {
-                console.error("[wand] Error sending answer:", err);
-              });
-            }
-          }
-        });
 
         initTerminal();
         setupMobileKeyboardHandlers();
@@ -6665,6 +6666,8 @@ export function renderApp(configPath: string): string {
                   if (block.content) contentLen += block.content.length; // tool_result content
                   if (block.id) contentLen += block.id.length; // tool_use id
                   if (block.tool_use_id) contentLen += block.tool_use_id.length; // tool_result id
+                  if (block.description) contentLen += block.description.length; // tool_use description
+                  if (block.input) contentLen += JSON.stringify(block.input).length; // tool_use input
                 }
               } else {
                 totalBlocks += 1;
@@ -6672,7 +6675,7 @@ export function renderApp(configPath: string): string {
               }
             }
           }
-          outputHash = msgCount * 10000 + totalBlocks * 100 + (contentLen % 100);
+          outputHash = msgCount * 100000 + totalBlocks * 1000 + contentLen;
         }
 
         // Force full render if message count changed or explicitly requested
@@ -6696,13 +6699,35 @@ export function renderApp(configPath: string): string {
         // Full render when: forced, no existing messages, or message count decreased/changed
         var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
 
-        if (needsFullRender) {
-          // Full render for first load / restore / session switch — no animation to avoid flicker
-          // With column-reverse, render messages in reverse order (newest first)
+        function saveToolCardStates(container) {
+          var states = {};
+          if (!container) return states;
+          container.querySelectorAll(".tool-use-card[data-tool-use-id]").forEach(function(c) {
+            var tid = c.getAttribute("data-tool-use-id");
+            if (tid) states[tid] = c.classList.contains("collapsed");
+          });
+          return states;
+        }
+        function restoreToolCardStates(container, states) {
+          if (!container) return;
+          container.querySelectorAll(".tool-use-card[data-tool-use-id]").forEach(function(c) {
+            var tid = c.getAttribute("data-tool-use-id");
+            if (tid && tid in states) {
+              if (states[tid]) c.classList.add("collapsed");
+              else c.classList.remove("collapsed");
+            }
+          });
+        }
+        function fullRenderChat() {
+          var saved = existingCount > 0 ? saveToolCardStates(chatMessages) : {};
           chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
+          restoreToolCardStates(chatMessages, saved);
           attachAllCopyHandlers(chatMessages);
-          // column-reverse: scrollTop=0 shows newest messages at the visual bottom
           chatMessages.scrollTop = 0;
+        }
+
+        if (needsFullRender) {
+          fullRenderChat();
         } else if (msgCount > existingCount) {
           // New messages added — prepend them (column-reverse means prepend = visual append)
           var newMessages = messages.slice(existingCount);
@@ -6739,34 +6764,16 @@ export function renderApp(configPath: string): string {
                 var newBubble = newEl.querySelector(".chat-message-bubble");
                 // Only update if bubble content actually changed
                 if (newBubble && currentContent.innerHTML !== newBubble.innerHTML) {
-                  // Preserve user-toggled collapsed state on tool cards
-                  var oldCards = firstEl.querySelectorAll(".tool-use-card[data-tool-use-id]");
-                  var toggledState = {};
-                  oldCards.forEach(function(c) {
-                    var tid = c.getAttribute("data-tool-use-id");
-                    if (tid) toggledState[tid] = c.classList.contains("collapsed");
-                  });
+                  var toggledState = saveToolCardStates(firstEl);
                   chatMessages.replaceChild(newEl, firstEl);
-                  // Restore toggled states
-                  var newCards = newEl.querySelectorAll(".tool-use-card[data-tool-use-id]");
-                  newCards.forEach(function(c) {
-                    var tid = c.getAttribute("data-tool-use-id");
-                    if (tid && tid in toggledState) {
-                      if (toggledState[tid]) c.classList.add("collapsed");
-                      else c.classList.remove("collapsed");
-                    }
-                  });
+                  restoreToolCardStates(newEl, toggledState);
                   attachCopyHandler(newEl);
                 }
               }
             }
           }
         } else if (msgCount < existingCount) {
-          // Message count decreased (session switched or output truncated) - full re-render without animation
-          chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
-          attachAllCopyHandlers(chatMessages);
-          // column-reverse: scrollTop=0 shows newest
-          chatMessages.scrollTop = 0;
+          fullRenderChat();
         }
 
         // Update todo progress bar from latest messages
@@ -7369,7 +7376,7 @@ export function renderApp(configPath: string): string {
         }
 
         // 构建卡片标题：优先用 description，其次用 generateInputSummary
-        var description = block.description || "";
+        var description = block.description || (block.input && block.input.description) || "";
         var summary = generateInputSummary(block.name, block.input);
 
         // 卡片标题显示逻辑：有 description 时显示 description 作为标题，summary 作为次要信息
