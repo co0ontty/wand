@@ -7303,8 +7303,8 @@ export function renderApp(configPath: string): string {
           }
         }
 
-        // 生成输入内容摘要（不显示完整 JSON）
-        var inputSummary = generateInputSummary(block.name, block.input);
+        // 优先使用 description，否则生成输入内容摘要
+        var description = block.description || generateInputSummary(block.name, block.input);
         // 完整 JSON 内容用于展开后显示
         var fullJson = JSON.stringify(block.input, null, 2);
 
@@ -7337,7 +7337,7 @@ export function renderApp(configPath: string): string {
             '<span class="tool-use-icon">' + statusIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(toolName) + '</span>' +
             fileHtml +
-            (inputSummary ? '<span class="tool-use-summary">· ' + escapeHtml(inputSummary) + '</span>' : '') +
+            (description ? '<span class="tool-use-summary">· ' + escapeHtml(description) + '</span>' : '') +
             '<span class="tool-use-status">' + statusText + '</span>' +
             toggleHtml +
           '</div>' +

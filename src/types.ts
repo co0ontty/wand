@@ -65,6 +65,7 @@ export interface ToolUseBlock {
   type: "tool_use";
   id: string;
   name: string;
+  description?: string;
   input: Record<string, unknown>;
 }
 

@@ -806,6 +806,7 @@ export class ProcessManager extends EventEmitter {
             type: "tool_use" as const,
             id: (b.id as string) || "",
             name: (b.name as string) || "",
+            description: (b.description as string) || "",
             input
           };
         }
