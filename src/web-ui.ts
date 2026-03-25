@@ -1610,6 +1610,15 @@ export function renderApp(configPath: string): string {
     .chat-status-bar.running {
       color: var(--text-secondary);
     }
+    .chat-status-tokens {
+      margin-left: 12px;
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+    }
+    .chat-status-bar.running .chat-status-tokens {
+      color: var(--text-secondary);
+    }
     .chat-status-bar.ended .chat-status-dot {
       background: var(--text-muted);
     }
@@ -3802,6 +3811,7 @@ export function renderApp(configPath: string): string {
             '<div id="floating-controls" class="floating-pad hidden">' +
               '<div class="floating-pad-title">Claude 快捷键</div>' +
               '<div class="floating-pad-grid">' +
+                '<button id="float-stop-btn" class="btn btn-danger" type="button" title="强制停止当前会话">⏹ 停止</button>' +
                 '<button class="btn btn-secondary quick-input" data-input-key="ctrl_c" type="button" title="中断当前操作">Ctrl+C</button>' +
                 '<button class="btn btn-secondary quick-input" data-input-key="ctrl_d" type="button" title="发送 EOF">Ctrl+D</button>' +
                 '<button class="btn btn-secondary quick-input" data-input-key="ctrl_l" type="button" title="清屏">Ctrl+L</button>' +
@@ -4337,6 +4347,13 @@ export function renderApp(configPath: string): string {
         if (floatToggle) floatToggle.addEventListener("click", toggleFloatingControls);
         var floatBackdrop = document.getElementById("floating-backdrop");
         if (floatBackdrop) floatBackdrop.addEventListener("click", hideFloatingControls);
+
+        // Float stop button
+        var floatStopBtn = document.getElementById("float-stop-btn");
+        if (floatStopBtn) floatStopBtn.addEventListener("click", function() {
+          stopSession();
+          hideFloatingControls();
+        });
 
         document.querySelectorAll(".quick-input").forEach(function(btn) {
           btn.addEventListener("click", function() {
@@ -6703,7 +6720,10 @@ export function renderApp(configPath: string): string {
           chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
           restoreToolCardStates(chatMessages, saved);
           attachAllCopyHandlers(chatMessages);
-          chatMessages.scrollTop = 0;
+          // Use requestAnimationFrame to ensure scroll happens after DOM layout
+          requestAnimationFrame(function() {
+            chatMessages.scrollTop = 0;
+          });
         }
 
         if (needsFullRender) {
@@ -6806,10 +6826,40 @@ export function renderApp(configPath: string): string {
         var isRunning = session.status === "running";
         var statusClass = isRunning ? "running" : "ended";
         var statusText = isRunning ? "运行中…" : "已结束";
-        var html = '<div class="chat-status-bar ' + statusClass + '"><span class="chat-status-dot"></span>' + statusText + '</div>';
+
+        // Calculate total token usage from current messages
+        var totalInput = 0;
+        var totalOutput = 0;
+        var totalCache = 0;
+        var totalCost = 0;
+        var messages = state.currentMessages || [];
+        for (var i = 0; i < messages.length; i++) {
+          var msg = messages[i];
+          if (msg.usage) {
+            if (msg.usage.inputTokens) totalInput += msg.usage.inputTokens;
+            if (msg.usage.outputTokens) totalOutput += msg.usage.outputTokens;
+            if (msg.usage.cacheReadInputTokens) totalCache += msg.usage.cacheReadInputTokens;
+            if (msg.usage.totalCostUsd) totalCost += msg.usage.totalCostUsd;
+          }
+        }
+
+        // Build token usage string
+        var tokenParts = [];
+        if (totalInput > 0) tokenParts.push("输入 " + totalInput);
+        if (totalOutput > 0) tokenParts.push("输出 " + totalOutput);
+        if (totalCache > 0) tokenParts.push("缓存 " + totalCache);
+        var tokenHtml = tokenParts.length > 0
+          ? '<span class="chat-status-tokens">' + tokenParts.join(" · ") + '</span>'
+          : "";
+
+        var html = '<div class="chat-status-bar ' + statusClass + '"><span class="chat-status-dot"></span>' + statusText + tokenHtml + '</div>';
+
+        // Always update if we have token data (it changes during streaming)
+        var hasTokenData = totalInput > 0 || totalOutput > 0;
         if (existing) {
           var wasRunning = existing.classList.contains("running");
-          if (wasRunning !== isRunning) {
+          // Update if status changed or if we have new token data
+          if (wasRunning !== isRunning || hasTokenData) {
             existing.outerHTML = html;
           }
         } else {
@@ -6844,14 +6894,20 @@ export function renderApp(configPath: string): string {
         container.classList.remove("hidden");
 
         var completed = 0;
+        var inProgress = 0;
         var activeTask = "";
         for (var k = 0; k < todos.length; k++) {
           if (todos[k].status === "completed") completed++;
-          if (todos[k].status === "in_progress" && !activeTask) {
-            activeTask = todos[k].activeForm || todos[k].content || "";
+          if (todos[k].status === "in_progress") {
+            inProgress++;
+            if (!activeTask) {
+              activeTask = todos[k].activeForm || todos[k].content || "";
+            }
           }
         }
 
+        // 显示当前执行步骤 = 已完成 + 正在进行（如果有）
+        var currentStep = completed + inProgress;
         var allDone = completed === todos.length;
         if (allDone) {
           container.classList.add("all-done");
@@ -6861,7 +6917,7 @@ export function renderApp(configPath: string): string {
         }
 
         var counter = document.getElementById("todo-progress-counter");
-        if (counter) counter.textContent = completed + "/" + todos.length;
+        if (counter) counter.textContent = currentStep + "/" + todos.length;
 
         var task = document.getElementById("todo-progress-task");
         if (task) task.textContent = activeTask;
