@@ -12,27 +12,18 @@ export interface SSLConfig {
   cert: Buffer;
 }
 
-/**
- * Get certificate file paths for a given config directory
- */
-export function getCertificatePaths(configDir: string): CertificatePaths {
+function getCertificatePaths(configDir: string): CertificatePaths {
   return {
     keyPath: path.join(configDir, "server.key"),
     certPath: path.join(configDir, "server.crt")
   };
 }
 
-/**
- * Check if certificates exist
- */
-export function certificatesExist(paths: CertificatePaths): boolean {
+function certificatesExist(paths: CertificatePaths): boolean {
   return existsSync(paths.keyPath) && existsSync(paths.certPath);
 }
 
-/**
- * Load existing certificates
- */
-export function loadCertificates(paths: CertificatePaths): SSLConfig | null {
+function loadCertificates(paths: CertificatePaths): SSLConfig | null {
   try {
     if (!certificatesExist(paths)) {
       return null;
@@ -138,18 +129,6 @@ e0WxR2BqMJsC
   );
 
   return placeholder;
-}
-
-/**
- * Save certificates to disk
- */
-export function saveCertificates(paths: CertificatePaths, ssl: SSLConfig): void {
-  const dir = path.dirname(paths.keyPath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  writeFileSync(paths.keyPath, ssl.key, { mode: 0o600 });
-  writeFileSync(paths.certPath, ssl.cert, { mode: 0o644 });
 }
 
 /**

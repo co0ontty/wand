@@ -64,7 +64,8 @@ Required manual tests:
 - `cert.ts` — HTTPS certificate generation
 - `types.ts` — Shared TypeScript types
 - `message-parser.ts` — Parses PTY output into structured chat messages (strips ANSI, filters noise)
-- `web-ui.ts` — Generates the browser HTML UI
+- `web-ui.ts` — Web UI 入口，重导出 `src/web-ui/` 模块
+- `src/web-ui/` — 模块化的浏览器 UI（index/styles/scripts/utils + content/）
 
 **Execution modes:** `auto-edit`, `default`, `full-access`, `native`. Passed to child processes via environment variables (`WAND_MODE`, `WAND_AUTO_CONFIRM`, `WAND_AUTO_EDIT`).
 - `full-access`: Auto-confirms prompts by detecting confirmation patterns and sending appropriate responses. Adds `--permission-mode acceptEdits` for Claude commands.
@@ -112,17 +113,11 @@ TypeScript with ES modules, 2-space indentation, double quotes, semicolons. Use 
 
 ## Web UI Design
 
-`web-ui.ts` generates a single HTML file with embedded CSS/JS. The design uses warm, earthy tones with cream/beige backgrounds (`#f6f1e8`) and burnt orange accent (`#c5653d`). Typography uses Inter for UI text and Geist Mono for code. CSS variables define the full theme in `:root`.
+`src/web-ui/` 是模块化的浏览器 UI，由 `web-ui.ts` 重导出 `renderApp`。UI 代码拆分为 index/styles/scripts/utils 模块，静态资源在 `content/` 子目录。构建时通过 `build:copy-content` 复制到 dist。
 
-**UI modes:** The UI supports Terminal mode (xterm.js rendering) and Chat mode (Markdown message bubbles). A sidebar drawer provides session history. Floating quick-input controls are available for mobile.
+**UI 模式：** Terminal 模式（xterm.js）和 Chat 模式（Markdown 消息气泡）。侧边栏显示会话历史。
 
-**Input behavior:** The textarea maintains per-session draft state in `state.drafts`. Enter sends; Shift+Enter inserts a newline.
-
-**Recent additions:**
-- Deep thinking card: Shows Claude's thinking state with rotating icon and pulse animation
-- Prompt suggestion card: Displays Claude Code "Try..." suggestions with pulsing effect
-- Improved ANSI escape sequence stripping for cleaner message parsing
-- Debounced chat rendering to reduce flicker during rapid output updates
+**输入行为：** Enter 发送，Shift+Enter 换行。每个会话有独立的草稿状态（`state.drafts`）。
 
 ## Optimization Roadmap
 

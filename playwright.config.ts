@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_PORT = 8544;
 const TEST_CONFIG_PATH = resolve(__dirname, "tests", "test-config.json");
-const BASE_URL = `https://localhost:${TEST_PORT}`;
+const BASE_URL = `http://localhost:${TEST_PORT}`;
 
 export default defineConfig({
   testDir: "./tests",
@@ -30,7 +30,7 @@ export default defineConfig({
   webServer: {
     command: `npm run build && node dist/cli.js web --config ${TEST_CONFIG_PATH}`,
     url: BASE_URL,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120 * 1000,
     ignoreHTTPSErrors: true,
   },

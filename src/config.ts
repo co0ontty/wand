@@ -4,8 +4,8 @@ import path from "node:path";
 import process from "node:process";
 import { ExecutionMode, WandConfig } from "./types.js";
 
-export const DEFAULT_CONFIG_DIR = ".wand";
-export const DEFAULT_CONFIG_FILE = "config.json";
+const DEFAULT_CONFIG_DIR = ".wand";
+const DEFAULT_CONFIG_FILE = "config.json";
 
 export const defaultConfig = (): WandConfig => ({
   host: "0.0.0.0",
@@ -81,11 +81,6 @@ export async function ensureConfig(configPath: string): Promise<WandConfig> {
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
     return config;
   }
-}
-
-export async function loadConfig(configPath: string): Promise<WandConfig> {
-  const raw = await readFile(configPath, "utf8");
-  return mergeWithDefaults(JSON.parse(raw) as Partial<WandConfig>);
 }
 
 export async function saveConfig(configPath: string, config: WandConfig): Promise<void> {

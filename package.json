@@ -10,7 +10,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:copy-content",
+    "build:copy-content": "cp -r src/web-ui/content dist/web-ui/",
     "dev": "tsx src/cli.ts web",
     "check": "tsc --noEmit -p tsconfig.json",
     "pre-release-test": "node scripts/pre-release-test.js",
