@@ -1406,7 +1406,7 @@ export function renderApp(configPath: string): string {
     .input-panel {
       padding: 10px 16px;
       flex-shrink: 0;
-      z-index: 30;
+      z-index: 15;
     }
 
     .input-composer {
