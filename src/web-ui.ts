@@ -5862,9 +5862,13 @@ export function renderApp(configPath: string): string {
 
       function autoResizeInput(el) {
         if (!el) return;
+        // Force synchronous reflow so scrollHeight reflects current content
+        void el.offsetHeight;
         // Temporarily remove min-height and collapse to measure true content height
         el.style.minHeight = "0";
         el.style.height = "0";
+        // Force reflow again after style changes
+        void el.offsetHeight;
         var maxHeight = 160;
         var minHeight = 44;
         var contentHeight = el.scrollHeight;
