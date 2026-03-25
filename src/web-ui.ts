@@ -97,15 +97,49 @@ export function renderApp(configPath: string): string {
       flex-shrink: 0;
       position: sticky;
       z-index: 30;
-      padding-left: 0;
-      transition: padding-left var(--transition-normal);
-    }
-    .topbar.sidebar-open {
-      padding-left: 300px;
     }
 
     .topbar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .topbar-actions { display: flex; align-items: center; gap: 6px; }
+
+    /* Hamburger toggle animation */
+    .sidebar-toggle-btn {
+      position: relative;
+      width: 36px;
+      height: 36px;
+      padding: 0 !important;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .hamburger-icon {
+      width: 18px;
+      height: 14px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .hamburger-icon span {
+      display: block;
+      width: 100%;
+      height: 2px;
+      background: var(--text-primary);
+      border-radius: 1px;
+      transition: transform 0.25s ease, opacity 0.2s ease;
+      transform-origin: center;
+    }
+    .sidebar-toggle-btn.active .hamburger-icon span:nth-child(1) {
+      transform: translateY(6px) rotate(45deg);
+    }
+    .sidebar-toggle-btn.active .hamburger-icon span:nth-child(2) {
+      opacity: 0;
+      transform: scaleX(0);
+    }
+    .sidebar-toggle-btn.active .hamburger-icon span:nth-child(3) {
+      transform: translateY(-6px) rotate(-45deg);
+    }
+
     .logo-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: center; }
     .logo { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.875rem; }
     .logo-icon {
@@ -179,9 +213,12 @@ export function renderApp(configPath: string): string {
 
     .drawer-backdrop {
       position: fixed;
-      inset: 0;
+      top: 52px;
+      left: 0;
+      right: 0;
+      bottom: 0;
       z-index: 24;
-      background: rgba(42, 28, 18, 0.26);
+      background: rgba(42, 28, 18, 0.18);
       opacity: 0;
       pointer-events: none;
       transition: opacity var(--transition-normal);
@@ -194,24 +231,25 @@ export function renderApp(configPath: string): string {
 
     .sidebar {
       position: fixed;
-      top: 0;
+      top: 52px;
       left: 0;
       bottom: 0;
       z-index: 25;
       width: min(300px, calc(100vw - 20px));
-      background: rgba(255, 251, 245, 0.94);
+      background: rgba(255, 251, 245, 0.97);
       border-right: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: column;
       min-height: 0;
       backdrop-filter: blur(18px);
-      box-shadow: 24px 0 56px rgba(89, 58, 32, 0.14);
+      box-shadow: 4px 0 24px rgba(89, 58, 32, 0.08);
       transform: translateX(-100%);
       transition: transform var(--transition-normal);
     }
 
     .sidebar.open {
       transform: translateX(0);
+      box-shadow: 4px 0 32px rgba(89, 58, 32, 0.14);
     }
 
     /* 侧边栏头部优化 */
@@ -781,9 +819,13 @@ export function renderApp(configPath: string): string {
       border-radius: 14px 14px 4px 14px;
       font-family: var(--font-mono);
       font-size: 0.8125rem;
-      max-width: 85%;
+      max-width: 100%;
       overflow-wrap: break-word;
       word-break: break-word;
+    }
+
+    .chat-message.user {
+      max-width: 90%;
     }
 
     .chat-message.assistant .chat-message-bubble {
@@ -960,6 +1002,9 @@ export function renderApp(configPath: string): string {
       cursor: pointer;
       font-size: 0.8125rem;
       user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
       transition: background var(--transition-fast);
       min-height: 44px;
       flex-wrap: nowrap;
@@ -997,27 +1042,31 @@ export function renderApp(configPath: string): string {
       to { transform: rotate(360deg); }
     }
     .tool-use-name {
-      font-family: var(--font-mono);
+      font-family: var(--font-sans);
       font-weight: 600;
+      font-size: 0.8125rem;
       color: var(--text-primary);
-      flex: 0 0 auto;
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
     .tool-use-file {
       font-size: 0.75rem;
       font-family: var(--font-mono);
       color: var(--text-muted);
-      max-width: 200px;
+      max-width: 300px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      flex: 1 1 auto;
+      flex: 0 1 auto;
       min-width: 0;
     }
     .tool-use-summary {
       font-size: 0.75rem;
       color: var(--text-secondary);
-      flex: 1 1 auto;
+      flex: 0 1 auto;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1089,6 +1138,17 @@ export function renderApp(configPath: string): string {
       font-size: 0.75rem;
       color: var(--text-muted);
       font-style: italic;
+    }
+    .tool-use-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      margin-bottom: 6px;
+      padding-bottom: 6px;
+      border-bottom: 1px dashed var(--border-subtle);
+    }
+    .tool-use-meta-label {
+      color: var(--text-secondary);
     }
     /* AskUserQuestion - simplified */
     .tool-use-card.ask-user {
@@ -2464,7 +2524,7 @@ export function renderApp(configPath: string): string {
         gap: 8px;
       }
       .topbar-center { display: none; }
-      .sidebar { width: min(300px, calc(100vw - 20px)); }
+      .sidebar { width: min(300px, calc(100vw - 20px)); top: 50px; }
       .terminal-container { margin: 0 12px 12px; min-height: 0; }
       .btn { min-height: 40px; }
       .btn-sm { min-height: 36px; padding: 6px 10px; font-size: 0.75rem; }
@@ -2551,11 +2611,9 @@ export function renderApp(configPath: string): string {
         overflow: visible;
         padding-left: 0;
       }
-      .topbar.sidebar-open {
-        padding-left: 0;
-      }
 
       .sidebar {
+        top: 44px;
         width: min(280px, calc(100vw - 16px));
         max-height: none;
         border-bottom: none;
@@ -3021,6 +3079,7 @@ export function renderApp(configPath: string): string {
       }
 
       .sidebar {
+        top: 52px;
         width: min(320px, calc(100vw - 40px));
       }
 
@@ -3043,6 +3102,8 @@ export function renderApp(configPath: string): string {
         min-height: 40px;
         padding: 6px 10px;
       }
+
+      .sidebar { top: 40px; }
 
       .logo-icon { width: 20px; height: 20px; font-size: 9px; }
       .logo { font-size: 0.8125rem; }
@@ -3577,9 +3638,13 @@ export function renderApp(configPath: string): string {
         var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
         return '<div class="app-container">' +
-          '<header class="topbar' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + '">' +
+          '<header class="topbar">' +
             '<div class="topbar-left">' +
-              '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm">≡</button>' +
+              '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm sidebar-toggle-btn' + (state.sessionsDrawerOpen ? ' active' : '') + '" aria-label="Toggle sidebar">' +
+                '<span class="hamburger-icon">' +
+                  '<span></span><span></span><span></span>' +
+                '</span>' +
+              '</button>' +
             '</div>' +
             '<div class="logo-wrap">' +
               '<div class="logo">' +
@@ -4736,9 +4801,10 @@ export function renderApp(configPath: string): string {
           var target = e.target;
           if (!target || !(target instanceof Element)) return;
 
-          // Tool use card toggle
+          // Tool use card toggle — match header or any child of header
           var header = target.closest("[data-tool-toggle]");
           if (header) {
+            e.preventDefault();
             e.stopPropagation();
             var card = header.closest(".tool-use-card");
             if (card) {
@@ -5308,9 +5374,9 @@ export function renderApp(configPath: string): string {
         if (mainLayout) {
           mainLayout.classList.toggle("sidebar-open", state.sessionsDrawerOpen);
         }
-        var topbar = document.querySelector(".topbar");
-        if (topbar) {
-          topbar.classList.toggle("sidebar-open", state.sessionsDrawerOpen);
+        var toggleBtn = document.getElementById("sessions-toggle-button");
+        if (toggleBtn) {
+          toggleBtn.classList.toggle("active", state.sessionsDrawerOpen);
         }
       }
 
@@ -6233,8 +6299,8 @@ export function renderApp(configPath: string): string {
         // Also focus on chat messages tap
         if (chatMessages) {
           chatMessages.addEventListener('click', function(e) {
-            // Only focus if not clicking on a link or button
-            if (e.target.tagName !== 'A' && e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
+            // Only focus if not clicking on a link, button, or tool card header
+            if (e.target.tagName !== 'A' && e.target.tagName !== 'BUTTON' && !e.target.closest('button') && !e.target.closest('[data-tool-toggle]')) {
               var inputBox = document.getElementById('input-box');
               if (inputBox && state.selectedId) inputBox.focus();
             }
@@ -7270,7 +7336,6 @@ export function renderApp(configPath: string): string {
 
         // 检测是否是文件操作
         var fileInfo = extractFileInfo(toolName, block.input);
-        var fileHtml = fileInfo ? '<span class="tool-use-file">' + escapeHtml(fileInfo) + '</span>' : "";
         var toggleHtml = '<span class="tool-use-toggle">▼</span>';
 
         // Special rendering for AskUserQuestion tool
@@ -7291,9 +7356,9 @@ export function renderApp(configPath: string): string {
               optionsHtml += '</div>';
             }
             return '<div class="tool-use-card ask-user" data-tool-use-id="' + escapeHtml(toolId) + '">' +
-              '<div class="tool-use-header">' +
+              '<div class="tool-use-header" data-tool-toggle>' +
                 '<span class="tool-use-icon">❓</span>' +
-                '<span class="tool-use-name">AskUserQuestion</span>' +
+                '<span class="tool-use-name">提问</span>' +
               '</div>' +
               '<div class="tool-use-body ask-user-body">' +
                 questionText +
@@ -7303,10 +7368,34 @@ export function renderApp(configPath: string): string {
           }
         }
 
-        // 优先使用 description，否则生成输入内容摘要
-        var description = block.description || generateInputSummary(block.name, block.input);
+        // 构建卡片标题：优先用 description，其次用 generateInputSummary
+        var description = block.description || "";
+        var summary = generateInputSummary(block.name, block.input);
+
+        // 卡片标题显示逻辑：有 description 时显示 description 作为标题，summary 作为次要信息
+        // 无 description 时显示工具名 + summary
+        var titleText = "";
+        var subtitleHtml = "";
+        if (description) {
+          // description 作为主标题（截断到 80 字符）
+          titleText = description.length > 80 ? description.slice(0, 77) + "..." : description;
+          // 文件路径作为副标题
+          if (fileInfo) {
+            subtitleHtml = '<span class="tool-use-file">' + escapeHtml(fileInfo) + '</span>';
+          }
+        } else {
+          // 无 description，使用工具名 + 文件路径 + summary
+          titleText = getToolDisplayName(toolName);
+          if (fileInfo) {
+            subtitleHtml = '<span class="tool-use-file">' + escapeHtml(fileInfo) + '</span>';
+          }
+          if (summary) {
+            subtitleHtml += '<span class="tool-use-summary">' + escapeHtml(summary) + '</span>';
+          }
+        }
+
         // 完整 JSON 内容用于展开后显示
-        var fullJson = JSON.stringify(block.input, null, 2);
+        var fullJson = block.input ? JSON.stringify(block.input, null, 2) : "{}";
 
         // 根据 toolResult 决定状态
         var statusClass = "loading";
@@ -7335,17 +7424,39 @@ export function renderApp(configPath: string): string {
         return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +
           '<div class="tool-use-header" data-tool-toggle>' +
             '<span class="tool-use-icon">' + statusIcon + '</span>' +
-            '<span class="tool-use-name">' + escapeHtml(toolName) + '</span>' +
-            fileHtml +
-            (description ? '<span class="tool-use-summary">· ' + escapeHtml(description) + '</span>' : '') +
+            '<span class="tool-use-name">' + escapeHtml(titleText) + '</span>' +
+            subtitleHtml +
             '<span class="tool-use-status">' + statusText + '</span>' +
             toggleHtml +
           '</div>' +
           '<div class="tool-use-body">' +
+            (description ? '<div class="tool-use-meta"><span class="tool-use-meta-label">工具：</span>' + escapeHtml(toolName) + '</div>' : '') +
             '<pre class="tool-use-content">' + escapeHtml(fullJson) + '</pre>' +
             (resultHtml ? '<div class="tool-use-result">' + resultHtml + '</div>' : '') +
           '</div>' +
         '</div>';
+      }
+
+      function getToolDisplayName(toolName) {
+        var names = {
+          "Read": "读取文件",
+          "Write": "写入文件",
+          "Edit": "编辑文件",
+          "MultiEdit": "多处编辑",
+          "Bash": "执行命令",
+          "Grep": "搜索内容",
+          "Glob": "查找文件",
+          "WebFetch": "获取网页",
+          "WebSearch": "搜索网页",
+          "Task": "任务",
+          "TodoWrite": "更新待办",
+          "TodoRead": "读取待办",
+          "NotebookEdit": "编辑笔记本",
+          "Agent": "子代理",
+          "AskUserQuestion": "提问",
+          "Exit": "退出"
+        };
+        return names[toolName] || toolName;
       }
 
       function getToolIcon(toolName) {
