@@ -47,6 +47,11 @@ export const defaultConfig = (): WandConfig => ({
       label: "Claude Native",
       command: "claude",
       mode: "native"
+    },
+    {
+      label: "Claude Managed",
+      command: "claude",
+      mode: "managed"
     }
   ]
 });
@@ -122,7 +127,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
 }
 
 export function isExecutionMode(value: unknown): value is ExecutionMode {
-  return value === "auto-edit" || value === "default" || value === "full-access" || value === "native";
+  return value === "auto-edit" || value === "default" || value === "full-access" || value === "native" || value === "managed";
 }
 
 function normalizePresetCommand(command: string): string {

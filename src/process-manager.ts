@@ -205,13 +205,19 @@ export class ProcessManager extends EventEmitter {
     this.emitEvent({ type: "started", sessionId: id, data: this.snapshot(record) });
 
     // For native mode, skip PTY creation — sendInput() will spawn child processes directly
-    if (mode === "native") {
+    if (mode === "native" || mode === "managed") {
       // If there's an initial input, kick off the first JSON chat turn
       if (initialInput) {
-        this.runJsonChatTurn(record, initialInput);
+        const message = mode === "managed"
+          ? this.wrapManagedPrompt(initialInput)
+          : initialInput;
+        this.runJsonChatTurn(record, message);
       }
       return this.snapshot(record);
     }
+
+    // For managed mode without initial input, create PTY but don't send anything
+    // (managed mode waits for user input via sendInput)
 
     // For default mode with Claude commands and initial input, also use JSON chat turn
     // This ensures chat view works correctly from the first message
@@ -378,12 +384,15 @@ export class ProcessManager extends EventEmitter {
   sendInput(id: string, input: string, view?: "chat" | "terminal"): SessionSnapshot {
     const record = this.mustGet(id);
 
-    // Native mode: always use JSON chat turn
+    // Native / managed mode: always use JSON chat turn
     // Strip trailing newlines — input from chat UI includes Enter key as "\n"
-    if (record.mode === "native") {
+    if (record.mode === "native" || record.mode === "managed") {
       const cleanInput = input.replace(/[\r\n]+$/, "").trim();
       if (cleanInput) {
-        return this.runJsonChatTurn(record, cleanInput);
+        const message = record.mode === "managed"
+          ? this.wrapManagedPrompt(cleanInput)
+          : cleanInput;
+        return this.runJsonChatTurn(record, message);
       }
       return this.snapshot(record);
     }
@@ -622,6 +631,28 @@ export class ProcessManager extends EventEmitter {
 
     this.persist(record);
     return this.snapshot(record);
+  }
+
+  /**
+   * Wrap user message with autonomous completion instructions for managed mode.
+   * The AI is told to complete the task in one shot without asking questions.
+   */
+  private wrapManagedPrompt(userMessage: string): string {
+    return `${userMessage}
+
+---
+
+You are in **managed (autonomous) mode**. Complete the task above in your response.
+
+Rules:
+- Do NOT ask clarifying questions — make reasonable assumptions and proceed.
+- Do NOT ask for confirmation — use your best judgment.
+- Complete the entire task in one response without stopping for input.
+- If you encounter an error, try alternative approaches automatically.
+- Execute all necessary steps: write code, run commands, fix issues, and verify results.
+- After completing the task, briefly summarize what was done.
+
+Begin now:`;
   }
 
   private processJsonEvent(
@@ -1013,8 +1044,8 @@ export class ProcessManager extends EventEmitter {
 
     try {
       record.stopRequested = true;
-      // For native mode, kill the child process
-      if (record.mode === "native" && record.childProcess) {
+      // For native / managed mode, kill the child process
+      if ((record.mode === "native" || record.mode === "managed") && record.childProcess) {
         record.childProcess.kill();
         record.childProcess = null;
       }
@@ -1038,7 +1069,7 @@ export class ProcessManager extends EventEmitter {
       try {
         record.stopRequested = true;
         // For native mode, kill the child process
-        if (record.mode === "native" && record.childProcess) {
+        if ((record.mode === "native" || record.mode === "managed") && record.childProcess) {
           record.childProcess.kill();
           record.childProcess = null;
         }

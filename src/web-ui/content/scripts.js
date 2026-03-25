@@ -273,6 +273,7 @@
             '<div class="logo-wrap">' +
               '<div class="logo">' +
                 '<div class="logo-icon">W</div>' +
+                '<span class="logo-text">Wand</span>' +
               '</div>' +
             '</div>' +
             '<div class="topbar-center">' +
@@ -281,8 +282,14 @@
               '</div>' +
             '</div>' +
             '<div class="topbar-right">' +
-              '<button id="topbar-new-session-button" class="btn btn-primary btn-sm">+ 新对话</button>' +
-              '<button id="logout-button" class="btn btn-ghost btn-sm">退出</button>' +
+              '<button id="topbar-new-session-button" class="topbar-new-btn" title="新对话">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
+                '新对话' +
+              '</button>' +
+              '<button id="logout-button" class="topbar-logout-btn" title="退出登录">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
+                '退出' +
+              '</button>' +
             '</div>' +
           '</header>' +
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
@@ -374,6 +381,7 @@
                   '</div>' +
                   '<div class="todo-progress-body hidden" id="todo-progress-body">' +
                     '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
+                    '<div id="recent-actions" class="recent-actions"></div>' +
                   '</div>' +
                 '</div>' +
                 '<div class="input-composer">' +
@@ -803,6 +811,67 @@
         if (card) card.classList.toggle("collapsed");
         if (e) { e.preventDefault(); e.stopPropagation(); }
       };
+      // Toggle function for inline thinking blocks — called via onclick attribute
+      window.__thinkingToggle = function(el) {
+        var isCollapsed = el.classList.contains("collapsed");
+        if (isCollapsed) {
+          el.classList.remove("collapsed");
+          el.classList.add("expanded");
+          el.querySelector(".thinking-inline-preview").textContent = el.dataset.thinking || "";
+          var action = el.querySelector(".thinking-inline-action");
+          if (action) action.textContent = "收起";
+        } else {
+          el.classList.remove("expanded");
+          el.classList.add("collapsed");
+          var preview = (el.dataset.thinking || "").slice(0, 57) + ((el.dataset.thinking || "").length > 60 ? "…" : "");
+          el.querySelector(".thinking-inline-preview").textContent = preview;
+          var action = el.querySelector(".thinking-inline-action");
+          if (action) action.textContent = "展开";
+        }
+      };
+      // Toggle function for inline tool rows (Read, Glob, Grep, etc.)
+      window.__inlineToolToggle = function(el) {
+        var expanded = el.classList.toggle("inline-tool-open");
+        var body = el.querySelector(".inline-tool-expanded");
+        if (body) {
+          body.style.display = expanded ? "block" : "none";
+        }
+        // Update status indicator
+        var statusSpan = el.querySelector(".inline-tool-status");
+        if (statusSpan) {
+          if (el.dataset.status === "error") {
+            statusSpan.textContent = "⚠️";
+          } else if (el.dataset.status === "done") {
+            statusSpan.textContent = expanded ? "✅" : "✅";
+          }
+        }
+      };
+      // Toggle function for terminal tool blocks
+      window.__terminalExpand = function(el) {
+        var body = el.querySelector(".term-body");
+        if (body) {
+          var isHidden = body.style.display === "none";
+          body.style.display = isHidden ? "block" : "none";
+          el.dataset.expanded = isHidden ? "true" : "false";
+          var toggleIcon = el.querySelector(".term-toggle-icon");
+          if (toggleIcon) toggleIcon.textContent = isHidden ? "▼" : "▲";
+        }
+      };
+      // Update streaming thinking content (called from WebSocket handler)
+      function updateStreamingThinking(text) {
+        var el = document.querySelector(".thinking-streaming");
+        if (el) {
+          var textEl = el.querySelector(".thinking-streaming-text");
+          if (textEl) {
+            // Show last 3 lines in scrollable area
+            var lines = text.split("\n");
+            var displayLines = lines.slice(-3);
+            textEl.textContent = displayLines.join("\n");
+            // Auto-scroll to bottom
+            textEl.scrollTop = textEl.scrollHeight;
+          }
+        }
+      }
       // Global handler for ask-user option buttons — called via onclick
       window.__askOption = function(btnEl) {
         var optionLabel = btnEl.dataset.optionLabel;
@@ -1639,7 +1708,9 @@
               ? "原生"
               : mode === "auto-edit"
                 ? "自动编辑"
-                : mode;
+                : mode === "managed"
+                  ? "托管"
+                  : mode;
       }
 
       function inferToolFromCommand(command) {
@@ -1681,13 +1752,18 @@
             ? "按单轮消息调用 Claude 原生输出，适合快速问答或一次性生成。"
             : "Codex 不支持这里的原生单轮模式。";
         }
+        if (mode === "managed") {
+          return tool === "claude"
+            ? "AI 自动完成所有工作，无需中途确认，适合有明确目标的任务。"
+            : "Codex 不支持托管模式。";
+        }
         return "保留标准交互流程，适合手动确认每一步。";
       }
 
       function getSupportedModes(tool) {
         return tool === "codex"
           ? ["default", "full-access", "auto-edit"]
-          : ["default", "full-access", "auto-edit", "native"];
+          : ["default", "full-access", "auto-edit", "native", "managed"];
       }
 
       function getSafeModeForTool(tool, mode) {
@@ -1712,7 +1788,8 @@
           'default': '标准模式 - 需要确认文件修改',
           'full-access': '完全访问 - 自动确认所有操作',
           'auto-edit': '自动编辑 - 自动确认文件修改',
-          'native': '原生模式 - 返回结构化输出'
+          'native': '原生模式 - 返回结构化输出',
+          'managed': '托管模式 - AI 自动完成所有工作'
         };
         return hints[mode] || '';
       }
@@ -1981,7 +2058,7 @@
         }
         updateSessionsList();
         switchToSessionView(id);
-        loadOutput(id).then(focusInputBox);
+        loadOutput(id).then(function() { focusInputBox(true); });
       }
 
       function updateDrawerState() {
@@ -2226,7 +2303,7 @@
           state.lastRenderedEmpty = null;
           return refreshAll();
         })
-        .then(focusInputBox)
+        .then(function() { focusInputBox(true); })
         .catch(function() {
           showToast("无法启动命令。", "error");
         });
@@ -2282,7 +2359,7 @@
           state.commandValue = command;
           return refreshAll();
         })
-        .then(focusInputBox)
+        .then(function() { focusInputBox(true); })
         .catch(function() {
           showError(errorEl, "无法启动命令。请检查命令是否正确安装。");
         });
@@ -2524,7 +2601,8 @@
         var contentHeight = el.scrollHeight;
         var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
         el.style.height = newHeight + "px";
-        el.style.minHeight = "";
+        // Keep inline minHeight to override CSS min-height
+        el.style.minHeight = minHeight + "px";
         el.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
       }
 
@@ -2539,6 +2617,9 @@
         var welcomeInput = document.getElementById("welcome-input");
         var value = welcomeInput ? welcomeInput.value.trim() : "";
         if (!value) return;
+        // Clear todo progress bar at the start of a new session
+        var todoEl = document.getElementById("todo-progress");
+        if (todoEl) todoEl.classList.add("hidden");
         welcomeInput.value = "";
         welcomeInput.placeholder = "正在启动会话...";
         welcomeInput.disabled = true;
@@ -2577,7 +2658,7 @@
             state.ws.send(JSON.stringify({ type: "subscribe", sessionId: data.id }));
           }
           loadOutput(data.id).then(function() {
-            focusInputBox();
+            focusInputBox(true);
           });
         })
         .catch(function(error) {
@@ -2686,12 +2767,18 @@
         var inputBox = document.getElementById("input-box");
         var value = inputBox ? inputBox.value : "";
         if (value) {
+          // Clear todo progress bar at the start of a new user turn
+          var todoEl = document.getElementById("todo-progress");
+          if (todoEl) todoEl.classList.add("hidden");
           // Send text + Enter as a single call to avoid race conditions
           var combinedInput = value + getControlInput("enter");
           // Clear the input box immediately to prevent double-sending
           if (inputBox) {
             inputBox.value = "";
-            autoResizeInput(inputBox);
+            // Force reset to minimum height, overriding CSS min-height
+            inputBox.style.height = "44px";
+            inputBox.style.minHeight = "44px";
+            inputBox.style.overflowY = "hidden";
           }
           setDraftValue("");
           return queueDirectInput(combinedInput).catch(function(err) {
@@ -2893,10 +2980,12 @@
         });
       }
 
-      function focusInputBox() {
+      function focusInputBox(skipMobile) {
         var inputBox = document.getElementById("input-box");
         if (!inputBox || !state.selectedId) return;
         if (document.activeElement === inputBox) return;
+        // Skip focus on mobile/touch devices for auto-triggered calls to avoid opening keyboard
+        if (skipMobile && ("ontouchstart" in window || navigator.maxTouchPoints > 0)) return;
         inputBox.focus();
         inputBox.setSelectionRange(inputBox.value.length, inputBox.value.length);
       }
@@ -3124,6 +3213,12 @@
               // Check if this is a new message (not just streaming update)
               var prevMsgCount = state.lastRenderedMsgCount;
               var currMsgCount = snapshot.messages ? snapshot.messages.length : 0;
+
+              // Streaming thinking update: update the thinking element in-place
+              if (msg.data.thinkingContent !== undefined && msg.sessionId === state.selectedId) {
+                updateStreamingThinking(msg.data.thinkingContent);
+              }
+
               // Immediate render for new messages, debounced for streaming updates
               scheduleChatRender(currMsgCount > prevMsgCount);
             }
@@ -3252,7 +3347,7 @@
             }
           }
           renderChat();
-        }, 80);
+        }, 30);
       }
 
       function doRenderChat(forceFullRender) {
@@ -3338,33 +3433,38 @@
         // Full render when: forced, no existing messages, or message count decreased/changed
         var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
 
-        function saveToolCardStates(container) {
-          var states = {};
-          if (!container) return states;
-          container.querySelectorAll(".tool-use-card[data-tool-use-id]").forEach(function(c) {
-            var tid = c.getAttribute("data-tool-use-id");
-            if (tid) states[tid] = c.classList.contains("collapsed");
-          });
-          return states;
-        }
-        function restoreToolCardStates(container, states) {
-          if (!container) return;
-          container.querySelectorAll(".tool-use-card[data-tool-use-id]").forEach(function(c) {
-            var tid = c.getAttribute("data-tool-use-id");
-            if (tid && tid in states) {
-              if (states[tid]) c.classList.add("collapsed");
-              else c.classList.remove("collapsed");
-            }
-          });
-        }
         function fullRenderChat() {
-          var saved = existingCount > 0 ? saveToolCardStates(chatMessages) : {};
           chatMessages.innerHTML = messages.slice().reverse().map(renderChatMessage).join("");
-          restoreToolCardStates(chatMessages, saved);
           attachAllCopyHandlers(chatMessages);
-          // Use requestAnimationFrame to ensure scroll happens after DOM layout
-          requestAnimationFrame(function() {
-            chatMessages.scrollTop = 0;
+          // Only expand the single newest tool card (first chat-message = newest due to column-reverse)
+          var firstMsg = chatMessages.querySelector(".chat-message");
+          if (firstMsg) {
+            var cards = firstMsg.querySelectorAll(".tool-use-card");
+            if (cards.length > 0) {
+              cards[0].classList.remove("collapsed");
+              for (var ci = 1; ci < cards.length; ci++) {
+                cards[ci].classList.add("collapsed");
+              }
+            }
+            // Scroll to newest message using scrollIntoView for mobile reliability
+            requestAnimationFrame(function() {
+              firstMsg.scrollIntoView({ block: "start", behavior: "instant" });
+            });
+          }
+        }
+
+        // Collapse all tool-use cards except those in the new message elements (marked with animate-in)
+        // newEls: NodeList/Array of newly added message elements, or null to keep only the first card expanded
+        function collapseOldToolCards(container, newEls) {
+          var allCards = container.querySelectorAll(".tool-use-card");
+          allCards.forEach(function(c) {
+            // Keep expanded if this card is inside a newly added message
+            if (newEls) {
+              for (var i = 0; i < newEls.length; i++) {
+                if (newEls[i].contains(c)) return;
+              }
+            }
+            c.classList.add("collapsed");
           });
         }
 
@@ -3387,8 +3487,11 @@
           }
           chatMessages.insertBefore(fragment, chatMessages.firstChild);
           attachAllCopyHandlers(chatMessages);
-          // Smart scroll: only auto-scroll if user is near bottom
-          smartScrollToBottom(chatOutput);
+          // Collapse all existing cards; new cards (with animate-in) stay expanded
+          collapseOldToolCards(chatMessages, fragment.children);
+          // Scroll to newest message (first child in DOM after prepend, due to column-reverse)
+          var newestEl = chatMessages.firstElementChild;
+          if (newestEl) newestEl.scrollIntoView({ block: "start", behavior: "instant" });
         } else if (msgCount === existingCount && outputHash !== prevHash) {
           // Same message count but content changed (streaming update) — update last message (newest visually)
           // With column-reverse, first DOM child = newest message
@@ -3406,10 +3509,20 @@
                 var newBubble = newEl.querySelector(".chat-message-bubble");
                 // Only update if bubble content actually changed
                 if (newBubble && currentContent.innerHTML !== newBubble.innerHTML) {
-                  var toggledState = saveToolCardStates(firstEl);
                   chatMessages.replaceChild(newEl, firstEl);
-                  restoreToolCardStates(newEl, toggledState);
                   attachCopyHandler(newEl);
+                  // Keep only the single newest tool card expanded, collapse all others
+                  var newestMsgEl = chatMessages.querySelector(".chat-message");
+                  var allCards = chatMessages.querySelectorAll(".tool-use-card");
+                  var newestCard = null;
+                  allCards.forEach(function(c) {
+                    if (newestMsgEl && newestMsgEl.contains(c)) {
+                      if (!newestCard) newestCard = c;
+                      else c.classList.add("collapsed");
+                    } else {
+                      c.classList.add("collapsed");
+                    }
+                  });
                 }
               }
             }
@@ -3505,7 +3618,8 @@
             existing.outerHTML = html;
           }
         } else {
-          chatOutput.insertAdjacentHTML("beforeend", html);
+          // Insert inside chat-messages so it stays sticky at the top during scrolling
+          chatMessages.insertAdjacentHTML("beforeend", html);
         }
       }
 
@@ -3580,6 +3694,41 @@
             '</li>';
           }
           list.innerHTML = html;
+        }
+
+        // Extract recent important actions for key points summary
+        var recentActions = [];
+        var actionTools = ["Write", "Edit", "Bash", "WebFetch", "WebSearch"];
+        var msgCount = messages.length;
+        for (var ai = 0; ai < msgCount && recentActions.length < 5; ai++) {
+          var m = messages[ai];
+          if (!m.content || !Array.isArray(m.content)) continue;
+          for (var bi = 0; bi < m.content.length && recentActions.length < 5; bi++) {
+            var blk = m.content[bi];
+            if (blk.type !== "tool_use") continue;
+            var toolName = blk.name || "";
+            if (actionTools.indexOf(toolName) === -1) continue;
+            var desc = blk.description || generateInputSummary(toolName, blk.input) || toolName;
+            if (desc && desc.length > 50) desc = desc.slice(0, 47) + "...";
+            var icon = getToolIcon(toolName);
+            recentActions.push({ icon: icon, text: desc });
+          }
+        }
+
+        var actionsEl = document.getElementById("recent-actions");
+        if (actionsEl) {
+          if (recentActions.length > 0) {
+            var actionsHtml = '<div class="recent-actions-label">最近操作</div>';
+            actionsHtml += '<div class="recent-actions-list">';
+            for (var ri = 0; ri < recentActions.length; ri++) {
+              var a = recentActions[ri];
+              actionsHtml += '<span class="recent-action-pill">' + a.icon + ' ' + escapeHtml(a.text) + '</span>';
+            }
+            actionsHtml += '</div>';
+            actionsEl.innerHTML = actionsHtml;
+          } else {
+            actionsEl.innerHTML = '';
+          }
         }
       }
 
@@ -3882,9 +4031,10 @@
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
           return '<div class="chat-message thinking">' +
-            '<div class="thinking-card">' +
-              '<span class="thinking-icon spinning">💭</span>' +
-              '<span class="thinking-content">' + escapeHtml(msg.content) + '</span>' +
+            '<div class="thinking-inline thinking-pty collapsed" data-thinking="" onclick="__thinkingToggle(this)">' +
+              '<span class="thinking-inline-icon">🧠</span>' +
+              '<span class="thinking-inline-preview">' + escapeHtml(msg.content) + '</span>' +
+              '<span class="thinking-inline-action">展开</span>' +
             '</div>' +
           '</div>';
         }
@@ -3990,16 +4140,23 @@
 
           case "thinking":
             var thinkingText = block.thinking || "";
-            return '<details class="thinking-card enhanced">' +
-              '<summary class="thinking-header">' +
-                '<span class="thinking-icon-wrap"><span class="thinking-spin">💭</span></span>' +
-                '<span class="thinking-label">深度思考</span>' +
-                '<span class="thinking-toggle">点击展开</span>' +
-              '</summary>' +
-              '<div class="thinking-body">' +
-                '<div class="thinking-text">' + escapeHtml(thinkingText) + '</div>' +
-              '</div>' +
-            '</details>';
+            // Compact display: brain icon + brief text, click to expand
+            var preview = thinkingText.length > 60 ? thinkingText.slice(0, 57) + "…" : thinkingText;
+            var isStreaming = block.thinking === undefined && block.type === "thinking";
+            if (isStreaming) {
+              // During streaming: show 3-line scrollable area
+              return '<div class="thinking-inline thinking-streaming" data-thinking="">' +
+                '<div class="thinking-streaming-inner">' +
+                  '<span class="thinking-streaming-icon spinning">🧠</span>' +
+                  '<div class="thinking-streaming-text"></div>' +
+                '</div>' +
+              '</div>';
+            }
+            return '<div class="thinking-inline collapsed" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
+              '<span class="thinking-inline-icon">🧠</span>' +
+              '<span class="thinking-inline-preview">' + escapeHtml(preview) + '</span>' +
+              '<span class="thinking-inline-action">展开</span>' +
+            '</div>';
 
           case "tool_use":
             var toolResult = toolResults[block.id];
@@ -4014,16 +4171,254 @@
         }
       }
 
+      // Lightweight inline display — used for Read, Glob, Grep, WebFetch, WebSearch, TodoRead
+      function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo) {
+        var toolId = block.id || "tool-" + toolName;
+        var inputData = block.input || {};
+        var resultContent = (toolResult && toolResult.content) ? toolResult.content.trim() : "";
+        var isError = toolResult && toolResult.is_error;
+        var hasResult = resultContent.length > 0;
+        var statusIcon = isError ? "⚠️" : (hasResult ? "✅" : "⏳");
+
+        // Build the inline preview line
+        var icon = "";
+        var title = "";
+        var meta = "";
+        var preview = "";
+
+        if (toolName === "Read") {
+          icon = '<svg class="inline-tool-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h2.764c.958 0 1.76.56 2.311 1.184C8.405 3.77 9.146 4 10 4h3.5A1.5 1.5 0 0 1 15 5.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9z"/><path d="M2 5.5h12M2 8h8M2 10.5h5"/></svg>';
+          var path = inputData.file_path || inputData.path || fileInfo || "";
+          var lineCount = "";
+          if (inputData.limit) {
+            lineCount = " " + inputData.offset + "-" + (inputData.offset + inputData.limit);
+          }
+          title = path;
+          meta = lineCount;
+        } else if (toolName === "Glob") {
+          icon = '<svg class="inline-tool-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="5"/><path d="M10.5 10.5L14 14"/></svg>';
+          var pattern = inputData.pattern || "";
+          var gPath = inputData.path || fileInfo || "";
+          title = pattern;
+          meta = gPath;
+        } else if (toolName === "Grep") {
+          icon = '<svg class="inline-tool-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M11.5 11.5L15 15"/></svg>';
+          var pattern = inputData.pattern || "";
+          var gPath = inputData.path || fileInfo || "";
+          title = pattern;
+          meta = gPath;
+          if (inputData.context) meta += " -C" + inputData.context;
+        } else if (toolName === "WebFetch") {
+          icon = '<svg class="inline-tool-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 1.5v13M1.5 8h13"/></svg>';
+          var url = inputData.url || "";
+          title = url;
+          meta = extraInfo || "";
+        } else if (toolName === "WebSearch") {
+          icon = '<svg class="inline-tool-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="5"/><path d="M10.5 10.5L14 14"/><path d="M5 7h4M7 5v4"/></svg>';
+          var query = inputData.query || "";
+          title = query;
+          meta = extraInfo || "";
+        } else if (toolName === "TodoRead") {
+          icon = '<svg class="inline-tool-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 8l2 2 4-4"/></svg>';
+          title = "读取待办列表";
+          meta = extraInfo || "";
+        } else {
+          icon = '<svg class="inline-tool-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M8 5v3.5M8 11h.01"/></svg>';
+          title = getToolDisplayName(toolName);
+          meta = extraInfo || "";
+        }
+
+        // Format result preview
+        if (hasResult) {
+          var lines = resultContent.split("\n");
+          if (lines.length > 3) {
+            preview = lines.slice(0, 3).join("\n") + "\n…";
+          } else {
+            preview = resultContent;
+          }
+        }
+
+        var resultDataAttr = escapeHtml(resultContent);
+        var previewDataAttr = escapeHtml(preview);
+        var fullResult = resultContent;
+
+        var expandedHtml = "";
+        if (hasResult) {
+          expandedHtml = '<div class="inline-tool-expanded">' +
+            '<div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + '</div>' +
+          '</div>';
+        } else if (isError) {
+          expandedHtml = '<div class="inline-tool-expanded"><div class="inline-tool-result inline-tool-error">' +
+            escapeHtml(resultContent || "操作失败") + '</div></div>';
+        } else if (!toolResult) {
+          expandedHtml = '<div class="inline-tool-expanded"><div class="inline-tool-loading">等待响应…</div></div>';
+        }
+
+        var extraInfoHtml = meta ? '<span class="inline-tool-meta">' + escapeHtml(meta) + '</span>' : '';
+
+        return '<div class="inline-tool ' + (isError ? 'inline-tool-error-inline' : '') + '" ' +
+          'data-result="' + escapeHtml(fullResult) + '" ' +
+          'data-preview="' + previewDataAttr + '" ' +
+          'data-status="' + (isError ? 'error' : (hasResult ? 'done' : 'pending')) + '" ' +
+          'onclick="__inlineToolToggle(this)">' +
+          '<div class="inline-tool-row">' +
+            '<span class="inline-tool-status">' + statusIcon + '</span>' +
+            icon +
+            '<span class="inline-tool-title">' + escapeHtml(title) + '</span>' +
+            extraInfoHtml +
+          '</div>' +
+          expandedHtml +
+        '</div>';
+      }
+
+      // Terminal-style display for Bash commands
+      function renderTerminalTool(block, toolResult, toolName) {
+        var inputData = block.input || {};
+        var command = inputData.command || inputData.cmd || "";
+        var resultContent = (toolResult && toolResult.content) ? toolResult.content.trim() : "";
+        var isError = toolResult && toolResult.is_error;
+        var exitCode = inputData.exitCode;
+        var hasResult = resultContent.length > 0;
+
+        var statusDot = "";
+        if (toolResult) {
+          if (isError) {
+            statusDot = '<span class="term-status-dot term-error"></span>';
+          } else if (exitCode === 0 || exitCode === undefined) {
+            statusDot = '<span class="term-status-dot term-success"></span>';
+          } else {
+            statusDot = '<span class="term-status-dot term-warn"></span>';
+          }
+        } else {
+          statusDot = '<span class="term-status-dot term-running"></span>';
+        }
+
+        var prompt = '<span class="term-prompt">$</span>';
+        var cmdDisplay = escapeHtml(command);
+
+        var outputLines = resultContent.split("\n");
+        var outputHtml = "";
+        for (var oi = 0; oi < outputLines.length; oi++) {
+          var line = outputLines[oi];
+          if (!line && oi === outputLines.length - 1) continue;
+          outputHtml += '<div class="term-line">' + escapeHtml(line) + '</div>';
+        }
+
+        var exitCodeHtml = "";
+        if (toolResult && exitCode !== undefined) {
+          var codeClass = exitCode === 0 ? "term-exit-success" : "term-exit-error";
+          exitCodeHtml = '<div class="term-exit ' + codeClass + '">exit ' + exitCode + '</div>';
+        }
+
+        return '<div class="inline-terminal" data-expanded="true">' +
+          '<div class="term-header" onclick="__terminalExpand(this)">' +
+            statusDot +
+            '<span class="term-title">执行命令</span>' +
+            '<span class="term-toggle-icon">▼</span>' +
+          '</div>' +
+          '<div class="term-body">' +
+            '<div class="term-command"><span class="term-prompt">$</span> ' + cmdDisplay + '</div>' +
+            (outputHtml ? '<div class="term-output">' + outputHtml + '</div>' : '') +
+            exitCodeHtml +
+          '</div>' +
+        '</div>';
+      }
+
+      // GitHub-style diff display for Edit/Write/MultiEdit
+      function renderDiffTool(block, toolResult, toolName) {
+        var inputData = block.input || {};
+        var path = inputData.file_path || inputData.path || "";
+        var fileName = path.split("/").pop() || path;
+
+        var oldStr = inputData.old_string || "";
+        var newStr = inputData.new_string || inputData.content || "";
+        var oldContent = inputData.old_content || "";
+        var newContent = inputData.new_content || "";
+
+        var isWrite = toolName === "Write" || toolName === "MultiEdit";
+        var isError = toolResult && toolResult.is_error;
+        var hasResult = toolResult && toolResult.content && toolResult.content.trim().length > 0;
+
+        // Build side-by-side diff HTML (old | new columns)
+        var leftCol = "";
+        var rightCol = "";
+        if (isWrite) {
+          // Write: only show new content on right
+          rightCol = '<div class="diff-line diff-add">+ ' + escapeHtml(newContent) + '</div>';
+        } else {
+          // Edit: old on left, new on right
+          if (oldStr) {
+            leftCol = '<div class="diff-line diff-remove">- ' + escapeHtml(oldStr) + '</div>';
+          }
+          if (newStr) {
+            rightCol = '<div class="diff-line diff-add">+ ' + escapeHtml(newStr) + '</div>';
+          }
+        }
+
+        var statusClass = "";
+        var statusText = "";
+        if (toolResult) {
+          if (isError) {
+            statusClass = "diff-error";
+            statusText = "❌ 修改失败";
+          } else {
+            statusClass = "diff-success";
+            statusText = "✅ 已修改";
+          }
+        } else {
+          statusClass = "diff-pending";
+          statusText = "⏳ 执行中…";
+        }
+
+        // If only one column has content, show full width
+        var bothCols = leftCol && rightCol;
+        var colClass = bothCols ? "diff-col-half" : "diff-col-full";
+
+        return '<div class="inline-diff" data-tool-name="' + escapeHtml(toolName) + '">' +
+          '<div class="diff-header">' +
+            '<span class="diff-file-icon">📄</span>' +
+            '<span class="diff-file-name">' + escapeHtml(fileName) + '</span>' +
+            '<span class="diff-path">' + escapeHtml(path) + '</span>' +
+            '<span class="diff-status ' + statusClass + '">' + statusText + '</span>' +
+          '</div>' +
+          '<div class="diff-body">' +
+            '<div class="diff-columns">' +
+              (bothCols ? '<div class="diff-col ' + colClass + '"><div class="diff-col-label">旧</div>' + leftCol + '</div>' : '') +
+              '<div class="diff-col ' + colClass + '"><div class="diff-col-label">' + (bothCols ? '新' : '') + '</div>' + (rightCol || leftCol) + '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function formatInlineResult(content, toolName) {
+        if (!content) return '<span class="inline-tool-empty">无输出</span>';
+        var lines = content.split("\n");
+        var displayLines = lines.length > 8 ? lines.slice(0, 8).join("\n") + "\n…" : content;
+        return '<pre class="inline-tool-result-text">' + escapeHtml(displayLines) + '</pre>';
+      }
+
       function renderToolUseCard(block, toolResult, index) {
         var toolName = block.name || "unknown";
         var toolId = block.id || "tool-" + toolName + "-" + (typeof index === "number" ? index : 0);
-        var toolIcon = getToolIcon(toolName);
-
-        // 检测是否是文件操作
         var fileInfo = extractFileInfo(toolName, block.input);
-        var toggleHtml = '<span class="tool-use-toggle">▼</span>';
 
-        // Special rendering for AskUserQuestion tool
+        // ── Lightweight inline tools: Read, Glob, Grep, WebFetch, WebSearch, TodoRead
+        if (toolName === "Read" || toolName === "Glob" || toolName === "Grep" ||
+            toolName === "WebFetch" || toolName === "WebSearch" || toolName === "TodoRead") {
+          return renderInlineTool(block, toolResult, toolName, fileInfo, "");
+        }
+
+        // ── Terminal-style: Bash
+        if (toolName === "Bash") {
+          return renderTerminalTool(block, toolResult, toolName);
+        }
+
+        // ── Diff-style: Edit, Write, MultiEdit
+        if (toolName === "Edit" || toolName === "Write" || toolName === "MultiEdit") {
+          return renderDiffTool(block, toolResult, toolName);
+        }
+
+        // ── AskUserQuestion tool — special card
         if (toolName === "AskUserQuestion" && block.input && block.input.questions) {
           var questions = block.input.questions;
           if (questions && questions.length > 0) {
@@ -4053,23 +4448,17 @@
           }
         }
 
-        // 构建卡片标题：优先用 description，其次用 generateInputSummary
+        // ── Default card rendering for: Agent, Task, TodoWrite, NotebookEdit, Exit, and unknown tools
         var description = block.description || (block.input && block.input.description) || "";
         var summary = generateInputSummary(block.name, block.input);
-
-        // 卡片标题显示逻辑：有 description 时显示 description 作为标题，summary 作为次要信息
-        // 无 description 时显示工具名 + summary
         var titleText = "";
         var subtitleHtml = "";
         if (description) {
-          // description 作为主标题（截断到 80 字符）
           titleText = description.length > 80 ? description.slice(0, 77) + "..." : description;
-          // 文件路径作为副标题
           if (fileInfo) {
             subtitleHtml = '<span class="tool-use-file">' + escapeHtml(fileInfo) + '</span>';
           }
         } else {
-          // 无 description，使用工具名 + 文件路径 + summary
           titleText = getToolDisplayName(toolName);
           if (fileInfo) {
             subtitleHtml = '<span class="tool-use-file">' + escapeHtml(fileInfo) + '</span>';
@@ -4078,40 +4467,33 @@
             subtitleHtml += '<span class="tool-use-summary">' + escapeHtml(summary) + '</span>';
           }
         }
-
-        // 完整 JSON 内容用于展开后显示
         var fullJson = block.input ? JSON.stringify(block.input, null, 2) : "{}";
-
-        // 根据 toolResult 决定状态
         var statusClass = "loading";
-        var statusIcon = '<span class="tool-use-spinner"></span>';
-        var statusText = "执行中";
+        var headerIcon = '<span class="tool-use-spinner"></span>';
         var resultHtml = "";
 
         if (toolResult) {
           var isError = toolResult.is_error;
           var content = toolResult.content || "";
           statusClass = isError ? "error" : "success";
-          statusIcon = isError ? "❌" : "✅";
-          statusText = isError ? "失败" : "成功";
-
-          // 有内容才显示结果
+          headerIcon = getToolIcon(toolName);
           var hasContent = content && content.trim().length > 0;
           if (hasContent) {
             resultHtml = '<pre class="tool-use-result-content">' + escapeHtml(content) + '</pre>';
           } else {
             resultHtml = '<span class="tool-use-result-empty">无输出</span>';
           }
+        } else {
+          headerIcon = getToolIcon(toolName);
         }
 
-        // Default to collapsed state (except when loading/executing)
         var collapsedClass = statusClass !== "loading" ? " collapsed" : "";
+        var toggleHtml = '<span class="tool-use-toggle">▼</span>';
         return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +
           '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
-            '<span class="tool-use-icon">' + statusIcon + '</span>' +
+            '<span class="tool-use-icon">' + headerIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(titleText) + '</span>' +
             subtitleHtml +
-            '<span class="tool-use-status">' + statusText + '</span>' +
             toggleHtml +
           '</div>' +
           '<div class="tool-use-body">' +
