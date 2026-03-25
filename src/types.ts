@@ -44,6 +44,19 @@ export interface PathSuggestion {
   isDirectory: boolean;
 }
 
+export interface GitFileStatus {
+  staged?: 'modified' | 'added' | 'deleted' | 'renamed';
+  unstaged?: 'modified' | 'deleted';
+  untracked?: boolean;
+}
+
+export interface FileEntry {
+  path: string;
+  name: string;
+  type: 'dir' | 'file';
+  gitStatus?: GitFileStatus;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;

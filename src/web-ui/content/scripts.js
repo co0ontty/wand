@@ -46,7 +46,13 @@
         ws: null,
         wsConnected: false,
         currentView: "chat",
-        sidebarTab: "sessions",
+        filePanelOpen: (function() {
+          try {
+            return localStorage.getItem("wand-file-panel-open") === "true";
+          } catch (e) {
+            return false;
+          }
+        })(),
         currentMessages: [],
         lastRenderedHash: 0,
         lastRenderedMsgCount: 0,
@@ -302,27 +308,10 @@
                 '</div>' +
                 '<button id="close-drawer-button" class="btn btn-ghost btn-sm sidebar-close" type="button" aria-label="关闭菜单">×</button>' +
               '</div>' +
-              '<div class="sidebar-tabs">' +
-                '<button class="sidebar-tab' + (state.sidebarTab !== "files" ? " active" : "") + '" id="tab-sessions" type="button">会话</button>' +
-                '<button class="sidebar-tab' + (state.sidebarTab === "files" ? " active" : "") + '" id="tab-files" type="button">文件</button>' +
-              '</div>' +
               '<div class="sidebar-body">' +
-                '<div id="sessions-panel"' + (state.sidebarTab === "files" ? ' class="hidden"' : "") + '>' +
+                '<div id="sessions-panel">' +
                   '<p class="sidebar-intro">最近的会话记录会显示在这里</p>' +
                   '<div class="sessions-list" id="sessions-list">' + renderSessions() + '</div>' +
-                '</div>' +
-                '<div id="files-panel"' + (state.sidebarTab !== "files" ? ' class="hidden"' : "") + '>' +
-                  '<div class="file-explorer-header">' +
-                    '<span class="file-explorer-path" id="file-explorer-cwd">' + escapeHtml(state.config && state.config.defaultCwd ? state.config.defaultCwd : "") + '</span>' +
-                    '<div class="file-explorer-actions">' +
-                      '<button class="file-explorer-refresh" id="file-explorer-refresh" title="刷新" aria-label="刷新文件列表">↻</button>' +
-                    '</div>' +
-                  '</div>' +
-                  '<div class="file-search-box">' +
-                    '<input type="text" id="file-search-input" class="file-search-input" placeholder="搜索文件..." autocomplete="off" />' +
-                    '<button class="file-search-clear" id="file-search-clear" type="button" aria-label="清除搜索">×</button>' +
-                  '</div>' +
-                  '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(state.config && state.config.defaultCwd ? state.config.defaultCwd : "") + '</div>' +
                 '</div>' +
               '</div>' +
               '<div class="sidebar-footer">' +
@@ -340,6 +329,27 @@
                     '<button id="view-terminal-btn" class="view-toggle-btn' + (state.currentView === "terminal" ? " active" : "") + '" type="button">终端</button>' +
                     '<button id="view-chat-btn" class="view-toggle-btn' + (state.currentView === "chat" ? " active" : "") + '" type="button">对话</button>' +
                   '</div>' +
+                  '<div class="file-panel-toggle" aria-label="文件浏览器">' +
+                    '<button id="file-panel-toggle-btn" class="view-toggle-btn' + (state.filePanelOpen ? " active" : "") + '" type="button" title="文件浏览器">📁</button>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+              // File side panel
+              '<div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '">' +
+                '<div class="file-side-panel-header">' +
+                  '<span class="file-side-panel-title">文件</span>' +
+                  '<button id="file-side-panel-close" class="btn btn-ghost btn-sm" type="button" aria-label="关闭">×</button>' +
+                '</div>' +
+                '<div class="file-side-panel-body">' +
+                  '<div class="file-explorer-header">' +
+                    '<span class="file-explorer-path" id="file-explorer-cwd">' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : (state.config && state.config.defaultCwd ? state.config.defaultCwd : "")) + '</span>' +
+                    '<button class="file-explorer-refresh" id="file-explorer-refresh" title="刷新" aria-label="刷新文件列表">↻</button>' +
+                  '</div>' +
+                  '<div class="file-search-box">' +
+                    '<input type="text" id="file-search-input" class="file-search-input" placeholder="搜索文件..." autocomplete="off" />' +
+                    '<button class="file-search-clear" id="file-search-clear" type="button" aria-label="清除搜索">×</button>' +
+                  '</div>' +
+                  '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : (state.config && state.config.defaultCwd ? state.config.defaultCwd : "")) + '</div>' +
                 '</div>' +
               '</div>' +
               // Blank chat state (when no session)
@@ -498,18 +508,46 @@
         '</section>';
       }
 
-      function setSidebarTab(tab) {
-        if (state.sidebarTab === tab) return;
-        state.sidebarTab = tab;
-        var tabSessions = document.getElementById("tab-sessions");
-        var tabFiles = document.getElementById("tab-files");
-        var sessionsPanel = document.getElementById("sessions-panel");
-        var filesPanel = document.getElementById("files-panel");
-        if (tabSessions) tabSessions.classList.toggle("active", tab !== "files");
-        if (tabFiles) tabFiles.classList.toggle("active", tab === "files");
-        if (sessionsPanel) sessionsPanel.classList.toggle("hidden", tab === "files");
-        if (filesPanel) filesPanel.classList.toggle("hidden", tab !== "files");
-        if (tab === "files") refreshFileExplorer();
+      function toggleFilePanel() {
+        state.filePanelOpen = !state.filePanelOpen;
+        try {
+          localStorage.setItem("wand-file-panel-open", String(state.filePanelOpen));
+        } catch (e) {}
+        updateFilePanelState();
+        if (state.filePanelOpen) {
+          refreshFileExplorer();
+        }
+      }
+
+      function updateFilePanelState() {
+        var panel = document.getElementById("file-side-panel");
+        var mainContent = document.querySelector(".main-content");
+        var toggleBtn = document.getElementById("file-panel-toggle-btn");
+        if (panel) {
+          panel.classList.toggle("open", state.filePanelOpen);
+        }
+        if (mainContent) {
+          mainContent.classList.toggle("file-panel-open", state.filePanelOpen);
+        }
+        if (toggleBtn) {
+          toggleBtn.classList.toggle("active", state.filePanelOpen);
+        }
+      }
+
+      function updateFilePanelCwd(session) {
+        var cwdEl = document.getElementById("file-explorer-cwd");
+        if (!cwdEl) return;
+        var cwd = session && session.cwd ? session.cwd : (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        cwdEl.textContent = cwd;
+      }
+
+      function closeFilePanel() {
+        if (!state.filePanelOpen) return;
+        state.filePanelOpen = false;
+        try {
+          localStorage.setItem("wand-file-panel-open", "false");
+        } catch (e) {}
+        updateFilePanelState();
       }
 
       function renderFileExplorer(cwd) {
@@ -526,13 +564,24 @@
         var explorer = document.getElementById("file-explorer");
         var cwdEl = document.getElementById("file-explorer-cwd");
         if (!explorer) return;
-        var cwd = cwdEl ? cwdEl.textContent : "";
+        // Get cwd from current session or config
+        var cwd = "";
+        if (state.selectedId) {
+          var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+          if (session) cwd = session.cwd || "";
+        }
+        if (!cwd && state.config && state.config.defaultCwd) {
+          cwd = state.config.defaultCwd;
+        }
         if (!cwd) {
           explorer.innerHTML = '<div class="file-explorer empty">No working directory.</div>';
           return;
         }
         explorer.innerHTML = '<div class="file-explorer"><div class="tree-loading" style="padding:12px;color:var(--text-muted);font-size:0.8125rem;">Loading...</div></div>';
-        fetch("/api/directory?q=" + encodeURIComponent(cwd), { credentials: "same-origin" })
+        // Update the cwd display
+        if (cwdEl) cwdEl.textContent = cwd;
+        // Fetch with git status
+        fetch("/api/directory?q=" + encodeURIComponent(cwd) + "&gitStatus=true", { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(items) {
             if (!items || items.length === 0) {
@@ -590,12 +639,31 @@
       function renderFileTreeItem(item) {
         var name = escapeHtml(item.name);
         var isDir = item.type === "dir";
-        var icon = isDir ? "▸" : "📄";
+        // Use clear emoji icons: 📁 for folders, 📄 for files
+        var displayIcon = isDir ? "📁" : "📄";
+        var toggleIcon = isDir ? "▸" : "";
         var toggleClass = isDir ? "" : " empty";
+        var gitStatus = item.gitStatus;
+        var statusBadge = renderGitStatusBadge(gitStatus);
         return '<div class="tree-item" data-path="' + escapeHtml(item.path) + '" data-type="' + escapeHtml(item.type) + '">' +
-          '<span class="tree-toggle' + toggleClass + '">' + icon + '</span>' +
+          '<span class="tree-toggle' + toggleClass + '">' + toggleIcon + '</span>' +
+          '<span class="tree-icon">' + displayIcon + '</span>' +
           '<span class="tree-name">' + name + '</span>' +
+          (statusBadge ? '<span class="git-status-badge ' + statusBadge.class + '" title="' + statusBadge.title + '">' + statusBadge.text + '</span>' : '') +
         '</div>';
+      }
+
+      function renderGitStatusBadge(gitStatus) {
+        if (!gitStatus) return null;
+        // Priority: staged > unstaged > untracked
+        if (gitStatus.staged === "added") return { text: "A", class: "git-added", title: "已暂存（新增）" };
+        if (gitStatus.staged === "modified") return { text: "M", class: "git-modified", title: "已暂存（修改）" };
+        if (gitStatus.staged === "deleted") return { text: "D", class: "git-deleted", title: "已暂存（删除）" };
+        if (gitStatus.staged === "renamed") return { text: "R", class: "git-renamed", title: "已暂存（重命名）" };
+        if (gitStatus.unstaged === "modified") return { text: "M", class: "git-unstaged", title: "未暂存（修改）" };
+        if (gitStatus.unstaged === "deleted") return { text: "D", class: "git-unstaged-deleted", title: "未暂存（删除）" };
+        if (gitStatus.untracked) return { text: "?", class: "git-untracked", title: "未跟踪" };
+        return null;
       }
 
       function attachFileTreeListeners() {
@@ -620,9 +688,9 @@
           return;
         }
 
-        // Load children
+        // Load children with git status
         if (toggle) toggle.classList.add("open");
-        fetch("/api/directory?q=" + encodeURIComponent(path))
+        fetch("/api/directory?q=" + encodeURIComponent(path) + "&gitStatus=true", { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(items) {
             var childrenDiv = document.createElement("div");
@@ -1102,11 +1170,11 @@
         var viewChatBtn = document.getElementById("view-chat-btn");
         if (viewChatBtn) viewChatBtn.addEventListener("click", function() { setView("chat"); });
 
-        // Sidebar tabs
-        var tabSessions = document.getElementById("tab-sessions");
-        if (tabSessions) tabSessions.addEventListener("click", function() { setSidebarTab("sessions"); });
-        var tabFiles = document.getElementById("tab-files");
-        if (tabFiles) tabFiles.addEventListener("click", function() { setSidebarTab("files"); });
+        // File panel toggle
+        var filePanelToggle = document.getElementById("file-panel-toggle-btn");
+        if (filePanelToggle) filePanelToggle.addEventListener("click", toggleFilePanel);
+        var filePanelClose = document.getElementById("file-side-panel-close");
+        if (filePanelClose) filePanelClose.addEventListener("click", closeFilePanel);
 
         // File explorer
         var fileRefresh = document.getElementById("file-explorer-refresh");
@@ -2058,6 +2126,11 @@
         }
         updateSessionsList();
         switchToSessionView(id);
+        // Update file panel cwd and refresh if open
+        if (state.filePanelOpen) {
+          updateFilePanelCwd(session);
+          refreshFileExplorer();
+        }
         loadOutput(id).then(function() { focusInputBox(true); });
       }
 
@@ -3446,11 +3519,11 @@
                 cards[ci].classList.add("collapsed");
               }
             }
-            // Scroll to newest message using scrollIntoView for mobile reliability
-            requestAnimationFrame(function() {
-              firstMsg.scrollIntoView({ block: "start", behavior: "instant" });
-            });
           }
+          // Scroll to bottom (newest message) - with column-reverse, scrollTop=0 is visual bottom
+          requestAnimationFrame(function() {
+            chatMessages.scrollTop = 0;
+          });
         }
 
         // Collapse all tool-use cards except those in the new message elements (marked with animate-in)
@@ -3489,9 +3562,10 @@
           attachAllCopyHandlers(chatMessages);
           // Collapse all existing cards; new cards (with animate-in) stay expanded
           collapseOldToolCards(chatMessages, fragment.children);
-          // Scroll to newest message (first child in DOM after prepend, due to column-reverse)
-          var newestEl = chatMessages.firstElementChild;
-          if (newestEl) newestEl.scrollIntoView({ block: "start", behavior: "instant" });
+          // Scroll to bottom (newest message) - with column-reverse, scrollTop=0 is visual bottom
+          requestAnimationFrame(function() {
+            chatMessages.scrollTop = 0;
+          });
         } else if (msgCount === existingCount && outputHash !== prevHash) {
           // Same message count but content changed (streaming update) — update last message (newest visually)
           // With column-reverse, first DOM child = newest message
@@ -3666,8 +3740,9 @@
         var currentStep = completed + inProgress;
         var allDone = completed === todos.length;
         if (allDone) {
-          container.classList.add("all-done");
-          activeTask = "全部完成";
+          // Hide todo when all tasks are completed
+          container.classList.add("hidden");
+          return;
         } else {
           container.classList.remove("all-done");
         }

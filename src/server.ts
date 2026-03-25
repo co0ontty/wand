@@ -2,9 +2,13 @@ import express, { NextFunction, Request, Response } from "express";
 import { readdir } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import path from "node:path";
 import process from "node:process";
 import { WebSocketServer, WebSocket } from "ws";
+
+const execAsync = promisify(exec);
 import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
 import { ensureCertificates } from "./cert.js";
 import { isExecutionMode, resolveConfigDir } from "./config.js";
@@ -15,6 +19,8 @@ import {
   ChatMessage,
   CommandRequest,
   ExecutionMode,
+  FileEntry,
+  GitFileStatus,
   InputRequest,
   PathSuggestion,
   ResizeRequest,
@@ -24,6 +30,127 @@ import { parseMessages } from "./message-parser.js";
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+/**
+ * Check if a directory is inside a git repository
+ */
+async function isGitRepo(dirPath: string): Promise<boolean> {
+  try {
+    await execAsync("git rev-parse --is-inside-work-tree", { cwd: dirPath });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get the git repository root directory
+ */
+async function getGitRepoRoot(dirPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execAsync("git rev-parse --show-toplevel", { cwd: dirPath });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get git status for all files in a directory
+ * Returns a map of relative file paths to their git status
+ */
+async function getGitStatusMap(gitRoot: string): Promise<Map<string, GitFileStatus>> {
+  const statusMap = new Map<string, GitFileStatus>();
+
+  try {
+    // Get git status in porcelain format (stable for parsing)
+    // -uno: don't list untracked files (we'll get them separately)
+    const { stdout: stagedStdout } = await execAsync(
+      "git status --porcelain -uno",
+      { cwd: gitRoot }
+    );
+
+    // Get untracked files separately
+    const { stdout: untrackedStdout } = await execAsync(
+      "git ls-files --others --exclude-standard",
+      { cwd: gitRoot }
+    );
+
+    // Parse staged/unstaged changes
+    const lines = stagedStdout.split("\n").filter(line => line.trim());
+    for (const line of lines) {
+      if (line.length < 4) continue;
+
+      const stagedChar = line[0];
+      const unstagedChar = line[1];
+      const filePath = line.slice(3).trim();
+
+      if (!filePath) continue;
+
+      const status: GitFileStatus = {};
+
+      // Parse staged status
+      if (stagedChar === "M") status.staged = "modified";
+      else if (stagedChar === "A") status.staged = "added";
+      else if (stagedChar === "D") status.staged = "deleted";
+      else if (stagedChar === "R") status.staged = "renamed";
+
+      // Parse unstaged status
+      if (unstagedChar === "M") status.unstaged = "modified";
+      else if (unstagedChar === "D") status.unstaged = "deleted";
+
+      statusMap.set(filePath, status);
+    }
+
+    // Parse untracked files
+    const untrackedFiles = untrackedStdout.split("\n").filter(line => line.trim());
+    for (const filePath of untrackedFiles) {
+      const existing = statusMap.get(filePath);
+      if (existing) {
+        existing.untracked = true;
+      } else {
+        statusMap.set(filePath, { untracked: true });
+      }
+    }
+
+    return statusMap;
+  } catch (error) {
+    // Git command failed, return empty map
+    return statusMap;
+  }
+}
+
+/**
+ * Enrich file entries with git status
+ */
+async function enrichWithGitStatus(
+  items: FileEntry[],
+  dirPath: string
+): Promise<FileEntry[]> {
+  try {
+    const gitRoot = await getGitRepoRoot(dirPath);
+    if (!gitRoot) {
+      return items;
+    }
+
+    const gitStatusMap = await getGitStatusMap(gitRoot);
+
+    return items.map((item) => {
+      // Get path relative to git root
+      const relativePath = path.relative(gitRoot, item.path);
+      // Normalize path separators for cross-platform compatibility
+      const normalizedPath = relativePath.replace(/\\/g, '/');
+      const gitStatus = gitStatusMap.get(normalizedPath);
+
+      return {
+        ...item,
+        gitStatus: gitStatus || undefined
+      };
+    });
+  } catch {
+    return items;
+  }
 }
 
 // Simple in-memory rate limiter for login attempts
@@ -269,6 +396,7 @@ self.addEventListener('fetch', (event) => {
 
   app.get("/api/directory", async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q : "";
+    const includeGitStatus = req.query.gitStatus === "true";
     const targetPath = path.resolve(process.cwd(), q);
 
     // Security check: ensure the resolved path is within the current working directory
@@ -280,7 +408,7 @@ self.addEventListener('fetch', (event) => {
 
     try {
       const entries = await readdir(targetPath, { withFileTypes: true });
-      const items = entries
+      let items: FileEntry[] = entries
         .sort((a, b) => {
           // Directories first, then alphabetically
           if (a.isDirectory() && !b.isDirectory()) return -1;
@@ -291,8 +419,14 @@ self.addEventListener('fetch', (event) => {
         .map((entry) => ({
           path: path.join(targetPath, entry.name),
           name: entry.name,
-          type: entry.isDirectory() ? "dir" : "file"
+          type: entry.isDirectory() ? "dir" : "file" as const
         }));
+
+      // Enrich with git status if requested
+      if (includeGitStatus) {
+        items = await enrichWithGitStatus(items, targetPath);
+      }
+
       res.json(items);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法读取目录。可能原因：路径不存在或权限不足。") });
