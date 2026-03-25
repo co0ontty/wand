@@ -9,3 +9,9 @@ auto-start-result.png
 final-verify.png
 fix1-layout.png
 page-screenshot*.png
+
+# Playwright
+playwright-report/
+
+# Test sessions
+tests/sessions/
