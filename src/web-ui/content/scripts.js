@@ -3283,17 +3283,31 @@
                 snapshot.messages = msg.data.messages;
               }
               updateSessionSnapshot(snapshot);
-              // Check if this is a new message (not just streaming update)
-              var prevMsgCount = state.lastRenderedMsgCount;
-              var currMsgCount = snapshot.messages ? snapshot.messages.length : 0;
 
-              // Streaming thinking update: update the thinking element in-place
-              if (msg.data.thinkingContent !== undefined && msg.sessionId === state.selectedId) {
-                updateStreamingThinking(msg.data.thinkingContent);
+              // Only process if this is the selected session
+              if (msg.sessionId === state.selectedId) {
+                // Update current messages immediately from the snapshot
+                var updatedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+                if (updatedSession) {
+                  if (updatedSession.messages && updatedSession.messages.length > 0) {
+                    state.currentMessages = updatedSession.messages;
+                  } else if (updatedSession.output) {
+                    state.currentMessages = parseMessages(updatedSession.output, updatedSession.command);
+                  }
+                }
+
+                // Check if this is a new message (not just streaming update)
+                var prevMsgCount = state.lastRenderedMsgCount;
+                var currMsgCount = state.currentMessages.length;
+
+                // Streaming thinking update: update the thinking element in-place
+                if (msg.data.thinkingContent !== undefined) {
+                  updateStreamingThinking(msg.data.thinkingContent);
+                }
+
+                // Immediate render for new messages, debounced for streaming updates
+                scheduleChatRender(currMsgCount > prevMsgCount);
               }
-
-              // Immediate render for new messages, debounced for streaming updates
-              scheduleChatRender(currMsgCount > prevMsgCount);
             }
             // Real-time terminal output
             if (msg.sessionId === state.selectedId && state.terminal && msg.data && msg.data.output) {
@@ -3395,21 +3409,13 @@
         if (chatRenderTimer) clearTimeout(chatRenderTimer);
         if (immediate) {
           chatRenderTimer = null;
-          // Re-parse messages from the latest session output
-          var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
-          if (selectedSession) {
-            if (selectedSession.messages && selectedSession.messages.length > 0) {
-              state.currentMessages = selectedSession.messages;
-            } else if (selectedSession.output) {
-              state.currentMessages = parseMessages(selectedSession.output, selectedSession.command);
-            }
-          }
+          // Messages already updated in handleWebSocketMessage, just render
           renderChat();
           return;
         }
         chatRenderTimer = setTimeout(function() {
           chatRenderTimer = null;
-          // Re-parse messages from the latest session output
+          // Re-parse messages from the latest session output (fallback for edge cases)
           var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (selectedSession) {
             // Prefer structured messages from JSON chat mode
