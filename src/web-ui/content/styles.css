@@ -2124,21 +2124,6 @@
       z-index: 26;
     }
 
-    .token-usage-display {
-      margin-top: 8px;
-      padding: 6px 10px;
-      background: rgba(255, 255, 255, 0.5);
-      border-radius: var(--radius-sm);
-      font-size: 0.6875rem;
-      color: var(--text-muted);
-      font-family: var(--font-mono);
-      transition: all 0.2s var(--ease-out-expo);
-    }
-    .token-usage-display.hidden { display: none; }
-    .token-usage-display #token-usage-text {
-      opacity: 0.8;
-    }
-
     .input-composer {
       background: rgba(255, 255, 255, 0.85);
       border: 1px solid var(--border-default);

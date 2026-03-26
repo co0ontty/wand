@@ -4,10 +4,16 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
+
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
 import { SessionLogger } from "./session-logger.js";
 import { ContentBlock, ConversationTurn, ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
+
+/** Check if the current process is running as root (UID 0). */
+function isRunningAsRoot(): boolean {
+  return process.getuid?.() === 0 || process.geteuid?.() === 0;
+}
 
 export interface ProcessEvent {
   type: "output" | "status" | "started" | "ended" | "usage" | "task";
@@ -474,8 +480,8 @@ export class ProcessManager extends EventEmitter {
       parts.push("--resume", record.claudeSessionId);
     }
 
-    // Add permission mode for full-access
-    if (/^claude(?:\s|$)/.test(baseCommand) && !/--permission-mode\b/.test(baseCommand)) {
+    // Add permission mode for full-access (skip bypassPermissions when running as root)
+    if (/^claude(?:\s|$)/.test(baseCommand) && !/--permission-mode\b/.test(baseCommand) && !isRunningAsRoot()) {
       parts.push("--permission-mode", "bypassPermissions");
     }
 
@@ -1381,11 +1387,13 @@ Begin now:`;
     if (mode === "full-access" && /^claude(?:\s|$)/.test(command)) {
       // Check if permission-mode is already specified
       if (!/--permission-mode\b/.test(command)) {
-        // Add --permission-mode bypassPermissions for full-access mode
-        if (command === "claude --enable-auto-mode") {
-          return "claude --enable-auto-mode --permission-mode bypassPermissions";
+        // Skip bypassPermissions when running as root (causes exit code 1)
+        if (!isRunningAsRoot()) {
+          if (command === "claude --enable-auto-mode") {
+            return "claude --enable-auto-mode --permission-mode bypassPermissions";
+          }
+          return command.replace(/^claude\s/, "claude --permission-mode bypassPermissions ");
         }
-        return command.replace(/^claude\s/, "claude --permission-mode bypassPermissions ");
       }
     }
     return command;

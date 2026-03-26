@@ -58,7 +58,6 @@
         lastRenderedMsgCount: 0,
         lastRenderedEmpty: null,
         renderPending: false,
-        cumulativeUsage: null, // Accumulated usage from real-time usage events
         currentTask: null, // Current task title from Claude
         fileSearchQuery: "",
         allFiles: [],
@@ -407,9 +406,6 @@
                       '</button>' +
                     '</div>' +
                   '</div>' +
-                '</div>' +
-                '<div id="token-usage-display" class="token-usage-display hidden">' +
-                  '<span id="token-usage-text"></span>' +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
               '</div>' +
@@ -2247,7 +2243,6 @@
         state.lastRenderedMsgCount = 0;
         state.lastRenderedEmpty = null;
         state.currentMessages = [];
-        state.cumulativeUsage = null;
         if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
         // Reset todo progress bar
         var todoEl = document.getElementById("todo-progress");
@@ -3476,28 +3471,7 @@
             }
             break;
           case 'usage':
-            // Real-time token usage update from streaming result events
-            if (msg.sessionId === state.selectedId && msg.data && msg.data.usage) {
-              var u = msg.data.usage;
-              // Initialize cumulative usage if not set
-              if (!state.cumulativeUsage) {
-                state.cumulativeUsage = {
-                  inputTokens: 0,
-                  outputTokens: 0,
-                  cacheReadInputTokens: 0,
-                  cacheCreationInputTokens: 0,
-                  totalCostUsd: 0
-                };
-              }
-              // Accumulate usage from each result event (each turn adds its usage)
-              if (u.input_tokens) state.cumulativeUsage.inputTokens += u.input_tokens;
-              if (u.output_tokens) state.cumulativeUsage.outputTokens += u.output_tokens;
-              if (u.cache_read_input_tokens) state.cumulativeUsage.cacheReadInputTokens += u.cache_read_input_tokens;
-              if (u.cache_creation_input_tokens) state.cumulativeUsage.cacheCreationInputTokens += u.cache_creation_input_tokens;
-              if (u._totalCostUsd !== undefined) state.cumulativeUsage.totalCostUsd += u._totalCostUsd;
-              // Update display with cumulative usage
-              updateTokenUsageDisplayFromCumulative();
-            }
+            // Token usage events are processed server-side; per-message usage is read from msg.usage
             break;
           case 'task':
             // Current task update from Claude's tool execution
@@ -3506,25 +3480,6 @@
               updateTaskDisplay();
             }
             break;
-        }
-      }
-
-      function updateTokenUsageDisplayFromCumulative() {
-        var display = document.getElementById("token-usage-display");
-        var textEl = document.getElementById("token-usage-text");
-        if (!display || !textEl) return;
-        var u = state.cumulativeUsage;
-        if (!u) return;
-        var parts = [];
-        if (u.inputTokens > 0) parts.push("输入 " + u.inputTokens);
-        if (u.outputTokens > 0) parts.push("输出 " + u.outputTokens);
-        if (u.cacheReadInputTokens > 0) parts.push("缓存 " + u.cacheReadInputTokens);
-        if (u.totalCostUsd > 0) parts.push("$" + u.totalCostUsd.toFixed(4));
-        if (parts.length > 0) {
-          textEl.textContent = parts.join("  ·  ");
-          display.classList.remove("hidden");
-        } else {
-          display.classList.add("hidden");
         }
       }
 
@@ -3800,9 +3755,6 @@
 
         // Update todo progress bar from latest messages
         updateTodoProgress(messages);
-
-        // Update real-time token usage display
-        updateTokenUsageDisplay(messages);
       }
 
       // Smart scroll: only auto-scroll if user is near bottom
@@ -3841,42 +3793,6 @@
           }
         }
       });
-
-      function updateTokenUsageDisplay(messages) {
-        var display = document.getElementById("token-usage-display");
-        var textEl = document.getElementById("token-usage-text");
-        if (!display || !textEl) return;
-
-        // Calculate total token usage from current messages
-        var totalInput = 0;
-        var totalOutput = 0;
-        var totalCache = 0;
-        var totalCost = 0;
-
-        for (var i = 0; i < messages.length; i++) {
-          var msg = messages[i];
-          if (msg.usage) {
-            if (msg.usage.inputTokens) totalInput += msg.usage.inputTokens;
-            if (msg.usage.outputTokens) totalOutput += msg.usage.outputTokens;
-            if (msg.usage.cacheReadInputTokens) totalCache += msg.usage.cacheReadInputTokens;
-            if (msg.usage.totalCostUsd) totalCost += msg.usage.totalCostUsd;
-          }
-        }
-
-        // Build token usage string
-        var parts = [];
-        if (totalInput > 0) parts.push("输入 " + totalInput);
-        if (totalOutput > 0) parts.push("输出 " + totalOutput);
-        if (totalCache > 0) parts.push("缓存 " + totalCache);
-        if (totalCost > 0) parts.push("$" + totalCost.toFixed(4));
-
-        if (parts.length > 0) {
-          textEl.textContent = parts.join("  ·  ");
-          display.classList.remove("hidden");
-        } else {
-          display.classList.add("hidden");
-        }
-      }
 
       function updateTodoProgress(messages) {
         var todos = null;
