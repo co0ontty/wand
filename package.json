@@ -1,5 +1,5 @@
 {
-  "name": "wand",
+  "name": "@co0ontty/wand",
   "version": "0.2.0",
   "description": "Remote web coding controller for local CLI tools.",
   "type": "module",
