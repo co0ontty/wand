@@ -9,11 +9,6 @@ import { WandStorage } from "./storage.js";
 import { SessionLogger } from "./session-logger.js";
 import { ContentBlock, ConversationTurn, ExecutionMode, SessionSnapshot, WandConfig } from "./types.js";
 
-/** Check if running as root (uid 0) */
-function isRunningAsRoot(): boolean {
-  return process.getuid?.() === 0 || process.geteuid?.() === 0;
-}
-
 export interface ProcessEvent {
   type: "output" | "status" | "started" | "ended" | "usage" | "task";
   sessionId: string;
@@ -470,8 +465,8 @@ export class ProcessManager extends EventEmitter {
     const parts = [baseCommand, "-p", `'${escapedMessage}'`, "--output-format", "stream-json"];
     if (isClaude) parts.push("--verbose");
 
-    // Add --enable-auto-mode for claude commands (skip for root)
-    if (isClaude && !/--enable-auto-mode\b/.test(baseCommand) && !isRunningAsRoot()) {
+    // Add --enable-auto-mode for claude commands
+    if (isClaude && !/--enable-auto-mode\b/.test(baseCommand)) {
       parts.push("--enable-auto-mode");
     }
 
@@ -479,8 +474,8 @@ export class ProcessManager extends EventEmitter {
       parts.push("--resume", record.claudeSessionId);
     }
 
-    // Add permission mode for full-access (skip for root users who have all permissions)
-    if (/^claude(?:\s|$)/.test(baseCommand) && !/--permission-mode\b/.test(baseCommand) && !isRunningAsRoot()) {
+    // Add permission mode for full-access
+    if (/^claude(?:\s|$)/.test(baseCommand) && !/--permission-mode\b/.test(baseCommand)) {
       parts.push("--permission-mode", "bypassPermissions");
     }
 
@@ -1370,8 +1365,8 @@ Begin now:`;
   }
 
   private processCommandForMode(command: string, mode: ExecutionMode): string {
-    // Add --enable-auto-mode to claude commands (skip for root)
-    if (/^claude(?:\s|$)/.test(command) && !isRunningAsRoot()) {
+    // Add --enable-auto-mode to claude commands
+    if (/^claude(?:\s|$)/.test(command)) {
       // Check if --enable-auto-mode is already specified
       if (!/--enable-auto-mode\b/.test(command)) {
         if (command === "claude") {
@@ -1382,8 +1377,8 @@ Begin now:`;
       }
     }
 
-    // For full-access mode with claude commands, add permission flags (skip for root)
-    if (mode === "full-access" && /^claude(?:\s|$)/.test(command) && !isRunningAsRoot()) {
+    // For full-access mode with claude commands, add permission flags
+    if (mode === "full-access" && /^claude(?:\s|$)/.test(command)) {
       // Check if permission-mode is already specified
       if (!/--permission-mode\b/.test(command)) {
         // Add --permission-mode bypassPermissions for full-access mode
