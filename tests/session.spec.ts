@@ -78,10 +78,6 @@ test.describe("Session Management", () => {
     // Check Claude tool card
     const claudeCard = page.locator('[data-tool="claude"]');
     await expect(claudeCard).toBeVisible();
-
-    // Check Codex tool card
-    const codexCard = page.locator('[data-tool="codex"]');
-    await expect(codexCard).toBeVisible();
   });
 
   test("should select tool card on click", async ({ page }) => {

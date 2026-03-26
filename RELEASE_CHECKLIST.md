@@ -40,7 +40,6 @@ node dist/cli.js web
 
 ### 2.4 新建会话测试
 - [ ] 点击「新对话」按钮正常
-- [ ] 可以选择 Claude/Codex 模式
 - [ ] 模式选择器（full-access/default/auto-edit/native）正常
 
 ### 2.5 Chat 模式测试

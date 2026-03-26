@@ -19,7 +19,7 @@ node dist/cli.js web       # Start the web console server
 
 **Smoke test after changes:**
 ```bash
-npm run build && node dist/cli.js init && node dist/cli.js web
+npm run build && wand init && wand web
 ```
 
 **Testing:**
@@ -46,13 +46,12 @@ Required manual tests:
 4. Chat mode displays messages bottom-to-top
 5. No message flickering during streaming
 6. Keyboard shortcuts work (Ctrl+C, Ctrl+D, etc.)
-7. Floating control panel works
-8. Session resume works (if claudeSessionId exists)
-9. Draft persistence works after refresh
+7. Session resume works (if claudeSessionId exists)
+8. Draft persistence works after refresh
 
 ## Architecture Overview
 
-`wand-cli` is a Node.js tool that exposes a web console for operating local CLI tools from a browser. It uses Express for HTTP, `node-pty` for PTY sessions, `xterm.js` for terminal rendering, and `node:sqlite` for persistence.
+`wand` is a Node.js tool that exposes a web console for operating local CLI tools from a browser. It uses Express for HTTP, `node-pty` for PTY sessions, `xterm.js` for terminal rendering, and `node:sqlite` for persistence.
 
 **Module responsibilities:**
 - `cli.ts` — CLI entrypoint; parses commands (`init`, `web`, `config:*`)

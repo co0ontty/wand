@@ -1,14 +1,20 @@
 {
-  "name": "wand-cli",
+  "name": "wand",
   "version": "0.2.0",
   "description": "Remote web coding controller for local CLI tools.",
   "type": "module",
   "bin": {
     "wand": "dist/cli.js"
   },
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
   "files": [
     "dist"
   ],
+  "preferGlobal": true,
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run build:copy-content",
     "build:copy-content": "cp -r src/web-ui/content dist/web-ui/",

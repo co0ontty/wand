@@ -2033,6 +2033,21 @@
       z-index: 15;
     }
 
+    .token-usage-display {
+      margin-top: 8px;
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: var(--radius-sm);
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      transition: opacity var(--transition-fast);
+    }
+    .token-usage-display.hidden { display: none; }
+    .token-usage-display #token-usage-text {
+      opacity: 0.8;
+    }
+
     .input-composer {
       background: rgba(255, 255, 255, 0.85);
       border: 1px solid var(--border-default);
@@ -2239,53 +2254,6 @@
 
     @keyframes spin {
       to { transform: rotate(360deg); }
-    }
-
-    /* Session status indicator in chat — sticky at top of scroll container */
-    .chat-status-bar {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 8px 12px;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      user-select: none;
-      flex-shrink: 0;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      background: var(--bg-primary);
-    }
-    .chat-status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .chat-status-bar.running .chat-status-dot {
-      background: var(--success);
-      box-shadow: 0 0 6px var(--success);
-      animation: status-pulse 1.5s ease-in-out infinite;
-    }
-    .chat-status-bar.running {
-      color: var(--text-secondary);
-    }
-    .chat-status-tokens {
-      margin-left: 12px;
-      font-family: var(--font-mono);
-      font-size: 0.6875rem;
-      color: var(--text-muted);
-    }
-    .chat-status-bar.running .chat-status-tokens {
-      color: var(--text-secondary);
-    }
-    .chat-status-bar.ended .chat-status-dot {
-      background: var(--text-muted);
-    }
-    @keyframes status-pulse {
-      0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--success); }
-      50% { opacity: 0.5; box-shadow: 0 0 2px var(--success); }
     }
 
     .folder-picker-container {
@@ -2758,79 +2726,6 @@
     }
     .input-actions-spacer { flex: 1; }
 
-    .floating-toggle {
-      width: 44px;
-      height: 44px;
-      min-width: 44px;
-      min-height: 44px;
-      border-radius: var(--radius-md);
-      box-shadow: 0 4px 16px rgba(89, 58, 32, 0.15);
-      padding: 0;
-      font-size: 1.2rem;
-      line-height: 1;
-      cursor: pointer;
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
-      z-index: 40;
-    }
-    .floating-toggle:hover {
-      transform: scale(1.05);
-      box-shadow: 0 6px 20px rgba(89, 58, 32, 0.2);
-    }
-    .floating-toggle:active {
-      transform: scale(0.95);
-    }
-    /* Hide floating toggle in Chat mode */
-    .floating-toggle.hidden-in-chat {
-      display: none;
-    }
-
-    .floating-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 38;
-    }
-
-    .floating-pad {
-      position: fixed;
-      right: 16px;
-      bottom: 80px;
-      z-index: 41;
-      width: min(220px, calc(100vw - 28px));
-      background: rgba(255, 251, 245, 0.98);
-      border: 1px solid rgba(150, 118, 85, 0.18);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-soft);
-      padding: 12px;
-      backdrop-filter: blur(18px);
-      transition: opacity 0.2s ease, transform 0.2s ease;
-    }
-
-    .floating-pad-title {
-      font-size: 0.6875rem;
-      color: var(--text-muted);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 10px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .floating-pad-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 6px;
-      align-items: center;
-    }
-
-    .floating-pad-grid .btn {
-      width: 100%;
-      min-height: 38px;
-      padding: 6px 4px;
-      font-size: 0.75rem;
-      border-radius: var(--radius-sm);
-    }
-
     .quick-input {
       font-family: var(--font-mono);
       font-weight: 500;
@@ -2852,10 +2747,6 @@
     .btn-no:hover {
       background: var(--danger);
       color: white;
-    }
-
-    .floating-pad-spacer {
-      visibility: hidden;
     }
 
     .login-container {

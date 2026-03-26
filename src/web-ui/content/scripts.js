@@ -367,9 +367,6 @@
                     '<button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button">' +
                       '<span class="tool-icon">🤖</span>Claude' +
                     '</button>' +
-                    '<button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button">' +
-                      '<span class="tool-icon">⚡</span>Codex' +
-                    '</button>' +
                     '<button class="blank-chat-tool-btn" id="welcome-tool-folder" type="button" title="选择工作目录">' +
                       '<span class="tool-icon">📎</span>目录' +
                     '</button>' +
@@ -414,6 +411,9 @@
                     '</div>' +
                   '</div>' +
                 '</div>' +
+                '<div id="token-usage-display" class="token-usage-display hidden">' +
+                  '<span id="token-usage-text"></span>' +
+                '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
               '</div>' +
               // Folder picker modal (hidden by default)
@@ -439,24 +439,6 @@
                 '</div>' +
               '</section>' +
             '</main>' +
-            // Floating controls for keyboard shortcuts
-            '<button id="floating-controls-toggle" class="floating-toggle" type="button" aria-label="快捷键" title="快捷键">⌨</button>' +
-            '<div id="floating-controls" class="floating-pad hidden">' +
-              '<div class="floating-pad-title">Claude 快捷键</div>' +
-              '<div class="floating-pad-grid">' +
-                '<button id="float-stop-btn" class="btn btn-danger" type="button" title="强制停止当前会话">⏹ 停止</button>' +
-                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_c" type="button" title="中断当前操作">Ctrl+C</button>' +
-                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_d" type="button" title="发送 EOF">Ctrl+D</button>' +
-                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_l" type="button" title="清屏">Ctrl+L</button>' +
-                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_u" type="button" title="删除到行首">Ctrl+U</button>' +
-                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_k" type="button" title="删除到行尾">Ctrl+K</button>' +
-                '<button class="btn btn-secondary quick-input" data-input-key="ctrl_w" type="button" title="删除前一个单词">Ctrl+W</button>' +
-                '<button class="btn btn-secondary quick-input" data-input-key="up" type="button" title="上一条命令">↑</button>' +
-                '<button class="btn btn-secondary quick-input" data-input-key="down" type="button" title="下一条命令">↓</button>' +
-                '<button class="btn btn-primary quick-input" data-input-key="enter" type="button" title="发送/确认">Enter</button>' +
-              '</div>' +
-            '</div>' +
-            '<div id="floating-backdrop" class="floating-backdrop hidden"></div>' +
           '</div>' +
         '</div>' + renderSessionModal() + renderSettingsModal();
       }
@@ -789,7 +771,7 @@
       }
 
       function renderSessionModal() {
-        var modalTool = state.sessionTool === "codex" ? "codex" : "claude";
+        var modalTool = "claude";
         var modalMode = getSafeModeForTool(modalTool, state.modeValue || state.chatMode || "default");
         var commandValue = state.commandValue || modalTool;
         return '<section id="session-modal" class="modal-backdrop hidden">' +
@@ -802,13 +784,9 @@
               '<div class="field">' +
                 '<label class="field-label">工具</label>' +
                 '<div class="tool-picker" id="tool-picker">' +
-                  '<button class="tool-card' + (modalTool === "claude" ? " active" : "") + '" type="button" data-tool="claude">' +
+                  '<button class="tool-card active" type="button" data-tool="claude">' +
                     '<div class="tool-card-title"><span>Claude</span><span class="tool-chip">推荐</span></div>' +
                     '<div class="tool-card-desc">适合长会话、恢复上下文，以及 Claude 原生单轮回复。</div>' +
-                  '</button>' +
-                  '<button class="tool-card' + (modalTool === "codex" ? " active" : "") + '" type="button" data-tool="codex">' +
-                    '<div class="tool-card-title"><span>Codex</span><span class="tool-chip">快速</span></div>' +
-                    '<div class="tool-card-desc">适合直接进入编码工作流，保留完整 CLI 交互。</div>' +
                   '</button>' +
                 '</div>' +
                 '<p id="tool-description" class="field-hint">' + escapeHtml(getSessionToolDescription(modalTool)) + '</p>' +
@@ -822,7 +800,7 @@
               '</div>' +
               '<div class="field">' +
                 '<label class="field-label" for="command">命令</label>' +
-                '<textarea id="command" class="field-input" placeholder="claude&#10;codex&#10;任意 CLI 命令" rows="2">' + escapeHtml(commandValue) + '</textarea>' +
+                '<textarea id="command" class="field-input" placeholder="claude&#10;任意 CLI 命令" rows="2">' + escapeHtml(commandValue) + '</textarea>' +
                 '<span id="session-command-preview" class="command-preview">' + escapeHtml(commandValue) + '</span>' +
               '</div>' +
               '<div class="field">' +
@@ -845,8 +823,8 @@
           : "claude";
         var presets = state.config && state.config.commandPresets ? state.config.commandPresets : [];
         var cards = presets.slice(0, 2).map(function(p) {
-          var icon = p.command.indexOf("claude") !== -1 ? "🤖" : (p.command.indexOf("codex") !== -1 ? "⚡" : "⌨");
-          var desc = p.command.indexOf("claude") !== -1 ? "Anthropic 编程助手" : (p.command.indexOf("codex") !== -1 ? "OpenAI 编程助手" : "CLI 工具");
+          var icon = p.command.indexOf("claude") !== -1 ? "🤖" : "⌨";
+          var desc = p.command.indexOf("claude") !== -1 ? "Anthropic 编程助手" : "CLI 工具";
           return '<div class="quick-card" data-command="' + escapeHtml(p.command) + '">' +
             '<div class="quick-card-icon">' + icon + '</div>' +
             '<div class="quick-card-body">' +
@@ -1005,12 +983,6 @@
             quickStartSession("claude");
           });
         }
-        var welcomeCodexBtn = document.getElementById("welcome-tool-codex");
-        if (welcomeCodexBtn) {
-          welcomeCodexBtn.addEventListener("click", function() {
-            quickStartSession("codex");
-          });
-        }
         var welcomeFolderBtn = document.getElementById("welcome-tool-folder");
         if (welcomeFolderBtn) {
           welcomeFolderBtn.addEventListener("click", openFolderPickerWithInitialPath);
@@ -1026,7 +998,7 @@
         if (commandEl) commandEl.addEventListener("input", function() {
           state.commandValue = this.value;
           var inferredTool = inferToolFromCommand(this.value);
-          if (inferredTool === "claude" || inferredTool === "codex") {
+          if (inferredTool === "claude") {
             state.sessionTool = inferredTool;
             state.modeValue = getSafeModeForTool(inferredTool, state.modeValue);
           }
@@ -1095,23 +1067,6 @@
         if (modeSelect) modeSelect.addEventListener("change", function() {
           state.chatMode = this.value;
           showToast("新会话模式已切换为：" + getModeLabel(this.value), "info");
-        });
-        var floatToggle = document.getElementById("floating-controls-toggle");
-        if (floatToggle) floatToggle.addEventListener("click", toggleFloatingControls);
-        var floatBackdrop = document.getElementById("floating-backdrop");
-        if (floatBackdrop) floatBackdrop.addEventListener("click", hideFloatingControls);
-
-        // Float stop button
-        var floatStopBtn = document.getElementById("float-stop-btn");
-        if (floatStopBtn) floatStopBtn.addEventListener("click", function() {
-          stopSession();
-          hideFloatingControls();
-        });
-
-        document.querySelectorAll(".quick-input").forEach(function(btn) {
-          btn.addEventListener("click", function() {
-            sendDirectInput(getControlInput(btn.dataset.inputKey || ""));
-          });
         });
 
         var sessionModal = document.getElementById("session-modal");
@@ -1784,27 +1739,23 @@
       function inferToolFromCommand(command) {
         var base = String(command || "").trim().split(/\s+/)[0] || "";
         if (base === "claude") return "claude";
-        if (base === "codex") return "codex";
         return "custom";
       }
 
       function getPreferredTool() {
-        return inferToolFromCommand(state.preferredCommand) === "codex" ? "codex" : "claude";
+        return "claude";
       }
 
       function getComposerTool() {
         var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
         var selectedTool = inferToolFromCommand(selectedSession && selectedSession.command ? selectedSession.command : "");
-        if (selectedTool === "claude" || selectedTool === "codex") {
+        if (selectedTool === "claude") {
           return selectedTool;
         }
         return getPreferredTool();
       }
 
       function getSessionToolDescription(tool) {
-        if (tool === "codex") {
-          return "适合快速启动编码会话；不提供 Claude 的原生单轮模式。";
-        }
         return "适合持续对话、恢复上下文，也支持原生单轮回复模式。";
       }
 
@@ -1816,22 +1767,16 @@
           return "保留交互式会话，同时更偏向直接编辑代码。";
         }
         if (mode === "native") {
-          return tool === "claude"
-            ? "按单轮消息调用 Claude 原生输出，适合快速问答或一次性生成。"
-            : "Codex 不支持这里的原生单轮模式。";
+          return "按单轮消息调用 Claude 原生输出，适合快速问答或一次性生成。";
         }
         if (mode === "managed") {
-          return tool === "claude"
-            ? "AI 自动完成所有工作，无需中途确认，适合有明确目标的任务。"
-            : "Codex 不支持托管模式。";
+          return "AI 自动完成所有工作，无需中途确认，适合有明确目标的任务。";
         }
         return "保留标准交互流程，适合手动确认每一步。";
       }
 
       function getSupportedModes(tool) {
-        return tool === "codex"
-          ? ["default", "full-access", "auto-edit"]
-          : ["default", "full-access", "auto-edit", "native", "managed"];
+        return ["default", "full-access", "auto-edit", "native", "managed"];
       }
 
       function getSafeModeForTool(tool, mode) {
@@ -1888,14 +1833,11 @@
         var chatBtn = document.getElementById("view-chat-btn");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
-        var floatingToggle = document.getElementById("floating-controls-toggle");
 
         if (terminalBtn) terminalBtn.classList.toggle("active", state.currentView === "terminal");
         if (chatBtn) chatBtn.classList.toggle("active", state.currentView === "chat");
         if (terminalContainer) terminalContainer.classList.toggle("active", hasSession && state.currentView === "terminal");
         if (chatContainer) chatContainer.classList.toggle("active", hasSession && state.currentView === "chat");
-        // Hide floating shortcut in Chat mode - only useful in Terminal mode
-        if (floatingToggle) floatingToggle.classList.toggle("hidden-in-chat", state.currentView === "chat");
       }
 
       function syncSessionModalUI() {
@@ -1904,11 +1846,7 @@
         var toolHint = document.getElementById("tool-description");
         var modeHint = document.getElementById("mode-description");
         var previewEl = document.getElementById("session-command-preview");
-        var tool = inferToolFromCommand(state.commandValue || state.preferredCommand || state.sessionTool || "claude");
-
-        if (tool === "custom") {
-          tool = state.sessionTool === "codex" ? "codex" : "claude";
-        }
+        var tool = "claude";
 
         state.sessionTool = tool;
         state.modeValue = getSafeModeForTool(tool, state.modeValue || state.chatMode || "default");
@@ -1922,9 +1860,7 @@
             commandEl.value = tool;
             state.commandValue = tool;
           }
-          commandEl.placeholder = tool === "codex"
-            ? "codex --model gpt-5"
-            : "claude --model sonnet";
+          commandEl.placeholder = "claude --model sonnet";
         }
 
         if (modeEl) {
@@ -2114,13 +2050,9 @@
         // Reset todo progress bar
         var todoEl = document.getElementById("todo-progress");
         if (todoEl) todoEl.classList.add("hidden");
-        // Reset chat status bar
-        var chatOutput = document.getElementById("chat-output");
-        var oldStatusBar = chatOutput && chatOutput.querySelector(".chat-status-bar");
-        if (oldStatusBar) oldStatusBar.remove();
         var session = state.sessions.find(function(item) { return item.id === id; });
         var inferredTool = inferToolFromCommand(session && session.command ? session.command : "");
-        if (inferredTool === "claude" || inferredTool === "codex") {
+        if (inferredTool === "claude") {
           state.preferredCommand = inferredTool;
           state.chatMode = getSafeModeForTool(inferredTool, session && session.mode ? session.mode : state.chatMode);
         }
@@ -2180,7 +2112,7 @@
           var commandEl = document.getElementById("command");
           var defaultTool = getPreferredTool();
           var fallbackCommand = state.commandValue || state.preferredCommand || defaultTool;
-          state.sessionTool = inferToolFromCommand(fallbackCommand) === "codex" ? "codex" : defaultTool;
+          state.sessionTool = defaultTool;
           state.commandValue = fallbackCommand || state.sessionTool;
           state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
           if (commandEl) commandEl.value = state.commandValue;
@@ -2352,7 +2284,7 @@
         var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
         var defaultMode = (state.config && state.config.defaultMode) ? state.config.defaultMode : "default";
         var inferredTool = inferToolFromCommand(command);
-        if (inferredTool === "claude" || inferredTool === "codex") {
+        if (inferredTool === "claude") {
           state.preferredCommand = inferredTool;
           state.chatMode = getSafeModeForTool(inferredTool, state.chatMode);
         }
@@ -2397,7 +2329,7 @@
         }
 
         var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
-        var selectedTool = inferToolFromCommand(command) === "codex" ? "codex" : "claude";
+        var selectedTool = inferToolFromCommand(command);
         var selectedMode = getSafeModeForTool(selectedTool, modeEl && modeEl.value ? modeEl.value : state.modeValue);
         state.modeValue = selectedMode;
         state.chatMode = selectedMode;
@@ -2872,22 +2804,6 @@
         return queueDirectInput(input);
       }
 
-      function toggleFloatingControls() {
-        var panel = document.getElementById("floating-controls");
-        var backdrop = document.getElementById("floating-backdrop");
-        if (!panel) return;
-        var isHidden = panel.classList.contains("hidden");
-        panel.classList.toggle("hidden", !isHidden);
-        if (backdrop) backdrop.classList.toggle("hidden", !isHidden);
-      }
-
-      function hideFloatingControls() {
-        var panel = document.getElementById("floating-controls");
-        var backdrop = document.getElementById("floating-backdrop");
-        if (panel) panel.classList.add("hidden");
-        if (backdrop) backdrop.classList.add("hidden");
-      }
-
       function getControlInput(key) {
         switch (key) {
           case "yes":
@@ -3026,7 +2942,7 @@
 
       function startCommand(command, cwd, errorEl) {
         var inferredTool = inferToolFromCommand(command);
-        if (inferredTool === "claude" || inferredTool === "codex") {
+        if (inferredTool === "claude") {
           state.preferredCommand = inferredTool;
           state.chatMode = getSafeModeForTool(inferredTool, state.chatMode);
         }
@@ -3447,15 +3363,10 @@
 
         if (messages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
-            var emptyStatusHtml = selectedSession.status === "running"
-              ? '<div class="chat-status-bar running"><span class="chat-status-dot"></span>运行中…</div>'
-              : "";
-            chatOutput.innerHTML = '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>' + emptyStatusHtml;
+            chatOutput.innerHTML = '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>';
             state.lastRenderedEmpty = "empty";
             state.lastRenderedMsgCount = 0;
           }
-          // Always update status even if empty state is cached
-          updateChatStatusBar(chatOutput, selectedSession);
           return;
         }
 
@@ -3614,8 +3525,8 @@
         // Update todo progress bar from latest messages
         updateTodoProgress(messages);
 
-        // Update session status indicator
-        updateChatStatusBar(chatOutput, selectedSession);
+        // Update real-time token usage display
+        updateTokenUsageDisplay(messages);
       }
 
       // Smart scroll: only auto-scroll if user is near bottom
@@ -3655,19 +3566,17 @@
         }
       });
 
-      function updateChatStatusBar(chatOutput, session) {
-        if (!chatOutput || !session) return;
-        var existing = chatOutput.querySelector(".chat-status-bar");
-        var isRunning = session.status === "running";
-        var statusClass = isRunning ? "running" : "ended";
-        var statusText = isRunning ? "运行中…" : "已结束";
+      function updateTokenUsageDisplay(messages) {
+        var display = document.getElementById("token-usage-display");
+        var textEl = document.getElementById("token-usage-text");
+        if (!display || !textEl) return;
 
         // Calculate total token usage from current messages
         var totalInput = 0;
         var totalOutput = 0;
         var totalCache = 0;
         var totalCost = 0;
-        var messages = state.currentMessages || [];
+
         for (var i = 0; i < messages.length; i++) {
           var msg = messages[i];
           if (msg.usage) {
@@ -3679,27 +3588,17 @@
         }
 
         // Build token usage string
-        var tokenParts = [];
-        if (totalInput > 0) tokenParts.push("输入 " + totalInput);
-        if (totalOutput > 0) tokenParts.push("输出 " + totalOutput);
-        if (totalCache > 0) tokenParts.push("缓存 " + totalCache);
-        var tokenHtml = tokenParts.length > 0
-          ? '<span class="chat-status-tokens">' + tokenParts.join(" · ") + '</span>'
-          : "";
+        var parts = [];
+        if (totalInput > 0) parts.push("输入 " + totalInput);
+        if (totalOutput > 0) parts.push("输出 " + totalOutput);
+        if (totalCache > 0) parts.push("缓存 " + totalCache);
+        if (totalCost > 0) parts.push("$" + totalCost.toFixed(4));
 
-        var html = '<div class="chat-status-bar ' + statusClass + '"><span class="chat-status-dot"></span>' + statusText + tokenHtml + '</div>';
-
-        // Always update if we have token data (it changes during streaming)
-        var hasTokenData = totalInput > 0 || totalOutput > 0;
-        if (existing) {
-          var wasRunning = existing.classList.contains("running");
-          // Update if status changed or if we have new token data
-          if (wasRunning !== isRunning || hasTokenData) {
-            existing.outerHTML = html;
-          }
+        if (parts.length > 0) {
+          textEl.textContent = parts.join("  ·  ");
+          display.classList.remove("hidden");
         } else {
-          // Insert inside chat-messages so it stays sticky at the top during scrolling
-          chatMessages.insertAdjacentHTML("beforeend", html);
+          display.classList.add("hidden");
         }
       }
 

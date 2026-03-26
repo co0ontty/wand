@@ -19,11 +19,6 @@ export const defaultConfig = (): WandConfig => ({
   allowedCommandPrefixes: [],
   commandPresets: [
     {
-      label: "Codex",
-      command: "codex",
-      mode: "default"
-    },
-    {
       label: "Claude",
       command: "claude",
       mode: "default"
@@ -31,11 +26,6 @@ export const defaultConfig = (): WandConfig => ({
     {
       label: "Claude Full Access",
       command: "claude",
-      mode: "full-access"
-    },
-    {
-      label: "Codex Full Access",
-      command: "codex",
       mode: "full-access"
     },
     {
