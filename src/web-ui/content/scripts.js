@@ -58,6 +58,8 @@
         lastRenderedMsgCount: 0,
         lastRenderedEmpty: null,
         renderPending: false,
+        cumulativeUsage: null, // Accumulated usage from real-time usage events
+        currentTask: null, // Current task title from Claude
         fileSearchQuery: "",
         allFiles: [],
         // Load last used working directory from localStorage
@@ -275,26 +277,20 @@
                   '<span></span><span></span><span></span>' +
                 '</span>' +
               '</button>' +
-            '</div>' +
-            '<div class="logo-wrap">' +
-              '<div class="logo">' +
-                '<div class="logo-icon">W</div>' +
-                '<span class="logo-text">Wand</span>' +
+              '<div class="topbar-logo">' +
+                '<div class="topbar-logo-icon">W</div>' +
               '</div>' +
             '</div>' +
             '<div class="topbar-center">' +
-              '<div class="session-summary">' +
-                '<span class="session-summary-value">' + escapeHtml(terminalTitle) + '</span>' +
-              '</div>' +
+              '<span class="topbar-title">' + escapeHtml(terminalTitle) + '</span>' +
             '</div>' +
             '<div class="topbar-right">' +
               '<button id="topbar-new-session-button" class="topbar-new-btn" title="新对话">' +
                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
                 '新对话' +
               '</button>' +
-              '<button id="logout-button" class="topbar-logout-btn" title="退出登录">' +
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
-                '退出' +
+              '<button id="logout-button" class="topbar-btn square" title="退出登录">' +
+                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
               '</button>' +
             '</div>' +
           '</header>' +
@@ -323,6 +319,7 @@
                 '<div class="terminal-title">' +
                   '<span class="terminal-title-text" id="terminal-title">' + (selectedSession ? shortCommand(selectedSession.command) : "Wand") + '</span>' +
                   '<span class="terminal-info" id="terminal-info">' + (selectedSession ? (getModeLabel(selectedSession.mode) + " | " + selectedSession.status) : "开始对话") + '</span>' +
+                  '<span class="current-task hidden" id="current-task"></span>' +
                 '</div>' +
                 '<div class="terminal-header-actions">' +
                   '<div class="view-toggle" aria-label="视图切换">' +
@@ -656,6 +653,11 @@
             toggleTreeNode(item);
           });
         });
+        tree.querySelectorAll(".tree-item[data-type='file']").forEach(function(item) {
+          item.addEventListener("dblclick", function() {
+            openFilePreview(item.dataset.path);
+          });
+        });
       }
 
       function toggleTreeNode(item) {
@@ -688,6 +690,205 @@
             attachFileTreeListeners();
           })
           .catch(function() {});
+      }
+
+      function openFilePreview(filePath) {
+        var overlay = document.createElement("div");
+        overlay.className = "file-preview-overlay";
+        overlay.innerHTML =
+          '<div class="file-preview-modal">' +
+            '<div class="file-preview-header">' +
+              '<div class="file-preview-title">' +
+                '<span>📄</span>' +
+                '<span class="file-preview-filename">Loading...</span>' +
+              '</div>' +
+              '<div class="file-preview-path" title="' + escapeHtml(filePath) + '">' + escapeHtml(filePath) + '</div>' +
+              '<button class="file-preview-close" title="Close">✕</button>' +
+            '</div>' +
+            '<div class="file-preview-body">' +
+              '<div class="file-preview-loading">Loading preview...</div>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(overlay);
+
+        var closeBtn = overlay.querySelector(".file-preview-close");
+        var closeModal = function() {
+          overlay.remove();
+          document.removeEventListener("keydown", escHandler);
+        };
+        closeBtn.addEventListener("click", closeModal);
+        overlay.addEventListener("click", function(e) {
+          if (e.target === overlay) closeModal();
+        });
+        var escHandler = function(e) {
+          if (e.key === "Escape") closeModal();
+        };
+        document.addEventListener("keydown", escHandler);
+
+        fetch("/api/file-preview?path=" + encodeURIComponent(filePath), { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data.error) {
+              var body = overlay.querySelector(".file-preview-body");
+              body.innerHTML = '<div class="file-preview-error"><span class="preview-error-icon">⚠</span><span>' + escapeHtml(data.error) + '</span></div>';
+              return;
+            }
+            renderPreviewContent(overlay, data);
+          })
+          .catch(function(err) {
+            var body = overlay.querySelector(".file-preview-body");
+            body.innerHTML = '<div class="file-preview-error"><span class="preview-error-icon">⚠</span><span>Failed to load preview</span></div>';
+          });
+      }
+
+      function renderPreviewContent(overlay, data) {
+        var filename = overlay.querySelector(".file-preview-filename");
+        filename.textContent = data.name;
+
+        var langBadge = document.createElement("span");
+        langBadge.className = "file-preview-lang";
+        langBadge.textContent = data.lang || data.ext.replace(".", "");
+        overlay.querySelector(".file-preview-title").appendChild(langBadge);
+
+        var body = overlay.querySelector(".file-preview-body");
+
+        if (data.lang === "markdown") {
+          body.innerHTML = '<div class="markdown-preview">' + renderMarkdownPreview(data.content) + '</div>';
+        } else {
+          var highlighted = highlightCodePreview(data.content, data.lang);
+          var lines = highlighted.split("\n");
+          var lineNums = lines.map(function(_, i) { return i + 1; });
+
+          body.innerHTML =
+            '<div class="code-preview-wrapper">' +
+              '<div class="code-preview-lines">' + lineNums.join("\n") + '</div>' +
+              '<div class="code-preview-content"><pre>' + lines.join("\n") + '</pre></div>' +
+            '</div>';
+        }
+      }
+
+      function highlightCodePreview(code, lang) {
+        // Escape HTML first
+        var escaped = code
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+
+        // Simple token-based syntax highlighting
+        var tokens = getSyntaxTokens();
+        if (!tokens) return escaped;
+
+        // Order matters: longer patterns first, then by priority
+        var patterns = [];
+        for (var category in tokens) {
+          var t = tokens[category];
+          if (t && t.pattern) {
+            patterns.push({ pattern: t.pattern, cls: t.cls, priority: t.priority || 5 });
+          }
+        }
+        patterns.sort(function(a, b) { return b.priority - a.priority; });
+
+        // Build regex for all patterns
+        var allPatterns = patterns.map(function(p) { return "(" + p.pattern.source + ")"; });
+        var regex = new RegExp(allPatterns.join("|"), "gm");
+
+        return escaped.replace(regex, function(match) {
+          for (var i = 0; i < patterns.length; i++) {
+            var p = patterns[i];
+            var re = new RegExp("^" + p.pattern.source + "$", "gm");
+            if (re.test(match)) {
+              return '<span class="' + p.cls + '">' + match + '</span>';
+            }
+          }
+          return match;
+        });
+      }
+
+      function getSyntaxTokens() {
+        return {
+          comment: { pattern: /\/\/.*|#[^\n]*/y, cls: "syntax-comment", priority: 1 },
+          string: { pattern: /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/y, cls: "syntax-string", priority: 2 },
+          keyword: { pattern: /\b(?:async|await|break|case|catch|class|const|continue|debugger|declare|default|delete|do|else|enum|export|extends|finally|for|from|function|get|if|implements|import|in|instanceof|interface|let|module|namespace|new|null|of|override|private|protected|public|readonly|return|set|static|super|switch|this|throw|try|type|typeof|undefined|var|void|while|yield|abstract|as|base|bool|byte|char|decimal|double|event|explicit|extern|false|fixed|float|foreach|goto|implicit|in|int|internal|is|lock|long|object|operator|out|params|partial|readonly|ref|sbyte|sealed|short|sizeof|stackalloc|string|struct|switch|throw|true|try|uint|ulong|unchecked|unsafe|ushort|using|virtual|volatile|where|while|with|yield|def|elif|else|except|exec|finally|for|from|global|if|import|lambda|nonlocal|not|or|pass|print|raise|return|try|while|with|yield|True|False|None|and|in|is|lambda|not|or|fn|pub|use|mod|impl|trait|struct|enum|match|loop|while|for|if|else|return|self|super|crate|where|async|await|move|ref|mut|static|const|unsafe|extern|use|as|impl|struct|enum|type|fn|let|loop|if|else|match|return|self|Self|mod|pub|crate|macro|derive|where|async|await|dyn|self|package|func|go|return|defer|go|if|else|switch|case|default|for|range|select|break|continue|fallthrough|const|struct|enum|type|interface|map|chan|var|nil|true|false|iota|len|cap|append|make|new|panic|recover|select|else|if|elif|end|for|function|if|in|local|nil|not|or|repeat|return|then|true|until|while|end|and|begin|do|end|false|for|function|if|in|local|nil|not|or|repeat|return|then|true|until|while)\b/y, cls: "syntax-keyword", priority: 3 },
+          number: { pattern: /\b(?:0x[\da-fA-F]+|0b[01]+|0o[0-7]+|\d+\.?\d*(?:e[+-]?\d+)?)\b/y, cls: "syntax-number", priority: 2 },
+          function: { pattern: /\b[A-Z][a-zA-Z0-9]*[a-z]\w*(?=\s*\()/y, cls: "syntax-function", priority: 4 },
+          type: { pattern: /\b(?:string|number|boolean|void|any|unknown|never|object|symbol|bigint|Array|Object|String|Number|Boolean|Map|Set|WeakMap|WeakSet|Promise|Error|Type|Interface|Enum|Class|Struct|Impl|Trait|fn|fnc|func|function|def|proc|fun|pub|static|const|let|var|int|float|double|bool|char|byte|string|u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|usize|isize|str|Vec|HashMap|Option|Result|Box|Rc|Arc|Cell|RefCell)\b/y, cls: "syntax-type", priority: 4 },
+          operator: { pattern: /[+\-*/%=<>!&|^~?:]+|\.\.\.?/y, cls: "syntax-operator", priority: 5 },
+          punctuation: { pattern: /[{}[\]();,\.]/y, cls: "syntax-punctuation", priority: 6 }
+        };
+      }
+
+      function renderMarkdownPreview(text) {
+        if (!text) return "";
+        var escaped = escapeHtml(text);
+
+        // Code blocks with syntax highlighting
+        escaped = escaped.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+          var highlighted = highlightCodePreview(code.trim(), lang);
+          return '<pre><code class="language-' + lang + '">' + highlighted + '</code></pre>';
+        });
+
+        // Inline code
+        escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+        // Headers
+        escaped = escaped.replace(/^######\s+(.*)$/gm, '<h6>$1</h6>');
+        escaped = escaped.replace(/^#####\s+(.*)$/gm, '<h5>$1</h5>');
+        escaped = escaped.replace(/^####\s+(.*)$/gm, '<h4>$1</h4>');
+        escaped = escaped.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>');
+        escaped = escaped.replace(/^##\s+(.*)$/gm, '<h2>$1</h2>');
+        escaped = escaped.replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
+
+        // Bold and italic
+        escaped = escaped.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        escaped = escaped.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        escaped = escaped.replace(/___(.+?)___/g, '<strong><em>$1</em></strong>');
+        escaped = escaped.replace(/__(.+?)__/g, '<strong>$1</strong>');
+        escaped = escaped.replace(/_(.+?)_/g, '<em>$1</em>');
+
+        // Strikethrough
+        escaped = escaped.replace(/~~(.+?)~~/g, '<del>$1</del>');
+
+        // Links
+        escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+        // Images
+        escaped = escaped.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1">');
+
+        // Blockquote
+        escaped = escaped.replace(/^&gt;\s+(.*)$/gm, '<blockquote>$1</blockquote>');
+
+        // Horizontal rule
+        escaped = escaped.replace(/^---+$/gm, '<hr>');
+        escaped = escaped.replace(/^\*\*\*+$/gm, '<hr>');
+
+        // Unordered lists
+        escaped = escaped.replace(/^[\-\*]\s+(.*)$/gm, '<li>$1</li>');
+        escaped = escaped.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+
+        // Ordered lists
+        escaped = escaped.replace(/^\d+\.\s+(.*)$/gm, '<li>$1</li>');
+
+        // Tables
+        escaped = escaped.replace(/\|(.+)\|/g, function(match) {
+          var cells = match.split("|").slice(1, -1);
+          if (cells.every(function(c) { return /^[\-:]+$/.test(c.trim()); })) {
+            return "";
+          }
+          return '<tr>' + cells.map(function(c) { return '<td>' + c.trim() + '</td>'; }).join("") + '</tr>';
+        });
+        escaped = escaped.replace(/(<tr>.*<\/tr>\n?)+/g, '<table>$&</table>');
+
+        // Paragraphs
+        var paragraphs = escaped.split(/\n{2,}/);
+        escaped = paragraphs.map(function(p) {
+          p = p.trim();
+          if (!p) return "";
+          if (/^<(h[1-6]|ul|ol|li|blockquote|pre|table|hr|div)/.test(p)) return p;
+          return '<p>' + p.replace(/\n/g, "<br>") + '</p>';
+        }).join("\n");
+
+        return escaped;
       }
 
       function renderFolderPicker(state) {
@@ -2046,6 +2247,7 @@
         state.lastRenderedMsgCount = 0;
         state.lastRenderedEmpty = null;
         state.currentMessages = [];
+        state.cumulativeUsage = null;
         if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
         // Reset todo progress bar
         var todoEl = document.getElementById("todo-progress");
@@ -2994,9 +3196,10 @@
               var rect = vk.boundingRect;
               var kbHeight = rect ? rect.height : 0;
               inputPanel.style.paddingBottom = kbHeight > 0 ? kbHeight + 'px' : '';
-              // Scroll chat into view when keyboard opens
+              // Scroll chat into view when keyboard opens - column-reverse: block "end" = visual bottom
               if (kbHeight > 0 && chatMessages) {
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                var firstMsg = chatMessages.querySelector(".chat-message");
+                if (firstMsg) firstMsg.scrollIntoView({ block: "end", behavior: "smooth" });
               }
             }
           });
@@ -3041,10 +3244,11 @@
           var isKeyboardOpen = offsetBottom > 50;
 
           if (isKeyboardOpen) {
-            // Keyboard is open - scroll chat to bottom
+            // Keyboard is open - scroll chat to bottom (newest message)
             if (chatMessages) {
               setTimeout(function() {
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                var firstMsg = chatMessages.querySelector(".chat-message");
+                if (firstMsg) firstMsg.scrollIntoView({ block: "end", behavior: "smooth" });
               }, 100);
             }
           }
@@ -3246,6 +3450,11 @@
             // Session ended - update status immediately before async loadSessions
             var endedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
             if (endedSession) endedSession.status = msg.data && msg.data.status ? msg.data.status : "exited";
+            // Clear current task on session end
+            if (msg.sessionId === state.selectedId) {
+              state.currentTask = null;
+              updateTaskDisplay();
+            }
             loadSessions();
             if (msg.sessionId === state.selectedId) {
               loadOutput(msg.sessionId);
@@ -3266,6 +3475,69 @@
               }
             }
             break;
+          case 'usage':
+            // Real-time token usage update from streaming result events
+            if (msg.sessionId === state.selectedId && msg.data && msg.data.usage) {
+              var u = msg.data.usage;
+              // Initialize cumulative usage if not set
+              if (!state.cumulativeUsage) {
+                state.cumulativeUsage = {
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  cacheReadInputTokens: 0,
+                  cacheCreationInputTokens: 0,
+                  totalCostUsd: 0
+                };
+              }
+              // Accumulate usage from each result event (each turn adds its usage)
+              if (u.input_tokens) state.cumulativeUsage.inputTokens += u.input_tokens;
+              if (u.output_tokens) state.cumulativeUsage.outputTokens += u.output_tokens;
+              if (u.cache_read_input_tokens) state.cumulativeUsage.cacheReadInputTokens += u.cache_read_input_tokens;
+              if (u.cache_creation_input_tokens) state.cumulativeUsage.cacheCreationInputTokens += u.cache_creation_input_tokens;
+              if (u._totalCostUsd !== undefined) state.cumulativeUsage.totalCostUsd += u._totalCostUsd;
+              // Update display with cumulative usage
+              updateTokenUsageDisplayFromCumulative();
+            }
+            break;
+          case 'task':
+            // Current task update from Claude's tool execution
+            if (msg.sessionId === state.selectedId) {
+              state.currentTask = msg.data || null;
+              updateTaskDisplay();
+            }
+            break;
+        }
+      }
+
+      function updateTokenUsageDisplayFromCumulative() {
+        var display = document.getElementById("token-usage-display");
+        var textEl = document.getElementById("token-usage-text");
+        if (!display || !textEl) return;
+        var u = state.cumulativeUsage;
+        if (!u) return;
+        var parts = [];
+        if (u.inputTokens > 0) parts.push("输入 " + u.inputTokens);
+        if (u.outputTokens > 0) parts.push("输出 " + u.outputTokens);
+        if (u.cacheReadInputTokens > 0) parts.push("缓存 " + u.cacheReadInputTokens);
+        if (u.totalCostUsd > 0) parts.push("$" + u.totalCostUsd.toFixed(4));
+        if (parts.length > 0) {
+          textEl.textContent = parts.join("  ·  ");
+          display.classList.remove("hidden");
+        } else {
+          display.classList.add("hidden");
+        }
+      }
+
+      function updateTaskDisplay() {
+        var taskEl = document.getElementById("current-task");
+        if (!taskEl) return;
+        var task = state.currentTask;
+        if (task && task.title) {
+          taskEl.textContent = task.title;
+          taskEl.classList.remove("hidden");
+        } else {
+          taskEl.textContent = "";
+          taskEl.classList.add("hidden");
         }
       }
 
@@ -3437,7 +3709,7 @@
               }
             }
           }
-          // Scroll to bottom (newest message) - with column-reverse, scrollTop=0 is visual bottom
+          // Scroll to bottom (newest message) - column-reverse: scrollTop=0 is visual bottom
           requestAnimationFrame(function() {
             chatMessages.scrollTop = 0;
           });
@@ -3479,7 +3751,7 @@
           attachAllCopyHandlers(chatMessages);
           // Collapse all existing cards; new cards (with animate-in) stay expanded
           collapseOldToolCards(chatMessages, fragment.children);
-          // Scroll to bottom (newest message) - with column-reverse, scrollTop=0 is visual bottom
+          // Scroll to bottom (newest message) - column-reverse: scrollTop=0 is visual bottom
           requestAnimationFrame(function() {
             chatMessages.scrollTop = 0;
           });
@@ -3502,6 +3774,10 @@
                 if (newBubble && currentContent.innerHTML !== newBubble.innerHTML) {
                   chatMessages.replaceChild(newEl, firstEl);
                   attachCopyHandler(newEl);
+                  // Ensure streaming content stays scrolled to bottom - column-reverse: scrollTop=0 is visual bottom
+                  requestAnimationFrame(function() {
+                    chatMessages.scrollTop = 0;
+                  });
                   // Keep only the single newest tool card expanded, collapse all others
                   var newestMsgEl = chatMessages.querySelector(".chat-message");
                   var allCards = chatMessages.querySelectorAll(".tool-use-card");

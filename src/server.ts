@@ -1,5 +1,5 @@
 import express, { NextFunction, Request, Response } from "express";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { exec } from "node:child_process";
@@ -432,6 +432,100 @@ self.addEventListener('fetch', (event) => {
       res.status(400).json({ error: getErrorMessage(error, "无法读取目录。可能原因：路径不存在或权限不足。") });
     }
   });
+
+  // File preview API - reads file contents with size limit
+  const MAX_FILE_SIZE = 512 * 1024; // 512KB limit
+  app.get("/api/file-preview", async (req, res) => {
+    const filePath = typeof req.query.path === "string" ? req.query.path : "";
+    if (!filePath) {
+      res.status(400).json({ error: "Missing path parameter" });
+      return;
+    }
+
+    const resolvedPath = path.resolve(filePath);
+    const allowedBase = process.cwd();
+    if (!resolvedPath.startsWith(allowedBase)) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+
+    try {
+      const fileStat = await stat(resolvedPath);
+      if (fileStat.isDirectory()) {
+        res.status(400).json({ error: "Cannot preview a directory" });
+        return;
+      }
+
+      if (fileStat.size > MAX_FILE_SIZE) {
+        res.status(413).json({ error: "File too large", truncated: true, size: fileStat.size, maxSize: MAX_FILE_SIZE });
+        return;
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
+      const previewableExts = [
+        // Markdown
+        ".md", ".markdown", ".mdown", ".mkd", ".mkdn",
+        // Code
+        ".ts", ".tsx", ".js", ".jsx", ".json", ".html", ".css", ".scss", ".less",
+        ".py", ".rb", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp",
+        ".cs", ".swift", ".kt", ".scala", ".php", ".sh", ".bash", ".zsh",
+        ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env",
+        ".xml", ".sql", ".graphql", ".proto",
+        ".dockerfile", ".gitignore", ".env", ".editorconfig",
+        ".mdx", ".vue", ".svelte",
+        // Text
+        ".txt", ".log", ".diff", ".patch"
+      ];
+
+      const isText = previewableExts.includes(ext) ||
+        ext === "" ||
+        [".gitignore", "dockerfile", ".env.local", ".env.development"].some(e => filePath.toLowerCase().endsWith(e));
+
+      if (!isText) {
+        res.status(415).json({ error: "Unsupported file type", ext });
+        return;
+      }
+
+      const content = await readFile(resolvedPath, "utf-8");
+      const lang = getLanguageFromExt(ext, filePath);
+
+      res.json({
+        path: resolvedPath,
+        name: path.basename(filePath),
+        ext,
+        lang,
+        content,
+        size: fileStat.size
+      });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "Failed to read file") });
+    }
+  });
+
+  // Helper to detect language from extension
+  function getLanguageFromExt(ext: string, filePath: string): string {
+    const map: Record<string, string> = {
+      ".ts": "typescript", ".tsx": "tsx", ".js": "javascript", ".jsx": "jsx",
+      ".json": "json", ".html": "html", ".htm": "html",
+      ".css": "css", ".scss": "scss", ".less": "less",
+      ".py": "python", ".rb": "ruby", ".go": "go", ".rs": "rust",
+      ".java": "java", ".c": "c", ".cpp": "cpp", ".h": "c", ".hpp": "cpp",
+      ".cs": "csharp", ".swift": "swift", ".kt": "kotlin", ".scala": "scala",
+      ".php": "php", ".sh": "bash", ".bash": "bash", ".zsh": "bash",
+      ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".ini": "ini",
+      ".xml": "xml", ".sql": "sql", ".graphql": "graphql",
+      ".md": "markdown", ".markdown": "markdown", ".mdown": "markdown",
+      ".mkd": "markdown", ".mkdn": "markdown",
+      ".dockerfile": "dockerfile", ".gitignore": "plaintext",
+      ".diff": "diff", ".patch": "diff", ".proto": "protobuf",
+      ".env": "bash", ".editorconfig": "ini",
+      ".mdx": "markdown", ".vue": "html", ".svelte": "html"
+    };
+    const baseName = path.basename(filePath).toLowerCase();
+    if (baseName === "dockerfile") return "dockerfile";
+    if (baseName === ".gitignore") return "plaintext";
+    return map[ext] || "plaintext";
+  }
 
   // Folder picker API - starts from /tmp by default, supports navigation
   app.get("/api/folders", async (req, res) => {

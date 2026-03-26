@@ -1,7 +1,7 @@
 {
   "name": "@co0ontty/wand",
-  "version": "0.2.0",
-  "description": "Remote web coding controller for local CLI tools.",
+  "version": "0.2.1",
+  "description": "A web terminal for local CLI tools like Claude.",
   "type": "module",
   "bin": {
     "wand": "dist/cli.js"

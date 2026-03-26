@@ -7,7 +7,7 @@ A browser-accessible local terminal for running CLI tools like Claude.
 ## 启动 / Start
 
 ```bash
-npm install @co0ontty/wand && node dist/cli.js init && node dist/cli.js web
+npm install -g @co0ontty/wand && wand init && wand web
 ```
 
 配置文件 / Config: `~/.wand/config.json`

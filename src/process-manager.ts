@@ -15,9 +15,15 @@ function isRunningAsRoot(): boolean {
 }
 
 export interface ProcessEvent {
-  type: "output" | "status" | "started" | "ended";
+  type: "output" | "status" | "started" | "ended" | "usage" | "task";
   sessionId: string;
   data?: unknown;
+}
+
+/** Human-readable task information for the UI */
+export interface TaskInfo {
+  title: string;
+  tool?: string;
 }
 
 export type ProcessEventHandler = (event: ProcessEvent) => void;
@@ -74,6 +80,12 @@ interface SessionRecord extends SessionSnapshot {
   ptyLastUserInput: string;
   /** Whether the user input echo has been detected and skipped */
   ptyEchoSkipped: boolean;
+  /** Current task title displayed in the UI (derived from tool_use blocks) */
+  currentTask: TaskInfo | null;
+  /** Debounce timer for task events */
+  taskDebounceTimer: NodeJS.Timeout | null;
+  /** Last emitted task title to avoid duplicate events */
+  lastEmittedTask: string | null;
 }
 
 const MAX_SESSIONS = 50;
@@ -118,7 +130,10 @@ export class ProcessManager extends EventEmitter {
         ptyChatState: "idle",
         ptyAssistantBuffer: "",
         ptyLastUserInput: "",
-        ptyEchoSkipped: false
+        ptyEchoSkipped: false,
+        currentTask: null,
+        taskDebounceTimer: null,
+        lastEmittedTask: null
       });
     }
     this.archiveExpiredSessions();
@@ -194,7 +209,10 @@ export class ProcessManager extends EventEmitter {
       ptyChatState: "idle",
       ptyAssistantBuffer: "",
       ptyLastUserInput: "",
-      ptyEchoSkipped: false
+      ptyEchoSkipped: false,
+      currentTask: null,
+      taskDebounceTimer: null,
+      lastEmittedTask: null
     };
 
     this.sessions.set(id, record);
@@ -452,6 +470,11 @@ export class ProcessManager extends EventEmitter {
     const parts = [baseCommand, "-p", `'${escapedMessage}'`, "--output-format", "stream-json"];
     if (isClaude) parts.push("--verbose");
 
+    // Add --enable-auto-mode for claude commands (skip for root)
+    if (isClaude && !/--enable-auto-mode\b/.test(baseCommand) && !isRunningAsRoot()) {
+      parts.push("--enable-auto-mode");
+    }
+
     if (record.claudeSessionId) {
       parts.push("--resume", record.claudeSessionId);
     }
@@ -607,6 +630,8 @@ export class ProcessManager extends EventEmitter {
       }
 
       record.jsonChatBusy = false;
+      // Clear current task when turn ends
+      this.emitTask(record, null);
       // Native mode: session stays "running" to accept more turns, unless stop was requested
       if (record.stopRequested) {
         record.status = "stopped";
@@ -684,6 +709,13 @@ Begin now:`;
                 // New block type — add it
                 assistantBlocks.push(block as { type: string; [key: string]: unknown });
                 this.appendBlockToOutput(record, block as { type: string; [key: string]: unknown });
+                // Emit task event when a tool_use block is added
+                if (blockType === "tool_use") {
+                  const b = block as { type: string; name?: string; input?: unknown };
+                  if (b.name) {
+                    this.emitTask(record, this.formatTaskTitle(b));
+                  }
+                }
               }
             }
           }
@@ -694,6 +726,12 @@ Begin now:`;
         // Streaming: new content block starting
         if (event.content_block) {
           assistantBlocks.push({ ...event.content_block } as { type: string; [key: string]: unknown });
+          // Emit task event when a tool_use block starts
+          const cb = event.content_block as { type?: string; name?: string; input?: unknown };
+          if (cb.type === "tool_use" && cb.name) {
+            const block = { type: cb.type, name: cb.name, input: cb.input };
+            this.emitTask(record, this.formatTaskTitle(block));
+          }
         }
         break;
       }
@@ -739,6 +777,13 @@ Begin now:`;
                 } else {
                   assistantBlocks.push(block as { type: string; [key: string]: unknown });
                   this.appendBlockToOutput(record, block as { type: string; [key: string]: unknown });
+                  // Emit task event when a tool_use block is added in result
+                  if (blockType === "tool_use") {
+                    const b = block as { type: string; name?: string; input?: unknown };
+                    if (b.name) {
+                      this.emitTask(record, this.formatTaskTitle(b));
+                    }
+                  }
                 }
               }
             }
@@ -769,6 +814,8 @@ Begin now:`;
             usage._totalCostUsd = event.total_cost_usd;
           }
           (assistantBlocks as unknown as Record<string, unknown>)._lastUsage = usage;
+          // Emit usage event immediately so frontend can update in real-time
+          this.emitEvent({ type: "usage", sessionId: record.id, data: { usage } });
         }
         break;
       }
@@ -852,6 +899,116 @@ Begin now:`;
           return { type: "text" as const, text: JSON.stringify(b) };
       }
     });
+  }
+
+  /** Format a human-readable task title from a tool_use block */
+  private formatTaskTitle(block: { type: string; name?: string; input?: unknown; _partialJson?: string }): TaskInfo {
+    const tool = block.name || "";
+    const input = block.input as Record<string, unknown> || {};
+
+    switch (tool) {
+      case "Read":
+      case "NotebookEdit": {
+        const file = (input.file_path || input.notebook_path || "") as string;
+        return { title: file ? `Reading ${ProcessManager.shortPath(file)}` : "Reading file", tool };
+      }
+      case "Write": {
+        const file = (input.file_path || "") as string;
+        return { title: file ? `Writing ${ProcessManager.shortPath(file)}` : "Writing file", tool };
+      }
+      case "Edit": {
+        const file = (input.file_path || "") as string;
+        return { title: file ? `Editing ${ProcessManager.shortPath(file)}` : "Editing file", tool };
+      }
+      case "Bash": {
+        const cmd = ((input.command || "") as string).trim();
+        // Show shortened command in title
+        const shortCmd = cmd.length > 40 ? cmd.slice(0, 37) + "..." : cmd;
+        return { title: shortCmd ? `Running ${shortCmd}` : "Running command", tool };
+      }
+      case "Grep": {
+        const pattern = (input.pattern || input.query || "") as string;
+        const path = (input.path || "") as string;
+        return { title: pattern ? `Searching "${pattern}"${path ? " in " + ProcessManager.shortPath(path) : ""}` : "Searching files", tool };
+      }
+      case "Glob": {
+        const pattern = (input.pattern || "") as string;
+        return { title: pattern ? `Finding files matching "${pattern}"` : "Finding files", tool };
+      }
+      case "TodoWrite": {
+        return { title: "Updating tasks", tool };
+      }
+      case "WebFetch": {
+        const url = (input.url || "") as string;
+        return { title: url ? `Fetching ${ProcessManager.truncateUrl(url)}` : "Fetching URL", tool };
+      }
+      case "Task": {
+        const prompt = ((input.prompt || input.description || "") as string).slice(0, 50);
+        return { title: prompt ? `Running task: ${prompt}` : "Running task", tool };
+      }
+      case "WebSearch": {
+        const query = (input.query || "") as string;
+        return { title: query ? `Searching web for "${query}"` : "Searching web", tool };
+      }
+      case "Agent": {
+        const agentTool = (input.agent || "") as string;
+        return { title: agentTool ? `Using ${agentTool} agent` : "Running agent", tool };
+      }
+      case "Think": {
+        return { title: "Thinking...", tool };
+      }
+      default:
+        return { title: tool ? `Using ${tool}` : "Working", tool };
+    }
+  }
+
+  /** Emit a task event for a session, debounced to avoid flooding */
+  private emitTask(record: SessionRecord, task: TaskInfo | null): void {
+    // Clear existing debounce timer
+    if (record.taskDebounceTimer) {
+      clearTimeout(record.taskDebounceTimer);
+      record.taskDebounceTimer = null;
+    }
+
+    // Don't re-emit the same task
+    if (task && task.title === record.lastEmittedTask) return;
+
+    if (task === null) {
+      // Clear task after a delay — allows a brief display of "idle" state
+      record.taskDebounceTimer = setTimeout(() => {
+        record.currentTask = null;
+        record.lastEmittedTask = null;
+        this.emitEvent({ type: "task", sessionId: record.id, data: null });
+      }, 2000);
+      return;
+    }
+
+    // Debounce task changes by 100ms to avoid flickering on rapid tool switches
+    record.taskDebounceTimer = setTimeout(() => {
+      record.taskDebounceTimer = null;
+      record.currentTask = task;
+      record.lastEmittedTask = task.title;
+      this.emitEvent({ type: "task", sessionId: record.id, data: task });
+    }, 100);
+  }
+
+  /** Shorten a file path for display (show last 2 components) */
+  private static shortPath(p: string): string {
+    if (!p) return "";
+    const parts = p.split("/").filter(Boolean);
+    if (parts.length <= 2) return p;
+    return "…/" + parts.slice(-2).join("/");
+  }
+
+  /** Truncate a URL for display */
+  private static truncateUrl(url: string): string {
+    try {
+      const u = new URL(url);
+      const path = u.pathname === "/" ? "" : u.pathname;
+      return (u.hostname + path).slice(0, 40);
+    } catch {
+      return url.slice(0, 40);
+    }
   }
 
   private buildAssistantTurn(blocks: Array<{ type: string; [key: string]: unknown }>): ConversationTurn {
@@ -1042,6 +1199,12 @@ Begin now:`;
       return this.snapshot(record);
     }
 
+    // Clear any pending task debounce timer
+    if (record.taskDebounceTimer) {
+      clearTimeout(record.taskDebounceTimer);
+      record.taskDebounceTimer = null;
+    }
+
     try {
       record.stopRequested = true;
       // For native / managed mode, kill the child process
@@ -1065,6 +1228,11 @@ Begin now:`;
 
   delete(id: string): void {
     const record = this.mustGet(id);
+    // Clear any pending task debounce timer
+    if (record.taskDebounceTimer) {
+      clearTimeout(record.taskDebounceTimer);
+      record.taskDebounceTimer = null;
+    }
     if (record.status === "running") {
       try {
         record.stopRequested = true;
@@ -1202,13 +1370,25 @@ Begin now:`;
   }
 
   private processCommandForMode(command: string, mode: ExecutionMode): string {
+    // Add --enable-auto-mode to claude commands (skip for root)
+    if (/^claude(?:\s|$)/.test(command) && !isRunningAsRoot()) {
+      // Check if --enable-auto-mode is already specified
+      if (!/--enable-auto-mode\b/.test(command)) {
+        if (command === "claude") {
+          command = "claude --enable-auto-mode";
+        } else {
+          command = command.replace(/^claude\s/, "claude --enable-auto-mode ");
+        }
+      }
+    }
+
     // For full-access mode with claude commands, add permission flags (skip for root)
     if (mode === "full-access" && /^claude(?:\s|$)/.test(command) && !isRunningAsRoot()) {
       // Check if permission-mode is already specified
       if (!/--permission-mode\b/.test(command)) {
         // Add --permission-mode bypassPermissions for full-access mode
-        if (command === "claude") {
-          return "claude --permission-mode bypassPermissions";
+        if (command === "claude --enable-auto-mode") {
+          return "claude --enable-auto-mode --permission-mode bypassPermissions";
         }
         return command.replace(/^claude\s/, "claude --permission-mode bypassPermissions ");
       }
