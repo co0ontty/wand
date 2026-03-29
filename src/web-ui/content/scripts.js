@@ -341,6 +341,7 @@
                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
                 '新对话' +
               '</button>' +
+              '<button id="terminal-interactive-toggle-top" class="topbar-btn' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨ ' + (state.terminalInteractive ? '交互开' : '交互关') + '</button>' +
               '<button id="pwa-install-button" class="topbar-btn square hidden" title="安装应用">' +
                 '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
               '</button>' +
@@ -381,7 +382,6 @@
                   '<div class="view-toggle" aria-label="视图切换">' +
                     '<button id="view-terminal-btn" class="view-toggle-btn active" type="button">终端</button>' +
                   '</div>' +
-                  '<button id="terminal-interactive-toggle" class="view-toggle-btn terminal-tool-btn' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨ ' + (state.terminalInteractive ? '交互开' : '交互关') + '</button>' +
                   '<div class="file-panel-toggle" aria-label="文件浏览器">' +
                     '<button id="file-panel-toggle-btn" class="view-toggle-btn' + (state.filePanelOpen ? " active" : "") + '" type="button" title="文件浏览器">📁</button>' +
                   '</div>' +
@@ -464,6 +464,16 @@
                         '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
                       '</button>' +
                     '</div>' +
+                  '</div>' +
+                  // Session info bar at bottom
+                  '<div class="input-session-info-bar">' +
+                    '<span id="session-cwd-display" class="session-cwd-display">' + (selectedSession && selectedSession.cwd ? escapeHtml(selectedSession.cwd) : '未设置目录') + '</span>' +
+                    '<span class="session-info-separator">|</span>' +
+                    '<span id="session-mode-display" class="session-mode-display">' + (selectedSession ? getModeLabel(selectedSession.mode) : '默认') + '</span>' +
+                    '<span class="session-info-separator">|</span>' +
+                    '<span id="session-status-display" class="session-status-display">' + (selectedSession ? getSessionStatusLabel(selectedSession) : '-') + '</span>' +
+                    '<span class="session-info-separator">|</span>' +
+                    '<span id="session-exit-display" class="session-exit-display">exit=' + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : 'n/a') + '</span>' +
                   '</div>' +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
@@ -1370,8 +1380,12 @@
         // View toggle handlers
         var viewTermBtn = document.getElementById("view-terminal-btn");
         if (viewTermBtn) viewTermBtn.addEventListener("click", function() { setView("terminal"); });
-        var terminalInteractiveToggle = document.getElementById("terminal-interactive-toggle");
-        if (terminalInteractiveToggle) terminalInteractiveToggle.addEventListener("click", toggleTerminalInteractive);
+        // Terminal interactive toggle (both topbar and terminal-header)
+        var terminalInteractiveToggles = ["terminal-interactive-toggle-top"];
+        terminalInteractiveToggles.forEach(function(id) {
+          var toggle = document.getElementById(id);
+          if (toggle) toggle.addEventListener("click", toggleTerminalInteractive);
+        });
         // Keyboard popup handlers
         var keyboardToggle = document.getElementById("keyboard-toggle");
         if (keyboardToggle) keyboardToggle.addEventListener("click", handleKeyboardToggle);
@@ -1580,6 +1594,7 @@
             folderPickerToggle.classList.toggle("open");
           });
         }
+
 
         // Drag and drop support
         var folderPickerContainer = document.querySelector(".folder-picker-compact");
@@ -2268,6 +2283,16 @@
           infoEl.textContent = selectedSession ? (getModeLabel(selectedSession.mode) + " | " + getSessionStatusLabel(selectedSession)) : "开始对话";
         }
 
+        // Update session info bar at bottom
+        var cwdEl = document.getElementById("session-cwd-display");
+        var modeEl = document.getElementById("session-mode-display");
+        var statusEl = document.getElementById("session-status-display");
+        var exitEl = document.getElementById("session-exit-display");
+        if (cwdEl) cwdEl.textContent = selectedSession && selectedSession.cwd ? escapeHtml(selectedSession.cwd) : '未设置目录';
+        if (modeEl) modeEl.textContent = selectedSession ? getModeLabel(selectedSession.mode) : '默认';
+        if (statusEl) statusEl.textContent = selectedSession ? getSessionStatusLabel(selectedSession) : '-';
+        if (exitEl) exitEl.textContent = 'exit=' + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : 'n/a');
+
         var inputPanel = document.querySelector(".input-panel");
         if (selectedSession) {
           if (blankChat) blankChat.classList.add("hidden");
@@ -2297,10 +2322,6 @@
           .then(function(data) {
             updateSessionSnapshot(data);
             updateShellChrome();
-            var terminalInfo = document.getElementById("terminal-info");
-            if (terminalInfo) {
-              terminalInfo.textContent = data.cwd + " | " + getModeLabel(data.mode) + " | " + getSessionStatusLabel(data) + " | exit=" + (data.exitCode ?? "n/a");
-            }
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
             state.currentMessages = [];
@@ -3334,11 +3355,15 @@
       }
 
       function updateInteractiveControls() {
-        var toggle = document.getElementById("terminal-interactive-toggle");
-        if (toggle) {
-          toggle.classList.toggle("active", state.terminalInteractive);
-          toggle.textContent = state.terminalInteractive ? "⌨ 交互开" : "⌨ 交互关";
-        }
+        // Update both toggle buttons (topbar and terminal-header)
+        var toggles = ["terminal-interactive-toggle-top"];
+        toggles.forEach(function(id) {
+          var toggle = document.getElementById(id);
+          if (toggle) {
+            toggle.classList.toggle("active", state.terminalInteractive);
+            toggle.textContent = state.terminalInteractive ? "⌨ 交互开" : "⌨ 交互关";
+          }
+        });
         // Inline keyboard visibility follows current view
         var inlineKeyboard = document.getElementById("inline-keyboard");
         if (inlineKeyboard) inlineKeyboard.classList.toggle("hidden", state.currentView !== "terminal");

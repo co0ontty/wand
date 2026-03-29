@@ -886,6 +886,16 @@
       color: var(--accent);
     }
 
+    /* Topbar interactive toggle button */
+    #terminal-interactive-toggle-top.active {
+      background: var(--accent-muted);
+      color: var(--accent);
+      border-color: rgba(197, 101, 61, 0.2);
+    }
+    #terminal-interactive-toggle-top.active:hover {
+      background: rgba(197, 101, 61, 0.18);
+    }
+
     .btn {
       display: inline-flex;
       align-items: center;
@@ -2626,7 +2636,8 @@
     .input-composer-left {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
+      flex-wrap: wrap;
     }
     .input-composer-right {
       display: flex;
@@ -2655,6 +2666,36 @@
       color: var(--text-muted);
       white-space: nowrap;
       user-select: none;
+    }
+
+    /* Session info bar at bottom of input composer */
+    .input-session-info-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: rgba(245, 240, 230, 0.6);
+      border-top: 1px solid var(--border-subtle);
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+    .session-cwd-display {
+      font-weight: 500;
+      color: var(--text-primary);
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-mode-display,
+    .session-status-display,
+    .session-exit-display {
+      color: var(--text-secondary);
+      font-weight: 400;
+    }
+    .session-info-separator {
+      color: var(--border-default);
+      opacity: 0.6;
     }
 
     .input-row { display: flex; gap: 8px; align-items: flex-end; max-width: 100%; }
@@ -3074,6 +3115,88 @@
       flex: 1;
       padding: 4px 8px;
       font-size: 0.6875rem;
+    }
+
+    /* Inline folder picker in input composer */
+    .folder-picker-compact-inline {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 6px;
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      transition: all var(--transition-fast);
+    }
+    .folder-picker-compact-inline:focus-within {
+      background: rgba(255, 255, 255, 0.9);
+      border-color: var(--accent);
+    }
+    .folder-picker-compact-inline-input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-primary);
+      outline: none;
+      padding: 2px 0;
+      min-width: 120px;
+    }
+    .folder-picker-compact-inline-input::placeholder {
+      color: var(--text-muted);
+    }
+    .folder-picker-compact-inline-toggle {
+      background: none;
+      border: none;
+      padding: 2px 4px;
+      font-size: 0.625rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: 3px;
+      transition: all var(--transition-fast);
+      flex-shrink: 0;
+    }
+    .folder-picker-compact-inline-toggle:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+    }
+    .folder-picker-compact-inline-toggle.open {
+      transform: rotate(180deg);
+    }
+    .folder-picker-inline-dropdown {
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      margin-top: 4px;
+      padding: 6px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      box-shadow: var(--shadow-elevated);
+      display: flex;
+      gap: 4px;
+      min-width: 180px;
+      z-index: 100;
+    }
+    .folder-picker-inline-dropdown.hidden {
+      display: none;
+    }
+    .folder-picker-inline-quick-btn {
+      flex: 1;
+      padding: 4px 8px;
+      font-size: 0.6875rem;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      white-space: nowrap;
+    }
+    .folder-picker-inline-quick-btn:hover {
+      background: var(--accent-soft);
+      border-color: var(--accent);
     }
 
     /* Working directory indicator embedded in input box */
@@ -4041,6 +4164,16 @@
 
       .input-composer-left { gap: 3px; }
       .input-composer-right { gap: 4px; }
+
+      /* 移动端会话信息栏 */
+      .input-session-info-bar {
+        padding: 4px 8px;
+        font-size: 0.6875rem;
+        flex-wrap: wrap;
+      }
+      .session-cwd-display {
+        max-width: 120px;
+      }
 
       .input-row { flex-direction: column; align-items: stretch; gap: 6px; max-width: 100%; }
       .input-field { gap: 4px; min-width: 0; max-width: 100%; }
