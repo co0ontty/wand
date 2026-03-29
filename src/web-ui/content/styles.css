@@ -1127,14 +1127,6 @@
     .terminal-tool-btn { flex-shrink: 0; }
 
     /* Terminal scale controls */
-    .terminal-scale-toggle {
-      display: flex;
-      align-items: center;
-      gap: 2px;
-      background: rgba(255, 251, 245, 0.72);
-      border-radius: 6px;
-      padding: 2px;
-    }
     .terminal-scale-btn {
       min-width: 24px;
       height: 24px;
@@ -1149,34 +1141,50 @@
       text-align: center;
       padding: 0 2px;
     }
-
-    /* Topbar scale toggle */
-    .topbar-scale-toggle {
-      display: flex;
+    .terminal-scale-overlay {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: inline-flex;
       align-items: center;
-      gap: 2px;
-      background: rgba(255, 251, 245, 0.72);
-      border-radius: 6px;
+      gap: 1px;
       padding: 2px;
+      border-radius: 7px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(24, 20, 17, 0.38);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+      opacity: 0.72;
+      transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+      z-index: 12;
+      pointer-events: auto;
     }
-    .topbar-scale-toggle .terminal-scale-btn {
-      min-width: 24px;
-      height: 24px;
-      padding: 0 4px;
-      font-size: 0.875rem;
-      font-weight: 600;
+    .terminal-container:hover .terminal-scale-overlay,
+    .terminal-scale-overlay:focus-within {
+      opacity: 1;
+      background: rgba(24, 20, 17, 0.56);
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+    .terminal-scale-overlay-btn {
+      min-width: 22px;
+      height: 22px;
+      padding: 0 3px;
+      color: rgba(245, 234, 220, 0.88);
       background: transparent;
       border: none;
+      border-radius: 5px;
+      transition: background 0.18s ease, color 0.18s ease;
     }
-    .topbar-scale-toggle .terminal-scale-btn:hover {
-      background: rgba(197, 101, 61, 0.1);
+    .terminal-scale-overlay-btn:hover {
+      background: rgba(214, 123, 82, 0.18);
+      color: rgba(255, 247, 239, 0.96);
     }
-    .topbar-scale-toggle .terminal-scale-label {
-      font-size: 0.6875rem;
-      color: var(--text-muted);
-      min-width: 32px;
+    .terminal-scale-overlay-label {
+      font-size: 0.625rem;
+      color: rgba(245, 234, 220, 0.66);
+      min-width: 34px;
       text-align: center;
-      padding: 0 2px;
+      padding: 0 3px;
     }
 
     /* Terminal interactive mode indicator */
@@ -4015,15 +4023,14 @@
       }
 
       body {
-        overflow-x: hidden;
-        overflow-y: auto;
+        overflow: hidden;
         -webkit-overflow-scrolling: touch;
       }
 
       .app-container {
         min-height: 100dvh;
-        height: auto;
-        overflow: visible;
+        height: 100dvh;
+        overflow: hidden;
       }
 
       /* 移动端顶栏 - 紧凑版 */
@@ -4102,8 +4109,23 @@
       .view-toggle { height: 28px; padding: 2px; gap: 1px; }
       .view-toggle-btn { height: 24px; min-height: 24px; padding: 0 6px; font-size: 0.625rem; gap: 2px; border-radius: 4px; }
 
-      /* 移动端隐藏顶部工具栏缩放按钮（通过手势缩放更自然） */
-      .topbar-scale-toggle { display: none; }
+      /* 移动端终端内缩放浮层 */
+      .terminal-scale-overlay {
+        top: 6px;
+        right: 6px;
+        padding: 2px;
+        gap: 1px;
+      }
+      .terminal-scale-overlay-btn {
+        min-width: 20px;
+        height: 20px;
+        font-size: 0.75rem;
+      }
+      .terminal-scale-overlay-label {
+        min-width: 28px;
+        font-size: 0.5625rem;
+        padding: 0 2px;
+      }
 
       /* 移动端简化交互模式按钮 */
       .terminal-tool-btn {
@@ -4118,6 +4140,7 @@
         flex-direction: column;
         flex: 1;
         min-height: 0;
+        height: 100%;
         overflow: hidden;
         padding-left: 0;
       }
@@ -4135,13 +4158,14 @@
         min-height: 0;
         display: flex;
         flex-direction: column;
+        overflow: hidden;
       }
 
-      /* 终端容器在移动端使用固定高度 */
+      /* 终端容器在移动端占据剩余空间，输入区稳定贴底 */
       .terminal-container {
-        flex: 0 0 50vh;
-        min-height: 200px;
-        max-height: 70vh;
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none;
       }
 
       .sessions-list {
@@ -4179,7 +4203,10 @@
         z-index: 30;
         padding: 6px 8px;
         padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
-        flex-shrink: 0;
+        flex: 0 0 auto;
+        margin-top: auto;
+        background: linear-gradient(180deg, rgba(246, 241, 232, 0) 0%, rgba(246, 241, 232, 0.82) 20%, rgba(246, 241, 232, 0.94) 100%);
+        backdrop-filter: blur(12px);
       }
 
       .input-composer {
@@ -4325,7 +4352,8 @@
 
       .chat-container {
         min-height: 0;
-        flex: 1;
+        flex: 1 1 auto;
+        overflow: auto;
         display: none;
         flex-direction: column;
       }

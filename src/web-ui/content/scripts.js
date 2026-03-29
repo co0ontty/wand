@@ -46,7 +46,7 @@
         isSyncingInputBox: false,
         loginPending: false,
         loginChecked: false,
-        sessionsDrawerOpen: true,
+        sessionsDrawerOpen: false,
         modalOpen: false,
         presetValue: "",
         cwdValue: "",
@@ -69,6 +69,8 @@
             return 1;
           }
         })(),
+        terminalBaseFontSize: 13,
+        keyboardPopupOpen: false,
         filePanelOpen: (function() {
           try {
             return localStorage.getItem("wand-file-panel-open") === "true";
@@ -233,7 +235,7 @@
               '<line x1="6" y1="12" x2="18" y2="12"/>' +
             '</svg>' +
           '</button>' +
-          '<div id="keyboard-popup" class="keyboard-popup hidden">' +
+          '<div id="keyboard-popup" class="keyboard-popup' + (state.keyboardPopupOpen ? '' : ' hidden') + '">' +
             '<div class="keyboard-popup-row modifiers">' +
               '<button class="kp-key' + (state.modifiers.ctrl ? ' active' : '') + '" data-key="ctrl" type="button">Ctrl</button>' +
               '<button class="kp-key' + (state.modifiers.alt ? ' active' : '') + '" data-key="alt" type="button">Alt</button>' +
@@ -342,11 +344,6 @@
                 '新对话' +
               '</button>' +
               '<button id="terminal-interactive-toggle-top" class="topbar-btn' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨ ' + (state.terminalInteractive ? '交互开' : '交互关') + '</button>' +
-              '<div class="topbar-scale-toggle" style="display:flex;align-items:center;gap:2px;margin-right:6px;">' +
-                '<button id="terminal-scale-down-top" class="topbar-btn terminal-scale-btn" type="button" title="缩小">−</button>' +
-                '<span class="terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
-                '<button id="terminal-scale-up-top" class="topbar-btn terminal-scale-btn" type="button" title="放大">+</button>' +
-              '</div>' +
               '<button id="pwa-install-button" class="topbar-btn square hidden" title="安装应用">' +
                 '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
               '</button>' +
@@ -412,7 +409,13 @@
                   '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : (state.config && state.config.defaultCwd ? state.config.defaultCwd : "")) + '</div>' +
                 '</div>' +
               '</div>' +
-              '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"></div>' +
+              '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active">' +
+                '<div class="terminal-scale-overlay" aria-label="终端缩放控件">' +
+                  '<button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="缩小">−</button>' +
+                  '<span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
+                  '<button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大">+</button>' +
+                '</div>' +
+              '</div>' +
               '<div id="chat-output" class="chat-container hidden"></div>' +
               '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
                 '<div class="blank-chat-inner">' +
@@ -615,10 +618,9 @@
       }
 
       function applyTerminalScale() {
-        var container = document.getElementById("output");
-        if (container) {
-          container.style.fontSize = (state.terminalScale * 14) + "px";
-        }
+        if (!state.terminal) return;
+        state.terminal.options.fontSize = state.terminalBaseFontSize * state.terminalScale;
+        state.terminal.refresh(0, state.terminal.rows - 1);
       }
 
       function updateScaleLabel() {
@@ -2134,7 +2136,6 @@
       }
 
       function applyCurrentView() {
-        state.currentView = "terminal";
         var hasSession = !!state.selectedId;
         var terminalBtn = document.getElementById("view-terminal-btn");
         var terminalContainer = document.getElementById("output");
@@ -2180,12 +2181,8 @@
         if (!updated) {
           state.sessions.unshift(snapshot);
         }
-        if (snapshot.id === state.selectedId && state.terminalInteractive) {
-          if (snapshot.status !== "running" && prevSession && prevSession.status === "running") {
-            setTerminalInteractive(false);
-          }
-        }
         if (snapshot.id === state.selectedId) {
+          reconcileInteractiveState();
           updateTaskDisplay();
         }
       }
@@ -2267,6 +2264,7 @@
         if (!selectedSession) {
           setTerminalInteractive(false);
           hideMiniKeyboard();
+          closeKeyboardPopup();
         }
         var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "Wand";
         var summaryEl = document.querySelector(".session-summary-value");
@@ -2309,6 +2307,7 @@
         }
         syncComposerModeSelect();
         applyCurrentView();
+        reconcileInteractiveState();
       }
 
       function loadOutput(id) {
@@ -3133,7 +3132,6 @@
 
       function postInput(input) {
         if (!state.selectedId) return Promise.resolve();
-        state.currentView = "terminal";
 
         // Pre-check: don't send if session is not running
         if (!isSelectedSessionRunning()) {
@@ -3318,6 +3316,7 @@
 
       function hideMiniKeyboard(clearModifiersOnHide) {
         // Just clear modifiers, inline keyboard visibility follows view
+        state.keyboardPopupOpen = false;
         if (clearModifiersOnHide !== false) {
           clearModifiers();
         }
@@ -3354,6 +3353,19 @@
         updateInteractiveControls();
       }
 
+      function reconcileInteractiveState() {
+        var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
+        var shouldDisableInteractive = !selectedSession || selectedSession.status !== "running" || state.currentView !== "terminal";
+        if (shouldDisableInteractive && state.terminalInteractive) {
+          setTerminalInteractive(false);
+          return;
+        }
+        if ((!selectedSession || state.currentView !== "terminal") && state.keyboardPopupOpen) {
+          state.keyboardPopupOpen = false;
+        }
+        updateInteractiveControls();
+      }
+
       function updateInteractiveControls() {
         // Update both toggle buttons (topbar and terminal-header)
         var toggles = ["terminal-interactive-toggle-top"];
@@ -3371,6 +3383,16 @@
         if (inputHint) inputHint.classList.toggle("hidden", state.currentView === "terminal");
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", state.terminalInteractive);
+        var keyboardToggle = document.getElementById("keyboard-toggle");
+        if (keyboardToggle) {
+          keyboardToggle.classList.toggle("hidden", state.currentView !== "terminal" || !state.selectedId);
+          keyboardToggle.classList.toggle("active", state.keyboardPopupOpen);
+        }
+        var popup = document.getElementById("keyboard-popup");
+        if (popup) {
+          var shouldShowPopup = state.keyboardPopupOpen && state.currentView === "terminal" && !!state.selectedId;
+          popup.classList.toggle("hidden", !shouldShowPopup);
+        }
       }
 
       function captureTerminalInput(event) {
@@ -3436,25 +3458,14 @@
       function handleKeyboardToggle(event) {
         event.preventDefault();
         event.stopPropagation();
-        var btn = document.getElementById("keyboard-toggle");
-        var popup = document.getElementById("keyboard-popup");
-        if (!btn || !popup) return;
-
-        var isHidden = popup.classList.contains("hidden");
-        if (isHidden) {
-          popup.classList.remove("hidden");
-          btn.classList.add("active");
-        } else {
-          popup.classList.add("hidden");
-          btn.classList.remove("active");
-        }
+        if (state.currentView !== "terminal" || !state.selectedId) return;
+        state.keyboardPopupOpen = !state.keyboardPopupOpen;
+        updateInteractiveControls();
       }
 
       function closeKeyboardPopup() {
-        var btn = document.getElementById("keyboard-toggle");
-        var popup = document.getElementById("keyboard-popup");
-        if (btn) btn.classList.remove("active");
-        if (popup) popup.classList.add("hidden");
+        state.keyboardPopupOpen = false;
+        updateInteractiveControls();
       }
 
       function enableTerminalCapture() {
@@ -4098,15 +4109,16 @@
       }
 
       function setView(view) {
-        state.currentView = "terminal";
-        setTerminalInteractive(false);
+        state.currentView = view || "terminal";
+        if (state.currentView !== "terminal") {
+          setTerminalInteractive(false);
+          closeKeyboardPopup();
+        }
         applyCurrentView();
-        var keyboardToggle = document.getElementById("keyboard-toggle");
-        if (keyboardToggle) keyboardToggle.classList.remove("hidden");
-        closeKeyboardPopup();
-        var inputHint = document.querySelector(".input-hint");
-        if (inputHint) inputHint.classList.add("hidden");
-        setTimeout(scheduleTerminalResize, 40);
+        reconcileInteractiveState();
+        if (state.currentView === "terminal") {
+          setTimeout(scheduleTerminalResize, 40);
+        }
       }
 
       function renderChat(forceFullRender) {
