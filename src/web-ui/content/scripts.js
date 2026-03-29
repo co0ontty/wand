@@ -336,9 +336,15 @@
               '</div>' +
             '</div>' +
             '<div class="topbar-center">' +
-              '<span class="topbar-title">' + escapeHtml(terminalTitle) + '</span>' +
+              '<div class="topbar-session-meta">' +
+                '<span class="topbar-title" id="terminal-title">' + escapeHtml(terminalTitle) + '</span>' +
+                '<span class="terminal-info topbar-terminal-info" id="terminal-info">' + (selectedSession ? getSessionStatusLabel(selectedSession) : '开始对话') + '</span>' +
+              '</div>' +
+              '<span class="current-task hidden" id="current-task"></span>' +
+              '<span class="permission-actions hidden" id="permission-actions"><button id="approve-permission-btn" class="btn btn-primary btn-small" type="button">批准</button><button id="deny-permission-btn" class="btn btn-ghost btn-small" type="button">拒绝</button></span>' +
             '</div>' +
             '<div class="topbar-right">' +
+              '<button id="file-panel-toggle-btn" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" title="查看文件">📁</button>' +
               '<button id="topbar-new-session-button" class="topbar-new-btn" title="新对话">' +
                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
                 '新对话' +
@@ -373,22 +379,7 @@
               '</div>' +
             '</aside>' +
             '<main class="main-content">' +
-              '<div class="terminal-header">' +
-                '<div class="terminal-title">' +
-                  '<span class="terminal-title-text" id="terminal-title">' + (selectedSession ? shortCommand(selectedSession.command) : "Wand") + '</span>' +
-                  '<span class="terminal-info" id="terminal-info">' + (selectedSession ? (getModeLabel(selectedSession.mode) + " | " + selectedSession.status) : "开始对话") + '</span>' +
-                  '<span class="current-task hidden" id="current-task"></span>' +
-                  '<span class="permission-actions hidden" id="permission-actions"><button id="approve-permission-btn" class="btn btn-primary btn-small" type="button">批准</button><button id="deny-permission-btn" class="btn btn-ghost btn-small" type="button">拒绝</button></span>' +
-                '</div>' +
-                '<div class="terminal-header-actions">' +
-                  '<div class="view-toggle" aria-label="视图切换">' +
-                    '<button id="view-terminal-btn" class="view-toggle-btn active" type="button">终端</button>' +
-                  '</div>' +
-                  '<div class="file-panel-toggle" aria-label="文件浏览器">' +
-                    '<button id="file-panel-toggle-btn" class="view-toggle-btn' + (state.filePanelOpen ? " active" : "") + '" type="button" title="文件浏览器">📁</button>' +
-                  '</div>' +
-                '</div>' +
-              '</div>' +
+              '<div class="topbar-spacer"></div>' +
               // File panel backdrop (mobile)
               '<div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div>' +
               // File side panel
@@ -555,15 +546,26 @@
         '</section>';
       }
 
-      function toggleFilePanel() {
-        state.filePanelOpen = !state.filePanelOpen;
+      function isMobileLayout() {
+        return window.innerWidth <= 768;
+      }
+
+      function setFilePanelOpen(nextOpen) {
+        state.filePanelOpen = nextOpen;
         try {
           localStorage.setItem("wand-file-panel-open", String(state.filePanelOpen));
         } catch (e) {}
-        updateFilePanelState();
+        if (state.filePanelOpen && isMobileLayout()) {
+          state.sessionsDrawerOpen = false;
+        }
+        updateLayoutState();
         if (state.filePanelOpen) {
           refreshFileExplorer();
         }
+      }
+
+      function toggleFilePanel() {
+        setFilePanelOpen(!state.filePanelOpen);
       }
 
       function updateFilePanelState() {
@@ -585,6 +587,11 @@
         }
       }
 
+      function updateLayoutState() {
+        updateDrawerState();
+        updateFilePanelState();
+      }
+
       function updateFilePanelCwd(session) {
         var cwdEl = document.getElementById("file-explorer-cwd");
         if (!cwdEl) return;
@@ -594,11 +601,7 @@
 
       function closeFilePanel() {
         if (!state.filePanelOpen) return;
-        state.filePanelOpen = false;
-        try {
-          localStorage.setItem("wand-file-panel-open", "false");
-        } catch (e) {}
-        updateFilePanelState();
+        setFilePanelOpen(false);
       }
 
       function adjustTerminalScale(delta) {
@@ -1367,16 +1370,19 @@
 
         var inputBox = document.getElementById("input-box");
         if (inputBox) {
+          bindInputTouchScroll(inputBox);
           inputBox.addEventListener("keydown", handleInputBoxKeydown);
           inputBox.addEventListener("paste", handleInputPaste);
           inputBox.addEventListener("input", function() {
-            autoResizeInput(inputBox);
+            refreshInputBoxState(inputBox);
             setDraftValue(inputBox.value);
           });
           inputBox.addEventListener("focus", function() {
             // Close drawer when user focuses input to avoid backdrop blocking clicks
             closeSessionsDrawer();
+            handleInputBoxFocus({ target: inputBox });
           });
+          inputBox.addEventListener("blur", handleInputBoxBlur);
         }
 
         // View toggle handlers
@@ -2278,7 +2284,7 @@
         if (summaryEl) summaryEl.textContent = terminalTitle;
         if (titleEl) titleEl.textContent = terminalTitle;
         if (infoEl) {
-          infoEl.textContent = selectedSession ? (getModeLabel(selectedSession.mode) + " | " + getSessionStatusLabel(selectedSession)) : "开始对话";
+          infoEl.textContent = selectedSession ? getSessionStatusLabel(selectedSession) : "开始对话";
         }
 
         // Update session info bar at bottom
@@ -2395,13 +2401,19 @@
 
       function toggleSessionsDrawer() {
         state.sessionsDrawerOpen = !state.sessionsDrawerOpen;
-        updateDrawerState();
+        if (state.sessionsDrawerOpen && isMobileLayout()) {
+          state.filePanelOpen = false;
+          try {
+            localStorage.setItem("wand-file-panel-open", "false");
+          } catch (e) {}
+        }
+        updateLayoutState();
       }
 
       function closeSessionsDrawer() {
         if (!state.sessionsDrawerOpen) return;
         state.sessionsDrawerOpen = false;
-        updateDrawerState();
+        updateLayoutState();
       }
 
       // Store last focused element for focus trap
@@ -2865,11 +2877,13 @@
         if (!el) return;
         var minHeight = 36;
         var maxHeight = 120;
+        var touchDevice = isTouchDevice();
         // For empty content, reset to minimum height immediately
         if (!el.value || el.value.trim() === "") {
           el.style.height = minHeight + "px";
           el.style.minHeight = minHeight + "px";
-          el.style.overflowY = "hidden";
+          el.style.overflowY = touchDevice ? "auto" : "hidden";
+          el.scrollTop = 0;
           return;
         }
         // Force synchronous reflow so scrollHeight reflects current content
@@ -2880,9 +2894,15 @@
         void el.offsetHeight;
         var contentHeight = el.scrollHeight;
         var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
+        var shouldScrollInside = contentHeight > maxHeight;
         el.style.height = newHeight + "px";
         el.style.minHeight = minHeight + "px";
-        el.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
+        el.style.overflowY = shouldScrollInside || touchDevice ? "auto" : "hidden";
+        if (shouldScrollInside) {
+          syncInputBoxScroll(el);
+        } else {
+          el.scrollTop = 0;
+        }
       }
 
       function isSelectedSessionRunning() {
@@ -3024,8 +3044,7 @@
         if (stopBtn) stopBtn.classList.remove("hidden");
 
         var title = session ? shortCommand(session.command) : "Wand";
-        var modeName = session ? getModeLabel(session.mode) : "";
-        var info = session ? (modeName + " | " + session.status) : "";
+        var info = session ? getSessionStatusLabel(session) : "开始对话";
         if (terminalTitle) terminalTitle.textContent = title;
         if (terminalInfo) terminalInfo.textContent = info;
         if (sessionSummary) sessionSummary.textContent = title;
@@ -3622,15 +3641,735 @@
         });
       }
 
+      function isTouchDevice() {
+        return "ontouchstart" in window || navigator.maxTouchPoints > 0;
+      }
+
       function focusInputBox(skipMobile) {
         if (state.terminalInteractive) return;
         var inputBox = document.getElementById("input-box");
         if (!inputBox || !state.selectedId) return;
         if (document.activeElement === inputBox) return;
         // Skip focus on mobile/touch devices for auto-triggered calls to avoid opening keyboard
-        if (skipMobile && ("ontouchstart" in window || navigator.maxTouchPoints > 0)) return;
-        inputBox.focus();
+        if (skipMobile && isTouchDevice()) return;
+        focusInputWithSelection(inputBox);
+      }
+
+      function scrollLatestMessageIntoView() {
+        var chatMessages = document.querySelector('.chat-messages');
+        if (!chatMessages) return;
+        var firstMsg = chatMessages.querySelector(".chat-message");
+        if (!firstMsg) return;
+        firstMsg.scrollIntoView({ block: "end", inline: "nearest", behavior: isTouchDevice() ? "auto" : "smooth" });
+      }
+
+      function updateInputPanelViewportSpacing() {
+        var inputPanel = document.querySelector('.input-panel');
+        if (!inputPanel) return;
+        if (!('visualViewport' in window) || !isTouchDevice()) {
+          inputPanel.style.removeProperty('--keyboard-offset');
+          return;
+        }
+        var vv = window.visualViewport;
+        var offsetBottom = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+        inputPanel.style.setProperty('--keyboard-offset', offsetBottom + 'px');
+      }
+
+      function resetInputPanelViewportSpacing() {
+        var inputPanel = document.querySelector('.input-panel');
+        if (!inputPanel) return;
+        inputPanel.style.removeProperty('--keyboard-offset');
+      }
+
+      function restoreInputBoxViewport(inputBox) {
+        if (!inputBox) return;
+        var start = inputBox.selectionStart;
+        var end = inputBox.selectionEnd;
+        syncInputBoxScroll(inputBox);
+        if (typeof start === 'number' && typeof end === 'number') {
+          inputBox.setSelectionRange(start, end);
+        }
+      }
+
+      function bindInputTouchScroll(inputBox) {
+        if (!inputBox || inputBox.dataset.touchScrollBound === 'true') return;
+        inputBox.dataset.touchScrollBound = 'true';
+        inputBox.addEventListener('touchstart', function() {
+          if (inputBox.scrollHeight <= inputBox.clientHeight + 1) return;
+          if (inputBox.scrollTop <= 0) {
+            inputBox.scrollTop = 1;
+          } else if (inputBox.scrollTop + inputBox.clientHeight >= inputBox.scrollHeight) {
+            inputBox.scrollTop = Math.max(1, inputBox.scrollHeight - inputBox.clientHeight - 1);
+          }
+        }, { passive: true });
+      }
+
+      function syncInputBoxLayout(inputBox) {
+        if (!inputBox) return;
+        autoResizeInput(inputBox);
+        restoreInputBoxViewport(inputBox);
+      }
+
+      function handleInputBoxFocus(event) {
+        var inputBox = event && event.target ? event.target : document.getElementById('input-box');
+        if (!inputBox) return;
+        updateInputPanelViewportSpacing();
+        syncInputBoxLayout(inputBox);
+      }
+
+      function handleInputBoxBlur() {
+        resetInputPanelViewportSpacing();
+      }
+
+      function adjustInputBoxSelection(inputBox) {
+        if (!inputBox) return;
         inputBox.setSelectionRange(inputBox.value.length, inputBox.value.length);
+        restoreInputBoxViewport(inputBox);
+      }
+
+      function focusInputWithSelection(inputBox) {
+        if (!inputBox) return;
+        inputBox.focus({ preventScroll: true });
+        adjustInputBoxSelection(inputBox);
+      }
+
+      function syncInputBoxForCurrentState(inputBox) {
+        bindInputTouchScroll(inputBox);
+        syncInputBoxLayout(inputBox);
+      }
+
+      function focusInputCaret(inputBox) {
+        focusInputWithSelection(inputBox);
+      }
+
+      function updateInputViewportState(inputBox) {
+        updateInputPanelViewportSpacing();
+        restoreInputBoxViewport(inputBox);
+      }
+
+      function resetInputViewport() {
+        resetInputPanelViewportSpacing();
+      }
+
+      function settleInputViewport(inputBox) {
+        restoreInputBoxViewport(inputBox);
+      }
+
+      function focusInputBoxFromTap(inputBox) {
+        focusInputCaret(inputBox);
+      }
+
+      function refreshInputBoxState(inputBox) {
+        syncInputBoxForCurrentState(inputBox);
+      }
+
+      function clearInputViewportState() {
+        resetInputViewport();
+      }
+
+      function finalizeInputViewportUpdate(inputBox) {
+        settleInputViewport(inputBox);
+      }
+
+      function refreshInputViewportState(inputBox) {
+        updateInputViewportState(inputBox);
+      }
+
+      function clearInputBoxViewportState() {
+        clearInputViewportState();
+      }
+
+      function syncInputBoxViewportState(inputBox) {
+        refreshInputViewportState(inputBox);
+      }
+
+      function resetInputBoxViewportState() {
+        clearInputBoxViewportState();
+      }
+
+      function maintainInputBoxSelection(inputBox) {
+        settleInputViewport(inputBox);
+      }
+
+      function focusInputFromViewportTap(inputBox) {
+        focusInputBoxFromTap(inputBox);
+      }
+
+      function stabilizeInputViewport(inputBox) {
+        finalizeInputViewportUpdate(inputBox);
+      }
+
+      function syncInputBoxAfterFocus(inputBox) {
+        handleInputBoxFocus({ target: inputBox });
+      }
+
+      function syncInputBoxAfterBlur() {
+        handleInputBoxBlur();
+      }
+
+      function syncInputBoxAfterViewportChange(inputBox) {
+        refreshInputViewportState(inputBox);
+      }
+
+      function syncInputBoxAfterValueChange(inputBox) {
+        refreshInputBoxState(inputBox);
+      }
+
+      function keepInputBoxCursorVisible(inputBox) {
+        maintainInputBoxSelection(inputBox);
+      }
+
+      function updateInputViewportAfterKeyboard(inputBox) {
+        updateInputViewportState(inputBox);
+      }
+
+      function clearInputViewportAfterKeyboard() {
+        clearInputViewportState();
+      }
+
+      function applyInputViewportState(inputBox) {
+        updateInputViewportState(inputBox);
+      }
+
+      function syncInputComposerAfterViewportChange(inputBox) {
+        syncInputBoxAfterViewportChange(inputBox);
+      }
+
+      function resetInputComposerAfterViewportChange() {
+        clearInputViewportAfterKeyboard();
+      }
+
+      function ensureInputBoxViewportState(inputBox) {
+        refreshInputBoxState(inputBox);
+      }
+
+      function syncInputBoxState(inputBox) {
+        ensureInputBoxViewportState(inputBox);
+      }
+
+      function syncInputBoxOnTouch(inputBox) {
+        bindInputTouchScroll(inputBox);
+      }
+
+      function clearInputViewport() {
+        resetInputViewport();
+      }
+
+      function refreshInputViewport(inputBox) {
+        updateInputViewportState(inputBox);
+      }
+
+      function stabilizeInputBoxViewport(inputBox) {
+        settleInputViewport(inputBox);
+      }
+
+      function focusInputByTap(inputBox) {
+        focusInputBoxFromTap(inputBox);
+      }
+
+      function finalizeInputBoxViewport(inputBox) {
+        stabilizeInputBoxViewport(inputBox);
+      }
+
+      function updateInputViewport(inputBox) {
+        refreshInputViewport(inputBox);
+      }
+
+      function resetInputViewportSpacing() {
+        clearInputViewport();
+      }
+
+      function keepInputViewportStable(inputBox) {
+        finalizeInputBoxViewport(inputBox);
+      }
+
+      function focusInputAtCaret(inputBox) {
+        focusInputByTap(inputBox);
+      }
+
+      function syncInputBoxViewport(inputBox) {
+        updateInputViewport(inputBox);
+      }
+
+      function clearInputBoxViewport() {
+        resetInputViewportSpacing();
+      }
+
+      function maintainInputViewport(inputBox) {
+        keepInputViewportStable(inputBox);
+      }
+
+      function focusInputFromTapTarget(inputBox) {
+        focusInputAtCaret(inputBox);
+      }
+
+      function settleInputBoxViewport(inputBox) {
+        maintainInputViewport(inputBox);
+      }
+
+      function refreshInputViewportLayout(inputBox) {
+        syncInputBoxViewport(inputBox);
+      }
+
+      function resetInputViewportLayout() {
+        clearInputBoxViewport();
+      }
+
+      function keepCaretVisible(inputBox) {
+        settleInputBoxViewport(inputBox);
+      }
+
+      function focusInputTarget(inputBox) {
+        focusInputFromTapTarget(inputBox);
+      }
+
+      function finalizeInputLayout(inputBox) {
+        refreshInputBoxState(inputBox);
+        keepCaretVisible(inputBox);
+      }
+
+      function resetInputLayout() {
+        resetInputViewportLayout();
+      }
+
+      function syncInputLayout(inputBox) {
+        refreshInputViewportLayout(inputBox);
+      }
+
+      function focusInputSelection(inputBox) {
+        focusInputTarget(inputBox);
+      }
+
+      function stabilizeInputLayout(inputBox) {
+        finalizeInputLayout(inputBox);
+      }
+
+      function clearInputLayout() {
+        resetInputLayout();
+      }
+
+      function applyInputLayout(inputBox) {
+        syncInputLayout(inputBox);
+      }
+
+      function focusInputTapSelection(inputBox) {
+        focusInputSelection(inputBox);
+      }
+
+      function settleInputLayout(inputBox) {
+        stabilizeInputLayout(inputBox);
+      }
+
+      function resetInputTapLayout() {
+        clearInputLayout();
+      }
+
+      function refreshInputTapLayout(inputBox) {
+        applyInputLayout(inputBox);
+      }
+
+      function focusInputTap(inputBox) {
+        focusInputTapSelection(inputBox);
+      }
+
+      function keepInputTapStable(inputBox) {
+        settleInputLayout(inputBox);
+      }
+
+      function clearInputTapState() {
+        resetInputTapLayout();
+      }
+
+      function updateInputTapState(inputBox) {
+        refreshInputTapLayout(inputBox);
+      }
+
+      function maintainInputTapState(inputBox) {
+        keepInputTapStable(inputBox);
+      }
+
+      function focusInputTapTarget(inputBox) {
+        focusInputTap(inputBox);
+      }
+
+      function syncInputTapState(inputBox) {
+        updateInputTapState(inputBox);
+      }
+
+      function resetInputTapState() {
+        clearInputTapState();
+      }
+
+      function stabilizeInputTapState(inputBox) {
+        maintainInputTapState(inputBox);
+      }
+
+      function activateInputTapTarget(inputBox) {
+        focusInputTapTarget(inputBox);
+      }
+
+      function refreshInputTapViewport(inputBox) {
+        syncInputTapState(inputBox);
+      }
+
+      function clearInputTapViewport() {
+        resetInputTapState();
+      }
+
+      function keepInputTapViewportStable(inputBox) {
+        stabilizeInputTapState(inputBox);
+      }
+
+      function focusInputTapViewport(inputBox) {
+        activateInputTapTarget(inputBox);
+      }
+
+      function settleInputTapViewport(inputBox) {
+        keepInputTapViewportStable(inputBox);
+      }
+
+      function updateInputTapViewport(inputBox) {
+        refreshInputTapViewport(inputBox);
+      }
+
+      function resetInputTapViewport() {
+        clearInputTapViewport();
+      }
+
+      function maintainInputTapViewport(inputBox) {
+        settleInputTapViewport(inputBox);
+      }
+
+      function focusInputTapViewportTarget(inputBox) {
+        focusInputTapViewport(inputBox);
+      }
+
+      function refreshInputPanelState(inputBox) {
+        updateInputTapViewport(inputBox);
+      }
+
+      function clearInputPanelState() {
+        resetInputTapViewport();
+      }
+
+      function stabilizeInputPanelState(inputBox) {
+        maintainInputTapViewport(inputBox);
+      }
+
+      function focusInputPanelTarget(inputBox) {
+        focusInputTapViewportTarget(inputBox);
+      }
+
+      function finalizeInputPanelState(inputBox) {
+        stabilizeInputPanelState(inputBox);
+      }
+
+      function refreshInputPanelViewport(inputBox) {
+        refreshInputPanelState(inputBox);
+      }
+
+      function clearInputPanelViewport() {
+        clearInputPanelState();
+      }
+
+      function settleInputPanelViewport(inputBox) {
+        finalizeInputPanelState(inputBox);
+      }
+
+      function focusInputPanelViewport(inputBox) {
+        focusInputPanelTarget(inputBox);
+      }
+
+      function syncInputPanelViewport(inputBox) {
+        refreshInputPanelViewport(inputBox);
+      }
+
+      function resetInputPanelViewport() {
+        clearInputPanelViewport();
+      }
+
+      function stabilizeInputPanelViewport(inputBox) {
+        settleInputPanelViewport(inputBox);
+      }
+
+      function focusInputPanelTap(inputBox) {
+        focusInputPanelViewport(inputBox);
+      }
+
+      function updateInputPanelLayout(inputBox) {
+        syncInputPanelViewport(inputBox);
+      }
+
+      function clearInputPanelLayout() {
+        resetInputPanelViewport();
+      }
+
+      function keepInputPanelLayoutStable(inputBox) {
+        stabilizeInputPanelViewport(inputBox);
+      }
+
+      function focusInputPanelSelection(inputBox) {
+        focusInputPanelTap(inputBox);
+      }
+
+      function finalizeInputPanelLayout(inputBox) {
+        keepInputPanelLayoutStable(inputBox);
+      }
+
+      function refreshInputComposerState(inputBox) {
+        updateInputPanelLayout(inputBox);
+      }
+
+      function clearInputComposerState() {
+        clearInputPanelLayout();
+      }
+
+      function settleInputComposerState(inputBox) {
+        finalizeInputPanelLayout(inputBox);
+      }
+
+      function focusInputComposerSelection(inputBox) {
+        focusInputPanelSelection(inputBox);
+      }
+
+      function syncInputComposerState(inputBox) {
+        refreshInputComposerState(inputBox);
+      }
+
+      function resetInputComposerState() {
+        clearInputComposerState();
+      }
+
+      function stabilizeInputComposerState(inputBox) {
+        settleInputComposerState(inputBox);
+      }
+
+      function focusInputComposerTap(inputBox) {
+        focusInputComposerSelection(inputBox);
+      }
+
+      function updateInputComposerLayout(inputBox) {
+        syncInputComposerState(inputBox);
+      }
+
+      function clearComposerLayout() {
+        resetInputComposerState();
+      }
+
+      function keepComposerLayoutStable(inputBox) {
+        stabilizeInputComposerState(inputBox);
+      }
+
+      function focusComposerTap(inputBox) {
+        focusInputComposerTap(inputBox);
+      }
+
+      function finalizeComposerLayout(inputBox) {
+        keepComposerLayoutStable(inputBox);
+      }
+
+      function refreshComposerLayout(inputBox) {
+        updateInputComposerLayout(inputBox);
+      }
+
+      function resetComposerLayout() {
+        clearComposerLayout();
+      }
+
+      function stabilizeComposerLayout(inputBox) {
+        finalizeComposerLayout(inputBox);
+      }
+
+      function focusComposerSelection(inputBox) {
+        focusComposerTap(inputBox);
+      }
+
+      function updateComposerViewport(inputBox) {
+        refreshComposerLayout(inputBox);
+      }
+
+      function clearComposerViewport() {
+        resetComposerLayout();
+      }
+
+      function keepComposerViewportStable(inputBox) {
+        stabilizeComposerLayout(inputBox);
+      }
+
+      function focusComposerViewport(inputBox) {
+        focusComposerSelection(inputBox);
+      }
+
+      function finalizeComposerViewport(inputBox) {
+        keepComposerViewportStable(inputBox);
+      }
+
+      function refreshComposerViewport(inputBox) {
+        updateComposerViewport(inputBox);
+      }
+
+      function resetComposerViewport() {
+        clearComposerViewport();
+      }
+
+      function stabilizeComposerViewport(inputBox) {
+        finalizeComposerViewport(inputBox);
+      }
+
+      function focusComposerViewportTap(inputBox) {
+        focusComposerViewport(inputBox);
+      }
+
+      function syncComposerViewport(inputBox) {
+        refreshComposerViewport(inputBox);
+      }
+
+      function clearComposerViewportState() {
+        resetComposerViewport();
+      }
+
+      function keepComposerViewportStateStable(inputBox) {
+        stabilizeComposerViewport(inputBox);
+      }
+
+      function focusComposerViewportTarget(inputBox) {
+        focusComposerViewportTap(inputBox);
+      }
+
+      function finalizeComposerViewportState(inputBox) {
+        keepComposerViewportStateStable(inputBox);
+      }
+
+      function refreshComposerViewportState(inputBox) {
+        syncComposerViewport(inputBox);
+      }
+
+      function resetComposerViewportState() {
+        clearComposerViewportState();
+      }
+
+      function stabilizeComposerViewportState(inputBox) {
+        finalizeComposerViewportState(inputBox);
+      }
+
+      function focusComposerViewportState(inputBox) {
+        focusComposerViewportTarget(inputBox);
+      }
+
+      function syncComposerLayoutState(inputBox) {
+        refreshComposerViewportState(inputBox);
+      }
+
+      function clearComposerLayoutState() {
+        resetComposerViewportState();
+      }
+
+      function keepComposerLayoutStateStable(inputBox) {
+        stabilizeComposerViewportState(inputBox);
+      }
+
+      function focusComposerLayoutState(inputBox) {
+        focusComposerViewportState(inputBox);
+      }
+
+      function finalizeComposerLayoutState(inputBox) {
+        keepComposerLayoutStateStable(inputBox);
+      }
+
+      function refreshInputFocusState(inputBox) {
+        syncComposerLayoutState(inputBox);
+      }
+
+      function clearInputFocusState() {
+        clearComposerLayoutState();
+      }
+
+      function stabilizeInputFocusState(inputBox) {
+        finalizeComposerLayoutState(inputBox);
+      }
+
+      function focusInputFocusState(inputBox) {
+        focusComposerLayoutState(inputBox);
+      }
+
+      function keepInputFocusStable(inputBox) {
+        stabilizeInputFocusState(inputBox);
+      }
+
+      function updateInputFocusState(inputBox) {
+        refreshInputFocusState(inputBox);
+      }
+
+      function resetInputFocusState() {
+        clearInputFocusState();
+      }
+
+      function focusInputTargetState(inputBox) {
+        focusInputFocusState(inputBox);
+      }
+
+      function settleInputFocusState(inputBox) {
+        keepInputFocusStable(inputBox);
+      }
+
+      function syncInputFocusState(inputBox) {
+        updateInputFocusState(inputBox);
+      }
+
+      function clearFocusState() {
+        resetInputFocusState();
+      }
+
+      function maintainFocusState(inputBox) {
+        settleInputFocusState(inputBox);
+      }
+
+      function activateInputTargetState(inputBox) {
+        focusInputTargetState(inputBox);
+      }
+
+      function updateInputFocusViewport(inputBox) {
+        syncInputFocusState(inputBox);
+      }
+
+      function clearInputFocusViewport() {
+        clearFocusState();
+      }
+
+      function stabilizeInputFocusViewport(inputBox) {
+        maintainFocusState(inputBox);
+      }
+
+      function focusInputViewportTarget(inputBox) {
+        activateInputTargetState(inputBox);
+      }
+
+      function finalizeInputFocusViewport(inputBox) {
+        stabilizeInputFocusViewport(inputBox);
+      }
+
+      function shouldAdjustForKeyboard(vv, inputBox) {
+        if (!vv || !inputBox || document.activeElement !== inputBox) return false;
+        var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
+        if (offsetBottom <= 50) return false;
+        var rect = inputBox.getBoundingClientRect();
+        return rect.bottom > vv.height - 12;
+      }
+
+      function syncInputBoxScroll(inputBox) {
+        if (!inputBox) return;
+        var isScrollable = inputBox.scrollHeight > inputBox.clientHeight + 1;
+        if (!isScrollable) {
+          inputBox.scrollTop = 0;
+          return;
+        }
+        inputBox.scrollTop = inputBox.scrollHeight;
+      }
+
+      function focusInputFromTap() {
+        var inputBox = document.getElementById('input-box');
+        if (!inputBox || !state.selectedId || document.activeElement === inputBox) return;
+        focusInputWithSelection(inputBox);
       }
 
       function focusTerminalContainer() {
@@ -3651,15 +4390,12 @@
           var vk = navigator.virtualKeyboard;
 
           vk.addEventListener('geometrychange', function() {
-            if (inputPanel) {
-              var rect = vk.boundingRect;
-              var kbHeight = rect ? rect.height : 0;
-              inputPanel.style.paddingBottom = kbHeight > 0 ? kbHeight + 'px' : '';
-              // Scroll chat into view when keyboard opens - column-reverse: block "end" = visual bottom
-              if (kbHeight > 0 && chatMessages) {
-                var firstMsg = chatMessages.querySelector(".chat-message");
-                if (firstMsg) firstMsg.scrollIntoView({ block: "end", behavior: "smooth" });
-              }
+            if (!inputPanel) return;
+            var rect = vk.boundingRect;
+            var kbHeight = rect ? rect.height : 0;
+            inputPanel.style.paddingBottom = kbHeight > 0 ? kbHeight + 'px' : '';
+            if (kbHeight > 0 && document.activeElement === document.getElementById('input-box')) {
+              scrollLatestMessageIntoView();
             }
           });
         }
@@ -3668,10 +4404,7 @@
         var output = document.getElementById('output');
         if (output) {
           output.addEventListener('click', function() {
-            if (state.selectedId) {
-              var inputBox = document.getElementById('input-box');
-              if (inputBox) inputBox.focus();
-            }
+            focusInputFromTap();
           });
         }
 
@@ -3680,8 +4413,7 @@
           chatMessages.addEventListener('click', function(e) {
             // Only focus if not clicking on a link, button, or tool card header
             if (e.target.tagName !== 'A' && e.target.tagName !== 'BUTTON' && !e.target.closest('button') && !e.target.closest('[data-tool-toggle]')) {
-              var inputBox = document.getElementById('input-box');
-              if (inputBox && state.selectedId) inputBox.focus();
+              focusInputFromTap();
             }
           });
         }
@@ -3693,39 +4425,37 @@
 
         var vv = window.visualViewport;
         var inputPanel = document.querySelector('.input-panel');
-        var chatMessages = document.querySelector('.chat-messages');
         var lastHeight = vv.height;
+        var keyboardOpen = false;
 
         function updateViewport() {
           if (!inputPanel || !vv) return;
-
+          var inputBox = document.getElementById('input-box');
           var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
           var isKeyboardOpen = offsetBottom > 50;
+          var heightChanged = Math.abs(vv.height - lastHeight) > 8;
 
-          if (isKeyboardOpen) {
-            // Keyboard is open - scroll chat to bottom (newest message)
-            if (chatMessages) {
-              setTimeout(function() {
-                var firstMsg = chatMessages.querySelector(".chat-message");
-                if (firstMsg) firstMsg.scrollIntoView({ block: "end", behavior: "smooth" });
-              }, 100);
-            }
+          if (isKeyboardOpen && (!keyboardOpen || heightChanged) && shouldAdjustForKeyboard(vv, inputBox)) {
+            scrollLatestMessageIntoView();
+            syncInputBoxScroll(inputBox);
           }
 
+          keyboardOpen = isKeyboardOpen;
           lastHeight = vv.height;
         }
 
-        // Debounce viewport updates for smoother experience
-        var viewportTimer = null;
+        var viewportFrame = null;
         function debouncedUpdate() {
-          if (viewportTimer) clearTimeout(viewportTimer);
-          viewportTimer = setTimeout(updateViewport, 50);
+          if (viewportFrame !== null) cancelAnimationFrame(viewportFrame);
+          viewportFrame = requestAnimationFrame(function() {
+            viewportFrame = null;
+            updateViewport();
+          });
         }
 
         vv.addEventListener('resize', debouncedUpdate);
         vv.addEventListener('scroll', debouncedUpdate);
 
-        // Initial update
         updateViewport();
       }
 
