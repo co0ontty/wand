@@ -342,6 +342,11 @@
                 '新对话' +
               '</button>' +
               '<button id="terminal-interactive-toggle-top" class="topbar-btn' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨ ' + (state.terminalInteractive ? '交互开' : '交互关') + '</button>' +
+              '<div class="topbar-scale-toggle" style="display:flex;align-items:center;gap:2px;margin-right:6px;">' +
+                '<button id="terminal-scale-down-top" class="topbar-btn terminal-scale-btn" type="button" title="缩小">−</button>' +
+                '<span class="terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
+                '<button id="terminal-scale-up-top" class="topbar-btn terminal-scale-btn" type="button" title="放大">+</button>' +
+              '</div>' +
               '<button id="pwa-install-button" class="topbar-btn square hidden" title="安装应用">' +
                 '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
               '</button>' +
@@ -384,11 +389,6 @@
                   '</div>' +
                   '<div class="file-panel-toggle" aria-label="文件浏览器">' +
                     '<button id="file-panel-toggle-btn" class="view-toggle-btn' + (state.filePanelOpen ? " active" : "") + '" type="button" title="文件浏览器">📁</button>' +
-                  '</div>' +
-                  '<div class="terminal-scale-toggle" aria-label="终端缩放">' +
-                    '<button id="terminal-scale-down" class="view-toggle-btn terminal-scale-btn" type="button" title="缩小">−</button>' +
-                    '<span class="terminal-scale-label" id="terminal-scale-label">' + Math.round(state.terminalScale * 100) + '%</span>' +
-                    '<button id="terminal-scale-up" class="view-toggle-btn terminal-scale-btn" type="button" title="放大">+</button>' +
                   '</div>' +
                 '</div>' +
               '</div>' +
@@ -622,7 +622,7 @@
       }
 
       function updateScaleLabel() {
-        var label = document.getElementById("terminal-scale-label");
+        var label = document.getElementById("terminal-scale-label-top");
         if (label) {
           label.textContent = Math.round(state.terminalScale * 100) + "%";
         }
@@ -1428,9 +1428,9 @@
         var filePanelBackdrop = document.getElementById("file-panel-backdrop");
         if (filePanelBackdrop) filePanelBackdrop.addEventListener("click", closeFilePanel);
 
-        // Terminal scale controls
-        var scaleDownBtn = document.getElementById("terminal-scale-down");
-        var scaleUpBtn = document.getElementById("terminal-scale-up");
+        // Terminal scale controls (topbar)
+        var scaleDownBtn = document.getElementById("terminal-scale-down-top");
+        var scaleUpBtn = document.getElementById("terminal-scale-up-top");
         if (scaleDownBtn) scaleDownBtn.addEventListener("click", function() { adjustTerminalScale(-0.25); });
         if (scaleUpBtn) scaleUpBtn.addEventListener("click", function() { adjustTerminalScale(0.25); });
 

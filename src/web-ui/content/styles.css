@@ -1150,6 +1150,35 @@
       padding: 0 2px;
     }
 
+    /* Topbar scale toggle */
+    .topbar-scale-toggle {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      background: rgba(255, 251, 245, 0.72);
+      border-radius: 6px;
+      padding: 2px;
+    }
+    .topbar-scale-toggle .terminal-scale-btn {
+      min-width: 24px;
+      height: 24px;
+      padding: 0 4px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      background: transparent;
+      border: none;
+    }
+    .topbar-scale-toggle .terminal-scale-btn:hover {
+      background: rgba(197, 101, 61, 0.1);
+    }
+    .topbar-scale-toggle .terminal-scale-label {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      min-width: 32px;
+      text-align: center;
+      padding: 0 2px;
+    }
+
     /* Terminal interactive mode indicator */
     .terminal-container.interactive {
       border-color: rgba(79, 122, 88, 0.5);
@@ -4073,8 +4102,8 @@
       .view-toggle { height: 28px; padding: 2px; gap: 1px; }
       .view-toggle-btn { height: 24px; min-height: 24px; padding: 0 6px; font-size: 0.625rem; gap: 2px; border-radius: 4px; }
 
-      /* 移动端隐藏终端缩放按钮（通过手势缩放更自然） */
-      .terminal-scale-toggle { display: none; }
+      /* 移动端隐藏顶部工具栏缩放按钮（通过手势缩放更自然） */
+      .topbar-scale-toggle { display: none; }
 
       /* 移动端简化交互模式按钮 */
       .terminal-tool-btn {
