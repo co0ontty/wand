@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import process from "node:process";
-import { ensureConfig, loadConfig, resolveConfigPath, saveConfig } from "./config.js";
+import { ensureConfig, hasConfigFile, isExecutionMode, resolveConfigPath, saveConfig } from "./config.js";
 import { startServer } from "./server.js";
+import { ensureDatabaseFile, resolveDatabasePath } from "./storage.js";
 import { WandConfig } from "./types.js";
 
 async function main(): Promise<void> {
@@ -12,13 +13,11 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "init": {
-      await ensureConfig(configPath);
-      process.stdout.write(`[wand] Config ready at ${configPath}\n`);
+      await ensureRequiredFiles(configPath);
       break;
     }
     case "web": {
-      await ensureConfig(configPath);
-      const config = await loadConfig(configPath);
+      const config = await ensureRequiredFiles(configPath);
       await startServer(config, configPath);
       break;
     }
@@ -27,8 +26,7 @@ async function main(): Promise<void> {
       break;
     }
     case "config:show": {
-      await ensureConfig(configPath);
-      const config = await loadConfig(configPath);
+      const config = await ensureConfig(configPath);
       process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
       break;
     }
@@ -39,8 +37,7 @@ async function main(): Promise<void> {
         throw new Error("Usage: wand config:set <key> <value>");
       }
 
-      await ensureConfig(configPath);
-      const config = await loadConfig(configPath);
+      const config = await ensureConfig(configPath);
       const nextConfig = setConfigValue(config, key, value);
       await saveConfig(configPath, nextConfig);
       process.stdout.write(`[wand] Updated ${key} in ${configPath}\n`);
@@ -66,7 +63,7 @@ function printHelp(): void {
   process.stdout.write(`wand <command>
 
 Commands:
-  wand init                 Create default config in .wand/config.json
+  wand init                 Create default files in ~/.wand/
   wand web                  Start web console server
   wand config:path          Print resolved config path
   wand config:show          Print current config
@@ -75,6 +72,27 @@ Commands:
 Options:
   --config <path>           Use a custom config file path
 `);
+}
+
+async function ensureRequiredFiles(configPath: string): Promise<WandConfig> {
+  const dbPath = resolveDatabasePath(configPath);
+  const hadConfig = hasConfigFile(configPath);
+  const config = await ensureConfig(configPath);
+  const createdDb = ensureDatabaseFile(dbPath);
+
+  if (!hadConfig) {
+    process.stdout.write(`[wand] Created default config at ${configPath}\n`);
+  } else {
+    process.stdout.write(`[wand] Config ready at ${configPath}\n`);
+  }
+
+  if (createdDb) {
+    process.stdout.write(`[wand] Created SQLite database at ${dbPath}\n`);
+  } else {
+    process.stdout.write(`[wand] SQLite database ready at ${dbPath}\n`);
+  }
+
+  return config;
 }
 
 function setConfigValue(
@@ -100,7 +118,7 @@ function setConfigValue(
         port: Number(value)
       };
     case "defaultMode":
-      if (value !== "auto-edit" && value !== "default" && value !== "full-access") {
+      if (!isExecutionMode(value)) {
         throw new Error("defaultMode must be auto-edit, default, or full-access");
       }
       return {

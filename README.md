@@ -1,81 +1,33 @@
-# wand-cli
+# wand
 
-`wand-cli` is a small Node.js developer tool that exposes a mobile-friendly web console for operating local CLI tools from a browser.
+通过浏览器访问本地终端，支持 Claude 等命令行工具。
 
-## Features
+## 功能
 
-- `wand web` starts a local web server
-- Config file lives in `.wand/config.json` by default
-- Password-based web access
-- Interactive TTY sessions for CLI tools such as Codex and Claude
-- Real terminal rendering in the browser via `xterm.js`
-- PTY auto-resize to match the browser terminal viewport
-- Three execution modes:
-  - `auto-edit`
-  - `default`
-  - `full-access`
-- Optional startup commands launched with the web service
-- Mobile-friendly command presets, modal new-session flow, path suggestions, and quick input controls
+- Web 终端 / Chat 模式双视图
+- 会话持久化与恢复
+- Claude Code 集成
+- 文件浏览器
+- HTTPS 安全连接
 
-## Quick start
+## 快速开始
+
+```bash
+npm install -g @co0ontty/wand
+wand init
+wand web
+```
+
+配置文件：`~/.wand/config.json`
+
+## 开发
 
 ```bash
 npm install
 npm run build
-node dist/cli.js init
-node dist/cli.js web
+npm run dev
 ```
 
-## Config
+## License
 
-Default config path:
-
-```text
-.wand/config.json
-```
-
-Example:
-
-```json
-{
-  "host": "127.0.0.1",
-  "port": 3170,
-  "password": "change-me",
-  "defaultMode": "default",
-  "shell": "/bin/bash",
-  "defaultCwd": "/path/to/project",
-  "startupCommands": [],
-  "allowedCommandPrefixes": [],
-  "commandPresets": [
-    {
-      "label": "Codex",
-      "command": "codex",
-      "mode": "default"
-    },
-    {
-      "label": "Claude",
-      "command": "claude",
-      "mode": "default"
-    }
-  ]
-}
-```
-
-## Mobile usage
-
-Set `host` to `0.0.0.0` if you want to open the web console from your phone on the same network.
-
-```bash
-node dist/cli.js config:set host 0.0.0.0
-node dist/cli.js config:set password your-password
-node dist/cli.js web
-```
-
-Then open `http://<your-machine-ip>:3170` on your phone.
-
-## Publish
-
-```bash
-npm run build
-npm publish
-```
+MIT

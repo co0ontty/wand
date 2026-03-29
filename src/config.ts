@@ -1,14 +1,16 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { ExecutionMode, WandConfig } from "./types.js";
 
-export const DEFAULT_CONFIG_DIR = ".wand";
-export const DEFAULT_CONFIG_FILE = "config.json";
+const DEFAULT_CONFIG_DIR = ".wand";
+const DEFAULT_CONFIG_FILE = "config.json";
 
 export const defaultConfig = (): WandConfig => ({
   host: "127.0.0.1",
-  port: 3170,
+  port: 8443,
+  https: true,
   password: "change-me",
   defaultMode: "default",
   shell: process.env.SHELL || "/bin/bash",
@@ -17,19 +19,29 @@ export const defaultConfig = (): WandConfig => ({
   allowedCommandPrefixes: [],
   commandPresets: [
     {
-      label: "Codex",
-      command: "codex",
-      mode: "default"
-    },
-    {
       label: "Claude",
       command: "claude",
       mode: "default"
     },
     {
+      label: "Claude Full Access",
+      command: "claude",
+      mode: "full-access"
+    },
+    {
       label: "Cursor Agent",
       command: "cursor-agent",
       mode: "default"
+    },
+    {
+      label: "Claude Native",
+      command: "claude",
+      mode: "native"
+    },
+    {
+      label: "Claude Managed",
+      command: "claude",
+      mode: "managed"
     }
   ]
 });
@@ -39,7 +51,15 @@ export function resolveConfigPath(inputPath?: string): string {
     return path.resolve(process.cwd(), inputPath);
   }
 
-  return path.resolve(process.cwd(), DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_FILE);
+  return path.resolve(process.env.HOME || process.cwd(), DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_FILE);
+}
+
+export function resolveConfigDir(configPath: string): string {
+  return path.dirname(configPath);
+}
+
+export function hasConfigFile(configPath: string): boolean {
+  return existsSync(configPath);
 }
 
 export async function ensureConfig(configPath: string): Promise<WandConfig> {
@@ -58,11 +78,6 @@ export async function ensureConfig(configPath: string): Promise<WandConfig> {
   }
 }
 
-export async function loadConfig(configPath: string): Promise<WandConfig> {
-  const raw = await readFile(configPath, "utf8");
-  return mergeWithDefaults(JSON.parse(raw) as Partial<WandConfig>);
-}
-
 export async function saveConfig(configPath: string, config: WandConfig): Promise<void> {
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
@@ -73,6 +88,8 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
   return {
     ...defaults,
     ...input,
+    // Ensure https is boolean
+    https: typeof input.https === "boolean" ? input.https : defaults.https,
     defaultCwd:
       typeof input.defaultCwd === "string" && input.defaultCwd.trim()
         ? input.defaultCwd
@@ -99,8 +116,8 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
   };
 }
 
-function isExecutionMode(value: unknown): value is ExecutionMode {
-  return value === "auto-edit" || value === "default" || value === "full-access";
+export function isExecutionMode(value: unknown): value is ExecutionMode {
+  return value === "assist" || value === "agent" || value === "agent-max" || value === "auto-edit" || value === "default" || value === "full-access" || value === "native" || value === "managed";
 }
 
 function normalizePresetCommand(command: string): string {

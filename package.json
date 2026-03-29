@@ -1,16 +1,23 @@
 {
-  "name": "wand-cli",
-  "version": "0.1.0",
-  "description": "Remote web coding controller for local CLI tools.",
+  "name": "@co0ontty/wand",
+  "version": "0.3.0",
+  "description": "A web terminal for local CLI tools like Claude.",
   "type": "module",
   "bin": {
     "wand": "dist/cli.js"
   },
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
   "files": [
     "dist"
   ],
+  "preferGlobal": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:copy-content",
+    "build:copy-content": "cp -r src/web-ui/content dist/web-ui/",
     "dev": "tsx src/cli.ts web",
     "check": "tsc --noEmit -p tsconfig.json"
   },
@@ -22,17 +29,21 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=22.5.0"
   },
   "dependencies": {
     "@types/cookie": "^0.6.0",
+    "@xterm/addon-fit": "^0.11.0",
     "express": "^4.21.2",
     "node-pty": "^1.1.0",
+    "ws": "^8.19.0",
     "xterm": "^5.3.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.1",
+    "@types/express": "^4.17.21",
     "@types/node": "^22.13.14",
+    "@types/ws": "^8.18.1",
+    "playwright": "^1.58.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }
