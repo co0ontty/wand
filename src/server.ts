@@ -891,7 +891,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   // ── Startup commands ──
 
-  await processes.runStartupCommands();
+  processes.runStartupCommands();
 
   // ── WebSocket broadcast layer ──
 

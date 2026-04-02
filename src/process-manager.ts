@@ -1398,7 +1398,7 @@ export class ProcessManager extends EventEmitter {
     this.storage.deleteSession(id);
   }
 
-  async runStartupCommands(): Promise<SessionSnapshot[]> {
+  runStartupCommands(): SessionSnapshot[] {
     return this.config.startupCommands.map((command) =>
       this.start(command, this.config.defaultCwd, this.config.defaultMode)
     );
