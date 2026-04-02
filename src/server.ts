@@ -297,23 +297,33 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   // PWA manifest
   app.get("/manifest.json", (_req, res) => {
     res.type("json").send(JSON.stringify({
-      id: "/",
+      id: "/wand",
       scope: "/",
+      lang: "zh-CN",
+      dir: "ltr",
       name: "Wand Console",
       short_name: "Wand",
       description: "Local CLI Console for Vibe Coding",
       start_url: "/",
       display: "standalone",
+      display_override: ["window-controls-overlay", "standalone"],
       background_color: "#f6f1e8",
       theme_color: "#c5653d",
       orientation: "any",
+      prefer_related_applications: false,
       icons: [
-        { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-        { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" }
+        { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
+        { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+        { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }
       ],
       categories: ["developer tools", "productivity"],
       shortcuts: [
-        { name: "New Session", url: "/?action=new", description: "Start a new CLI session" }
+        {
+          name: "New Session",
+          url: "/?action=new",
+          description: "Start a new CLI session",
+          icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }]
+        }
       ]
     }));
   });
@@ -348,13 +358,15 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   // Service Worker for offline support
   app.get("/sw.js", (_req, res) => {
     res.type("javascript").send(`
-const STATIC_CACHE = 'wand-static-v2';
-const RUNTIME_CACHE = 'wand-runtime-v2';
+const STATIC_CACHE = 'wand-static-v4';
+const RUNTIME_CACHE = 'wand-runtime-v4';
 const APP_SHELL = '/';
 const STATIC_ASSETS = [
   APP_SHELL,
   '/manifest.json',
   '/icon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
   '/vendor/xterm/css/xterm.css',
   '/vendor/xterm/lib/xterm.js',
   '/vendor/xterm-addon-fit/lib/addon-fit.js'
@@ -1211,7 +1223,7 @@ function parseStoredPathList<T>(raw: string | null): T[] {
   }
   const wsClients = new Set<WsClient>();
   const MAX_QUEUE_SIZE = 500; // Max messages in queue before applying backpressure
-  const OUTPUT_DEBOUNCE_MS = 50; // Debounce PTY output updates to reduce flicker
+  const OUTPUT_DEBOUNCE_MS = 16; // Debounce PTY output updates to roughly one frame
 
   // Output debounce cache - batch rapid output events per session
   const outputDebounceCache = new Map<string, { event: ProcessEvent; timer: NodeJS.Timeout }>();

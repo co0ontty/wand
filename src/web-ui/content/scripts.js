@@ -21,6 +21,30 @@
         });
     }
 
+    // PWA display mode detection
+    (function() {
+      function detectDisplayMode() {
+        var mode = 'browser';
+        if (window.matchMedia('(display-mode: window-controls-overlay)').matches) {
+          mode = 'window-controls-overlay';
+        } else if (window.matchMedia('(display-mode: standalone)').matches) {
+          mode = 'standalone';
+        } else if (window.matchMedia('(display-mode: fullscreen)').matches) {
+          mode = 'fullscreen';
+        } else if (navigator.standalone === true) {
+          mode = 'standalone'; // iOS Safari
+        }
+        document.documentElement.setAttribute('data-display-mode', mode);
+        document.documentElement.classList.toggle('is-pwa', mode !== 'browser');
+        return mode;
+      }
+      detectDisplayMode();
+      // Re-detect when display mode changes (e.g., user toggles WCO)
+      ['standalone', 'window-controls-overlay', 'fullscreen'].forEach(function(m) {
+        window.matchMedia('(display-mode: ' + m + ')').addEventListener('change', detectDisplayMode);
+      });
+    })();
+
     (function() {
       var configPath = "${escapeHtml(configPath)}";
 
@@ -36,6 +60,15 @@
         fitAddon: null,
         terminalSessionId: null,
         terminalOutput: "",
+        terminalViewportSize: { width: 0, height: 0 },
+        terminalAutoFollow: true,
+        terminalScrollIdleTimer: null,
+        terminalScrollIdleMs: 1800,
+        terminalScrollThreshold: 12,
+        showTerminalJumpToBottom: false,
+        terminalViewportEl: null,
+        terminalViewportScrollHandler: null,
+        terminalViewportTouchHandler: null,
         resizeObserver: null,
         resizeHandler: null,
         resizeTimer: null,
@@ -313,7 +346,6 @@
             '</div>' +
             '<div class="login-body">' +
               '<p class="login-hint">输入 Wand 访问密码以进入控制台。</p>' +
-              '<p class="login-tip">如果页面是通过 <strong>https://</strong> 打开的，请改用 <strong>http://</strong> 访问本地服务。</p>' +
               '<div class="field">' +
                 '<label class="field-label" for="password">密码</label>' +
                 '<div class="password-field">' +
@@ -422,6 +454,7 @@
                   '<span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
                   '<button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大">+</button>' +
                 '</div>' +
+                '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部">↓ 最新</button>' +
               '</div>' +
               '<div id="chat-output" class="chat-container hidden"></div>' +
               '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
@@ -1469,6 +1502,10 @@
         var scaleUpBtn = document.getElementById("terminal-scale-up-top");
         if (scaleDownBtn) scaleDownBtn.addEventListener("click", function() { adjustTerminalScale(-0.25); });
         if (scaleUpBtn) scaleUpBtn.addEventListener("click", function() { adjustTerminalScale(0.25); });
+        var jumpBottomBtn = document.getElementById("terminal-jump-bottom");
+        if (jumpBottomBtn) jumpBottomBtn.addEventListener("click", function() {
+          maybeScrollTerminalToBottom("force");
+        });
 
         // File explorer
         var fileRefresh = document.getElementById("file-explorer-refresh");
@@ -1949,6 +1986,172 @@
         });
       }
 
+      function getTerminalViewport() {
+        if (!state.terminal || !state.terminal.element) return null;
+        if (state.terminalViewportEl && state.terminal.element.contains(state.terminalViewportEl)) {
+          return state.terminalViewportEl;
+        }
+        state.terminalViewportEl = state.terminal.element.querySelector(".xterm-viewport");
+        return state.terminalViewportEl;
+      }
+
+      function clearTerminalScrollIdleTimer() {
+        if (state.terminalScrollIdleTimer) {
+          clearTimeout(state.terminalScrollIdleTimer);
+          state.terminalScrollIdleTimer = null;
+        }
+      }
+
+      function updateTerminalJumpToBottomButton() {
+        var button = document.getElementById("terminal-jump-bottom");
+        var shouldShow = !!state.selectedId
+          && state.currentView === "terminal"
+          && !state.terminalAutoFollow
+          && !isTerminalNearBottom();
+        state.showTerminalJumpToBottom = shouldShow;
+        if (button) {
+          button.classList.toggle("visible", shouldShow);
+        }
+      }
+
+      function isTerminalNearBottom() {
+        var viewport = getTerminalViewport();
+        if (!viewport) return true;
+        var distance = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+        return distance <= state.terminalScrollThreshold;
+      }
+
+      function scrollTerminalToBottom(smooth) {
+        if (!state.terminal) return;
+        if (smooth) {
+          var viewport = getTerminalViewport();
+          if (viewport) {
+            viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+            setTimeout(function() {
+              if (state.terminal) state.terminal.scrollToBottom();
+            }, 160);
+            return;
+          }
+        }
+        state.terminal.scrollToBottom();
+      }
+
+      function scheduleTerminalResumeFollow() {
+        clearTerminalScrollIdleTimer();
+        updateTerminalJumpToBottomButton();
+        state.terminalScrollIdleTimer = setTimeout(function() {
+          state.terminalScrollIdleTimer = null;
+          state.terminalAutoFollow = true;
+          if (!isTerminalNearBottom()) {
+            scrollTerminalToBottom(true);
+          }
+          updateTerminalJumpToBottomButton();
+        }, state.terminalScrollIdleMs);
+      }
+
+      function setTerminalManualScrollActive() {
+        state.terminalAutoFollow = false;
+        updateTerminalJumpToBottomButton();
+        scheduleTerminalResumeFollow();
+      }
+
+      function maybeScrollTerminalToBottom(reason) {
+        if (!state.terminal) return;
+        var force = reason === "force";
+        if (force) {
+          state.terminalAutoFollow = true;
+          clearTerminalScrollIdleTimer();
+          scrollTerminalToBottom(false);
+          updateTerminalJumpToBottomButton();
+          return;
+        }
+        if (!state.terminalAutoFollow && !isTerminalNearBottom()) {
+          updateTerminalJumpToBottomButton();
+          return;
+        }
+        state.terminalAutoFollow = true;
+        scrollTerminalToBottom(false);
+        updateTerminalJumpToBottomButton();
+      }
+
+      function syncTerminalBuffer(sessionId, output, options) {
+        if (!state.terminal) return false;
+        var normalizedOutput = normalizeTerminalOutput(output || "");
+        var nextSessionId = sessionId || null;
+        var opts = options || {};
+        var mode = opts.mode || "append";
+        var shouldScroll = opts.scroll !== false;
+        var sessionChanged = state.terminalSessionId !== nextSessionId;
+        var currentOutput = state.terminalOutput || "";
+        var wrote = false;
+
+        if (normalizedOutput === currentOutput && !sessionChanged) {
+          if (shouldScroll) maybeScrollTerminalToBottom("output");
+          updateTerminalJumpToBottomButton();
+          return false;
+        }
+
+        if (sessionChanged) {
+          state.terminal.reset();
+          currentOutput = "";
+          state.terminalOutput = "";
+          state.terminalAutoFollow = true;
+          clearTerminalScrollIdleTimer();
+          updateTerminalJumpToBottomButton();
+        }
+
+        if (mode === "replace") {
+          if (normalizedOutput !== currentOutput) {
+            state.terminal.reset();
+            if (normalizedOutput) {
+              state.terminal.write(normalizedOutput);
+            }
+            wrote = true;
+          }
+        } else if (normalizedOutput.length < currentOutput.length && !sessionChanged) {
+          // Ignore regressive snapshots for the active session; wait for an explicit replace.
+          return false;
+        } else if (normalizedOutput.startsWith(currentOutput)) {
+          var delta = normalizedOutput.slice(currentOutput.length);
+          if (delta) {
+            state.terminal.write(delta);
+            wrote = true;
+          }
+        } else if (currentOutput && currentOutput.startsWith(normalizedOutput)) {
+          // Ignore shorter/stale snapshots from polling or reconnect races.
+          return false;
+        } else {
+          state.terminal.reset();
+          if (normalizedOutput) {
+            state.terminal.write(normalizedOutput);
+          }
+          wrote = true;
+        }
+
+        state.terminalSessionId = nextSessionId;
+        state.terminalOutput = normalizedOutput;
+        if (shouldScroll && (wrote || sessionChanged || mode === "replace")) {
+          maybeScrollTerminalToBottom(sessionChanged || mode === "replace" ? "force" : "output");
+        } else {
+          updateTerminalJumpToBottomButton();
+        }
+        return wrote || sessionChanged;
+      }
+
+      function shouldResizeTerminalViewport() {
+        var output = document.getElementById("output");
+        if (!output) return false;
+        var rect = output.getBoundingClientRect();
+        var width = Math.round(rect.width);
+        var height = Math.round(rect.height);
+        if (!width || !height) return false;
+        if (state.terminalViewportSize.width === width && state.terminalViewportSize.height === height) {
+          return false;
+        }
+        state.terminalViewportSize = { width: width, height: height };
+        return true;
+      }
+
       function initTerminal() {
         var container = document.getElementById("output");
         if (!container || state.terminal) return;
@@ -1960,7 +2163,7 @@
         state.terminal = new Terminal({
           cols: 120,
           rows: 36,
-          convertEol: false,
+          convertEol: true,
           disableStdin: false,
           cursorBlink: false,
           fontFamily: '"Geist Mono", "SF Mono", monospace',
@@ -1998,14 +2201,42 @@
 
         state.terminal.open(container);
         applyTerminalScale();
-        state.fitAddon.fit();
+        state.terminalViewportSize = { width: 0, height: 0 };
+        state.terminalAutoFollow = true;
+        clearTerminalScrollIdleTimer();
+        if (shouldResizeTerminalViewport()) {
+          state.fitAddon.fit();
+        }
+
+        var viewport = getTerminalViewport();
+        if (viewport) {
+          state.terminalViewportScrollHandler = function() {
+            if (isTerminalNearBottom()) {
+              state.terminalAutoFollow = true;
+              clearTerminalScrollIdleTimer();
+              updateTerminalJumpToBottomButton();
+              return;
+            }
+            setTerminalManualScrollActive();
+          };
+          state.terminalViewportTouchHandler = function() {
+            setTerminalManualScrollActive();
+          };
+          viewport.addEventListener("scroll", state.terminalViewportScrollHandler, { passive: true });
+          viewport.addEventListener("touchmove", state.terminalViewportTouchHandler, { passive: true });
+        }
+
+        container.addEventListener('wheel', function(e) {
+          if (!isTerminalNearBottom() || e.deltaY < 0) {
+            setTerminalManualScrollActive();
+          }
+          e.stopPropagation();
+        }, { passive: true });
 
         if (state.selectedId) {
           var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-          if (session && session.output) {
-            var normalizedOutput = normalizeTerminalOutput(session.output);
-            state.terminal.write(normalizedOutput);
-            state.terminalOutput = normalizedOutput;
+          if (session) {
+            syncTerminalBuffer(session.id, session.output || "", { mode: "replace", scroll: false });
           }
         } else {
           state.terminal.writeln("点击上方「新对话」开始你的第一次对话。");
@@ -2016,13 +2247,8 @@
           queueDirectInput(data);
         });
 
-        // 鼠标滚轮支持 - 在终端容器上滚动
-        container.addEventListener('wheel', function(e) {
-          // 总是允许滚动，让 xterm 处理滚轮事件
-          e.stopPropagation();
-        }, { passive: true });
-
         container.addEventListener("click", focusInputBox);
+        updateTerminalJumpToBottomButton();
 
         // 初始化拖动调整大小
         initTerminalResizeHandle();
@@ -2349,37 +2575,19 @@
         if (state.terminal && terminalContainer && !terminalContainer.contains(state.terminal.element)) {
           state.terminal.open(terminalContainer);
           applyTerminalScale();
+          state.terminalViewportSize = { width: 0, height: 0 };
           scheduleTerminalResize();
         }
 
-        var shouldSyncTerminal = selectedSession && state.terminal;
-        if (shouldSyncTerminal) {
-          var normalizedOutput = normalizeTerminalOutput(selectedSession.output || "");
-          var sessionChanged = state.terminalSessionId !== selectedSession.id;
-          if (sessionChanged) {
-            state.terminal.reset();
-            state.terminalOutput = "";
-          }
-          if (normalizedOutput !== state.terminalOutput) {
-            if (normalizedOutput.startsWith(state.terminalOutput)) {
-              state.terminal.write(normalizedOutput.slice(state.terminalOutput.length));
-            } else {
-              state.terminal.reset();
-              state.terminal.write(normalizedOutput);
-            }
-            state.terminalOutput = normalizedOutput;
-          }
-          state.terminalSessionId = selectedSession.id;
-        }
-
-        if (!selectedSession) {
+        if (selectedSession && state.terminal) {
+          syncTerminalBuffer(selectedSession.id, selectedSession.output || "", { mode: "replace" });
+        } else if (!selectedSession) {
           state.terminalSessionId = null;
           state.terminalOutput = "";
         }
 
         if (state.terminal && selectedSession && state.currentView === "terminal") {
-          state.terminal.scrollToBottom();
-          scheduleTerminalResize();
+          maybeScrollTerminalToBottom("view");
         }
 
         var inputPanel = document.querySelector(".input-panel");
@@ -2417,21 +2625,7 @@
             state.currentMessages = [];
 
             if (state.terminal) {
-              if (state.terminalSessionId !== id) {
-                state.terminal.reset();
-                state.terminalOutput = "";
-              }
-              var newOutput = normalizeTerminalOutput(data.output || "");
-              if (newOutput.startsWith(state.terminalOutput)) {
-                state.terminal.write(newOutput.slice(state.terminalOutput.length));
-              } else {
-                state.terminal.reset();
-                state.terminal.write(newOutput);
-              }
-              state.terminalSessionId = id;
-              state.terminalOutput = newOutput;
-              state.terminal.scrollToBottom();
-              scheduleTerminalResize();
+              syncTerminalBuffer(id, data.output || "", { mode: "replace" });
             }
 
             renderChat(false);
@@ -3138,7 +3332,8 @@
         if (!state.terminal) initTerminal();
         applyCurrentView();
         if (state.currentView === "terminal") {
-          setTimeout(scheduleTerminalResize, 40);
+          state.terminalViewportSize = { width: 0, height: 0 };
+          scheduleTerminalResize(true);
         }
         // Don't call renderChat() here — loadOutput() always calls renderChat() after it resolves.
         // Calling renderChat() prematurely would render with stale/empty messages.
@@ -4841,12 +5036,12 @@
         if (!output) return;
 
         if (typeof ResizeObserver === "function") {
-          state.resizeObserver = new ResizeObserver(function() { scheduleTerminalResize(); });
+          state.resizeObserver = new ResizeObserver(function() { scheduleTerminalResize(true); });
           state.resizeObserver.observe(output);
         }
-        state.resizeHandler = scheduleTerminalResize;
+        state.resizeHandler = function() { scheduleTerminalResize(true); };
         window.addEventListener("resize", state.resizeHandler);
-        requestAnimationFrame(scheduleTerminalResize);
+        requestAnimationFrame(function() { scheduleTerminalResize(true); });
       }
 
       function teardownTerminal() {
@@ -4858,24 +5053,53 @@
           window.removeEventListener("resize", state.resizeHandler);
           state.resizeHandler = null;
         }
+        clearTerminalScrollIdleTimer();
+        if (state.terminalViewportEl) {
+          if (state.terminalViewportScrollHandler) {
+            state.terminalViewportEl.removeEventListener("scroll", state.terminalViewportScrollHandler);
+          }
+          if (state.terminalViewportTouchHandler) {
+            state.terminalViewportEl.removeEventListener("touchmove", state.terminalViewportTouchHandler);
+          }
+        }
+        state.terminalViewportEl = null;
+        state.terminalViewportScrollHandler = null;
+        state.terminalViewportTouchHandler = null;
         if (state.terminal) {
           state.terminal.dispose();
           state.terminal = null;
         }
         state.fitAddon = null;
         state.terminalSessionId = null;
+        state.terminalOutput = "";
+        state.terminalViewportSize = { width: 0, height: 0 };
+        state.terminalAutoFollow = true;
+        state.showTerminalJumpToBottom = false;
+        updateTerminalJumpToBottomButton();
       }
 
-      function scheduleTerminalResize() {
-        if (state.resizeTimer) clearTimeout(state.resizeTimer);
-        state.resizeTimer = setTimeout(syncTerminalSize, 60);
+      function scheduleTerminalResize(immediate) {
+        if (state.resizeTimer) {
+          clearTimeout(state.resizeTimer);
+          state.resizeTimer = null;
+        }
+        var delay = immediate ? 0 : 100;
+        state.resizeTimer = setTimeout(function() {
+          state.resizeTimer = null;
+          requestAnimationFrame(syncTerminalSize);
+        }, delay);
       }
 
       function syncTerminalSize() {
         var output = document.getElementById("output");
         if (!state.terminal || !state.fitAddon || !output) return;
+        if (!shouldResizeTerminalViewport()) return;
 
+        var shouldFollow = state.terminalAutoFollow || isTerminalNearBottom();
         state.fitAddon.fit();
+        if (shouldFollow) {
+          maybeScrollTerminalToBottom("resize");
+        }
 
         var nextSize = {
           cols: state.terminal.cols,
@@ -4978,16 +5202,9 @@
 
             }
             // Real-time terminal output
-            if (msg.sessionId === state.selectedId && state.terminal && msg.data && msg.data.output) {
-              var newOutput = normalizeTerminalOutput(msg.data.output || "");
-              if (newOutput.startsWith(state.terminalOutput)) {
-                state.terminal.write(newOutput.slice(state.terminalOutput.length));
-              } else {
-                state.terminal.reset();
-                state.terminal.write(newOutput);
-              }
-              state.terminalOutput = newOutput;
-              state.terminal.scrollToBottom();
+            if (msg.sessionId === state.selectedId && state.terminal && msg.data
+              && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
+              syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
             }
             break;
           case 'started':
@@ -5036,8 +5253,7 @@
             // Initial state for subscribed session (after reconnect or subscription)
             if (msg.sessionId === state.selectedId && msg.data) {
               if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
-              updateTerminalOutput(msg.data.output || "");
-              scheduleTerminalResize();
+              updateTerminalOutput(msg.data.output || "", msg.sessionId, "replace");
             }
             break;
           case 'usage':
@@ -5127,17 +5343,9 @@
           });
       }
 
-      function updateTerminalOutput(output) {
-        if (!state.terminal) return;
-        var normalized = normalizeTerminalOutput(output);
-        if (normalized.startsWith(state.terminalOutput)) {
-          state.terminal.write(normalized.slice(state.terminalOutput.length));
-        } else {
-          state.terminal.reset();
-          state.terminal.write(normalized);
-        }
-        state.terminalOutput = normalized;
-        state.terminal.scrollToBottom();
+      function updateTerminalOutput(output, sessionId, mode) {
+        if (!state.terminal) return false;
+        return syncTerminalBuffer(sessionId || state.selectedId, output, { mode: mode || "append" });
       }
 
       function stopPolling() {
@@ -5155,8 +5363,10 @@
         }
         applyCurrentView();
         reconcileInteractiveState();
+        updateTerminalJumpToBottomButton();
         if (state.currentView === "terminal") {
-          setTimeout(scheduleTerminalResize, 40);
+          state.terminalViewportSize = { width: 0, height: 0 };
+          scheduleTerminalResize(true);
         }
       }
 
@@ -6795,20 +7005,9 @@
       }
 
       function normalizeTerminalOutput(value) {
-        var text = String(value || "");
-        var normalized = "";
-        for (var i = 0; i < text.length; i += 1) {
-          var char = text.charAt(i);
-          if (char === String.fromCharCode(10)) {
-            if (i === 0 || text.charAt(i - 1) !== String.fromCharCode(13)) {
-              normalized += String.fromCharCode(13);
-            }
-            normalized += char;
-            continue;
-          }
-          normalized += char;
-        }
-        return normalized;
+        return String(value || "")
+          .replace(/\r\r\n/g, "\r\n")
+          .replace(/\u0000/g, "");
       }
 
       function showError(el, msg) {

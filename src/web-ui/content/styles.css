@@ -121,6 +121,47 @@
       }
     }
 
+    /* ===== PWA 独立窗口模式 ===== */
+    @media (display-mode: standalone) {
+      .topbar {
+        padding-top: max(12px, env(safe-area-inset-top, 0px));
+      }
+      .app-container {
+        --pwa-top-inset: env(safe-area-inset-top, 0px);
+        --layout-topbar-height: calc(var(--topbar-height) + env(safe-area-inset-top, 0px));
+        --layout-sidebar-offset: var(--layout-topbar-height);
+      }
+    }
+
+    /* ===== PWA 窗口控件覆盖模式 (Window Controls Overlay) ===== */
+    @media (display-mode: window-controls-overlay) {
+      .app-container {
+        --layout-topbar-height: max(var(--topbar-height), env(titlebar-area-height, 0px));
+        --layout-sidebar-offset: var(--layout-topbar-height);
+      }
+      .topbar {
+        padding-left: env(titlebar-area-x, 16px);
+        padding-right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%));
+        padding-top: env(titlebar-area-y, 0px);
+        min-height: var(--layout-topbar-height);
+        -webkit-app-region: drag;
+        app-region: drag;
+      }
+      .topbar button,
+      .topbar a,
+      .topbar input,
+      .topbar select,
+      .topbar .topbar-btn,
+      .topbar .btn-sm {
+        -webkit-app-region: no-drag;
+        app-region: no-drag;
+      }
+      .topbar-logo-icon {
+        -webkit-app-region: no-drag;
+        app-region: no-drag;
+      }
+    }
+
     /* ===== 全局重置 ===== */
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1470,6 +1511,33 @@
 
     .terminal-container.active {
       display: flex;
+      align-items: stretch;
+    }
+
+    .terminal-container > #output {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+    }
+
+    .terminal-container > #output .xterm {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+    }
+
+    .terminal-container > #output .xterm-viewport {
+      background: transparent !important;
+    }
+
+    .terminal-container .xterm-viewport {
+      background: transparent !important;
+    }
+
+    .terminal-container .xterm {
+      padding: 0;
     }
 
     .terminal-container:focus-within {
@@ -1480,20 +1548,6 @@
         0 0 0 2px rgba(197, 101, 61, 0.15);
     }
 
-    .terminal-container .xterm {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      padding: 6px;
-    }
-
-    .terminal-container .xterm-viewport {
-      background: transparent !important;
-    }
-
-    /* ===== 终端缩放手柄 ===== */
     .terminal-resize-handle {
       position: absolute;
       bottom: 3px;
@@ -1655,6 +1709,43 @@
       min-width: 34px;
       text-align: center;
       padding: 0 3px;
+    }
+
+    .terminal-jump-bottom {
+      position: absolute;
+      right: 14px;
+      bottom: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-width: 78px;
+      height: 32px;
+      padding: 0 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 999px;
+      background: rgba(24, 20, 17, 0.72);
+      color: rgba(255, 247, 239, 0.92);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(10px);
+      cursor: pointer;
+      z-index: 13;
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+    }
+    .terminal-jump-bottom.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .terminal-jump-bottom:hover {
+      background: rgba(38, 30, 24, 0.84);
+      border-color: rgba(214, 123, 82, 0.28);
+    }
+    .terminal-jump-bottom:active {
+      transform: translateY(1px);
     }
 
     /* Terminal interactive mode indicator */
@@ -4638,7 +4729,7 @@
         gap: 4px;
         min-height: var(--layout-topbar-height);
         padding: 4px 8px;
-        padding-top: max(4px, env(safe-area-inset-top, 0px));
+        padding-top: max(12px, env(safe-area-inset-top, 0px));
       }
 
       .topbar-left { display: flex; gap: 4px; }

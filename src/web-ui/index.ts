@@ -30,7 +30,7 @@ export function renderApp(configPath: string): string {
   <meta name="msapplication-TileColor" content="#c5653d" />
   <meta name="msapplication-tap-highlight" content="no" />
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
   <style>
