@@ -424,8 +424,8 @@ export class ClaudePtyBridge extends EventEmitter {
     if (trimmed.length === 1 && trimmed.charCodeAt(0) < 32) return false;
     // ANSI escape sequences (arrow keys, etc.)
     if (trimmed.startsWith("\x1b")) return false;
-    // Single "y" or "n" — likely auto-confirm response
-    if (/^[yn]$/i.test(trimmed)) return false;
+    // Single "y" or "n" — likely auto-confirm response (Claude only)
+    if (this.isClaudeCommand && /^[yn]$/i.test(trimmed)) return false;
     // Just Enter/CR
     if (trimmed === "\r" || trimmed === "\n") return false;
     return true;

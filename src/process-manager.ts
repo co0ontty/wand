@@ -897,9 +897,12 @@ export class ProcessManager extends EventEmitter {
         this.lifecycleManager.register(snapshot.id, "archived");
       }
     }
-    this.backfillExitedClaudeSessionIds();
-    // Auto-recover the most recent exited session with a Claude session ID
-    this.autoRecoverExitedSessions();
+    // Defer expensive file-system scanning and auto-recovery so the server
+    // can start responding to requests immediately.
+    setImmediate(() => {
+      this.backfillExitedClaudeSessionIds();
+      this.autoRecoverExitedSessions();
+    });
     this.archiveExpiredSessions();
   }
 

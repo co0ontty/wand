@@ -3364,22 +3364,36 @@
           if (todoEl) todoEl.classList.add("hidden");
           // Send text + Enter as a single call to avoid race conditions
           var combinedInput = value + getControlInput("enter");
-          // Clear the input box immediately to prevent double-sending
-          if (inputBox) {
-            inputBox.value = "";
-            autoResizeInput(inputBox);
+          var isOffline = !state.wsConnected;
+
+          if (isOffline) {
+            // Offline: queue for flush on reconnect, clear input immediately
+            if (state.pendingMessages.length >= 100) {
+              state.pendingMessages.shift();
+            }
+            state.pendingMessages.push(combinedInput);
+            if (inputBox) {
+              inputBox.value = "";
+              autoResizeInput(inputBox);
+            }
+            setDraftValue("");
+            return Promise.resolve();
           }
-          setDraftValue("");
+
+          // Online: send via queue, only clear on success
           return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
             if (!readySession) {
-              if (inputBox) {
-                inputBox.value = value;
-                autoResizeInput(inputBox);
-              }
-              setDraftValue(value);
+              showToast("会话未就绪，将稍后重试。", "info");
               return null;
             }
-            return queueDirectInput(combinedInput);
+            return queueDirectInput(combinedInput).then(function() {
+              // Clear input only after the send succeeds
+              if (inputBox && inputBox.value === value) {
+                inputBox.value = "";
+                autoResizeInput(inputBox);
+              }
+              setDraftValue("");
+            });
           }).catch(function(err) {
             showToast(getInputErrorMessage(err), "error");
             throw err;
@@ -3486,6 +3500,18 @@
 
         // Pre-check: don't send if session is not running
         if (!isSelectedSessionRunning()) {
+          // If WebSocket is disconnected, queue for flush on reconnect
+          if (!state.wsConnected) {
+            if (state.pendingMessages.length >= 100) {
+              state.pendingMessages.shift();
+            }
+            state.pendingMessages.push(input);
+            console.log("[wand] postInput: session not running, queued for reconnect", {
+              sessionId: state.selectedId,
+              inputLength: input.length
+            });
+            return Promise.resolve();
+          }
           console.warn("[wand] postInput: session not running, skipping send", {
             sessionId: state.selectedId
           });
@@ -3493,12 +3519,17 @@
           return Promise.resolve();
         }
 
-        // If WebSocket is disconnected, queue the message
+        // If WebSocket is disconnected, queue the message (no HTTP fetch while offline)
         if (!state.wsConnected) {
           if (state.pendingMessages.length >= 100) {
             state.pendingMessages.shift();
           }
           state.pendingMessages.push(input);
+          console.log("[wand] postInput: WebSocket disconnected, queued message", {
+            sessionId: state.selectedId,
+            inputLength: input.length
+          });
+          return Promise.resolve();
         }
 
         console.log("[wand] postInput: sending", {
@@ -3905,14 +3936,57 @@
       function flushPendingMessages() {
         if (state.pendingMessages.length === 0) return;
 
-        // Send queued messages in order
+        // Send queued messages in order, bypassing the session-running check
+        // since our local state may be stale right after reconnect
         var queue = state.pendingMessages.slice();
         state.pendingMessages = [];
 
+        var sendPromise = Promise.resolve();
         queue.forEach(function(input) {
-          postInput(input).catch(function() {
-            // Ignore errors during flush
+          sendPromise = sendPromise.then(function() {
+            return sendInputDirect(input).catch(function() {
+              // Ignore errors during flush
+            });
           });
+        });
+      }
+
+      function sendInputDirect(input) {
+        if (!input || !state.selectedId) return Promise.resolve();
+        return fetch("/api/sessions/" + state.selectedId + "/input", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ input: input, view: state.currentView })
+        })
+        .then(function(res) {
+          if (!res.ok) {
+            return res.json().catch(function() { return { error: "请求失败" }; }).then(function(payload) {
+              var error = buildInputError(payload);
+              error.httpStatus = res.status;
+              // Don't re-queue on session-unavailable — the session will auto-resume
+              // on the user's next message, and stale queue items would cause duplicates
+              if (isSessionUnavailableError(error)) {
+                console.log("[wand] sendInputDirect: session unavailable, dropping", {
+                  sessionId: state.selectedId,
+                  errorCode: error.errorCode
+                });
+                return null;
+              }
+              throw error;
+            });
+          }
+          return res.json();
+        })
+        .then(function(snapshot) {
+          if (snapshot && snapshot.id) {
+            updateSessionSnapshot(snapshot);
+            if (snapshot.messages && snapshot.messages.length > 0) {
+              state.currentMessages = snapshot.messages;
+            }
+            renderChat(true);
+          }
+          return snapshot;
         });
       }
 

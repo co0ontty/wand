@@ -204,6 +204,40 @@ export class WandStorage {
     }
   }
 
+  /**
+   * Lightweight update — only touches scalar session fields, skips messages.
+   * Use this in the hot persist path to avoid serializing large message arrays.
+   * Full messages are written by saveSession() at state transitions (exit/stop).
+   */
+  saveSessionMetadata(snapshot: SessionSnapshot): void {
+    this.db
+      .prepare(
+        `UPDATE command_sessions SET
+           command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
+           started_at = ?, ended_at = ?, output = ?,
+           archived = ?, archived_at = ?, claude_session_id = ?,
+           resumed_from_session_id = ?, resumed_to_session_id = ?, auto_recovered = ?
+         WHERE id = ?`
+      )
+      .run(
+        snapshot.command,
+        snapshot.cwd,
+        snapshot.mode,
+        snapshot.status,
+        snapshot.exitCode,
+        snapshot.startedAt,
+        snapshot.endedAt,
+        snapshot.output,
+        snapshot.archived ? 1 : 0,
+        snapshot.archivedAt,
+        snapshot.claudeSessionId,
+        snapshot.resumedFromSessionId ?? null,
+        snapshot.resumedToSessionId ?? null,
+        snapshot.autoRecovered ? 1 : 0,
+        snapshot.id
+      );
+  }
+
   getSession(id: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
