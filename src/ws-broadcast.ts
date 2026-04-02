@@ -147,22 +147,25 @@ export class WsBroadcastManager {
     if (client.sendInProgress || client.sendQueue.length === 0 || client.backpressurePaused) {
       return;
     }
+    // Check socket state before dequeuing to avoid dropping messages
+    if (client.ws.readyState !== WebSocket.OPEN) {
+      // Socket closed — discard remaining queue and remove client
+      client.sendQueue.length = 0;
+      this.clients.delete(client);
+      return;
+    }
     client.sendInProgress = true;
     const message = client.sendQueue.shift()!;
-    if (client.ws.readyState === WebSocket.OPEN) {
-      client.ws.send(message, (err) => {
-        client.sendInProgress = false;
-        if (err) return;
-        // Check backpressure threshold
-        const threshold = MAX_QUEUE_SIZE * 0.8;
-        if (client.backpressurePaused && client.sendQueue.length < threshold) {
-          client.backpressurePaused = false;
-        }
-        this.processWsQueue(client);
-      });
-    } else {
+    client.ws.send(message, (err) => {
       client.sendInProgress = false;
-    }
+      if (err) return;
+      // Check backpressure threshold
+      const threshold = MAX_QUEUE_SIZE * 0.8;
+      if (client.backpressurePaused && client.sendQueue.length < threshold) {
+        client.backpressurePaused = false;
+      }
+      this.processWsQueue(client);
+    });
   }
 
   private readSessionCookie(req: { headers: { cookie?: string } }): string | undefined {

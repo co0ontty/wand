@@ -105,6 +105,8 @@ interface SessionRecord extends SessionSnapshot {
   knownClaudeTaskIds?: Set<string>;
   /** Retry timer for discovering the real Claude resumable task id */
   claudeTaskDiscoveryTimer?: NodeJS.Timeout | null;
+  /** Timer for delayed initial input delivery */
+  initialInputTimer?: NodeJS.Timeout | null;
   /** Claude project jsonl mtimes visible before this session started */
   knownClaudeProjectMtimes?: Map<string, number>;
 }
@@ -805,6 +807,8 @@ export class ProcessManager extends EventEmitter {
   private readonly lifecycleManager: SessionLifecycleManager;
   /** Per-session debounce timers for throttled persist calls */
   private readonly persistDebounceTimers = new Map<string, NodeJS.Timeout>();
+  /** Last persisted message count per session — used to skip redundant file writes */
+  private readonly lastPersistedMessageCount = new Map<string, number>();
 
   constructor(
     private readonly config: WandConfig,
@@ -935,6 +939,7 @@ export class ProcessManager extends EventEmitter {
       .slice(0, this.sessions.size - MAX_SESSIONS + 1)
       .forEach((id) => {
         this.sessions.delete(id);
+        this.lastPersistedMessageCount.delete(id);
         this.storage.deleteSession(id);
       });
   }
@@ -1060,8 +1065,13 @@ export class ProcessManager extends EventEmitter {
         clearTimeout(current.claudeTaskDiscoveryTimer);
         current.claudeTaskDiscoveryTimer = null;
       }
+      if (current.initialInputTimer) {
+        clearTimeout(current.initialInputTimer);
+        current.initialInputTimer = null;
+      }
       if (current.ptyBridge) {
         current.ptyBridge.onExit(exitCode);
+        current.ptyBridge.removeAllListeners();
       }
       current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
       current.exitCode = current.stopRequested ? null : exitCode;
@@ -1160,7 +1170,8 @@ export class ProcessManager extends EventEmitter {
     });
 
     if (initialInput) {
-      setTimeout(() => {
+      record.initialInputTimer = setTimeout(() => {
+        record.initialInputTimer = null;
         if (!initialInputSent) sendInitialInput();
       }, 3000);
     }
@@ -1325,22 +1336,24 @@ export class ProcessManager extends EventEmitter {
       clearTimeout(record.taskDebounceTimer);
       record.taskDebounceTimer = null;
     }
+    if (record.claudeTaskDiscoveryTimer) {
+      clearTimeout(record.claudeTaskDiscoveryTimer);
+      record.claudeTaskDiscoveryTimer = null;
+    }
+    if (record.initialInputTimer) {
+      clearTimeout(record.initialInputTimer);
+      record.initialInputTimer = null;
+    }
 
-    try {
-      record.stopRequested = true;
-      // Kill any running child process (from JSON chat turns)
-      if (record.childProcess) {
-        record.childProcess.kill();
-        record.childProcess = null;
-      }
-      // Kill the PTY process
-      if (record.ptyProcess) {
-        record.ptyProcess.kill();
-      }
-    } catch {
-      record.status = "failed";
-      record.endedAt = new Date().toISOString();
-      record.output += "\n[wand] Failed to stop session cleanly.\n";
+    record.stopRequested = true;
+    // Kill any running child process (from JSON chat turns)
+    if (record.childProcess) {
+      record.childProcess.kill();
+      record.childProcess = null;
+    }
+    // Kill the PTY process
+    if (record.ptyProcess) {
+      record.ptyProcess.kill();
     }
 
     // Immediately update status and clear PTY references so the session no longer
@@ -1350,7 +1363,10 @@ export class ProcessManager extends EventEmitter {
     record.exitCode = null;
     record.endedAt = new Date().toISOString();
     record.ptyProcess = null;
-    record.ptyBridge = null;
+    if (record.ptyBridge) {
+      record.ptyBridge.removeAllListeners();
+      record.ptyBridge = null;
+    }
 
     // Update lifecycle
     this.lifecycleManager.archive(id, "Session stopped by user", "user");
@@ -1365,6 +1381,14 @@ export class ProcessManager extends EventEmitter {
     if (record.taskDebounceTimer) {
       clearTimeout(record.taskDebounceTimer);
       record.taskDebounceTimer = null;
+    }
+    if (record.claudeTaskDiscoveryTimer) {
+      clearTimeout(record.claudeTaskDiscoveryTimer);
+      record.claudeTaskDiscoveryTimer = null;
+    }
+    if (record.initialInputTimer) {
+      clearTimeout(record.initialInputTimer);
+      record.initialInputTimer = null;
     }
     const pendingPersist = this.persistDebounceTimers.get(id);
     if (pendingPersist) {
@@ -1392,13 +1416,15 @@ export class ProcessManager extends EventEmitter {
     // Always clean up all state references, regardless of current status
     record.childProcess = null;
     record.ptyProcess = null;
-    record.ptyBridge = null;
+    if (record.ptyBridge) {
+      record.ptyBridge.removeAllListeners();
+      record.ptyBridge = null;
+    }
 
     this.sessions.delete(id);
+    this.lastPersistedMessageCount.delete(id);
     this.storage.deleteSession(id);
-  }
-
-  runStartupCommands(): SessionSnapshot[] {
+  }  runStartupCommands(): SessionSnapshot[] {
     return this.config.startupCommands.map((command) =>
       this.start(command, this.config.defaultCwd, this.config.defaultMode)
     );
@@ -1555,9 +1581,13 @@ export class ProcessManager extends EventEmitter {
       resumedToSessionId: record.resumedToSessionId ?? null,
       autoRecovered: record.autoRecovered ?? false,
     });
-    // Save structured messages to file for analysis
+    // Save structured messages to file only when count changes
     if (messages.length > 0) {
-      this.logger.saveMessages(record.id, messages);
+      const lastCount = this.lastPersistedMessageCount.get(record.id) ?? 0;
+      if (messages.length !== lastCount) {
+        this.lastPersistedMessageCount.set(record.id, messages.length);
+        this.logger.saveMessages(record.id, messages);
+      }
     }
   }
 

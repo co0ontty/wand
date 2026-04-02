@@ -889,10 +889,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
-  // ── Startup commands ──
-
-  processes.runStartupCommands();
-
   // ── WebSocket broadcast layer ──
 
   const server = useHttps
@@ -941,4 +937,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       "修改方法：在界面右上角「设置」中修改密码，或运行：node dist/cli.js config:set password <你的新密码>"
     );
   }
+
+  // Start configured background sessions after the server is already reachable.
+  processes.runStartupCommands();
 }
