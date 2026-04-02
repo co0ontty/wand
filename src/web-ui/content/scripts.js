@@ -156,7 +156,20 @@
         }
       }
 
+      renderBootLoading();
       restoreLoginSession();
+
+      function renderBootLoading() {
+        var app = document.getElementById("app");
+        if (!app) return;
+        app.innerHTML =
+          '<div class="boot-loading">' +
+            '<div class="boot-loading-card">' +
+              '<div class="boot-loading-spinner"></div>' +
+              '<div class="boot-loading-text">正在恢复会话…</div>' +
+            '</div>' +
+          '</div>';
+      }
 
       function restoreLoginSession() {
         fetch("/api/config", { credentials: "same-origin" })
@@ -172,16 +185,18 @@
             if (!config) return;
             state.config = config;
             state.loginChecked = true;
-            // Render the app shell first, THEN load session data into it.
-            // This avoids refreshAll() rendering chat content that render() immediately destroys.
-            try {
-              render();
-            } catch (_e) {
-              // render() may fail if external scripts (xterm.js) failed to load;
-              // continue with polling and session loading so the app remains functional
-            }
-            startPolling();
-            return refreshAll();
+            requestAnimationFrame(function() {
+              // Render the app shell first, THEN load session data into it.
+              // This avoids refreshAll() rendering chat content that render() immediately destroys.
+              try {
+                render();
+              } catch (_e) {
+                // render() may fail if external scripts (xterm.js) failed to load;
+                // continue with polling and session loading so the app remains functional
+              }
+              startPolling();
+              refreshAll();
+            });
           })
           .catch(function() {
             state.loginChecked = true;
@@ -189,14 +204,15 @@
           });
       }
 
-      render();
-
       function render() {
         var app = document.getElementById("app");
         var isLoggedIn = state.config !== null;
         var wasModalOpen = state.modalOpen;
+        var shouldResetShell = !isLoggedIn || !document.getElementById("output");
 
-        teardownTerminal();
+        if (shouldResetShell) {
+          teardownTerminal();
+        }
 
         app.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
         // Reset chat render tracking since DOM was fully replaced
@@ -423,7 +439,6 @@
                   '</div>' +
                 '</div>' +
               '</div>' +
-              '<div id="chat-output" class="chat-container hidden"></div>' +
               '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
                 '<div id="todo-progress" class="todo-progress hidden">' +
                   '<div class="todo-progress-header" id="todo-progress-toggle">' +
@@ -466,6 +481,7 @@
                     '<span id="session-mode-display" class="session-mode-display">' + (selectedSession ? getModeLabel(selectedSession.mode) : '默认') + '</span>' +
                     '<span class="session-info-separator">|</span>' +
                     '<span id="session-status-display" class="session-status-display">' + (selectedSession ? getSessionStatusLabel(selectedSession) : '-') + '</span>' +
+                    (selectedSession && selectedSession.claudeSessionId ? '<span class="session-info-separator">|</span><span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>' : '') +
                     '<span class="session-info-separator">|</span>' +
                     '<span id="session-exit-display" class="session-exit-display">exit=' + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : 'n/a') + '</span>' +
                   '</div>' +
@@ -1065,14 +1081,22 @@
         var deleteButton = '<button class="btn btn-ghost btn-sm session-action-btn" data-action="delete" data-session-id="' + session.id + '" type="button" aria-label="删除会话">×</button>';
         var resumeButton = "";
         var sessionIdDisplay = "";
+        var recoveryHint = "";
 
-        // 如果有 Claude 会话 ID，显示恢复按钮
         if (session.claudeSessionId) {
           var shortId = session.claudeSessionId.slice(0, 8);
           sessionIdDisplay = '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>';
           if (session.status !== "running") {
-            resumeButton = '<button class="btn btn-secondary btn-sm session-action-btn" data-action="resume" data-claude-session-id="' + escapeHtml(session.claudeSessionId) + '" data-cwd="' + escapeHtml(session.cwd) + '" type="button" aria-label="恢复会话" title="恢复 Claude 会话">↻</button>';
+            resumeButton = '<button class="btn btn-secondary btn-sm session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="恢复会话" title="恢复 Claude 会话">↻</button>';
           }
+        }
+
+        if (session.autoRecovered) {
+          recoveryHint = '<span class="session-id" title="自动恢复的会话">自动恢复</span>';
+        } else if (session.resumedToSessionId) {
+          recoveryHint = '<span class="session-id" title="已恢复到新会话">已恢复</span>';
+        } else if (session.resumedFromSessionId) {
+          recoveryHint = '<span class="session-id" title="从旧会话恢复而来">续接</span>';
         }
 
         return '<div class="session-item' + activeClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
@@ -1083,6 +1107,7 @@
                 '<span>' + escapeHtml(modeName) + '</span>' +
                 '<span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + '</span>' +
                 sessionIdDisplay +
+                recoveryHint +
               '</div>' +
             '</div>' +
             '<span class="session-actions">' + resumeButton + deleteButton + '</span>' +
@@ -1301,6 +1326,9 @@
           sessionsList.addEventListener("click", handleSessionItemClick);
           sessionsList.addEventListener("keydown", handleSessionItemKeydown);
         }
+
+        // Claude session ID badge click-to-copy (event delegation on document)
+        document.addEventListener("click", handleClaudeIdCopy);
 
         var modeCardsEl = document.getElementById("mode-cards");
         if (modeCardsEl) modeCardsEl.addEventListener("click", function(e) {
@@ -1880,8 +1908,8 @@
           event.stopPropagation();
           if (actionButton.dataset.action === "delete" && actionButton.dataset.sessionId) {
             deleteSession(actionButton.dataset.sessionId);
-          } else if (actionButton.dataset.action === "resume" && actionButton.dataset.claudeSessionId) {
-            startCommand("claude --resume " + actionButton.dataset.claudeSessionId, actionButton.dataset.cwd || "");
+          } else if (actionButton.dataset.action === "resume" && actionButton.dataset.sessionId) {
+            handleResumeAction(actionButton);
           }
           return;
         }
@@ -1900,6 +1928,25 @@
           selectSession(item.dataset.sessionId);
           closeSessionsDrawer();
         }
+      }
+
+      /** Copy Claude session ID from badge to clipboard */
+      function handleClaudeIdCopy(event) {
+        var badge = event.target.closest("#claude-session-id-badge");
+        if (!badge) return;
+        var fullId = badge.dataset.claudeId;
+        if (!fullId) return;
+        navigator.clipboard.writeText(fullId).then(function() {
+          var original = badge.textContent;
+          badge.textContent = "\u2713 已复制";
+          badge.classList.add("copied");
+          setTimeout(function() {
+            badge.textContent = original;
+            badge.classList.remove("copied");
+          }, 1200);
+        }).catch(function() {
+          showToast("复制失败", "error");
+        });
       }
 
       function initTerminal() {
@@ -2056,9 +2103,7 @@
       }
 
       function refreshAll() {
-        return loadSessions().then(function() {
-          if (state.selectedId) return loadOutput(state.selectedId);
-        });
+        return loadSessions();
       }
 
       function getModeLabel(mode) {
@@ -2250,9 +2295,6 @@
               }
             }
             updateShellChrome();
-            if (state.selectedId) {
-              loadOutput(state.selectedId);
-            }
           });
       }
 
@@ -2273,6 +2315,7 @@
           closeKeyboardPopup();
         }
         var terminalTitle = selectedSession ? shortCommand(selectedSession.command) : "Wand";
+        var terminalInfo = selectedSession ? getSessionStatusLabel(selectedSession) : "开始对话";
         var summaryEl = document.querySelector(".session-summary-value");
         var titleEl = document.getElementById("terminal-title");
         var infoEl = document.getElementById("terminal-info");
@@ -2281,10 +2324,10 @@
         var chatContainer = document.getElementById("chat-output");
         var stopBtn = document.getElementById("stop-button");
 
-        if (summaryEl) summaryEl.textContent = terminalTitle;
-        if (titleEl) titleEl.textContent = terminalTitle;
-        if (infoEl) {
-          infoEl.textContent = selectedSession ? getSessionStatusLabel(selectedSession) : "开始对话";
+        if (summaryEl && summaryEl.textContent !== terminalTitle) summaryEl.textContent = terminalTitle;
+        if (titleEl && titleEl.textContent !== terminalTitle) titleEl.textContent = terminalTitle;
+        if (infoEl && infoEl.textContent !== terminalInfo) {
+          infoEl.textContent = terminalInfo;
         }
 
         // Update session info bar at bottom
@@ -2292,10 +2335,52 @@
         var modeEl = document.getElementById("session-mode-display");
         var statusEl = document.getElementById("session-status-display");
         var exitEl = document.getElementById("session-exit-display");
-        if (cwdEl) cwdEl.textContent = selectedSession && selectedSession.cwd ? escapeHtml(selectedSession.cwd) : '未设置目录';
-        if (modeEl) modeEl.textContent = selectedSession ? getModeLabel(selectedSession.mode) : '默认';
-        if (statusEl) statusEl.textContent = selectedSession ? getSessionStatusLabel(selectedSession) : '-';
-        if (exitEl) exitEl.textContent = 'exit=' + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : 'n/a');
+        var cwdText = selectedSession && selectedSession.cwd ? selectedSession.cwd : "未设置目录";
+        var modeText = selectedSession ? getModeLabel(selectedSession.mode) : "默认";
+        var exitText = "exit=" + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : "n/a");
+        if (cwdEl && cwdEl.textContent !== cwdText) cwdEl.textContent = cwdText;
+        if (modeEl && modeEl.textContent !== modeText) modeEl.textContent = modeText;
+        if (statusEl && statusEl.textContent !== terminalInfo) statusEl.textContent = terminalInfo;
+        if (exitEl && exitEl.textContent !== exitText) exitEl.textContent = exitText;
+
+        if (!state.terminal && terminalContainer && selectedSession) {
+          initTerminal();
+        }
+        if (state.terminal && terminalContainer && !terminalContainer.contains(state.terminal.element)) {
+          state.terminal.open(terminalContainer);
+          applyTerminalScale();
+          scheduleTerminalResize();
+        }
+
+        var shouldSyncTerminal = selectedSession && state.terminal;
+        if (shouldSyncTerminal) {
+          var normalizedOutput = normalizeTerminalOutput(selectedSession.output || "");
+          var sessionChanged = state.terminalSessionId !== selectedSession.id;
+          if (sessionChanged) {
+            state.terminal.reset();
+            state.terminalOutput = "";
+          }
+          if (normalizedOutput !== state.terminalOutput) {
+            if (normalizedOutput.startsWith(state.terminalOutput)) {
+              state.terminal.write(normalizedOutput.slice(state.terminalOutput.length));
+            } else {
+              state.terminal.reset();
+              state.terminal.write(normalizedOutput);
+            }
+            state.terminalOutput = normalizedOutput;
+          }
+          state.terminalSessionId = selectedSession.id;
+        }
+
+        if (!selectedSession) {
+          state.terminalSessionId = null;
+          state.terminalOutput = "";
+        }
+
+        if (state.terminal && selectedSession && state.currentView === "terminal") {
+          state.terminal.scrollToBottom();
+          scheduleTerminalResize();
+        }
 
         var inputPanel = document.querySelector(".input-panel");
         if (selectedSession) {
@@ -3079,14 +3164,6 @@
             terminalInteractive: state.terminalInteractive,
             inputLength: value.length
           });
-          if (!isSelectedSessionRunning()) {
-            console.warn("[wand] Prevented send because selected session is not running", {
-              sessionId: state.selectedId,
-              sessionStatus: selectedSession ? selectedSession.status : null
-            });
-            showToast("会话已结束，请重新启动会话。", "error");
-            return Promise.resolve();
-          }
           // Clear todo progress bar at the start of a new user turn
           var todoEl = document.getElementById("todo-progress");
           if (todoEl) todoEl.classList.add("hidden");
@@ -3098,7 +3175,17 @@
             autoResizeInput(inputBox);
           }
           setDraftValue("");
-          return queueDirectInput(combinedInput).catch(function(err) {
+          return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
+            if (!readySession) {
+              if (inputBox) {
+                inputBox.value = value;
+                autoResizeInput(inputBox);
+              }
+              setDraftValue(value);
+              return null;
+            }
+            return queueDirectInput(combinedInput);
+          }).catch(function(err) {
             showToast(getInputErrorMessage(err), "error");
             throw err;
           });
@@ -3108,12 +3195,12 @@
 
       function getInputErrorMessage(error) {
         if (error && (error.errorCode === "SESSION_NOT_RUNNING" || error.errorCode === "SESSION_NO_PTY")) {
-          return "会话已结束，请重新启动会话。";
+          return "会话已结束；若存在 Claude 历史会话，将在你下次发送消息时自动恢复。";
         }
         if (error && error.errorCode === "SESSION_NOT_FOUND") {
-          return "会话不存在，请重新启动会话。";
+          return "会话不存在，请重新选择或新建会话。";
         }
-        return (error && error.message) || "会话已结束，请重启会话。";
+        return (error && error.message) || "会话暂不可用；若存在 Claude 历史会话，将自动尝试恢复。";
       }
 
       function buildInputError(payload) {
@@ -3133,6 +3220,56 @@
       function markSessionStopped(sessionId, status) {
         if (!sessionId) return;
         updateSessionSnapshot({ id: sessionId, status: status || "exited" });
+      }
+
+      function hasRealConversationHistory(session) {
+        if (!session || !Array.isArray(session.messages) || session.messages.length < 2) {
+          return false;
+        }
+        var hasUser = session.messages.some(function(turn) {
+          return turn && turn.role === "user" && Array.isArray(turn.content) && turn.content.some(function(block) {
+            return block && block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0;
+          });
+        });
+        var hasAssistant = session.messages.some(function(turn) {
+          return turn && turn.role === "assistant" && Array.isArray(turn.content) && turn.content.some(function(block) {
+            return block && block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0;
+          });
+        });
+        return hasUser && hasAssistant;
+      }
+
+      function canAutoResumeSession(session) {
+        return !!(session && session.status === "exited" && session.claudeSessionId && hasRealConversationHistory(session));
+      }
+
+      function ensureSessionReadyForInput(session, errorEl) {
+        if (!session) {
+          showToast("会话不存在，请重新选择或新建会话。", "error");
+          return Promise.resolve(null);
+        }
+        if (session.status === "running") {
+          return Promise.resolve(session);
+        }
+        if (!canAutoResumeSession(session)) {
+          showToast("该会话没有可恢复的 Claude 历史上下文，请新建会话。", "error");
+          return Promise.resolve(null);
+        }
+
+        showToast("正在恢复历史会话…", "info");
+        return resumeClaudeSessionById(session.claudeSessionId, errorEl).then(function(data) {
+          if (!data) return null;
+          updateSessionSnapshot(data);
+          updateSessionsList();
+          switchToSessionView(data.id);
+          if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({ type: "subscribe", sessionId: data.id }));
+          }
+          return loadOutput(data.id).then(function() {
+            focusInputBox(true);
+            return data;
+          });
+        });
       }
 
       function queueDirectInput(input) {
@@ -3157,7 +3294,7 @@
           console.warn("[wand] postInput: session not running, skipping send", {
             sessionId: state.selectedId
           });
-          showToast("会话已结束，请重新启动会话。", "error");
+          showToast("会话未运行，正在等待自动恢复后重试。", "info");
           return Promise.resolve();
         }
 
@@ -3639,6 +3776,178 @@
           state.drafts[data.id] = "";
           return data;
         });
+      }
+
+      function resumeSession(sessionId, errorEl) {
+        if (!sessionId) return Promise.resolve(null);
+        return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/resume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            mode: state.chatMode || state.config.defaultMode || "default"
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            if (errorEl) showError(errorEl, data.error);
+            else showToast(data.error, "error");
+            return null;
+          }
+          state.selectedId = data.id;
+          persistSelectedId();
+          state.drafts[data.id] = "";
+          return data;
+        })
+        .catch(function(error) {
+          var message = (error && error.message) || "无法恢复会话。";
+          if (errorEl) showError(errorEl, message);
+          else showToast(message, "error");
+          return null;
+        });
+      }
+
+      function resumeClaudeSessionById(claudeSessionId, errorEl) {
+        if (!claudeSessionId) return Promise.resolve(null);
+        return fetch("/api/claude-sessions/" + encodeURIComponent(claudeSessionId) + "/resume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            mode: state.chatMode || state.config.defaultMode || "default"
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            if (errorEl) showError(errorEl, data.error);
+            else showToast(data.error, "error");
+            return null;
+          }
+          state.selectedId = data.id;
+          persistSelectedId();
+          state.drafts[data.id] = "";
+          return data;
+        })
+        .catch(function(error) {
+          var message = (error && error.message) || "无法按 Claude 会话 ID 恢复会话。";
+          if (errorEl) showError(errorEl, message);
+          else showToast(message, "error");
+          return null;
+        });
+      }
+
+      function activateSession(data) {
+        if (!data || !data.id) return Promise.resolve();
+        state.lastRenderedHash = 0;
+        state.lastRenderedMsgCount = 0;
+        state.lastRenderedEmpty = null;
+        switchToSessionView(data.id);
+        updateSessionSnapshot(data);
+        updateSessionsList();
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+          state.ws.send(JSON.stringify({ type: "subscribe", sessionId: data.id }));
+        }
+        return loadOutput(data.id).then(function() {
+          focusInputBox(true);
+        });
+      }
+
+      function resumeSessionFromList(sessionId) {
+        return resumeSession(sessionId).then(function(data) {
+          if (!data) return null;
+          return activateSession(data).then(function() {
+            return data;
+          });
+        });
+      }
+
+      function startAndActivateCommand(command, cwd, errorEl) {
+        return startCommand(command, cwd, errorEl).then(function(data) {
+          if (!data) return null;
+          return activateSession(data).then(function() {
+            return data;
+          });
+        });
+      }
+
+      function createSessionFromWelcomeInput(value) {
+        var welcomeInput = document.getElementById("welcome-input");
+        if (!welcomeInput) return;
+        welcomeInput.placeholder = "Claude 正在思考，请稍候...";
+        welcomeInput.disabled = true;
+        var mode = state.chatMode || "full-access";
+        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        var preferredTool = getPreferredTool();
+        fetch("/api/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            command: preferredTool,
+            cwd: defaultCwd,
+            mode: mode,
+            initialInput: value
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            showToast(data.error, "error");
+            welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+            welcomeInput.disabled = false;
+            return null;
+          }
+          return activateSession(data);
+        })
+        .catch(function(error) {
+          showToast((error && error.message) || "无法启动会话。", "error");
+          welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+          welcomeInput.disabled = false;
+        })
+        .finally(function() {
+          welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+          welcomeInput.disabled = false;
+        });
+      }
+
+      function createSessionFromInput(value, inputBox, welcomeInput) {
+        var mode = state.chatMode || "full-access";
+        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        var preferredTool = getPreferredTool();
+        fetch("/api/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            command: preferredTool,
+            cwd: defaultCwd,
+            mode: mode,
+            initialInput: value || undefined
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            showToast(data.error, "error");
+            return null;
+          }
+          if (inputBox) inputBox.value = "";
+          if (welcomeInput) welcomeInput.value = "";
+          return activateSession(data);
+        })
+        .catch(function(error) {
+          showToast((error && error.message) || "无法启动会话。", "error");
+        });
+      }
+
+      function handleResumeAction(actionButton) {
+        actionButton.disabled = true;
+        resumeSessionFromList(actionButton.dataset.sessionId)
+          .finally(function() {
+            actionButton.disabled = false;
+          });
       }
 
       function isTouchDevice() {

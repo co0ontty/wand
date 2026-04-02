@@ -28,7 +28,12 @@ const OUTPUT_MAX_SIZE = 120000;
 const SESSION_ID_WINDOW_SIZE = 4096;
 const PERMISSION_WINDOW_SIZE = 800;
 
-const CLAUDE_SESSION_ID_PATTERN = /"session_id"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i;
+const UUID_PATTERN = "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})";
+const CLAUDE_SESSION_ID_PATTERNS = [
+  new RegExp(`"session_id"\\s*:\\s*"${UUID_PATTERN}"`, "i"),
+  new RegExp(`(?:^|\\s)--resume\\s+${UUID_PATTERN}(?:\\s|$)`, "i"),
+  new RegExp(`(?:claude\\s+session\\s+id|session\\s+id)\\s*[:#]?\\s*${UUID_PATTERN}`, "i")
+];
 
 // Patterns for permission detection
 const PERMISSION_PATTERNS = [
@@ -448,7 +453,10 @@ export class ClaudePtyBridge extends EventEmitter {
   private captureSessionId(chunk: string): void {
     if (this.claudeSessionId) return;
     this.sessionIdWindow = appendWindow(this.sessionIdWindow, chunk, SESSION_ID_WINDOW_SIZE);
-    const match = CLAUDE_SESSION_ID_PATTERN.exec(this.sessionIdWindow);
+    const match = CLAUDE_SESSION_ID_PATTERNS
+      .map((pattern) => pattern.exec(this.sessionIdWindow))
+      .find((result) => Boolean(result?.[1]));
+
     if (match?.[1]) {
       this.claudeSessionId = match[1];
       this.emitEvent({

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 
 import process from "node:process";
 import { ensureConfig, hasConfigFile, isExecutionMode, resolveConfigPath, saveConfig } from "./config.js";

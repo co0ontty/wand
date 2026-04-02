@@ -417,20 +417,23 @@
       align-items: center;
       gap: 6px;
       font-family: var(--font-sans);
-      font-size: 0.8125rem;
+      font-size: 0.75rem;
       font-weight: 600;
       color: white;
       background: linear-gradient(135deg, var(--accent) 0%, #a95130 100%);
-      border: none;
+      border: 1px solid rgba(169, 81, 48, 0.18);
       border-radius: var(--radius-full);
-      padding: 0 16px;
-      height: 34px;
+      padding: 0 14px;
+      height: 32px;
+      min-height: 32px;
       cursor: pointer;
-      transition: all 0.25s var(--ease-out-expo);
-      box-shadow: 0 2px 8px rgba(197, 101, 61, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      transition: all var(--transition-fast);
+      box-shadow: 0 2px 8px rgba(197, 101, 61, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.15);
       white-space: nowrap;
       position: relative;
       overflow: hidden;
+      line-height: 1;
+      box-sizing: border-box;
     }
 
     .topbar-new-btn::before {
@@ -457,8 +460,8 @@
 
     .topbar-new-btn:hover {
       background: linear-gradient(135deg, var(--accent-hover) 0%, #b85c37 100%);
-      box-shadow: 0 4px 16px rgba(197, 101, 61, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-      transform: translateY(-1px) scale(1.02);
+      box-shadow: 0 3px 12px rgba(197, 101, 61, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
     }
 
     .topbar-new-btn:hover::before {
@@ -466,7 +469,7 @@
     }
 
     .topbar-new-btn:active {
-      transform: translateY(0) scale(0.98);
+      transform: translateY(0);
       box-shadow: 0 2px 6px rgba(197, 101, 61, 0.2);
     }
 
@@ -1998,6 +2001,7 @@
       gap: 16px;
       padding: 20px 4px 12px;
       min-height: 0;
+      scrollbar-gutter: stable;
     }
 
     /* ===== 消息动画 ===== */
@@ -3243,6 +3247,30 @@
       color: var(--border-default);
       opacity: 0.6;
     }
+    .claude-session-id-badge {
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      background: rgba(150, 118, 85, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      user-select: none;
+      transition: all var(--transition-fast);
+      border: 1px solid transparent;
+    }
+    .claude-session-id-badge:hover {
+      color: var(--accent);
+      background: rgba(197, 101, 61, 0.1);
+      border-color: rgba(197, 101, 61, 0.2);
+    }
+    .claude-session-id-badge:active {
+      transform: scale(0.95);
+    }
+    .claude-session-id-badge.copied {
+      color: var(--success);
+      background: rgba(106, 165, 76, 0.1);
+    }
 
     .input-row { display: flex; gap: 8px; align-items: flex-end; max-width: 100%; }
     .input-field { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; }
@@ -4023,6 +4051,41 @@
         linear-gradient(180deg, rgba(255, 246, 235, 0.85), rgba(255, 251, 245, 0.85));
     }
 
+    .boot-loading {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .boot-loading-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      background: var(--surface-elevated);
+      box-shadow: var(--shadow-sm);
+      color: var(--text-secondary);
+    }
+
+    .boot-loading-spinner {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      border: 2px solid rgba(197, 101, 61, 0.16);
+      border-top-color: var(--accent);
+      border-radius: 999px;
+      animation: loginSpin 0.8s linear infinite;
+    }
+
+    .boot-loading-text {
+      font-size: 0.9375rem;
+      font-weight: 500;
+    }
+
     .login-logo { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px; }
 
     .login-logo-icon {
@@ -4036,10 +4099,10 @@
 
     .login-logo-text { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.02em; }
     .login-subtitle { color: var(--text-muted); font-size: 0.875rem; }
-    .login-body { padding: 24px; }
-    .login-card-loading .login-body { padding-top: 20px; padding-bottom: 28px; }
-    .login-hint { font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.6; }
-    .login-muted { margin: 4px 0 0; font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; }
+    .login-body { padding: 22px 24px 24px; }
+    .login-card-loading .login-body { padding-top: 18px; padding-bottom: 24px; }
+    .login-hint { font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5; }
+    .login-muted { margin: 4px 0 0; font-size: 0.75rem; color: var(--text-muted); line-height: 1.45; }
     .login-status {
       display: flex;
       align-items: flex-start;
@@ -4055,16 +4118,6 @@
       border-top-color: var(--accent);
       border-radius: 999px;
       animation: loginSpin 0.8s linear infinite;
-    }
-    .login-tip {
-      font-size: 0.75rem;
-      color: var(--warning);
-      background: rgba(255, 244, 230, 0.92);
-      border: 1px solid rgba(169, 106, 47, 0.18);
-      border-radius: var(--radius-md);
-      padding: 10px 12px;
-      margin-bottom: 18px;
-      line-height: 1.55;
     }
     .password-field {
       position: relative;

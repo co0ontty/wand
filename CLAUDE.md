@@ -18,7 +18,12 @@ node dist/cli.js web       # Start the packaged web server (after building)
 npm run build && wand init && wand web
 ```
 
-**Pre-release checklist:** Manual browser testing is required. See `RELEASE_CHECKLIST.md`.
+**Manual release / browser QA:** Follow `RELEASE_CHECKLIST.md`.
+
+## Additional References
+
+- `README.md` contains the end-user quick-start flow (`npm install -g @co0ontty/wand`, `wand init`, `wand web`).
+- There is no `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` in this repo.
 
 **No linter or formatter is configured.** Follow the code style conventions below exactly.
 

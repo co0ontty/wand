@@ -1,5 +1,6 @@
 import express, { NextFunction, Request, Response } from "express";
 import { readdir, readFile, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { exec } from "node:child_process";
@@ -303,32 +304,17 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       description: "Local CLI Console for Vibe Coding",
       start_url: "/",
       display: "standalone",
-      display_override: ["standalone", "minimal-ui", "browser"],
       background_color: "#f6f1e8",
       theme_color: "#c5653d",
       orientation: "any",
       icons: [
-        { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" },
         { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
         { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" }
       ],
       categories: ["developer tools", "productivity"],
       shortcuts: [
-        { name: "New Session", short_name: "New", url: "/?action=new", description: "Start a new CLI session" }
-      ],
-      // iOS Safari specific
-      ios: {
-        statusBarStyle: "black-translucent"
-      },
-      // Android Chrome specific
-      share_target: {
-        action: "/",
-        method: "GET",
-        params: {
-          text: "q",
-          url: "url"
-        }
-      }
+        { name: "New Session", url: "/?action=new", description: "Start a new CLI session" }
+      ]
     }));
   });
 
@@ -345,12 +331,18 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     res.type("svg").send(iconSvg);
   });
 
+  const iconsDir = path.resolve(
+    existsSync(path.join(process.cwd(), "dist", "web-ui", "content"))
+      ? path.join(process.cwd(), "dist", "web-ui", "content")
+      : path.join(process.cwd(), "src", "web-ui", "content")
+  );
+
   app.get("/icon-192.png", (_req, res) => {
-    res.redirect(302, "/icon.svg");
+    res.sendFile(path.join(iconsDir, "icon-192.png"), { maxAge: "1y" });
   });
 
   app.get("/icon-512.png", (_req, res) => {
-    res.redirect(302, "/icon.svg");
+    res.sendFile(path.join(iconsDir, "icon-512.png"), { maxAge: "1y" });
   });
 
   // Service Worker for offline support
@@ -1004,53 +996,104 @@ function parseStoredPathList<T>(raw: string | null): T[] {
   app.post("/api/sessions/:id/resume", (req, res) => {
     const sessionId = req.params.id;
     const body = req.body as { mode?: ExecutionMode; view?: "chat" | "terminal" };
-    
+
     try {
-      const existingSession = processes.get(sessionId);
+      const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
       if (!existingSession) {
         res.status(404).json({ error: "会话不存在。" });
         return;
       }
 
-      if (existingSession.status !== "running") {
-        res.status(400).json({ error: "会话已结束，无法恢复。" });
-        return;
-      }
-
-      // Get the Claude session ID for resuming
       const claudeSessionId = existingSession.claudeSessionId;
       if (!claudeSessionId) {
         res.status(400).json({ error: "此会话没有 Claude 会话 ID，无法恢复。" });
         return;
       }
 
-      // Determine the new mode
-      const newMode = normalizeMode(body.mode, config.defaultMode);
-      
-      // Build the resume command
-      const command = existingSession.command;
+      const command = existingSession.command.trim();
       const isClaude = /^claude\b/.test(command);
-      
       if (!isClaude) {
         res.status(400).json({ error: "只有 Claude 命令支持恢复功能。" });
         return;
       }
 
-      // Create a new session with --resume flag
+      const newMode = body.mode
+        ? normalizeMode(body.mode, config.defaultMode)
+        : normalizeMode(existingSession.mode, config.defaultMode);
       const resumeCommand = `${command} --resume ${claudeSessionId}`;
-      const snapshot = processes.start(
+      const newSnapshot = processes.start(
         resumeCommand,
         existingSession.cwd,
         newMode,
-        undefined
+        undefined,
+        { resumedFromSessionId: sessionId }
       );
 
-      // Copy the Claude session ID to the new session
-      // This is done internally by the process manager when it detects --resume
+      // Persist the resumedToSessionId on the original session
+      storage.saveSession({
+        ...existingSession,
+        resumedToSessionId: newSnapshot.id
+      });
 
-      res.status(201).json(snapshot);
+      res.status(201).json({
+        resumedFromSessionId: sessionId,
+        ...newSnapshot
+      });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
+    }
+  });
+
+  app.post("/api/claude-sessions/:claudeSessionId/resume", (req, res) => {
+    const claudeSessionId = String(req.params.claudeSessionId || "").trim();
+    const body = req.body as { mode?: ExecutionMode };
+
+    try {
+      if (!claudeSessionId) {
+        res.status(400).json({ error: "Claude 会话 ID 不能为空。" });
+        return;
+      }
+
+      const existingSession = storage.getLatestSessionByClaudeSessionId(claudeSessionId);
+      if (!existingSession) {
+        res.status(404).json({ error: "未找到对应的 Claude 会话记录。" });
+        return;
+      }
+
+      const command = existingSession.command.trim();
+      if (!/^claude\b/.test(command)) {
+        res.status(400).json({ error: "只有 Claude 命令支持按 Claude Session ID 恢复。" });
+        return;
+      }
+      if (!existingSession.cwd || !processes.hasClaudeSessionFile(existingSession.cwd, claudeSessionId)) {
+        res.status(400).json({ error: "对应的 Claude 历史会话文件不存在，无法恢复。" });
+        return;
+      }
+
+      const newMode = body.mode
+        ? normalizeMode(body.mode, config.defaultMode)
+        : normalizeMode(existingSession.mode, config.defaultMode);
+      const resumeCommand = `${command} --resume ${claudeSessionId}`;
+      const newSnapshot = processes.start(
+        resumeCommand,
+        existingSession.cwd,
+        newMode,
+        undefined,
+        { resumedFromSessionId: existingSession.id }
+      );
+
+      storage.saveSession({
+        ...existingSession,
+        resumedToSessionId: newSnapshot.id
+      });
+
+      res.status(201).json({
+        resumedFromSessionId: existingSession.id,
+        resumedClaudeSessionId: claudeSessionId,
+        ...newSnapshot
+      });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法按 Claude 会话 ID 恢复会话。") });
     }
   });
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { ChildProcess } from "node:child_process";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
@@ -100,6 +101,595 @@ interface SessionRecord extends SessionSnapshot {
   taskDebounceTimer: NodeJS.Timeout | null;
   /** Last emitted task title to avoid duplicate events */
   lastEmittedTask: string | null;
+  /** Claude task ids visible before this session started */
+  knownClaudeTaskIds?: Set<string>;
+  /** Retry timer for discovering the real Claude resumable task id */
+  claudeTaskDiscoveryTimer?: NodeJS.Timeout | null;
+  /** Claude project jsonl mtimes visible before this session started */
+  knownClaudeProjectMtimes?: Map<string, number>;
+}
+
+interface ClaudeProjectSessionCandidate {
+  id: string;
+  filePath: string;
+  mtimeMs: number;
+}
+
+interface ClaudeProjectSessionDetails extends ClaudeProjectSessionCandidate {
+  hasConversation: boolean;
+}
+
+interface ResumeEligibility {
+  hasClaudeSessionId: boolean;
+  hasRealConversation: boolean;
+  eligible: boolean;
+}
+
+const REAL_CONVERSATION_MIN_LINES = 2;
+const REAL_CONVERSATION_MIN_MESSAGES = 2;
+const DISCOVERY_RECENT_WINDOW_MS = 10 * 60 * 1000;
+const START_TIME_SKEW_MS = 30 * 1000;
+const RESUME_COMMAND_ID_PATTERN = /(?:^|\s)--resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\s|$)/i;
+
+function hasRealConversationMessages(messages: ConversationTurn[] | undefined): boolean {
+  if (!messages || messages.length < REAL_CONVERSATION_MIN_MESSAGES) {
+    return false;
+  }
+
+  const hasUser = messages.some((turn) => turn.role === "user"
+    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
+  const hasAssistant = messages.some((turn) => turn.role === "assistant"
+    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
+  return hasUser && hasAssistant;
+}
+
+function getResumeCommandSessionId(command: string): string | null {
+  const match = RESUME_COMMAND_ID_PATTERN.exec(command);
+  return match?.[1] ?? null;
+}
+
+function readClaudeProjectSessionDetails(filePath: string, id: string): ClaudeProjectSessionDetails | null {
+  try {
+    const stats = statSync(filePath);
+    const raw = readFileSync(filePath, "utf8");
+    const lines = raw.split("\n").filter((line) => line.trim().length > 0);
+    const fileSessionIds = new Set<string>();
+    let hasAssistant = false;
+    let hasUser = false;
+
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line) as {
+          sessionId?: string;
+          type?: string;
+          message?: {
+            role?: string;
+          };
+        };
+        if (parsed.sessionId) {
+          fileSessionIds.add(parsed.sessionId);
+        }
+        if (parsed.type === "user" || parsed.message?.role === "user") {
+          hasUser = true;
+        }
+        if (parsed.type === "assistant" || parsed.message?.role === "assistant") {
+          hasAssistant = true;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    if (fileSessionIds.size > 0 && !fileSessionIds.has(id)) {
+      return null;
+    }
+
+    return {
+      id,
+      filePath,
+      mtimeMs: stats.mtimeMs,
+      hasConversation: hasUser && hasAssistant && lines.length >= REAL_CONVERSATION_MIN_LINES
+    };
+  } catch {
+    return null;
+  }
+}
+
+function hasRuntimeConversationSignal(messages: ConversationTurn[] | undefined): boolean {
+  if (!messages || messages.length === 0) {
+    return false;
+  }
+  const hasUser = messages.some((turn) => turn.role === "user"
+    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
+  const hasAssistant = messages.some((turn) => turn.role === "assistant");
+  return hasUser && hasAssistant;
+}
+
+function hasStoredConversationHistory(messages: ConversationTurn[] | undefined): boolean {
+  return hasRealConversationMessages(messages);
+}
+
+function shouldBindClaudeSessionId(record: Pick<SessionRecord, "messages">): boolean {
+  return hasRuntimeConversationSignal(record.messages);
+}
+
+function shouldAllowResume(record: Pick<SessionRecord, "claudeSessionId" | "messages">): boolean {
+  return Boolean(record.claudeSessionId) && hasStoredConversationHistory(record.messages);
+}
+
+function shouldBackfillFromStoredHistory(record: Pick<SessionRecord, "messages">): boolean {
+  return hasStoredConversationHistory(record.messages);
+}
+
+function shouldDisplayResumeAction(messages: ConversationTurn[] | undefined): boolean {
+  return hasStoredConversationHistory(messages);
+}
+
+function shouldAutoResumeMessages(messages: ConversationTurn[] | undefined): boolean {
+  return hasStoredConversationHistory(messages);
+}
+
+function shouldBackfillMessages(messages: ConversationTurn[] | undefined): boolean {
+  return hasStoredConversationHistory(messages);
+}
+
+function shouldPromoteProjectSessionId(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldBindClaudeSessionId(record);
+}
+
+function shouldPromoteStoredSessionId(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldBackfillMessages(record.messages);
+}
+
+function shouldPromoteUiSessionId(messages: ConversationTurn[] | undefined): boolean {
+  return shouldDisplayResumeAction(messages);
+}
+
+function shouldPromoteResumeSessionId(messages: ConversationTurn[] | undefined): boolean {
+  return shouldAutoResumeMessages(messages);
+}
+
+function hasBindableConversation(messages: ConversationTurn[] | undefined): boolean {
+  return shouldBindFromRuntimeMessages({ messages: messages ?? [] });
+}
+
+function hasBackfillableConversation(messages: ConversationTurn[] | undefined): boolean {
+  return shouldBackfillMessages(messages);
+}
+
+function hasUiConversation(messages: ConversationTurn[] | undefined): boolean {
+  return shouldPromoteUiSessionId(messages);
+}
+
+function hasResumeConversation(messages: ConversationTurn[] | undefined): boolean {
+  return shouldPromoteResumeSessionId(messages);
+}
+
+function isRuntimeConversationReady(messages: ConversationTurn[] | undefined): boolean {
+  return hasBindableConversation(messages);
+}
+
+function isStoredConversationReady(messages: ConversationTurn[] | undefined): boolean {
+  return hasBackfillableConversation(messages);
+}
+
+function isResumeConversationReady(messages: ConversationTurn[] | undefined): boolean {
+  return hasResumeConversation(messages);
+}
+
+function shouldBindFromRuntimeMessages(record: Pick<SessionRecord, "messages">): boolean {
+  return isRuntimeConversationReady(record.messages);
+}
+
+function shouldAllowUiResume(messages: ConversationTurn[] | undefined): boolean {
+  return hasUiConversation(messages);
+}
+
+function shouldPromoteResumeAction(record: Pick<SessionRecord, "claudeSessionId" | "messages">): boolean {
+  return shouldAllowResume(record);
+}
+
+function shouldBackfillClaudeSessionIdFromDisk(record: Pick<SessionRecord, "messages">): boolean {
+  return isStoredConversationReady(record.messages);
+}
+
+function shouldUseProjectCandidate(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldBindFromRuntimeMessages(record);
+}
+
+function shouldResumeProjectCandidate(record: Pick<SessionRecord, "claudeSessionId" | "messages">): boolean {
+  return shouldPromoteResumeAction(record);
+}
+
+function shouldBackfillProjectCandidate(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldBackfillClaudeSessionIdFromDisk(record);
+}
+
+function hasMinimumRuntimeConversation(messages: ConversationTurn[] | undefined): boolean {
+  return shouldBindFromRuntimeMessages({ messages: messages ?? [] });
+}
+
+function hasMinimumStoredConversation(messages: ConversationTurn[] | undefined): boolean {
+  return shouldAllowUiResume(messages);
+}
+
+function hasMinimumResumeConversation(messages: ConversationTurn[] | undefined): boolean {
+  return isResumeConversationReady(messages);
+}
+
+function hasMinimumBackfillConversation(messages: ConversationTurn[] | undefined): boolean {
+  return isStoredConversationReady(messages);
+}
+
+function hasProjectConversationSignal(messages: ConversationTurn[] | undefined): boolean {
+  return hasMinimumRuntimeConversation(messages);
+}
+
+function hasStoredProjectConversationSignal(messages: ConversationTurn[] | undefined): boolean {
+  return hasMinimumBackfillConversation(messages);
+}
+
+function hasUiProjectConversationSignal(messages: ConversationTurn[] | undefined): boolean {
+  return hasMinimumStoredConversation(messages);
+}
+
+function hasResumeProjectConversationSignal(messages: ConversationTurn[] | undefined): boolean {
+  return hasMinimumResumeConversation(messages);
+}
+
+function canBindFromProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return hasProjectConversationSignal(messages);
+}
+
+function canBackfillFromProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return hasStoredProjectConversationSignal(messages);
+}
+
+function canShowUiProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return hasUiProjectConversationSignal(messages);
+}
+
+function canResumeProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return hasResumeProjectConversationSignal(messages);
+}
+
+function shouldUseRuntimeProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return canBindFromProjectConversation(messages);
+}
+
+function shouldUseStoredProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return canBackfillFromProjectConversation(messages);
+}
+
+function shouldUseUiProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return canShowUiProjectConversation(messages);
+}
+
+function shouldUseResumeProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return canResumeProjectConversation(messages);
+}
+
+function hasProjectConversationForBinding(messages: ConversationTurn[] | undefined): boolean {
+  return shouldUseRuntimeProjectConversation(messages);
+}
+
+function hasProjectConversationForBackfill(messages: ConversationTurn[] | undefined): boolean {
+  return shouldUseStoredProjectConversation(messages);
+}
+
+function hasProjectConversationForUi(messages: ConversationTurn[] | undefined): boolean {
+  return shouldUseUiProjectConversation(messages);
+}
+
+function hasProjectConversationForResume(messages: ConversationTurn[] | undefined): boolean {
+  return shouldUseResumeProjectConversation(messages);
+}
+
+function isBindableProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return hasProjectConversationForBinding(messages);
+}
+
+function isBackfillableProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return hasProjectConversationForBackfill(messages);
+}
+
+function isUiProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return hasProjectConversationForUi(messages);
+}
+
+function isResumeProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return hasProjectConversationForResume(messages);
+}
+
+function hasLiveProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return isBindableProjectConversation(messages);
+}
+
+function hasStoredProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return isBackfillableProjectConversation(messages);
+}
+
+function hasVisibleProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return isUiProjectConversation(messages);
+}
+
+function hasRecoverableProjectConversation(messages: ConversationTurn[] | undefined): boolean {
+  return isResumeProjectConversation(messages);
+}
+
+function shouldBindLiveProjectSessionId(messages: ConversationTurn[] | undefined): boolean {
+  return hasLiveProjectConversation(messages);
+}
+
+function shouldBackfillStoredProjectSessionId(messages: ConversationTurn[] | undefined): boolean {
+  return hasStoredProjectConversation(messages);
+}
+
+function shouldDisplayVisibleProjectSessionId(messages: ConversationTurn[] | undefined): boolean {
+  return hasVisibleProjectConversation(messages);
+}
+
+function shouldResumeRecoverableProjectSessionId(messages: ConversationTurn[] | undefined): boolean {
+  return hasRecoverableProjectConversation(messages);
+}
+
+function canBindLiveProjectSession(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldBindLiveProjectSessionId(record.messages);
+}
+
+function canBackfillStoredProjectSession(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldBackfillStoredProjectSessionId(record.messages);
+}
+
+function canDisplayVisibleProjectSession(messages: ConversationTurn[] | undefined): boolean {
+  return shouldDisplayVisibleProjectSessionId(messages);
+}
+
+function canResumeRecoverableProjectSession(messages: ConversationTurn[] | undefined): boolean {
+  return shouldResumeRecoverableProjectSessionId(messages);
+}
+
+function shouldAdoptProjectSessionDuringRuntime(record: Pick<SessionRecord, "messages">): boolean {
+  return canBindLiveProjectSession(record);
+}
+
+function shouldAdoptProjectSessionDuringBackfill(record: Pick<SessionRecord, "messages">): boolean {
+  return canBackfillStoredProjectSession(record);
+}
+
+function shouldAdoptProjectSessionForUi(messages: ConversationTurn[] | undefined): boolean {
+  return canDisplayVisibleProjectSession(messages);
+}
+
+function shouldAdoptProjectSessionForResume(messages: ConversationTurn[] | undefined): boolean {
+  return canResumeRecoverableProjectSession(messages);
+}
+
+function hasRuntimeProjectAdoption(messages: ConversationTurn[] | undefined): boolean {
+  return shouldAdoptProjectSessionForUi(messages);
+}
+
+function hasBackfillProjectAdoption(messages: ConversationTurn[] | undefined): boolean {
+  return shouldBackfillStoredProjectSessionId(messages);
+}
+
+function hasUiProjectAdoption(messages: ConversationTurn[] | undefined): boolean {
+  return shouldAdoptProjectSessionForUi(messages);
+}
+
+function hasResumeProjectAdoption(messages: ConversationTurn[] | undefined): boolean {
+  return shouldAdoptProjectSessionForResume(messages);
+}
+
+function shouldAdoptProjectSession(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldAdoptProjectSessionDuringRuntime(record);
+}
+
+function shouldAdoptStoredProjectSession(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldAdoptProjectSessionDuringBackfill(record);
+}
+
+function shouldAdoptUiProjectSession(messages: ConversationTurn[] | undefined): boolean {
+  return hasUiProjectAdoption(messages);
+}
+
+function shouldAdoptResumeProjectSession(messages: ConversationTurn[] | undefined): boolean {
+  return hasResumeProjectAdoption(messages);
+}
+
+function canUseProjectSessionAtRuntime(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldAdoptProjectSession(record);
+}
+
+function canUseProjectSessionAtBackfill(record: Pick<SessionRecord, "messages">): boolean {
+  return shouldAdoptStoredProjectSession(record);
+}
+
+function canUseProjectSessionAtUi(messages: ConversationTurn[] | undefined): boolean {
+  return shouldAdoptUiProjectSession(messages);
+}
+
+function canUseProjectSessionAtResume(messages: ConversationTurn[] | undefined): boolean {
+  return shouldAdoptResumeProjectSession(messages);
+}
+
+function hasProjectSessionRuntimeEligibility(messages: ConversationTurn[] | undefined): boolean {
+  return shouldAdoptProjectSessionDuringRuntime({ messages: messages ?? [] });
+}
+
+function hasProjectSessionBackfillEligibility(messages: ConversationTurn[] | undefined): boolean {
+  return shouldAdoptProjectSessionDuringBackfill({ messages: messages ?? [] });
+}
+
+function hasProjectSessionUiEligibility(messages: ConversationTurn[] | undefined): boolean {
+  return canUseProjectSessionAtUi(messages);
+}
+
+function hasProjectSessionResumeEligibility(messages: ConversationTurn[] | undefined): boolean {
+  return canUseProjectSessionAtResume(messages);
+}
+
+function shouldClaimProjectSessionDuringRuntime(messages: ConversationTurn[] | undefined): boolean {
+  return hasProjectSessionRuntimeEligibility(messages);
+}
+
+function shouldClaimProjectSessionDuringBackfill(messages: ConversationTurn[] | undefined): boolean {
+  return hasProjectSessionBackfillEligibility(messages);
+}
+
+function shouldClaimProjectSessionForUi(messages: ConversationTurn[] | undefined): boolean {
+  return hasProjectSessionUiEligibility(messages);
+}
+
+function shouldClaimProjectSessionForResume(messages: ConversationTurn[] | undefined): boolean {
+  return hasProjectSessionResumeEligibility(messages);
+}
+
+function hasClaimableProjectSessionRuntime(messages: ConversationTurn[] | undefined): boolean {
+  return shouldClaimProjectSessionDuringRuntime(messages);
+}
+
+function hasClaimableProjectSessionBackfill(messages: ConversationTurn[] | undefined): boolean {
+  return shouldClaimProjectSessionDuringBackfill(messages);
+}
+
+function hasClaimableProjectSessionUi(messages: ConversationTurn[] | undefined): boolean {
+  return shouldClaimProjectSessionForUi(messages);
+}
+
+function hasClaimableProjectSessionResume(messages: ConversationTurn[] | undefined): boolean {
+  return shouldClaimProjectSessionForResume(messages);
+}
+
+function isClaimableProjectSessionRuntime(messages: ConversationTurn[] | undefined): boolean {
+  return hasClaimableProjectSessionRuntime(messages);
+}
+
+function isClaimableProjectSessionBackfill(messages: ConversationTurn[] | undefined): boolean {
+  return hasClaimableProjectSessionBackfill(messages);
+}
+
+function isClaimableProjectSessionUi(messages: ConversationTurn[] | undefined): boolean {
+  return hasClaimableProjectSessionUi(messages);
+}
+
+function isClaimableProjectSessionResume(messages: ConversationTurn[] | undefined): boolean {
+  return hasClaimableProjectSessionResume(messages);
+}
+
+function listClaudeProjectSessionCandidates(cwd: string): ClaudeProjectSessionCandidate[] {
+  const projectDir = getClaudeProjectDir(cwd);
+  try {
+    return readdirSync(projectDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+      .map((entry) => entry.name.replace(/\.jsonl$/, ""))
+      .filter((name) => UUID_V4_PATTERN.test(name))
+      .map((id) => {
+        const filePath = path.join(projectDir, `${id}.jsonl`);
+        const stats = statSync(filePath);
+        return { id, filePath, mtimeMs: stats.mtimeMs };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function listClaudeProjectSessionMtimes(cwd: string): Map<string, number> {
+  return new Map(listClaudeProjectSessionCandidates(cwd).map((candidate) => [candidate.id, candidate.mtimeMs]));
+}
+
+function hasRecentProjectActivity(candidate: ClaudeProjectSessionCandidate, startedAt: string): boolean {
+  const startedAtMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return true;
+  }
+  return candidate.mtimeMs >= startedAtMs - START_TIME_SKEW_MS
+    && candidate.mtimeMs <= Date.now() + DISCOVERY_RECENT_WINDOW_MS;
+}
+
+function selectClaudeProjectSessionForRecord(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): ClaudeProjectSessionDetails | null {
+  const knownMtimes = record.knownClaudeProjectMtimes ?? new Map<string, number>();
+  const candidates = listClaudeProjectSessionCandidates(record.cwd)
+    .filter((candidate) => {
+      const previousMtime = knownMtimes.get(candidate.id);
+      return previousMtime === undefined || candidate.mtimeMs > previousMtime;
+    })
+    .filter((candidate) => hasRecentProjectActivity(candidate, record.startedAt))
+    .map((candidate) => readClaudeProjectSessionDetails(candidate.filePath, candidate.id))
+    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const hasUserTurn = record.messages.some((turn) => turn.role === "user"
+    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
+  if (!hasUserTurn) {
+    return null;
+  }
+
+  return candidates[0] ?? null;
+}
+
+function getResumeEligibility(record: Pick<SessionRecord, "claudeSessionId" | "messages">): ResumeEligibility {
+  const hasClaudeSessionId = Boolean(record.claudeSessionId);
+  const hasRealConversation = hasRealConversationMessages(record.messages);
+  return {
+    hasClaudeSessionId,
+    hasRealConversation,
+    eligible: hasClaudeSessionId && hasRealConversation
+  };
+}
+
+function hasResumeEligibleConversation(record: Pick<SessionRecord, "claudeSessionId" | "messages">): boolean {
+  return getResumeEligibility(record).eligible;
+}
+
+function getLatestClaudeProjectSessionId(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): string | null {
+  return selectClaudeProjectSessionForRecord(record)?.id ?? null;
+}
+
+function listRecentClaudeProjectSessionIds(cwd: string, startedAt: string): string[] {
+  return listClaudeProjectSessionCandidates(cwd)
+    .filter((candidate) => hasRecentProjectActivity(candidate, startedAt))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .map((candidate) => candidate.id);
+}
+
+function findRealClaudeProjectSessionId(cwd: string, startedAt: string): string | null {
+  const candidates = listRecentClaudeProjectSessionIds(cwd, startedAt)
+    .map((id) => {
+      const filePath = path.join(getClaudeProjectDir(cwd), `${id}.jsonl`);
+      return readClaudeProjectSessionDetails(filePath, id);
+    })
+    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return candidates[0]?.id ?? null;
+}
+
+function isClaudeSessionFileAvailable(cwd: string, claudeSessionId: string): boolean {
+  const filePath = path.join(getClaudeProjectDir(cwd), `${claudeSessionId}.jsonl`);
+  return Boolean(readClaudeProjectSessionDetails(filePath, claudeSessionId));
+}
+
+function shouldAutoResumeSession(record: Pick<SessionRecord, "status" | "claudeSessionId" | "messages" | "archived" | "resumedToSessionId" | "ptyProcess">): boolean {
+  return record.status === "exited"
+    && !record.archived
+    && !record.resumedToSessionId
+    && record.ptyProcess === null
+    && hasResumeEligibleConversation(record);
+}
+
+function shouldBackfillClaudeSessionId(record: Pick<SessionRecord, "status" | "claudeSessionId" | "command" | "messages">): boolean {
+  return record.status === "exited"
+    && !record.claudeSessionId
+    && /^claude\b/.test(record.command.trim())
+    && hasRealConversationMessages(record.messages);
+}
+
+function snapshotMessages(record: Pick<SessionRecord, "ptyBridge" | "messages">): ConversationTurn[] {
+  return record.ptyBridge?.getMessages() ?? record.messages;
 }
 
 const MAX_SESSIONS = 50;
@@ -108,6 +698,42 @@ const CONFIRM_WINDOW_SIZE = 800;
 
 // Claude 会话 ID 格式：UUID v4
 const CLAUDE_SESSION_ID_PATTERN = /"session_id"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function listClaudeTaskIds(): string[] {
+  const tasksDir = path.join(os.homedir(), ".claude", "tasks");
+  try {
+    return readdirSync(tasksDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && UUID_V4_PATTERN.test(entry.name))
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+}
+
+function getClaudeProjectDir(cwd: string): string {
+  const normalized = path.resolve(cwd).replace(/\//g, "-");
+  return path.join(os.homedir(), ".claude", "projects", normalized);
+}
+
+
+function getLatestClaudeTaskId(excludeIds: Set<string>): string | null {
+  const tasksDir = path.join(os.homedir(), ".claude", "tasks");
+  try {
+    const candidates = readdirSync(tasksDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && UUID_V4_PATTERN.test(entry.name) && !excludeIds.has(entry.name))
+      .map((entry) => {
+        const fullPath = path.join(tasksDir, entry.name);
+        const stats = statSync(fullPath);
+        return { id: entry.name, mtimeMs: stats.mtimeMs };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    return candidates[0]?.id ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Append text to a windowed buffer, trimming from start if over max size. */
 function appendWindow(buffer: string, chunk: string, maxSize: number): string {
@@ -142,6 +768,7 @@ export class ProcessManager extends EventEmitter {
     });
     for (const snapshot of this.storage.loadSessions()) {
       const isClaudeCmd = /^claude\b/.test(snapshot.command.trim());
+      const resumeCommandSessionId = getResumeCommandSessionId(snapshot.command);
       // Sessions restored from storage have ptyProcess: null — the old server's PTY
       // belongs to a dead process. Mark running sessions as exited so the UI
       // reflects reality and users can start fresh sessions.
@@ -170,7 +797,11 @@ export class ProcessManager extends EventEmitter {
           ptyBridge: null,
           currentTask: null,
           taskDebounceTimer: null,
-          lastEmittedTask: null
+          lastEmittedTask: null,
+          knownClaudeTaskIds: undefined,
+          claudeTaskDiscoveryTimer: null,
+          knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
+          claudeSessionId: resumeCommandSessionId ?? updated.claudeSessionId
         });
         this.lifecycleManager.register(snapshot.id, "idle");
         console.error(`[ProcessManager] Restored session ${snapshot.id} marked as exited (PTY orphaned)`);
@@ -197,11 +828,18 @@ export class ProcessManager extends EventEmitter {
           ptyBridge: null,
           currentTask: null,
           taskDebounceTimer: null,
-          lastEmittedTask: null
+          lastEmittedTask: null,
+          knownClaudeTaskIds: undefined,
+          claudeTaskDiscoveryTimer: null,
+          knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(snapshot.cwd) : undefined,
+          claudeSessionId: resumeCommandSessionId ?? snapshot.claudeSessionId
         });
         this.lifecycleManager.register(snapshot.id, "archived");
       }
     }
+    this.backfillExitedClaudeSessionIds();
+    // Auto-recover the most recent exited session with a Claude session ID
+    this.autoRecoverExitedSessions();
     this.archiveExpiredSessions();
   }
 
@@ -238,18 +876,24 @@ export class ProcessManager extends EventEmitter {
       });
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean }): SessionSnapshot {
     this.assertCommandAllowed(command);
 
     const resolvedCwd = cwd
       ? path.resolve(process.cwd(), cwd)
       : path.resolve(process.cwd(), this.config.defaultCwd);
 
+    const isClaudeCmd = this.isClaudeCommand(command);
+
     // For full-access mode with claude, add permission flags
     const processedCommand = this.processCommandForMode(command, mode);
+    const resumeCommandSessionId = getResumeCommandSessionId(processedCommand) ?? getResumeCommandSessionId(command);
+    const knownClaudeTaskIds = isClaudeCmd ? new Set(listRecentClaudeProjectSessionIds(resolvedCwd, new Date().toISOString())) : null;
+    const knownClaudeProjectMtimes = isClaudeCmd ? listClaudeProjectSessionMtimes(resolvedCwd) : null;
+    const initialClaudeSessionId = resumeCommandSessionId ?? null;
+    const startedAt = new Date().toISOString();
 
     const id = randomUUID();
-    const isClaudeCmd = this.isClaudeCommand(command);
     const record: SessionRecord = {
       id,
       command,
@@ -260,7 +904,7 @@ export class ProcessManager extends EventEmitter {
       allowedScopes: [],
       status: "running",
       exitCode: null,
-      startedAt: new Date().toISOString(),
+      startedAt,
       endedAt: null,
       output: "",
       archived: false,
@@ -268,7 +912,7 @@ export class ProcessManager extends EventEmitter {
       permissionBlocked: undefined,
       pendingEscalation: null,
       lastEscalationResult: null,
-      claudeSessionId: null,
+      claudeSessionId: initialClaudeSessionId,
       processId: null,
       ptyProcess: null,
       stopRequested: false,
@@ -276,6 +920,8 @@ export class ProcessManager extends EventEmitter {
       ptyPermissionBlocked: false,
       lastAutoConfirmAt: 0,
       autoApprovePermissions: this.shouldAutoApprovePermissions(command, mode),
+      resumedFromSessionId: opts?.resumedFromSessionId ?? null,
+      autoRecovered: opts?.autoRecovered ?? false,
       rememberedEscalationScopes: new Set(),
       rememberedEscalationTargets: new Set(),
       storedOutput: "",
@@ -284,7 +930,10 @@ export class ProcessManager extends EventEmitter {
       ptyBridge: null,
       currentTask: null,
       taskDebounceTimer: null,
-      lastEmittedTask: null
+      lastEmittedTask: null,
+      knownClaudeTaskIds: knownClaudeTaskIds ?? undefined,
+      claudeTaskDiscoveryTimer: null,
+      knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined
     };
 
     // Create PTY bridge for this session
@@ -344,6 +993,10 @@ export class ProcessManager extends EventEmitter {
     child.onExit(({ exitCode }) => {
       const current = this.sessions.get(id);
       if (!current) return;
+      if (current.claudeTaskDiscoveryTimer) {
+        clearTimeout(current.claudeTaskDiscoveryTimer);
+        current.claudeTaskDiscoveryTimer = null;
+      }
       if (current.ptyBridge) {
         current.ptyBridge.onExit(exitCode);
       }
@@ -414,6 +1067,21 @@ export class ProcessManager extends EventEmitter {
         process.stderr.write(`[wand] Captured Claude session ID: ${bridgeSessionId}\n`);
       }
 
+      if (!rec.claudeSessionId && rec.knownClaudeTaskIds) {
+        rec.messages = snapshotMessages(rec);
+        const discoveredTaskId = getLatestClaudeProjectSessionId({
+          cwd: rec.cwd,
+          startedAt: rec.startedAt,
+          knownClaudeProjectMtimes: rec.knownClaudeProjectMtimes,
+          messages: rec.messages
+        });
+        if (discoveredTaskId) {
+          rec.claudeSessionId = discoveredTaskId;
+          rec.knownClaudeTaskIds.add(discoveredTaskId);
+          process.stderr.write(`[wand] Captured Claude project session ID: ${discoveredTaskId}\n`);
+        }
+      }
+
       // Auto-confirm for full-access mode
       if (rec.autoApprovePermissions) {
         this.autoConfirmWithRecord(rec, chunk, child);
@@ -432,6 +1100,36 @@ export class ProcessManager extends EventEmitter {
       }, 3000);
     }
 
+    if (record.knownClaudeTaskIds) {
+      const tryDiscoverClaudeTaskId = () => {
+        const current = this.sessions.get(id);
+        if (!current || current.status !== "running" || current.claudeSessionId || !current.knownClaudeTaskIds) {
+          return;
+        }
+        if (getResumeCommandSessionId(current.command)) {
+          current.claudeTaskDiscoveryTimer = null;
+          return;
+        }
+        current.messages = snapshotMessages(current);
+        const discoveredTaskId = getLatestClaudeProjectSessionId({
+          cwd: current.cwd,
+          startedAt: current.startedAt,
+          knownClaudeProjectMtimes: current.knownClaudeProjectMtimes,
+          messages: current.messages
+        });
+        if (discoveredTaskId) {
+          current.claudeSessionId = discoveredTaskId;
+          current.knownClaudeTaskIds.add(discoveredTaskId);
+          current.claudeTaskDiscoveryTimer = null;
+          process.stderr.write(`[wand] Discovered Claude resumable project session ID: ${discoveredTaskId}\n`);
+          this.persist(current);
+          return;
+        }
+        current.claudeTaskDiscoveryTimer = setTimeout(tryDiscoverClaudeTaskId, 1000);
+      };
+      record.claudeTaskDiscoveryTimer = setTimeout(tryDiscoverClaudeTaskId, 500);
+    }
+
     return this.snapshot(record);
   }
 
@@ -440,6 +1138,10 @@ export class ProcessManager extends EventEmitter {
     return Array.from(this.sessions.values())
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
       .map((session) => this.snapshot(session));
+  }
+
+  hasClaudeSessionFile(cwd: string, claudeSessionId: string): boolean {
+    return isClaudeSessionFileAvailable(cwd, claudeSessionId);
   }
 
   get(id: string): SessionSnapshot | null {
@@ -654,7 +1356,10 @@ export class ProcessManager extends EventEmitter {
       pendingEscalation: record.pendingEscalation || undefined,
       lastEscalationResult: record.lastEscalationResult || undefined,
       claudeSessionId: record.claudeSessionId || null,
-      messages: messages.length > 0 ? messages : undefined
+      messages: messages.length > 0 ? messages : undefined,
+      resumedFromSessionId: record.resumedFromSessionId ?? undefined,
+      resumedToSessionId: record.resumedToSessionId ?? undefined,
+      autoRecovered: record.autoRecovered ?? false
     };
   }
 
@@ -768,9 +1473,89 @@ export class ProcessManager extends EventEmitter {
       record.messages = messages;
     }
     this.storage.saveSession(this.snapshot(record));
+    this.logger.saveMetadata(record.id, {
+      id: record.id,
+      command: record.command,
+      status: record.status,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt,
+      claudeSessionId: record.claudeSessionId,
+      resumedFromSessionId: record.resumedFromSessionId ?? null,
+      resumedToSessionId: record.resumedToSessionId ?? null,
+      autoRecovered: record.autoRecovered ?? false
+    });
     // Save structured messages to file for analysis
     if (messages.length > 0) {
       this.logger.saveMessages(record.id, messages);
+    }
+  }
+
+  private backfillExitedClaudeSessionIds(): void {
+    for (const record of this.sessions.values()) {
+      record.messages = snapshotMessages(record);
+      if (!shouldBackfillClaudeSessionId(record)) {
+        continue;
+      }
+      const discoveredSessionId = findRealClaudeProjectSessionId(record.cwd, record.startedAt);
+      if (!discoveredSessionId) {
+        continue;
+      }
+      record.claudeSessionId = discoveredSessionId;
+      this.persist(record);
+    }
+  }
+
+  /**
+   * Auto-recover the most recent exited session that has a Claude session ID.
+   * Only resumes one session per server start, using the most recent eligible
+   * session. Sets `resumedToSessionId` on the original session and
+   * `autoRecovered: true` on the new session.
+   */
+  private autoRecoverExitedSessions(): void {
+    // Find eligible exited sessions
+    const eligibleSessions: SessionRecord[] = [];
+    for (const record of this.sessions.values()) {
+      record.messages = snapshotMessages(record);
+      if (shouldAutoResumeSession(record)) {
+        eligibleSessions.push(record);
+      }
+    }
+
+    if (eligibleSessions.length === 0) return;
+
+    // Sort by startedAt descending (most recent first)
+    eligibleSessions.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+
+    // Only auto-recover the single most recent session
+    const original = eligibleSessions[0];
+    const isClaude = /^claude\b/.test(original.command.trim());
+    if (!isClaude) return;
+
+    console.error(
+      `[ProcessManager] Auto-recovering session ${original.id} with Claude session ID ${original.claudeSessionId}`
+    );
+
+    const resumeCommand = `${original.command.trim()} --resume ${original.claudeSessionId}`;
+    let newRecord: SessionRecord | null = null;
+
+    try {
+      const snapshot = this.start(resumeCommand, original.cwd, original.mode, undefined, {
+        resumedFromSessionId: original.id,
+        autoRecovered: true
+      });
+
+      newRecord = this.sessions.get(snapshot.id) ?? null;
+      if (!newRecord) return;
+
+      // Set resumedToSessionId on the original session
+      original.resumedToSessionId = snapshot.id;
+      this.storage.saveSession(this.snapshot(original));
+
+      console.error(
+        `[ProcessManager] Auto-recovered session ${snapshot.id} from ${original.id}`
+      );
+    } catch (err) {
+      console.error(`[ProcessManager] Auto-recovery failed: ${String(err)}`);
     }
   }
 

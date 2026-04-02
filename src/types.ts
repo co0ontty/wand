@@ -166,7 +166,13 @@ export interface SessionSnapshot {
   /** Session lifecycle state */
   lifecycleState?: "running" | "idle" | "archived";
   /** Last activity timestamp */
-  lastActivityAt?: string;
+  lastActivityAt?: string | null;
+  /** 此会话是从哪个 Wand 会话恢复而来 */
+  resumedFromSessionId?: string | null;
+  /** 此会话被哪个恢复后的会话替代 */
+  resumedToSessionId?: string | null;
+  /** 服务器重启时是否自动恢复 */
+  autoRecovered?: boolean;
 }
 
 // ── Session Lifecycle ──

@@ -158,9 +158,10 @@ export class WandStorage {
       this.db
         .prepare(
           `INSERT INTO command_sessions (
-             id, command, cwd, mode, status, exit_code, started_at, ended_at, output
+           id, command, cwd, mode, status, exit_code, started_at, ended_at, output
              , archived, archived_at, claude_session_id, messages
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              command = excluded.command,
              cwd = excluded.cwd,
@@ -173,7 +174,10 @@ export class WandStorage {
              archived = excluded.archived,
              archived_at = excluded.archived_at,
              claude_session_id = excluded.claude_session_id,
-             messages = excluded.messages`
+             messages = excluded.messages,
+             resumed_from_session_id = excluded.resumed_from_session_id,
+             resumed_to_session_id = excluded.resumed_to_session_id,
+             auto_recovered = excluded.auto_recovered`
         )
         .run(
           snapshot.id,
@@ -188,7 +192,10 @@ export class WandStorage {
           snapshot.archived ? 1 : 0,
           snapshot.archivedAt,
           snapshot.claudeSessionId,
-          snapshot.messages ? JSON.stringify(snapshot.messages) : null
+          snapshot.messages ? JSON.stringify(snapshot.messages) : null,
+          snapshot.resumedFromSessionId ?? null,
+          snapshot.resumedToSessionId ?? null,
+          snapshot.autoRecovered ? 1 : 0
         );
       this.db.exec("COMMIT");
     } catch (error) {
@@ -197,10 +204,73 @@ export class WandStorage {
     }
   }
 
+  getSession(id: string): SessionSnapshot | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered
+         FROM command_sessions
+         WHERE id = ?`
+      )
+      .get(id) as {
+        id: string;
+        command: string;
+        cwd: string;
+        mode: SessionSnapshot["mode"];
+        status: SessionSnapshot["status"];
+        exit_code: number | null;
+        started_at: string;
+        ended_at: string | null;
+        output: string;
+        archived: number;
+        archived_at: string | null;
+        claude_session_id: string | null;
+        messages: string | null;
+        resumed_from_session_id: string | null;
+        resumed_to_session_id: string | null;
+        auto_recovered: number;
+      } | undefined;
+
+    return row ? this.mapSessionRow(row) : null;
+  }
+
+  getLatestSessionByClaudeSessionId(claudeSessionId: string): SessionSnapshot | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered
+         FROM command_sessions
+         WHERE claude_session_id = ?
+         ORDER BY started_at DESC
+         LIMIT 1`
+      )
+      .get(claudeSessionId) as {
+        id: string;
+        command: string;
+        cwd: string;
+        mode: SessionSnapshot["mode"];
+        status: SessionSnapshot["status"];
+        exit_code: number | null;
+        started_at: string;
+        ended_at: string | null;
+        output: string;
+        archived: number;
+        archived_at: string | null;
+        claude_session_id: string | null;
+        messages: string | null;
+        resumed_from_session_id: string | null;
+        resumed_to_session_id: string | null;
+        auto_recovered: number;
+      } | undefined;
+
+    return row ? this.mapSessionRow(row) : null;
+  }
+
   loadSessions(): SessionSnapshot[] {
     const rows = this.db
       .prepare(
         `SELECT id, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered
          FROM command_sessions
          ORDER BY started_at DESC`
       )
@@ -218,9 +288,33 @@ export class WandStorage {
       archived_at: string | null;
       claude_session_id: string | null;
       messages: string | null;
+      resumed_from_session_id: string | null;
+      resumed_to_session_id: string | null;
+      auto_recovered: number;
     }>;
 
-    return rows.map((row) => ({
+    return rows.map((row) => this.mapSessionRow(row));
+  }
+
+  private mapSessionRow(row: {
+    id: string;
+    command: string;
+    cwd: string;
+    mode: SessionSnapshot["mode"];
+    status: SessionSnapshot["status"];
+    exit_code: number | null;
+    started_at: string;
+    ended_at: string | null;
+    output: string;
+    archived: number;
+    archived_at: string | null;
+    claude_session_id: string | null;
+    messages: string | null;
+    resumed_from_session_id: string | null;
+    resumed_to_session_id: string | null;
+    auto_recovered: number;
+  }): SessionSnapshot {
+    return {
       id: row.id,
       command: row.command,
       cwd: row.cwd,
@@ -233,8 +327,11 @@ export class WandStorage {
       archived: Boolean(row.archived),
       archivedAt: row.archived_at,
       claudeSessionId: row.claude_session_id,
-      messages: parseStoredMessages(row.messages)
-    }));
+      messages: parseStoredMessages(row.messages),
+      resumedFromSessionId: row.resumed_from_session_id ?? undefined,
+      resumedToSessionId: row.resumed_to_session_id ?? undefined,
+      autoRecovered: Boolean(row.auto_recovered)
+    };
   }
 
   deleteSession(id: string): void {
@@ -256,5 +353,14 @@ function ensureCommandSessionSchema(db: DatabaseSync): void {
   }
   if (!names.has("messages")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN messages TEXT");
+  }
+  if (!names.has("resumed_from_session_id")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN resumed_from_session_id TEXT");
+  }
+  if (!names.has("resumed_to_session_id")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN resumed_to_session_id TEXT");
+  }
+  if (!names.has("auto_recovered")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN auto_recovered INTEGER NOT NULL DEFAULT 0");
   }
 }
