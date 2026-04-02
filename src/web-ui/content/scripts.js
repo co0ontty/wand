@@ -2737,6 +2737,11 @@
       }
 
       function setupFocusTrap(modal) {
+        // Remove any existing focus trap before adding a new one
+        if (focusTrapHandler) {
+          document.removeEventListener("keydown", focusTrapHandler);
+        }
+
         // Focusable elements selector
         var focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
 
@@ -5061,23 +5066,26 @@
           e.preventDefault();
         });
 
-        document.addEventListener("mousemove", function(e) {
+        // Store document-level listeners so they can be removed in teardownTerminal
+        state._resizeMouseMove = function(e) {
           if (!isResizing) return;
           var deltaY = e.clientY - startY;
           var newHeight = Math.max(200, Math.min(startHeight + deltaY, window.innerHeight - 200));
           container.style.height = newHeight + "px";
           container.style.flex = "none";
           scheduleTerminalResize();
-        });
+        };
+        document.addEventListener("mousemove", state._resizeMouseMove);
 
-        document.addEventListener("mouseup", function() {
+        state._resizeMouseUp = function() {
           if (isResizing) {
             isResizing = false;
             document.body.style.cursor = "";
             document.body.style.userSelect = "";
             scheduleTerminalResize();
           }
-        });
+        };
+        document.addEventListener("mouseup", state._resizeMouseUp);
 
         // 触摸设备支持
         resizeHandle.addEventListener("touchstart", function(e) {
@@ -5087,7 +5095,7 @@
           e.preventDefault();
         }, { passive: false });
 
-        document.addEventListener("touchmove", function(e) {
+        state._resizeTouchMove = function(e) {
           if (!isResizing) return;
           var deltaY = e.touches[0].clientY - startY;
           var newHeight = Math.max(200, Math.min(startHeight + deltaY, window.innerHeight - 200));
@@ -5095,14 +5103,16 @@
           container.style.flex = "none";
           scheduleTerminalResize();
           e.preventDefault();
-        }, { passive: false });
+        };
+        document.addEventListener("touchmove", state._resizeTouchMove, { passive: false });
 
-        document.addEventListener("touchend", function() {
+        state._resizeTouchEnd = function() {
           if (isResizing) {
             isResizing = false;
             scheduleTerminalResize();
           }
-        });
+        };
+        document.addEventListener("touchend", state._resizeTouchEnd);
       }
 
       function observeTerminalResize() {
@@ -5126,6 +5136,23 @@
         if (state.resizeHandler) {
           window.removeEventListener("resize", state.resizeHandler);
           state.resizeHandler = null;
+        }
+        // Clean up document-level resize drag listeners
+        if (state._resizeMouseMove) {
+          document.removeEventListener("mousemove", state._resizeMouseMove);
+          state._resizeMouseMove = null;
+        }
+        if (state._resizeMouseUp) {
+          document.removeEventListener("mouseup", state._resizeMouseUp);
+          state._resizeMouseUp = null;
+        }
+        if (state._resizeTouchMove) {
+          document.removeEventListener("touchmove", state._resizeTouchMove);
+          state._resizeTouchMove = null;
+        }
+        if (state._resizeTouchEnd) {
+          document.removeEventListener("touchend", state._resizeTouchEnd);
+          state._resizeTouchEnd = null;
         }
         clearTerminalScrollIdleTimer();
         if (state.terminalViewportEl) {
@@ -5208,6 +5235,12 @@
 
       function initWebSocket() {
         if (!window.WebSocket) return false;
+
+        // Prevent duplicate connections
+        if (state.ws) {
+          try { state.ws.close(); } catch (e) { /* ignore */ }
+          state.ws = null;
+        }
 
         var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         var wsUrl = protocol + '//' + window.location.host + '/ws';
