@@ -69,7 +69,11 @@ export async function ensureConfig(configPath: string): Promise<WandConfig> {
   try {
     const raw = await readFile(configPath, "utf8");
     const merged = mergeWithDefaults(JSON.parse(raw) as Partial<WandConfig>);
-    await writeFile(configPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+    const normalized = `${JSON.stringify(merged, null, 2)}\n`;
+    // Only write if the file content actually changed
+    if (raw.trimEnd() !== normalized.trimEnd()) {
+      await writeFile(configPath, normalized, "utf8");
+    }
     return merged;
   } catch {
     const config = defaultConfig();

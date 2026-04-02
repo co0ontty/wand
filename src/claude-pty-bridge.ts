@@ -21,11 +21,12 @@ import type {
   SessionEndData,
   RawOutputData,
 } from "./types.js";
+import { stripAnsi, isNoiseLine } from "./pty-text-utils.js";
 
 // ── Constants ──
 
 const OUTPUT_MAX_SIZE = 120000;
-const SESSION_ID_WINDOW_SIZE = 4096;
+const SESSION_ID_WINDOW_SIZE = 16384;
 const PERMISSION_WINDOW_SIZE = 800;
 
 const UUID_PATTERN = "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})";
@@ -33,26 +34,6 @@ const CLAUDE_SESSION_ID_PATTERNS = [
   new RegExp(`"session_id"\\s*:\\s*"${UUID_PATTERN}"`, "i"),
   new RegExp(`(?:^|\\s)--resume\\s+${UUID_PATTERN}(?:\\s|$)`, "i"),
   new RegExp(`(?:claude\\s+session\\s+id|session\\s+id)\\s*[:#]?\\s*${UUID_PATTERN}`, "i")
-];
-
-// Patterns for permission detection
-const PERMISSION_PATTERNS = [
-  /(?:^|\b)(?:press\s+)?(?:y|yes)\s*(?:\/|\bor\b)\s*(?:n|no)(?:\b|$)/i,
-  /\[(?:y|yes)\s*\/\s*(?:n|no)\]/i,
-  /\((?:y|yes)\s*\/\s*(?:n|no)\)/i,
-  /\((?:y|yes)\s*\/\s*(?:n|no)\s*\/\s*always\)/i,
-  /\bcontinue\?\s*(?:\((?:y|yes)\s*\/\s*(?:n|no)\))?/i,
-  /\bare you sure\??/i,
-  /\bdo you want to continue\??/i,
-  /\bdo you want to (?:create|write|delete|modify|execute)/i,
-  /\bconfirm(?:\s+execution|\s+changes|\s+action)?\??/i,
-  /\bproceed\??/i,
-  /\benter to confirm\b/i,
-  /\bwould you like to\b/i,
-  /\bshall i\b/i,
-  /\bcan i\b/i,
-  /\bpermission\b/i,
-  /\bgrant\b.*\bpermission\b/i
 ];
 
 // ── Internal State Types ──
@@ -583,7 +564,7 @@ export class ClaudePtyBridge extends EventEmitter {
   }
 
   private parseChatResponse(): void {
-    const clean = this.stripAnsi(this.chatState.buffer);
+    const clean = stripAnsi(this.chatState.buffer);
 
     if (!this.chatState.echoSkipped) {
       const echoEndIndex = this.findEchoEndIndex(clean, this.chatState.lastUserInput);
@@ -612,7 +593,7 @@ export class ClaudePtyBridge extends EventEmitter {
       if (!trimmed) {
         continue;
       }
-      if (this.isStatusLine(trimmed)) {
+      if (isNoiseLine(trimmed)) {
         continue;
       }
       if (trimmed.startsWith("❯")) {
@@ -688,17 +669,6 @@ export class ClaudePtyBridge extends EventEmitter {
 
   // ── Text Processing Utilities ──
 
-  private stripAnsi(text: string): string {
-    // eslint-disable-next-line no-control-regex
-    return text
-      .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")   // CSI sequences
-      .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "") // OSC sequences
-      .replace(/\x1b[><=ePX^_]/g, "")              // Single-char escapes
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "") // Control chars (keep \t \n \r)
-      .replace(/\r\n?/g, "\n");
-  }
-
   /**
    * Find the end index of the echoed user input in the PTY buffer.
    * The echo may contain ANSI codes between characters.
@@ -733,30 +703,8 @@ export class ClaudePtyBridge extends EventEmitter {
     return matchedChars === inputChars.length ? endIndex : 0;
   }
 
-  private isStatusLine(line: string): boolean {
-    if (!line) return false;
-    if (line.startsWith("────")) return true;
-    if (line === "❯") return true;
-    if (line.includes("esc to interrupt")) return true;
-    if (line.includes("Claude Code v")) return true;
-    if (line.includes("Failed to install Anthropic")) return true;
-    if (line.includes("Claude Code has switched")) return true;
-    if (line.includes("[wand]")) return true;
-    if (line.includes("Captured Claude session ID")) return true;
-    if (line.includes("ctrl+g")) return true;
-    if (line.includes("/effort")) return true;
-    if (line.includes("? for shortcuts")) return true;
-    if (line.includes("auto mode is unavailable")) return true;
-    if (/MCP server.*failed/i.test(line)) return true;
-    if (line.includes("Germinating") || line.includes("Doodling") || line.includes("Brewing")) return true;
-    if (line.includes("Permissions") && line.includes("mode")) return true;
-    if (line.startsWith("●") && line.includes("·")) return true;
-    if (line.startsWith("[>") || line.startsWith("[<")) return true;
-    return false;
-  }
-
   private cleanForChat(raw: string): string {
-    const text = this.stripAnsi(raw);
+    const text = stripAnsi(raw);
     const lines = text.split("\n");
     const cleanLines: string[] = [];
 
@@ -773,7 +721,7 @@ export class ClaudePtyBridge extends EventEmitter {
         continue;
       }
 
-      if (this.isStatusLine(trimmed)) {
+      if (isNoiseLine(trimmed)) {
         continue;
       }
 

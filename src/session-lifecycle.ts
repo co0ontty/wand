@@ -188,22 +188,26 @@ export class SessionLifecycleManager {
     const now = Date.now();
 
     for (const [sessionId, lifecycle] of this.sessions) {
-      if (lifecycle.state === "archived") {
-        continue;
-      }
+      try {
+        if (lifecycle.state === "archived") {
+          continue;
+        }
 
-      const timeSinceLastActivity = now - lifecycle.lastActivityAt;
+        const timeSinceLastActivity = now - lifecycle.lastActivityAt;
 
-      // Check for archive timeout
-      if (timeSinceLastActivity > this.archiveTimeout) {
-        this.archive(sessionId, "Session timed out", "timeout");
-        continue;
-      }
+        // Check for archive timeout
+        if (timeSinceLastActivity > this.archiveTimeout) {
+          this.archive(sessionId, "Session timed out", "timeout");
+          continue;
+        }
 
-      // Check for idle timeout
-      if (timeSinceLastActivity > this.idleTimeout && lifecycle.state !== "idle") {
-        this.setState(sessionId, "idle");
-        this.events.onIdle?.(sessionId);
+        // Check for idle timeout
+        if (timeSinceLastActivity > this.idleTimeout && lifecycle.state !== "idle") {
+          this.setState(sessionId, "idle");
+          this.events.onIdle?.(sessionId);
+        }
+      } catch (err) {
+        console.error(`[Lifecycle] Error checking session ${sessionId}: ${String(err)}`);
       }
     }
   }

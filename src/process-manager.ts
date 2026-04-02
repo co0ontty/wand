@@ -180,8 +180,15 @@ function readClaudeProjectSessionDetails(filePath: string, id: string): ClaudePr
       }
     }
 
+    // Only reject if the file explicitly claims a DIFFERENT primary session ID.
+    // A resumed session's JSONL may contain multiple session IDs across turns.
+    // If no sessionId appears at all (early startup file), don't reject.
     if (fileSessionIds.size > 0 && !fileSessionIds.has(id)) {
-      return null;
+      // Check if at least one line references this ID (partial match is ok)
+      const hasAnyReference = lines.some((line) => line.includes(`"${id}"`));
+      if (!hasAnyReference) {
+        return null;
+      }
     }
 
     return {
@@ -632,6 +639,38 @@ function selectClaudeProjectSessionForRecord(record: Pick<SessionRecord, "cwd" |
   return candidates[0] ?? null;
 }
 
+/**
+ * Broader fallback: find a JSONL file by mtime proximity when strict
+ * mtime-correlation fails (e.g., file existed before session but Claude
+ * wrote conversation content during this session).
+ * Looks for the most recently modified file that was active near the
+ * session's start time and has real conversation content.
+ */
+function selectClaudeProjectSessionByProximity(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): ClaudeProjectSessionDetails | null {
+  const hasUserTurn = record.messages.some((turn) => turn.role === "user"
+    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
+  if (!hasUserTurn) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(record.startedAt);
+  const now = Date.now();
+  // Look for files modified from ~60s before session start up to now
+  const proximityWindowMs = 60 * 1000;
+
+  const candidates = listClaudeProjectSessionCandidates(record.cwd)
+    .filter((candidate) => {
+      if (!Number.isFinite(startedAtMs)) return true;
+      return candidate.mtimeMs >= startedAtMs - proximityWindowMs
+        && candidate.mtimeMs <= now + DISCOVERY_RECENT_WINDOW_MS;
+    })
+    .map((candidate) => readClaudeProjectSessionDetails(candidate.filePath, candidate.id))
+    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  return candidates[0] ?? null;
+}
+
 function getResumeEligibility(record: Pick<SessionRecord, "claudeSessionId" | "messages">): ResumeEligibility {
   const hasClaudeSessionId = Boolean(record.claudeSessionId);
   const hasRealConversation = hasRealConversationMessages(record.messages);
@@ -647,7 +686,10 @@ function hasResumeEligibleConversation(record: Pick<SessionRecord, "claudeSessio
 }
 
 function getLatestClaudeProjectSessionId(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): string | null {
-  return selectClaudeProjectSessionForRecord(record)?.id ?? null;
+  // Try strict mtime-correlation first, then fall back to mtime proximity
+  return selectClaudeProjectSessionForRecord(record)?.id
+    ?? selectClaudeProjectSessionByProximity(record)?.id
+    ?? null;
 }
 
 function listRecentClaudeProjectSessionIds(cwd: string, startedAt: string): string[] {
@@ -658,6 +700,7 @@ function listRecentClaudeProjectSessionIds(cwd: string, startedAt: string): stri
 }
 
 function findRealClaudeProjectSessionId(cwd: string, startedAt: string): string | null {
+  // Strict mtime-based discovery first
   const candidates = listRecentClaudeProjectSessionIds(cwd, startedAt)
     .map((id) => {
       const filePath = path.join(getClaudeProjectDir(cwd), `${id}.jsonl`);
@@ -665,7 +708,22 @@ function findRealClaudeProjectSessionId(cwd: string, startedAt: string): string 
     })
     .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return candidates[0]?.id ?? null;
+  if (candidates.length > 0) return candidates[0].id;
+
+  // Fallback: broader proximity search for files with conversation content
+  const startedAtMs = Date.parse(startedAt);
+  const now = Date.now();
+  const proximityWindowMs = 60 * 1000;
+  const proximityCandidates = listClaudeProjectSessionCandidates(cwd)
+    .filter((candidate) => {
+      if (!Number.isFinite(startedAtMs)) return true;
+      return candidate.mtimeMs >= startedAtMs - proximityWindowMs
+        && candidate.mtimeMs <= now + DISCOVERY_RECENT_WINDOW_MS;
+    })
+    .map((candidate) => readClaudeProjectSessionDetails(candidate.filePath, candidate.id))
+    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return proximityCandidates[0]?.id ?? null;
 }
 
 function isClaudeSessionFileAvailable(cwd: string, claudeSessionId: string): boolean {
@@ -745,6 +803,8 @@ export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly logger: SessionLogger;
   private readonly lifecycleManager: SessionLifecycleManager;
+  /** Per-session debounce timers for throttled persist calls */
+  private readonly persistDebounceTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly config: WandConfig,
@@ -1005,7 +1065,9 @@ export class ProcessManager extends EventEmitter {
       current.endedAt = new Date().toISOString();
       current.ptyProcess = null;
       this.lifecycleManager.archive(id, `Session ${current.status}`, current.stopRequested ? "user" : "error");
-      this.persist(current);
+      this.flushPersist(current);
+      // Final full snapshot with messages to SQLite (persist() only saves metadata)
+      this.storage.saveSession(this.snapshot(current));
       this.emitEvent({ type: "ended", sessionId: id, data: this.snapshot(current) });
     });
 
@@ -1091,7 +1153,7 @@ export class ProcessManager extends EventEmitter {
         sendInitialInput();
       }
 
-      this.persist(rec);
+      this.schedulePersist(rec);
     });
 
     if (initialInput) {
@@ -1301,6 +1363,11 @@ export class ProcessManager extends EventEmitter {
       clearTimeout(record.taskDebounceTimer);
       record.taskDebounceTimer = null;
     }
+    const pendingPersist = this.persistDebounceTimers.get(id);
+    if (pendingPersist) {
+      clearTimeout(pendingPersist);
+      this.persistDebounceTimers.delete(id);
+    }
 
     // Kill live processes if still running
     if (record.status === "running") {
@@ -1472,7 +1539,8 @@ export class ProcessManager extends EventEmitter {
     if (messages !== record.messages) {
       record.messages = messages;
     }
-    this.storage.saveSession(this.snapshot(record));
+    // Use lightweight metadata-only write (skips large messages JSON)
+    this.storage.saveSessionMetadata(this.snapshot(record));
     this.logger.saveMetadata(record.id, {
       id: record.id,
       command: record.command,
@@ -1482,12 +1550,42 @@ export class ProcessManager extends EventEmitter {
       claudeSessionId: record.claudeSessionId,
       resumedFromSessionId: record.resumedFromSessionId ?? null,
       resumedToSessionId: record.resumedToSessionId ?? null,
-      autoRecovered: record.autoRecovered ?? false
+      autoRecovered: record.autoRecovered ?? false,
     });
     // Save structured messages to file for analysis
     if (messages.length > 0) {
       this.logger.saveMessages(record.id, messages);
     }
+  }
+
+  /**
+   * Schedule a debounced persist call for the given record.
+   * Multiple calls within the debounce window are coalesced into a single write.
+   * Use this in hot paths (e.g. onData) to reduce I/O pressure.
+   */
+  private schedulePersist(record: SessionRecord): void {
+    const existing = this.persistDebounceTimers.get(record.id);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const timer = setTimeout(() => {
+      this.persistDebounceTimers.delete(record.id);
+      this.persist(record);
+    }, 1000);
+    this.persistDebounceTimers.set(record.id, timer);
+  }
+
+  /**
+   * Immediately persist any pending debounced write and clear the timer.
+   * Use this at critical points (exit, stop, delete) to ensure no data loss.
+   */
+  private flushPersist(record: SessionRecord): void {
+    const existing = this.persistDebounceTimers.get(record.id);
+    if (existing) {
+      clearTimeout(existing);
+      this.persistDebounceTimers.delete(record.id);
+    }
+    this.persist(record);
   }
 
   private backfillExitedClaudeSessionIds(): void {
@@ -1530,6 +1628,21 @@ export class ProcessManager extends EventEmitter {
     const original = eligibleSessions[0];
     const isClaude = /^claude\b/.test(original.command.trim());
     if (!isClaude) return;
+
+    // If no claudeSessionId is bound yet, try to discover it via proximity search
+    if (!original.claudeSessionId) {
+      const discovered = findRealClaudeProjectSessionId(original.cwd, original.startedAt);
+      if (discovered) {
+        original.claudeSessionId = discovered;
+        process.stderr.write(`[wand] Backfilled Claude session ID for auto-recovery: ${discovered}\n`);
+        this.persist(original);
+      }
+    }
+
+    if (!original.claudeSessionId) {
+      console.error(`[ProcessManager] Skipping auto-recovery: no Claude session ID for session ${original.id}`);
+      return;
+    }
 
     console.error(
       `[ProcessManager] Auto-recovering session ${original.id} with Claude session ID ${original.claudeSessionId}`
@@ -1699,11 +1812,12 @@ export class ProcessManager extends EventEmitter {
         break;
 
       case "chat.turn":
-        // Turn completed - persist messages
+        // Turn completed - persist full messages snapshot
         record.messages = record.ptyBridge?.getMessages() ?? record.messages;
         this.lifecycleManager.stopThinking(record.id);
         this.lifecycleManager.waitingInput(record.id);
         this.persist(record);
+        this.storage.saveSession(this.snapshot(record));
         break;
 
       case "ended":
