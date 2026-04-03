@@ -43,12 +43,17 @@ export function parseMessages(output: string): ChatMessage[] {
 
   if (currentUserText !== null && currentAssistantLines.length > 0) {
     turns.push({ user: currentUserText, assistantLines: currentAssistantLines });
+  } else if (currentUserText !== null) {
+    // User input exists but no assistant response yet — still record the turn
+    turns.push({ user: currentUserText, assistantLines: currentAssistantLines });
   }
 
   for (const turn of turns) {
     messages.push({ role: "user", content: turn.user });
     const content = turn.assistantLines.join("\n").replace(/[ \t]+\n/g, "\n").replace(/[\n\s]+$/, "");
-    messages.push({ role: "assistant", content });
+    if (content) {
+      messages.push({ role: "assistant", content });
+    }
   }
 
   return messages;
