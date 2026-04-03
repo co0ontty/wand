@@ -3035,6 +3035,67 @@
       flex-shrink: 0;
     }
 
+    /* Permission actions inline in composer bar */
+    .permission-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      animation: permission-fade-in 0.2s ease-out;
+    }
+    .permission-actions.hidden {
+      display: none;
+    }
+    .permission-actions-divider {
+      width: 1px;
+      height: 16px;
+      background: var(--border);
+      margin: 0 2px;
+    }
+    .permission-actions-label {
+      font-size: 0.7rem;
+      color: #d18b00;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-permission {
+      font-size: 0.65rem;
+      padding: 1px 8px;
+      border-radius: 4px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      line-height: 1.4;
+      font-weight: 500;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .btn-permission:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-permission-approve {
+      background: rgba(240, 165, 0, 0.15);
+      color: #d18b00;
+      border-color: rgba(240, 165, 0, 0.3);
+    }
+    .btn-permission-approve:hover:not(:disabled) {
+      background: rgba(240, 165, 0, 0.25);
+    }
+    .btn-permission-deny {
+      background: transparent;
+      color: var(--text-muted);
+      border-color: var(--border);
+    }
+    .btn-permission-deny:hover:not(:disabled) {
+      background: rgba(220, 50, 50, 0.08);
+      color: var(--danger);
+      border-color: rgba(220, 50, 50, 0.3);
+    }
+    @keyframes permission-fade-in {
+      from { opacity: 0; transform: translateX(-4px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
     .composer-interactive-toggle {
       display: inline-flex;
       align-items: center;

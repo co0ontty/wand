@@ -44,3 +44,20 @@ export function isNoiseLine(line: string): boolean {
   if (line.includes("/effort")) return true;
   return false;
 }
+
+/** Append text to a windowed buffer, trimming from start if over max size. */
+export function appendWindow(buffer: string, chunk: string, maxSize: number): string {
+  const next = buffer + chunk;
+  return next.length > maxSize ? next.slice(-maxSize) : next;
+}
+
+/** Normalize prompt text for permission detection (strip ANSI, collapse whitespace). */
+export function normalizePromptText(value: string): string {
+  return value
+    .replace(/\u001b\[(\d+)C/g, (_match, count) => " ".repeat(Number(count) || 1))
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n+/g, "\n")
+    .trim();
+}

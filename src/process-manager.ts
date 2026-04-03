@@ -12,6 +12,7 @@ import { SessionLogger } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, SessionEvent, SessionSnapshot, WandConfig } from "./types.js";
 import { SessionLifecycleManager } from "./session-lifecycle.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
+import { appendWindow, normalizePromptText } from "./pty-text-utils.js";
 
 /** Check if the current process is running as root (UID 0). */
 function isRunningAsRoot(): boolean {
@@ -71,17 +72,7 @@ const PROMPT_PATTERNS = [
   /\bwould you like to\b/i,
   /\bshall i\b/i,
   /\bcan i\b/i,
-  /\bpermission\b/i,
   /\bgrant\b.*\bpermission\b/i
-];
-
-// Patterns that indicate a selection-based prompt (needs Enter, not 'y')
-const SELECTION_PROMPT_PATTERNS = [
-  /\bwould you like to\b/i,
-  /\bgrant.*permission\b/i,
-  /\bpermission\b/i,
-  /\btrust.*folder\b/i,
-  /\bconfirm\b/i
 ];
 
 interface SessionRecord extends SessionSnapshot {
@@ -948,12 +939,6 @@ function getLatestClaudeTaskId(excludeIds: Set<string>): string | null {
   }
 }
 
-/** Append text to a windowed buffer, trimming from start if over max size. */
-function appendWindow(buffer: string, chunk: string, maxSize: number): string {
-  const next = buffer + chunk;
-  return next.length > maxSize ? next.slice(-maxSize) : next;
-}
-
 export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly logger: SessionLogger;
@@ -1310,8 +1295,8 @@ export class ProcessManager extends EventEmitter {
         }
       }
 
-      // Auto-confirm for full-access mode
-      if (rec.autoApprovePermissions) {
+      // Auto-confirm for full-access mode (legacy path for non-Claude sessions without ptyBridge)
+      if (rec.autoApprovePermissions && !rec.ptyBridge) {
         this.autoConfirmWithRecord(rec, chunk, child);
       }
 
@@ -1653,91 +1638,57 @@ export class ProcessManager extends EventEmitter {
   }
 
   resolveEscalation(id: string, requestId: string, resolution?: "approve_once" | "approve_turn" | "deny"): SessionSnapshot {
-    const record = this.mustGet(id);
-    const escalation = record.pendingEscalation;
-    if (!escalation || escalation.requestId !== requestId) {
-      throw new Error("Escalation request not found.");
-    }
-
-    const finalResolution = resolution ?? "approve_once";
-    record.lastEscalationResult = {
-      requestId,
-      resolution: finalResolution,
-      reason: escalation.reason
-    };
-
-    if (finalResolution === "deny") {
-      record.pendingEscalation = null;
-      if (record.ptyProcess && record.status === "running") {
-        record.ptyProcess.write("n\r");
-      }
-      record.ptyPermissionBlocked = false;
-      this.persist(record);
-      return this.snapshot(record);
-    }
-
-    if (finalResolution === "approve_turn") {
-      record.rememberedEscalationScopes.add(escalation.scope);
-      if (escalation.target) {
-        record.rememberedEscalationTargets.add(escalation.target);
-      }
-    }
-
-    record.pendingEscalation = null;
-    record.ptyPermissionBlocked = false;
-    if (record.ptyProcess && record.status === "running") {
-      record.ptyProcess.write("\r");
-    }
-    this.persist(record);
-    return this.snapshot(record);
+    return this.resolvePermission(id, resolution ?? "approve_once", requestId);
   }
 
   approvePermission(id: string): SessionSnapshot {
-    const record = this.mustGet(id);
-
-    // Use bridge for permission resolution
-    if (record.ptyBridge) {
-      record.ptyBridge.resolvePermission("approve_once");
-    } else if (record.ptyProcess && record.status === "running") {
-      record.ptyProcess.write("\r");
-    }
-    record.ptyPermissionBlocked = false;
-    record.pendingEscalation = null;
-    this.persist(record);
-    return this.snapshot(record);
+    return this.resolvePermission(id, "approve_once");
   }
 
   denyPermission(id: string): SessionSnapshot {
-    const record = this.mustGet(id);
-
-    // Use bridge for permission resolution
-    if (record.ptyBridge) {
-      record.ptyBridge.resolvePermission("deny");
-    } else if (record.ptyProcess && record.status === "running") {
-      record.ptyProcess.write("n\r");
-    }
-    record.ptyPermissionBlocked = false;
-    record.pendingEscalation = null;
-    this.persist(record);
-    return this.snapshot(record);
+    return this.resolvePermission(id, "deny");
   }
 
   /**
-   * Resolve permission with specific resolution type.
+   * Canonical permission resolution method.
+   * All other permission methods delegate to this.
    * @param resolution - "approve_once", "approve_turn", or "deny"
+   * @param requestId - Optional escalation request ID for validation
    */
-  resolvePermission(id: string, resolution: "approve_once" | "approve_turn" | "deny"): SessionSnapshot {
+  resolvePermission(id: string, resolution: "approve_once" | "approve_turn" | "deny", requestId?: string): SessionSnapshot {
     const record = this.mustGet(id);
 
-    if (record.ptyBridge) {
-      record.ptyBridge.resolvePermission(resolution);
-    } else if (record.ptyProcess && record.status === "running") {
-      if (resolution === "deny") {
-        record.ptyProcess.write("n\r");
-      } else {
-        record.ptyProcess.write("\r");
+    // Validate requestId if provided
+    if (requestId && record.pendingEscalation) {
+      if (record.pendingEscalation.requestId !== requestId) {
+        throw new Error("Escalation request not found.");
       }
     }
+
+    // Record escalation result for audit trail
+    if (record.pendingEscalation) {
+      record.lastEscalationResult = {
+        requestId: record.pendingEscalation.requestId,
+        resolution,
+        reason: record.pendingEscalation.reason,
+      };
+    }
+
+    // Handle "approve_turn" memory
+    if (resolution === "approve_turn" && record.pendingEscalation) {
+      record.rememberedEscalationScopes.add(record.pendingEscalation.scope);
+      if (record.pendingEscalation.target) {
+        record.rememberedEscalationTargets.add(record.pendingEscalation.target);
+      }
+    }
+
+    // Resolve via bridge or direct PTY write
+    if (record.ptyBridge) {
+      record.ptyBridge.resolvePermission(resolution === "approve_turn" ? "approve_once" : resolution);
+    } else if (record.ptyProcess && record.status === "running") {
+      record.ptyProcess.write(resolution === "deny" ? "n\r" : "\r");
+    }
+
     record.ptyPermissionBlocked = false;
     record.pendingEscalation = null;
     this.persist(record);
@@ -1914,6 +1865,10 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
+  /**
+   * @deprecated Only retained for non-Claude-CLI sessions without ptyBridge.
+   * For Claude CLI sessions, auto-approval is handled by ClaudePtyBridge.detectPermission().
+   */
   private autoConfirmWithRecord(record: SessionRecord, output: string, ptyProcess: IPty): void {
     if (!record.autoApprovePermissions) {
       return;
@@ -1934,9 +1889,6 @@ export class ProcessManager extends EventEmitter {
     const toolPermissionPrompt =
       /\bdo you want to\b/i.test(normalized) &&
       /\(yes\b/i.test(normalized);
-
-    // Check if this is a selection-based prompt (needs Enter, not 'y')
-    const isSelectionPrompt = SELECTION_PROMPT_PATTERNS.some((pattern) => pattern.test(normalized));
 
     // Reduced cooldown for faster response
     if (now - record.lastAutoConfirmAt < 500) {
@@ -2100,16 +2052,6 @@ export class ProcessManager extends EventEmitter {
     // Let users specify it explicitly if they want auto mode.
     return command;
   }
-}
-
-function normalizePromptText(value: string): string {
-  return value
-    .replace(/\u001b\[(\d+)C/g, (_match, count) => " ".repeat(Number(count) || 1))
-    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n+/g, "\n")
-    .trim();
 }
 
 function clampDimension(value: number, min: number, max: number): number {

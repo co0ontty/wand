@@ -395,7 +395,7 @@
             '</aside>' +
             '<main class="main-content">' +
               '<span class="current-task hidden" id="current-task"></span>' +
-              '<span class="permission-actions hidden" id="permission-actions"><button id="approve-permission-btn" class="btn btn-primary btn-small" type="button">批准</button><button id="deny-permission-btn" class="btn btn-ghost btn-small" type="button">拒绝</button></span>' +
+              '' +
               // File panel backdrop (mobile)
               '<div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div>' +
               // File side panel
@@ -463,6 +463,12 @@
                         renderModeOptions(preferredTool, composerMode) +
                       '</select>' +
                       '<button id="terminal-interactive-toggle-top" class="composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨</button>' +
+                      '<span class="permission-actions hidden" id="permission-actions">' +
+                        '<span class="permission-actions-divider"></span>' +
+                        '<span class="permission-actions-label" id="permission-actions-label">等待授权</span>' +
+                        '<button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">批准</button>' +
+                        '<button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">拒绝</button>' +
+                      '</span>' +
                     '</div>' +
                     '<div class="input-composer-right">' +
                       '<span id="queue-counter" class="queue-counter hidden">队列: 0</span>' +
@@ -5533,31 +5539,59 @@
               updateTaskDisplay();
             }
             break;
+          case 'status':
+            if (msg.sessionId && msg.data) {
+              var statusUpdate = { id: msg.sessionId };
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'permissionBlocked')) {
+                statusUpdate.permissionBlocked = !!msg.data.permissionBlocked;
+              }
+              if (msg.data.permissionRequest) {
+                statusUpdate.pendingEscalation = {
+                  scope: msg.data.permissionRequest.scope,
+                  target: msg.data.permissionRequest.target,
+                  reason: msg.data.permissionRequest.prompt
+                };
+              }
+              if (msg.data.permissionBlocked === false) {
+                statusUpdate.pendingEscalation = null;
+              }
+              updateSessionSnapshot(statusUpdate);
+              if (msg.sessionId === state.selectedId) {
+                updateTaskDisplay();
+              }
+            }
+            break;
         }
       }
 
       function updateTaskDisplay() {
         var taskEl = document.getElementById("current-task");
         var permissionActionsEl = document.getElementById("permission-actions");
+        var permissionLabel = document.getElementById("permission-actions-label");
         if (!taskEl) return;
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var pendingEscalation = selectedSession && selectedSession.pendingEscalation ? selectedSession.pendingEscalation : null;
-        if (pendingEscalation) {
-          var reason = pendingEscalation.reason || "等待 Claude 权限授权";
-          var target = pendingEscalation.target ? " · " + pendingEscalation.target : "";
-          taskEl.textContent = reason + target;
+        var isBlocked = pendingEscalation || (selectedSession && selectedSession.permissionBlocked);
+
+        if (isBlocked) {
+          // Show permission label in input composer area
+          if (permissionLabel) {
+            if (pendingEscalation) {
+              var reason = pendingEscalation.reason || "等待授权";
+              var target = pendingEscalation.target ? " · " + pendingEscalation.target : "";
+              permissionLabel.textContent = reason + target;
+            } else {
+              permissionLabel.textContent = "等待授权";
+            }
+          }
+          if (permissionActionsEl) permissionActionsEl.classList.remove("hidden");
+          // Also show in task bar
+          taskEl.textContent = pendingEscalation ? (pendingEscalation.reason || "等待 Claude 权限授权") : "等待 Claude 权限授权";
           taskEl.classList.remove("hidden");
           taskEl.classList.add("permission-blocked");
-          if (permissionActionsEl) permissionActionsEl.classList.remove("hidden");
           return;
         }
-        if (selectedSession && selectedSession.permissionBlocked) {
-          taskEl.textContent = "等待 Claude 权限授权";
-          taskEl.classList.remove("hidden");
-          taskEl.classList.add("permission-blocked");
-          if (permissionActionsEl) permissionActionsEl.classList.remove("hidden");
-          return;
-        }
+
         taskEl.classList.remove("permission-blocked");
         if (permissionActionsEl) permissionActionsEl.classList.add("hidden");
         var task = state.currentTask;
@@ -5572,6 +5606,10 @@
 
       function approvePermission() {
         if (!state.selectedId) return;
+        var approveBtn = document.getElementById("approve-permission-btn");
+        var denyBtn = document.getElementById("deny-permission-btn");
+        if (approveBtn) approveBtn.disabled = true;
+        if (denyBtn) denyBtn.disabled = true;
         fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/approve-permission", {
           method: "POST",
           credentials: "same-origin"
@@ -5587,11 +5625,19 @@
           })
           .catch(function(error) {
             showToast((error && error.message) || "无法批准授权。", "error");
+          })
+          .finally(function() {
+            if (approveBtn) approveBtn.disabled = false;
+            if (denyBtn) denyBtn.disabled = false;
           });
       }
 
       function denyPermission() {
         if (!state.selectedId) return;
+        var approveBtn = document.getElementById("approve-permission-btn");
+        var denyBtn = document.getElementById("deny-permission-btn");
+        if (approveBtn) approveBtn.disabled = true;
+        if (denyBtn) denyBtn.disabled = true;
         fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/deny-permission", {
           method: "POST",
           credentials: "same-origin"
@@ -5607,6 +5653,10 @@
           })
           .catch(function(error) {
             showToast((error && error.message) || "无法拒绝授权。", "error");
+          })
+          .finally(function() {
+            if (approveBtn) approveBtn.disabled = false;
+            if (denyBtn) denyBtn.disabled = false;
           });
       }
 

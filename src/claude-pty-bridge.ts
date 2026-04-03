@@ -21,7 +21,7 @@ import type {
   SessionEndData,
   RawOutputData,
 } from "./types.js";
-import { stripAnsi, isNoiseLine } from "./pty-text-utils.js";
+import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText } from "./pty-text-utils.js";
 
 // ── Constants ──
 
@@ -69,23 +69,6 @@ interface PermissionState {
 export type PermissionResolution = "approve_once" | "approve_turn" | "deny";
 
 // ── Helper Functions ──
-
-/** Append text to a windowed buffer, trimming from start if over max size. */
-function appendWindow(buffer: string, chunk: string, maxSize: number): string {
-  const next = buffer + chunk;
-  return next.length > maxSize ? next.slice(-maxSize) : next;
-}
-
-/** Normalize prompt text for permission detection */
-function normalizePromptText(value: string): string {
-  return value
-    .replace(/\u001b\[(\d+)C/g, (_match, count) => " ".repeat(Number(count) || 1))
-    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n+/g, "\n")
-    .trim();
-}
 
 /** Normalize PTY output (fix line endings) */
 function normalizePtyOutput(value: string): string {
@@ -530,7 +513,6 @@ export class ClaudePtyBridge extends EventEmitter {
       /\bdo you want to\b/i.test(normalized) ||
       /\bgrant\b.*\bpermission\b/i.test(normalized) ||
       /\bhaven't granted\b/i.test(normalized) ||
-      /\bpermission\b/i.test(normalized) ||
       /\benter to confirm\b/i.test(normalized)
     );
   }
