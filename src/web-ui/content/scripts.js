@@ -122,6 +122,9 @@
         modifiers: { ctrl: false, alt: false, shift: false },
         fileSearchQuery: "",
         allFiles: [],
+        claudeHistory: [],
+        claudeHistoryLoaded: false,
+        claudeHistoryExpanded: false,
         // Load last used working directory from localStorage
         workingDir: (function() {
           try {
@@ -573,9 +576,6 @@
       }
 
       function renderSessions() {
-        if (state.sessions.length === 0) {
-          return '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
-        }
         var activeSessions = state.sessions.filter(function(session) { return !session.archived; });
         var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
         var groups = [];
@@ -585,6 +585,10 @@
         if (archivedSessions.length > 0) {
           groups.push(renderSessionGroup("已归档", archivedSessions));
         }
+        groups.push(renderClaudeHistorySection());
+        if (groups.length === 1 && state.sessions.length === 0) {
+          return '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>' + renderClaudeHistorySection();
+        }
         return groups.join("");
       }
 
@@ -593,6 +597,115 @@
           '<div class="session-group-title">' + escapeHtml(title) + '</div>' +
           sessions.map(renderSessionItem).join("") +
         '</section>';
+      }
+
+      function renderClaudeHistorySection() {
+        var chevron = state.claudeHistoryExpanded ? "&#9662;" : "&#9656;";
+        var countBadge = state.claudeHistoryLoaded && state.claudeHistory.length > 0
+          ? ' <span class="history-count">' + state.claudeHistory.length + '</span>'
+          : '';
+        var header = '<div class="session-group-title claude-history-toggle" id="claude-history-toggle">' +
+          '<span class="chevron">' + chevron + '</span> Claude 历史' + countBadge +
+          '</div>';
+
+        if (!state.claudeHistoryExpanded) {
+          return '<section class="session-group">' + header + '</section>';
+        }
+
+        if (!state.claudeHistoryLoaded) {
+          return '<section class="session-group">' + header +
+            '<div class="claude-history-loading">扫描历史会话中…</div></section>';
+        }
+
+        var filtered = state.claudeHistory.filter(function(s) {
+          return s.hasConversation && !s.managedByWand;
+        });
+
+        if (filtered.length === 0) {
+          return '<section class="session-group">' + header +
+            '<div class="claude-history-loading">没有发现外部 Claude 会话</div></section>';
+        }
+
+        // Group by cwd
+        var groups = {};
+        var groupOrder = [];
+        filtered.forEach(function(s) {
+          if (!groups[s.cwd]) {
+            groups[s.cwd] = [];
+            groupOrder.push(s.cwd);
+          }
+          groups[s.cwd].push(s);
+        });
+
+        var html = '';
+        groupOrder.forEach(function(cwd) {
+          var cwdShort = cwd.split("/").filter(Boolean).slice(-3).join("/");
+          html += '<div class="session-group-title" style="font-size:0.6rem;padding:4px 8px 4px;opacity:0.7">' +
+            escapeHtml(cwdShort) + ' (' + groups[cwd].length + ')</div>';
+          html += groups[cwd].map(renderClaudeHistoryItem).join("");
+        });
+
+        return '<section class="session-group">' + header + html + '</section>';
+      }
+
+      function renderClaudeHistoryItem(session) {
+        var shortId = session.claudeSessionId.slice(0, 8);
+        var preview = session.firstUserMessage || "(空会话)";
+        var timeStr = formatHistoryTime(session.timestamp);
+
+        return '<div class="session-item claude-history-item" data-claude-history-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
+          '<div class="session-item-row">' +
+            '<div class="session-main">' +
+              '<div class="session-command claude-history-preview">' + escapeHtml(preview) + '</div>' +
+              '<div class="session-meta">' +
+                '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>' +
+                '<span>' + escapeHtml(timeStr) + '</span>' +
+              '</div>' +
+            '</div>' +
+            '<span class="session-actions">' +
+              '<button class="btn btn-secondary btn-sm session-action-btn" data-action="resume-history" data-claude-session-id="' +
+              session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) +
+              '" type="button" aria-label="恢复会话" title="恢复此 Claude 历史会话">&#8635;</button>' +
+            '</span>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function formatHistoryTime(isoStr) {
+        if (!isoStr) return "";
+        try {
+          var d = new Date(isoStr);
+          var now = new Date();
+          var diffMs = now - d;
+          var diffMin = Math.floor(diffMs / 60000);
+          if (diffMin < 1) return "刚刚";
+          if (diffMin < 60) return diffMin + " 分钟前";
+          var diffHr = Math.floor(diffMin / 60);
+          if (diffHr < 24) return diffHr + " 小时前";
+          var diffDay = Math.floor(diffHr / 24);
+          if (diffDay < 30) return diffDay + " 天前";
+          return d.toLocaleDateString();
+        } catch (e) {
+          return "";
+        }
+      }
+
+      function loadClaudeHistory() {
+        return fetch("/api/claude-history", { credentials: "same-origin" })
+          .then(function(res) {
+            if (!res.ok) return [];
+            return res.json();
+          })
+          .then(function(sessions) {
+            state.claudeHistory = sessions || [];
+            state.claudeHistoryLoaded = true;
+            updateSessionsList();
+          })
+          .catch(function() {
+            state.claudeHistoryLoaded = true;
+            state.claudeHistory = [];
+            updateSessionsList();
+          });
       }
 
       function isMobileLayout() {
@@ -1179,19 +1292,20 @@
             '</div>' +
             '<div class="modal-body">' +
               '<div class="field">' +
+                '<label class="field-label">模式</label>' +
+                '<div id="mode-cards" class="mode-cards">' +
+                  renderModeCards(modalMode) +
+                '</div>' +
+                '<p id="mode-description" class="field-hint">' + escapeHtml(getToolModeHint(modalTool, modalMode)) + '</p>' +
+              '</div>' +
+              '<div class="field">' +
                 '<label class="field-label" for="cwd">工作目录</label>' +
                 '<div class="suggestions-wrap">' +
                   '<input id="cwd" type="text" class="field-input" autocomplete="off" placeholder="留空则使用默认目录" />' +
                   '<div id="cwd-suggestions" class="suggestions hidden"></div>' +
                 '</div>' +
                 '<p class="field-hint">会话将在此目录启动，支持路径自动补全。</p>' +
-              '</div>' +
-              '<div class="field">' +
-                '<label class="field-label">模式</label>' +
-                '<div id="mode-cards" class="mode-cards">' +
-                  renderModeCards(modalMode) +
-                '</div>' +
-                '<p id="mode-description" class="field-hint">' + escapeHtml(getToolModeHint(modalTool, modalMode)) + '</p>' +
+                '<div id="recent-paths-bubbles" class="recent-paths-bubbles"></div>' +
               '</div>' +
               '<button id="run-button" class="btn btn-primary btn-block">启动会话</button>' +
               '<p id="modal-error" class="error-message hidden"></p>' +
@@ -1939,6 +2053,20 @@
       function handleSessionItemClick(event) {
         var target = event.target;
         if (!target || !(target instanceof Element)) return;
+
+        // Claude history toggle
+        var historyToggle = target.closest("#claude-history-toggle");
+        if (historyToggle) {
+          event.preventDefault();
+          event.stopPropagation();
+          state.claudeHistoryExpanded = !state.claudeHistoryExpanded;
+          if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
+            loadClaudeHistory();
+          }
+          updateSessionsList();
+          return;
+        }
+
         var actionButton = target.closest("[data-action]");
         if (actionButton && actionButton instanceof HTMLElement) {
           event.preventDefault();
@@ -1947,6 +2075,8 @@
             deleteSession(actionButton.dataset.sessionId);
           } else if (actionButton.dataset.action === "resume" && actionButton.dataset.sessionId) {
             handleResumeAction(actionButton);
+          } else if (actionButton.dataset.action === "resume-history" && actionButton.dataset.claudeSessionId) {
+            handleResumeHistoryAction(actionButton);
           }
           return;
         }
@@ -2324,6 +2454,9 @@
         state.selectedId = null;
         persistSelectedId();
         state.sessions = [];
+        state.claudeHistory = [];
+        state.claudeHistoryLoaded = false;
+        state.claudeHistoryExpanded = false;
         state.sessionsDrawerOpen = false;
         render();
       }
@@ -2710,6 +2843,7 @@
           state.sessionTool = getPreferredTool();
           state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
           syncSessionModalUI();
+          loadRecentPathBubbles();
           setTimeout(function() {
             var modeCardsEl = document.getElementById("mode-cards");
             if (modeCardsEl) modeCardsEl.focus();
@@ -2737,7 +2871,6 @@
       }
 
       function setupFocusTrap(modal) {
-        // Remove any existing focus trap before adding a new one
         if (focusTrapHandler) {
           document.removeEventListener("keydown", focusTrapHandler);
         }
@@ -2928,6 +3061,36 @@
         .catch(function() {
           showError(errorEl, "无法启动会话，请确认 Claude 已正确安装。");
         });
+      }
+
+      function loadRecentPathBubbles() {
+        var container = document.getElementById("recent-paths-bubbles");
+        if (!container) return;
+        fetch("/api/recent-paths", { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(items) {
+            if (!items || !items.length) {
+              container.innerHTML = "";
+              return;
+            }
+            container.innerHTML = items.map(function(item) {
+              return '<button class="recent-path-bubble" data-path="' + escapeHtml(item.path) + '" title="' + escapeHtml(item.path) + '">' +
+                escapeHtml(item.name) +
+              '</button>';
+            }).join("");
+            container.querySelectorAll(".recent-path-bubble").forEach(function(el) {
+              el.addEventListener("click", function() {
+                var cwdEl = document.getElementById("cwd");
+                if (cwdEl) {
+                  cwdEl.value = el.dataset.path;
+                  state.cwdValue = el.dataset.path || "";
+                }
+              });
+            });
+          })
+          .catch(function() {
+            if (container) container.innerHTML = "";
+          });
       }
 
       function schedulePathSuggestions() {
@@ -4224,6 +4387,52 @@
           });
       }
 
+      function handleResumeHistoryAction(actionButton) {
+        var claudeSessionId = actionButton.dataset.claudeSessionId;
+        var cwd = actionButton.dataset.cwd;
+        if (!claudeSessionId) return;
+        actionButton.disabled = true;
+        resumeClaudeHistorySession(claudeSessionId, cwd)
+          .then(function(data) {
+            if (data && data.id) {
+              state.selectedId = data.id;
+              persistSelectedId();
+              state.drafts[data.id] = "";
+              loadSessions().then(function() {
+                selectSession(data.id);
+                closeSessionsDrawer();
+              });
+            }
+          })
+          .finally(function() {
+            actionButton.disabled = false;
+          });
+      }
+
+      function resumeClaudeHistorySession(claudeSessionId, cwd) {
+        return fetch("/api/claude-sessions/" + encodeURIComponent(claudeSessionId) + "/resume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            mode: state.chatMode || (state.config && state.config.defaultMode) || "default",
+            cwd: cwd
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            showToast(data.error, "error");
+            return null;
+          }
+          return data;
+        })
+        .catch(function(error) {
+          showToast((error && error.message) || "无法恢复历史会话。", "error");
+          return null;
+        });
+      }
+
       function isTouchDevice() {
         return "ontouchstart" in window || navigator.maxTouchPoints > 0;
       }
@@ -5067,7 +5276,7 @@
         });
 
         // Store document-level listeners so they can be removed in teardownTerminal
-        state._resizeMouseMove = function(e) {
+        state.resizeMouseMove = function(e) {
           if (!isResizing) return;
           var deltaY = e.clientY - startY;
           var newHeight = Math.max(200, Math.min(startHeight + deltaY, window.innerHeight - 200));
@@ -5075,9 +5284,9 @@
           container.style.flex = "none";
           scheduleTerminalResize();
         };
-        document.addEventListener("mousemove", state._resizeMouseMove);
+        document.addEventListener("mousemove", state.resizeMouseMove);
 
-        state._resizeMouseUp = function() {
+        state.resizeMouseUp = function() {
           if (isResizing) {
             isResizing = false;
             document.body.style.cursor = "";
@@ -5085,7 +5294,7 @@
             scheduleTerminalResize();
           }
         };
-        document.addEventListener("mouseup", state._resizeMouseUp);
+        document.addEventListener("mouseup", state.resizeMouseUp);
 
         // 触摸设备支持
         resizeHandle.addEventListener("touchstart", function(e) {
@@ -5095,7 +5304,7 @@
           e.preventDefault();
         }, { passive: false });
 
-        state._resizeTouchMove = function(e) {
+        state.resizeTouchMove = function(e) {
           if (!isResizing) return;
           var deltaY = e.touches[0].clientY - startY;
           var newHeight = Math.max(200, Math.min(startHeight + deltaY, window.innerHeight - 200));
@@ -5104,15 +5313,15 @@
           scheduleTerminalResize();
           e.preventDefault();
         };
-        document.addEventListener("touchmove", state._resizeTouchMove, { passive: false });
+        document.addEventListener("touchmove", state.resizeTouchMove, { passive: false });
 
-        state._resizeTouchEnd = function() {
+        state.resizeTouchEnd = function() {
           if (isResizing) {
             isResizing = false;
             scheduleTerminalResize();
           }
         };
-        document.addEventListener("touchend", state._resizeTouchEnd);
+        document.addEventListener("touchend", state.resizeTouchEnd);
       }
 
       function observeTerminalResize() {
@@ -5129,6 +5338,10 @@
       }
 
       function teardownTerminal() {
+        if (state.resizeTimer) {
+          clearTimeout(state.resizeTimer);
+          state.resizeTimer = null;
+        }
         if (state.resizeObserver) {
           state.resizeObserver.disconnect();
           state.resizeObserver = null;
@@ -5137,23 +5350,14 @@
           window.removeEventListener("resize", state.resizeHandler);
           state.resizeHandler = null;
         }
-        // Clean up document-level resize drag listeners
-        if (state._resizeMouseMove) {
-          document.removeEventListener("mousemove", state._resizeMouseMove);
-          state._resizeMouseMove = null;
-        }
-        if (state._resizeMouseUp) {
-          document.removeEventListener("mouseup", state._resizeMouseUp);
-          state._resizeMouseUp = null;
-        }
-        if (state._resizeTouchMove) {
-          document.removeEventListener("touchmove", state._resizeTouchMove);
-          state._resizeTouchMove = null;
-        }
-        if (state._resizeTouchEnd) {
-          document.removeEventListener("touchend", state._resizeTouchEnd);
-          state._resizeTouchEnd = null;
-        }
+        [["mousemove", "resizeMouseMove"], ["mouseup", "resizeMouseUp"],
+         ["touchmove", "resizeTouchMove"], ["touchend", "resizeTouchEnd"]
+        ].forEach(function(pair) {
+          if (state[pair[1]]) {
+            document.removeEventListener(pair[0], state[pair[1]]);
+            state[pair[1]] = null;
+          }
+        });
         clearTerminalScrollIdleTimer();
         if (state.terminalViewportEl) {
           if (state.terminalViewportScrollHandler) {
