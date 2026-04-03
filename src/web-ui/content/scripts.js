@@ -583,8 +583,11 @@
             '<div class="claude-history-loading">扫描历史会话中…</div></section>';
         }
 
+        var todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        var todayMs = todayStart.getTime();
         var filtered = state.claudeHistory.filter(function(s) {
-          return s.hasConversation && !s.managedByWand;
+          return s.hasConversation && !s.managedByWand && s.mtimeMs < todayMs;
         });
 
         if (filtered.length === 0) {
@@ -1516,7 +1519,7 @@
           inputBox.addEventListener("paste", handleInputPaste);
           inputBox.addEventListener("input", function() {
             refreshInputBoxState(inputBox);
-            setDraftValue(inputBox.value);
+            setDraftValue(inputBox.value, true);
           });
           inputBox.addEventListener("focus", function() {
             // Close drawer when user focuses input to avoid backdrop blocking clicks
@@ -3119,7 +3122,7 @@
               // Move cursor to after the inserted newline
               inputBox.selectionStart = start + 1;
               inputBox.selectionEnd = start + 1;
-              setDraftValue(newValue);
+              setDraftValue(newValue, true);
               autoResizeInput(inputBox);
             }
             return;
@@ -3134,7 +3137,7 @@
           setTimeout(function() {
             var inputBox = document.getElementById("input-box");
             if (inputBox) {
-              setDraftValue(inputBox.value);
+              setDraftValue(inputBox.value, true);
             }
           }, 0);
           return;
@@ -3148,7 +3151,7 @@
             var current = inputBox.value;
             var newValue = current.slice(0, start) + String.fromCharCode(9) + current.slice(start);
             inputBox.value = newValue;
-            setDraftValue(newValue);
+            setDraftValue(newValue, true);
           }
           return;
         }
@@ -3261,15 +3264,17 @@
         return "";
       }
 
-      function setDraftValue(value) {
+      function setDraftValue(value, skipDom) {
         if (!state.selectedId) return;
         state.drafts[state.selectedId] = value;
         // Persist to localStorage
         try {
           localStorage.setItem("wand-draft-" + state.selectedId, value);
         } catch (e) { /* ignore */ }
-        var inputBox = document.getElementById("input-box");
-        if (inputBox) inputBox.value = value;
+        if (!skipDom) {
+          var inputBox = document.getElementById("input-box");
+          if (inputBox) inputBox.value = value;
+        }
       }
 
       function autoResizeInput(el) {
