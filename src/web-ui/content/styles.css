@@ -1747,13 +1747,13 @@
     }
 
     .shortcut-key {
-      height: 22px;
-      min-width: 22px;
-      border-radius: 4px;
-      border: 1px solid rgba(125, 91, 57, 0.15);
-      background: rgba(255, 255, 255, 0.6);
+      height: 20px;
+      min-width: 20px;
+      border-radius: 3px;
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      background: rgba(255, 255, 255, 0.5);
       color: var(--text-muted);
-      font-size: 0.625rem;
+      font-size: 0.5625rem;
       font-family: var(--font-mono);
       font-weight: 500;
       cursor: pointer;
@@ -1761,7 +1761,7 @@
       align-items: center;
       justify-content: center;
       transition: all 0.12s ease;
-      padding: 0 5px;
+      padding: 0 4px;
       flex-shrink: 0;
       -webkit-tap-highlight-color: transparent;
       user-select: none;
@@ -1788,9 +1788,9 @@
     }
 
     .shortcut-key.shortcut-dir {
-      min-width: 20px;
-      padding: 0 3px;
-      font-size: 0.6875rem;
+      min-width: 18px;
+      padding: 0 2px;
+      font-size: 0.625rem;
     }
 
     .shortcut-key[data-key="escape"] {
@@ -2999,7 +2999,7 @@
     .token-type { color: #d5a35b; }
 
     .input-panel {
-      padding: 8px 12px;
+      padding: 6px 10px;
       flex-shrink: 0;
       z-index: 26;
       overscroll-behavior: contain;
@@ -3009,7 +3009,7 @@
     .input-composer {
       background: rgba(255, 255, 255, 0.85);
       border: 1px solid var(--border-default);
-      border-radius: 16px;
+      border-radius: 14px;
       transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
       overflow: hidden;
       position: relative;
@@ -3017,34 +3017,35 @@
     }
     .input-composer:focus-within {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-muted), 0 0 24px rgba(197, 101, 61, 0.1);
+      box-shadow: 0 0 0 2px var(--accent-muted), 0 0 16px rgba(197, 101, 61, 0.08);
       background: rgba(255, 255, 255, 0.98);
     }
     .input-composer-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 3px 5px 5px 8px;
-      gap: 6px;
+      padding: 2px 4px 3px 6px;
+      gap: 4px;
     }
     .input-composer-left {
       display: flex;
       align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
+      gap: 4px;
+      flex-wrap: nowrap;
+      flex-shrink: 0;
     }
 
     .composer-interactive-toggle {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 26px;
-      height: 26px;
+      width: 22px;
+      height: 22px;
       border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-sm);
+      border-radius: 4px;
       background: transparent;
       color: var(--text-muted);
-      font-size: 0.8125rem;
+      font-size: 0.75rem;
       cursor: pointer;
       transition: all var(--transition-fast);
       flex-shrink: 0;
@@ -3063,15 +3064,17 @@
     .input-composer-right {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
       position: relative;
+      flex: 1;
+      justify-content: flex-end;
     }
     .queue-counter {
-      font-size: 0.6875rem;
+      font-size: 0.625rem;
       color: var(--accent);
       background: var(--accent-muted);
-      padding: 2px 8px;
-      border-radius: 10px;
+      padding: 1px 6px;
+      border-radius: 8px;
       white-space: nowrap;
       font-weight: 600;
       animation: queuePulse 1.5s ease-in-out infinite;
@@ -3083,27 +3086,28 @@
     }
 
     .input-hint {
-      font-size: 0.625rem;
+      font-size: 0.5625rem;
       color: var(--text-muted);
       white-space: nowrap;
       user-select: none;
+      opacity: 0.7;
     }
 
     /* Session info bar at bottom of input composer */
     .input-session-info-bar {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px 10px;
-      background: rgba(245, 240, 230, 0.6);
+      gap: 5px;
+      padding: 3px 8px;
+      background: rgba(245, 240, 230, 0.5);
       border-top: 1px solid var(--border-subtle);
-      font-size: 0.75rem;
+      font-size: 0.6875rem;
       color: var(--text-secondary);
     }
     .session-cwd-display {
       font-weight: 500;
       color: var(--text-primary);
-      max-width: 200px;
+      max-width: 180px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -3681,14 +3685,14 @@
     .input-textarea {
       --input-max-height: 120px;
       font-family: var(--font-mono);
-      font-size: 0.875rem;
+      font-size: 0.8125rem;
       background: transparent;
       border: none;
       color: var(--text-primary);
-      padding: 10px 12px 4px;
+      padding: 8px 10px 3px;
       outline: none;
       resize: none;
-      min-height: 36px;
+      min-height: 32px;
       max-height: var(--input-max-height);
       width: 100%;
       overflow-y: hidden;
@@ -3731,26 +3735,25 @@
     /* Chat mode select pill */
     .chat-mode-select {
       font-family: var(--font-sans);
-      font-size: 0.6875rem;
+      font-size: 0.625rem;
       font-weight: 500;
-      padding: 2px 8px;
-      border-radius: 12px;
+      padding: 1px 16px 1px 6px;
+      border-radius: 10px;
       border: 1px solid var(--border-subtle);
       background: rgba(246, 241, 232, 0.7);
       color: var(--text-secondary);
       cursor: pointer;
       transition: all var(--transition-fast);
-      min-height: 24px;
-      max-width: 100px;
+      min-height: 22px;
+      max-width: 90px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       appearance: none;
       -webkit-appearance: none;
-      padding-right: 18px;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239a8e82' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' fill='none'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%239a8e82' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
       background-repeat: no-repeat;
-      background-position: right 5px center;
+      background-position: right 4px center;
     }
     .chat-mode-select:hover {
       border-color: var(--accent);
@@ -3764,9 +3767,9 @@
 
     /* Circular action buttons */
     .btn-circle {
-      width: 34px;
-      height: 34px;
-      min-width: 34px;
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
       border-radius: 50%;
       border: none;
       display: inline-flex;
@@ -3780,11 +3783,11 @@
     .btn-circle-send {
       background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
       color: white;
-      box-shadow: 0 2px 8px rgba(197, 101, 61, 0.3);
+      box-shadow: 0 1px 6px rgba(197, 101, 61, 0.25);
     }
     .btn-circle-send:hover {
       transform: scale(1.08);
-      box-shadow: 0 4px 12px rgba(197, 101, 61, 0.4);
+      box-shadow: 0 3px 10px rgba(197, 101, 61, 0.35);
     }
     .btn-circle-send:active {
       transform: scale(0.95);
@@ -4647,8 +4650,8 @@
       /* 移动端输入面板 - 紧凑 */
       .input-panel {
         z-index: 30;
-        padding: 6px 8px;
-        padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px) + var(--keyboard-offset, 0px));
+        padding: 4px 6px;
+        padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px) + var(--keyboard-offset, 0px));
         flex: 0 0 auto;
         margin-top: auto;
         background: linear-gradient(180deg, rgba(246, 241, 232, 0) 0%, rgba(246, 241, 232, 0.82) 20%, rgba(246, 241, 232, 0.94) 100%);
@@ -4656,33 +4659,33 @@
       }
 
       .input-textarea {
-        padding-bottom: 6px;
+        padding-bottom: 4px;
       }
 
       .input-session-info-bar {
-        padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
+        padding: 2px 6px;
+        padding-bottom: calc(3px + env(safe-area-inset-bottom, 0px));
+        font-size: 0.625rem;
       }
 
       .input-composer {
-        border-radius: 12px;
+        border-radius: 10px;
       }
 
       .input-composer-bar {
-        padding: 2px 4px 4px 6px;
-        gap: 4px;
+        padding: 1px 3px 2px 5px;
+        gap: 3px;
       }
 
       .input-composer-left { gap: 3px; }
-      .input-composer-right { gap: 4px; }
+      .input-composer-right { gap: 3px; }
 
       /* 移动端会话信息栏 */
       .input-session-info-bar {
-        padding: 4px 8px;
-        font-size: 0.6875rem;
         flex-wrap: wrap;
       }
       .session-cwd-display {
-        max-width: 120px;
+        max-width: 100px;
       }
 
       .input-row { flex-direction: column; align-items: stretch; gap: 6px; max-width: 100%; }
@@ -4713,13 +4716,13 @@
       }
 
       .btn-circle {
-        width: 32px;
-        height: 32px;
+        width: 26px;
+        height: 26px;
         border-radius: 50%;
       }
       .btn-circle-send svg, .btn-circle-stop svg {
-        width: 14px;
-        height: 14px;
+        width: 12px;
+        height: 12px;
       }
 
       /* 防止iOS自动缩放 */
@@ -4729,18 +4732,18 @@
       }
 
       .input-textarea {
-        min-height: 36px;
-        padding: 8px;
+        min-height: 32px;
+        padding: 6px 8px 3px;
         font-size: 16px;
         line-height: 1.35;
       }
 
       .chat-mode-select {
-        max-width: 70px;
+        max-width: 65px;
         font-size: 0.5625rem;
-        height: 28px;
-        min-height: 28px;
-        padding: 0 4px;
+        height: 22px;
+        min-height: 22px;
+        padding: 0 14px 0 4px;
         border-radius: 5px;
       }
       .input-hint {
@@ -4752,13 +4755,13 @@
         gap: 2px;
       }
       .shortcut-key {
-        height: 24px;
-        min-width: 24px;
-        font-size: 0.625rem;
-        padding: 0 4px;
+        height: 20px;
+        min-width: 20px;
+        font-size: 0.5625rem;
+        padding: 0 3px;
       }
       .shortcut-key.shortcut-dir {
-        min-width: 22px;
+        min-width: 18px;
       }
 
       /* 小键盘 FAB */
@@ -4978,10 +4981,10 @@
         padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
       }
 
-      .input-composer { border-radius: 10px; }
-      .input-textarea { min-height: 32px; padding: 6px; font-size: 15px; }
+      .input-composer { border-radius: 8px; }
+      .input-textarea { min-height: 28px; padding: 5px 6px 2px; font-size: 15px; }
 
-      .btn-circle { width: 28px; height: 28px; }
+      .btn-circle { width: 24px; height: 24px; min-width: 24px; }
 
       .session-item {
         padding: 6px 8px;
