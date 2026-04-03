@@ -13,6 +13,7 @@ const execAsync = promisify(exec);
 const SERVER_MODULE_DIR = path.dirname(new URL(import.meta.url).pathname);
 const RUNTIME_ROOT_DIR = path.resolve(SERVER_MODULE_DIR, "..");
 
+import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
 import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
 import { ensureCertificates } from "./cert.js";
 import { isExecutionMode, resolveConfigDir } from "./config.js";
@@ -20,7 +21,7 @@ import { ProcessManager, ProcessEvent, SessionInputError } from "./process-manag
 import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { renderApp } from "./web-ui/index.js";
 import { parseMessages } from "./message-parser.js";
-import { generatePwaManifest, generateServiceWorker, getIconSvg } from "./pwa.js";
+import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
 import { isPathWithinBase, isBlockedFolderPath, normalizeFolderPath } from "./middleware/path-safety.js";
@@ -290,7 +291,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const app = express();
   const storage = new WandStorage(resolveDatabasePath(configPath));
   setAuthStorage(storage);
-  const processes = new ProcessManager(config, storage, resolveConfigDir(configPath));
+  const configDir = resolveConfigDir(configPath);
+  const avatarSeed = await ensureAvatarSeed(configDir);
+  const processes = new ProcessManager(config, storage, configDir);
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
   const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
@@ -311,7 +314,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.get("/icon.svg", (_req, res) => {
-    res.type("svg").send(getIconSvg());
+    res.type("image/svg+xml").send(getAvatarSvg(avatarSeed, 192));
   });
 
   const iconsDir = path.resolve(
@@ -321,11 +324,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   );
 
   app.get("/icon-192.png", (_req, res) => {
-    res.sendFile(path.join(iconsDir, "icon-192.png"), { maxAge: "1y" });
+    res.type("image/svg+xml").send(getAvatarSvg(avatarSeed, 192));
   });
 
   app.get("/icon-512.png", (_req, res) => {
-    res.sendFile(path.join(iconsDir, "icon-512.png"), { maxAge: "1y" });
+    res.type("image/svg+xml").send(getAvatarSvg(avatarSeed, 512));
   });
 
   app.get("/sw.js", (_req, res) => {

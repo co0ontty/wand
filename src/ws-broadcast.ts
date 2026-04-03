@@ -155,8 +155,15 @@ export class WsBroadcastManager {
   }
 
   private processWsQueue(client: WsClient): void {
-    if (client.sendInProgress || client.sendQueue.length === 0 || client.backpressurePaused) {
+    if (client.sendInProgress || client.sendQueue.length === 0) {
       return;
+    }
+    if (client.backpressurePaused) {
+      if (client.sendQueue.length < MAX_QUEUE_SIZE * 0.8) {
+        client.backpressurePaused = false;
+      } else {
+        return;
+      }
     }
     // Check socket state before dequeuing to avoid dropping messages
     if (client.ws.readyState !== WebSocket.OPEN) {
@@ -170,11 +177,6 @@ export class WsBroadcastManager {
     client.ws.send(message, (err) => {
       client.sendInProgress = false;
       if (err) return;
-      // Check backpressure threshold
-      const threshold = MAX_QUEUE_SIZE * 0.8;
-      if (client.backpressurePaused && client.sendQueue.length < threshold) {
-        client.backpressurePaused = false;
-      }
       this.processWsQueue(client);
     });
   }

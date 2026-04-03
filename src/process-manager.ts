@@ -1602,6 +1602,7 @@ export class ProcessManager extends EventEmitter {
     this.deleteClaudeCache(record);
     this.sessions.delete(id);
     this.lastPersistedMessageCount.delete(id);
+    this.lifecycleManager.unregister(id);
   }
 
   private deleteClaudeCache(record: Pick<SessionRecord, "claudeSessionId" | "cwd">): void {
