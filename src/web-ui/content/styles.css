@@ -1730,149 +1730,78 @@
     }
 
     /* Keyboard toggle button and popup */
-    .keyboard-toggle-btn {
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      border: 1px solid rgba(125, 91, 57, 0.2);
-      background: rgba(255, 255, 255, 0.7);
-      color: var(--text-secondary);
-      cursor: pointer;
+    /* ===== 内联快捷键 ===== */
+    .inline-shortcuts {
       display: flex;
       align-items: center;
-      justify-content: center;
-      transition: all 0.15s ease;
+      gap: 3px;
       flex-shrink: 0;
-      -webkit-tap-highlight-color: transparent;
+    }
+
+    .shortcut-sep {
+      color: var(--text-muted);
+      font-size: 0.625rem;
+      opacity: 0.5;
+      margin: 0 1px;
       user-select: none;
-      position: relative;
-    }
-    .keyboard-toggle-btn:hover {
-      border-color: var(--accent-soft);
-      background: rgba(255, 255, 255, 0.9);
-      color: var(--text-primary);
-    }
-    .keyboard-toggle-btn:active {
-      background: var(--accent-soft);
-      border-color: var(--accent);
-      color: white;
-      transform: scale(0.95);
-    }
-    .keyboard-toggle-btn.active {
-      background: var(--accent-soft);
-      border-color: var(--accent);
-      color: white;
-    }
-    .keyboard-toggle-btn.hidden {
-      display: none;
     }
 
-    /* Keyboard popup panel */
-    .keyboard-popup {
-      position: fixed;
-      bottom: calc(var(--keyboard-offset, 0px) + 160px);
-      right: 12px;
-      background: rgba(255, 252, 245, 0.98);
-      border: 1px solid rgba(125, 91, 57, 0.25);
-      border-radius: 12px;
-      padding: 10px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-      z-index: 2000;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      min-width: 180px;
-    }
-    .keyboard-popup.hidden {
-      display: none;
-    }
-    .keyboard-popup-row {
-      display: flex;
-      gap: 6px;
-      justify-content: center;
-    }
-    .keyboard-popup-row.modifiers {
-      justify-content: flex-start;
-    }
-    .keyboard-popup-row.actions {
-      flex-wrap: wrap;
-    }
-
-    /* Popup keyboard keys */
-    .kp-key {
-      min-width: 40px;
-      height: 32px;
-      border-radius: 6px;
-      border: 1px solid rgba(125, 91, 57, 0.25);
-      background: rgba(255, 255, 255, 0.85);
-      color: var(--text-secondary);
-      font-size: 0.8rem;
+    .shortcut-key {
+      height: 22px;
+      min-width: 22px;
+      border-radius: 4px;
+      border: 1px solid rgba(125, 91, 57, 0.15);
+      background: rgba(255, 255, 255, 0.6);
+      color: var(--text-muted);
+      font-size: 0.625rem;
       font-family: var(--font-mono);
       font-weight: 500;
       cursor: pointer;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.15s ease;
-      padding: 0 8px;
+      transition: all 0.12s ease;
+      padding: 0 5px;
       flex-shrink: 0;
       -webkit-tap-highlight-color: transparent;
       user-select: none;
-    }
-    .kp-key:hover {
-      border-color: var(--accent-soft);
-      background: rgba(255, 255, 255, 0.95);
-      color: var(--text-primary);
-    }
-    .kp-key:active {
-      background: var(--accent-soft);
-      border-color: var(--accent);
-      color: white;
-      transform: scale(0.95);
-    }
-    .kp-key.active {
-      background: var(--accent-soft);
-      border-color: var(--accent);
-      color: white;
-      box-shadow: 0 0 0 2px rgba(197, 101, 61, 0.15);
-    }
-    .kp-action {
-      min-width: 50px;
-      flex: 1;
-    }
-    .kp-escape {
-      color: #c07070;
-    }
-    .kp-escape:hover {
-      color: #a05050;
-    }
-    .kp-key[data-key="enter"] {
-      color: #4a7c59;
-    }
-    .kp-key[data-key="ctrl_enter"] {
-      color: var(--accent);
-      font-weight: 600;
+      line-height: 1;
     }
 
-    /* Direction keys grid layout - cross shape */
-    .kp-dir-grid {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
+    .shortcut-key:hover {
+      border-color: rgba(125, 91, 57, 0.3);
+      background: rgba(255, 255, 255, 0.85);
+      color: var(--text-secondary);
     }
-    .kp-dir-up {
-      display: flex;
-      justify-content: center;
+
+    .shortcut-key:active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: white;
+      transform: scale(0.93);
     }
-    .kp-dir-lr {
-      display: flex;
-      gap: 4px;
+
+    .shortcut-key.active {
+      background: rgba(197, 101, 61, 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
     }
-    .kp-dir {
-      min-width: 36px;
-      height: 36px;
-      font-size: 1rem;
+
+    .shortcut-key.shortcut-dir {
+      min-width: 20px;
+      padding: 0 3px;
+      font-size: 0.6875rem;
+    }
+
+    .shortcut-key[data-key="escape"] {
+      color: #b06060;
+    }
+    .shortcut-key[data-key="enter"] {
+      color: #4a7c59;
+    }
+    .shortcut-key[data-key="ctrl_enter"] {
+      color: var(--accent);
+      font-weight: 600;
     }
 
     /* Mobile keyboard overlap compensation */
@@ -4818,30 +4747,18 @@
         display: none;
       }
 
-      /* 键盘弹出按钮 - 紧凑 */
-      .keyboard-toggle-btn {
-        width: 28px;
-        height: 28px;
-        padding: 0;
-        border-radius: 5px;
+      /* 移动端内联快捷键 */
+      .inline-shortcuts {
+        gap: 2px;
       }
-      .keyboard-toggle-btn svg {
-        width: 14px;
-        height: 14px;
-      }
-      .keyboard-popup {
-        padding: 6px;
-        gap: 4px;
-        border-radius: 8px;
-        right: 8px;
-        bottom: calc(var(--keyboard-offset, 0px) + 140px);
-        min-width: 160px;
-      }
-      .kp-key {
-        min-width: 36px;
-        height: 32px;
+      .shortcut-key {
+        height: 24px;
+        min-width: 24px;
         font-size: 0.625rem;
-        border-radius: 5px;
+        padding: 0 4px;
+      }
+      .shortcut-key.shortcut-dir {
+        min-width: 22px;
       }
 
       /* 小键盘 FAB */

@@ -275,38 +275,21 @@
 
       function renderInlineKeyboard() {
         if (!state.selectedId) return "";
-        // Keyboard toggle button + popup panel
-        var isActive = state.currentView === "terminal";
-        return '<button id="keyboard-toggle" class="keyboard-toggle-btn' + (isActive ? "" : " hidden") + '" type="button" title="快捷键盘">' +
-            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-              '<rect x="2" y="4" width="20" height="16" rx="2" ry="2"/>' +
-              '<line x1="6" y1="8" x2="6.01" y2="8"/>' +
-              '<line x1="10" y1="8" x2="10.01" y2="8"/>' +
-              '<line x1="14" y1="8" x2="14.01" y2="8"/>' +
-              '<line x1="18" y1="8" x2="18.01" y2="8"/>' +
-              '<line x1="6" y1="12" x2="18" y2="12"/>' +
-            '</svg>' +
-          '</button>' +
-          '<div id="keyboard-popup" class="keyboard-popup' + (state.keyboardPopupOpen ? '' : ' hidden') + '">' +
-            '<div class="keyboard-popup-row modifiers">' +
-              '<button class="kp-key' + (state.modifiers.ctrl ? ' active' : '') + '" data-key="ctrl" type="button">Ctrl</button>' +
-              '<button class="kp-key' + (state.modifiers.alt ? ' active' : '') + '" data-key="alt" type="button">Alt</button>' +
-            '</div>' +
-            '<div class="keyboard-popup-row directions">' +
-              '<div class="kp-dir-grid">' +
-                '<div class="kp-dir-up"><button class="kp-key kp-dir" data-key="up" type="button">↑</button></div>' +
-                '<div class="kp-dir-lr">' +
-                  '<button class="kp-key kp-dir" data-key="left" type="button">←</button>' +
-                  '<button class="kp-key kp-dir" data-key="down" type="button">↓</button>' +
-                  '<button class="kp-key kp-dir" data-key="right" type="button">→</button>' +
-                '</div>' +
-              '</div>' +
-            '</div>' +
-            '<div class="keyboard-popup-row actions">' +
-              '<button class="kp-key kp-action" data-key="enter" type="button">↵ 回车</button>' +
-              '<button class="kp-key kp-action" data-key="ctrl_enter" type="button">C-↵</button>' +
-              '<button class="kp-key kp-action kp-escape" data-key="escape" type="button">Esc</button>' +
-            '</div>' +
+        // Inline shortcut keys shown directly in composer bar
+        var isTerminal = state.currentView === "terminal";
+        if (!isTerminal) return "";
+        return '<div class="inline-shortcuts">' +
+            '<button class="shortcut-key' + (state.modifiers.ctrl ? ' active' : '') + '" data-key="ctrl" type="button">Ctrl</button>' +
+            '<button class="shortcut-key' + (state.modifiers.alt ? ' active' : '') + '" data-key="alt" type="button">Alt</button>' +
+            '<span class="shortcut-sep">·</span>' +
+            '<button class="shortcut-key shortcut-dir" data-key="up" type="button">↑</button>' +
+            '<button class="shortcut-key shortcut-dir" data-key="down" type="button">↓</button>' +
+            '<button class="shortcut-key shortcut-dir" data-key="left" type="button">←</button>' +
+            '<button class="shortcut-key shortcut-dir" data-key="right" type="button">→</button>' +
+            '<span class="shortcut-sep">·</span>' +
+            '<button class="shortcut-key" data-key="enter" type="button">↵</button>' +
+            '<button class="shortcut-key" data-key="ctrl_enter" type="button">C-↵</button>' +
+            '<button class="shortcut-key" data-key="escape" type="button">Esc</button>' +
           '</div>';
       }
 
@@ -1552,23 +1535,9 @@
           var toggle = document.getElementById(id);
           if (toggle) toggle.addEventListener("click", toggleTerminalInteractive);
         });
-        // Keyboard popup handlers
-        var keyboardToggle = document.getElementById("keyboard-toggle");
-        if (keyboardToggle) keyboardToggle.addEventListener("click", handleKeyboardToggle);
-        var keyboardPopup = document.getElementById("keyboard-popup");
-        if (keyboardPopup) keyboardPopup.addEventListener("click", handleInlineKeyboardClick);
-        // Close popup when clicking outside
-        document.addEventListener("click", function(event) {
-          var toggle = document.getElementById("keyboard-toggle");
-          var popup = document.getElementById("keyboard-popup");
-          var target = event.target;
-          if (!popup || popup.classList.contains("hidden") || !target) return;
-          var clickedPopup = popup.contains(target);
-          var clickedToggle = !!toggle && toggle.contains(target);
-          if (!clickedPopup && !clickedToggle) {
-            closeKeyboardPopup();
-          }
-        });
+        // Inline shortcuts click handler
+        var inlineShortcuts = document.querySelector(".inline-shortcuts");
+        if (inlineShortcuts) inlineShortcuts.addEventListener("click", handleInlineKeyboardClick);
 
         // PWA install button
         var pwaInstallBtn = document.getElementById("pwa-install-button");
@@ -3915,16 +3884,6 @@
         if (inputHint) inputHint.classList.toggle("hidden", state.currentView === "terminal");
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", state.terminalInteractive);
-        var keyboardToggle = document.getElementById("keyboard-toggle");
-        if (keyboardToggle) {
-          keyboardToggle.classList.toggle("hidden", state.currentView !== "terminal" || !state.selectedId);
-          keyboardToggle.classList.toggle("active", state.keyboardPopupOpen);
-        }
-        var popup = document.getElementById("keyboard-popup");
-        if (popup) {
-          var shouldShowPopup = state.keyboardPopupOpen && state.currentView === "terminal" && !!state.selectedId;
-          popup.classList.toggle("hidden", !shouldShowPopup);
-        }
       }
 
       function captureTerminalInput(event) {
@@ -3955,8 +3914,7 @@
       }
 
       function handleInlineKeyboardClick(event) {
-        // Support both old .ik-key and new .kp-key buttons
-        var btn = event.target.closest(".ik-key, .kp-key");
+        var btn = event.target.closest(".shortcut-key");
         if (!btn) return;
         var key = btn.getAttribute("data-key");
         if (!key) return;
@@ -3967,7 +3925,6 @@
           return;
         }
         if (key === "ctrl_enter") {
-          // Ctrl+Enter for confirm/approve in terminal
           var sequence = buildPtySequence("enter", { ctrl: true, alt: false, shift: false });
           if (sequence) sendTerminalSequence(sequence);
           return;
@@ -3979,10 +3936,10 @@
       }
 
       function updateKeyboardPopupUI() {
-        var popup = document.getElementById("keyboard-popup");
-        if (!popup) return;
+        var container = document.querySelector(".inline-shortcuts");
+        if (!container) return;
         ["ctrl", "alt"].forEach(function(name) {
-          var btn = popup.querySelector('[data-key="' + name + '"]');
+          var btn = container.querySelector('[data-key="' + name + '"]');
           if (btn) btn.classList.toggle("active", !!state.modifiers[name]);
         });
       }
