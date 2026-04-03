@@ -1595,11 +1595,13 @@ export class ProcessManager extends EventEmitter {
       record.ptyBridge = null;
     }
 
-    this.sessions.delete(id);
-    this.lastPersistedMessageCount.delete(id);
+    // Delete from persistent storage BEFORE removing from in-memory map,
+    // so a storage failure doesn't leave orphan records in the database.
+    this.storage.deleteSession(id);
     this.logger.deleteSession(id);
     this.deleteClaudeCache(record);
-    this.storage.deleteSession(id);
+    this.sessions.delete(id);
+    this.lastPersistedMessageCount.delete(id);
   }
 
   private deleteClaudeCache(record: Pick<SessionRecord, "claudeSessionId" | "cwd">): void {

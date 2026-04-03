@@ -119,11 +119,19 @@ function setConfigValue(
       };
     case "defaultMode":
       if (!isExecutionMode(value)) {
-        throw new Error("defaultMode must be auto-edit, default, or full-access");
+        throw new Error(`defaultMode must be one of: assist, agent, agent-max, auto-edit, default, full-access, managed, native`);
       }
       return {
         ...config,
         defaultMode: value
+      };
+    case "https":
+      if (value !== "true" && value !== "false") {
+        throw new Error("https must be 'true' or 'false'");
+      }
+      return {
+        ...config,
+        https: value === "true"
       };
     default:
       throw new Error(`Unsupported config key: ${key}`);
