@@ -92,6 +92,10 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/config.ts` | Default config, merge logic, config path resolution |
 | `src/session-lifecycle.ts` | Idle/thinking/waiting/archive state machine |
 | `src/session-logger.ts` | File-based logs under `~/.wand/sessions/` |
+| `src/auth.ts` | Session token creation, validation, and revocation |
+| `src/cert.ts` | Self-signed HTTPS certificate generation and loading |
+| `src/ws-broadcast.ts` | WebSocket broadcast manager for `/ws` fanout |
+| `src/pwa.ts` | PWA manifest and service worker script generation |
 | `src/web-ui/` | Server-rendered HTML plus browser assets |
 | `src/types.ts` | Shared contracts across CLI, server, storage, PTY bridge, and UI |
 
@@ -148,4 +152,5 @@ Use short, imperative subjects (e.g., `Add config path validation`). One logical
 
 - Never commit real passwords or machine-specific paths from `~/.wand/config.json`
 - Keep `host` on `127.0.0.1` unless remote access is intentional
+- HTTPS is off by default (`https: false`); enable it only when needed and keep `host` restricted
 - Document any new command execution permissions added to the config schema
