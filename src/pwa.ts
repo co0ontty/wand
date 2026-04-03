@@ -19,11 +19,8 @@ export function generatePwaManifest(): string {
     orientation: "any",
     prefer_related_applications: false,
     icons: [
-      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
-      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
       { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+      { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "maskable" },
     ],
     categories: ["developer tools", "productivity"],
     shortcuts: [
@@ -31,7 +28,7 @@ export function generatePwaManifest(): string {
         name: "New Session",
         url: "/?action=new",
         description: "Start a new CLI session",
-        icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+        icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml" }],
       },
     ],
   });
@@ -123,13 +120,3 @@ self.addEventListener('fetch', (event) => {
 `;
 }
 
-export function getIconSvg(): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
-    <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#d77a52"/>
-      <stop offset="100%" style="stop-color:#a95130"/>
-    </linearGradient></defs>
-    <rect width="192" height="192" rx="38" fill="url(#g)"/>
-    <text x="96" y="128" text-anchor="middle" font-family="system-ui,sans-serif" font-size="88" font-weight="700" fill="white">W</text>
-  </svg>`;
-}

@@ -308,9 +308,7 @@
       padding-left: 0;
       transition: padding-left var(--transition-normal);
     }
-    .main-layout.sidebar-open {
-      padding-left: min(var(--sidebar-width), calc(100vw - 20px));
-    }
+    /* .sidebar-open class toggled for semantic purposes only; sidebar overlays without resizing main layout */
 
     /* ===== 抽屉背景遮罩 ===== */
     .drawer-backdrop {
