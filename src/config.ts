@@ -10,7 +10,7 @@ const DEFAULT_CONFIG_FILE = "config.json";
 export const defaultConfig = (): WandConfig => ({
   host: "127.0.0.1",
   port: 8443,
-  https: true,
+  https: false,
   password: "change-me",
   defaultMode: "default",
   shell: process.env.SHELL || "/bin/bash",

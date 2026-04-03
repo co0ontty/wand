@@ -10,6 +10,9 @@ import process from "node:process";
 import { WebSocketServer } from "ws";
 
 const execAsync = promisify(exec);
+const SERVER_MODULE_DIR = path.dirname(new URL(import.meta.url).pathname);
+const RUNTIME_ROOT_DIR = path.resolve(SERVER_MODULE_DIR, "..");
+
 import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
 import { ensureCertificates } from "./cert.js";
 import { isExecutionMode, resolveConfigDir } from "./config.js";
@@ -243,6 +246,16 @@ function parseStoredPathList<T>(raw: string | null): T[] {
   }
 }
 
+const HIDDEN_CLAUDE_SESSIONS_KEY = "hidden_claude_sessions";
+
+function getHiddenClaudeSessionIds(storage: WandStorage): Set<string> {
+  return new Set(parseStoredPathList<string>(storage.getConfigValue(HIDDEN_CLAUDE_SESSIONS_KEY)));
+}
+
+function saveHiddenClaudeSessionIds(storage: WandStorage, hidden: Set<string>): void {
+  storage.setConfigValue(HIDDEN_CLAUDE_SESSIONS_KEY, JSON.stringify(Array.from(hidden)));
+}
+
 const MAX_RECENT_PATHS = 10;
 
 // ── File language detection ──
@@ -278,12 +291,13 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const storage = new WandStorage(resolveDatabasePath(configPath));
   setAuthStorage(storage);
   const processes = new ProcessManager(config, storage, resolveConfigDir(configPath));
-  const useHttps = config.https !== false;
+  const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
+  const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
 
   app.use(express.json({ limit: "1mb" }));
-  app.use("/vendor/xterm", express.static(path.resolve(process.cwd(), "node_modules/xterm")));
-  app.use("/vendor/xterm-addon-fit", express.static(path.resolve(process.cwd(), "node_modules/@xterm/addon-fit")));
+  app.use("/vendor/xterm", express.static(path.join(nodeModulesDir, "xterm")));
+  app.use("/vendor/xterm-addon-fit", express.static(path.join(nodeModulesDir, "@xterm", "addon-fit")));
 
   // ── Web UI and PWA endpoints ──
 
@@ -301,9 +315,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   const iconsDir = path.resolve(
-    existsSync(path.join(process.cwd(), "dist", "web-ui", "content"))
-      ? path.join(process.cwd(), "dist", "web-ui", "content")
-      : path.join(process.cwd(), "src", "web-ui", "content")
+    existsSync(path.join(SERVER_MODULE_DIR, "web-ui", "content"))
+      ? path.join(SERVER_MODULE_DIR, "web-ui", "content")
+      : path.join(RUNTIME_ROOT_DIR, "src", "web-ui", "content")
   );
 
   app.get("/icon-192.png", (_req, res) => {
@@ -392,9 +406,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   app.get("/api/claude-history", (_req, res) => {
     try {
       const sessions = processes.listClaudeHistorySessions();
-      // Filter out hidden sessions
-      const hiddenRaw = storage.getConfigValue("hidden_claude_sessions");
-      const hidden = new Set(parseStoredPathList<string>(hiddenRaw));
+      const hidden = getHiddenClaudeSessionIds(storage);
       const filtered = hidden.size > 0
         ? sessions.filter((s: { claudeSessionId?: string }) => !s.claudeSessionId || !hidden.has(s.claudeSessionId))
         : sessions;
@@ -410,13 +422,104 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.status(400).json({ error: "会话 ID 不能为空。" });
       return;
     }
-    const hiddenRaw = storage.getConfigValue("hidden_claude_sessions");
-    const hidden = parseStoredPathList<string>(hiddenRaw);
-    if (!hidden.includes(claudeSessionId)) {
-      hidden.push(claudeSessionId);
-      storage.setConfigValue("hidden_claude_sessions", JSON.stringify(hidden));
+    const hidden = getHiddenClaudeSessionIds(storage);
+    if (!hidden.has(claudeSessionId)) {
+      hidden.add(claudeSessionId);
+      saveHiddenClaudeSessionIds(storage, hidden);
     }
     res.json({ ok: true });
+  });
+
+  app.delete("/api/claude-history", (req, res) => {
+    const cwd = typeof req.query.cwd === "string" ? req.query.cwd.trim() : "";
+    if (!cwd) {
+      res.status(400).json({ error: "目录不能为空。" });
+      return;
+    }
+
+    try {
+      const sessions = processes.listClaudeHistorySessions();
+      const hidden = getHiddenClaudeSessionIds(storage);
+      let added = 0;
+
+      for (const session of sessions) {
+        if (!session.claudeSessionId || session.cwd !== cwd) {
+          continue;
+        }
+        if (hidden.has(session.claudeSessionId)) {
+          continue;
+        }
+        hidden.add(session.claudeSessionId);
+        added += 1;
+      }
+
+      if (added > 0) {
+        saveHiddenClaudeSessionIds(storage, hidden);
+      }
+
+      res.json({ ok: true, deleted: added });
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "无法删除该目录下的历史会话。") });
+    }
+  });
+
+  app.post("/api/claude-history/batch-delete", express.json(), (req, res) => {
+    const claudeSessionIds = Array.isArray(req.body?.claudeSessionIds)
+      ? req.body.claudeSessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+
+    if (claudeSessionIds.length === 0) {
+      res.status(400).json({ error: "至少提供一个历史会话 ID。" });
+      return;
+    }
+
+    try {
+      const hidden = getHiddenClaudeSessionIds(storage);
+      let added = 0;
+      for (const claudeSessionId of claudeSessionIds) {
+        if (hidden.has(claudeSessionId)) {
+          continue;
+        }
+        hidden.add(claudeSessionId);
+        added += 1;
+      }
+      if (added > 0) {
+        saveHiddenClaudeSessionIds(storage, hidden);
+      }
+      res.json({ ok: true, deleted: added });
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "无法批量删除历史会话。") });
+    }
+  });
+
+  app.post("/api/sessions/batch-delete", express.json(), (req, res) => {
+    const sessionIds = Array.isArray(req.body?.sessionIds)
+      ? req.body.sessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+
+    if (sessionIds.length === 0) {
+      res.status(400).json({ error: "至少提供一个会话 ID。" });
+      return;
+    }
+
+    let deleted = 0;
+    const failed: string[] = [];
+
+    for (const sessionId of sessionIds) {
+      try {
+        processes.delete(sessionId);
+        deleted += 1;
+      } catch {
+        failed.push(sessionId);
+      }
+    }
+
+    if (deleted === 0 && failed.length > 0) {
+      res.status(400).json({ error: "无法批量删除会话。", failed });
+      return;
+    }
+
+    res.json({ ok: true, deleted, failed });
   });
 
   app.get("/api/sessions/:id", (req, res) => {

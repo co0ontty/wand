@@ -125,6 +125,9 @@
         claudeHistory: [],
         claudeHistoryLoaded: false,
         claudeHistoryExpanded: false,
+        sessionsManageMode: false,
+        selectedSessionIds: {},
+        selectedClaudeHistoryIds: {},
         // Load last used working directory from localStorage
         workingDir: (function() {
           try {
@@ -551,34 +554,62 @@
         var activeSessions = state.sessions.filter(function(session) { return !session.archived; });
         var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
         var groups = [];
+        groups.push(renderSessionManageBar());
         if (activeSessions.length > 0) {
-          groups.push(renderSessionGroup("最近", activeSessions));
+          groups.push(renderSessionGroup("最近", activeSessions, "sessions"));
         }
         if (archivedSessions.length > 0) {
-          groups.push(renderSessionGroup("已归档", archivedSessions));
+          groups.push(renderSessionGroup("已归档", archivedSessions, "sessions"));
         }
         groups.push(renderClaudeHistorySection());
-        if (groups.length === 1 && state.sessions.length === 0) {
-          return '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>' + renderClaudeHistorySection();
+        if (activeSessions.length === 0 && archivedSessions.length === 0) {
+          return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>' + renderClaudeHistorySection();
         }
         return groups.join("");
       }
 
-      function renderSessionGroup(title, sessions) {
+      function renderSessionManageBar() {
+        if (!state.sessionsManageMode) {
+          return '<div class="session-manage-bar">' +
+            '<button class="session-manage-toggle" data-action="toggle-manage-mode" type="button">管理</button>' +
+          '</div>';
+        }
+
+        var sessionCount = getSelectedSessionIds().length;
+        var historyCount = getSelectedClaudeHistoryIds().length;
+        var totalCount = sessionCount + historyCount;
+        var hasAny = totalCount > 0;
+
+        return '<div class="session-manage-bar active">' +
+          '<div class="session-manage-summary">已选择 ' + totalCount + ' 项</div>' +
+          '<div class="session-manage-actions">' +
+            '<button class="session-manage-btn" data-action="select-all-visible" type="button">全选</button>' +
+            '<button class="session-manage-btn" data-action="clear-selection" type="button">清空</button>' +
+            '<button class="session-manage-btn danger" data-action="delete-selected" type="button"' + (hasAny ? '' : ' disabled') + '>删除所选</button>' +
+            '<button class="session-manage-btn" data-action="toggle-manage-mode" type="button">完成</button>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function renderSessionGroup(title, sessions, kind) {
         return '<section class="session-group">' +
           '<div class="session-group-title">' + escapeHtml(title) + '</div>' +
-          sessions.map(renderSessionItem).join("") +
+          sessions.map(function(session) { return renderSessionItem(session, kind); }).join("") +
         '</section>';
       }
 
       function renderClaudeHistorySection() {
+        var visibleHistory = getVisibleClaudeHistorySessions();
         var chevron = state.claudeHistoryExpanded ? "&#9662;" : "&#9656;";
-        var countBadge = state.claudeHistoryLoaded && state.claudeHistory.length > 0
-          ? ' <span class="history-count">' + state.claudeHistory.length + '</span>'
+        var countBadge = state.claudeHistoryLoaded && visibleHistory.length > 0
+          ? ' <span class="history-count">' + visibleHistory.length + '</span>'
+          : '';
+        var clearAllButton = state.claudeHistoryExpanded && state.claudeHistoryLoaded && visibleHistory.length > 0
+          ? '<button class="session-manage-btn danger compact" data-action="clear-all-history" type="button">清空历史</button>'
           : '';
         var header = '<div class="session-group-title claude-history-toggle" id="claude-history-toggle">' +
           '<span class="chevron">' + chevron + '</span> Claude 历史' + countBadge +
-          '</div>';
+          '</div>' + clearAllButton;
 
         if (!state.claudeHistoryExpanded) {
           return '<section class="session-group">' + header + '</section>';
@@ -589,22 +620,14 @@
             '<div class="claude-history-loading">扫描历史会话中…</div></section>';
         }
 
-        var todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        var todayMs = todayStart.getTime();
-        var filtered = state.claudeHistory.filter(function(s) {
-          return s.hasConversation && !s.managedByWand && s.mtimeMs < todayMs;
-        });
-
-        if (filtered.length === 0) {
+        if (visibleHistory.length === 0) {
           return '<section class="session-group">' + header +
             '<div class="claude-history-loading">没有发现外部 Claude 会话</div></section>';
         }
 
-        // Group by cwd
         var groups = {};
         var groupOrder = [];
-        filtered.forEach(function(s) {
+        visibleHistory.forEach(function(s) {
           if (!groups[s.cwd]) {
             groups[s.cwd] = [];
             groupOrder.push(s.cwd);
@@ -615,25 +638,186 @@
         var html = '';
         groupOrder.forEach(function(cwd) {
           var cwdShort = cwd.split("/").filter(Boolean).slice(-3).join("/");
-          html += '<div class="session-group-title" style="font-size:0.6rem;padding:4px 8px 4px;opacity:0.7">' +
-            escapeHtml(cwdShort) + ' (' + groups[cwd].length + ')</div>';
-          html += groups[cwd].map(renderClaudeHistoryItem).join("");
+          html += renderClaudeHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length);
+          html += groups[cwd].map(function(session) { return renderClaudeHistoryItem(session, "history"); }).join("");
         });
 
         return '<section class="session-group">' + header + html + '</section>';
       }
 
-      function renderClaudeHistoryItem(session) {
+      function getVisibleClaudeHistorySessions() {
+        var todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        var todayMs = todayStart.getTime();
+        return state.claudeHistory.filter(function(s) {
+          return s.hasConversation && !s.managedByWand && s.mtimeMs < todayMs;
+        });
+      }
+
+      function getSelectedSessionIds() {
+        return Object.keys(state.selectedSessionIds).filter(function(id) { return !!state.selectedSessionIds[id]; });
+      }
+
+      function getSelectedClaudeHistoryIds() {
+        return Object.keys(state.selectedClaudeHistoryIds).filter(function(id) { return !!state.selectedClaudeHistoryIds[id]; });
+      }
+
+      function clearManageSelections() {
+        state.selectedSessionIds = {};
+        state.selectedClaudeHistoryIds = {};
+      }
+
+      function toggleManageMode(force) {
+        state.sessionsManageMode = typeof force === "boolean" ? force : !state.sessionsManageMode;
+        if (!state.sessionsManageMode) {
+          clearManageSelections();
+          closeSwipedItem();
+        }
+        updateSessionsList();
+      }
+
+      function selectAllVisibleItems() {
+        var nextSessionIds = {};
+        state.sessions.forEach(function(session) {
+          nextSessionIds[session.id] = true;
+        });
+        var nextHistoryIds = {};
+        getVisibleClaudeHistorySessions().forEach(function(session) {
+          nextHistoryIds[session.claudeSessionId] = true;
+        });
+        state.selectedSessionIds = nextSessionIds;
+        state.selectedClaudeHistoryIds = nextHistoryIds;
+        updateSessionsList();
+      }
+
+      function clearSelections() {
+        clearManageSelections();
+        updateSessionsList();
+      }
+
+      function toggleManagedItemSelection(kind, id) {
+        if (!state.sessionsManageMode || !id) return;
+        var target = kind === "history" ? state.selectedClaudeHistoryIds : state.selectedSessionIds;
+        if (target[id]) {
+          delete target[id];
+        } else {
+          target[id] = true;
+        }
+        updateSessionsList();
+      }
+
+      function renderManageCheckbox(kind, id, label) {
+        if (!state.sessionsManageMode) return '';
+        var selected = kind === "history" ? !!state.selectedClaudeHistoryIds[id] : !!state.selectedSessionIds[id];
+        return '<label class="session-manage-check">' +
+          '<input type="checkbox" data-action="toggle-selection" data-kind="' + escapeHtml(kind) + '" data-id="' + escapeHtml(id) + '"' + (selected ? ' checked' : '') + ' aria-label="' + escapeHtml(label) + '">' +
+          '<span></span>' +
+        '</label>';
+      }
+
+      function confirmDelete(message) {
+        return window.confirm(message);
+      }
+
+      function batchDeleteSelected() {
+        var sessionIds = getSelectedSessionIds();
+        var historyIds = getSelectedClaudeHistoryIds();
+        var total = sessionIds.length + historyIds.length;
+        if (!total) return;
+        if (!confirmDelete('确认删除所选 ' + total + ' 项吗？')) {
+          return;
+        }
+
+        var requests = [];
+        if (sessionIds.length > 0) {
+          requests.push(fetch('/api/sessions/batch-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ sessionIds: sessionIds })
+          }).then(function(res) { return res.json(); }));
+        }
+        if (historyIds.length > 0) {
+          requests.push(fetch('/api/claude-history/batch-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ claudeSessionIds: historyIds })
+          }).then(function(res) { return res.json(); }));
+        }
+
+        Promise.all(requests)
+          .then(function() {
+            if (sessionIds.indexOf(state.selectedId) !== -1) {
+              state.selectedId = null;
+              persistSelectedId();
+            }
+            state.claudeHistory = state.claudeHistory.filter(function(session) {
+              return historyIds.indexOf(session.claudeSessionId) === -1;
+            });
+            clearManageSelections();
+            return refreshAll();
+          })
+          .catch(function() {
+            var errorEl = document.getElementById('action-error');
+            showError(errorEl, '无法批量删除所选项目。');
+          });
+      }
+
+      function clearAllClaudeHistory() {
+        var visibleHistory = getVisibleClaudeHistorySessions();
+        if (!visibleHistory.length) return;
+        if (!confirmDelete('确认清空当前显示的 ' + visibleHistory.length + ' 条 Claude 历史吗？')) {
+          return;
+        }
+        return fetch('/api/claude-history/batch-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ claudeSessionIds: visibleHistory.map(function(session) { return session.claudeSessionId; }) })
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && data.error) {
+              throw new Error(data.error);
+            }
+            state.claudeHistory = [];
+            clearManageSelections();
+            updateSessionsList();
+          })
+          .catch(function() {
+            var errorEl = document.getElementById('action-error');
+            showError(errorEl, '无法清空历史会话。');
+          });
+      }
+
+      function renderClaudeHistoryDirectoryHeader(cwd, cwdShort, count) {
+        return '<div class="claude-history-directory-header">' +
+          '<div class="session-group-title claude-history-directory-title">' +
+            '<span class="claude-history-directory-label">' + escapeHtml(cwdShort) + ' (' + count + ')</span>' +
+            '<button class="session-manage-btn danger compact claude-history-directory-clear-btn" data-action="delete-history-directory" data-cwd="' +
+            escapeHtml(cwd) + '" type="button" aria-label="清空此目录的历史会话" title="清空此目录的历史会话">清空此目录</button>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function renderClaudeHistoryItem(session, kind) {
         var shortId = session.claudeSessionId.slice(0, 8);
         var preview = session.firstUserMessage || "(空会话)";
         var timeStr = formatHistoryTime(session.timestamp);
+        var checkbox = renderManageCheckbox(kind, session.claudeSessionId, "选择历史会话 " + preview);
+        var deleteButton = state.sessionsManageMode ? '' :
+          '<button class="session-action-btn delete-btn" data-action="delete-history" data-claude-session-id="' +
+          session.claudeSessionId + '" type="button" aria-label="删除会话" title="隐藏此历史会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
+        var resumeButton = state.sessionsManageMode ? '' :
+          '<button class="session-action-btn" data-action="resume-history" data-claude-session-id="' +
+          session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) +
+          '" type="button" aria-label="恢复会话" title="恢复此 Claude 历史会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
 
-        return '<div class="session-item claude-history-item" data-claude-history-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
-          '<div class="session-delete-zone">' +
-            '<button class="session-delete-btn" data-action="delete-history" data-claude-session-id="' + session.claudeSessionId + '" type="button">删除</button>' +
-          '</div>' +
+        return '<div class="session-item claude-history-item' + (state.sessionsManageMode && state.selectedClaudeHistoryIds[session.claudeSessionId] ? ' selected' : '') + '" data-claude-history-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +
+              checkbox +
               '<div class="session-main">' +
                 '<div class="session-command claude-history-preview">' + escapeHtml(preview) + '</div>' +
                 '<div class="session-meta">' +
@@ -641,18 +825,11 @@
                   '<span>' + escapeHtml(timeStr) + '</span>' +
                 '</div>' +
               '</div>' +
-              '<span class="session-actions">' +
-                '<button class="session-action-btn" data-action="resume-history" data-claude-session-id="' +
-                session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) +
-                '" type="button" aria-label="恢复会话" title="恢复此 Claude 历史会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>' +
-                '<button class="session-action-btn delete-btn" data-action="delete-history" data-claude-session-id="' +
-                session.claudeSessionId + '" type="button" aria-label="删除会话" title="隐藏此历史会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>' +
-              '</span>' +
+              '<span class="session-actions">' + resumeButton + deleteButton + '</span>' +
             '</div>' +
           '</div>' +
         '</div>';
       }
-
       function formatHistoryTime(isoStr) {
         if (!isoStr) return "";
         try {
@@ -1203,17 +1380,19 @@
 
       function renderSessionItem(session) {
         var activeClass = session.id === state.selectedId ? " active" : "";
+        var selectedClass = state.sessionsManageMode && state.selectedSessionIds[session.id] ? " selected" : "";
         var metaStatus = getSessionStatusLabel(session);
         var metaStatusClass = getSessionStatusClass(session);
         var modeName = session.mode === "full-access" ? "全权限" : session.mode === "default" ? "默认" : session.mode === "native" ? "原生" : session.mode === "auto-edit" ? "自动编辑" : session.mode;
         var resumeButton = "";
         var sessionIdDisplay = "";
         var recoveryHint = "";
+        var checkbox = renderManageCheckbox("sessions", session.id, "选择会话 " + session.command);
 
         if (session.claudeSessionId) {
           var shortId = session.claudeSessionId.slice(0, 8);
           sessionIdDisplay = '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>';
-          if (session.status !== "running") {
+          if (session.status !== "running" && !state.sessionsManageMode) {
             resumeButton = '<button class="session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="恢复会话" title="恢复 Claude 会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
           }
         }
@@ -1226,15 +1405,13 @@
           recoveryHint = '<span class="session-id" title="从旧会话恢复而来">续接</span>';
         }
 
-        var deleteButton = '<button class="session-action-btn delete-btn" data-action="delete-confirm" data-session-id="' + session.id + '" type="button" aria-label="删除会话" title="删除此会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
+        var deleteButton = state.sessionsManageMode ? '' : '<button class="session-action-btn delete-btn" data-action="delete-session" data-session-id="' + session.id + '" type="button" aria-label="删除会话" title="删除此会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
         var actionsHtml = '<span class="session-actions">' + resumeButton + deleteButton + '</span>';
 
-        return '<div class="session-item' + activeClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
-          '<div class="session-delete-zone">' +
-            '<button class="session-delete-btn" data-action="delete-confirm" data-session-id="' + session.id + '" type="button">删除</button>' +
-          '</div>' +
+        return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +
+              checkbox +
               '<div class="session-main">' +
                 '<div class="session-command">' + escapeHtml(session.command) + '</div>' +
                 '<div class="session-meta">' +
@@ -1249,7 +1426,6 @@
           '</div>' +
         '</div>';
       }
-
       function renderModeCards(selectedMode) {
         var modes = [
           { id: "default",     label: "标准",     desc: "逐步确认操作" },
@@ -2030,7 +2206,6 @@
         var target = event.target;
         if (!target || !(target instanceof Element)) return;
 
-        // Claude history toggle
         var historyToggle = target.closest("#claude-history-toggle");
         if (historyToggle) {
           event.preventDefault();
@@ -2047,10 +2222,32 @@
         if (actionButton && actionButton instanceof HTMLElement) {
           event.preventDefault();
           event.stopPropagation();
-          if (actionButton.dataset.action === "delete-confirm" && actionButton.dataset.sessionId) {
-            handleDeleteConfirm(actionButton);
+          if (actionButton.dataset.action === "toggle-manage-mode") {
+            toggleManageMode();
+          } else if (actionButton.dataset.action === "select-all-visible") {
+            selectAllVisibleItems();
+          } else if (actionButton.dataset.action === "clear-selection") {
+            clearSelections();
+          } else if (actionButton.dataset.action === "delete-selected") {
+            batchDeleteSelected();
+          } else if (actionButton.dataset.action === "toggle-selection") {
+            toggleManagedItemSelection(actionButton.dataset.kind, actionButton.dataset.id);
+          } else if (actionButton.dataset.action === "delete-session" && actionButton.dataset.sessionId) {
+            if (confirmDelete("确认删除这个会话吗？")) {
+              deleteSession(actionButton.dataset.sessionId);
+            }
           } else if (actionButton.dataset.action === "delete-history" && actionButton.dataset.claudeSessionId) {
-            handleDeleteConfirm(actionButton);
+            if (confirmDelete("确认隐藏这条 Claude 历史吗？")) {
+              executeDeleteHistory(actionButton.dataset.claudeSessionId, actionButton.closest(".session-item"));
+            }
+          } else if (actionButton.dataset.action === "delete-history-directory" && actionButton.dataset.cwd) {
+            var items = getHistoryItemsByCwd(actionButton.dataset.cwd);
+            if (confirmDelete("确认清空此目录下的 " + items.length + " 条 Claude 历史吗？")) {
+              setDeletingState(items, true);
+              deleteClaudeHistoryDirectory(actionButton.dataset.cwd, actionButton, items);
+            }
+          } else if (actionButton.dataset.action === "clear-all-history") {
+            clearAllClaudeHistory();
           } else if (actionButton.dataset.action === "resume" && actionButton.dataset.sessionId) {
             handleResumeAction(actionButton);
           } else if (actionButton.dataset.action === "resume-history" && actionButton.dataset.claudeSessionId) {
@@ -2058,14 +2255,21 @@
           }
           return;
         }
+
         var item = target.closest(".session-item");
         if (item) {
-          // Don't select if swiped — close the swipe instead
+          if (state.sessionsManageMode) {
+            if (item.dataset.sessionId) {
+              toggleManagedItemSelection("sessions", item.dataset.sessionId);
+            } else if (item.dataset.claudeHistoryId) {
+              toggleManagedItemSelection("history", item.dataset.claudeHistoryId);
+            }
+            return;
+          }
           if (item.classList.contains("swiped")) {
             closeSwipedItem();
             return;
           }
-          // Don't select if a swipe gesture just ended
           if (_swipeState) return;
           if (item.dataset.sessionId) {
             selectSession(item.dataset.sessionId);
@@ -2077,8 +2281,17 @@
       function handleSessionItemKeydown(event) {
         if (event.key !== "Enter" && event.key !== " ") return;
         var item = event.target.closest(".session-item");
-        if (item && item.dataset.sessionId) {
-          event.preventDefault();
+        if (!item) return;
+        event.preventDefault();
+        if (state.sessionsManageMode) {
+          if (item.dataset.sessionId) {
+            toggleManagedItemSelection("sessions", item.dataset.sessionId);
+          } else if (item.dataset.claudeHistoryId) {
+            toggleManagedItemSelection("history", item.dataset.claudeHistoryId);
+          }
+          return;
+        }
+        if (item.dataset.sessionId) {
           selectSession(item.dataset.sessionId);
           closeSessionsDrawer();
         }
@@ -2313,15 +2526,23 @@
           }
         });
 
-        state.fitAddon = new FitAddon.FitAddon();
-        state.terminal.loadAddon(state.fitAddon);
+        var fitAddonConstructor =
+          typeof FitAddon !== "undefined" && FitAddon && typeof FitAddon.FitAddon === "function"
+            ? FitAddon.FitAddon
+            : null;
+        state.fitAddon = fitAddonConstructor ? new fitAddonConstructor() : null;
+        if (state.fitAddon) {
+          state.terminal.loadAddon(state.fitAddon);
+        } else {
+          console.error("[wand] xterm fit addon failed to load; continuing without fit support.");
+        }
 
         state.terminal.open(container);
         applyTerminalScale();
         state.terminalViewportSize = { width: 0, height: 0 };
         state.terminalAutoFollow = true;
         clearTerminalScrollIdleTimer();
-        if (shouldResizeTerminalViewport()) {
+        if (state.fitAddon && shouldResizeTerminalViewport()) {
           state.fitAddon.fit();
         }
 
@@ -4168,7 +4389,7 @@
         }, 250);
       }
 
-      function deleteClaudeHistorySession(claudeSessionId, item) {
+      function executeDeleteHistory(claudeSessionId, item) {
         if (item) {
           item.classList.add("deleting");
         }
@@ -4179,10 +4400,10 @@
               if (data && data.error) {
                 throw new Error(data.error);
               }
-              // Remove from local state
               state.claudeHistory = state.claudeHistory.filter(function(s) {
                 return s.claudeSessionId !== claudeSessionId;
               });
+              delete state.selectedClaudeHistoryIds[claudeSessionId];
               updateSessionsList();
             })
             .catch(function() {
@@ -4193,36 +4414,40 @@
         }, 250);
       }
 
-      var _deleteConfirmTimer = null;
+      function deleteClaudeHistorySession(claudeSessionId, item) {
+        executeDeleteHistory(claudeSessionId, item);
+      }
 
-      function handleDeleteConfirm(btn) {
-        var sessionId = btn.dataset.sessionId;
-        var claudeSessionId = btn.dataset.claudeSessionId;
-        var isHistory = !!claudeSessionId && !sessionId;
-
-        if (btn.classList.contains("confirm")) {
-          // Second tap — execute delete
-          if (_deleteConfirmTimer) {
-            clearTimeout(_deleteConfirmTimer);
-            _deleteConfirmTimer = null;
-          }
-          if (isHistory) {
-            var item = btn.closest(".session-item");
-            deleteClaudeHistorySession(claudeSessionId, item);
-          } else if (sessionId) {
-            deleteSession(sessionId);
-          }
-        } else {
-          // First tap — show confirm state
-          btn.classList.add("confirm");
-          btn.textContent = "确认?";
-          if (_deleteConfirmTimer) clearTimeout(_deleteConfirmTimer);
-          _deleteConfirmTimer = setTimeout(function() {
-            btn.classList.remove("confirm");
-            btn.textContent = "\uD83D\uDDD1";
-            _deleteConfirmTimer = null;
-          }, 3000);
+      function deleteClaudeHistoryDirectory(cwd, btn, items) {
+        if (!cwd) {
+          return;
         }
+        fetch("/api/claude-history?cwd=" + encodeURIComponent(cwd), { method: "DELETE", credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && data.error) {
+              throw new Error(data.error);
+            }
+            state.claudeHistory = state.claudeHistory.filter(function(s) {
+              return s.cwd !== cwd;
+            });
+            updateSessionsList();
+          })
+          .catch(function() {
+            setDeletingState(items, false);
+            var errorEl = document.getElementById("action-error");
+            showError(errorEl, "无法清理该目录的历史会话。");
+          });
+      }
+
+      function setDeletingState(items, deleting) {
+        items.forEach(function(item) {
+          item.classList.toggle("deleting", deleting);
+        });
+      }
+
+      function getHistoryItemsByCwd(cwd) {
+        return Array.prototype.slice.call(document.querySelectorAll('.claude-history-item[data-cwd="' + window.CSS.escape(String(cwd)) + '"]'));
       }
 
       // ── Swipe-to-delete gesture ──
@@ -4235,193 +4460,13 @@
           _swipedItem.classList.remove("swiped");
           var content = _swipedItem.querySelector(".session-item-content");
           if (content) content.style.transform = "";
-          // Reset confirm state of delete button
-          var btn = _swipedItem.querySelector(".session-delete-btn");
-          if (btn) {
-            btn.classList.remove("confirm");
-            btn.textContent = "\u5220\u9664";
-          }
           _swipedItem = null;
-        }
-        if (_deleteConfirmTimer) {
-          clearTimeout(_deleteConfirmTimer);
-          _deleteConfirmTimer = null;
         }
       }
 
-      function initSwipeToDelete(container) {
-        var THRESHOLD = 40;
-        var ZONE_WIDTH = 72;
-
-        function getSwipeItem(target) {
-          var el = target.closest ? target.closest(".session-item") : null;
-          return el;
-        }
-
-        container.addEventListener("touchstart", function(e) {
-          var item = getSwipeItem(e.target);
-          if (!item) return;
-          // Don't interfere with action buttons
-          if (e.target.closest("[data-action]")) return;
-          _swipeState = {
-            item: item,
-            startX: e.touches[0].clientX,
-            startY: e.touches[0].clientY,
-            currentX: 0,
-            locked: false,
-            started: false
-          };
-        }, { passive: true });
-
-        container.addEventListener("touchmove", function(e) {
-          if (!_swipeState) return;
-          var dx = e.touches[0].clientX - _swipeState.startX;
-          var dy = e.touches[0].clientY - _swipeState.startY;
-
-          // Determine direction lock
-          if (!_swipeState.locked) {
-            if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
-            if (Math.abs(dy) > Math.abs(dx)) {
-              // Vertical scroll — cancel swipe
-              _swipeState = null;
-              return;
-            }
-            _swipeState.locked = true;
-          }
-
-          // Only allow left swipe (negative dx)
-          var offset = Math.min(0, Math.max(-ZONE_WIDTH, dx));
-          // If item was already swiped open, adjust
-          if (_swipeState.item === _swipedItem) {
-            offset = Math.min(0, Math.max(-ZONE_WIDTH, dx - ZONE_WIDTH));
-          }
-
-          _swipeState.currentX = offset;
-          _swipeState.started = true;
-          var content = _swipeState.item.querySelector(".session-item-content");
-          if (content) {
-            content.style.transition = "none";
-            content.style.transform = "translateX(" + offset + "px)";
-          }
-
-          e.preventDefault();
-        }, { passive: false });
-
-        container.addEventListener("touchend", function() {
-          if (!_swipeState) return;
-          var item = _swipeState.item;
-          var content = item.querySelector(".session-item-content");
-          var wasSwiped = _swipeState.started;
-          var offset = _swipeState.currentX;
-          _swipeState = null;
-
-          if (!wasSwiped) return;
-
-          if (content) {
-            content.style.transition = "";
-          }
-
-          if (Math.abs(offset) >= THRESHOLD) {
-            // Snap open
-            if (_swipedItem && _swipedItem !== item) {
-              closeSwipedItem();
-            }
-            item.classList.add("swiped");
-            if (content) content.style.transform = "";
-            _swipedItem = item;
-          } else {
-            // Snap back
-            if (content) content.style.transform = "";
-            if (item === _swipedItem) {
-              item.classList.remove("swiped");
-              _swipedItem = null;
-            }
-          }
-        }, { passive: true });
-
-        // Mouse drag support for desktop
-        container.addEventListener("mousedown", function(e) {
-          var item = getSwipeItem(e.target);
-          if (!item) return;
-          if (e.target.closest("[data-action]")) return;
-          if (e.button !== 0) return;
-          _swipeState = {
-            item: item,
-            startX: e.clientX,
-            startY: e.clientY,
-            currentX: 0,
-            locked: false,
-            started: false
-          };
-        });
-
-        document.addEventListener("mousemove", function(e) {
-          if (!_swipeState) return;
-          var dx = e.clientX - _swipeState.startX;
-          var dy = e.clientY - _swipeState.startY;
-
-          if (!_swipeState.locked) {
-            if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
-            if (Math.abs(dy) > Math.abs(dx)) {
-              _swipeState = null;
-              return;
-            }
-            _swipeState.locked = true;
-          }
-
-          var offset = Math.min(0, Math.max(-ZONE_WIDTH, dx));
-          if (_swipeState.item === _swipedItem) {
-            offset = Math.min(0, Math.max(-ZONE_WIDTH, dx - ZONE_WIDTH));
-          }
-
-          _swipeState.currentX = offset;
-          _swipeState.started = true;
-          var content = _swipeState.item.querySelector(".session-item-content");
-          if (content) {
-            content.style.transition = "none";
-            content.style.transform = "translateX(" + offset + "px)";
-          }
-
-          e.preventDefault();
-        });
-
-        document.addEventListener("mouseup", function() {
-          if (!_swipeState) return;
-          var item = _swipeState.item;
-          var content = item.querySelector(".session-item-content");
-          var wasSwiped = _swipeState.started;
-          var offset = _swipeState.currentX;
-          _swipeState = null;
-
-          if (!wasSwiped) return;
-
-          if (content) {
-            content.style.transition = "";
-          }
-
-          if (Math.abs(offset) >= THRESHOLD) {
-            if (_swipedItem && _swipedItem !== item) {
-              closeSwipedItem();
-            }
-            item.classList.add("swiped");
-            if (content) content.style.transform = "";
-            _swipedItem = item;
-          } else {
-            if (content) content.style.transform = "";
-            if (item === _swipedItem) {
-              item.classList.remove("swiped");
-              _swipedItem = null;
-            }
-          }
-        });
-
-        // Close swiped item when clicking elsewhere
-        document.addEventListener("click", function(e) {
-          if (!_swipedItem) return;
-          if (!_swipedItem.contains(e.target)) {
-            closeSwipedItem();
-          }
-        }, true);
+      function initSwipeToDelete() {
+        _swipeState = null;
+        _swipedItem = null;
       }
 
       function startCommand(command, cwd, errorEl) {
