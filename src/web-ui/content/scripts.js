@@ -375,49 +375,30 @@
         var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
         return '<div class="app-container">' +
-          '<header class="topbar">' +
-            '<div class="topbar-left">' +
-              '<button id="sessions-toggle-button" class="btn btn-secondary btn-sm sidebar-toggle-btn' + (state.sessionsDrawerOpen ? ' active' : '') + '" aria-label="Toggle sidebar">' +
-                '<span class="hamburger-icon">' +
-                  '<span></span><span></span><span></span>' +
-                '</span>' +
-              '</button>' +
-              '<div class="topbar-logo">' +
-                '<div class="topbar-logo-icon">W</div>' +
-              '</div>' +
-            '</div>' +
-            '<div class="topbar-center">' +
-              '<div class="topbar-session-meta">' +
-                '<span class="topbar-title" id="terminal-title">' + escapeHtml(terminalTitle) + '</span>' +
-                '<span class="terminal-info topbar-terminal-info" id="terminal-info">' + (selectedSession ? getSessionStatusLabel(selectedSession) : '开始对话') + '</span>' +
-              '</div>' +
-              '<span class="current-task hidden" id="current-task"></span>' +
-              '<span class="permission-actions hidden" id="permission-actions"><button id="approve-permission-btn" class="btn btn-primary btn-small" type="button">批准</button><button id="deny-permission-btn" class="btn btn-ghost btn-small" type="button">拒绝</button></span>' +
-            '</div>' +
-            '<div class="topbar-right">' +
-              '<button id="file-panel-toggle-btn" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" title="查看文件">📁</button>' +
-              '<button id="topbar-new-session-button" class="topbar-new-btn" title="新对话">' +
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
-                '新对话' +
-              '</button>' +
-              '<button id="terminal-interactive-toggle-top" class="topbar-btn' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨ ' + (state.terminalInteractive ? '交互开' : '交互关') + '</button>' +
-              '<button id="pwa-install-button" class="topbar-btn square hidden" title="安装应用">' +
-                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
-              '</button>' +
-              '<button id="logout-button" class="topbar-btn square" title="退出登录">' +
-                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
-              '</button>' +
-            '</div>' +
-          '</header>' +
+          '<button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? ' active' : '') + '" aria-label="Toggle sidebar">' +
+            '<span class="hamburger-icon">' +
+              '<span></span><span></span><span></span>' +
+            '</span>' +
+          '</button>' +
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
           '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + '">' +
             '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
               '<div class="sidebar-header">' +
                 '<div class="sidebar-header-main">' +
+                  '<div class="topbar-logo-icon">W</div>' +
                   '<span class="sidebar-title">会话</span>' +
                   '<span class="session-count" id="session-count">' + String(state.sessions.length) + '</span>' +
                 '</div>' +
-                '<button id="close-drawer-button" class="btn btn-ghost btn-sm sidebar-close" type="button" aria-label="关闭菜单">×</button>' +
+                '<div class="sidebar-header-actions">' +
+                  '<button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="查看文件">📁</button>' +
+                  '<button id="pwa-install-button" class="btn btn-ghost btn-sm hidden" title="安装应用">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
+                  '</button>' +
+                  '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="退出登录">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
+                  '</button>' +
+                  '<button id="close-drawer-button" class="btn btn-ghost btn-sm sidebar-close" type="button" aria-label="关闭菜单">×</button>' +
+                '</div>' +
               '</div>' +
               '<div class="sidebar-body">' +
                 '<div id="sessions-panel">' +
@@ -430,7 +411,8 @@
               '</div>' +
             '</aside>' +
             '<main class="main-content">' +
-              '<div class="topbar-spacer"></div>' +
+              '<span class="current-task hidden" id="current-task"></span>' +
+              '<span class="permission-actions hidden" id="permission-actions"><button id="approve-permission-btn" class="btn btn-primary btn-small" type="button">批准</button><button id="deny-permission-btn" class="btn btn-ghost btn-small" type="button">拒绝</button></span>' +
               // File panel backdrop (mobile)
               '<div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div>' +
               // File side panel
@@ -497,6 +479,7 @@
                       '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
                         renderModeOptions(preferredTool, composerMode) +
                       '</select>' +
+                      '<button id="terminal-interactive-toggle-top" class="composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨</button>' +
                     '</div>' +
                     '<div class="input-composer-right">' +
                       '<span id="queue-counter" class="queue-counter hidden">队列: 0</span>' +
@@ -3923,7 +3906,6 @@
           var toggle = document.getElementById(id);
           if (toggle) {
             toggle.classList.toggle("active", state.terminalInteractive);
-            toggle.textContent = state.terminalInteractive ? "⌨ 交互开" : "⌨ 交互关";
           }
         });
         // Inline keyboard visibility follows current view
@@ -5513,9 +5495,21 @@
 
             }
             // Real-time terminal output
-            if (msg.sessionId === state.selectedId && state.terminal && msg.data
-              && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
-              syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
+            if (msg.sessionId === state.selectedId && state.terminal && msg.data) {
+              if (msg.data.chunk && (!state.terminalSessionId || state.terminalSessionId === msg.sessionId)) {
+                // Fast path: write chunk directly to avoid full-output comparison
+                // which can trigger terminal.reset() and cause screen flicker.
+                state.terminal.write(msg.data.chunk);
+                state.terminalSessionId = msg.sessionId;
+                if (msg.data.output) {
+                  state.terminalOutput = normalizeTerminalOutput(msg.data.output);
+                }
+                maybeScrollTerminalToBottom("output");
+                updateTerminalJumpToBottomButton();
+              } else if (Object.prototype.hasOwnProperty.call(msg.data, "output")) {
+                // Fallback: no chunk available, use full-output comparison
+                syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
+              }
             }
             break;
           case 'started':

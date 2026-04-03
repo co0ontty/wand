@@ -100,7 +100,6 @@
       /* ===== 布局尺寸 ===== */
       --sidebar-width: 300px;
       --file-panel-width: 320px;
-      --topbar-height: 52px;
 
       /* ===== 高级缓动函数 ===== */
       --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -123,42 +122,19 @@
 
     /* ===== PWA 独立窗口模式 ===== */
     @media (display-mode: standalone) {
-      .topbar {
-        padding-top: max(12px, env(safe-area-inset-top, 0px));
+      .floating-sidebar-toggle {
+        top: max(10px, env(safe-area-inset-top, 10px));
       }
       .app-container {
         --pwa-top-inset: env(safe-area-inset-top, 0px);
-        --layout-topbar-height: calc(var(--topbar-height) + env(safe-area-inset-top, 0px));
-        --layout-sidebar-offset: var(--layout-topbar-height);
       }
     }
 
     /* ===== PWA 窗口控件覆盖模式 (Window Controls Overlay) ===== */
     @media (display-mode: window-controls-overlay) {
-      .app-container {
-        --layout-topbar-height: max(var(--topbar-height), env(titlebar-area-height, 0px));
-        --layout-sidebar-offset: var(--layout-topbar-height);
-      }
-      .topbar {
-        padding-left: env(titlebar-area-x, 16px);
-        padding-right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%));
-        padding-top: env(titlebar-area-y, 0px);
-        min-height: var(--layout-topbar-height);
-        -webkit-app-region: drag;
-        app-region: drag;
-      }
-      .topbar button,
-      .topbar a,
-      .topbar input,
-      .topbar select,
-      .topbar .topbar-btn,
-      .topbar .btn-sm {
-        -webkit-app-region: no-drag;
-        app-region: no-drag;
-      }
-      .topbar-logo-icon {
-        -webkit-app-region: no-drag;
-        app-region: no-drag;
+      .floating-sidebar-toggle {
+        top: max(10px, env(titlebar-area-y, 10px));
+        left: max(10px, env(titlebar-area-x, 10px));
       }
     }
 
@@ -224,8 +200,6 @@
 
     /* ===== 应用容器 ===== */
     .app-container {
-      --layout-topbar-height: var(--topbar-height);
-      --layout-sidebar-offset: var(--layout-topbar-height);
       --layout-main-file-panel-width: var(--file-panel-width);
       display: flex;
       flex-direction: column;
@@ -236,107 +210,44 @@
       overflow: hidden;
     }
 
-    /* ===== 顶栏组件 ===== */
-    .topbar {
+    /* ===== 浮动侧栏切换按钮 ===== */
+    .floating-sidebar-toggle {
+      position: fixed;
+      top: max(10px, env(safe-area-inset-top, 10px));
+      left: 10px;
+      z-index: 200;
+      width: 34px;
+      height: 34px;
+      padding: 0;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      min-height: var(--topbar-height);
-      padding: 0 16px;
+      justify-content: center;
       background: rgba(255, 251, 245, 0.85);
-      border-bottom: 1px solid var(--border-subtle);
-      backdrop-filter: blur(24px) saturate(180%);
-      flex-shrink: 0;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      transition: border-color var(--transition-fast), background var(--transition-fast);
-    }
-
-    .topbar::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(197, 101, 61, 0.1), transparent);
-      opacity: 0;
-      transition: opacity var(--transition-fast);
-    }
-
-    .topbar:hover::before {
-      opacity: 1;
-    }
-
-    /* ===== 顶栏左侧区域 ===== */
-    .topbar-left {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-    }
-
-    .topbar-logo {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .topbar-logo-icon {
-      width: 28px;
-      height: 28px;
-      background: linear-gradient(145deg, #d4785a 0%, #b8573a 50%, #a04a2e 100%);
-      border-radius: var(--radius-xs);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      color: white;
-      font-weight: 800;
-      box-shadow: 0 2px 8px rgba(184, 92, 55, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-      letter-spacing: -0.02em;
-      flex-shrink: 0;
-      transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-    }
-
-    .topbar-logo-icon:hover {
-      transform: scale(1.05);
-      box-shadow: 0 4px 12px rgba(184, 92, 55, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
-    }
-
-    /* ===== 汉堡菜单按钮 ===== */
-    .sidebar-toggle-btn {
-      position: relative;
-      width: 32px;
-      height: 32px;
-      padding: 0 !important;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: transparent !important;
-      border: none !important;
-      border-radius: var(--radius-xs) !important;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
       cursor: pointer;
+      backdrop-filter: blur(16px) saturate(180%);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
       transition: all var(--transition-fast);
     }
 
-    .sidebar-toggle-btn:hover {
-      background: rgba(150, 118, 85, 0.08) !important;
+    .floating-sidebar-toggle:hover {
+      background: rgba(255, 251, 245, 0.95);
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.1);
     }
 
-    .sidebar-toggle-btn.active {
-      background: rgba(197, 101, 61, 0.12) !important;
+    .floating-sidebar-toggle.active {
+      background: rgba(197, 101, 61, 0.1);
+      border-color: rgba(197, 101, 61, 0.2);
     }
 
-    .sidebar-toggle-btn:active {
-      transform: scale(0.95);
+    .floating-sidebar-toggle:active {
+      transform: scale(0.92);
     }
 
     .hamburger-icon {
-      width: 18px;
-      height: 14px;
+      width: 16px;
+      height: 12px;
       position: relative;
       display: flex;
       flex-direction: column;
@@ -349,191 +260,45 @@
       height: 2px;
       background: var(--text-secondary);
       border-radius: var(--radius-full);
-      transition: transform 0.3s var(--ease-out-expo), opacity 0.2s ease, background 0.15s ease, width 0.2s ease;
+      transition: transform 0.3s var(--ease-out-expo), opacity 0.2s ease, background 0.15s ease;
       transform-origin: center;
     }
 
-    .sidebar-toggle-btn:hover .hamburger-icon span {
+    .floating-sidebar-toggle:hover .hamburger-icon span {
       background: var(--text-primary);
     }
 
-    .sidebar-toggle-btn.active .hamburger-icon span:nth-child(1) {
-      transform: translateY(6px) rotate(45deg);
-      width: 100%;
+    .floating-sidebar-toggle.active .hamburger-icon span:nth-child(1) {
+      transform: translateY(5px) rotate(45deg);
     }
 
-    .sidebar-toggle-btn.active .hamburger-icon span:nth-child(2) {
+    .floating-sidebar-toggle.active .hamburger-icon span:nth-child(2) {
       opacity: 0;
       transform: scaleX(0);
-      width: 100%;
     }
 
-    .sidebar-toggle-btn.active .hamburger-icon span:nth-child(3) {
-      transform: translateY(-6px) rotate(-45deg);
-      width: 100%;
+    .floating-sidebar-toggle.active .hamburger-icon span:nth-child(3) {
+      transform: translateY(-5px) rotate(-45deg);
+    }
+
+    .topbar-logo-icon {
+      width: 22px;
+      height: 22px;
+      background: linear-gradient(145deg, #d4785a 0%, #b8573a 50%, #a04a2e 100%);
+      border-radius: var(--radius-xs);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: white;
+      font-weight: 800;
+      box-shadow: 0 1px 4px rgba(184, 92, 55, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      letter-spacing: -0.02em;
+      flex-shrink: 0;
     }
 
     .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
     .status-dot.active { background: var(--success); box-shadow: 0 0 8px var(--success); }
-
-    /* Topbar center — session title */
-    .topbar-center {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      overflow: hidden;
-    }
-
-    .topbar-session-meta {
-      min-width: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      overflow: hidden;
-    }
-
-    .topbar-title {
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: var(--text-secondary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 300px;
-      font-family: var(--font-mono);
-    }
-
-    .topbar-terminal-info {
-      flex-shrink: 0;
-      white-space: nowrap;
-    }
-
-    .topbar-spacer {
-      height: 6px;
-      flex-shrink: 0;
-    }
-
-    @media (max-width: 768px) {
-      .topbar-session-meta {
-        max-width: 100%;
-      }
-
-      .topbar-terminal-info {
-        font-size: 0.5625rem;
-      }
-    }
-
-    @media (max-width: 640px) {
-      .topbar-center {
-        justify-content: flex-start;
-      }
-
-      .topbar-session-meta {
-        justify-content: flex-start;
-        gap: 6px;
-      }
-    }
-
-    @media (max-width: 390px) {
-      .topbar-terminal-info {
-        display: none;
-      }
-    }
-
-    .topbar-right {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      flex-shrink: 0;
-      min-width: 0;
-    }
-
-    /* ===== 顶栏新建会话按钮 ===== */
-    .topbar-new-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-family: var(--font-sans);
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: white;
-      background: linear-gradient(135deg, var(--accent) 0%, #a95130 100%);
-      border: 1px solid rgba(169, 81, 48, 0.18);
-      border-radius: var(--radius-full);
-      padding: 0 14px;
-      height: 32px;
-      min-height: 32px;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-      box-shadow: 0 2px 8px rgba(197, 101, 61, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-      white-space: nowrap;
-      position: relative;
-      overflow: hidden;
-      line-height: 1;
-      box-sizing: border-box;
-    }
-
-    .topbar-new-btn::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, transparent 50%);
-      opacity: 0;
-      transition: opacity 0.25s ease;
-    }
-
-    .topbar-new-btn::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 0;
-      height: 0;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.3);
-      transform: translate(-50%, -50%);
-      transition: width 0.6s ease, height 0.6s ease;
-    }
-
-    .topbar-new-btn:hover {
-      background: linear-gradient(135deg, var(--accent-hover) 0%, #b85c37 100%);
-      box-shadow: 0 3px 12px rgba(197, 101, 61, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-      transform: translateY(-1px);
-    }
-
-    .topbar-new-btn:hover::before {
-      opacity: 1;
-    }
-
-    .topbar-new-btn:active {
-      transform: translateY(0);
-      box-shadow: 0 2px 6px rgba(197, 101, 61, 0.2);
-    }
-
-    .topbar-new-btn:active::after {
-      width: 200px;
-      height: 200px;
-    }
-
-    .topbar-new-btn:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 3px;
-    }
-
-    .topbar-new-btn svg {
-      width: 14px;
-      height: 14px;
-      flex-shrink: 0;
-      transition: transform 0.3s var(--ease-spring);
-    }
-
-    .topbar-new-btn:hover svg {
-      transform: rotate(90deg) scale(1.1);
-    }
 
     .main-layout {
       display: flex;
@@ -550,7 +315,7 @@
     /* ===== 抽屉背景遮罩 ===== */
     .drawer-backdrop {
       position: fixed;
-      top: var(--layout-sidebar-offset);
+      top: 0;
       left: 0;
       right: 0;
       bottom: 0;
@@ -571,7 +336,7 @@
     /* ===== 侧边栏组件 ===== */
     .sidebar {
       position: fixed;
-      top: var(--layout-sidebar-offset);
+      top: 0;
       left: 0;
       bottom: 0;
       z-index: 25;
@@ -616,6 +381,23 @@
       gap: 10px;
       min-width: 0;
       flex: 1;
+    }
+
+    .sidebar-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-logout {
+      color: var(--text-muted);
+      opacity: 0.7;
+      transition: opacity var(--transition-fast), color var(--transition-fast);
+    }
+    .sidebar-logout:hover {
+      opacity: 1;
+      color: var(--text-secondary);
     }
 
     .sidebar-title {
@@ -3322,6 +3104,33 @@
       gap: 6px;
       flex-wrap: wrap;
     }
+
+    .composer-interactive-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      flex-shrink: 0;
+      padding: 0;
+    }
+    .composer-interactive-toggle:hover {
+      background: rgba(197, 101, 61, 0.08);
+      color: var(--text-secondary);
+      border-color: var(--accent);
+    }
+    .composer-interactive-toggle.active {
+      background: rgba(197, 101, 61, 0.12);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
     .input-composer-right {
       display: flex;
       align-items: center;
@@ -4726,20 +4535,12 @@
     /* 平板适配 */
     @media (max-width: 768px) {
       .app-container {
-        --layout-topbar-height: 50px;
-        --layout-sidebar-offset: var(--layout-topbar-height);
         --layout-main-file-panel-width: 0px;
       }
 
-      .topbar {
-        padding: 6px 12px;
-        min-height: var(--layout-topbar-height);
-        gap: 8px;
-      }
-      .topbar-center { display: none; }
       .sidebar {
         width: min(300px, calc(100vw - 20px));
-        top: var(--layout-sidebar-offset);
+        top: 0;
       }
       .terminal-container { margin: 0 12px 12px; min-height: 0; }
       .btn { min-height: 40px; }
@@ -4773,8 +4574,6 @@
       }
 
       .app-container {
-        --layout-topbar-height: 40px;
-        --layout-sidebar-offset: var(--layout-topbar-height);
         --layout-main-file-panel-width: 0px;
       }
 
@@ -4794,58 +4593,17 @@
         overflow: hidden;
       }
 
-      /* 移动端顶栏 - 紧凑版 */
-      .topbar {
-        position: sticky;
-        top: 0;
-        z-index: 30;
-        align-items: center;
-        gap: 4px;
-        min-height: var(--layout-topbar-height);
-        padding: 4px 8px;
-        padding-top: max(12px, env(safe-area-inset-top, 0px));
-      }
-
-      .topbar-left { display: flex; gap: 4px; }
-      .topbar-center { display: none; }
-      .topbar-right {
-        display: flex;
-        gap: 4px;
-        align-items: center;
-      }
-
-      .topbar-logo-icon { width: 22px; height: 22px; font-size: 10px; border-radius: 6px; }
-
-      /* 移动端按钮 - 紧凑触摸区域 */
-      .topbar .btn-sm,
-      .topbar .topbar-btn {
-        height: 36px;
-        min-height: 36px;
-        min-width: 36px;
-        padding: 0 8px;
-        font-size: 0.6875rem;
+      /* 移动端浮动按钮 */
+      .floating-sidebar-toggle {
+        width: 30px;
+        height: 30px;
+        top: max(8px, env(safe-area-inset-top, 8px));
+        left: 8px;
         border-radius: 6px;
       }
+      .floating-sidebar-toggle .hamburger-icon { width: 13px; height: 9px; }
 
-      /* 移动端 PWA 安装按钮 */
-      .topbar #pwa-install-button {
-        color: var(--accent);
-      }
-      .topbar #pwa-install-button svg {
-        width: 14px;
-        height: 14px;
-      }
-      .topbar .btn-icon,
-      .topbar .topbar-btn.square {
-        width: 36px;
-        height: 36px;
-        min-width: 36px;
-        min-height: 36px;
-        padding: 0;
-        border-radius: 6px;
-      }
-      .sidebar-toggle-btn { width: 36px; height: 36px; min-width: 36px; min-height: 36px; border-radius: 6px; }
-      .hamburger-icon { width: 14px; height: 10px; }
+      .sidebar { top: 0; }
 
       /* 移动端终端顶栏 - 紧凑 */
       .terminal-header { padding: 5px 8px; min-height: 32px; }
@@ -4905,7 +4663,7 @@
       }
 
       .sidebar {
-        top: var(--layout-sidebar-offset);
+        top: 0;
         width: min(260px, calc(100vw - 12px));
         max-height: none;
         border-bottom: none;
@@ -5263,10 +5021,6 @@
     /* iPhone 14/15 等标准屏幕 (390px - 420px) - 使用基础移动端样式，略微调整 */
     @media (min-width: 391px) and (max-width: 420px) {
       /* 继承 max-width: 640px 的样式，此处仅做微调 */
-      .topbar {
-        padding: 4px 10px;
-        min-height: 40px;
-      }
 
       .terminal-container {
         margin: 0 6px 6px;
@@ -5282,37 +5036,13 @@
     /* iPhone SE 等小屏幕 (<= 390px) */
     @media (max-width: 390px) {
       /* 继承 max-width: 640px 的样式，此处仅做小屏微调 */
-      .app-container {
-        --layout-topbar-height: 38px;
-        --layout-sidebar-offset: var(--layout-topbar-height);
+      .floating-sidebar-toggle {
+        width: 26px;
+        height: 26px;
+        top: max(6px, env(safe-area-inset-top, 6px));
+        left: 6px;
       }
-
-      .topbar {
-        padding: 3px 6px;
-        min-height: var(--layout-topbar-height);
-        gap: 3px;
-      }
-
-      .topbar-logo-icon { width: 20px; height: 20px; font-size: 9px; border-radius: 5px; }
-
-      .topbar .btn-sm,
-      .topbar .topbar-btn {
-        height: 32px;
-        min-height: 32px;
-        min-width: 32px;
-        padding: 0 6px;
-        font-size: 0.625rem;
-        border-radius: 5px;
-      }
-      .topbar .btn-icon,
-      .topbar .topbar-btn.square {
-        width: 32px;
-        height: 32px;
-        min-width: 32px;
-        min-height: 32px;
-        border-radius: 5px;
-      }
-      .sidebar-toggle-btn { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
+      .floating-sidebar-toggle .hamburger-icon { width: 11px; height: 8px; }
 
       .terminal-header { padding: 4px 6px; min-height: 28px; }
       .terminal-title-text { font-size: 0.6875rem; }
@@ -5342,7 +5072,7 @@
       }
       .session-action-btn { width: 28px; height: 28px; min-width: 28px; min-height: 28px; }
 
-      .sidebar { top: var(--layout-sidebar-offset); width: min(240px, calc(100vw - 10px)); }
+      .sidebar { top: 0; width: min(240px, calc(100vw - 10px)); }
 
       .modal { max-height: 80vh; }
       .modal-header { padding: 8px 10px; min-height: 36px; }
@@ -5354,18 +5084,8 @@
 
     /* iPad Mini 等平板 (641px - 768px) */
     @media (min-width: 641px) and (max-width: 768px) {
-      .app-container {
-        --layout-topbar-height: 52px;
-        --layout-sidebar-offset: var(--layout-topbar-height);
-      }
-
-      .topbar {
-        min-height: var(--layout-topbar-height);
-        padding: 8px 14px;
-      }
-
       .sidebar {
-        top: var(--layout-sidebar-offset);
+        top: 0;
         width: min(320px, calc(100vw - 40px));
       }
 
@@ -5384,20 +5104,14 @@
 
     /* 横屏模式优化 */
     @media (max-height: 420px) and (orientation: landscape) {
-      .app-container {
-        --layout-topbar-height: 40px;
-        --layout-sidebar-offset: var(--layout-topbar-height);
+      .floating-sidebar-toggle {
+        width: 28px;
+        height: 28px;
+        top: 6px;
+        left: 6px;
       }
 
-      .topbar {
-        min-height: var(--layout-topbar-height);
-        padding: 6px 10px;
-      }
-
-      .sidebar { top: var(--layout-sidebar-offset); }
-
-      .topbar-logo-icon { width: 20px; height: 20px; font-size: 9px; }
-      .topbar-new-btn { height: 30px; padding: 0 12px; font-size: 0.72rem; }
+      .sidebar { top: 0; }
 
       .terminal-container {
         min-height: 55vh;
