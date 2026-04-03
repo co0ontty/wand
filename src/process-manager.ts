@@ -1959,6 +1959,8 @@ export class ProcessManager extends EventEmitter {
   private handleBridgeEvent(record: SessionRecord, event: SessionEvent): void {
     switch (event.type) {
       case "output.raw":
+        // Sync record.output from bridge before emitting so the event carries fresh data
+        record.output = record.ptyBridge?.getRawOutput() ?? record.output;
         // Emit output event for terminal view
         this.emitEvent({
           type: "output",
@@ -1973,6 +1975,8 @@ export class ProcessManager extends EventEmitter {
         break;
 
       case "output.chat":
+        // Sync record.output from bridge before emitting so the event carries fresh data
+        record.output = record.ptyBridge?.getRawOutput() ?? record.output;
         // Emit output event with updated messages for chat view
         this.emitEvent({
           type: "output",

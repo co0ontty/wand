@@ -101,6 +101,17 @@ export class WsBroadcastManager {
       const existing = this.outputDebounceCache.get(event.sessionId);
       if (existing) {
         clearTimeout(existing.timer);
+        // Accumulate chunk data across debounce window so the browser can
+        // write incrementally instead of doing a full terminal reset.
+        const prevData = existing.event.data as Record<string, unknown> | undefined;
+        const curData = event.data as Record<string, unknown> | undefined;
+        const prevChunk = prevData?.chunk as string | undefined;
+        const curChunk = curData?.chunk as string | undefined;
+        if (prevChunk && curChunk) {
+          event = { ...event, data: { ...curData, chunk: prevChunk + curChunk } };
+        } else if (prevChunk && !curChunk) {
+          event = { ...event, data: { ...curData, chunk: prevChunk } };
+        }
       }
       const timer = setTimeout(() => {
         this.outputDebounceCache.delete(event.sessionId);
