@@ -385,6 +385,14 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     res.json(processes.list());
   });
 
+  app.get("/api/claude-history", (_req, res) => {
+    try {
+      res.json(processes.listClaudeHistorySessions());
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "无法扫描 Claude 历史会话。") });
+    }
+  });
+
   app.get("/api/sessions/:id", (req, res) => {
     const snapshot = processes.get(req.params.id);
     if (!snapshot) {
@@ -783,33 +791,42 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.post("/api/claude-sessions/:claudeSessionId/resume", (req, res) => {
     const claudeSessionId = String(req.params.claudeSessionId || "").trim();
-    const body = req.body as { mode?: ExecutionMode };
+    const body = req.body as { mode?: ExecutionMode; cwd?: string };
     try {
       if (!claudeSessionId) {
         res.status(400).json({ error: "Claude 会话 ID 不能为空。" });
         return;
       }
       const existingSession = storage.getLatestSessionByClaudeSessionId(claudeSessionId);
-      if (!existingSession) {
-        res.status(404).json({ error: "未找到对应的 Claude 会话记录。" });
-        return;
+      if (existingSession) {
+        const command = existingSession.command.trim();
+        if (!/^claude\b/.test(command)) {
+          res.status(400).json({ error: "只有 Claude 命令支持按 Claude Session ID 恢复。" });
+          return;
+        }
+        if (!existingSession.cwd || !processes.hasClaudeSessionFile(existingSession.cwd, claudeSessionId)) {
+          res.status(400).json({ error: "对应的 Claude 历史会话文件不存在，无法恢复。" });
+          return;
+        }
+        const newMode = body.mode
+          ? normalizeMode(body.mode, config.defaultMode)
+          : normalizeMode(existingSession.mode, config.defaultMode);
+        const resumeCommand = `${command} --resume ${claudeSessionId}`;
+        const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { resumedFromSessionId: existingSession.id });
+        storage.saveSession({ ...existingSession, resumedToSessionId: newSnapshot.id });
+        res.status(201).json({ resumedFromSessionId: existingSession.id, resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
+      } else {
+        // No existing wand session — resume directly with cwd from request body
+        const cwd = body.cwd?.trim();
+        if (!cwd) {
+          res.status(400).json({ error: "未找到对应的会话记录，请提供工作目录 (cwd)。" });
+          return;
+        }
+        const newMode = normalizeMode(body.mode, config.defaultMode);
+        const resumeCommand = `claude --resume ${claudeSessionId}`;
+        const newSnapshot = processes.start(resumeCommand, cwd, newMode);
+        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
       }
-      const command = existingSession.command.trim();
-      if (!/^claude\b/.test(command)) {
-        res.status(400).json({ error: "只有 Claude 命令支持按 Claude Session ID 恢复。" });
-        return;
-      }
-      if (!existingSession.cwd || !processes.hasClaudeSessionFile(existingSession.cwd, claudeSessionId)) {
-        res.status(400).json({ error: "对应的 Claude 历史会话文件不存在，无法恢复。" });
-        return;
-      }
-      const newMode = body.mode
-        ? normalizeMode(body.mode, config.defaultMode)
-        : normalizeMode(existingSession.mode, config.defaultMode);
-      const resumeCommand = `${command} --resume ${claudeSessionId}`;
-      const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { resumedFromSessionId: existingSession.id });
-      storage.saveSession({ ...existingSession, resumedToSessionId: newSnapshot.id });
-      res.status(201).json({ resumedFromSessionId: existingSession.id, resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法按 Claude 会话 ID 恢复会话。") });
     }

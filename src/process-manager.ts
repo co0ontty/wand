@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { ChildProcess } from "node:child_process";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, openSync, readSync, closeSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
@@ -43,6 +43,18 @@ export class SessionInputError extends Error {
 }
 
 export type ProcessEventHandler = (event: ProcessEvent) => void;
+
+/** A Claude Code session discovered by scanning ~/.claude/projects/ directories. */
+export interface ClaudeHistorySession {
+  claudeSessionId: string;
+  projectDir: string;
+  cwd: string;
+  firstUserMessage: string;
+  timestamp: string;
+  mtimeMs: number;
+  hasConversation: boolean;
+  managedByWand: boolean;
+}
 
 const PROMPT_PATTERNS = [
   /(?:^|\b)(?:press\s+)?(?:y|yes)\s*(?:\/|\bor\b)\s*(?:n|no)(?:\b|$)/i,
@@ -733,6 +745,147 @@ function isClaudeSessionFileAvailable(cwd: string, claudeSessionId: string): boo
   return Boolean(readClaudeProjectSessionDetails(filePath, claudeSessionId));
 }
 
+/**
+ * Reverse the normalization done by getClaudeProjectDir.
+ * "-vol1-1000-yolo-claude-wand" → "/vol1/1000/yolo-claude/wand"
+ * This is lossy (real hyphens become slashes), so we try all possible
+ * interpretations and validate with existsSync, falling back to naive replacement.
+ */
+function invertNormalizedProjectDir(dirName: string): string {
+  // The normalization is: path.resolve(cwd).replace(/\//g, "-")
+  const naive = dirName.replace(/-/g, "/");
+  if (existsSync(naive)) return naive;
+
+  // BFS: at each hyphen position, try "/" (path separator) or "-" (literal hyphen).
+  // Prune candidates that don't exist as directories, but only if at least one
+  // candidate survives pruning. Otherwise keep all to allow deeper merges.
+  const parts = dirName.split("-").filter(Boolean);
+  if (parts.length === 0 || parts.length > 20) return naive;
+
+  let candidates = ["/" + parts[0]];
+
+  for (let i = 1; i < parts.length; i++) {
+    const next: string[] = [];
+    for (const prefix of candidates) {
+      next.push(prefix + "/" + parts[i]);
+      next.push(prefix + "-" + parts[i]);
+    }
+
+    if (i < parts.length - 1) {
+      // Prune non-existent prefixes, but keep all if none exist
+      const valid = next.filter((c) => { try { return existsSync(c); } catch { return false; } });
+      candidates = valid.length > 0 ? valid : next;
+    } else {
+      candidates = next;
+    }
+
+    if (candidates.length > 200) candidates = candidates.slice(0, 200);
+  }
+
+  // Return the first candidate that exists, or the first one, or naive
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return candidates[0] || naive;
+}
+
+/** Read only the first ~8KB of a JSONL file to extract summary metadata. */
+function readClaudeSessionSummary(filePath: string, id: string, cwd: string): ClaudeHistorySession | null {
+  try {
+    const stats = statSync(filePath);
+    const fd = openSync(filePath, "r");
+    const buffer = Buffer.alloc(8192);
+    const bytesRead = readSync(fd, buffer, 0, 8192, 0);
+    closeSync(fd);
+    const chunk = buffer.toString("utf8", 0, bytesRead);
+    const lines = chunk.split("\n").filter((line) => line.trim().length > 0);
+
+    let timestamp = "";
+    let firstUserMessage = "";
+    let hasUser = false;
+    let hasAssistant = false;
+
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line) as {
+          sessionId?: string;
+          type?: string;
+          timestamp?: string;
+          content?: string;
+          message?: { role?: string; content?: unknown };
+        };
+        if (!timestamp && parsed.timestamp) {
+          timestamp = parsed.timestamp;
+        }
+        if (parsed.type === "user" || parsed.message?.role === "user") {
+          hasUser = true;
+          if (!firstUserMessage) {
+            if (typeof parsed.content === "string" && parsed.content.trim()) {
+              firstUserMessage = parsed.content.trim().slice(0, 120);
+            } else if (parsed.message?.content && typeof parsed.message.content === "string") {
+              firstUserMessage = parsed.message.content.trim().slice(0, 120);
+            }
+          }
+        }
+        if (parsed.type === "assistant" || parsed.message?.role === "assistant") {
+          hasAssistant = true;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    // cwd is passed in from the caller
+    return {
+      claudeSessionId: id,
+      projectDir: path.basename(path.dirname(filePath)),
+      cwd,
+      firstUserMessage,
+      timestamp: timestamp || new Date(stats.mtimeMs).toISOString(),
+      mtimeMs: stats.mtimeMs,
+      hasConversation: hasUser && hasAssistant,
+      managedByWand: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Scan all ~/.claude/projects/ directories for session JSONL files. */
+function listAllClaudeHistorySessions(): ClaudeHistorySession[] {
+  const projectsDir = path.join(os.homedir(), ".claude", "projects");
+  try {
+    const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory());
+
+    const results: ClaudeHistorySession[] = [];
+    for (const dir of projectDirs) {
+      const dirPath = path.join(projectsDir, dir.name);
+      const cwd = invertNormalizedProjectDir(dir.name);
+      try {
+        const files = readdirSync(dirPath, { withFileTypes: true })
+          .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+          .map((entry) => entry.name.replace(/\.jsonl$/, ""))
+          .filter((name) => UUID_V4_PATTERN.test(name));
+
+        for (const sessionId of files) {
+          const filePath = path.join(dirPath, `${sessionId}.jsonl`);
+          const summary = readClaudeSessionSummary(filePath, sessionId, cwd);
+          if (summary) {
+            results.push(summary);
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return results.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  } catch {
+    return [];
+  }
+}
+
 function shouldAutoResumeSession(record: Pick<SessionRecord, "status" | "claudeSessionId" | "messages" | "archived" | "resumedToSessionId" | "ptyProcess">): boolean {
   return record.status === "exited"
     && !record.archived
@@ -1218,6 +1371,35 @@ export class ProcessManager extends EventEmitter {
 
   hasClaudeSessionFile(cwd: string, claudeSessionId: string): boolean {
     return isClaudeSessionFileAvailable(cwd, claudeSessionId);
+  }
+
+  private claudeHistoryCache: { data: ClaudeHistorySession[]; expiresAt: number } | null = null;
+  private static readonly HISTORY_CACHE_TTL_MS = 30_000;
+
+  listClaudeHistorySessions(): ClaudeHistorySession[] {
+    const now = Date.now();
+    if (this.claudeHistoryCache && now < this.claudeHistoryCache.expiresAt) {
+      return this.claudeHistoryCache.data;
+    }
+
+    const allSessions = listAllClaudeHistorySessions();
+
+    // Cross-reference with wand-managed sessions
+    const managedClaudeIds = new Set<string>();
+    for (const record of this.sessions.values()) {
+      if (record.claudeSessionId) {
+        managedClaudeIds.add(record.claudeSessionId);
+      }
+    }
+
+    for (const session of allSessions) {
+      if (managedClaudeIds.has(session.claudeSessionId)) {
+        session.managedByWand = true;
+      }
+    }
+
+    this.claudeHistoryCache = { data: allSessions, expiresAt: now + ProcessManager.HISTORY_CACHE_TTL_MS };
+    return allSessions;
   }
 
   get(id: string): SessionSnapshot | null {
