@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { ChildProcess } from "node:child_process";
-import { existsSync, openSync, readSync, closeSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, unlinkSync, openSync, readSync, closeSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
@@ -1076,6 +1076,11 @@ export class ProcessManager extends EventEmitter {
       })
       .slice(0, this.sessions.size - MAX_SESSIONS + 1)
       .forEach((id) => {
+        const record = this.sessions.get(id);
+        if (record) {
+          this.logger.deleteSession(id);
+          this.deleteClaudeCache(record);
+        }
         this.sessions.delete(id);
         this.lastPersistedMessageCount.delete(id);
         this.storage.deleteSession(id);
@@ -1211,6 +1216,8 @@ export class ProcessManager extends EventEmitter {
         current.ptyBridge.onExit(exitCode);
         current.ptyBridge.removeAllListeners();
       }
+      current.pendingEscalation = null;
+      current.ptyPermissionBlocked = false;
       current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
       current.exitCode = current.stopRequested ? null : exitCode;
       current.endedAt = new Date().toISOString();
@@ -1590,8 +1597,27 @@ export class ProcessManager extends EventEmitter {
 
     this.sessions.delete(id);
     this.lastPersistedMessageCount.delete(id);
+    this.logger.deleteSession(id);
+    this.deleteClaudeCache(record);
     this.storage.deleteSession(id);
-  }  runStartupCommands(): SessionSnapshot[] {
+  }
+
+  private deleteClaudeCache(record: Pick<SessionRecord, "claudeSessionId" | "cwd">): void {
+    if (!record.claudeSessionId) return;
+    const jsonlPath = path.join(
+      getClaudeProjectDir(record.cwd),
+      `${record.claudeSessionId}.jsonl`
+    );
+    try {
+      if (existsSync(jsonlPath)) {
+        unlinkSync(jsonlPath);
+      }
+    } catch {
+      // Non-critical — Claude cache cleanup is best-effort
+    }
+  }
+
+  runStartupCommands(): SessionSnapshot[] {
     return this.config.startupCommands.map((command) =>
       this.start(command, this.config.defaultCwd, this.config.defaultMode)
     );
@@ -1674,8 +1700,8 @@ export class ProcessManager extends EventEmitter {
       };
     }
 
-    // Handle "approve_turn" memory
-    if (resolution === "approve_turn" && record.pendingEscalation) {
+    // Handle "approve_turn" memory — only in ProcessManager for non-bridge sessions
+    if (resolution === "approve_turn" && record.pendingEscalation && !record.ptyBridge) {
       record.rememberedEscalationScopes.add(record.pendingEscalation.scope);
       if (record.pendingEscalation.target) {
         record.rememberedEscalationTargets.add(record.pendingEscalation.target);
@@ -1684,7 +1710,7 @@ export class ProcessManager extends EventEmitter {
 
     // Resolve via bridge or direct PTY write
     if (record.ptyBridge) {
-      record.ptyBridge.resolvePermission(resolution === "approve_turn" ? "approve_once" : resolution);
+      record.ptyBridge.resolvePermission(resolution);
     } else if (record.ptyProcess && record.status === "running") {
       record.ptyProcess.write(resolution === "deny" ? "n\r" : "\r");
     }
@@ -1985,6 +2011,10 @@ export class ProcessManager extends EventEmitter {
       case "chat.turn":
         // Turn completed - persist full messages snapshot
         record.messages = record.ptyBridge?.getMessages() ?? record.messages;
+        // Clear remembered permissions at turn boundaries
+        record.ptyBridge?.clearRememberedPermissions();
+        record.rememberedEscalationScopes.clear();
+        record.rememberedEscalationTargets.clear();
         this.lifecycleManager.stopThinking(record.id);
         this.lifecycleManager.waitingInput(record.id);
         this.persist(record);

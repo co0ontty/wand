@@ -292,7 +292,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.get("/manifest.json", (_req, res) => {
-    res.type("json").send(generatePwaManifest());
+    res.setHeader("Content-Type", "application/manifest+json");
+    res.send(generatePwaManifest());
   });
 
   app.get("/icon.svg", (_req, res) => {
@@ -314,7 +315,10 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.get("/sw.js", (_req, res) => {
-    res.type("javascript").send(generateServiceWorker());
+    res.setHeader("Content-Type", "application/javascript");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Service-Worker-Allowed", "/");
+    res.send(generateServiceWorker());
   });
 
   app.get("/offline", (_req, res) => {
@@ -387,10 +391,32 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.get("/api/claude-history", (_req, res) => {
     try {
-      res.json(processes.listClaudeHistorySessions());
+      const sessions = processes.listClaudeHistorySessions();
+      // Filter out hidden sessions
+      const hiddenRaw = storage.getConfigValue("hidden_claude_sessions");
+      const hidden = new Set(parseStoredPathList<string>(hiddenRaw));
+      const filtered = hidden.size > 0
+        ? sessions.filter((s: { claudeSessionId?: string }) => !s.claudeSessionId || !hidden.has(s.claudeSessionId))
+        : sessions;
+      res.json(filtered);
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "无法扫描 Claude 历史会话。") });
     }
+  });
+
+  app.delete("/api/claude-history/:claudeSessionId", (req, res) => {
+    const claudeSessionId = req.params.claudeSessionId?.trim();
+    if (!claudeSessionId) {
+      res.status(400).json({ error: "会话 ID 不能为空。" });
+      return;
+    }
+    const hiddenRaw = storage.getConfigValue("hidden_claude_sessions");
+    const hidden = parseStoredPathList<string>(hiddenRaw);
+    if (!hidden.includes(claudeSessionId)) {
+      hidden.push(claudeSessionId);
+      storage.setConfigValue("hidden_claude_sessions", JSON.stringify(hidden));
+    }
+    res.json({ ok: true });
   });
 
   app.get("/api/sessions/:id", (req, res) => {

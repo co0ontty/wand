@@ -629,19 +629,26 @@
         var timeStr = formatHistoryTime(session.timestamp);
 
         return '<div class="session-item claude-history-item" data-claude-history-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
-          '<div class="session-item-row">' +
-            '<div class="session-main">' +
-              '<div class="session-command claude-history-preview">' + escapeHtml(preview) + '</div>' +
-              '<div class="session-meta">' +
-                '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>' +
-                '<span>' + escapeHtml(timeStr) + '</span>' +
+          '<div class="session-delete-zone">' +
+            '<button class="session-delete-btn" data-action="delete-history" data-claude-session-id="' + session.claudeSessionId + '" type="button">删除</button>' +
+          '</div>' +
+          '<div class="session-item-content">' +
+            '<div class="session-item-row">' +
+              '<div class="session-main">' +
+                '<div class="session-command claude-history-preview">' + escapeHtml(preview) + '</div>' +
+                '<div class="session-meta">' +
+                  '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>' +
+                  '<span>' + escapeHtml(timeStr) + '</span>' +
+                '</div>' +
               '</div>' +
+              '<span class="session-actions">' +
+                '<button class="session-action-btn" data-action="resume-history" data-claude-session-id="' +
+                session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) +
+                '" type="button" aria-label="恢复会话" title="恢复此 Claude 历史会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>' +
+                '<button class="session-action-btn delete-btn" data-action="delete-history" data-claude-session-id="' +
+                session.claudeSessionId + '" type="button" aria-label="删除会话" title="隐藏此历史会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>' +
+              '</span>' +
             '</div>' +
-            '<span class="session-actions">' +
-              '<button class="btn btn-secondary btn-sm session-action-btn" data-action="resume-history" data-claude-session-id="' +
-              session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) +
-              '" type="button" aria-label="恢复会话" title="恢复此 Claude 历史会话">&#8635;</button>' +
-            '</span>' +
           '</div>' +
         '</div>';
       }
@@ -1199,7 +1206,6 @@
         var metaStatus = getSessionStatusLabel(session);
         var metaStatusClass = getSessionStatusClass(session);
         var modeName = session.mode === "full-access" ? "全权限" : session.mode === "default" ? "默认" : session.mode === "native" ? "原生" : session.mode === "auto-edit" ? "自动编辑" : session.mode;
-        var deleteButton = '<button class="btn btn-ghost btn-sm session-action-btn" data-action="delete" data-session-id="' + session.id + '" type="button" aria-label="删除会话">×</button>';
         var resumeButton = "";
         var sessionIdDisplay = "";
         var recoveryHint = "";
@@ -1208,7 +1214,7 @@
           var shortId = session.claudeSessionId.slice(0, 8);
           sessionIdDisplay = '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>';
           if (session.status !== "running") {
-            resumeButton = '<button class="btn btn-secondary btn-sm session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="恢复会话" title="恢复 Claude 会话">↻</button>';
+            resumeButton = '<button class="session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="恢复会话" title="恢复 Claude 会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
           }
         }
 
@@ -1220,18 +1226,26 @@
           recoveryHint = '<span class="session-id" title="从旧会话恢复而来">续接</span>';
         }
 
+        var deleteButton = '<button class="session-action-btn delete-btn" data-action="delete-confirm" data-session-id="' + session.id + '" type="button" aria-label="删除会话" title="删除此会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
+        var actionsHtml = '<span class="session-actions">' + resumeButton + deleteButton + '</span>';
+
         return '<div class="session-item' + activeClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
-          '<div class="session-item-row">' +
-            '<div class="session-main">' +
-              '<div class="session-command">' + escapeHtml(session.command) + '</div>' +
-              '<div class="session-meta">' +
-                '<span>' + escapeHtml(modeName) + '</span>' +
-                '<span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + '</span>' +
-                sessionIdDisplay +
-                recoveryHint +
+          '<div class="session-delete-zone">' +
+            '<button class="session-delete-btn" data-action="delete-confirm" data-session-id="' + session.id + '" type="button">删除</button>' +
+          '</div>' +
+          '<div class="session-item-content">' +
+            '<div class="session-item-row">' +
+              '<div class="session-main">' +
+                '<div class="session-command">' + escapeHtml(session.command) + '</div>' +
+                '<div class="session-meta">' +
+                  '<span>' + escapeHtml(modeName) + '</span>' +
+                  '<span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + '</span>' +
+                  sessionIdDisplay +
+                  recoveryHint +
+                '</div>' +
               '</div>' +
+              actionsHtml +
             '</div>' +
-            '<span class="session-actions">' + resumeButton + deleteButton + '</span>' +
           '</div>' +
         '</div>';
       }
@@ -1447,6 +1461,7 @@
         if (sessionsList) {
           sessionsList.addEventListener("click", handleSessionItemClick);
           sessionsList.addEventListener("keydown", handleSessionItemKeydown);
+          initSwipeToDelete(sessionsList);
         }
 
         // Claude session ID badge click-to-copy (event delegation on document)
@@ -2032,8 +2047,10 @@
         if (actionButton && actionButton instanceof HTMLElement) {
           event.preventDefault();
           event.stopPropagation();
-          if (actionButton.dataset.action === "delete" && actionButton.dataset.sessionId) {
-            deleteSession(actionButton.dataset.sessionId);
+          if (actionButton.dataset.action === "delete-confirm" && actionButton.dataset.sessionId) {
+            handleDeleteConfirm(actionButton);
+          } else if (actionButton.dataset.action === "delete-history" && actionButton.dataset.claudeSessionId) {
+            handleDeleteConfirm(actionButton);
           } else if (actionButton.dataset.action === "resume" && actionButton.dataset.sessionId) {
             handleResumeAction(actionButton);
           } else if (actionButton.dataset.action === "resume-history" && actionButton.dataset.claudeSessionId) {
@@ -2042,9 +2059,18 @@
           return;
         }
         var item = target.closest(".session-item");
-        if (item && item.dataset.sessionId) {
-          selectSession(item.dataset.sessionId);
-          closeSessionsDrawer();
+        if (item) {
+          // Don't select if swiped — close the swipe instead
+          if (item.classList.contains("swiped")) {
+            closeSwipedItem();
+            return;
+          }
+          // Don't select if a swipe gesture just ended
+          if (_swipeState) return;
+          if (item.dataset.sessionId) {
+            selectSession(item.dataset.sessionId);
+            closeSessionsDrawer();
+          }
         }
       }
 
@@ -2785,6 +2811,7 @@
 
       function closeSessionsDrawer() {
         if (!state.sessionsDrawerOpen) return;
+        closeSwipedItem();
         state.sessionsDrawerOpen = false;
         updateLayoutState();
       }
@@ -4115,26 +4142,286 @@
       }
 
       function deleteSession(id) {
-        // 二次确认
-        if (!confirm("确定要删除这个会话吗？此操作无法撤销。")) {
-          return;
+        var item = document.querySelector('.session-item[data-session-id="' + id + '"]');
+        if (item) {
+          item.classList.add("deleting");
         }
-        fetch("/api/sessions/" + id, { method: "DELETE", credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data && data.error) {
-              throw new Error(data.error);
+        setTimeout(function() {
+          fetch("/api/sessions/" + id, { method: "DELETE", credentials: "same-origin" })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+              if (data && data.error) {
+                throw new Error(data.error);
+              }
+              if (state.selectedId === id) {
+                state.selectedId = null;
+                persistSelectedId();
+              }
+              return refreshAll();
+            })
+            .catch(function() {
+              // Remove deleting state on error so item reappears
+              if (item) item.classList.remove("deleting");
+              var errorEl = document.getElementById("action-error");
+              showError(errorEl, "无法删除会话。");
+            });
+        }, 250);
+      }
+
+      function deleteClaudeHistorySession(claudeSessionId, item) {
+        if (item) {
+          item.classList.add("deleting");
+        }
+        setTimeout(function() {
+          fetch("/api/claude-history/" + encodeURIComponent(claudeSessionId), { method: "DELETE", credentials: "same-origin" })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+              if (data && data.error) {
+                throw new Error(data.error);
+              }
+              // Remove from local state
+              state.claudeHistory = state.claudeHistory.filter(function(s) {
+                return s.claudeSessionId !== claudeSessionId;
+              });
+              updateSessionsList();
+            })
+            .catch(function() {
+              if (item) item.classList.remove("deleting");
+              var errorEl = document.getElementById("action-error");
+              showError(errorEl, "无法删除历史会话。");
+            });
+        }, 250);
+      }
+
+      var _deleteConfirmTimer = null;
+
+      function handleDeleteConfirm(btn) {
+        var sessionId = btn.dataset.sessionId;
+        var claudeSessionId = btn.dataset.claudeSessionId;
+        var isHistory = !!claudeSessionId && !sessionId;
+
+        if (btn.classList.contains("confirm")) {
+          // Second tap — execute delete
+          if (_deleteConfirmTimer) {
+            clearTimeout(_deleteConfirmTimer);
+            _deleteConfirmTimer = null;
+          }
+          if (isHistory) {
+            var item = btn.closest(".session-item");
+            deleteClaudeHistorySession(claudeSessionId, item);
+          } else if (sessionId) {
+            deleteSession(sessionId);
+          }
+        } else {
+          // First tap — show confirm state
+          btn.classList.add("confirm");
+          btn.textContent = "确认?";
+          if (_deleteConfirmTimer) clearTimeout(_deleteConfirmTimer);
+          _deleteConfirmTimer = setTimeout(function() {
+            btn.classList.remove("confirm");
+            btn.textContent = "\uD83D\uDDD1";
+            _deleteConfirmTimer = null;
+          }, 3000);
+        }
+      }
+
+      // ── Swipe-to-delete gesture ──
+
+      var _swipeState = null;
+      var _swipedItem = null;
+
+      function closeSwipedItem() {
+        if (_swipedItem) {
+          _swipedItem.classList.remove("swiped");
+          var content = _swipedItem.querySelector(".session-item-content");
+          if (content) content.style.transform = "";
+          // Reset confirm state of delete button
+          var btn = _swipedItem.querySelector(".session-delete-btn");
+          if (btn) {
+            btn.classList.remove("confirm");
+            btn.textContent = "\u5220\u9664";
+          }
+          _swipedItem = null;
+        }
+        if (_deleteConfirmTimer) {
+          clearTimeout(_deleteConfirmTimer);
+          _deleteConfirmTimer = null;
+        }
+      }
+
+      function initSwipeToDelete(container) {
+        var THRESHOLD = 40;
+        var ZONE_WIDTH = 72;
+
+        function getSwipeItem(target) {
+          var el = target.closest ? target.closest(".session-item") : null;
+          return el;
+        }
+
+        container.addEventListener("touchstart", function(e) {
+          var item = getSwipeItem(e.target);
+          if (!item) return;
+          // Don't interfere with action buttons
+          if (e.target.closest("[data-action]")) return;
+          _swipeState = {
+            item: item,
+            startX: e.touches[0].clientX,
+            startY: e.touches[0].clientY,
+            currentX: 0,
+            locked: false,
+            started: false
+          };
+        }, { passive: true });
+
+        container.addEventListener("touchmove", function(e) {
+          if (!_swipeState) return;
+          var dx = e.touches[0].clientX - _swipeState.startX;
+          var dy = e.touches[0].clientY - _swipeState.startY;
+
+          // Determine direction lock
+          if (!_swipeState.locked) {
+            if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+            if (Math.abs(dy) > Math.abs(dx)) {
+              // Vertical scroll — cancel swipe
+              _swipeState = null;
+              return;
             }
-            if (state.selectedId === id) {
-              state.selectedId = null;
-              persistSelectedId();
+            _swipeState.locked = true;
+          }
+
+          // Only allow left swipe (negative dx)
+          var offset = Math.min(0, Math.max(-ZONE_WIDTH, dx));
+          // If item was already swiped open, adjust
+          if (_swipeState.item === _swipedItem) {
+            offset = Math.min(0, Math.max(-ZONE_WIDTH, dx - ZONE_WIDTH));
+          }
+
+          _swipeState.currentX = offset;
+          _swipeState.started = true;
+          var content = _swipeState.item.querySelector(".session-item-content");
+          if (content) {
+            content.style.transition = "none";
+            content.style.transform = "translateX(" + offset + "px)";
+          }
+
+          e.preventDefault();
+        }, { passive: false });
+
+        container.addEventListener("touchend", function() {
+          if (!_swipeState) return;
+          var item = _swipeState.item;
+          var content = item.querySelector(".session-item-content");
+          var wasSwiped = _swipeState.started;
+          var offset = _swipeState.currentX;
+          _swipeState = null;
+
+          if (!wasSwiped) return;
+
+          if (content) {
+            content.style.transition = "";
+          }
+
+          if (Math.abs(offset) >= THRESHOLD) {
+            // Snap open
+            if (_swipedItem && _swipedItem !== item) {
+              closeSwipedItem();
             }
-            return refreshAll();
-          })
-          .catch(function() {
-            var errorEl = document.getElementById("action-error");
-            showError(errorEl, "无法删除会话。");
-          });
+            item.classList.add("swiped");
+            if (content) content.style.transform = "";
+            _swipedItem = item;
+          } else {
+            // Snap back
+            if (content) content.style.transform = "";
+            if (item === _swipedItem) {
+              item.classList.remove("swiped");
+              _swipedItem = null;
+            }
+          }
+        }, { passive: true });
+
+        // Mouse drag support for desktop
+        container.addEventListener("mousedown", function(e) {
+          var item = getSwipeItem(e.target);
+          if (!item) return;
+          if (e.target.closest("[data-action]")) return;
+          if (e.button !== 0) return;
+          _swipeState = {
+            item: item,
+            startX: e.clientX,
+            startY: e.clientY,
+            currentX: 0,
+            locked: false,
+            started: false
+          };
+        });
+
+        document.addEventListener("mousemove", function(e) {
+          if (!_swipeState) return;
+          var dx = e.clientX - _swipeState.startX;
+          var dy = e.clientY - _swipeState.startY;
+
+          if (!_swipeState.locked) {
+            if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+            if (Math.abs(dy) > Math.abs(dx)) {
+              _swipeState = null;
+              return;
+            }
+            _swipeState.locked = true;
+          }
+
+          var offset = Math.min(0, Math.max(-ZONE_WIDTH, dx));
+          if (_swipeState.item === _swipedItem) {
+            offset = Math.min(0, Math.max(-ZONE_WIDTH, dx - ZONE_WIDTH));
+          }
+
+          _swipeState.currentX = offset;
+          _swipeState.started = true;
+          var content = _swipeState.item.querySelector(".session-item-content");
+          if (content) {
+            content.style.transition = "none";
+            content.style.transform = "translateX(" + offset + "px)";
+          }
+
+          e.preventDefault();
+        });
+
+        document.addEventListener("mouseup", function() {
+          if (!_swipeState) return;
+          var item = _swipeState.item;
+          var content = item.querySelector(".session-item-content");
+          var wasSwiped = _swipeState.started;
+          var offset = _swipeState.currentX;
+          _swipeState = null;
+
+          if (!wasSwiped) return;
+
+          if (content) {
+            content.style.transition = "";
+          }
+
+          if (Math.abs(offset) >= THRESHOLD) {
+            if (_swipedItem && _swipedItem !== item) {
+              closeSwipedItem();
+            }
+            item.classList.add("swiped");
+            if (content) content.style.transform = "";
+            _swipedItem = item;
+          } else {
+            if (content) content.style.transform = "";
+            if (item === _swipedItem) {
+              item.classList.remove("swiped");
+              _swipedItem = null;
+            }
+          }
+        });
+
+        // Close swiped item when clicking elsewhere
+        document.addEventListener("click", function(e) {
+          if (!_swipedItem) return;
+          if (!_swipedItem.contains(e.target)) {
+            closeSwipedItem();
+          }
+        }, true);
       }
 
       function startCommand(command, cwd, errorEl) {

@@ -1,4 +1,4 @@
-import { mkdirSync, appendFileSync, writeFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs";
+import { mkdirSync, rmSync, appendFileSync, writeFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import type { ConversationTurn } from "./types.js";
@@ -122,5 +122,16 @@ export class SessionLogger {
     } catch {
       // Non-critical
     }
+  }
+
+  /** Delete all log files for a session */
+  deleteSession(sessionId: string): void {
+    const dir = path.join(this.baseDir, sessionId);
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Non-critical
+    }
+    this.dirs.delete(sessionId);
   }
 }

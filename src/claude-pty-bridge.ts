@@ -354,6 +354,7 @@ export class ClaudePtyBridge extends EventEmitter {
 
     // Clear state
     this.permissionState.isBlocked = false;
+    this.permissionState.window = "";
     this.permissionState.lastPrompt = null;
     this.permissionState.lastScope = null;
     this.permissionState.lastTarget = null;
@@ -388,6 +389,7 @@ export class ClaudePtyBridge extends EventEmitter {
    */
   clearPermissionBlocked(): void {
     this.permissionState.isBlocked = false;
+    this.permissionState.window = "";
     this.permissionState.lastPrompt = null;
     this.permissionState.lastScope = null;
     this.permissionState.lastTarget = null;
@@ -444,7 +446,50 @@ export class ClaudePtyBridge extends EventEmitter {
     const normalized = normalizePromptText(this.permissionState.window);
     const blocked = this.isPermissionPromptDetected(normalized);
 
-    if (this.permissionState.isBlocked === blocked) return;
+    // If state hasn't changed, check if a new distinct prompt appeared while already blocked
+    if (this.permissionState.isBlocked === blocked) {
+      if (blocked) {
+        const prompt = this.extractPromptText(normalized);
+        if (prompt !== this.permissionState.lastPrompt) {
+          // New permission prompt while already blocked — update and re-process
+          const target = this.extractPermissionTarget(normalized);
+          const scope = this.inferScope(normalized, target);
+          this.permissionState.lastPrompt = prompt;
+          this.permissionState.lastScope = scope;
+          this.permissionState.lastTarget = target ?? null;
+
+          const shouldAutoApprove = this.autoApprove || this.shouldAutoApprove(scope, target);
+          if (shouldAutoApprove) {
+            const now = Date.now();
+            if (now - this.permissionState.lastAutoConfirmAt < 500) return;
+            this.permissionState.lastAutoConfirmAt = now;
+            process.stderr.write(`[wand] Auto-confirming permission for ${scope}${target ? `: ${target}` : ""}\n`);
+            if (this.ptyWrite) {
+              this.ptyWrite("\r");
+            }
+            this.permissionState.isBlocked = false;
+            this.permissionState.window = "";
+            this.permissionState.lastPrompt = null;
+            this.permissionState.lastScope = null;
+            this.permissionState.lastTarget = null;
+            this.emitEvent({
+              type: "permission.resolved",
+              sessionId: this.sessionId,
+              timestamp: Date.now(),
+              data: { resolution: "approve_once", autoApproved: true },
+            });
+          } else {
+            this.emitEvent({
+              type: "permission.prompt",
+              sessionId: this.sessionId,
+              timestamp: Date.now(),
+              data: { prompt, scope, target } as PermissionPromptData,
+            });
+          }
+        }
+      }
+      return;
+    }
 
     this.permissionState.isBlocked = blocked;
 
@@ -475,6 +520,7 @@ export class ClaudePtyBridge extends EventEmitter {
 
         // Clear blocked state immediately
         this.permissionState.isBlocked = false;
+        this.permissionState.window = "";
         this.permissionState.lastPrompt = null;
         this.permissionState.lastScope = null;
         this.permissionState.lastTarget = null;

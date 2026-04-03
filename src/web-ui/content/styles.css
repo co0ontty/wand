@@ -800,127 +800,203 @@
       width: 100%;
       text-align: left;
       background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
       color: var(--text-primary);
-      padding: 14px 16px;
+      padding: 10px 12px;
       cursor: pointer;
-      transition: all 0.3s var(--ease-out-expo);
+      transition: all 0.2s ease;
       font-family: var(--font-sans);
-      margin-bottom: 10px;
-      box-shadow: var(--shadow-xs);
+      margin-bottom: 4px;
       position: relative;
       overflow: hidden;
-      backdrop-filter: blur(8px);
     }
 
     .session-item::before {
       content: '';
       position: absolute;
       left: 0;
-      top: 0;
-      bottom: 0;
-      width: 4px;
-      background: linear-gradient(180deg, var(--accent), var(--accent-hover));
+      top: 4px;
+      bottom: 4px;
+      width: 3px;
+      background: var(--accent);
       opacity: 0;
       transform: scaleY(0);
-      transition: all 0.3s var(--ease-out-expo);
+      transition: all 0.2s ease;
       border-radius: var(--radius-full);
     }
 
-    .session-item::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at 50% 0%, rgba(197, 101, 61, 0.06) 0%, transparent 70%);
-      opacity: 0;
-      transition: opacity 0.3s ease;
-    }
-
-    .session-item:hover::after {
-      opacity: 1;
-    }
-
     .session-item-row {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
       position: relative;
       z-index: 1;
     }
 
+    .session-item-content {
+      position: relative;
+      z-index: 2;
+      background: inherit;
+      transition: transform 0.3s var(--ease-out-expo);
+      will-change: transform;
+    }
+
+    .session-item.swiped .session-item-content {
+      transform: translateX(-72px);
+    }
+
+    .session-delete-zone {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 72px;
+      background: #e05545;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1;
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    }
+
+    .session-delete-btn {
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.95);
+      font-size: 0.6875rem;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 8px 12px;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-sans);
+      letter-spacing: 0.02em;
+    }
+
+    @keyframes session-delete-collapse {
+      to {
+        max-height: 0;
+        opacity: 0;
+        margin-bottom: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        border-width: 0;
+      }
+    }
+
+    .session-item.deleting {
+      animation: session-delete-collapse 0.3s ease-out forwards;
+      overflow: hidden;
+      max-height: 120px;
+      pointer-events: none;
+    }
+
     .session-main {
       min-width: 0;
-      flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 3px;
+      padding-right: 64px;
     }
 
     /* ===== 会话操作按钮 ===== */
     .session-actions {
+      position: absolute;
+      right: 0;
+      top: 0;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 2px;
       flex-shrink: 0;
-      opacity: 0;
-      transform: translateX(8px);
-      transition: all 0.25s var(--ease-out-expo);
-    }
-
-    .session-item:hover .session-actions {
-      opacity: 1;
-      transform: translateX(0);
     }
 
     .session-action-btn {
-      width: 32px;
-      height: 32px;
-      min-height: 32px;
-      min-width: 32px;
+      width: 28px;
+      height: 28px;
+      min-height: 28px;
+      min-width: 28px;
       padding: 0;
-      border-radius: var(--radius-md);
+      border-radius: var(--radius-full);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.875rem;
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      transition: all 0.25s var(--ease-spring);
-      color: var(--text-secondary);
+      font-size: 0.8125rem;
+      background: transparent;
+      border: none;
+      transition: all 0.2s ease;
+      color: var(--text-muted);
+      cursor: pointer;
     }
 
     .session-action-btn:hover {
-      background: var(--accent-muted);
-      border-color: var(--accent);
+      background: rgba(150, 118, 85, 0.1);
       color: var(--accent);
-      transform: scale(1.12);
-      box-shadow: 0 4px 12px rgba(197, 101, 61, 0.25);
     }
 
     .session-action-btn:active {
-      transform: scale(0.95);
+      transform: scale(0.9);
       transition-duration: 0.1s;
+    }
+
+    .session-action-btn svg {
+      flex-shrink: 0;
+    }
+
+    /* Delete icon button in actions */
+    .session-action-btn.delete-btn:hover {
+      background: rgba(231, 76, 60, 0.08);
+      color: #d35244;
+    }
+
+    .session-action-btn.delete-btn.confirm {
+      background: #e74c3c;
+      color: #fff;
+      font-size: 0.6rem;
+      width: auto;
+      min-width: 28px;
+      padding: 0 8px;
+      border-radius: var(--radius-md);
+    }
+
+    /* PC: hover to show action buttons */
+    @media (hover: hover) {
+      .session-item .session-actions {
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+      .session-item:hover .session-actions,
+      .session-item.active .session-actions,
+      .session-item.swiped .session-actions {
+        opacity: 1;
+      }
+      /* Running sessions always show resume */
+      .session-item .session-actions:has(.session-action-btn[data-action="resume"]) {
+        opacity: 1;
+      }
+    }
+
+    /* Mobile: hide delete-btn in actions (swipe replaces it) */
+    @media (hover: none) {
+      .session-action-btn.delete-btn {
+        display: none;
+      }
     }
 
     /* ===== 会话卡片交互效果 ===== */
     .session-item:hover {
-      background: rgba(255, 252, 248, 0.98);
-      border-color: var(--accent-soft);
-      transform: translateY(-3px);
-      box-shadow: var(--shadow-md);
+      background: rgba(150, 118, 85, 0.06);
+      border-color: var(--border-subtle);
     }
 
     .session-item:hover::before {
-      opacity: 1;
+      opacity: 0.5;
       transform: scaleY(1);
     }
 
     .session-item.active {
-      background: linear-gradient(135deg, rgba(241, 214, 194, 0.5) 0%, rgba(255, 247, 239, 0.9) 100%);
-      border-color: var(--accent);
-      box-shadow: 0 4px 16px rgba(197, 101, 61, 0.15);
+      background: rgba(197, 101, 61, 0.08);
+      border-color: rgba(197, 101, 61, 0.2);
     }
 
     .session-item.active::before {
@@ -929,7 +1005,7 @@
     }
 
     .session-item:active {
-      transform: scale(0.98);
+      transform: scale(0.99);
       transition-duration: 0.1s;
     }
 
@@ -4547,8 +4623,8 @@
       .thinking-content { font-size: 0.8125rem; }
       .tool-picker { grid-template-columns: 1fr; }
       /* 平板触摸优化 - 44px触摸区域 */
-      .session-item { min-height: 52px; padding: 11px 12px; }
-      .session-action-btn { width: 34px; height: 34px; min-width: 34px; min-height: 34px; }
+      .session-item { min-height: 48px; padding: 10px 12px; }
+      .session-action-btn { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
       .tree-item { min-height: 44px; padding: 8px 12px; }
       .folder-picker-item { min-height: 44px; }
     }
@@ -5071,10 +5147,10 @@
       }
 
       .session-item {
-        min-height: 56px;
-        padding: 12px;
+        min-height: 52px;
+        padding: 11px 12px;
       }
-      .session-action-btn { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+      .session-action-btn { width: 34px; height: 34px; min-width: 34px; min-height: 34px; }
 
       .btn { min-height: 42px; }
       .btn-sm { min-height: 36px; }
