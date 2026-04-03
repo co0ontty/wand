@@ -959,6 +959,11 @@
       border-radius: var(--radius-md);
     }
 
+    .claude-history-item .session-actions:has(.session-action-btn.delete-btn.confirm) + .session-meta,
+    .claude-history-item .session-item-row:has(.session-action-btn.delete-btn.confirm) .session-meta {
+      visibility: hidden;
+    }
+
     /* PC: hover to show action buttons */
     @media (hover: hover) {
       .session-item .session-actions {
