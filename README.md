@@ -8,7 +8,7 @@
 - 会话持久化与恢复
 - Claude Code 集成
 - 文件浏览器
-- HTTPS 安全连接
+- HTTPS 安全连接（可选，配置 `https: true` 启用）
 
 ## 快速开始
 
