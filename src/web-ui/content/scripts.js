@@ -439,6 +439,9 @@
                 '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
                 '<div class="sidebar-footer-actions">' +
                   '<button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="查看文件">📁 文件</button>' +
+                  '<button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="设置">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> 设置' +
+                  '</button>' +
                   '<button id="pwa-install-button" class="btn btn-ghost btn-sm hidden" title="安装应用">' +
                     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 安装' +
                   '</button>' +
@@ -582,23 +585,113 @@
 
       function renderSettingsModal() {
         return '<section id="settings-modal" class="modal-backdrop hidden">' +
-          '<div class="modal">' +
+          '<div class="modal settings-modal">' +
             '<div class="modal-header">' +
               '<h2 class="modal-title">设置</h2>' +
               '<button id="close-settings-button" class="btn btn-ghost btn-icon">×</button>' +
             '</div>' +
             '<div class="modal-body">' +
-              '<div class="field">' +
-                '<label class="field-label" for="new-password">新密码</label>' +
-                '<input id="new-password" type="password" class="field-input" placeholder="输入新密码（至少 6 个字符）" autocomplete="new-password" />' +
+              // Tabs
+              '<div class="settings-tabs">' +
+                '<button class="settings-tab active" data-tab="about">关于</button>' +
+                '<button class="settings-tab" data-tab="general">基本配置</button>' +
+                '<button class="settings-tab" data-tab="security">安全</button>' +
+                '<button class="settings-tab" data-tab="presets">命令预设</button>' +
               '</div>' +
-              '<div class="field">' +
-                '<label class="field-label" for="confirm-password">确认密码</label>' +
-                '<input id="confirm-password" type="password" class="field-input" placeholder="再次输入新密码" autocomplete="new-password" />' +
+
+              // About tab
+              '<div class="settings-panel active" id="settings-tab-about">' +
+                '<div class="settings-about-info">' +
+                  '<div class="settings-about-row"><span class="settings-label">包名</span><span class="settings-value" id="settings-pkg-name">-</span></div>' +
+                  '<div class="settings-about-row"><span class="settings-label">当前版本</span><span class="settings-value" id="settings-version">-</span></div>' +
+                  '<div class="settings-about-row"><span class="settings-label">Node.js 要求</span><span class="settings-value" id="settings-node-req">-</span></div>' +
+                  '<div class="settings-about-row"><span class="settings-label">仓库地址</span><span class="settings-value" id="settings-repo-url"><a href="#" target="_blank" rel="noopener">-</a></span></div>' +
+                '</div>' +
+                '<div class="settings-update-section">' +
+                  '<div class="settings-about-row">' +
+                    '<span class="settings-label">最新版本</span>' +
+                    '<span class="settings-value" id="settings-latest-version">-</span>' +
+                  '</div>' +
+                  '<div class="settings-update-actions">' +
+                    '<button id="check-update-button" class="btn btn-ghost btn-sm">检查更新</button>' +
+                    '<button id="do-update-button" class="btn btn-primary btn-sm hidden">更新到最新版</button>' +
+                  '</div>' +
+                  '<p id="update-message" class="hint hidden"></p>' +
+                '</div>' +
               '</div>' +
-              '<button id="save-password-button" class="btn btn-primary btn-block">保存密码</button>' +
-              '<p id="settings-error" class="error-message hidden"></p>' +
-              '<p id="settings-success" class="hint hidden" style="color: var(--success);"></p>' +
+
+              // General config tab
+              '<div class="settings-panel" id="settings-tab-general">' +
+                '<div class="field">' +
+                  '<label class="field-label" for="cfg-host">监听地址 (host)</label>' +
+                  '<input id="cfg-host" type="text" class="field-input" placeholder="127.0.0.1" />' +
+                '</div>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="cfg-port">端口 (port)</label>' +
+                  '<input id="cfg-port" type="number" class="field-input" placeholder="8443" min="1" max="65535" />' +
+                '</div>' +
+                '<div class="field field-inline">' +
+                  '<label class="field-label" for="cfg-https">启用 HTTPS</label>' +
+                  '<input id="cfg-https" type="checkbox" class="field-checkbox" />' +
+                '</div>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="cfg-mode">默认执行模式</label>' +
+                  '<select id="cfg-mode" class="field-input">' +
+                    '<option value="default">default</option>' +
+                    '<option value="assist">assist</option>' +
+                    '<option value="agent">agent</option>' +
+                    '<option value="agent-max">agent-max</option>' +
+                    '<option value="auto-edit">auto-edit</option>' +
+                    '<option value="full-access">full-access</option>' +
+                    '<option value="native">native</option>' +
+                    '<option value="managed">managed</option>' +
+                  '</select>' +
+                '</div>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="cfg-cwd">默认工作目录</label>' +
+                  '<input id="cfg-cwd" type="text" class="field-input" placeholder="/home/user" />' +
+                '</div>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="cfg-shell">Shell</label>' +
+                  '<input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" />' +
+                '</div>' +
+                '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
+                '<p id="config-message" class="hint hidden"></p>' +
+              '</div>' +
+
+              // Security tab
+              '<div class="settings-panel" id="settings-tab-security">' +
+                '<h3 class="settings-section-title">修改密码</h3>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="new-password">新密码</label>' +
+                  '<input id="new-password" type="password" class="field-input" placeholder="输入新密码（至少 6 个字符）" autocomplete="new-password" />' +
+                '</div>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="confirm-password">确认密码</label>' +
+                  '<input id="confirm-password" type="password" class="field-input" placeholder="再次输入新密码" autocomplete="new-password" />' +
+                '</div>' +
+                '<button id="save-password-button" class="btn btn-primary btn-block">保存密码</button>' +
+                '<p id="settings-error" class="error-message hidden"></p>' +
+                '<p id="settings-success" class="hint hidden" style="color: var(--success);"></p>' +
+                '<hr class="settings-divider" />' +
+                '<h3 class="settings-section-title">SSL 证书</h3>' +
+                '<p class="settings-hint" id="cert-status">加载中...</p>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="cert-key-file">私钥文件 (.key)</label>' +
+                  '<input id="cert-key-file" type="file" class="field-input field-file" accept=".key,.pem" />' +
+                '</div>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="cert-cert-file">证书文件 (.crt/.pem)</label>' +
+                  '<input id="cert-cert-file" type="file" class="field-input field-file" accept=".crt,.pem,.cert" />' +
+                '</div>' +
+                '<button id="upload-cert-button" class="btn btn-primary btn-block">上传证书</button>' +
+                '<p id="cert-message" class="hint hidden"></p>' +
+              '</div>' +
+
+              // Command presets tab
+              '<div class="settings-panel" id="settings-tab-presets">' +
+                '<div id="presets-list" class="presets-list"></div>' +
+              '</div>' +
             '</div>' +
           '</div>' +
         '</section>';
@@ -1768,6 +1861,21 @@
         });
         var savePassBtn = document.getElementById("save-password-button");
         if (savePassBtn) savePassBtn.addEventListener("click", savePassword);
+        // Settings tab clicks
+        var settingsTabs = document.querySelectorAll(".settings-tab");
+        for (var ti = 0; ti < settingsTabs.length; ti++) {
+          settingsTabs[ti].addEventListener("click", function(e) {
+            switchSettingsTab(e.target.getAttribute("data-tab"));
+          });
+        }
+        var saveConfigBtn = document.getElementById("save-config-button");
+        if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
+        var uploadCertBtn = document.getElementById("upload-cert-button");
+        if (uploadCertBtn) uploadCertBtn.addEventListener("click", uploadCertificates);
+        var checkUpdateBtn = document.getElementById("check-update-button");
+        if (checkUpdateBtn) checkUpdateBtn.addEventListener("click", checkForUpdate);
+        var doUpdateBtn = document.getElementById("do-update-button");
+        if (doUpdateBtn) doUpdateBtn.addEventListener("click", performUpdate);
         var newSessBtn = document.getElementById("topbar-new-session-button");
         if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
         var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
@@ -3443,10 +3551,16 @@
         if (modal) {
           modal.classList.remove("hidden");
           lastFocusedElement = document.activeElement;
-          document.getElementById("new-password").value = "";
-          document.getElementById("confirm-password").value = "";
+          var passEl = document.getElementById("new-password");
+          var confirmEl = document.getElementById("confirm-password");
+          if (passEl) passEl.value = "";
+          if (confirmEl) confirmEl.value = "";
           hideSettingsMessages();
           setupFocusTrap(modal);
+          // Activate first tab
+          switchSettingsTab("about");
+          // Load settings data
+          loadSettingsData();
         }
       }
 
@@ -3514,6 +3628,247 @@
         .catch(function() {
           errorEl.textContent = "Failed to save password.";
           errorEl.classList.remove("hidden");
+        });
+      }
+
+      // ── Settings tab/panel logic ──
+
+      function switchSettingsTab(tabName) {
+        var tabs = document.querySelectorAll(".settings-tab");
+        var panels = document.querySelectorAll(".settings-panel");
+        for (var i = 0; i < tabs.length; i++) {
+          if (tabs[i].getAttribute("data-tab") === tabName) {
+            tabs[i].classList.add("active");
+          } else {
+            tabs[i].classList.remove("active");
+          }
+        }
+        for (var j = 0; j < panels.length; j++) {
+          if (panels[j].id === "settings-tab-" + tabName) {
+            panels[j].classList.add("active");
+          } else {
+            panels[j].classList.remove("active");
+          }
+        }
+      }
+
+      function loadSettingsData() {
+        fetch("/api/settings", { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            // About
+            var nameEl = document.getElementById("settings-pkg-name");
+            var verEl = document.getElementById("settings-version");
+            var nodeEl = document.getElementById("settings-node-req");
+            var repoEl = document.getElementById("settings-repo-url");
+            if (nameEl) nameEl.textContent = data.packageName || "-";
+            if (verEl) verEl.textContent = data.version || "-";
+            if (nodeEl) nodeEl.textContent = data.nodeVersion || "-";
+            if (repoEl && data.repoUrl) {
+              repoEl.innerHTML = '<a href="' + escapeHtml(data.repoUrl) + '" target="_blank" rel="noopener">' + escapeHtml(data.repoUrl) + '</a>';
+            }
+
+            // Config fields
+            var cfg = data.config || {};
+            var hostEl = document.getElementById("cfg-host");
+            var portEl = document.getElementById("cfg-port");
+            var httpsEl = document.getElementById("cfg-https");
+            var modeEl = document.getElementById("cfg-mode");
+            var cwdEl = document.getElementById("cfg-cwd");
+            var shellEl = document.getElementById("cfg-shell");
+            if (hostEl) hostEl.value = cfg.host || "";
+            if (portEl) portEl.value = cfg.port || "";
+            if (httpsEl) httpsEl.checked = cfg.https === true;
+            if (modeEl) modeEl.value = cfg.defaultMode || "default";
+            if (cwdEl) cwdEl.value = cfg.defaultCwd || "";
+            if (shellEl) shellEl.value = cfg.shell || "";
+
+            // Cert status
+            var certStatus = document.getElementById("cert-status");
+            if (certStatus) {
+              certStatus.textContent = data.hasCert ? "已安装 SSL 证书" : "未安装证书（使用自签名或 HTTP）";
+              certStatus.style.color = data.hasCert ? "var(--success)" : "var(--text-secondary)";
+            }
+
+            // Presets
+            var presetsList = document.getElementById("presets-list");
+            if (presetsList && cfg.commandPresets) {
+              var html = "";
+              for (var i = 0; i < cfg.commandPresets.length; i++) {
+                var p = cfg.commandPresets[i];
+                html += '<div class="preset-item">' +
+                  '<span class="preset-label">' + escapeHtml(p.label) + '</span>' +
+                  '<span class="preset-detail">' + escapeHtml(p.command) + (p.mode ? ' (' + escapeHtml(p.mode) + ')' : '') + '</span>' +
+                '</div>';
+              }
+              if (!html) html = '<p class="settings-hint">没有命令预设。</p>';
+              presetsList.innerHTML = html;
+            }
+          })
+          .catch(function() {});
+      }
+
+      function saveConfigSettings() {
+        var msgEl = document.getElementById("config-message");
+        if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
+
+        var body = {
+          host: (document.getElementById("cfg-host") || {}).value,
+          port: Number((document.getElementById("cfg-port") || {}).value),
+          https: (document.getElementById("cfg-https") || {}).checked,
+          defaultMode: (document.getElementById("cfg-mode") || {}).value,
+          defaultCwd: (document.getElementById("cfg-cwd") || {}).value,
+          shell: (document.getElementById("cfg-shell") || {}).value,
+        };
+
+        fetch("/api/settings/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(body)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (msgEl) {
+            if (data.error) {
+              msgEl.textContent = data.error;
+              msgEl.style.color = "var(--error)";
+            } else {
+              msgEl.textContent = "配置已保存，部分更改需要重启后生效。";
+              msgEl.style.color = "var(--success)";
+            }
+            msgEl.classList.remove("hidden");
+          }
+        })
+        .catch(function() {
+          if (msgEl) {
+            msgEl.textContent = "保存失败。";
+            msgEl.style.color = "var(--error)";
+            msgEl.classList.remove("hidden");
+          }
+        });
+      }
+
+      function uploadCertificates() {
+        var keyFile = document.getElementById("cert-key-file");
+        var certFile = document.getElementById("cert-cert-file");
+        var msgEl = document.getElementById("cert-message");
+        if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
+
+        if (!keyFile || !keyFile.files[0] || !certFile || !certFile.files[0]) {
+          if (msgEl) {
+            msgEl.textContent = "请选择私钥和证书文件。";
+            msgEl.style.color = "var(--error)";
+            msgEl.classList.remove("hidden");
+          }
+          return;
+        }
+
+        var keyReader = new FileReader();
+        keyReader.onload = function() {
+          var keyContent = keyReader.result;
+          var certReader = new FileReader();
+          certReader.onload = function() {
+            var certContent = certReader.result;
+            fetch("/api/settings/upload-cert", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify({ key: keyContent, cert: certContent })
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+              if (msgEl) {
+                if (data.error) {
+                  msgEl.textContent = data.error;
+                  msgEl.style.color = "var(--error)";
+                } else {
+                  msgEl.textContent = "证书已上传，重启后生效。";
+                  msgEl.style.color = "var(--success)";
+                  // Update cert status
+                  var certStatus = document.getElementById("cert-status");
+                  if (certStatus) {
+                    certStatus.textContent = "已安装 SSL 证书";
+                    certStatus.style.color = "var(--success)";
+                  }
+                }
+                msgEl.classList.remove("hidden");
+              }
+            })
+            .catch(function() {
+              if (msgEl) {
+                msgEl.textContent = "上传失败。";
+                msgEl.style.color = "var(--error)";
+                msgEl.classList.remove("hidden");
+              }
+            });
+          };
+          certReader.readAsText(certFile.files[0]);
+        };
+        keyReader.readAsText(keyFile.files[0]);
+      }
+
+      function checkForUpdate() {
+        var latestEl = document.getElementById("settings-latest-version");
+        var updateBtn = document.getElementById("do-update-button");
+        var msgEl = document.getElementById("update-message");
+        if (latestEl) latestEl.textContent = "检查中...";
+        if (msgEl) msgEl.classList.add("hidden");
+        if (updateBtn) updateBtn.classList.add("hidden");
+
+        fetch("/api/check-update", { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data.error) {
+              if (latestEl) latestEl.textContent = "检查失败";
+              return;
+            }
+            if (latestEl) latestEl.textContent = data.latest;
+            if (data.updateAvailable && updateBtn) {
+              updateBtn.classList.remove("hidden");
+            }
+            if (!data.updateAvailable && msgEl) {
+              msgEl.textContent = "已是最新版本。";
+              msgEl.style.color = "var(--success)";
+              msgEl.classList.remove("hidden");
+            }
+          })
+          .catch(function() {
+            if (latestEl) latestEl.textContent = "检查失败";
+          });
+      }
+
+      function performUpdate() {
+        var msgEl = document.getElementById("update-message");
+        var updateBtn = document.getElementById("do-update-button");
+        if (updateBtn) updateBtn.disabled = true;
+        if (msgEl) {
+          msgEl.textContent = "正在更新，请稍候...";
+          msgEl.style.color = "var(--text-secondary)";
+          msgEl.classList.remove("hidden");
+        }
+
+        fetch("/api/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin"
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (msgEl) {
+            msgEl.textContent = data.message || data.error || "更新请求已发送。";
+            msgEl.style.color = data.error ? "var(--error)" : "var(--success)";
+            msgEl.classList.remove("hidden");
+          }
+          if (updateBtn) updateBtn.disabled = false;
+        })
+        .catch(function() {
+          if (msgEl) {
+            msgEl.textContent = "更新失败。";
+            msgEl.style.color = "var(--error)";
+            msgEl.classList.remove("hidden");
+          }
+          if (updateBtn) updateBtn.disabled = false;
         });
       }
 
