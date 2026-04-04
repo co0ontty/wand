@@ -165,6 +165,14 @@
         }
       }
 
+      function getConfigCwd() {
+        return (state.config && state.config.defaultCwd) || "/tmp";
+      }
+
+      function getEffectiveCwd() {
+        return state.workingDir || getConfigCwd();
+      }
+
       // PWA install prompt handling
       window.addEventListener('beforeinstallprompt', function(e) {
         e.preventDefault();
@@ -464,14 +472,14 @@
                 '</div>' +
                 '<div class="file-side-panel-body">' +
                   '<div class="file-explorer-header">' +
-                    '<span class="file-explorer-path" id="file-explorer-cwd">' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : (state.config && state.config.defaultCwd ? state.config.defaultCwd : "")) + '</span>' +
+                    '<span class="file-explorer-path" id="file-explorer-cwd">' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</span>' +
                     '<button class="file-explorer-refresh" id="file-explorer-refresh" title="刷新" aria-label="刷新文件列表">↻</button>' +
                   '</div>' +
                   '<div class="file-search-box">' +
                     '<input type="text" id="file-search-input" class="file-search-input" placeholder="搜索文件..." autocomplete="off" />' +
                     '<button class="file-search-clear" id="file-search-clear" type="button" aria-label="清除搜索">×</button>' +
                   '</div>' +
-                  '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : (state.config && state.config.defaultCwd ? state.config.defaultCwd : "")) + '</div>' +
+                  '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div>' +
                 '</div>' +
               '</div>' +
               '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active">' +
@@ -498,7 +506,7 @@
                   '<div class="blank-chat-cwd-wrap">' +
                     '<div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" title="点击切换工作目录">' +
                       '<span class="blank-chat-cwd-icon">📁</span>' +
-                      '<span class="blank-chat-cwd-path" id="blank-chat-cwd-path">' + escapeHtml(state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp")) + '</span>' +
+                      '<span class="blank-chat-cwd-path" id="blank-chat-cwd-path">' + escapeHtml(getEffectiveCwd()) + '</span>' +
                       '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">▼</span>' +
                     '</div>' +
                     '<div class="blank-chat-cwd-dropdown hidden" id="blank-chat-cwd-dropdown"></div>' +
@@ -1103,7 +1111,7 @@
       function updateFilePanelCwd(session) {
         var cwdEl = document.getElementById("file-explorer-cwd");
         if (!cwdEl) return;
-        var cwd = session && session.cwd ? session.cwd : (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        var cwd = session && session.cwd ? session.cwd : getConfigCwd();
         cwdEl.textContent = cwd;
       }
 
@@ -1142,7 +1150,7 @@
       }
 
       function renderFileExplorer(cwd) {
-        var root = cwd || (state.config && state.config.defaultCwd) || "";
+        var root = cwd || getConfigCwd();
         if (!root) {
           return '<div class="file-explorer empty">No working directory configured.</div>';
         }
@@ -1161,8 +1169,8 @@
           var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (session) cwd = session.cwd || "";
         }
-        if (!cwd && state.config && state.config.defaultCwd) {
-          cwd = state.config.defaultCwd;
+        if (!cwd) {
+          cwd = getConfigCwd();
         }
         if (!cwd) {
           explorer.innerHTML = '<div class="file-explorer empty">No working directory.</div>';
@@ -1504,7 +1512,7 @@
       }
 
       function renderFolderPicker(state) {
-        var currentDir = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+        var currentDir = getEffectiveCwd();
 
         // 如果有选中的会话，不显示单独的工作目录标签（已嵌入输入框内部）
         if (state.selectedId) {
@@ -1530,7 +1538,7 @@
 
       // 渲染内嵌到输入框的工作目录指示器
       function renderWorkingDirIndicator(state) {
-        var currentDir = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+        var currentDir = getEffectiveCwd();
         var displayDir = currentDir;
 
         // 如果有选中的会话，使用会话的工作目录
@@ -1653,7 +1661,7 @@
               '<div class="field">' +
                 '<label class="field-label" for="cwd">工作目录</label>' +
                 '<div class="suggestions-wrap">' +
-                  '<input id="cwd" type="text" class="field-input" autocomplete="off" placeholder="' + escapeHtml(state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp")) + '" />' +
+                  '<input id="cwd" type="text" class="field-input" autocomplete="off" placeholder="' + escapeHtml(getEffectiveCwd()) + '" />' +
                   '<div id="cwd-suggestions" class="suggestions hidden"></div>' +
                 '</div>' +
                 '<p class="field-hint">留空则使用上方目录，支持路径自动补全。</p>' +
@@ -2221,7 +2229,7 @@
 
         if (folderPickerInput) {
           // Load initial folders from saved or default path
-          var initialPath = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+          var initialPath = getEffectiveCwd();
           loadFolderSuggestions(initialPath);
 
           folderPickerInput.addEventListener("focus", function() {
@@ -2397,15 +2405,13 @@
           folderPickerModal.classList.remove("hidden");
           // Set initial path in input
           if (folderPickerInput) {
-            folderPickerInput.value = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+            folderPickerInput.value = getEffectiveCwd();
           }
           // Load initial folders
-          var initialPath = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp");
+          var initialPath = getEffectiveCwd();
           loadFolderSuggestions(initialPath);
           renderBreadcrumb(initialPath);
         }
-
-        // Welcome screen folder button (legacy, now handled by initBlankChatCwd)
 
         if (closeFolderPicker && folderPickerModal) {
           closeFolderPicker.addEventListener("click", function() {
@@ -2424,6 +2430,16 @@
         initTerminal();
         setupMobileKeyboardHandlers();
         setupVisualViewportHandlers();
+      }
+
+      function activateSessionItem(sessionId) {
+        var session = state.sessions.find(function(s) { return s.id === sessionId; });
+        if (session && session.status !== "running") {
+          resumeSessionFromList(sessionId);
+        } else {
+          selectSession(sessionId);
+        }
+        closeSessionsDrawer();
       }
 
       function handleSessionItemClick(event) {
@@ -2502,13 +2518,7 @@
           }
           if (_swipeState) return;
           if (item.dataset.sessionId) {
-            var clickedSession = state.sessions.find(function(s) { return s.id === item.dataset.sessionId; });
-            if (clickedSession && clickedSession.status !== "running") {
-              resumeSessionFromList(item.dataset.sessionId);
-            } else {
-              selectSession(item.dataset.sessionId);
-            }
-            closeSessionsDrawer();
+            activateSessionItem(item.dataset.sessionId);
           }
         }
       }
@@ -2527,13 +2537,7 @@
           return;
         }
         if (item.dataset.sessionId) {
-          var keySession = state.sessions.find(function(s) { return s.id === item.dataset.sessionId; });
-          if (keySession && keySession.status !== "running") {
-            resumeSessionFromList(item.dataset.sessionId);
-          } else {
-            selectSession(item.dataset.sessionId);
-          }
-          closeSessionsDrawer();
+          activateSessionItem(item.dataset.sessionId);
         }
       }
 
@@ -3403,11 +3407,7 @@
             updateShellChrome();
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
-            if (data.messages && data.messages.length > 0) {
-              state.currentMessages = data.messages;
-            } else {
-              state.currentMessages = [];
-            }
+            state.currentMessages = data.messages || [];
 
             if (state.terminal) {
               syncTerminalBuffer(id, data.output || "", { mode: "replace" });
@@ -3891,7 +3891,7 @@
 
       function quickStartSession() {
         var command = getPreferredTool();
-        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        var defaultCwd = getEffectiveCwd();
         var defaultMode = (state.config && state.config.defaultMode) ? state.config.defaultMode : "default";
         state.preferredCommand = command;
         state.chatMode = getSafeModeForTool(command, state.chatMode);
@@ -3928,7 +3928,7 @@
 
         hideError(errorEl);
 
-        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        var defaultCwd = getEffectiveCwd();
         var selectedMode = getSafeModeForTool(command, state.modeValue);
         state.modeValue = selectedMode;
         state.chatMode = selectedMode;
@@ -4006,7 +4006,7 @@
       }
 
       function loadBlankChatCwdDropdown(dropdown) {
-        var defaultCwd = state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp";
+        var defaultCwd = getConfigCwd();
         dropdown.innerHTML = '<div class="blank-chat-cwd-loading">加载中...</div>';
         fetch("/api/recent-paths", { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
@@ -4364,7 +4364,7 @@
         welcomeInput.placeholder = "正在启动会话...";
         welcomeInput.disabled = true;
         var mode = state.chatMode || "full-access";
-        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
           method: "POST",
@@ -4426,7 +4426,7 @@
 
         // No selected session, create a new one
         var mode = state.chatMode || "full-access";
-        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
           method: "POST",
@@ -5380,7 +5380,7 @@
         welcomeInput.placeholder = "Claude 正在思考，请稍候...";
         welcomeInput.disabled = true;
         var mode = state.chatMode || "full-access";
-        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
           method: "POST",
@@ -5416,7 +5416,7 @@
 
       function createSessionFromInput(value, inputBox, welcomeInput) {
         var mode = state.chatMode || "full-access";
-        var defaultCwd = state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "");
+        var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
           method: "POST",
@@ -6588,7 +6588,7 @@
               }
               updateSessionSnapshot(snapshot);
               if (msg.sessionId === state.selectedId) {
-                if (msg.data.messages && msg.data.messages.length > 0) {
+                if (msg.data.messages) {
                   state.currentMessages = msg.data.messages;
                 }
                 updateTaskDisplay();
@@ -6719,10 +6719,10 @@
             }
           }
           if (permissionActionsEl) permissionActionsEl.classList.remove("hidden");
-          // Also show in task bar
-          taskEl.textContent = pendingEscalation ? (pendingEscalation.reason || "等待 Claude 权限授权") : "等待 Claude 权限授权";
-          taskEl.classList.remove("hidden");
-          taskEl.classList.add("permission-blocked");
+          // Hide top task bar — permission info is already shown in the composer
+          taskEl.textContent = "";
+          taskEl.classList.add("hidden");
+          taskEl.classList.remove("permission-blocked");
           return;
         }
 

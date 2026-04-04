@@ -1529,15 +1529,6 @@
       flex-shrink: 0;
       animation: task-pulse 1.2s ease-in-out infinite;
     }
-    .current-task.permission-blocked {
-      color: #d18b00;
-      background: rgba(240, 165, 0, 0.14);
-      border-color: rgba(240, 165, 0, 0.3);
-    }
-    .current-task.permission-blocked::before {
-      background: #f0a500;
-      animation: none;
-    }
     @keyframes task-pulse {
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.5; transform: scale(0.8); }
