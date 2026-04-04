@@ -559,14 +559,13 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.post("/api/update", async (_req, res) => {
     try {
-      const { updateAvailable } = await checkNpmLatestVersion();
+      const { updateAvailable, latest } = await checkNpmLatestVersion();
       if (!updateAvailable) {
         res.json({ ok: true, message: "已经是最新版本。" });
         return;
       }
-      res.json({ ok: true, message: "正在更新，请稍候..." });
-      // Run update in background — the server will restart
-      execAsync(`npm install -g ${PKG_NAME}@latest`, { timeout: 120000 }).catch(() => {});
+      await execAsync(`npm install -g ${PKG_NAME}@latest`, { timeout: 120000 });
+      res.json({ ok: true, message: `已更新到 ${latest}，请重启 wand 服务以生效。` });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "更新失败。") });
     }

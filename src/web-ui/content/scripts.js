@@ -3864,11 +3864,15 @@
         .then(function(res) { return res.json(); })
         .then(function(data) {
           if (msgEl) {
-            msgEl.textContent = data.message || data.error || "更新请求已发送。";
+            msgEl.textContent = data.message || data.error || "更新完成。";
             msgEl.style.color = data.error ? "var(--error)" : "var(--success)";
             msgEl.classList.remove("hidden");
           }
-          if (updateBtn) updateBtn.disabled = false;
+          if (data.error) {
+            if (updateBtn) updateBtn.disabled = false;
+          } else {
+            if (updateBtn) updateBtn.classList.add("hidden");
+          }
         })
         .catch(function() {
           if (msgEl) {
