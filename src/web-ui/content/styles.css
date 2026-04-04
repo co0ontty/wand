@@ -127,7 +127,28 @@
       }
       .app-container {
         --pwa-top-inset: env(safe-area-inset-top, 0px);
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
       }
+      .sidebar-header {
+        padding-top: calc(14px + env(safe-area-inset-top, 0px));
+      }
+      .main-content {
+        padding-top: 0;
+      }
+    }
+
+    /* iOS Safari PWA fallback (navigator.standalone adds .is-pwa via JS) */
+    .is-pwa .floating-sidebar-toggle {
+      top: max(10px, env(safe-area-inset-top, 10px));
+    }
+    .is-pwa .app-container {
+      --pwa-top-inset: env(safe-area-inset-top, 0px);
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    .is-pwa .sidebar-header {
+      padding-top: calc(14px + env(safe-area-inset-top, 0px));
     }
 
     /* ===== PWA 窗口控件覆盖模式 (Window Controls Overlay) ===== */
@@ -159,6 +180,8 @@
       color: var(--text-primary);
       min-height: 100vh;
       min-height: 100dvh;
+      height: 100vh;
+      height: 100dvh;
       line-height: var(--line-height-base);
       overflow: hidden;
     }
@@ -309,6 +332,11 @@
       transition: padding-left var(--transition-normal);
     }
     /* .sidebar-open class toggled for semantic purposes only; sidebar overlays without resizing main layout */
+    .sidebar-open .input-panel {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
 
     /* ===== 抽屉背景遮罩 ===== */
     .drawer-backdrop {
@@ -703,7 +731,6 @@
     }
 
     .sidebar-intro {
-      padding: 12px 14px 0;
       font-size: 0.75rem;
       color: var(--text-secondary);
       flex-shrink: 0;
@@ -734,7 +761,7 @@
     .session-manage-bar {
       display: flex;
       align-items: center;
-      justify-content: flex-end;
+      justify-content: space-between;
       margin-bottom: 12px;
     }
 
@@ -842,6 +869,12 @@
     }
     .claude-history-directory-header {
       margin-top: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .claude-history-directory-header .chevron {
+      font-size: 0.6rem;
+      margin-right: 2px;
     }
     .claude-history-directory-title {
       font-size: 0.6rem;
@@ -1188,6 +1221,27 @@
       flex-direction: column;
       gap: 10px;
       background: rgba(255, 251, 245, 0.7);
+    }
+
+    .sidebar-footer-actions {
+      display: flex;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .sidebar-footer-actions .btn {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+
+    .sidebar-footer-actions .btn:hover {
+      color: var(--text-primary);
+      background: var(--bg-tertiary);
     }
 
     .sidebar-meta {
@@ -1707,6 +1761,13 @@
       min-width: 34px;
       text-align: center;
       padding: 0 3px;
+    }
+
+    .terminal-scale-overlay-divider {
+      width: 1px;
+      height: 14px;
+      background: rgba(245, 234, 220, 0.2);
+      margin: 0 2px;
     }
 
     .terminal-jump-bottom {
