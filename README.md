@@ -10,7 +10,13 @@
 - 文件浏览器
 - HTTPS 安全连接（可选，配置 `https: true` 启用）
 
-## 快速开始
+## 一键安装
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.sh)
+```
+
+## 手动安装
 
 ```bash
 npm install -g @co0ontty/wand
