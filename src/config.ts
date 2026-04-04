@@ -17,6 +17,7 @@ export const defaultConfig = (): WandConfig => ({
   defaultCwd: process.cwd(),
   startupCommands: [],
   allowedCommandPrefixes: [],
+  shortcutLogMaxBytes: 10 * 1024 * 1024,
   commandPresets: [
     {
       label: "Claude",
@@ -98,6 +99,10 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
       typeof input.defaultCwd === "string" && input.defaultCwd.trim()
         ? input.defaultCwd
         : defaults.defaultCwd,
+    shortcutLogMaxBytes:
+      typeof input.shortcutLogMaxBytes === "number" && input.shortcutLogMaxBytes >= 0
+        ? input.shortcutLogMaxBytes
+        : defaults.shortcutLogMaxBytes,
     startupCommands: Array.isArray(input.startupCommands) ? input.startupCommands : defaults.startupCommands,
     allowedCommandPrefixes: Array.isArray(input.allowedCommandPrefixes)
       ? input.allowedCommandPrefixes

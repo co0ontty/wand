@@ -8,7 +8,7 @@ import os from "node:os";
 
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
-import { SessionLogger } from "./session-logger.js";
+import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, SessionEvent, SessionSnapshot, WandConfig } from "./types.js";
 import { SessionLifecycleManager } from "./session-lifecycle.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
@@ -954,7 +954,7 @@ export class ProcessManager extends EventEmitter {
     configDir?: string
   ) {
     super();
-    this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"));
+    this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"), config.shortcutLogMaxBytes);
     
     // Initialize lifecycle manager
     this.lifecycleManager = new SessionLifecycleManager({
@@ -1443,11 +1443,17 @@ export class ProcessManager extends EventEmitter {
       view: view ?? "chat"
     });
 
-    // Log shortcut key interactions in managed/full-access modes for auto-confirm analysis
-    if (shortcutKey && record.autoApprovePermissions) {
+    // Log shortcut key interactions for auto-confirm and mode analysis
+    if (shortcutKey) {
       const outputLines = record.output.split("\n");
       const tailLines = outputLines.slice(-15).join("\n");
-      this.logger.appendShortcutLog(id, shortcutKey, tailLines);
+      const ctx: ShortcutLogContext = {
+        mode: record.mode,
+        autoApprove: record.autoApprovePermissions,
+        permissionBlocked: record.ptyPermissionBlocked || !!record.pendingEscalation,
+        input,
+      };
+      this.logger.appendShortcutLog(id, shortcutKey, tailLines, ctx);
     }
 
     // Track user input via bridge for Chat mode
