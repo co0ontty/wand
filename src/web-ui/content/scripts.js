@@ -3310,6 +3310,58 @@
         }
       }
 
+      function subscribeToSession(sessionId) {
+        if (!sessionId || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        state.ws.send(JSON.stringify({ type: "subscribe", sessionId: sessionId }));
+      }
+
+      function mergeServerSession(localSession, serverSession) {
+        if (!localSession) return serverSession;
+
+        var merged = Object.assign({}, localSession, serverSession);
+        var localOutput = localSession.output || "";
+        var serverOutput = serverSession.output || "";
+        var keepLocalOutput = localOutput.length > serverOutput.length;
+
+        if (keepLocalOutput) {
+          merged.output = localOutput;
+        }
+
+        if (localSession.id === state.selectedId) {
+          if (localSession.permissionBlocked && serverSession.permissionBlocked === false) {
+            // server explicitly resolved it; keep resolved state
+          } else if (localSession.permissionBlocked && !serverSession.permissionBlocked) {
+            merged.permissionBlocked = true;
+          }
+
+          if (localSession.pendingEscalation && !serverSession.pendingEscalation && serverSession.permissionBlocked !== false) {
+            merged.pendingEscalation = localSession.pendingEscalation;
+          }
+
+          if (localSession.messages && localSession.messages.length > 0 && (!serverSession.messages || serverSession.messages.length === 0)) {
+            merged.messages = localSession.messages;
+          }
+        }
+
+        return merged;
+      }
+
+      function getPreferredMessages(session, fallbackOutput, allowFallback) {
+        if (session && session.messages && session.messages.length > 0) {
+          return session.messages;
+        }
+        if (!allowFallback) {
+          return [];
+        }
+        var output = typeof fallbackOutput === "string"
+          ? fallbackOutput
+          : (session && session.output) || "";
+        if (!output) {
+          return [];
+        }
+        return parseMessages(output, session && session.command);
+      }
+
       function getPreferredSessionId(sessions) {
         if (!sessions || !sessions.length) return null;
         // Keep currently selected session as long as it still exists
@@ -3344,10 +3396,7 @@
 
             state.sessions = serverSessions.map(function(serverSession) {
               var localSession = state.sessions.find(function(s) { return s.id === serverSession.id; });
-              if (localSession && localSession.output && localSession.output.length > (serverSession.output || '').length) {
-                return localSession;
-              }
-              return serverSession;
+              return mergeServerSession(localSession, serverSession);
             });
 
             state.selectedId = getPreferredSessionId(state.sessions);
@@ -3471,7 +3520,7 @@
             updateShellChrome();
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
-            state.currentMessages = data.messages || [];
+            state.currentMessages = getPreferredMessages(selectedSession, data.output, false);
 
             if (state.terminal) {
               syncTerminalBuffer(id, data.output || "", { mode: "replace" });
@@ -3506,6 +3555,7 @@
           refreshFileExplorer();
         }
         loadOutput(id).then(function() { focusInputBox(true); });
+        subscribeToSession(id);
       }
 
       function updateDrawerState() {
@@ -4553,9 +4603,7 @@
           switchToSessionView(data.id);
           updateSessionSnapshot(data);
           updateSessionsList();
-          if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-            state.ws.send(JSON.stringify({ type: "subscribe", sessionId: data.id }));
-          }
+          subscribeToSession(data.id);
           loadOutput(data.id).then(function() {
             focusInputBox(true);
           });
@@ -4616,9 +4664,7 @@
           updateSessionSnapshot(data);
           updateSessionsList();
           // Subscribe to new session via WebSocket
-          if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-            state.ws.send(JSON.stringify({ type: 'subscribe', sessionId: data.id }));
-          }
+          subscribeToSession(data.id);
           return loadOutput(data.id);
         })
         .catch(function(error) {
@@ -4791,9 +4837,7 @@
           updateSessionSnapshot(data);
           updateSessionsList();
           switchToSessionView(data.id);
-          if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-            state.ws.send(JSON.stringify({ type: "subscribe", sessionId: data.id }));
-          }
+          subscribeToSession(data.id);
           return loadOutput(data.id).then(function() {
             focusInputBox(true);
             return data;
@@ -5506,9 +5550,7 @@
         switchToSessionView(data.id);
         updateSessionSnapshot(data);
         updateSessionsList();
-        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-          state.ws.send(JSON.stringify({ type: "subscribe", sessionId: data.id }));
-        }
+        subscribeToSession(data.id);
         return loadOutput(data.id).then(function() {
           focusInputBox(true);
         });
@@ -6722,9 +6764,7 @@
             state.ws = ws;
             state.wsConnected = true;
             // Subscribe to current session if any
-            if (state.selectedId) {
-              ws.send(JSON.stringify({ type: 'subscribe', sessionId: state.selectedId }));
-            }
+            subscribeToSession(state.selectedId);
             // Flush pending messages after reconnection
             flushPendingMessages();
           };
@@ -6774,9 +6814,7 @@
               }
               updateSessionSnapshot(snapshot);
               if (msg.sessionId === state.selectedId) {
-                if (msg.data.messages) {
-                  state.currentMessages = msg.data.messages;
-                }
+                state.currentMessages = getPreferredMessages(snapshot, msg.data.output, false);
                 updateTaskDisplay();
                 scheduleChatRender();
               }
@@ -7119,12 +7157,7 @@
           // Re-parse messages from the latest session output (fallback for edge cases)
           var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (selectedSession) {
-            // Prefer structured messages from JSON chat mode
-            if (selectedSession.messages && selectedSession.messages.length > 0) {
-              state.currentMessages = selectedSession.messages;
-            } else if (selectedSession.output) {
-              state.currentMessages = parseMessages(selectedSession.output, selectedSession.command);
-            }
+            state.currentMessages = getPreferredMessages(selectedSession, selectedSession.output, true);
           }
           renderChat();
         }, 30);

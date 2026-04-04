@@ -6,30 +6,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm install                # Install dependencies (requires Node.js >= 22.5.0)
-npm run check              # Type-check only (tsc --noEmit); run after editing TS files
+npm run check              # Type-check only (tsc --noEmit)
 npm run build              # Compile TypeScript and copy src/web-ui/content into dist/web-ui/
 npm run dev                # Run the CLI entrypoint directly from src/ via tsx
-node dist/cli.js init      # Create or refresh ~/.wand/config.json and ~/.wand/wand.db
+node dist/cli.js init      # Create or refresh config + SQLite files
 node dist/cli.js web       # Start the packaged web server from dist/
-wand config:show           # Print merged runtime config
 wand config:path           # Print resolved config path
+wand config:show           # Print merged runtime config
 wand config:set host 0.0.0.0  # Update a simple config value
 ```
 
-There is no test suite yet, and no linter or formatter is configured.
+There is no automated test suite, no single-test command, and no lint/format script in this repo.
 
-**Smoke test after changes:**
+**Recommended validation after TS or UI changes:**
+```bash
+npm run check
+npm run build
+```
+
+**Smoke test:**
 ```bash
 npm run build && wand init && wand web
 ```
 
-**Dev test server:**
+**Isolated dev server with disposable data:**
 ```bash
 npm run dev -- -c /tmp/wand-test/config.json
 ```
-Uses `/tmp/wand-test/config.json` as the config file; database and sessions are stored in the same directory. All runtime settings (host, port, defaultCwd, etc.) live in the config file and can also be changed from the web UI settings panel. The `-c` flag works with the compiled binary too (`wand web -c /tmp/wand-test/config.json`).
+This keeps config, database, and session artifacts under `/tmp/wand-test/`. The same `-c` flag also works with the compiled binary (`wand web -c /tmp/wand-test/config.json`).
 
-**Manual release / browser QA:** Follow `RELEASE_CHECKLIST.md`.
+**Manual browser QA / release verification:** Follow `RELEASE_CHECKLIST.md`.
+
+**Install flow from README:**
+```bash
+npm install -g @co0ontty/wand
+wand init
+wand web
+```
+The runtime config file is `~/.wand/config.json` by default.
+
+**Repo-specific notes:**
+- `npm run dev` already runs `src/cli.ts web`; append CLI flags after `--`.
+- `ensureConfig()` rewrites the config file with defaults merged in, so config-schema changes must also update `src/config.ts`.
+- `npm run build` must keep copying `src/web-ui/content/` into `dist/web-ui/`; the packaged app depends on those static assets.
 
 ## Additional References
 
@@ -42,18 +61,51 @@ Uses `/tmp/wand-test/config.json` as the config file; database and sessions are 
 
 ### Runtime flow
 
-1. `src/cli.ts` parses `wand init`, `wand web`, and `config:*`, resolves the config path, and ensures config + database files exist before the server starts.
-2. `src/server.ts` creates the Express app, auth/session endpoints, file browser endpoints, and `/ws` fanout for live session updates.
-3. `ProcessManager` in `src/process-manager.ts` owns PTY-backed command sessions, writes input, emits `ProcessEvent`s, tracks permission prompts, and coordinates resume/archive behavior.
-4. `ClaudePtyBridge` in `src/claude-pty-bridge.ts` turns raw PTY output into structured chat events, permission events, task updates, and captured Claude session IDs.
-5. The browser subscribes over `/ws` and renders the same session in two forms: raw terminal output and structured chat turns.
+1. `src/cli.ts` is the only entrypoint. It parses `wand init`, `wand web`, and `config:*`, resolves `-c/--config`, and always ensures config + SQLite files exist before startup.
+2. `src/server.ts` wires the whole application together: Express routes, auth/session APIs, file browser APIs, update endpoints, static assets, and the `/ws` WebSocket server.
+3. `ProcessManager` in `src/process-manager.ts` is the core runtime owner for PTY-backed sessions. It launches commands, persists snapshots, handles resume/auto-recovery, watches for confirmation prompts, and bridges UI input back into the process.
+4. `ClaudePtyBridge` in `src/claude-pty-bridge.ts` parses Claude PTY output into structured conversation turns, permission events, task/tool updates, and captured Claude session IDs while preserving raw terminal output in parallel.
+5. The browser UI subscribes over `/ws` and renders the same session in two synchronized representations: terminal output and structured chat history.
+
+When debugging a user-visible session bug, trace the full chain: `cli.ts` -> `server.ts` -> `process-manager.ts` -> `claude-pty-bridge.ts` -> web UI.
+
+### API and UI boundary
+
+`src/server.ts` is also the backend surface for the app. It serves:
+- the single HTML shell from `renderApp()` in `src/web-ui/index.ts`
+- REST endpoints for auth, config/settings, sessions, path browsing/search, favorites/recent paths, command launch, resume, PTY input/resize, permission decisions, and updates
+- the `/ws` fanout used for live session state
+
+Before adding a new abstraction, check whether the needed data can fit into an existing `/api/*` route or `ProcessEvent` payload.
 
 ### State and persistence
 
-- Config lives in `~/.wand/config.json`; `ensureConfig()` in `src/config.ts` always rewrites the file with defaults merged in, so config schema changes must be reflected there.
-- SQLite lives in `~/.wand/wand.db`; `src/storage.ts` stores auth sessions, command sessions, Claude resume metadata, and serialized `ConversationTurn[]`.
+- Config lives in `~/.wand/config.json`; `ensureConfig()` in `src/config.ts` loads the file, merges defaults, and writes the normalized result back to disk.
+- SQLite lives beside the config (`resolveDatabasePath(configPath)`), usually `~/.wand/wand.db`; `src/storage.ts` stores auth sessions, command sessions, app config overrides, Claude resume metadata, and serialized `ConversationTurn[]`.
 - Schema migration policy is additive only: `ensureCommandSessionSchema()` adds missing columns and never drops old ones.
-- `src/session-logger.ts` also writes per-session artifacts under `~/.wand/sessions/<sessionId>/` for PTY logs and structured message snapshots.
+- `src/session-logger.ts` writes per-session artifacts under `~/.wand/sessions/<sessionId>/`, including rotating PTY logs, structured messages, metadata, native stream events, and shortcut interaction logs.
+
+If persistence looks inconsistent, inspect both SQLite (`src/storage.ts`) and file-based session artifacts (`src/session-logger.ts`); they are complementary, not redundant.
+
+### Session and resume model
+
+A session is not just a child process. `SessionSnapshot` in `src/types.ts` combines PTY state, buffered output, structured messages, lifecycle state, permission/escalation state, and optional Claude resume linkage (`claudeSessionId`, resumed-from/to fields, auto-recovery flags).
+
+Resume behavior is spread across multiple layers:
+- `ProcessManager` decides when a session is resumable and manages restored sessions
+- `ClaudePtyBridge` captures Claude session UUIDs from PTY output
+- `storage.ts` persists both raw output and structured messages
+- server routes expose session resume and Claude-history resume actions
+
+If resume buttons, recovered sessions, or chat history look wrong, inspect those files together.
+
+### Lifecycle and permissions
+
+Two cross-cutting systems shape session behavior:
+- `src/session-lifecycle.ts` marks sessions as initializing/running/thinking/waiting-input/idle/archived and performs timeout-driven idle/archive transitions.
+- `ProcessManager` + `ClaudePtyBridge` detect permission prompts, track approval policy (`ask-every-time`, `approve-once`, `remember-this-turn`), and convert Claude CLI prompt text into structured escalation state for the UI.
+
+A bug around blocked input or wrong session state is usually not just a UI issue; check lifecycle state and permission detection before changing rendering.
 
 ### Session model
 
@@ -68,13 +120,13 @@ If session recovery, resume buttons, or chat history look wrong, inspect `src/pr
 
 ### UI structure
 
-The frontend is not a separate SPA build. `src/server.ts` serves one HTML document built by `renderApp()` in `src/web-ui/index.ts`, which inlines generated CSS and JavaScript.
+The frontend is server-rendered, not a separate SPA build. `src/server.ts` serves one HTML document built by `renderApp()` in `src/web-ui/index.ts`, which inlines generated CSS and JavaScript and also references vendor assets.
 
 When changing frontend behavior, check both layers:
 - `src/web-ui/index.ts`, `styles.ts`, `scripts.ts` for server-assembled inline assets
 - `src/web-ui/content/styles.css` and `src/web-ui/content/scripts.js` for copied browser assets used from `dist/`
 
-Any build change that forgets to copy `src/web-ui/content/` will break the packaged app.
+Any build or packaging change that forgets to copy `src/web-ui/content/` into `dist/web-ui/` will break the packaged app even if dev mode still works.
 
 ### Output parsing and transport
 

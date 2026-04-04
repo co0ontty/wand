@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # 从最新的 git tag 提取版本号（去掉 v 前缀）
-TAG=$(git describe --tags --abbrev=0 2>/dev/null)
+TAG=$(git tag --sort=-v:refname --list 'v*' | head -1)
 if [ -z "$TAG" ]; then
   echo "错误：没有找到 git tag"
   exit 1
