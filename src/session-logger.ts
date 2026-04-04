@@ -1,7 +1,19 @@
-import { mkdirSync, rmSync, appendFileSync, writeFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs";
+import { mkdirSync, rmSync, appendFileSync, writeFileSync, readFileSync, existsSync, statSync, renameSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import type { ConversationTurn } from "./types.js";
+import type { ConversationTurn, ExecutionMode } from "./types.js";
+
+/** Context passed alongside a shortcut key interaction for richer logging */
+export interface ShortcutLogContext {
+  /** Execution mode the session is running in (e.g. "managed", "full-access") */
+  mode: ExecutionMode;
+  /** Whether auto-approve is active for this session */
+  autoApprove: boolean;
+  /** Whether a permission prompt was blocking at the time of the keypress */
+  permissionBlocked: boolean;
+  /** The actual input string sent to PTY */
+  input: string;
+}
 
 // ── Constants ──
 
@@ -9,6 +21,8 @@ import type { ConversationTurn } from "./types.js";
 const PTY_LOG_MAX_SIZE = 50 * 1024 * 1024;
 /** Maximum number of rotated log files to keep */
 const PTY_LOG_MAX_ROTATIONS = 3;
+/** Default max size for shortcut interaction logs per session (10 MB) */
+const DEFAULT_SHORTCUT_LOG_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
  * SessionLogger saves raw session content to local files for debugging and analysis.
@@ -22,9 +36,11 @@ const PTY_LOG_MAX_ROTATIONS = 3;
 export class SessionLogger {
   private readonly baseDir: string;
   private readonly dirs = new Map<string, string>();
+  private readonly shortcutLogMaxBytes: number;
 
-  constructor(configDir: string) {
+  constructor(configDir: string, shortcutLogMaxBytes?: number) {
     this.baseDir = path.join(configDir, "sessions");
+    this.shortcutLogMaxBytes = shortcutLogMaxBytes ?? DEFAULT_SHORTCUT_LOG_MAX_BYTES;
     try {
       mkdirSync(this.baseDir, { recursive: true });
     } catch {
@@ -136,17 +152,47 @@ export class SessionLogger {
   }
 
   /** Append a shortcut key interaction log entry (for analyzing auto-confirm gaps) */
-  appendShortcutLog(sessionId: string, shortcutKey: string, tailLines: string): void {
+  appendShortcutLog(sessionId: string, shortcutKey: string, tailLines: string, ctx?: ShortcutLogContext): void {
+    if (this.shortcutLogMaxBytes <= 0) return;
     try {
       const dir = this.ensureDir(sessionId);
+      const logPath = path.join(dir, "shortcut-interactions.jsonl");
       const entry = JSON.stringify({
         ts: new Date().toISOString(),
         key: shortcutKey,
+        mode: ctx?.mode,
+        autoApprove: ctx?.autoApprove,
+        permissionBlocked: ctx?.permissionBlocked,
+        input: ctx?.input,
         tail: tailLines,
       }) + "\n";
-      appendFileSync(path.join(dir, "shortcut-interactions.jsonl"), entry);
+
+      // Check size and truncate if needed
+      if (existsSync(logPath)) {
+        const size = statSync(logPath).size;
+        if (size + entry.length > this.shortcutLogMaxBytes) {
+          this.truncateShortcutLog(logPath);
+        }
+      }
+
+      appendFileSync(logPath, entry);
     } catch {
       // Non-critical
+    }
+  }
+
+  /** Truncate shortcut log by keeping only the most recent half of entries */
+  private truncateShortcutLog(logPath: string): void {
+    try {
+      const content = readFileSync(logPath, "utf8");
+      const lines = content.split("\n").filter(Boolean);
+      // Keep the latter half
+      const keepFrom = Math.floor(lines.length / 2);
+      const trimmed = lines.slice(keepFrom).join("\n") + "\n";
+      writeFileSync(logPath, trimmed);
+    } catch {
+      // If truncation fails, delete the file to prevent unbounded growth
+      try { unlinkSync(logPath); } catch { /* ignore */ }
     }
   }
 }
