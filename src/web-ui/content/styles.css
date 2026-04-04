@@ -159,6 +159,15 @@
       }
     }
 
+    /* ===== 首帧过渡抑制 ===== */
+    html.no-transition,
+    html.no-transition *,
+    html.no-transition *::before,
+    html.no-transition *::after {
+      transition: none !important;
+      animation: none !important;
+    }
+
     /* ===== 全局重置 ===== */
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1966,7 +1975,20 @@
 
     /* Keyboard toggle button and popup */
     /* ===== 内联快捷键 ===== */
-    .inline-shortcuts {
+    /* Desktop: show inline keys directly, hide toggle button and strip */
+    .inline-shortcuts-wrap {
+      display: flex;
+      align-items: center;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .shortcuts-toggle {
+      display: none;
+    }
+    .inline-shortcuts-strip {
+      display: none;
+    }
+    .inline-shortcuts-inline {
       display: flex;
       align-items: center;
       gap: 3px;
@@ -5046,18 +5068,61 @@
         display: none;
       }
 
-      /* 移动端内联快捷键 */
-      .inline-shortcuts {
-        gap: 2px;
+      /* 移动端内联快捷键 - 折叠为左右滑动条 */
+      .inline-shortcuts-inline {
+        display: none;
       }
-      .shortcut-key {
-        height: 20px;
-        min-width: 20px;
+      .inline-shortcuts-wrap {
+        flex-shrink: 1;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .shortcuts-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: all 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+        line-height: 1;
+      }
+      .shortcuts-toggle.active {
+        color: var(--accent);
+      }
+      .inline-shortcuts-strip {
+        display: none;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        align-items: center;
+        gap: 3px;
+        flex: 1;
+        min-width: 0;
+      }
+      .inline-shortcuts-strip::-webkit-scrollbar {
+        display: none;
+      }
+      .inline-shortcuts-wrap.expanded .inline-shortcuts-strip {
+        display: flex;
+      }
+      .inline-shortcuts-strip .shortcut-key {
+        height: 22px;
+        min-width: 22px;
         font-size: 0.5625rem;
-        padding: 0 3px;
+        padding: 0 4px;
+        flex-shrink: 0;
       }
-      .shortcut-key.shortcut-dir {
-        min-width: 18px;
+      .inline-shortcuts-strip .shortcut-key.shortcut-dir {
+        min-width: 20px;
       }
 
       /* 小键盘 FAB */

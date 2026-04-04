@@ -305,6 +305,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   // ── Web UI and PWA endpoints ──
 
   app.get("/", (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.type("html").send(renderApp(configPath));
   });
 

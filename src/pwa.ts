@@ -36,11 +36,10 @@ export function generatePwaManifest(): string {
 
 export function generateServiceWorker(): string {
   return `
-const STATIC_CACHE = 'wand-static-v4';
-const RUNTIME_CACHE = 'wand-runtime-v4';
+const STATIC_CACHE = 'wand-static-v6';
+const RUNTIME_CACHE = 'wand-runtime-v6';
 const APP_SHELL = '/';
 const STATIC_ASSETS = [
-  APP_SHELL,
   '/manifest.json',
   '/icon.svg',
   '/icon-192.png',
