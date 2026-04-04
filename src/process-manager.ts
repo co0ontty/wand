@@ -12,7 +12,19 @@ import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, SessionEvent, SessionSnapshot, WandConfig } from "./types.js";
 import { SessionLifecycleManager } from "./session-lifecycle.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
-import { appendWindow, normalizePromptText } from "./pty-text-utils.js";
+import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
+import {
+  getResumeCommandSessionId,
+  hasLiveProjectConversation,
+  hasRealConversationMessages,
+  hasStoredProjectConversation,
+  isResumeProjectConversation,
+  isUiProjectConversation,
+  shouldAllowResume,
+  shouldBackfillFromStoredHistory,
+  shouldBindClaudeSessionId,
+  shouldDisplayResumeAction,
+} from "./resume-policy.js";
 
 /** Check if the current process is running as root (UID 0). */
 function isRunningAsRoot(): boolean {
@@ -65,14 +77,11 @@ const PROMPT_PATTERNS = [
   /\bcontinue\?\s*(?:\((?:y|yes)\s*\/\s*(?:n|no)\))?/i,
   /\bare you sure\??/i,
   /\bdo you want to continue\??/i,
-  /\bdo you want to (?:create|write|delete|modify|execute)/i,
+  /\bdo you want to (?:create|write|delete|modify|execute)\b/i,
   /\bconfirm(?:\s+execution|\s+changes|\s+action)?\??/i,
-  /\bproceed\??/i,
+  /\bproceed\?\s*(?:\((?:y|yes)\s*\/\s*(?:n|no)\))?/i,
   /\benter to confirm\b/i,
-  /\bwould you like to\b/i,
-  /\bshall i\b/i,
-  /\bcan i\b/i,
-  /\bgrant\b.*\bpermission\b/i
+  /\bgrant\b.*\bpermission\b/i,
 ];
 
 interface SessionRecord extends SessionSnapshot {
@@ -131,27 +140,8 @@ interface ResumeEligibility {
 }
 
 const REAL_CONVERSATION_MIN_LINES = 2;
-const REAL_CONVERSATION_MIN_MESSAGES = 2;
 const DISCOVERY_RECENT_WINDOW_MS = 10 * 60 * 1000;
 const START_TIME_SKEW_MS = 30 * 1000;
-const RESUME_COMMAND_ID_PATTERN = /(?:^|\s)--resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\s|$)/i;
-
-function hasRealConversationMessages(messages: ConversationTurn[] | undefined): boolean {
-  if (!messages || messages.length < REAL_CONVERSATION_MIN_MESSAGES) {
-    return false;
-  }
-
-  const hasUser = messages.some((turn) => turn.role === "user"
-    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
-  const hasAssistant = messages.some((turn) => turn.role === "assistant"
-    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
-  return hasUser && hasAssistant;
-}
-
-function getResumeCommandSessionId(command: string): string | null {
-  const match = RESUME_COMMAND_ID_PATTERN.exec(command);
-  return match?.[1] ?? null;
-}
 
 function readClaudeProjectSessionDetails(filePath: string, id: string): ClaudeProjectSessionDetails | null {
   try {
@@ -207,226 +197,12 @@ function readClaudeProjectSessionDetails(filePath: string, id: string): ClaudePr
   }
 }
 
-function hasRuntimeConversationSignal(messages: ConversationTurn[] | undefined): boolean {
-  if (!messages || messages.length === 0) {
-    return false;
-  }
-  const hasUser = messages.some((turn) => turn.role === "user"
-    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
-  const hasAssistant = messages.some((turn) => turn.role === "assistant");
-  return hasUser && hasAssistant;
-}
-
-function hasStoredConversationHistory(messages: ConversationTurn[] | undefined): boolean {
-  return hasRealConversationMessages(messages);
-}
-
-function shouldBindClaudeSessionId(record: Pick<SessionRecord, "messages">): boolean {
-  return hasRuntimeConversationSignal(record.messages);
-}
-
-function shouldAllowResume(record: Pick<SessionRecord, "claudeSessionId" | "messages">): boolean {
-  return Boolean(record.claudeSessionId) && hasStoredConversationHistory(record.messages);
-}
-
-function shouldBackfillFromStoredHistory(record: Pick<SessionRecord, "messages">): boolean {
-  return hasStoredConversationHistory(record.messages);
-}
-
-function shouldDisplayResumeAction(messages: ConversationTurn[] | undefined): boolean {
-  return hasStoredConversationHistory(messages);
-}
-
-function shouldAutoResumeMessages(messages: ConversationTurn[] | undefined): boolean {
-  return hasStoredConversationHistory(messages);
-}
-
-function shouldBackfillMessages(messages: ConversationTurn[] | undefined): boolean {
-  return hasStoredConversationHistory(messages);
-}
-
-function shouldPromoteProjectSessionId(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldBindClaudeSessionId(record);
-}
-
-function shouldPromoteStoredSessionId(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldBackfillMessages(record.messages);
-}
-
-function shouldPromoteUiSessionId(messages: ConversationTurn[] | undefined): boolean {
+function hasVisibleProjectConversation(messages: ConversationTurn[] | undefined): boolean {
   return shouldDisplayResumeAction(messages);
 }
 
-function shouldPromoteResumeSessionId(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAutoResumeMessages(messages);
-}
-
-function hasBindableConversation(messages: ConversationTurn[] | undefined): boolean {
-  return shouldBindFromRuntimeMessages({ messages: messages ?? [] });
-}
-
-function hasBackfillableConversation(messages: ConversationTurn[] | undefined): boolean {
-  return shouldBackfillMessages(messages);
-}
-
-function hasUiConversation(messages: ConversationTurn[] | undefined): boolean {
-  return shouldPromoteUiSessionId(messages);
-}
-
-function hasResumeConversation(messages: ConversationTurn[] | undefined): boolean {
-  return shouldPromoteResumeSessionId(messages);
-}
-
-function isRuntimeConversationReady(messages: ConversationTurn[] | undefined): boolean {
-  return hasBindableConversation(messages);
-}
-
-function isStoredConversationReady(messages: ConversationTurn[] | undefined): boolean {
-  return hasBackfillableConversation(messages);
-}
-
-function isResumeConversationReady(messages: ConversationTurn[] | undefined): boolean {
-  return hasResumeConversation(messages);
-}
-
-function shouldBindFromRuntimeMessages(record: Pick<SessionRecord, "messages">): boolean {
-  return isRuntimeConversationReady(record.messages);
-}
-
-function shouldAllowUiResume(messages: ConversationTurn[] | undefined): boolean {
-  return hasUiConversation(messages);
-}
-
-function shouldPromoteResumeAction(record: Pick<SessionRecord, "claudeSessionId" | "messages">): boolean {
-  return shouldAllowResume(record);
-}
-
-function shouldBackfillClaudeSessionIdFromDisk(record: Pick<SessionRecord, "messages">): boolean {
-  return isStoredConversationReady(record.messages);
-}
-
-function shouldUseProjectCandidate(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldBindFromRuntimeMessages(record);
-}
-
-function shouldResumeProjectCandidate(record: Pick<SessionRecord, "claudeSessionId" | "messages">): boolean {
-  return shouldPromoteResumeAction(record);
-}
-
-function shouldBackfillProjectCandidate(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldBackfillClaudeSessionIdFromDisk(record);
-}
-
-function hasMinimumRuntimeConversation(messages: ConversationTurn[] | undefined): boolean {
-  return shouldBindFromRuntimeMessages({ messages: messages ?? [] });
-}
-
-function hasMinimumStoredConversation(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAllowUiResume(messages);
-}
-
-function hasMinimumResumeConversation(messages: ConversationTurn[] | undefined): boolean {
-  return isResumeConversationReady(messages);
-}
-
-function hasMinimumBackfillConversation(messages: ConversationTurn[] | undefined): boolean {
-  return isStoredConversationReady(messages);
-}
-
-function hasProjectConversationSignal(messages: ConversationTurn[] | undefined): boolean {
-  return hasMinimumRuntimeConversation(messages);
-}
-
-function hasStoredProjectConversationSignal(messages: ConversationTurn[] | undefined): boolean {
-  return hasMinimumBackfillConversation(messages);
-}
-
-function hasUiProjectConversationSignal(messages: ConversationTurn[] | undefined): boolean {
-  return hasMinimumStoredConversation(messages);
-}
-
-function hasResumeProjectConversationSignal(messages: ConversationTurn[] | undefined): boolean {
-  return hasMinimumResumeConversation(messages);
-}
-
-function canBindFromProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return hasProjectConversationSignal(messages);
-}
-
-function canBackfillFromProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return hasStoredProjectConversationSignal(messages);
-}
-
-function canShowUiProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return hasUiProjectConversationSignal(messages);
-}
-
-function canResumeProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return hasResumeProjectConversationSignal(messages);
-}
-
-function shouldUseRuntimeProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return canBindFromProjectConversation(messages);
-}
-
-function shouldUseStoredProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return canBackfillFromProjectConversation(messages);
-}
-
-function shouldUseUiProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return canShowUiProjectConversation(messages);
-}
-
-function shouldUseResumeProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return canResumeProjectConversation(messages);
-}
-
-function hasProjectConversationForBinding(messages: ConversationTurn[] | undefined): boolean {
-  return shouldUseRuntimeProjectConversation(messages);
-}
-
-function hasProjectConversationForBackfill(messages: ConversationTurn[] | undefined): boolean {
-  return shouldUseStoredProjectConversation(messages);
-}
-
-function hasProjectConversationForUi(messages: ConversationTurn[] | undefined): boolean {
-  return shouldUseUiProjectConversation(messages);
-}
-
-function hasProjectConversationForResume(messages: ConversationTurn[] | undefined): boolean {
-  return shouldUseResumeProjectConversation(messages);
-}
-
-function isBindableProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return hasProjectConversationForBinding(messages);
-}
-
-function isBackfillableProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return hasProjectConversationForBackfill(messages);
-}
-
-function isUiProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return hasProjectConversationForUi(messages);
-}
-
-function isResumeProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return hasProjectConversationForResume(messages);
-}
-
-function hasLiveProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return isBindableProjectConversation(messages);
-}
-
-function hasStoredProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return isBackfillableProjectConversation(messages);
-}
-
-function hasVisibleProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return isUiProjectConversation(messages);
-}
-
 function hasRecoverableProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return isResumeProjectConversation(messages);
+  return shouldAllowResume({ claudeSessionId: "resume-candidate", messages });
 }
 
 function shouldBindLiveProjectSessionId(messages: ConversationTurn[] | undefined): boolean {
@@ -1946,19 +1722,26 @@ export class ProcessManager extends EventEmitter {
 
     const claudeConfirmPrompt =
       /\bdo you want to\b/i.test(normalized) &&
-      /\byes\b/i.test(normalized);
+      hasExplicitConfirmSyntax(normalized) &&
+      hasPermissionActionContext(normalized);
 
     // Check for Claude's tool permission prompt patterns
     const toolPermissionPrompt =
       /\bdo you want to\b/i.test(normalized) &&
-      /\(yes\b/i.test(normalized);
+      /\(yes\b/i.test(normalized) &&
+      hasPermissionActionContext(normalized);
 
     // Reduced cooldown for faster response
     if (now - record.lastAutoConfirmAt < 500) {
       return;
     }
 
-    const shouldConfirm = trustFolderPrompt || claudeConfirmPrompt || toolPermissionPrompt || PROMPT_PATTERNS.some((pattern) => pattern.test(normalized));
+    const shouldConfirm = trustFolderPrompt
+      || claudeConfirmPrompt
+      || toolPermissionPrompt
+      || (hasExplicitConfirmSyntax(normalized)
+        && hasPermissionActionContext(normalized)
+        && PROMPT_PATTERNS.some((pattern) => pattern.test(normalized)));
 
     if (shouldConfirm) {
       record.lastAutoConfirmAt = now;

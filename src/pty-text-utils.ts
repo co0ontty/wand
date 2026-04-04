@@ -51,6 +51,30 @@ export function appendWindow(buffer: string, chunk: string, maxSize: number): st
   return next.length > maxSize ? next.slice(-maxSize) : next;
 }
 
+const EXPLICIT_CONFIRM_PATTERNS = [
+  /(?:^|\b)(?:press\s+)?(?:y|yes)\s*(?:\/|\bor\b)\s*(?:n|no)(?:\b|$)/i,
+  /\[(?:y|yes)\s*\/\s*(?:n|no)\]/i,
+  /\((?:y|yes)\s*\/\s*(?:n|no)\)/i,
+  /\((?:y|yes)\s*\/\s*(?:n|no)\s*\/\s*always\)/i,
+  /\byes\b.*\bno\b/i,
+  /\benter to confirm\b/i,
+];
+
+const PERMISSION_ACTION_PATTERNS = [
+  /\bgrant\b.*\bpermission\b/i,
+  /\bhaven't granted\b/i,
+  /\byes,\s*i\s*trust\s*this\s*folder\b/i,
+  /\b(?:write|modify|delete|create|execute|run|bash|command|network|web|fetch|permission|allow)\b/i,
+];
+
+export function hasExplicitConfirmSyntax(normalized: string): boolean {
+  return EXPLICIT_CONFIRM_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function hasPermissionActionContext(normalized: string): boolean {
+  return PERMISSION_ACTION_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 /** Normalize prompt text for permission detection (strip ANSI, collapse whitespace). */
 export function normalizePromptText(value: string): string {
   return value

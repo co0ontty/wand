@@ -21,7 +21,7 @@ import type {
   SessionEndData,
   RawOutputData,
 } from "./types.js";
-import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText } from "./pty-text-utils.js";
+import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitConfirmSyntax, hasPermissionActionContext } from "./pty-text-utils.js";
 
 // ── Constants ──
 
@@ -555,13 +555,15 @@ export class ClaudePtyBridge extends EventEmitter {
   }
 
   private isPermissionPromptDetected(normalized: string): boolean {
-    return (
-      /\bdo you want to\b/i.test(normalized) ||
-      /\bgrant\b.*\bpermission\b/i.test(normalized) ||
-      /\bhaven't granted\b/i.test(normalized) ||
-      /\benter to confirm\b/i.test(normalized) ||
-      /\bwould you like to proceed\b/i.test(normalized)
-    );
+    const hasActionIntent = /\bdo you want to\b/i.test(normalized)
+      || /\bwould you like to proceed\b/i.test(normalized)
+      || /\benter to confirm\b/i.test(normalized)
+      || /\bgrant\b.*\bpermission\b/i.test(normalized)
+      || /\bhaven't granted\b/i.test(normalized);
+
+    return hasActionIntent
+      && hasExplicitConfirmSyntax(normalized)
+      && hasPermissionActionContext(normalized);
   }
 
   private extractPromptText(normalized: string): string {
