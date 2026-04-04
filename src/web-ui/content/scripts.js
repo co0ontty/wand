@@ -2519,6 +2519,21 @@
           if (_swipeState) return;
           if (item.dataset.sessionId) {
             activateSessionItem(item.dataset.sessionId);
+          } else if (item.dataset.claudeHistoryId) {
+            var claudeSessionId = item.dataset.claudeHistoryId;
+            var cwd = item.dataset.cwd;
+            resumeClaudeHistorySession(claudeSessionId, cwd)
+              .then(function(data) {
+                if (data && data.id) {
+                  state.selectedId = data.id;
+                  persistSelectedId();
+                  state.drafts[data.id] = "";
+                  loadSessions().then(function() {
+                    selectSession(data.id);
+                    closeSessionsDrawer();
+                  });
+                }
+              });
           }
         }
       }
@@ -2538,6 +2553,21 @@
         }
         if (item.dataset.sessionId) {
           activateSessionItem(item.dataset.sessionId);
+        } else if (item.dataset.claudeHistoryId) {
+          var claudeSessionId = item.dataset.claudeHistoryId;
+          var cwd = item.dataset.cwd;
+          resumeClaudeHistorySession(claudeSessionId, cwd)
+            .then(function(data) {
+              if (data && data.id) {
+                state.selectedId = data.id;
+                persistSelectedId();
+                state.drafts[data.id] = "";
+                loadSessions().then(function() {
+                  selectSession(data.id);
+                  closeSessionsDrawer();
+                });
+              }
+            });
         }
       }
 
@@ -2972,15 +3002,9 @@
         state.terminalViewportSize = { width: 0, height: 0 };
         state.terminalAutoFollow = true;
         clearTerminalScrollIdleTimer();
-        // Double-rAF: wait for browser to complete layout before measuring and fitting
+        // Retry-based fit: wait for browser to complete layout before measuring and fitting
         if (state.fitAddon) {
-          requestAnimationFrame(function() {
-            requestAnimationFrame(function() {
-              if (state.fitAddon && shouldResizeTerminalViewport()) {
-                state.fitAddon.fit();
-              }
-            });
-          });
+          ensureTerminalFit();
         }
 
         var viewport = getTerminalViewport();
@@ -4493,9 +4517,8 @@
         // Init terminal if not already done
         if (!state.terminal) initTerminal();
         applyCurrentView();
-        if (state.currentView === "terminal") {
-          state.terminalViewportSize = { width: 0, height: 0 };
-          scheduleTerminalResize(true);
+        if (state.terminal && state.fitAddon) {
+          ensureTerminalFit();
         }
         // Don't call renderChat() here — loadOutput() always calls renderChat() after it resolves.
         // Calling renderChat() prematurely would render with stale/empty messages.
@@ -6463,6 +6486,34 @@
         updateTerminalJumpToBottomButton();
       }
 
+      function ensureTerminalFit() {
+        var maxAttempts = 10;
+        var attempt = 0;
+        function tryFit() {
+          attempt++;
+          state.terminalViewportSize = { width: 0, height: 0 };
+          if (shouldResizeTerminalViewport() && state.fitAddon) {
+            state.fitAddon.fit();
+            maybeScrollTerminalToBottom("resize");
+            if (state.selectedId && state.terminal) {
+              var nextSize = { cols: state.terminal.cols, rows: state.terminal.rows };
+              if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
+                state.lastResize = nextSize;
+                fetch("/api/sessions/" + state.selectedId + "/resize", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "same-origin",
+                  body: JSON.stringify(nextSize)
+                }).catch(function() {});
+              }
+            }
+          } else if (attempt < maxAttempts) {
+            requestAnimationFrame(tryFit);
+          }
+        }
+        requestAnimationFrame(tryFit);
+      }
+
       function scheduleTerminalResize(immediate) {
         if (state.resizeTimer) {
           clearTimeout(state.resizeTimer);
@@ -6661,6 +6712,8 @@
             if (msg.sessionId === state.selectedId && msg.data) {
               if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
               updateTerminalOutput(msg.data.output || "", msg.sessionId, "replace");
+              // Ensure terminal is properly fitted after receiving initial data
+              scheduleTerminalResize(true);
             }
             break;
           case 'usage':
