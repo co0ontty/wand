@@ -21,9 +21,12 @@
         });
 
       // Auto-reload when a new service worker takes control (e.g. after update)
+      // But skip reload during initial page load to avoid breaking initialization
       var reloading = false;
+      var pageReady = false;
+      setTimeout(function() { pageReady = true; }, 3000);
       navigator.serviceWorker.addEventListener('controllerchange', function() {
-        if (reloading) return;
+        if (reloading || !pageReady) return;
         reloading = true;
         location.reload();
       });
@@ -254,6 +257,23 @@
           })
           .catch(function() {
             state.loginChecked = true;
+            // If offline (no network), show a friendly offline message instead of login
+            if (!navigator.onLine) {
+              var app = document.getElementById("app");
+              if (app) {
+                app.innerHTML =
+                  '<div class="boot-loading">' +
+                    '<div class="boot-loading-card">' +
+                      '<div class="boot-loading-text" style="font-size:1.3em;margin-bottom:12px">📡 无法连接到服务器</div>' +
+                      '<div class="boot-loading-text" style="opacity:0.7;font-size:0.95em">请检查网络连接或确认 Wand 服务正在运行。</div>' +
+                      '<button onclick="location.reload()" style="margin-top:18px;padding:8px 24px;border-radius:8px;border:1px solid rgba(150,118,85,0.3);background:rgba(255,255,255,0.8);cursor:pointer;font-size:0.95em">重试</button>' +
+                    '</div>' +
+                  '</div>';
+              }
+              // Retry when network comes back
+              window.addEventListener('online', function() { location.reload(); }, { once: true });
+              return;
+            }
             render();
           });
       }
@@ -2508,6 +2528,186 @@
         updateTerminalJumpToBottomButton();
       }
 
+      // ===== Custom terminal scrollbar =====
+      function initTerminalScrollbar(container) {
+        var scrollbar = document.createElement("div");
+        scrollbar.className = "terminal-scrollbar";
+        var track = document.createElement("div");
+        track.className = "terminal-scrollbar-track";
+        var thumb = document.createElement("div");
+        thumb.className = "terminal-scrollbar-thumb";
+        track.appendChild(thumb);
+        scrollbar.appendChild(track);
+        container.appendChild(scrollbar);
+
+        state.terminalScrollbarEl = scrollbar;
+        state.terminalScrollbarThumbEl = thumb;
+        state.terminalScrollbarHideTimer = null;
+        state.terminalScrollbarDragging = false;
+        state.terminalScrollbarRafPending = false;
+
+        // Show/hide logic
+        function showScrollbar() {
+          if (state.terminalScrollbarHideTimer) {
+            clearTimeout(state.terminalScrollbarHideTimer);
+            state.terminalScrollbarHideTimer = null;
+          }
+          scrollbar.classList.add("visible");
+        }
+
+        function scheduleHideScrollbar() {
+          if (state.terminalScrollbarDragging) return;
+          if (state.terminalScrollbarHideTimer) clearTimeout(state.terminalScrollbarHideTimer);
+          state.terminalScrollbarHideTimer = setTimeout(function() {
+            state.terminalScrollbarHideTimer = null;
+            if (!state.terminalScrollbarDragging) {
+              scrollbar.classList.remove("visible");
+            }
+          }, 1500);
+        }
+
+        // Sync thumb position/size from viewport
+        function syncScrollbarThumb() {
+          state.terminalScrollbarRafPending = false;
+          var viewport = getTerminalViewport();
+          if (!viewport) return;
+          var sh = viewport.scrollHeight;
+          var ch = viewport.clientHeight;
+          if (sh <= ch) {
+            scrollbar.classList.remove("visible");
+            return;
+          }
+          var trackH = track.clientHeight;
+          var thumbH = Math.max(28, (ch / sh) * trackH);
+          var maxScroll = sh - ch;
+          var scrollRatio = viewport.scrollTop / maxScroll;
+          var thumbTop = scrollRatio * (trackH - thumbH);
+          thumb.style.height = thumbH + "px";
+          thumb.style.top = thumbTop + "px";
+        }
+
+        function requestSyncScrollbar() {
+          if (state.terminalScrollbarRafPending) return;
+          state.terminalScrollbarRafPending = true;
+          requestAnimationFrame(syncScrollbarThumb);
+        }
+
+        // Listen to viewport scroll
+        var viewport = getTerminalViewport();
+        if (viewport) {
+          viewport.addEventListener("scroll", function() {
+            showScrollbar();
+            requestSyncScrollbar();
+            scheduleHideScrollbar();
+          }, { passive: true });
+        }
+
+        // Track click → jump to position
+        track.addEventListener("mousedown", function(e) {
+          if (e.target === thumb) return;
+          e.preventDefault();
+          var viewport = getTerminalViewport();
+          if (!viewport) return;
+          var rect = track.getBoundingClientRect();
+          var clickRatio = (e.clientY - rect.top) / rect.height;
+          var maxScroll = viewport.scrollHeight - viewport.clientHeight;
+          viewport.scrollTop = clickRatio * maxScroll;
+        });
+
+        // Thumb drag — mouse
+        var dragStartY = 0;
+        var dragStartScrollTop = 0;
+
+        thumb.addEventListener("mousedown", function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          state.terminalScrollbarDragging = true;
+          thumb.classList.add("dragging");
+          dragStartY = e.clientY;
+          var viewport = getTerminalViewport();
+          dragStartScrollTop = viewport ? viewport.scrollTop : 0;
+          document.addEventListener("mousemove", onDragMove);
+          document.addEventListener("mouseup", onDragEnd);
+        });
+
+        function onDragMove(e) {
+          e.preventDefault();
+          var viewport = getTerminalViewport();
+          if (!viewport) return;
+          var trackH = track.clientHeight;
+          var sh = viewport.scrollHeight;
+          var ch = viewport.clientHeight;
+          var maxScroll = sh - ch;
+          if (maxScroll <= 0) return;
+          var thumbH = Math.max(28, (ch / sh) * trackH);
+          var scrollableTrack = trackH - thumbH;
+          if (scrollableTrack <= 0) return;
+          var deltaY = e.clientY - dragStartY;
+          var scrollDelta = (deltaY / scrollableTrack) * maxScroll;
+          viewport.scrollTop = dragStartScrollTop + scrollDelta;
+        }
+
+        function onDragEnd() {
+          state.terminalScrollbarDragging = false;
+          thumb.classList.remove("dragging");
+          document.removeEventListener("mousemove", onDragMove);
+          document.removeEventListener("mouseup", onDragEnd);
+          scheduleHideScrollbar();
+        }
+
+        // Thumb drag — touch
+        thumb.addEventListener("touchstart", function(e) {
+          if (e.touches.length !== 1) return;
+          e.stopPropagation();
+          state.terminalScrollbarDragging = true;
+          thumb.classList.add("dragging");
+          dragStartY = e.touches[0].clientY;
+          var viewport = getTerminalViewport();
+          dragStartScrollTop = viewport ? viewport.scrollTop : 0;
+          document.addEventListener("touchmove", onTouchDragMove, { passive: false });
+          document.addEventListener("touchend", onTouchDragEnd);
+          document.addEventListener("touchcancel", onTouchDragEnd);
+        }, { passive: false });
+
+        function onTouchDragMove(e) {
+          if (e.touches.length !== 1) return;
+          e.preventDefault();
+          var viewport = getTerminalViewport();
+          if (!viewport) return;
+          var trackH = track.clientHeight;
+          var sh = viewport.scrollHeight;
+          var ch = viewport.clientHeight;
+          var maxScroll = sh - ch;
+          if (maxScroll <= 0) return;
+          var thumbH = Math.max(28, (ch / sh) * trackH);
+          var scrollableTrack = trackH - thumbH;
+          if (scrollableTrack <= 0) return;
+          var deltaY = e.touches[0].clientY - dragStartY;
+          var scrollDelta = (deltaY / scrollableTrack) * maxScroll;
+          viewport.scrollTop = dragStartScrollTop + scrollDelta;
+        }
+
+        function onTouchDragEnd() {
+          state.terminalScrollbarDragging = false;
+          thumb.classList.remove("dragging");
+          document.removeEventListener("touchmove", onTouchDragMove);
+          document.removeEventListener("touchend", onTouchDragEnd);
+          document.removeEventListener("touchcancel", onTouchDragEnd);
+          scheduleHideScrollbar();
+        }
+
+        // Hover on scrollbar area shows it
+        scrollbar.addEventListener("mouseenter", function() {
+          showScrollbar();
+        });
+        scrollbar.addEventListener("mouseleave", function() {
+          if (!state.terminalScrollbarDragging) scheduleHideScrollbar();
+        });
+
+        // Initial sync
+        requestSyncScrollbar();
+      }
+
       function syncTerminalBuffer(sessionId, output, options) {
         if (!state.terminal) return false;
         var normalizedOutput = normalizeTerminalOutput(output || "");
@@ -2590,9 +2790,15 @@
         var container = document.getElementById("output");
         if (!container || state.terminal) return;
         if (typeof Terminal === "undefined") {
-          // xterm.js failed to load - terminal features unavailable
+          // xterm.js not yet loaded — retry after a short delay
+          if (!state.terminalInitRetries) state.terminalInitRetries = 0;
+          if (state.terminalInitRetries < 10) {
+            state.terminalInitRetries++;
+            setTimeout(initTerminal, 200);
+          }
           return;
         }
+        state.terminalInitRetries = 0;
 
         state.terminal = new Terminal({
           cols: 120,
@@ -2681,6 +2887,9 @@
           }
           e.stopPropagation();
         }, { passive: true });
+
+        // Create custom scrollbar overlay
+        initTerminalScrollbar(container);
 
         if (state.selectedId) {
           var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
@@ -2974,6 +3183,9 @@
               }
             }
             updateShellChrome();
+          })
+          .catch(function(e) {
+            console.error("[wand] loadSessions failed:", e);
           });
       }
 
@@ -4905,6 +5117,11 @@
 
       function handleInputBoxBlur() {
         resetInputPanelViewportSpacing();
+        // Restore app container height when keyboard closes
+        var appContainer = document.querySelector('.app-container');
+        if (appContainer) {
+          appContainer.style.height = '';
+        }
       }
 
       function adjustInputBoxSelection(inputBox) {
@@ -5610,16 +5827,26 @@
         if (!('visualViewport' in window)) return;
 
         var vv = window.visualViewport;
-        var inputPanel = document.querySelector('.input-panel');
         var lastHeight = vv.height;
         var keyboardOpen = false;
 
         function updateViewport() {
-          if (!inputPanel || !vv) return;
+          if (!vv) return;
           var inputBox = document.getElementById('input-box');
           var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
           var isKeyboardOpen = offsetBottom > 50;
           var heightChanged = Math.abs(vv.height - lastHeight) > 8;
+
+          // In PWA standalone mode, dynamically resize the app container
+          // because 100dvh does NOT shrink when keyboard appears in standalone PWA
+          var appContainer = document.querySelector('.app-container');
+          if (appContainer) {
+            if (isKeyboardOpen) {
+              appContainer.style.height = vv.height + 'px';
+            } else {
+              appContainer.style.height = '';
+            }
+          }
 
           if (isKeyboardOpen && (!keyboardOpen || heightChanged) && shouldAdjustForKeyboard(vv, inputBox)) {
             scrollLatestMessageIntoView();

@@ -2,6 +2,9 @@
  * PWA manifest and Service Worker generation.
  */
 
+/** Cache version is fixed per server process to avoid mid-session cache busting */
+const CACHE_VERSION = Date.now().toString(36);
+
 export function generatePwaManifest(): string {
   return JSON.stringify({
     id: "/wand",
@@ -21,6 +24,8 @@ export function generatePwaManifest(): string {
     icons: [
       { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
       { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "maskable" },
+      { src: "/icon-192.png", sizes: "192x192", type: "image/svg+xml", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/svg+xml", purpose: "any" },
     ],
     categories: ["developer tools", "productivity"],
     shortcuts: [
@@ -36,8 +41,8 @@ export function generatePwaManifest(): string {
 
 export function generateServiceWorker(): string {
   return `
-const STATIC_CACHE = 'wand-static-v6';
-const RUNTIME_CACHE = 'wand-runtime-v6';
+const STATIC_CACHE = 'wand-static-${CACHE_VERSION}';
+const RUNTIME_CACHE = 'wand-runtime-${CACHE_VERSION}';
 const APP_SHELL = '/';
 const STATIC_ASSETS = [
   '/manifest.json',
