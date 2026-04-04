@@ -124,7 +124,8 @@
         allFiles: [],
         claudeHistory: [],
         claudeHistoryLoaded: false,
-        claudeHistoryExpanded: false,
+        claudeHistoryExpanded: true,
+        claudeHistoryExpandedDirs: {},
         sessionsManageMode: false,
         selectedSessionIds: {},
         selectedClaudeHistoryIds: {},
@@ -235,6 +236,10 @@
               }
               startPolling();
               refreshAll();
+              // Auto-load claude history since section defaults to expanded
+              if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
+                loadClaudeHistory();
+              }
             });
           })
           .catch(function() {
@@ -376,24 +381,25 @@
                   '<span class="session-count" id="session-count">' + String(state.sessions.length) + '</span>' +
                 '</div>' +
                 '<div class="sidebar-header-actions">' +
-                  '<button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="查看文件">📁</button>' +
-                  '<button id="pwa-install-button" class="btn btn-ghost btn-sm hidden" title="安装应用">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
-                  '</button>' +
-                  '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="退出登录">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
-                  '</button>' +
                   '<button id="close-drawer-button" class="btn btn-ghost btn-sm sidebar-close" type="button" aria-label="关闭菜单">×</button>' +
                 '</div>' +
               '</div>' +
               '<div class="sidebar-body">' +
                 '<div id="sessions-panel">' +
-                  '<p class="sidebar-intro">最近的会话记录会显示在这里</p>' +
                   '<div class="sessions-list" id="sessions-list">' + renderSessions() + '</div>' +
                 '</div>' +
               '</div>' +
               '<div class="sidebar-footer">' +
                 '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
+                '<div class="sidebar-footer-actions">' +
+                  '<button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="查看文件">📁 文件</button>' +
+                  '<button id="pwa-install-button" class="btn btn-ghost btn-sm hidden" title="安装应用">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 安装' +
+                  '</button>' +
+                  '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="退出登录">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> 退出' +
+                  '</button>' +
+                '</div>' +
               '</div>' +
             '</aside>' +
             '<main class="main-content">' +
@@ -424,6 +430,8 @@
                   '<button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="缩小">−</button>' +
                   '<span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
                   '<button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大">+</button>' +
+                  '<span class="terminal-scale-overlay-divider"></span>' +
+                  '<button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面">↻</button>' +
                 '</div>' +
                 '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部">↓ 最新</button>' +
               '</div>' +
@@ -555,14 +563,24 @@
         var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
         var groups = [];
         groups.push(renderSessionManageBar());
-        if (activeSessions.length > 0) {
-          groups.push(renderSessionGroup("最近", activeSessions, "sessions"));
+
+        // Split claude history into recent (24h) and older
+        var recentHistorySessions = [];
+        if (state.claudeHistoryLoaded) {
+          var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+          recentHistorySessions = getVisibleClaudeHistorySessions().filter(function(s) {
+            return s.timestamp && new Date(s.timestamp).getTime() > cutoff;
+          });
+        }
+
+        if (activeSessions.length > 0 || recentHistorySessions.length > 0) {
+          groups.push(renderRecentGroup(activeSessions, recentHistorySessions));
         }
         if (archivedSessions.length > 0) {
           groups.push(renderSessionGroup("已归档", archivedSessions, "sessions"));
         }
         groups.push(renderClaudeHistorySection());
-        if (activeSessions.length === 0 && archivedSessions.length === 0) {
+        if (activeSessions.length === 0 && archivedSessions.length === 0 && recentHistorySessions.length === 0) {
           return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>' + renderClaudeHistorySection();
         }
         return groups.join("");
@@ -571,6 +589,7 @@
       function renderSessionManageBar() {
         if (!state.sessionsManageMode) {
           return '<div class="session-manage-bar">' +
+            '<span class="sidebar-intro">最近的会话记录</span>' +
             '<button class="session-manage-toggle" data-action="toggle-manage-mode" type="button">管理</button>' +
           '</div>';
         }
@@ -598,8 +617,21 @@
         '</section>';
       }
 
+      function renderRecentGroup(activeSessions, recentHistorySessions) {
+        var html = '<section class="session-group">' +
+          '<div class="session-group-title">最近</div>';
+        html += activeSessions.map(function(session) { return renderSessionItem(session, "sessions"); }).join("");
+        html += recentHistorySessions.map(function(session) { return renderClaudeHistoryItem(session, "history"); }).join("");
+        html += '</section>';
+        return html;
+      }
+
       function renderClaudeHistorySection() {
-        var visibleHistory = getVisibleClaudeHistorySessions();
+        // Exclude recent 24h items from history section
+        var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        var visibleHistory = getVisibleClaudeHistorySessions().filter(function(s) {
+          return !s.timestamp || new Date(s.timestamp).getTime() <= cutoff;
+        });
         var chevron = state.claudeHistoryExpanded ? "&#9662;" : "&#9656;";
         var countBadge = state.claudeHistoryLoaded && visibleHistory.length > 0
           ? ' <span class="history-count">' + visibleHistory.length + '</span>'
@@ -622,7 +654,7 @@
 
         if (visibleHistory.length === 0) {
           return '<section class="session-group">' + header +
-            '<div class="claude-history-loading">没有发现外部 Claude 会话</div></section>';
+            '<div class="claude-history-loading">没有更早的 Claude 历史会话</div></section>';
         }
 
         var groups = {};
@@ -638,19 +670,19 @@
         var html = '';
         groupOrder.forEach(function(cwd) {
           var cwdShort = cwd.split("/").filter(Boolean).slice(-3).join("/");
-          html += renderClaudeHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length);
-          html += groups[cwd].map(function(session) { return renderClaudeHistoryItem(session, "history"); }).join("");
+          var isDirExpanded = !!state.claudeHistoryExpandedDirs[cwd];
+          html += renderClaudeHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length, isDirExpanded);
+          if (isDirExpanded) {
+            html += groups[cwd].map(function(session) { return renderClaudeHistoryItem(session, "history"); }).join("");
+          }
         });
 
         return '<section class="session-group">' + header + html + '</section>';
       }
 
       function getVisibleClaudeHistorySessions() {
-        var todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        var todayMs = todayStart.getTime();
         return state.claudeHistory.filter(function(s) {
-          return s.hasConversation && !s.managedByWand && s.mtimeMs < todayMs;
+          return s.hasConversation && !s.managedByWand;
         });
       }
 
@@ -681,8 +713,11 @@
         state.sessions.forEach(function(session) {
           nextSessionIds[session.id] = true;
         });
+        var cutoff = Date.now() - 24 * 60 * 60 * 1000;
         var nextHistoryIds = {};
-        getVisibleClaudeHistorySessions().forEach(function(session) {
+        getVisibleClaudeHistorySessions().filter(function(session) {
+          return !session.timestamp || new Date(session.timestamp).getTime() <= cutoff;
+        }).forEach(function(session) {
           nextHistoryIds[session.claudeSessionId] = true;
         });
         state.selectedSessionIds = nextSessionIds;
@@ -765,23 +800,29 @@
       }
 
       function clearAllClaudeHistory() {
-        var visibleHistory = getVisibleClaudeHistorySessions();
+        var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        var visibleHistory = getVisibleClaudeHistorySessions().filter(function(s) {
+          return !s.timestamp || new Date(s.timestamp).getTime() <= cutoff;
+        });
         if (!visibleHistory.length) return;
         if (!confirmDelete('确认清空当前显示的 ' + visibleHistory.length + ' 条 Claude 历史吗？')) {
           return;
         }
+        var deleteIds = visibleHistory.map(function(session) { return session.claudeSessionId; });
         return fetch('/api/claude-history/batch-delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ claudeSessionIds: visibleHistory.map(function(session) { return session.claudeSessionId; }) })
+          body: JSON.stringify({ claudeSessionIds: deleteIds })
         })
           .then(function(res) { return res.json(); })
           .then(function(data) {
             if (data && data.error) {
               throw new Error(data.error);
             }
-            state.claudeHistory = [];
+            state.claudeHistory = state.claudeHistory.filter(function(s) {
+              return deleteIds.indexOf(s.claudeSessionId) === -1;
+            });
             clearManageSelections();
             updateSessionsList();
           })
@@ -791,9 +832,11 @@
           });
       }
 
-      function renderClaudeHistoryDirectoryHeader(cwd, cwdShort, count) {
-        return '<div class="claude-history-directory-header">' +
+      function renderClaudeHistoryDirectoryHeader(cwd, cwdShort, count, isExpanded) {
+        var chevron = isExpanded ? "&#9662;" : "&#9656;";
+        return '<div class="claude-history-directory-header" data-action="toggle-history-directory" data-cwd="' + escapeHtml(cwd) + '" role="button" tabindex="0">' +
           '<div class="session-group-title claude-history-directory-title">' +
+            '<span class="chevron">' + chevron + '</span>' +
             '<span class="claude-history-directory-label">' + escapeHtml(cwdShort) + ' (' + count + ')</span>' +
             '<button class="session-manage-btn danger compact claude-history-directory-clear-btn" data-action="delete-history-directory" data-cwd="' +
             escapeHtml(cwd) + '" type="button" aria-label="清空此目录的历史会话" title="清空此目录的历史会话">清空此目录</button>' +
@@ -1768,6 +1811,8 @@
         var scaleUpBtn = document.getElementById("terminal-scale-up-top");
         if (scaleDownBtn) scaleDownBtn.addEventListener("click", function() { adjustTerminalScale(-0.25); });
         if (scaleUpBtn) scaleUpBtn.addEventListener("click", function() { adjustTerminalScale(0.25); });
+        var pageRefreshBtn = document.getElementById("page-refresh-btn");
+        if (pageRefreshBtn) pageRefreshBtn.addEventListener("click", function() { location.reload(); });
         var jumpBottomBtn = document.getElementById("terminal-jump-bottom");
         if (jumpBottomBtn) jumpBottomBtn.addEventListener("click", function() {
           maybeScrollTerminalToBottom("force");
@@ -2240,11 +2285,17 @@
             if (confirmDelete("确认隐藏这条 Claude 历史吗？")) {
               executeDeleteHistory(actionButton.dataset.claudeSessionId, actionButton.closest(".session-item"));
             }
+          } else if (actionButton.dataset.action === "toggle-history-directory" && actionButton.dataset.cwd) {
+            var dirCwd = actionButton.dataset.cwd;
+            state.claudeHistoryExpandedDirs[dirCwd] = !state.claudeHistoryExpandedDirs[dirCwd];
+            updateSessionsList();
           } else if (actionButton.dataset.action === "delete-history-directory" && actionButton.dataset.cwd) {
-            var items = getHistoryItemsByCwd(actionButton.dataset.cwd);
-            if (confirmDelete("确认清空此目录下的 " + items.length + " 条 Claude 历史吗？")) {
+            var deleteCwd = actionButton.dataset.cwd;
+            var items = getHistoryItemsByCwd(deleteCwd);
+            var dirCount = getVisibleClaudeHistorySessions().filter(function(s) { return s.cwd === deleteCwd; }).length;
+            if (confirmDelete("确认清空此目录下的 " + dirCount + " 条 Claude 历史吗？")) {
               setDeletingState(items, true);
-              deleteClaudeHistoryDirectory(actionButton.dataset.cwd, actionButton, items);
+              deleteClaudeHistoryDirectory(deleteCwd, actionButton, items);
             }
           } else if (actionButton.dataset.action === "clear-all-history") {
             clearAllClaudeHistory();
@@ -2664,7 +2715,8 @@
         state.sessions = [];
         state.claudeHistory = [];
         state.claudeHistoryLoaded = false;
-        state.claudeHistoryExpanded = false;
+        state.claudeHistoryExpanded = true;
+        state.claudeHistoryExpandedDirs = {};
         state.sessionsDrawerOpen = false;
         render();
       }
