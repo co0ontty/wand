@@ -559,13 +559,15 @@ export class ClaudePtyBridge extends EventEmitter {
       /\bdo you want to\b/i.test(normalized) ||
       /\bgrant\b.*\bpermission\b/i.test(normalized) ||
       /\bhaven't granted\b/i.test(normalized) ||
-      /\benter to confirm\b/i.test(normalized)
+      /\benter to confirm\b/i.test(normalized) ||
+      /\bwould you like to proceed\b/i.test(normalized) ||
+      /❯/.test(normalized)
     );
   }
 
   private extractPromptText(normalized: string): string {
     // Return a snippet around the permission prompt
-    const match = normalized.match(/.{0,100}(?:do you want to|permission|grant|enter to confirm).{0,100}/i);
+    const match = normalized.match(/.{0,100}(?:do you want to|permission|grant|enter to confirm|would you like to proceed|❯).{0,100}/i);
     return match?.[0] ?? normalized.slice(-100);
   }
 

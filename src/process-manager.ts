@@ -72,7 +72,8 @@ const PROMPT_PATTERNS = [
   /\bwould you like to\b/i,
   /\bshall i\b/i,
   /\bcan i\b/i,
-  /\bgrant\b.*\bpermission\b/i
+  /\bgrant\b.*\bpermission\b/i,
+  /❯/
 ];
 
 interface SessionRecord extends SessionSnapshot {
@@ -1392,6 +1393,29 @@ export class ProcessManager extends EventEmitter {
 
     this.claudeHistoryCache = { data: allSessions, expiresAt: now + ProcessManager.HISTORY_CACHE_TTL_MS };
     return allSessions;
+  }
+
+  deleteClaudeHistoryFiles(sessions: { claudeSessionId: string; cwd: string }[]): number {
+    let deleted = 0;
+    for (const { claudeSessionId, cwd } of sessions) {
+      if (!UUID_V4_PATTERN.test(claudeSessionId)) continue;
+      const jsonlPath = path.join(
+        getClaudeProjectDir(cwd),
+        `${claudeSessionId}.jsonl`
+      );
+      try {
+        if (existsSync(jsonlPath)) {
+          unlinkSync(jsonlPath);
+          deleted++;
+        }
+      } catch {
+        // Best-effort — Claude cache cleanup is non-critical
+      }
+    }
+    if (deleted > 0) {
+      this.claudeHistoryCache = null;
+    }
+    return deleted;
   }
 
   get(id: string): SessionSnapshot | null {
