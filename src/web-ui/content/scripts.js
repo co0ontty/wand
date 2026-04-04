@@ -349,22 +349,25 @@
         }
       }
 
+      function renderShortcutKeys() {
+        return '<button class="shortcut-key' + (state.modifiers.ctrl ? ' active' : '') + '" data-key="ctrl" type="button">Ctrl</button>' +
+          '<button class="shortcut-key' + (state.modifiers.alt ? ' active' : '') + '" data-key="alt" type="button">Alt</button>' +
+          '<span class="shortcut-sep">·</span>' +
+          '<button class="shortcut-key shortcut-dir" data-key="up" type="button">↑</button>' +
+          '<button class="shortcut-key shortcut-dir" data-key="down" type="button">↓</button>' +
+          '<button class="shortcut-key shortcut-dir" data-key="left" type="button">←</button>' +
+          '<button class="shortcut-key shortcut-dir" data-key="right" type="button">→</button>' +
+          '<span class="shortcut-sep">·</span>' +
+          '<button class="shortcut-key" data-key="enter" type="button">↵</button>' +
+          '<button class="shortcut-key" data-key="ctrl_enter" type="button">C-↵</button>' +
+          '<button class="shortcut-key" data-key="escape" type="button">Esc</button>';
+      }
+
       function renderInlineKeyboard() {
         if (!state.selectedId) return "";
         var isTerminal = state.currentView === "terminal";
         if (!isTerminal) return "";
-        var keys =
-            '<button class="shortcut-key' + (state.modifiers.ctrl ? ' active' : '') + '" data-key="ctrl" type="button">Ctrl</button>' +
-            '<button class="shortcut-key' + (state.modifiers.alt ? ' active' : '') + '" data-key="alt" type="button">Alt</button>' +
-            '<span class="shortcut-sep">·</span>' +
-            '<button class="shortcut-key shortcut-dir" data-key="up" type="button">↑</button>' +
-            '<button class="shortcut-key shortcut-dir" data-key="down" type="button">↓</button>' +
-            '<button class="shortcut-key shortcut-dir" data-key="left" type="button">←</button>' +
-            '<button class="shortcut-key shortcut-dir" data-key="right" type="button">→</button>' +
-            '<span class="shortcut-sep">·</span>' +
-            '<button class="shortcut-key" data-key="enter" type="button">↵</button>' +
-            '<button class="shortcut-key" data-key="ctrl_enter" type="button">C-↵</button>' +
-            '<button class="shortcut-key" data-key="escape" type="button">Esc</button>';
+        var keys = renderShortcutKeys();
         var arrow = state.shortcutsExpanded ? '›' : '‹';
         return '<div class="inline-shortcuts-wrap' + (state.shortcutsExpanded ? ' expanded' : '') + '">' +
             '<button class="shortcuts-toggle' + (state.shortcutsExpanded ? ' active' : '') + '" type="button" title="快捷键">' + arrow + '</button>' +
@@ -373,9 +376,11 @@
           '</div>';
       }
 
-      function renderMiniKeyboard() {
-        // Mini keyboard is now inline, rendered in input-composer-right
-        return "";
+      function renderExpandedShortcutsRow() {
+        if (!state.selectedId) return "";
+        var isTerminal = state.currentView === "terminal";
+        if (!isTerminal) return "";
+        return '<div class="inline-shortcuts-expanded-row' + (state.shortcutsExpanded ? ' visible' : '') + '">' + renderShortcutKeys() + '</div>';
       }
 
       function renderLogin() {
@@ -573,6 +578,7 @@
                       '</button>' +
                     '</div>' +
                   '</div>' +
+                  renderExpandedShortcutsRow() +
                   // Session info bar at bottom
                   '<div class="input-session-info-bar">' +
                     '<span id="session-cwd-display" class="session-cwd-display">' + (selectedSession && selectedSession.cwd ? escapeHtml(selectedSession.cwd) : '未设置目录') + '</span>' +
@@ -1985,6 +1991,8 @@
         // Inline shortcuts click handler
         var inlineShortcutsWrap = document.querySelector(".inline-shortcuts-wrap");
         if (inlineShortcutsWrap) inlineShortcutsWrap.addEventListener("click", handleInlineKeyboardClick);
+        var expandedShortcutsRow = document.querySelector(".inline-shortcuts-expanded-row");
+        if (expandedShortcutsRow) expandedShortcutsRow.addEventListener("click", handleInlineKeyboardClick);
         // Shortcuts toggle (mobile fold/unfold)
         var shortcutsToggleBtn = document.querySelector(".shortcuts-toggle");
         if (shortcutsToggleBtn) shortcutsToggleBtn.addEventListener("click", function(e) {
@@ -1992,7 +2000,9 @@
           state.shortcutsExpanded = !state.shortcutsExpanded;
           var wrap = document.querySelector(".inline-shortcuts-wrap");
           var toggle = document.querySelector(".shortcuts-toggle");
+          var row = document.querySelector(".inline-shortcuts-expanded-row");
           if (wrap) wrap.classList.toggle("expanded", state.shortcutsExpanded);
+          if (row) row.classList.toggle("visible", state.shortcutsExpanded);
           if (toggle) {
             toggle.classList.toggle("active", state.shortcutsExpanded);
             toggle.textContent = state.shortcutsExpanded ? "\u203a" : "\u2039";
@@ -2002,9 +2012,12 @@
         document.addEventListener("click", function(e) {
           if (!state.shortcutsExpanded) return;
           var wrap = document.querySelector(".inline-shortcuts-wrap");
-          if (wrap && !wrap.contains(e.target)) {
+          var expandedRow = document.querySelector(".inline-shortcuts-expanded-row");
+          var clickedInsideRow = expandedRow && expandedRow.contains(e.target);
+          if (wrap && !wrap.contains(e.target) && !clickedInsideRow) {
             state.shortcutsExpanded = false;
             wrap.classList.remove("expanded");
+            if (expandedRow) expandedRow.classList.remove("visible");
             var toggle = document.querySelector(".shortcuts-toggle");
             if (toggle) {
               toggle.classList.remove("active");
