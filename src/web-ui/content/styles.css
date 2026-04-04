@@ -2042,6 +2042,10 @@
       position: relative;
       flex-shrink: 0;
     }
+    /* Desktop: expanded row is always hidden (mobile only) */
+    .inline-shortcuts-expanded-row {
+      display: none;
+    }
     .shortcuts-toggle {
       display: none;
     }
@@ -5128,14 +5132,18 @@
         display: none;
       }
 
-      /* 移动端内联快捷键 - 折叠为左右滑动条 */
+      /* 移动端内联快捷键 - 折叠为展开按钮，展开到独立第二行 */
       .inline-shortcuts-inline {
         display: none;
       }
       .inline-shortcuts-wrap {
-        flex-shrink: 1;
-        min-width: 0;
-        overflow: hidden;
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      /* 移动端: strip 永远不显示，展开由独立的 expanded-row 承载 */
+      .inline-shortcuts-strip {
+        display: none !important;
       }
       .shortcuts-toggle {
         display: inline-flex;
@@ -5158,30 +5166,31 @@
       .shortcuts-toggle.active {
         color: var(--accent);
       }
-      .inline-shortcuts-strip {
-        display: none;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        align-items: center;
-        gap: 3px;
-        flex: 1;
-        min-width: 0;
-      }
-      .inline-shortcuts-strip::-webkit-scrollbar {
+      /* 独立第二行：默认隐藏 */
+      .inline-shortcuts-expanded-row {
         display: none;
       }
-      .inline-shortcuts-wrap.expanded .inline-shortcuts-strip {
+      /* 独立第二行：展开时显示，居中、自动换行 */
+      .inline-shortcuts-expanded-row.visible {
         display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        align-content: flex-start;
+        flex-wrap: wrap;
+        gap: 3px;
+        padding: 4px 6px;
       }
-      .inline-shortcuts-strip .shortcut-key {
+      .inline-shortcuts-expanded-row .shortcut-sep {
+        display: none;
+      }
+      .inline-shortcuts-expanded-row .shortcut-key {
         height: 22px;
         min-width: 22px;
         font-size: 0.5625rem;
         padding: 0 4px;
-        flex-shrink: 0;
+        flex: 0 0 auto;
       }
-      .inline-shortcuts-strip .shortcut-key.shortcut-dir {
+      .inline-shortcuts-expanded-row .shortcut-key.shortcut-dir {
         min-width: 20px;
       }
 
