@@ -134,4 +134,19 @@ export class SessionLogger {
     }
     this.dirs.delete(sessionId);
   }
+
+  /** Append a shortcut key interaction log entry (for analyzing auto-confirm gaps) */
+  appendShortcutLog(sessionId: string, shortcutKey: string, tailLines: string): void {
+    try {
+      const dir = this.ensureDir(sessionId);
+      const entry = JSON.stringify({
+        ts: new Date().toISOString(),
+        key: shortcutKey,
+        tail: tailLines,
+      }) + "\n";
+      appendFileSync(path.join(dir, "shortcut-interactions.jsonl"), entry);
+    } catch {
+      // Non-critical
+    }
+  }
 }
