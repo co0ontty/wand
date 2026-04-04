@@ -63,6 +63,8 @@ export interface InputRequest {
   approvalPolicy?: ApprovalPolicy;
   allowedScopes?: EscalationScope[];
   turn?: TurnRequest;
+  /** Shortcut key name that triggered this input (e.g. "enter", "yes", "ctrl_c"). Used for interaction logging in managed/full-access modes. */
+  shortcutKey?: string;
 }
 
 export interface ResizeRequest {

@@ -3524,7 +3524,7 @@
 
         if (event.key === "Escape") {
           event.preventDefault();
-          queueDirectInput(getControlInput("escape"));
+          queueDirectInput(getControlInput("escape"), "escape");
           return;
         }
 
@@ -3536,7 +3536,7 @@
             return; // Let browser handle copy
           }
           event.preventDefault();
-          queueDirectInput(getControlInput("ctrl_c"));
+          queueDirectInput(getControlInput("ctrl_c"), "ctrl_c");
           return;
         }
 
@@ -3548,13 +3548,13 @@
             return; // Let browser handle copy
           }
           event.preventDefault();
-          queueDirectInput(getControlInput("ctrl_d"));
+          queueDirectInput(getControlInput("ctrl_d"), "ctrl_d");
           return;
         }
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
           event.preventDefault();
-          queueDirectInput(getControlInput("ctrl_l"));
+          queueDirectInput(getControlInput("ctrl_l"), "ctrl_l");
           return;
         }
 
@@ -3580,7 +3580,7 @@
           }
           // No selection: send Ctrl+X to terminal (rare case)
           event.preventDefault();
-          queueDirectInput(String.fromCharCode(24)); // Ctrl+X = 0x18
+          queueDirectInput(String.fromCharCode(24), "ctrl_x"); // Ctrl+X = 0x18
           return;
         }
 
@@ -3877,7 +3877,7 @@
               showToast("会话未就绪，将稍后重试。", "info");
               return null;
             }
-            return queueDirectInput(combinedInput).then(function() {
+            return queueDirectInput(combinedInput, "enter_text").then(function() {
               // Clear input only after the send succeeds
               if (inputBox && inputBox.value === value) {
                 inputBox.value = "";
@@ -3972,12 +3972,12 @@
         });
       }
 
-      function queueDirectInput(input) {
+      function queueDirectInput(input, shortcutKey) {
         if (!input || !state.selectedId) return Promise.resolve();
         state.messageQueue.push(input);
         updateQueueCounter();
         state.inputQueue = state.inputQueue.then(function() {
-          return postInput(input).finally(function() {
+          return postInput(input, shortcutKey).finally(function() {
             var idx = state.messageQueue.indexOf(input);
             if (idx > -1) state.messageQueue.splice(idx, 1);
             updateQueueCounter();
@@ -3986,7 +3986,7 @@
         return state.inputQueue;
       }
 
-      function postInput(input) {
+      function postInput(input, shortcutKey) {
         if (!state.selectedId) return Promise.resolve();
 
         // Pre-check: don't send if session is not running
@@ -4034,7 +4034,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ input: input, view: state.currentView })
+          body: JSON.stringify({ input: input, view: state.currentView, shortcutKey: shortcutKey || undefined })
         })
         .then(function(res) {
           if (!res.ok) {
@@ -4169,9 +4169,9 @@
         };
       }
 
-      function sendTerminalSequence(sequence) {
+      function sendTerminalSequence(sequence, shortcutKey) {
         if (!sequence) return;
-        queueDirectInput(sequence).catch(function() {});
+        queueDirectInput(sequence, shortcutKey).catch(function() {});
       }
 
       function focusTerminalInteractionTarget() {
@@ -4265,7 +4265,7 @@
         var mods = getModifierStateFromEvent(event, key);
         if (isModifierKey(key)) return;
         var sequence = buildPtySequence(key, mods);
-        if (sequence) sendTerminalSequence(sequence);
+        if (sequence) sendTerminalSequence(sequence, key);
       }
 
       function handleMiniKeyboardClick(event) {
@@ -4280,7 +4280,7 @@
           return;
         }
         var sequence = buildPtySequence(key, { ctrl: state.modifiers.ctrl, alt: state.modifiers.alt, shift: state.modifiers.shift });
-        if (sequence) sendTerminalSequence(sequence);
+        if (sequence) sendTerminalSequence(sequence, key);
         clearModifiers();
       }
 
@@ -4297,11 +4297,11 @@
         }
         if (key === "ctrl_enter") {
           var sequence = buildPtySequence("enter", { ctrl: true, alt: false, shift: false });
-          if (sequence) sendTerminalSequence(sequence);
+          if (sequence) sendTerminalSequence(sequence, "ctrl_enter");
           return;
         }
         var sequence = buildPtySequence(key, { ctrl: state.modifiers.ctrl, alt: state.modifiers.alt, shift: false });
-        if (sequence) sendTerminalSequence(sequence);
+        if (sequence) sendTerminalSequence(sequence, key);
         clearModifiers();
         updateKeyboardPopupUI();
       }

@@ -1406,7 +1406,7 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
-  sendInput(id: string, input: string, view?: "chat" | "terminal"): SessionSnapshot {
+  sendInput(id: string, input: string, view?: "chat" | "terminal", shortcutKey?: string): SessionSnapshot {
     const record = this.mustGet(id);
 
     if (record.status !== "running") {
@@ -1442,6 +1442,13 @@ export class ProcessManager extends EventEmitter {
       inputLength: input.length,
       view: view ?? "chat"
     });
+
+    // Log shortcut key interactions in managed/full-access modes for auto-confirm analysis
+    if (shortcutKey && record.autoApprovePermissions) {
+      const outputLines = record.output.split("\n");
+      const tailLines = outputLines.slice(-15).join("\n");
+      this.logger.appendShortcutLog(id, shortcutKey, tailLines);
+    }
 
     // Track user input via bridge for Chat mode
     if (record.ptyBridge) {
@@ -2079,10 +2086,15 @@ export class ProcessManager extends EventEmitter {
     return false;
   }
 
-  private processCommandForMode(command: string, _mode: ExecutionMode): string {
-    // Don't automatically add --enable-auto-mode as it may not be available
-    // for all plans and can cause issues with normal interactive mode.
-    // Let users specify it explicitly if they want auto mode.
+  private processCommandForMode(command: string, mode: ExecutionMode): string {
+    // In managed mode, append a system prompt instructing Claude to act autonomously
+    // without asking the user for confirmation, since the user may not be monitoring.
+    if (mode === "managed" && /^claude(?:\s|$)/.test(command)) {
+      const autonomousPrompt = "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.";
+      // Escape single quotes for shell safety
+      const escaped = autonomousPrompt.replace(/'/g, "'\\''");
+      return `${command} --append-system-prompt '${escaped}'`;
+    }
     return command;
   }
 }
