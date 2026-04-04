@@ -72,8 +72,7 @@ const PROMPT_PATTERNS = [
   /\bwould you like to\b/i,
   /\bshall i\b/i,
   /\bcan i\b/i,
-  /\bgrant\b.*\bpermission\b/i,
-  /❯/
+  /\bgrant\b.*\bpermission\b/i
 ];
 
 interface SessionRecord extends SessionSnapshot {
@@ -1404,15 +1403,13 @@ export class ProcessManager extends EventEmitter {
         `${claudeSessionId}.jsonl`
       );
       try {
-        if (existsSync(jsonlPath)) {
-          unlinkSync(jsonlPath);
-          deleted++;
-        }
+        unlinkSync(jsonlPath);
+        deleted++;
       } catch {
-        // Best-effort — Claude cache cleanup is non-critical
+        // Best-effort — file may already be gone
       }
     }
-    if (deleted > 0) {
+    if (sessions.length > 0) {
       this.claudeHistoryCache = null;
     }
     return deleted;
