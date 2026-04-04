@@ -29,12 +29,16 @@ const PKG_REPO_URL = "https://github.com/co0ontty/wand";
 // ── Update check cache ──
 
 let cachedLatestVersion: string | null = null;
+let cacheTimestamp = 0;
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-async function checkNpmLatestVersion(): Promise<{ current: string; latest: string; updateAvailable: boolean }> {
-  if (!cachedLatestVersion) {
+async function checkNpmLatestVersion(forceRefresh = false): Promise<{ current: string; latest: string; updateAvailable: boolean }> {
+  const now = Date.now();
+  if (forceRefresh || !cachedLatestVersion || (now - cacheTimestamp > CACHE_TTL_MS)) {
     try {
       const { stdout } = await execAsync(`npm view ${PKG_NAME} version`, { timeout: 15000 });
       cachedLatestVersion = stdout.trim();
+      cacheTimestamp = now;
     } catch {
       cachedLatestVersion = null;
     }
@@ -537,7 +541,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.get("/api/check-update", async (_req, res) => {
     try {
-      const result = await checkNpmLatestVersion();
+      const result = await checkNpmLatestVersion(true);
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "检查更新失败。") });
