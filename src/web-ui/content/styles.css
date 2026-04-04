@@ -1550,8 +1550,8 @@
       padding: 10px;
       overflow: hidden;
       min-height: 0;
-      margin: 0 10px 10px;
-      border-radius: var(--radius-lg);
+      margin: 0 6px 6px;
+      border-radius: var(--radius-md);
       border: 1px solid rgba(140, 110, 85, 0.35);
       box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.06),
@@ -4852,7 +4852,7 @@
         width: min(300px, calc(100vw - 20px));
         top: 0;
       }
-      .terminal-container { margin: 0 12px 12px; min-height: 0; }
+      .terminal-container { margin: 0 6px 6px; min-height: 0; }
       .btn { min-height: 40px; }
       .btn-sm { min-height: 36px; padding: 0 10px; font-size: 0.75rem; height: 36px; }
       .btn-icon { width: 36px; height: 36px; min-height: 36px; }
