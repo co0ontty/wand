@@ -16,7 +16,7 @@ export function renderApp(configPath: string): string {
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content, user-scalable=no" />
   <title>Wand Console</title>
   <meta name="description" content="Local CLI Console for Vibe Coding - Manage terminal sessions from your browser" />
   <meta name="theme-color" content="#f6f1e8" media="(prefers-color-scheme: light)" />
@@ -30,7 +30,7 @@ export function renderApp(configPath: string): string {
   <meta name="msapplication-TileColor" content="#c5653d" />
   <meta name="msapplication-tap-highlight" content="no" />
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
   <style>

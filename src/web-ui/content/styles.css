@@ -1595,10 +1595,79 @@
 
     .terminal-container .xterm-viewport {
       background: transparent !important;
+      scrollbar-width: none;
+    }
+    .terminal-container .xterm-viewport::-webkit-scrollbar {
+      display: none;
     }
 
     .terminal-container .xterm {
       padding: 0;
+    }
+
+    /* ===== 自定义终端滚动条 ===== */
+    .terminal-scrollbar {
+      position: absolute;
+      top: 4px;
+      right: 2px;
+      bottom: 4px;
+      width: 14px;
+      z-index: 10;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    .terminal-scrollbar.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .terminal-scrollbar-track {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 14px;
+      border-radius: 7px;
+    }
+    .terminal-scrollbar-thumb {
+      position: absolute;
+      right: 3px;
+      width: 8px;
+      min-height: 28px;
+      border-radius: 4px;
+      background: rgba(180, 150, 120, 0.35);
+      cursor: pointer;
+      transition: background 0.15s ease, width 0.15s ease, right 0.15s ease;
+    }
+    .terminal-scrollbar-thumb:hover {
+      background: rgba(200, 170, 140, 0.55);
+      width: 10px;
+      right: 2px;
+    }
+    .terminal-scrollbar-thumb.dragging,
+    .terminal-scrollbar-thumb:active {
+      background: rgba(220, 185, 150, 0.7);
+      width: 10px;
+      right: 2px;
+    }
+
+    @media (pointer: coarse) {
+      .terminal-scrollbar {
+        width: 20px;
+      }
+      .terminal-scrollbar-track {
+        width: 20px;
+      }
+      .terminal-scrollbar-thumb {
+        width: 12px;
+        right: 4px;
+        min-height: 36px;
+      }
+      .terminal-scrollbar-thumb:hover,
+      .terminal-scrollbar-thumb.dragging {
+        width: 14px;
+        right: 3px;
+      }
     }
 
     .terminal-container:focus-within {

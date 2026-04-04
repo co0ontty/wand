@@ -40,22 +40,25 @@ function generateRandomSeed(): string {
 
 /**
  * Generate an SVG identicon from a seed string.
- * Uses a 5x5 symmetric grid (mirrored to 9 columns), GitHub-style.
+ * Uses a 5x5 symmetric grid with white cells on a colored background.
+ * The pattern is mirrored horizontally for visual balance.
  */
 export function getAvatarSvg(seed: string, size: 192 | 512): string {
-  const cellSize = Math.round(size * 0.08);
-  const gap = Math.max(1, Math.round(size * 0.01));
-  const gridSize = 5;
-  const totalWidth = gridSize * cellSize + (gridSize - 1) * gap;
   const svgSize = size;
+  const gridSize = 5;
+  const padding = Math.round(svgSize * 0.12);
+  const innerSize = svgSize - padding * 2;
+  const cellSize = Math.floor(innerSize / gridSize);
+  const gridWidth = cellSize * gridSize;
+  const gridOffset = (svgSize - gridWidth) / 2;
 
-  // Derive color from seed
+  // Derive color from seed — warm tones that match the Wand theme
   const h = Math.abs(hashString(seed + "h")) % 360;
-  const s = 50 + (Math.abs(hashString(seed + "s")) % 40);
-  const l = 45 + (Math.abs(hashString(seed + "l")) % 20);
-  const color = `hsl(${h},${s}%,${l}%)`;
+  const s = 55 + (Math.abs(hashString(seed + "s")) % 30);
+  const l = 42 + (Math.abs(hashString(seed + "l")) % 16);
+  const bgColor = `hsl(${h},${s}%,${l}%)`;
 
-  // Derive fill states from seed (5 chars for 25 cells, each char's LSB)
+  // Derive fill states from seed
   const seedChars = seed.slice(0, 25);
   const cells: boolean[] = [];
   for (let i = 0; i < 25; i++) {
@@ -63,53 +66,41 @@ export function getAvatarSvg(seed: string, size: 192 | 512): string {
     cells.push(parseInt(char, 16) % 2 === 0);
   }
 
-  const rects: string[] = [];
-  const cx = svgSize / 2;
-  const cy = svgSize / 2;
-  const radius = svgSize * 0.22;
+  const parts: string[] = [];
+  const cornerR = Math.round(svgSize * 0.14);
 
-  // Outer background circle
-  rects.push(`<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${color}"/>`);
+  // Full SVG background with rounded corners
+  parts.push(`<rect width="${svgSize}" height="${svgSize}" rx="${cornerR}" fill="${bgColor}"/>`);
 
-  // Symmetric grid: columns 0-4, mirror to 8-4
+  // White cells on colored background — high contrast
+  const cellR = Math.round(cellSize * 0.12);
+  const cellGap = Math.max(1, Math.round(cellSize * 0.08));
+  const actualCell = cellSize - cellGap;
+
   for (let row = 0; row < gridSize; row++) {
     for (let col = 0; col < gridSize; col++) {
       const mirrorCol = gridSize - 1 - col;
       const idx = row * gridSize + col;
 
-      // Only draw for left half + middle column (right half mirrors)
       if (col > mirrorCol) continue;
-
       if (!cells[idx]) continue;
 
-      // Two mirrored rectangles
-      const x1 = col * (cellSize + gap);
-      const x2 = mirrorCol * (cellSize + gap);
-      const y = row * (cellSize + gap);
-      const offsetX = (svgSize - totalWidth) / 2;
-      const offsetY = (svgSize - totalWidth) / 2;
-
-      // Darken color for filled cells
-      const cellColor = `hsl(${h},${s}%,${l - 15}%)`;
-      const rx = Math.round(cellSize * 0.15);
+      const y = gridOffset + row * cellSize + cellGap / 2;
 
       if (col === mirrorCol) {
-        // Middle column — single centered rect
-        const mx = offsetX + col * (cellSize + gap);
-        const my = offsetY + y;
-        rects.push(`<rect x="${mx}" y="${my}" width="${cellSize}" height="${cellSize}" rx="${rx}" fill="${cellColor}"/>`);
+        const x = gridOffset + col * cellSize + cellGap / 2;
+        parts.push(`<rect x="${x}" y="${y}" width="${actualCell}" height="${actualCell}" rx="${cellR}" fill="rgba(255,255,255,0.9)"/>`);
       } else {
-        const mx1 = offsetX + x1;
-        const mx2 = offsetX + x2;
-        const my = offsetY + y;
-        rects.push(`<rect x="${mx1}" y="${my}" width="${cellSize}" height="${cellSize}" rx="${rx}" fill="${cellColor}"/>`);
-        rects.push(`<rect x="${mx2}" y="${my}" width="${cellSize}" height="${cellSize}" rx="${rx}" fill="${cellColor}"/>`);
+        const x1 = gridOffset + col * cellSize + cellGap / 2;
+        const x2 = gridOffset + mirrorCol * cellSize + cellGap / 2;
+        parts.push(`<rect x="${x1}" y="${y}" width="${actualCell}" height="${actualCell}" rx="${cellR}" fill="rgba(255,255,255,0.9)"/>`);
+        parts.push(`<rect x="${x2}" y="${y}" width="${actualCell}" height="${actualCell}" rx="${cellR}" fill="rgba(255,255,255,0.9)"/>`);
       }
     }
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgSize} ${svgSize}" width="${svgSize}" height="${svgSize}">
-  ${rects.join("\n  ")}
+  ${parts.join("\n  ")}
 </svg>`;
 }
 
