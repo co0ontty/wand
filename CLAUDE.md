@@ -23,6 +23,12 @@ There is no test suite yet, and no linter or formatter is configured.
 npm run build && wand init && wand web
 ```
 
+**Dev test server:**
+```bash
+npm run dev -- -c /tmp/wand-test/config.json
+```
+Uses `/tmp/wand-test/config.json` as the config file; database and sessions are stored in the same directory. All runtime settings (host, port, defaultCwd, etc.) live in the config file and can also be changed from the web UI settings panel. The `-c` flag works with the compiled binary too (`wand web -c /tmp/wand-test/config.json`).
+
 **Manual release / browser QA:** Follow `RELEASE_CHECKLIST.md`.
 
 ## Additional References

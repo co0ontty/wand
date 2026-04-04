@@ -494,9 +494,14 @@
                     '<button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button">' +
                       '<span class="tool-icon">🤖</span>新建终端会话' +
                     '</button>' +
-                    '<button class="blank-chat-tool-btn" id="welcome-tool-folder" type="button" title="选择工作目录">' +
-                      '<span class="tool-icon">📎</span>目录' +
-                    '</button>' +
+                  '</div>' +
+                  '<div class="blank-chat-cwd-wrap">' +
+                    '<div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" title="点击切换工作目录">' +
+                      '<span class="blank-chat-cwd-icon">📁</span>' +
+                      '<span class="blank-chat-cwd-path" id="blank-chat-cwd-path">' + escapeHtml(state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp")) + '</span>' +
+                      '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">▼</span>' +
+                    '</div>' +
+                    '<div class="blank-chat-cwd-dropdown hidden" id="blank-chat-cwd-dropdown"></div>' +
                   '</div>' +
                 '</div>' +
               '</div>' +
@@ -1648,10 +1653,10 @@
               '<div class="field">' +
                 '<label class="field-label" for="cwd">工作目录</label>' +
                 '<div class="suggestions-wrap">' +
-                  '<input id="cwd" type="text" class="field-input" autocomplete="off" placeholder="留空则使用默认目录" />' +
+                  '<input id="cwd" type="text" class="field-input" autocomplete="off" placeholder="' + escapeHtml(state.workingDir || (state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp")) + '" />' +
                   '<div id="cwd-suggestions" class="suggestions hidden"></div>' +
                 '</div>' +
-                '<p class="field-hint">会话将在此目录启动，支持路径自动补全。</p>' +
+                '<p class="field-hint">留空则使用上方目录，支持路径自动补全。</p>' +
                 '<div id="recent-paths-bubbles" class="recent-paths-bubbles"></div>' +
               '</div>' +
               '<button id="run-button" class="btn btn-primary btn-block">启动会话</button>' +
@@ -1810,10 +1815,7 @@
             quickStartSession();
           });
         }
-        var welcomeFolderBtn = document.getElementById("welcome-tool-folder");
-        if (welcomeFolderBtn) {
-          welcomeFolderBtn.addEventListener("click", openFolderPickerWithInitialPath);
-        }
+        initBlankChatCwd();
 
         var sessionsList = document.getElementById("sessions-list");
         if (sessionsList) {
@@ -2403,11 +2405,7 @@
           renderBreadcrumb(initialPath);
         }
 
-        // Welcome screen folder button
-        var welcomeFolderBtn = document.getElementById("welcome-tool-folder");
-        if (welcomeFolderBtn) {
-          welcomeFolderBtn.addEventListener("click", openFolderPickerWithInitialPath);
-        }
+        // Welcome screen folder button (legacy, now handled by initBlankChatCwd)
 
         if (closeFolderPicker && folderPickerModal) {
           closeFolderPicker.addEventListener("click", function() {
@@ -2504,7 +2502,12 @@
           }
           if (_swipeState) return;
           if (item.dataset.sessionId) {
-            selectSession(item.dataset.sessionId);
+            var clickedSession = state.sessions.find(function(s) { return s.id === item.dataset.sessionId; });
+            if (clickedSession && clickedSession.status !== "running") {
+              resumeSessionFromList(item.dataset.sessionId);
+            } else {
+              selectSession(item.dataset.sessionId);
+            }
             closeSessionsDrawer();
           }
         }
@@ -2524,7 +2527,12 @@
           return;
         }
         if (item.dataset.sessionId) {
-          selectSession(item.dataset.sessionId);
+          var keySession = state.sessions.find(function(s) { return s.id === item.dataset.sessionId; });
+          if (keySession && keySession.status !== "running") {
+            resumeSessionFromList(item.dataset.sessionId);
+          } else {
+            selectSession(item.dataset.sessionId);
+          }
           closeSessionsDrawer();
         }
       }
@@ -3949,6 +3957,93 @@
         .catch(function() {
           showError(errorEl, "无法启动会话，请确认 Claude 已正确安装。");
         });
+      }
+
+      // Blank-chat CWD inline display + dropdown
+      function initBlankChatCwd() {
+        var cwdEl = document.getElementById("blank-chat-cwd");
+        if (!cwdEl) return;
+        cwdEl.addEventListener("click", toggleBlankChatCwdDropdown);
+        cwdEl.addEventListener("keydown", function(e) {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleBlankChatCwdDropdown();
+          }
+        });
+        document.addEventListener("click", function(e) {
+          var dropdown = document.getElementById("blank-chat-cwd-dropdown");
+          if (!dropdown || dropdown.classList.contains("hidden")) return;
+          if (!e.target.closest(".blank-chat-cwd-wrap")) {
+            dropdown.classList.add("hidden");
+            var arrow = document.getElementById("blank-chat-cwd-arrow");
+            if (arrow) arrow.textContent = "▼";
+          }
+        });
+      }
+
+      function toggleBlankChatCwdDropdown() {
+        var dropdown = document.getElementById("blank-chat-cwd-dropdown");
+        var arrow = document.getElementById("blank-chat-cwd-arrow");
+        if (!dropdown) return;
+        var isHidden = dropdown.classList.contains("hidden");
+        if (isHidden) {
+          loadBlankChatCwdDropdown(dropdown);
+          dropdown.classList.remove("hidden");
+          if (arrow) arrow.textContent = "▲";
+        } else {
+          dropdown.classList.add("hidden");
+          if (arrow) arrow.textContent = "▼";
+        }
+      }
+
+      function loadBlankChatCwdDropdown(dropdown) {
+        var defaultCwd = state.config && state.config.defaultCwd ? state.config.defaultCwd : "/tmp";
+        dropdown.innerHTML = '<div class="blank-chat-cwd-loading">加载中...</div>';
+        fetch("/api/recent-paths", { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(items) {
+            var html = "";
+            // Default directory always first
+            var currentDir = state.workingDir || defaultCwd;
+            html += '<div class="blank-chat-cwd-item' + (currentDir === defaultCwd ? " active" : "") + '" data-path="' + escapeHtml(defaultCwd) + '">' +
+              '<span class="blank-chat-cwd-item-label">默认</span>' +
+              '<span class="blank-chat-cwd-item-path">' + escapeHtml(defaultCwd) + '</span>' +
+            '</div>';
+            // Recent paths (exclude default to avoid duplicate)
+            if (items && items.length) {
+              var seen = {};
+              seen[defaultCwd] = true;
+              items.forEach(function(item) {
+                if (seen[item.path]) return;
+                seen[item.path] = true;
+                html += '<div class="blank-chat-cwd-item' + (currentDir === item.path ? " active" : "") + '" data-path="' + escapeHtml(item.path) + '">' +
+                  '<span class="blank-chat-cwd-item-path">' + escapeHtml(item.path) + '</span>' +
+                '</div>';
+              });
+            }
+            dropdown.innerHTML = html;
+            dropdown.querySelectorAll(".blank-chat-cwd-item").forEach(function(el) {
+              el.addEventListener("click", function(e) {
+                e.stopPropagation();
+                var path = el.dataset.path;
+                state.workingDir = path;
+                try { localStorage.setItem("wand-working-dir", path); } catch(e) {}
+                var pathEl = document.getElementById("blank-chat-cwd-path");
+                if (pathEl) pathEl.textContent = path;
+                dropdown.classList.add("hidden");
+                var arrow = document.getElementById("blank-chat-cwd-arrow");
+                if (arrow) arrow.textContent = "▼";
+                // Update folder picker input if exists
+                var fpInput = document.getElementById("folder-picker-input");
+                if (fpInput) fpInput.value = path;
+              });
+            });
+          })
+          .catch(function() {
+            dropdown.innerHTML = '<div class="blank-chat-cwd-item" data-path="' + escapeHtml(defaultCwd) + '">' +
+              '<span class="blank-chat-cwd-item-path">' + escapeHtml(defaultCwd) + '</span>' +
+            '</div>';
+          });
       }
 
       function loadRecentPathBubbles() {

@@ -9,7 +9,7 @@ import { WandConfig } from "./types.js";
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0] || "help";
-  const configPath = resolveConfigPath(readFlagValue(args, "--config"));
+  const configPath = resolveConfigPath(readFlagValue(args, "-c") || readFlagValue(args, "--config"));
 
   switch (command) {
     case "init": {
@@ -70,7 +70,7 @@ Commands:
   wand config:set           Update a simple config value
 
 Options:
-  --config <path>           Use a custom config file path
+  -c, --config <path>       Use a custom config file (default: ~/.wand/config.json)
 `);
 }
 

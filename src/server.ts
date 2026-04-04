@@ -305,6 +305,15 @@ function saveHiddenClaudeSessionIds(storage: WandStorage, hidden: Set<string>): 
   storage.setConfigValue(HIDDEN_CLAUDE_SESSIONS_KEY, JSON.stringify(Array.from(hidden)));
 }
 
+function removeFromHiddenClaudeSessionIds(storage: WandStorage, idsToRemove: string[]): void {
+  const hidden = getHiddenClaudeSessionIds(storage);
+  let changed = false;
+  for (const id of idsToRemove) {
+    if (hidden.delete(id)) changed = true;
+  }
+  if (changed) saveHiddenClaudeSessionIds(storage, hidden);
+}
+
 const MAX_RECENT_PATHS = 10;
 
 // ── File language detection ──
@@ -586,10 +595,17 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.status(400).json({ error: "会话 ID 不能为空。" });
       return;
     }
-    const hidden = getHiddenClaudeSessionIds(storage);
-    if (!hidden.has(claudeSessionId)) {
-      hidden.add(claudeSessionId);
-      saveHiddenClaudeSessionIds(storage, hidden);
+    const session = processes.listClaudeHistorySessions()
+      .find((s) => s.claudeSessionId === claudeSessionId);
+    if (session) {
+      processes.deleteClaudeHistoryFiles([{ claudeSessionId, cwd: session.cwd }]);
+      removeFromHiddenClaudeSessionIds(storage, [claudeSessionId]);
+    } else {
+      const hidden = getHiddenClaudeSessionIds(storage);
+      if (!hidden.has(claudeSessionId)) {
+        hidden.add(claudeSessionId);
+        saveHiddenClaudeSessionIds(storage, hidden);
+      }
     }
     res.json({ ok: true });
   });
@@ -603,25 +619,18 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
     try {
       const sessions = processes.listClaudeHistorySessions();
-      const hidden = getHiddenClaudeSessionIds(storage);
-      let added = 0;
+      const toDelete: { claudeSessionId: string; cwd: string }[] = [];
 
       for (const session of sessions) {
-        if (!session.claudeSessionId || session.cwd !== cwd) {
-          continue;
+        if (session.claudeSessionId && session.cwd === cwd) {
+          toDelete.push({ claudeSessionId: session.claudeSessionId, cwd: session.cwd });
         }
-        if (hidden.has(session.claudeSessionId)) {
-          continue;
-        }
-        hidden.add(session.claudeSessionId);
-        added += 1;
       }
 
-      if (added > 0) {
-        saveHiddenClaudeSessionIds(storage, hidden);
-      }
+      const deleted = processes.deleteClaudeHistoryFiles(toDelete);
+      removeFromHiddenClaudeSessionIds(storage, toDelete.map((s) => s.claudeSessionId));
 
-      res.json({ ok: true, deleted: added });
+      res.json({ ok: true, deleted });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "无法删除该目录下的历史会话。") });
     }
@@ -638,19 +647,40 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
 
     try {
-      const hidden = getHiddenClaudeSessionIds(storage);
-      let added = 0;
-      for (const claudeSessionId of claudeSessionIds) {
-        if (hidden.has(claudeSessionId)) {
-          continue;
+      const allSessions = processes.listClaudeHistorySessions();
+      const sessionMap = new Map<string, string>();
+      for (const s of allSessions) {
+        if (s.claudeSessionId) sessionMap.set(s.claudeSessionId, s.cwd);
+      }
+
+      const toDelete: { claudeSessionId: string; cwd: string }[] = [];
+      const toHide: string[] = [];
+
+      for (const id of claudeSessionIds) {
+        const cwd = sessionMap.get(id);
+        if (cwd) {
+          toDelete.push({ claudeSessionId: id, cwd });
+        } else {
+          toHide.push(id);
         }
-        hidden.add(claudeSessionId);
-        added += 1;
       }
-      if (added > 0) {
-        saveHiddenClaudeSessionIds(storage, hidden);
+
+      const deleted = processes.deleteClaudeHistoryFiles(toDelete);
+      removeFromHiddenClaudeSessionIds(storage, toDelete.map((s) => s.claudeSessionId));
+
+      if (toHide.length > 0) {
+        const hidden = getHiddenClaudeSessionIds(storage);
+        let added = 0;
+        for (const id of toHide) {
+          if (!hidden.has(id)) {
+            hidden.add(id);
+            added++;
+          }
+        }
+        if (added > 0) saveHiddenClaudeSessionIds(storage, hidden);
       }
-      res.json({ ok: true, deleted: added });
+
+      res.json({ ok: true, deleted: deleted + toHide.length });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "无法批量删除历史会话。") });
     }
