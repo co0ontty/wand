@@ -1,6 +1,6 @@
 import express, { NextFunction, Request, Response } from "express";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { exec } from "node:child_process";
@@ -13,10 +13,54 @@ const execAsync = promisify(exec);
 const SERVER_MODULE_DIR = path.dirname(new URL(import.meta.url).pathname);
 const RUNTIME_ROOT_DIR = path.resolve(SERVER_MODULE_DIR, "..");
 
+// ── Package info ──
+
+const PKG_JSON = JSON.parse(readFileSync(path.join(RUNTIME_ROOT_DIR, "package.json"), "utf8")) as {
+  name: string;
+  version: string;
+  engines?: { node?: string };
+  repository?: { url?: string };
+};
+const PKG_NAME = PKG_JSON.name;
+const PKG_VERSION = PKG_JSON.version;
+const PKG_NODE_REQ = PKG_JSON.engines?.node ?? ">=22.5.0";
+const PKG_REPO_URL = "https://github.com/co0ontty/wand";
+
+// ── Update check cache ──
+
+let cachedLatestVersion: string | null = null;
+
+async function checkNpmLatestVersion(): Promise<{ current: string; latest: string; updateAvailable: boolean }> {
+  if (!cachedLatestVersion) {
+    try {
+      const { stdout } = await execAsync(`npm view ${PKG_NAME} version`, { timeout: 15000 });
+      cachedLatestVersion = stdout.trim();
+    } catch {
+      cachedLatestVersion = null;
+    }
+  }
+  const latest = cachedLatestVersion || PKG_VERSION;
+  return {
+    current: PKG_VERSION,
+    latest,
+    updateAvailable: latest !== PKG_VERSION && compareSemver(latest, PKG_VERSION) > 0,
+  };
+}
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
 import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
 import { ensureCertificates } from "./cert.js";
-import { isExecutionMode, resolveConfigDir } from "./config.js";
+import { isExecutionMode, resolveConfigDir, saveConfig } from "./config.js";
 import { ProcessManager, ProcessEvent, SessionInputError } from "./process-manager.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { renderApp } from "./web-ui/index.js";
@@ -401,6 +445,118 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
     });
+  });
+
+  // ── Settings endpoints ──
+
+  app.get("/api/settings", (_req, res) => {
+    const certPaths = {
+      keyPath: path.join(configDir, "server.key"),
+      certPath: path.join(configDir, "server.crt"),
+    };
+    const { password: _pw, ...safeConfig } = config;
+    res.json({
+      version: PKG_VERSION,
+      packageName: PKG_NAME,
+      nodeVersion: PKG_NODE_REQ,
+      repoUrl: PKG_REPO_URL,
+      config: safeConfig,
+      hasCert: existsSync(certPaths.keyPath) && existsSync(certPaths.certPath),
+    });
+  });
+
+  app.post("/api/settings/config", async (req, res) => {
+    const body = req.body as Partial<WandConfig>;
+    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell"] as const;
+    let changed = false;
+
+    for (const field of allowedFields) {
+      if (field in body && body[field] !== undefined) {
+        if (field === "port") {
+          const p = Number(body.port);
+          if (!Number.isInteger(p) || p < 1 || p > 65535) {
+            res.status(400).json({ error: `无效端口号: ${body.port}` });
+            return;
+          }
+          config.port = p;
+        } else if (field === "https") {
+          config.https = body.https === true;
+        } else if (field === "defaultMode") {
+          if (!isExecutionMode(body.defaultMode)) {
+            res.status(400).json({ error: `无效执行模式: ${body.defaultMode}` });
+            return;
+          }
+          config.defaultMode = body.defaultMode;
+        } else if (field === "host") {
+          config.host = String(body.host);
+        } else if (field === "defaultCwd") {
+          config.defaultCwd = String(body.defaultCwd);
+        } else if (field === "shell") {
+          config.shell = String(body.shell);
+        }
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      res.status(400).json({ error: "没有可更新的配置字段。" });
+      return;
+    }
+
+    try {
+      await saveConfig(configPath, config);
+      const { password: _pw, ...safeConfig } = config;
+      res.json({ ok: true, config: safeConfig, restartRequired: true });
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "保存配置失败。") });
+    }
+  });
+
+  app.post("/api/settings/upload-cert", async (req, res) => {
+    const { key, cert } = req.body as { key?: string; cert?: string };
+    if (!key || !cert) {
+      res.status(400).json({ error: "请提供 key 和 cert 内容。" });
+      return;
+    }
+
+    if (!key.includes("-----BEGIN") || !cert.includes("-----BEGIN")) {
+      res.status(400).json({ error: "证书内容格式无效，请上传 PEM 格式的文件。" });
+      return;
+    }
+
+    try {
+      const keyPath = path.join(configDir, "server.key");
+      const certPath = path.join(configDir, "server.crt");
+      writeFileSync(keyPath, key, { mode: 0o600 });
+      writeFileSync(certPath, cert, { mode: 0o644 });
+      res.json({ ok: true, restartRequired: true });
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "保存证书失败。") });
+    }
+  });
+
+  app.get("/api/check-update", async (_req, res) => {
+    try {
+      const result = await checkNpmLatestVersion();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "检查更新失败。") });
+    }
+  });
+
+  app.post("/api/update", async (_req, res) => {
+    try {
+      const { updateAvailable } = await checkNpmLatestVersion();
+      if (!updateAvailable) {
+        res.json({ ok: true, message: "已经是最新版本。" });
+        return;
+      }
+      res.json({ ok: true, message: "正在更新，请稍候..." });
+      // Run update in background — the server will restart
+      execAsync(`npm install -g ${PKG_NAME}@latest`, { timeout: 120000 }).catch(() => {});
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "更新失败。") });
+    }
   });
 
   app.get("/api/sessions", (_req, res) => {
@@ -1091,4 +1247,13 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   // Start configured background sessions after the server is already reachable.
   processes.runStartupCommands();
+
+  // Background update check on startup
+  checkNpmLatestVersion().then(({ current, latest, updateAvailable }) => {
+    if (updateAvailable) {
+      process.stdout.write(
+        `[wand] 发现新版本 ${latest}（当前 ${current}）。运行 npm install -g ${PKG_NAME}@latest 进行更新。\n`
+      );
+    }
+  }).catch(() => {});
 }
