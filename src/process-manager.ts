@@ -20,7 +20,7 @@ function isRunningAsRoot(): boolean {
 }
 
 export interface ProcessEvent {
-  type: "output" | "status" | "started" | "ended" | "usage" | "task";
+  type: "output" | "status" | "started" | "ended" | "usage" | "task" | "notification";
   sessionId: string;
   data?: unknown;
 }

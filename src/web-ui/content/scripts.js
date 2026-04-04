@@ -257,6 +257,24 @@
               }
               startPolling();
               refreshAll();
+              // Request browser notification permission after login
+              requestNotificationPermission();
+              // Show update bubble if server reports an available update
+              if (config.updateAvailable && config.latestVersion) {
+                showNotificationBubble({
+                  title: "\u53d1\u73b0\u65b0\u7248\u672c",
+                  body: "\u5f53\u524d " + (config.currentVersion || "-") + " \u2192 \u6700\u65b0 " + config.latestVersion,
+                  type: "info",
+                  icon: "\u2191",
+                  duration: 0,
+                  actionLabel: "\u53bb\u66f4\u65b0",
+                  action: function() {
+                    var settingsBtn = document.getElementById("open-settings-btn") || document.querySelector("[data-action='settings']");
+                    if (settingsBtn) settingsBtn.click();
+                  }
+                });
+                sendBrowserNotification("Wand \u53d1\u73b0\u65b0\u7248\u672c", "\u5f53\u524d " + (config.currentVersion || "-") + " \u2192 \u6700\u65b0 " + config.latestVersion, { tag: "wand-update" });
+              }
               // Auto-load claude history since section defaults to expanded
               if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
                 loadClaudeHistory();
@@ -630,6 +648,18 @@
                     '<button id="do-update-button" class="btn btn-primary btn-sm hidden">更新到最新版</button>' +
                   '</div>' +
                   '<p id="update-message" class="hint hidden"></p>' +
+                '</div>' +
+                '<div class="settings-notification-section">' +
+                  '<div class="settings-section-title">\u901a\u77e5\u72b6\u6001</div>' +
+                  '<div class="settings-about-row">' +
+                    '<span class="settings-label">\u6d4f\u89c8\u5668\u901a\u77e5</span>' +
+                    '<span class="settings-value" id="notification-permission-status">-</span>' +
+                  '</div>' +
+                  '<div class="settings-update-actions">' +
+                    '<button id="notification-request-btn" class="btn btn-ghost btn-sm hidden">\u6388\u6743\u901a\u77e5</button>' +
+                    '<button id="notification-test-btn" class="btn btn-ghost btn-sm">\u53d1\u9001\u6d4b\u8bd5\u901a\u77e5</button>' +
+                  '</div>' +
+                  '<p id="notification-test-message" class="hint hidden"></p>' +
                 '</div>' +
               '</div>' +
 
@@ -1886,6 +1916,16 @@
         if (checkUpdateBtn) checkUpdateBtn.addEventListener("click", checkForUpdate);
         var doUpdateBtn = document.getElementById("do-update-button");
         if (doUpdateBtn) doUpdateBtn.addEventListener("click", performUpdate);
+        // Notification test section
+        var notifRequestBtn = document.getElementById("notification-request-btn");
+        if (notifRequestBtn) notifRequestBtn.addEventListener("click", function() {
+          if (typeof Notification !== "undefined") {
+            Notification.requestPermission().then(function() { updateNotificationStatus(); });
+          }
+        });
+        var notifTestBtn = document.getElementById("notification-test-btn");
+        if (notifTestBtn) notifTestBtn.addEventListener("click", testNotification);
+        updateNotificationStatus();
         var newSessBtn = document.getElementById("topbar-new-session-button");
         if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
         var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
@@ -3911,6 +3951,101 @@
           }
           updateBtn.disabled = false;
         });
+      }
+
+      // ── Notification Settings Helpers ──
+
+      function updateNotificationStatus() {
+        var statusEl = document.getElementById("notification-permission-status");
+        var requestBtn = document.getElementById("notification-request-btn");
+        var testMsgEl = document.getElementById("notification-test-message");
+        if (!statusEl) return;
+
+        if (typeof Notification === "undefined") {
+          statusEl.textContent = "\u4e0d\u652f\u6301";
+          statusEl.style.color = "var(--fg-muted)";
+          if (requestBtn) requestBtn.classList.add("hidden");
+          return;
+        }
+
+        var perm = Notification.permission;
+        if (perm === "granted") {
+          statusEl.textContent = "\u5df2\u6388\u6743 \u2713";
+          statusEl.style.color = "var(--success)";
+          if (requestBtn) requestBtn.classList.add("hidden");
+        } else if (perm === "denied") {
+          statusEl.textContent = "\u5df2\u62d2\u7edd";
+          statusEl.style.color = "var(--danger)";
+          if (requestBtn) requestBtn.classList.add("hidden");
+          if (testMsgEl) {
+            testMsgEl.textContent = "\u6d4f\u89c8\u5668\u5df2\u62d2\u7edd\u901a\u77e5\u6743\u9650\uff0c\u8bf7\u5728\u6d4f\u89c8\u5668\u8bbe\u7f6e\u4e2d\u624b\u52a8\u5f00\u542f";
+            testMsgEl.style.color = "var(--fg-muted)";
+            testMsgEl.classList.remove("hidden");
+          }
+        } else {
+          statusEl.textContent = "\u672a\u6388\u6743";
+          statusEl.style.color = "var(--warning)";
+          if (requestBtn) requestBtn.classList.remove("hidden");
+        }
+      }
+
+      function testNotification() {
+        var testMsgEl = document.getElementById("notification-test-message");
+
+        // Always show in-app bubble
+        showNotificationBubble({
+          title: "\u6d4b\u8bd5\u901a\u77e5",
+          body: "\u8fd9\u662f\u4e00\u6761\u6d4b\u8bd5\u901a\u77e5\uff0c\u5e94\u7528\u5185\u6c14\u6ce1\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002",
+          type: "info",
+          icon: "\u266a",
+          duration: 5000,
+        });
+
+        // Test browser notification
+        if (typeof Notification === "undefined") {
+          if (testMsgEl) {
+            testMsgEl.textContent = "\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u901a\u77e5 API\uff0c\u4ec5\u53ef\u4f7f\u7528\u5e94\u7528\u5185\u6c14\u6ce1\u901a\u77e5\u3002";
+            testMsgEl.style.color = "var(--fg-muted)";
+            testMsgEl.classList.remove("hidden");
+          }
+          return;
+        }
+
+        if (Notification.permission === "granted") {
+          try {
+            var n = new Notification("Wand \u6d4b\u8bd5\u901a\u77e5", {
+              body: "\u6d4f\u89c8\u5668\u901a\u77e5\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002",
+              icon: "/favicon.ico",
+              tag: "wand-test",
+            });
+            setTimeout(function() { n.close(); }, 5000);
+            if (testMsgEl) {
+              testMsgEl.textContent = "\u2713 \u6d4f\u89c8\u5668\u901a\u77e5 + \u5e94\u7528\u5185\u6c14\u6ce1\u5747\u5df2\u53d1\u9001";
+              testMsgEl.style.color = "var(--success)";
+              testMsgEl.classList.remove("hidden");
+            }
+          } catch (_e) {
+            if (testMsgEl) {
+              testMsgEl.textContent = "\u6d4f\u89c8\u5668\u901a\u77e5\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u80fd\u9700\u8981 HTTPS";
+              testMsgEl.style.color = "var(--warning)";
+              testMsgEl.classList.remove("hidden");
+            }
+          }
+        } else {
+          // permission is "default" or "denied" — always try requesting
+          Notification.requestPermission().then(function(result) {
+            updateNotificationStatus();
+            if (result === "granted") {
+              testNotification();
+            } else if (result === "denied") {
+              if (testMsgEl) {
+                testMsgEl.textContent = "\u6d4f\u89c8\u5668\u5df2\u62d2\u7edd\u901a\u77e5\u6743\u9650\uff0c\u8bf7\u70b9\u51fb\u5730\u5740\u680f\u5de6\u4fa7\u9501\u56fe\u6807\u6216\u5728\u6d4f\u89c8\u5668\u8bbe\u7f6e\u4e2d\u624b\u52a8\u5f00\u542f";
+                testMsgEl.style.color = "var(--fg-muted)";
+                testMsgEl.classList.remove("hidden");
+              }
+            }
+          });
+        }
       }
 
       function quickStartSession() {
@@ -6681,6 +6816,33 @@
             }
             updateSessionSnapshot(endedSnapshot);
 
+            // Notify user when a session completes (browser + in-app if backgrounded or not viewing)
+            var endedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+            var endedName = endedSession ? (endedSession.label || endedSession.command || msg.sessionId) : msg.sessionId;
+            var endedExitCode = msg.data && msg.data.exitCode;
+            var endedIsError = endedExitCode !== null && endedExitCode !== undefined && endedExitCode !== 0;
+            sendBrowserNotification(
+              endedIsError ? "\u4f1a\u8bdd\u5f02\u5e38\u7ed3\u675f" : "\u4f1a\u8bdd\u5df2\u5b8c\u6210",
+              endedName,
+              {
+                tag: "wand-ended-" + msg.sessionId,
+                onClick: function() {
+                  if (msg.sessionId !== state.selectedId) selectSession(msg.sessionId);
+                }
+              }
+            );
+            if (msg.sessionId !== state.selectedId || document.hidden) {
+              showNotificationBubble({
+                title: endedIsError ? "\u4f1a\u8bdd\u5f02\u5e38\u7ed3\u675f" : "\u4f1a\u8bdd\u5df2\u5b8c\u6210",
+                body: endedName,
+                type: endedIsError ? "warning" : "success",
+                icon: endedIsError ? "!" : "\u2713",
+                duration: 6000,
+                actionLabel: "\u67e5\u770b",
+                action: function() { selectSession(msg.sessionId); }
+              });
+            }
+
             // Clear stale queued inputs so they cannot race with the ended session.
             // Each queued item's postInput will hit the server and get an error, but
             // clearing the queues here prevents them from growing unbounded.
@@ -6738,6 +6900,35 @@
                   target: msg.data.permissionRequest.target,
                   reason: msg.data.permissionRequest.prompt
                 };
+                // Browser notification for permission waiting (background tab)
+                var permSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+                var permSessionName = permSession ? (permSession.label || permSession.command || msg.sessionId) : msg.sessionId;
+                sendBrowserNotification(
+                  "\u4f1a\u8bdd\u7b49\u5f85\u6388\u6743",
+                  permSessionName + " \u2014 " + (msg.data.permissionRequest.prompt || "\u9700\u8981\u6743\u9650\u5ba1\u6279"),
+                  {
+                    tag: "wand-perm-" + msg.sessionId,
+                    onClick: function() {
+                      if (msg.sessionId !== state.selectedId) {
+                        selectSession(msg.sessionId);
+                      }
+                    }
+                  }
+                );
+                // In-app bubble if not currently viewing this session
+                if (msg.sessionId !== state.selectedId) {
+                  showNotificationBubble({
+                    title: "\u4f1a\u8bdd\u7b49\u5f85\u6388\u6743",
+                    body: permSessionName + " \u2014 " + (msg.data.permissionRequest.prompt || "\u9700\u8981\u6743\u9650\u5ba1\u6279"),
+                    type: "warning",
+                    icon: "!",
+                    duration: 0,
+                    actionLabel: "\u67e5\u770b",
+                    action: function() {
+                      selectSession(msg.sessionId);
+                    }
+                  });
+                }
               }
               if (msg.data.permissionBlocked === false) {
                 statusUpdate.pendingEscalation = null;
@@ -6745,6 +6936,29 @@
               updateSessionSnapshot(statusUpdate);
               if (msg.sessionId === state.selectedId) {
                 updateTaskDisplay();
+              }
+            }
+            break;
+          case 'notification':
+            if (msg.data) {
+              if (msg.data.kind === "update") {
+                showNotificationBubble({
+                  title: "\u53d1\u73b0\u65b0\u7248\u672c",
+                  body: "\u5f53\u524d " + (msg.data.current || "-") + " \u2192 \u6700\u65b0 " + (msg.data.latest || "-"),
+                  type: "info",
+                  icon: "\u2191",
+                  duration: 0,
+                  actionLabel: "\u53bb\u66f4\u65b0",
+                  action: function() {
+                    var settingsBtn = document.getElementById("open-settings-btn") || document.querySelector("[data-action='settings']");
+                    if (settingsBtn) settingsBtn.click();
+                  }
+                });
+                sendBrowserNotification(
+                  "Wand \u53d1\u73b0\u65b0\u7248\u672c",
+                  "\u5f53\u524d " + (msg.data.current || "-") + " \u2192 \u6700\u65b0 " + (msg.data.latest || "-"),
+                  { tag: "wand-update" }
+                );
               }
             }
             break;
@@ -8556,6 +8770,136 @@
         setTimeout(function() {
           toast.remove();
         }, type === "error" ? 4000 : 2200);
+      }
+
+      // ── Notification Bubble System ──
+
+      var notificationStack = [];
+      var notificationIdCounter = 0;
+      var NOTIFICATION_GAP = 8;
+      var NOTIFICATION_TOP = 24;
+
+      /**
+       * Show an in-app notification bubble at bottom-right.
+       * @param {object} opts
+       * @param {string} opts.title - Notification title
+       * @param {string} [opts.body] - Body text
+       * @param {string} [opts.type] - "info" | "warning" | "success" (default "info")
+       * @param {string} [opts.icon] - Icon character (default derived from type)
+       * @param {number} [opts.duration] - Auto-dismiss ms, 0 = manual only (default 8000)
+       * @param {string} [opts.actionLabel] - Action button label
+       * @param {function} [opts.action] - Action button callback
+       * @returns {{ dismiss: function }} handle
+       */
+      function showNotificationBubble(opts) {
+        var id = ++notificationIdCounter;
+        var type = opts.type || "info";
+        var icon = opts.icon || (type === "warning" ? "!" : type === "success" ? "\u2713" : "i");
+        var duration = opts.duration !== undefined ? opts.duration : 8000;
+
+        var bubble = document.createElement("div");
+        bubble.className = "notification-bubble";
+        bubble.setAttribute("data-nid", id);
+
+        var headerHtml =
+          '<div class="notification-bubble-header">' +
+            '<span class="notification-bubble-icon ' + type + '">' + icon + '</span>' +
+            '<span class="notification-bubble-title">' + escapeHtml(opts.title) + '</span>' +
+            '<button class="notification-bubble-close" title="\u5173\u95ed">\u00d7</button>' +
+          '</div>';
+
+        var bodyHtml = opts.body
+          ? '<div class="notification-bubble-body">' + escapeHtml(opts.body) + '</div>'
+          : '';
+
+        var actionsHtml = opts.actionLabel
+          ? '<div class="notification-bubble-actions">' +
+              '<button class="primary">' + escapeHtml(opts.actionLabel) + '</button>' +
+            '</div>'
+          : '';
+
+        bubble.innerHTML = headerHtml + bodyHtml + actionsHtml;
+        document.body.appendChild(bubble);
+
+        // Stack position
+        var entry = { id: id, el: bubble };
+        notificationStack.push(entry);
+        repositionNotifications();
+
+        // Wire close button
+        var closeBtn = bubble.querySelector(".notification-bubble-close");
+        if (closeBtn) closeBtn.onclick = function() { dismissNotification(id); };
+
+        // Wire action button
+        if (opts.actionLabel && opts.action) {
+          var actionBtn = bubble.querySelector(".notification-bubble-actions button");
+          if (actionBtn) actionBtn.onclick = function() {
+            opts.action();
+            dismissNotification(id);
+          };
+        }
+
+        // Auto-dismiss
+        var timer = null;
+        if (duration > 0) {
+          timer = setTimeout(function() { dismissNotification(id); }, duration);
+        }
+
+        return {
+          dismiss: function() { dismissNotification(id); }
+        };
+      }
+
+      function dismissNotification(id) {
+        var idx = -1;
+        for (var i = 0; i < notificationStack.length; i++) {
+          if (notificationStack[i].id === id) { idx = i; break; }
+        }
+        if (idx === -1) return;
+        var entry = notificationStack[idx];
+        entry.el.classList.add("slide-out");
+        notificationStack.splice(idx, 1);
+        repositionNotifications();
+        setTimeout(function() {
+          if (entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
+        }, 300);
+      }
+
+      function repositionNotifications() {
+        var top = NOTIFICATION_TOP;
+        for (var i = 0; i < notificationStack.length; i++) {
+          notificationStack[i].el.style.top = top + "px";
+          top += notificationStack[i].el.offsetHeight + NOTIFICATION_GAP;
+        }
+      }
+
+      // ── Browser Notification API ──
+
+      function requestNotificationPermission() {
+        if (typeof Notification !== "undefined" && Notification.permission === "default") {
+          Notification.requestPermission();
+        }
+      }
+
+      function sendBrowserNotification(title, body, opts) {
+        if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+        if (!document.hidden) return; // Only notify when tab is in background
+        try {
+          var n = new Notification(title, {
+            body: body || "",
+            icon: (opts && opts.icon) || "/favicon.ico",
+            tag: (opts && opts.tag) || undefined,
+          });
+          n.onclick = function() {
+            window.focus();
+            n.close();
+            if (opts && opts.onClick) opts.onClick();
+          };
+          // Auto-close after 10s
+          setTimeout(function() { n.close(); }, 10000);
+        } catch (_e) {
+          // Notification constructor may fail in some contexts (e.g. insecure origin)
+        }
       }
 
       function escapeHtml(value) {

@@ -16,7 +16,7 @@ const OUTPUT_DEBOUNCE_MS = 16;
 // ── Types ──
 
 export interface ProcessEvent {
-  type: "output" | "status" | "started" | "ended" | "usage" | "task";
+  type: "output" | "status" | "started" | "ended" | "usage" | "task" | "notification";
   sessionId: string;
   data?: unknown;
 }
