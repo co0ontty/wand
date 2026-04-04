@@ -557,9 +557,15 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
+  let updateInFlight = false;
   app.post("/api/update", async (_req, res) => {
+    if (updateInFlight) {
+      res.status(409).json({ error: "更新正在进行中，请稍候。" });
+      return;
+    }
+    updateInFlight = true;
     try {
-      const { updateAvailable, latest } = await checkNpmLatestVersion();
+      const { updateAvailable, latest } = await checkNpmLatestVersion(true);
       if (!updateAvailable) {
         res.json({ ok: true, message: "已经是最新版本。" });
         return;
@@ -568,6 +574,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.json({ ok: true, message: `已更新到 ${latest}，请重启 wand 服务以生效。` });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "更新失败。") });
+    } finally {
+      updateInFlight = false;
     }
   });
 

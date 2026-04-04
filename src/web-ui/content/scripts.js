@@ -3403,7 +3403,11 @@
             updateShellChrome();
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
-            state.currentMessages = [];
+            if (data.messages && data.messages.length > 0) {
+              state.currentMessages = data.messages;
+            } else {
+              state.currentMessages = [];
+            }
 
             if (state.terminal) {
               syncTerminalBuffer(id, data.output || "", { mode: "replace" });
@@ -3849,7 +3853,8 @@
       function performUpdate() {
         var msgEl = document.getElementById("update-message");
         var updateBtn = document.getElementById("do-update-button");
-        if (updateBtn) updateBtn.disabled = true;
+        if (!updateBtn) return;
+        updateBtn.disabled = true;
         if (msgEl) {
           msgEl.textContent = "正在更新，请稍候...";
           msgEl.style.color = "var(--text-secondary)";
@@ -3869,9 +3874,9 @@
             msgEl.classList.remove("hidden");
           }
           if (data.error) {
-            if (updateBtn) updateBtn.disabled = false;
+            updateBtn.disabled = false;
           } else {
-            if (updateBtn) updateBtn.classList.add("hidden");
+            updateBtn.classList.add("hidden");
           }
         })
         .catch(function() {
@@ -3880,7 +3885,7 @@
             msgEl.style.color = "var(--error)";
             msgEl.classList.remove("hidden");
           }
-          if (updateBtn) updateBtn.disabled = false;
+          updateBtn.disabled = false;
         });
       }
 
@@ -6583,7 +6588,11 @@
               }
               updateSessionSnapshot(snapshot);
               if (msg.sessionId === state.selectedId) {
+                if (msg.data.messages && msg.data.messages.length > 0) {
+                  state.currentMessages = msg.data.messages;
+                }
                 updateTaskDisplay();
+                scheduleChatRender();
               }
 
             }
