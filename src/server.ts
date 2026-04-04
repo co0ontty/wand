@@ -32,6 +32,9 @@ let cachedLatestVersion: string | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
+/** Cached update result broadcast to new clients on connect. */
+let cachedUpdateInfo: { current: string; latest: string; updateAvailable: boolean } | null = null;
+
 async function checkNpmLatestVersion(forceRefresh = false): Promise<{ current: string; latest: string; updateAvailable: boolean }> {
   const now = Date.now();
   if (forceRefresh || !cachedLatestVersion || (now - cacheTimestamp > CACHE_TTL_MS)) {
@@ -457,6 +460,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
+      updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
+      latestVersion: cachedUpdateInfo?.latest ?? null,
+      currentVersion: PKG_VERSION,
     });
   });
 
@@ -1290,11 +1296,18 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   processes.runStartupCommands();
 
   // Background update check on startup
-  checkNpmLatestVersion().then(({ current, latest, updateAvailable }) => {
-    if (updateAvailable) {
+  checkNpmLatestVersion().then((info) => {
+    cachedUpdateInfo = info;
+    if (info.updateAvailable) {
       process.stdout.write(
-        `[wand] 发现新版本 ${latest}（当前 ${current}）。运行 npm install -g ${PKG_NAME}@latest 进行更新。\n`
+        `[wand] 发现新版本 ${info.latest}（当前 ${info.current}）。运行 npm install -g ${PKG_NAME}@latest 进行更新。\n`
       );
+      // Broadcast update notification to all connected WS clients
+      wsManager.emitEvent({
+        type: "notification",
+        sessionId: "__system__",
+        data: { kind: "update", current: info.current, latest: info.latest },
+      });
     }
   }).catch(() => {});
 }
