@@ -19,6 +19,14 @@
             console.log('SW registration failed:', e.message || e);
           }
         });
+
+      // Auto-reload when a new service worker takes control (e.g. after update)
+      var reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function() {
+        if (reloading) return;
+        reloading = true;
+        location.reload();
+      });
     }
 
     // PWA display mode detection
@@ -119,6 +127,7 @@
         currentTask: null, // Current task title from Claude
         terminalInteractive: false,
         miniKeyboardVisible: false,
+        shortcutsExpanded: false,
         modifiers: { ctrl: false, alt: false, shift: false },
         fileSearchQuery: "",
         allFiles: [],
@@ -227,9 +236,10 @@
             state.loginChecked = true;
             requestAnimationFrame(function() {
               // Render the app shell first, THEN load session data into it.
-              // This avoids refreshAll() rendering chat content that render() immediately destroys.
+              // Skip updateShellChrome() here — sessions aren't loaded yet.
+              // refreshAll() will call updateShellChrome() after sessions arrive.
               try {
-                render();
+                render({ skipShellChrome: true });
               } catch (_e) {
                 // render() may fail if external scripts (xterm.js) failed to load;
                 // continue with polling and session loading so the app remains functional
@@ -248,7 +258,8 @@
           });
       }
 
-      function render() {
+      function render(options) {
+        var skipShellChrome = options && options.skipShellChrome;
         var app = document.getElementById("app");
         var isLoggedIn = state.config !== null;
         var wasModalOpen = state.modalOpen;
@@ -257,6 +268,9 @@
         if (shouldResetShell) {
           teardownTerminal();
         }
+
+        // Suppress CSS transitions during initial DOM build
+        document.documentElement.classList.add("no-transition");
 
         app.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
         // Reset chat render tracking since DOM was fully replaced
@@ -267,7 +281,15 @@
         updateDrawerState();
         syncComposerModeSelect();
         applyCurrentView();
-        updateShellChrome();
+        if (!skipShellChrome) {
+          updateShellChrome();
+        }
+
+        // Force reflow then re-enable transitions after layout settles
+        void document.body.offsetHeight;
+        requestAnimationFrame(function() {
+          document.documentElement.classList.remove("no-transition");
+        });
 
         // Restore modal state if it was open
         if (wasModalOpen && state.modalOpen) {
@@ -283,10 +305,9 @@
 
       function renderInlineKeyboard() {
         if (!state.selectedId) return "";
-        // Inline shortcut keys shown directly in composer bar
         var isTerminal = state.currentView === "terminal";
         if (!isTerminal) return "";
-        return '<div class="inline-shortcuts">' +
+        var keys =
             '<button class="shortcut-key' + (state.modifiers.ctrl ? ' active' : '') + '" data-key="ctrl" type="button">Ctrl</button>' +
             '<button class="shortcut-key' + (state.modifiers.alt ? ' active' : '') + '" data-key="alt" type="button">Alt</button>' +
             '<span class="shortcut-sep">·</span>' +
@@ -297,7 +318,12 @@
             '<span class="shortcut-sep">·</span>' +
             '<button class="shortcut-key" data-key="enter" type="button">↵</button>' +
             '<button class="shortcut-key" data-key="ctrl_enter" type="button">C-↵</button>' +
-            '<button class="shortcut-key" data-key="escape" type="button">Esc</button>' +
+            '<button class="shortcut-key" data-key="escape" type="button">Esc</button>';
+        var arrow = state.shortcutsExpanded ? '›' : '‹';
+        return '<div class="inline-shortcuts-wrap' + (state.shortcutsExpanded ? ' expanded' : '') + '">' +
+            '<button class="shortcuts-toggle' + (state.shortcutsExpanded ? ' active' : '') + '" type="button" title="快捷键">' + arrow + '</button>' +
+            '<div class="inline-shortcuts-strip">' + keys + '</div>' +
+            '<div class="inline-shortcuts-inline">' + keys + '</div>' +
           '</div>';
       }
 
@@ -1779,8 +1805,35 @@
           if (toggle) toggle.addEventListener("click", toggleTerminalInteractive);
         });
         // Inline shortcuts click handler
-        var inlineShortcuts = document.querySelector(".inline-shortcuts");
-        if (inlineShortcuts) inlineShortcuts.addEventListener("click", handleInlineKeyboardClick);
+        var inlineShortcutsWrap = document.querySelector(".inline-shortcuts-wrap");
+        if (inlineShortcutsWrap) inlineShortcutsWrap.addEventListener("click", handleInlineKeyboardClick);
+        // Shortcuts toggle (mobile fold/unfold)
+        var shortcutsToggleBtn = document.querySelector(".shortcuts-toggle");
+        if (shortcutsToggleBtn) shortcutsToggleBtn.addEventListener("click", function(e) {
+          e.stopPropagation();
+          state.shortcutsExpanded = !state.shortcutsExpanded;
+          var wrap = document.querySelector(".inline-shortcuts-wrap");
+          var toggle = document.querySelector(".shortcuts-toggle");
+          if (wrap) wrap.classList.toggle("expanded", state.shortcutsExpanded);
+          if (toggle) {
+            toggle.classList.toggle("active", state.shortcutsExpanded);
+            toggle.textContent = state.shortcutsExpanded ? "\u203a" : "\u2039";
+          }
+        });
+        // Close shortcuts strip on outside click
+        document.addEventListener("click", function(e) {
+          if (!state.shortcutsExpanded) return;
+          var wrap = document.querySelector(".inline-shortcuts-wrap");
+          if (wrap && !wrap.contains(e.target)) {
+            state.shortcutsExpanded = false;
+            wrap.classList.remove("expanded");
+            var toggle = document.querySelector(".shortcuts-toggle");
+            if (toggle) {
+              toggle.classList.remove("active");
+              toggle.textContent = "\u2039";
+            }
+          }
+        });
 
         // PWA install button
         var pwaInstallBtn = document.getElementById("pwa-install-button");
@@ -2593,8 +2646,15 @@
         state.terminalViewportSize = { width: 0, height: 0 };
         state.terminalAutoFollow = true;
         clearTerminalScrollIdleTimer();
-        if (state.fitAddon && shouldResizeTerminalViewport()) {
-          state.fitAddon.fit();
+        // Double-rAF: wait for browser to complete layout before measuring and fitting
+        if (state.fitAddon) {
+          requestAnimationFrame(function() {
+            requestAnimationFrame(function() {
+              if (state.fitAddon && shouldResizeTerminalViewport()) {
+                state.fitAddon.fit();
+              }
+            });
+          });
         }
 
         var viewport = getTerminalViewport();
@@ -4247,7 +4307,7 @@
       }
 
       function updateKeyboardPopupUI() {
-        var container = document.querySelector(".inline-shortcuts");
+        var container = document.querySelector(".inline-shortcuts-wrap");
         if (!container) return;
         ["ctrl", "alt"].forEach(function(name) {
           var btn = container.querySelector('[data-key="' + name + '"]');
