@@ -371,6 +371,26 @@
           '<button class="shortcut-key" data-key="escape" type="button">Esc</button>';
       }
 
+      function renderApprovalStatsBadge() {
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var stats = selectedSession && selectedSession.approvalStats;
+        if (!stats || stats.total === 0) return '<span class="approval-stats hidden" id="approval-stats"></span>';
+        return '<span class="approval-stats" id="approval-stats">' +
+          '<span class="approval-stats-divider"></span>' +
+          '<span class="approval-stats-badge" id="approval-stats-badge" title="本次会话自动批准统计">' +
+            '<svg class="approval-stats-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
+            '<span class="approval-stats-total">' + stats.total + '</span>' +
+          '</span>' +
+          '<span class="approval-stats-popup" id="approval-stats-popup">' +
+            '<span class="approval-stats-popup-title">自动批准统计</span>' +
+            (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">⚡</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
+            (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">📝</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
+            (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">🔧</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
+            '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">∑</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
+          '</span>' +
+        '</span>';
+      }
+
       function renderInlineKeyboard() {
         if (!state.selectedId) return "";
         var isTerminal = state.currentView === "terminal";
@@ -466,6 +486,12 @@
                   '<span class="session-count" id="session-count">' + String(state.sessions.length) + '</span>' +
                 '</div>' +
                 '<div class="sidebar-header-actions">' +
+                  '<button id="sidebar-home-btn" class="btn btn-ghost btn-sm" type="button" title="回到首页">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>' +
+                  '</button>' +
+                  '<button id="sidebar-refresh-btn" class="btn btn-ghost btn-sm" type="button" title="刷新页面">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>' +
+                  '</button>' +
                   '<button id="close-drawer-button" class="btn btn-ghost btn-sm sidebar-close" type="button" aria-label="关闭菜单">×</button>' +
                 '</div>' +
               '</div>' +
@@ -573,6 +599,7 @@
                         '<button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">批准</button>' +
                         '<button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">拒绝</button>' +
                       '</span>' +
+                      renderApprovalStatsBadge() +
                     '</div>' +
                     '<div class="input-composer-right">' +
                       '<span id="queue-counter" class="queue-counter hidden">队列: 0</span>' +
@@ -1908,6 +1935,18 @@
         if (drawerBackdrop) drawerBackdrop.addEventListener("click", closeSessionsDrawer);
         var closeDrawerBtn = document.getElementById("close-drawer-button");
         if (closeDrawerBtn) closeDrawerBtn.addEventListener("click", closeSessionsDrawer);
+        var homeBtn = document.getElementById("sidebar-home-btn");
+        if (homeBtn) homeBtn.addEventListener("click", function() {
+          state.selectedId = null;
+          persistSelectedId();
+          resetChatRenderCache();
+          closeSessionsDrawer();
+          renderApp();
+        });
+        var refreshBtn = document.getElementById("sidebar-refresh-btn");
+        if (refreshBtn) refreshBtn.addEventListener("click", function() {
+          window.location.reload();
+        });
         var logoutBtn = document.getElementById("logout-button");
         if (logoutBtn) logoutBtn.addEventListener("click", logout);
         var settingsBtn = document.getElementById("settings-button");
@@ -7048,9 +7087,15 @@
               if (msg.data.permissionBlocked === false) {
                 statusUpdate.pendingEscalation = null;
               }
+              if (msg.data.approvalStats) {
+                statusUpdate.approvalStats = msg.data.approvalStats;
+              }
               updateSessionSnapshot(statusUpdate);
               if (msg.sessionId === state.selectedId) {
                 updateTaskDisplay();
+                if (msg.data.approvalStats) {
+                  updateApprovalStats();
+                }
               }
             }
             break;
@@ -7117,6 +7162,39 @@
         } else {
           taskEl.textContent = "";
           taskEl.classList.add("hidden");
+        }
+      }
+
+      function updateApprovalStats() {
+        var container = document.getElementById("approval-stats");
+        if (!container) return;
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var stats = selectedSession && selectedSession.approvalStats;
+        if (!stats || stats.total === 0) {
+          container.className = "approval-stats hidden";
+          container.innerHTML = "";
+          return;
+        }
+        container.className = "approval-stats";
+        container.innerHTML =
+          '<span class="approval-stats-divider"></span>' +
+          '<span class="approval-stats-badge" id="approval-stats-badge" title="本次会话自动批准统计">' +
+            '<svg class="approval-stats-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
+            '<span class="approval-stats-total">' + stats.total + '</span>' +
+          '</span>' +
+          '<span class="approval-stats-popup" id="approval-stats-popup">' +
+            '<span class="approval-stats-popup-title">自动批准统计</span>' +
+            (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">⚡</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
+            (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">📝</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
+            (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">🔧</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
+            '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">∑</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
+          '</span>';
+        // Pulse animation on the badge
+        var badge = container.querySelector(".approval-stats-badge");
+        if (badge) {
+          badge.classList.remove("approval-stats-pulse");
+          void badge.offsetWidth;
+          badge.classList.add("approval-stats-pulse");
         }
       }
 
