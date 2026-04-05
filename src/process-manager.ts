@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { ChildProcess } from "node:child_process";
-import { existsSync, unlinkSync, openSync, readSync, closeSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, unlinkSync, rmSync, openSync, readSync, closeSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
@@ -1172,6 +1172,7 @@ export class ProcessManager extends EventEmitter {
 
   deleteClaudeHistoryFiles(sessions: { claudeSessionId: string; cwd: string }[]): number {
     let deleted = 0;
+    const claudeHome = path.join(os.homedir(), ".claude");
     for (const { claudeSessionId, cwd } of sessions) {
       if (!UUID_V4_PATTERN.test(claudeSessionId)) continue;
       const jsonlPath = path.join(
@@ -1183,6 +1184,15 @@ export class ProcessManager extends EventEmitter {
         deleted++;
       } catch {
         // Best-effort — file may already be gone
+      }
+      // Clean up related directories under ~/.claude/
+      for (const sub of ["session-env", "tasks", "todos"]) {
+        const dir = path.join(claudeHome, sub, claudeSessionId);
+        try {
+          if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+        } catch {
+          // Non-critical — best-effort
+        }
       }
     }
     if (sessions.length > 0) {
@@ -1417,16 +1427,25 @@ export class ProcessManager extends EventEmitter {
 
   private deleteClaudeCache(record: Pick<SessionRecord, "claudeSessionId" | "cwd">): void {
     if (!record.claudeSessionId) return;
-    const jsonlPath = path.join(
-      getClaudeProjectDir(record.cwd),
-      `${record.claudeSessionId}.jsonl`
-    );
+    const id = record.claudeSessionId;
+
+    // 1. Delete the project JSONL file
+    const jsonlPath = path.join(getClaudeProjectDir(record.cwd), `${id}.jsonl`);
     try {
-      if (existsSync(jsonlPath)) {
-        unlinkSync(jsonlPath);
-      }
+      if (existsSync(jsonlPath)) unlinkSync(jsonlPath);
     } catch {
-      // Non-critical — Claude cache cleanup is best-effort
+      // Non-critical — best-effort
+    }
+
+    // 2. Delete related directories under ~/.claude/
+    const claudeHome = path.join(os.homedir(), ".claude");
+    for (const sub of ["session-env", "tasks", "todos"]) {
+      const dir = path.join(claudeHome, sub, id);
+      try {
+        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // Non-critical — best-effort
+      }
     }
   }
 
@@ -1722,14 +1741,12 @@ export class ProcessManager extends EventEmitter {
 
     const claudeConfirmPrompt =
       /\bdo you want to\b/i.test(normalized) &&
-      hasExplicitConfirmSyntax(normalized) &&
-      hasPermissionActionContext(normalized);
+      (hasExplicitConfirmSyntax(normalized) || hasPermissionActionContext(normalized));
 
     // Check for Claude's tool permission prompt patterns
     const toolPermissionPrompt =
       /\bdo you want to\b/i.test(normalized) &&
-      /\(yes\b/i.test(normalized) &&
-      hasPermissionActionContext(normalized);
+      /\(yes\b/i.test(normalized);
 
     // Reduced cooldown for faster response
     if (now - record.lastAutoConfirmAt < 500) {
@@ -1876,7 +1893,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   private shouldAutoApprovePermissions(command: string, mode: ExecutionMode): boolean {
-    if (!/^claude(?:\s|$)/.test(command)) {
+    if (!/^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command)) {
       return false;
     }
 
@@ -1899,7 +1916,7 @@ export class ProcessManager extends EventEmitter {
   private processCommandForMode(command: string, mode: ExecutionMode): string {
     // In managed mode, append a system prompt instructing Claude to act autonomously
     // without asking the user for confirmation, since the user may not be monitoring.
-    if (mode === "managed" && /^claude(?:\s|$)/.test(command)) {
+    if (mode === "managed" && /^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command)) {
       const autonomousPrompt = "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.";
       // Escape single quotes for shell safety
       const escaped = autonomousPrompt.replace(/'/g, "'\\''");

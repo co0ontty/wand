@@ -555,15 +555,22 @@ export class ClaudePtyBridge extends EventEmitter {
   }
 
   private isPermissionPromptDetected(normalized: string): boolean {
-    const hasActionIntent = /\bdo you want to\b/i.test(normalized)
-      || /\bwould you like to proceed\b/i.test(normalized)
+    const hasIntent = /\bdo you want to\b/i.test(normalized)
+      || /\bwould you like to\b/i.test(normalized)
       || /\benter to confirm\b/i.test(normalized)
       || /\bgrant\b.*\bpermission\b/i.test(normalized)
       || /\bhaven't granted\b/i.test(normalized);
+    const hasConfirmSyntax = hasExplicitConfirmSyntax(normalized);
+    const hasActionCtx = hasPermissionActionContext(normalized);
 
-    return hasActionIntent
-      && hasExplicitConfirmSyntax(normalized)
-      && hasPermissionActionContext(normalized);
+    // Intent phrase + explicit confirm syntax (e.g. "Do you want to proceed? (yes/no)")
+    if (hasIntent && hasConfirmSyntax) return true;
+    // Intent phrase + action keyword (e.g. "Do you want to execute this command?")
+    if (hasIntent && hasActionCtx) return true;
+    // Standalone confirm syntax + action keyword (e.g. "[y/n] Allow bash command")
+    if (hasConfirmSyntax && hasActionCtx) return true;
+
+    return false;
   }
 
   private extractPromptText(normalized: string): string {
