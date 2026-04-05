@@ -198,10 +198,8 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
     const input = body.input ?? "";
     const view = body.view;
     const shortcutKey = body.shortcutKey;
-    console.error("[wand] Input request received", { sessionId, inputLength: input.length, view: view ?? "chat" });
     try {
       const snapshot = processes.sendInput(sessionId, input, view, shortcutKey);
-      console.error("[wand] Input request succeeded", { sessionId, status: snapshot.status, inputLength: input.length, view: view ?? "chat" });
       res.json(snapshot);
     } catch (error) {
       const response = getInputErrorResponse(error, sessionId);

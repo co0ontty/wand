@@ -552,9 +552,7 @@ export class ProcessManager extends EventEmitter {
       onStateChange: (sessionId, oldState, newState) => {
         this.emitEvent({ type: "status", sessionId, data: { oldState, newState } });
       },
-      onIdle: (sessionId) => {
-        console.error(`[ProcessManager] Session ${sessionId} is now idle`);
-      },
+      onIdle: (_sessionId) => {},
       onArchived: (sessionId, reason) => {
         console.error(`[ProcessManager] Session ${sessionId} archived: ${reason}`);
       },
@@ -856,7 +854,7 @@ export class ProcessManager extends EventEmitter {
         process.stderr.write(`[wand] Cannot send initial input: session not ready\n`);
         return;
       }
-      process.stderr.write(`[wand] Sending initial input: ${initialInput}\n`);
+      process.stderr.write(`[wand] Sending initial input (${initialInput.length} chars)\n`);
 
       // Track initial input via bridge for Chat mode
       if (current.ptyBridge) {
@@ -1047,13 +1045,7 @@ export class ProcessManager extends EventEmitter {
     const record = this.mustGet(id);
 
     if (record.status !== "running") {
-      console.error("[ProcessManager] Rejecting input for non-running session", {
-        sessionId: id,
-        status: record.status,
-        hasPty: !!record.ptyProcess,
-        inputLength: input.length,
-        view: view ?? "chat"
-      });
+      console.error(`[ProcessManager] Rejecting input: session ${id} not running (${record.status})`);
       throw new SessionInputError("Session is not running.", "SESSION_NOT_RUNNING", id, record.status);
     }
 
@@ -1062,23 +1054,9 @@ export class ProcessManager extends EventEmitter {
     this.lifecycleManager.startThinking(id);
 
     if (!record.ptyProcess) {
-      console.error("[ProcessManager] Rejecting input because PTY is missing", {
-        sessionId: id,
-        status: record.status,
-        hasPty: !!record.ptyProcess,
-        inputLength: input.length,
-        view: view ?? "chat"
-      });
+      console.error(`[ProcessManager] Rejecting input: session ${id} has no PTY`);
       throw new SessionInputError("Session is not running.", "SESSION_NO_PTY", id, record.status);
     }
-
-    console.error("[ProcessManager] Sending input to session", {
-      sessionId: id,
-      status: record.status,
-      hasPty: !!record.ptyProcess,
-      inputLength: input.length,
-      view: view ?? "chat"
-    });
 
     // Log shortcut key interactions for auto-confirm and mode analysis
     if (shortcutKey) {
@@ -1592,7 +1570,6 @@ export class ProcessManager extends EventEmitter {
 
     if (shouldConfirm) {
       record.lastAutoConfirmAt = now;
-      process.stderr.write(`[wand] Auto-confirming prompt for ${record.mode} mode\n`);
       // Always auto-confirm by sending Enter directly
       ptyProcess.write("\r");
     }
@@ -1691,6 +1668,7 @@ export class ProcessManager extends EventEmitter {
           const tailLines = outputLines.slice(-8).join("\n");
           this.logger.appendShortcutLog(record.id, "auto_approve", tailLines, {
             mode: record.mode,
+            scope: resolvedScope ?? "unknown",
             autoApprove: record.autoApprovePermissions,
             permissionBlocked: true,
             input: "\r",
@@ -1776,15 +1754,28 @@ export class ProcessManager extends EventEmitter {
   }
 
   private processCommandForMode(command: string, mode: ExecutionMode): string {
+    const isClaudeCmd = /^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command);
+    if (!isClaudeCmd) return command;
+
+    let result = command;
+
+    // When running as root, Claude CLI refuses --permission-mode bypassPermissions.
+    // Use acceptEdits to let Claude auto-accept edits natively, reducing the number
+    // of permission prompts wand has to auto-approve.
+    if (isRunningAsRoot() && (mode === "managed" || mode === "full-access" || mode === "auto-edit")) {
+      result += " --permission-mode acceptEdits";
+    }
+
     // In managed mode, append a system prompt instructing Claude to act autonomously
     // without asking the user for confirmation, since the user may not be monitoring.
-    if (mode === "managed" && /^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command)) {
+    if (mode === "managed") {
       const autonomousPrompt = "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.";
       // Escape single quotes for shell safety
       const escaped = autonomousPrompt.replace(/'/g, "'\\''");
-      return `${command} --append-system-prompt '${escaped}'`;
+      result += ` --append-system-prompt '${escaped}'`;
     }
-    return command;
+
+    return result;
   }
 }
 

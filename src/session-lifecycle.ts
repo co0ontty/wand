@@ -41,7 +41,6 @@ export class SessionLifecycleManager {
     };
 
     this.sessions.set(sessionId, lifecycle);
-    console.error(`[Lifecycle] Session ${sessionId} registered with state: ${initialState}`);
   }
 
   /**
@@ -50,7 +49,6 @@ export class SessionLifecycleManager {
   setState(sessionId: string, newState: SessionLifecycleState): void {
     const lifecycle = this.sessions.get(sessionId);
     if (!lifecycle) {
-      console.error(`[Lifecycle] Session ${sessionId} not found`);
       return;
     }
 
@@ -63,8 +61,6 @@ export class SessionLifecycleManager {
     lifecycle.stateSince = Date.now();
     lifecycle.lastActivityAt = Date.now();
 
-    console.error(`[Lifecycle] Session ${sessionId} state changed: ${oldState} -> ${newState}`);
-    
     // Emit state change event
     this.events.onStateChange?.(sessionId, oldState, newState);
   }
@@ -117,8 +113,6 @@ export class SessionLifecycleManager {
     lifecycle.archivedBy = by;
     lifecycle.archiveReason = reason;
 
-    console.error(`[Lifecycle] Session ${sessionId} archived: ${reason} (by: ${by})`);
-    
     // Emit archived event
     this.events.onArchived?.(sessionId, reason);
   }
@@ -128,7 +122,6 @@ export class SessionLifecycleManager {
    */
   unregister(sessionId: string): void {
     this.sessions.delete(sessionId);
-    console.error(`[Lifecycle] Session ${sessionId} unregistered`);
   }
 
   /**
