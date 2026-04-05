@@ -69,6 +69,10 @@
         suggestionTimer: null,
         terminal: null,
         fitAddon: null,
+        serializeAddon: null,
+        terminalDomView: null,
+        terminalDomUpdateTimer: null,
+        _lastDomHtml: "",
         terminalSessionId: null,
         terminalOutput: "",
         terminalViewportSize: { width: 0, height: 0 },
@@ -704,6 +708,11 @@
                   '<label class="field-label" for="cfg-shell">Shell</label>' +
                   '<input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" />' +
                 '</div>' +
+                '<div class="field field-inline">' +
+                  '<label class="field-label" for="cfg-dom-terminal">终端 DOM 渲染 <span style="font-size:0.7em;color:var(--warning);font-weight:600;">实验性</span></label>' +
+                  '<input id="cfg-dom-terminal" type="checkbox" class="field-checkbox" />' +
+                '</div>' +
+                '<p class="hint" style="margin-top:-8px;margin-bottom:8px;">移动端使用 DOM 渲染终端，支持原生文本选择与复制。保存后刷新页面生效。</p>' +
                 '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
                 '<p id="config-message" class="hint hidden"></p>' +
               '</div>' +
@@ -747,7 +756,7 @@
       }
 
       function renderSessions() {
-        var activeSessions = state.sessions.filter(function(session) { return !session.archived; });
+        var activeSessions = state.sessions.filter(function(session) { return !session.archived && !session.resumedToSessionId; });
         var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
         var groups = [];
         groups.push(renderSessionManageBar());
@@ -1176,6 +1185,10 @@
         if (!state.terminal) return;
         state.terminal.options.fontSize = state.terminalBaseFontSize * state.terminalScale;
         state.terminal.refresh(0, state.terminal.rows - 1);
+        // Apply to DOM terminal view as well
+        if (state.terminalDomView) {
+          state.terminalDomView.style.fontSize = (state.terminalBaseFontSize * state.terminalScale) + "px";
+        }
       }
 
       function updateScaleLabel() {
@@ -1630,10 +1643,6 @@
 
         if (session.autoRecovered) {
           recoveryHint = '<span class="session-id" title="自动恢复的会话">自动恢复</span>';
-        } else if (session.resumedToSessionId) {
-          recoveryHint = '<span class="session-id" title="已恢复到新会话">已恢复</span>';
-        } else if (session.resumedFromSessionId) {
-          recoveryHint = '<span class="session-id" title="从旧会话恢复而来">续接</span>';
         }
 
         var deleteButton = state.sessionsManageMode ? '' : '<button class="session-action-btn delete-btn" data-action="delete-session" data-session-id="' + session.id + '" type="button" aria-label="删除会话" title="删除此会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
@@ -1644,7 +1653,7 @@
             '<div class="session-item-row">' +
               checkbox +
               '<div class="session-main">' +
-                '<div class="session-command">' + escapeHtml(session.command) + '</div>' +
+                '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '') : session.command) + '</div>' +
                 '<div class="session-meta">' +
                   '<span>' + escapeHtml(modeName) + '</span>' +
                   '<span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + '</span>' +
@@ -2672,6 +2681,11 @@
       }
 
       function isTerminalNearBottom() {
+        // On mobile, check DOM view scroll position
+        if (state.terminalDomView) {
+          var d = state.terminalDomView.scrollHeight - state.terminalDomView.clientHeight - state.terminalDomView.scrollTop;
+          return d <= state.terminalScrollThreshold;
+        }
         var viewport = getTerminalViewport();
         if (!viewport) return true;
         var distance = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
@@ -2680,6 +2694,14 @@
 
       function scrollTerminalToBottom(smooth) {
         if (!state.terminal) return;
+        // Also scroll mobile DOM view
+        if (state.terminalDomView) {
+          if (smooth) {
+            state.terminalDomView.scrollTo({ top: state.terminalDomView.scrollHeight, behavior: "smooth" });
+          } else {
+            state.terminalDomView.scrollTop = state.terminalDomView.scrollHeight;
+          }
+        }
         if (smooth) {
           var viewport = getTerminalViewport();
           if (viewport) {
@@ -2967,6 +2989,7 @@
 
         state.terminalSessionId = nextSessionId;
         state.terminalOutput = normalizedOutput;
+        scheduleMobileDomUpdate();
         if (shouldScroll && (wrote || sessionChanged || mode === "replace")) {
           maybeScrollTerminalToBottom(sessionChanged || mode === "replace" ? "force" : "output");
         } else {
@@ -3050,6 +3073,12 @@
           console.error("[wand] xterm fit addon failed to load; continuing without fit support.");
         }
 
+        // Load serialize addon for mobile DOM rendering
+        if (typeof SerializeAddon !== "undefined" && SerializeAddon && typeof SerializeAddon.SerializeAddon === "function") {
+          state.serializeAddon = new SerializeAddon.SerializeAddon();
+          state.terminal.loadAddon(state.serializeAddon);
+        }
+
         state.terminal.open(container);
         applyTerminalScale();
         state.terminalViewportSize = { width: 0, height: 0 };
@@ -3087,6 +3116,9 @@
 
         // Create custom scrollbar overlay
         initTerminalScrollbar(container);
+
+        // Terminal copy button for mobile
+        initMobileDomTerminal(container);
 
         if (state.selectedId) {
           var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
@@ -3821,6 +3853,8 @@
             if (modeEl) modeEl.value = cfg.defaultMode || "default";
             if (cwdEl) cwdEl.value = cfg.defaultCwd || "";
             if (shellEl) shellEl.value = cfg.shell || "";
+            var domTermEl = document.getElementById("cfg-dom-terminal");
+            if (domTermEl) domTermEl.checked = cfg.experimentalDomTerminal === true;
 
             // Cert status
             var certStatus = document.getElementById("cert-status");
@@ -3858,6 +3892,7 @@
           defaultMode: (document.getElementById("cfg-mode") || {}).value,
           defaultCwd: (document.getElementById("cfg-cwd") || {}).value,
           shell: (document.getElementById("cfg-shell") || {}).value,
+          experimentalDomTerminal: (document.getElementById("cfg-dom-terminal") || {}).checked,
         };
 
         fetch("/api/settings/config", {
@@ -4549,12 +4584,11 @@
           el.scrollTop = 0;
           return;
         }
-        // Force synchronous reflow so scrollHeight reflects current content
-        void el.offsetHeight;
-        // Temporarily collapse to measure true content height
-        el.style.height = "0";
-        el.style.minHeight = "0";
-        void el.offsetHeight;
+        // Measure content height by temporarily setting height to minHeight
+        // and reading scrollHeight. Avoid collapsing to 0 which causes layout jumps.
+        var prevOverflow = el.style.overflowY;
+        el.style.overflowY = "hidden";
+        el.style.height = minHeight + "px";
         var contentHeight = el.scrollHeight;
         var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
         var shouldScrollInside = contentHeight > maxHeight;
@@ -4867,6 +4901,7 @@
             var idx = state.messageQueue.indexOf(input);
             if (idx > -1) state.messageQueue.splice(idx, 1);
             updateQueueCounter();
+            scheduleMobileDomUpdate();
           });
         });
         return state.inputQueue;
@@ -5728,9 +5763,10 @@
       function scrollLatestMessageIntoView() {
         var chatMessages = document.querySelector('.chat-messages');
         if (!chatMessages) return;
-        var firstMsg = chatMessages.querySelector(".chat-message");
-        if (!firstMsg) return;
-        firstMsg.scrollIntoView({ block: "end", inline: "nearest", behavior: isTouchDevice() ? "auto" : "smooth" });
+        // column-reverse: scrollTop=0 is the visual bottom.
+        // Use direct scrollTop instead of scrollIntoView() to avoid
+        // shifting ancestor containers and causing the input box to jump.
+        chatMessages.scrollTop = 0;
       }
 
       function updateInputPanelViewportSpacing() {
@@ -6469,9 +6505,6 @@
             var rect = vk.boundingRect;
             var kbHeight = rect ? rect.height : 0;
             inputPanel.style.paddingBottom = kbHeight > 0 ? kbHeight + 'px' : '';
-            if (kbHeight > 0 && document.activeElement === document.getElementById('input-box')) {
-              scrollLatestMessageIntoView();
-            }
           });
         }
 
@@ -6521,7 +6554,6 @@
           }
 
           if (isKeyboardOpen && (!keyboardOpen || heightChanged) && shouldAdjustForKeyboard(vv, inputBox)) {
-            scrollLatestMessageIntoView();
             syncInputBoxScroll(inputBox);
           }
 
@@ -6539,7 +6571,6 @@
         }
 
         vv.addEventListener('resize', debouncedUpdate);
-        vv.addEventListener('scroll', debouncedUpdate);
 
         updateViewport();
       }
@@ -6668,6 +6699,13 @@
           state.terminal = null;
         }
         state.fitAddon = null;
+        state.serializeAddon = null;
+        state.terminalDomView = null;
+        state._lastDomHtml = "";
+        if (state.terminalDomUpdateTimer) {
+          clearTimeout(state.terminalDomUpdateTimer);
+          state.terminalDomUpdateTimer = null;
+        }
         state.terminalSessionId = null;
         state.terminalOutput = "";
         state.terminalViewportSize = { width: 0, height: 0 };
@@ -6845,6 +6883,7 @@
                 }
                 maybeScrollTerminalToBottom("output");
                 updateTerminalJumpToBottomButton();
+                scheduleMobileDomUpdate();
               } else if (Object.prototype.hasOwnProperty.call(msg.data, "output")) {
                 // Fallback: no chunk available, use full-output comparison
                 syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
@@ -7675,6 +7714,240 @@
             }
           });
         });
+        // Attach message-level copy buttons for touch devices
+        attachMessageCopyButtons(container);
+      }
+
+      // ===== Mobile message copy (long-press or tap copy button) =====
+      var _msgCopyState = { timer: null, activeBtn: null };
+
+      function attachMessageCopyButtons(container) {
+        var isTouch = window.matchMedia("(pointer: coarse)").matches;
+        if (!isTouch) return;
+        container.querySelectorAll(".chat-message").forEach(function(msgEl) {
+          if (msgEl.querySelector(".msg-copy-btn")) return; // already attached
+          var bubble = msgEl.querySelector(".chat-message-bubble");
+          if (!bubble) return;
+          var btn = document.createElement("button");
+          btn.className = "msg-copy-btn";
+          btn.textContent = "复制";
+          btn.addEventListener("click", function(e) {
+            e.stopPropagation();
+            var text = bubble.innerText || bubble.textContent || "";
+            navigator.clipboard.writeText(text.trim()).then(function() {
+              btn.textContent = "已复制";
+              btn.classList.add("copied");
+              setTimeout(function() {
+                btn.textContent = "复制";
+                btn.classList.remove("copied");
+                btn.classList.remove("visible");
+              }, 1500);
+            });
+          });
+          msgEl.appendChild(btn);
+        });
+      }
+
+      // Long-press to show copy button on chat messages
+      (function initMobileCopyLongPress() {
+        var isTouch = window.matchMedia("(pointer: coarse)").matches;
+        if (!isTouch) return;
+
+        var longPressTimer = null;
+        var touchStartY = 0;
+
+        document.addEventListener("touchstart", function(e) {
+          var msgEl = e.target.closest(".chat-message");
+          if (!msgEl) return;
+          var bubble = msgEl.querySelector(".chat-message-bubble");
+          if (!bubble) return;
+          touchStartY = e.touches[0].clientY;
+          longPressTimer = setTimeout(function() {
+            var btn = msgEl.querySelector(".msg-copy-btn");
+            if (btn) {
+              // Hide any other visible copy buttons
+              document.querySelectorAll(".msg-copy-btn.visible").forEach(function(b) {
+                b.classList.remove("visible");
+              });
+              btn.classList.add("visible");
+            }
+          }, 500);
+        }, { passive: true });
+
+        document.addEventListener("touchmove", function(e) {
+          if (longPressTimer && Math.abs(e.touches[0].clientY - touchStartY) > 10) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+        }, { passive: true });
+
+        document.addEventListener("touchend", function() {
+          if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+        }, { passive: true });
+
+        // Dismiss copy buttons when tapping elsewhere
+        document.addEventListener("click", function(e) {
+          if (!e.target.closest(".msg-copy-btn")) {
+            document.querySelectorAll(".msg-copy-btn.visible").forEach(function(b) {
+              b.classList.remove("visible");
+            });
+          }
+        });
+      })();
+
+      // ===== Terminal copy button for mobile =====
+      // ===== Mobile DOM terminal view =====
+      function initMobileDomTerminal(container) {
+        var isTouch = window.matchMedia("(pointer: coarse)").matches;
+        if (!isTouch) return;
+        // Gated by experimental config flag
+        if (!state.config || !state.config.experimentalDomTerminal) return;
+
+        // Create DOM view container
+        var domView = document.createElement("div");
+        domView.className = "terminal-dom-view active";
+        container.appendChild(domView);
+
+        // Apply current scale
+        if (state.terminalScale !== 1) {
+          domView.style.fontSize = (state.terminalBaseFontSize * state.terminalScale) + "px";
+        }
+
+        // Hide xterm rendering layer but preserve layout for FitAddon
+        // Use visibility:hidden instead of display:none so fit() can compute cols/rows
+        setTimeout(function() {
+          var xtermEl = container.querySelector(".xterm");
+          if (xtermEl) {
+            xtermEl.style.visibility = "hidden";
+            xtermEl.style.position = "absolute";
+            xtermEl.style.pointerEvents = "none";
+          }
+        }, 100);
+
+        // Save reference
+        state.terminalDomView = domView;
+        state.terminalDomUpdateTimer = null;
+
+        // Scroll events for auto-follow
+        domView.addEventListener("scroll", function() {
+          var distance = domView.scrollHeight - domView.clientHeight - domView.scrollTop;
+          if (distance <= state.terminalScrollThreshold) {
+            state.terminalAutoFollow = true;
+            clearTerminalScrollIdleTimer();
+            updateTerminalJumpToBottomButton();
+          } else {
+            setTerminalManualScrollActive();
+          }
+        }, { passive: true });
+
+        domView.addEventListener("touchmove", function() {
+          setTerminalManualScrollActive();
+        }, { passive: true });
+
+        // Trigger initial render
+        scheduleMobileDomUpdate();
+      }
+
+      function updateMobileDomView() {
+        if (!state.terminalDomView || !state.serializeAddon) return;
+
+        try {
+          var html = state.serializeAddon.serializeAsHTML({
+            includeGlobalBackground: true
+          });
+
+          // Extract the <pre>...</pre> portion
+          var match = html.match(/<pre[\s\S]*<\/pre>/);
+          var preHtml = match ? match[0] : "";
+
+          // Fix colors for dark background
+          preHtml = fixDarkTerminalColors(preHtml);
+
+          // Skip update if content unchanged
+          if (preHtml === state._lastDomHtml) return;
+          state._lastDomHtml = preHtml;
+
+          // Preserve scroll position for non-auto-follow mode
+          var wasAtBottom = state.terminalAutoFollow;
+          var scrollTop = state.terminalDomView.scrollTop;
+
+          state.terminalDomView.innerHTML = preHtml;
+
+          if (wasAtBottom) {
+            state.terminalDomView.scrollTop = state.terminalDomView.scrollHeight;
+          } else {
+            state.terminalDomView.scrollTop = scrollTop;
+          }
+        } catch (e) {
+          // Fallback: plain text if serialize fails
+          if (state.terminal && state.terminal.buffer) {
+            var buf = state.terminal.buffer.active;
+            var lines = [];
+            for (var i = 0; i < buf.length; i++) {
+              var line = buf.getLine(i);
+              if (line) lines.push(line.translateToString(true));
+            }
+            var text = lines.join("\n").replace(/\n+$/, "");
+            state.terminalDomView.innerHTML = '<pre>' + escapeHtml(text) + '</pre>';
+            if (state.terminalAutoFollow) {
+              state.terminalDomView.scrollTop = state.terminalDomView.scrollHeight;
+            }
+          }
+        }
+      }
+
+      // Fix serialize addon's color issues on dark terminal background
+      function fixDarkTerminalColors(html) {
+        // Theme reference: bg=#1f1b17, fg=#f5eadc, black=#1f1b17, brightBlack=#625347
+        // 1. Hardcoded inverse: black text on gray → theme fg on theme brightBlack bg
+        html = html.replace(
+          /color:\s*#000000;\s*background-color:\s*#BFBFBF/g,
+          "color: #f5eadc; background-color: #625347"
+        );
+        // 2. Fix colors inside style attributes that are too dark to read on #1f1b17 background
+        html = html.replace(/style='([^']*)'/g, function(match, styles) {
+          // Extract the color value (not background-color)
+          return "style='" + styles.replace(
+            /\bcolor:\s*(#[0-9a-fA-F]{6})\b/g,
+            function(colorMatch, hex) {
+              // Check if this is actually a background-color (skip it)
+              var beforeColor = styles.substring(0, styles.indexOf(colorMatch));
+              if (beforeColor.lastIndexOf("background-") > beforeColor.lastIndexOf(";")) {
+                return colorMatch; // This is background-color, leave it
+              }
+              if (isColorTooDark(hex)) {
+                return "color: #625347"; // Use brightBlack
+              }
+              return colorMatch;
+            }
+          ) + "'";
+        });
+        return html;
+      }
+
+      function isColorTooDark(hex) {
+        // Parse hex color and check relative luminance
+        var r = parseInt(hex.substring(1, 3), 16);
+        var g = parseInt(hex.substring(3, 5), 16);
+        var b = parseInt(hex.substring(5, 7), 16);
+        // Simple perceived brightness: if below threshold, it's too dark for #1f1b17 bg
+        var brightness = (r * 299 + g * 587 + b * 114) / 1000;
+        return brightness < 45; // #1f1b17 has brightness ~22, threshold catches colors close to it
+      }
+
+      function scheduleMobileDomUpdate() {
+        if (!state.terminalDomView) return;
+        // Trailing-edge debounce: reset timer on each call to batch rapid updates
+        if (state.terminalDomUpdateTimer) {
+          clearTimeout(state.terminalDomUpdateTimer);
+        }
+        state.terminalDomUpdateTimer = setTimeout(function() {
+          state.terminalDomUpdateTimer = null;
+          updateMobileDomView();
+        }, 150);
       }
 
       function parseMessages(output, command) {
