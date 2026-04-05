@@ -70,7 +70,7 @@ import { ensureCertificates } from "./cert.js";
 import { isExecutionMode, resolveConfigDir, saveConfig } from "./config.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
-import { registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
@@ -86,12 +86,6 @@ import {
   ResizeRequest,
   WandConfig
 } from "./types.js";
-
-// ── Error helpers ──
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
 
 // ── Git helpers ──
 
@@ -266,25 +260,6 @@ function parseStoredPathList<T>(raw: string | null): T[] {
   }
 }
 
-const HIDDEN_CLAUDE_SESSIONS_KEY = "hidden_claude_sessions";
-
-function getHiddenClaudeSessionIds(storage: WandStorage): Set<string> {
-  return new Set(parseStoredPathList<string>(storage.getConfigValue(HIDDEN_CLAUDE_SESSIONS_KEY)));
-}
-
-function saveHiddenClaudeSessionIds(storage: WandStorage, hidden: Set<string>): void {
-  storage.setConfigValue(HIDDEN_CLAUDE_SESSIONS_KEY, JSON.stringify(Array.from(hidden)));
-}
-
-function removeFromHiddenClaudeSessionIds(storage: WandStorage, idsToRemove: string[]): void {
-  const hidden = getHiddenClaudeSessionIds(storage);
-  let changed = false;
-  for (const id of idsToRemove) {
-    if (hidden.delete(id)) changed = true;
-  }
-  if (changed) saveHiddenClaudeSessionIds(storage, hidden);
-}
-
 const MAX_RECENT_PATHS = 10;
 
 // ── File language detection ──
@@ -343,23 +318,17 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     res.send(generatePwaManifest());
   });
 
-  app.get("/icon.svg", (_req, res) => {
-    res.type("image/svg+xml").send(getAvatarSvg(avatarSeed, 192));
-  });
+  for (const [route, size] of [["/icon.svg", 192], ["/icon-192.png", 192], ["/icon-512.png", 512]] as const) {
+    app.get(route, (_req, res) => {
+      res.type("image/svg+xml").send(getAvatarSvg(avatarSeed, size));
+    });
+  }
 
   const iconsDir = path.resolve(
     existsSync(path.join(SERVER_MODULE_DIR, "web-ui", "content"))
       ? path.join(SERVER_MODULE_DIR, "web-ui", "content")
       : path.join(RUNTIME_ROOT_DIR, "src", "web-ui", "content")
   );
-
-  app.get("/icon-192.png", (_req, res) => {
-    res.type("image/svg+xml").send(getAvatarSvg(avatarSeed, 192));
-  });
-
-  app.get("/icon-512.png", (_req, res) => {
-    res.type("image/svg+xml").send(getAvatarSvg(avatarSeed, 512));
-  });
 
   app.get("/sw.js", (_req, res) => {
     res.setHeader("Content-Type", "application/javascript");

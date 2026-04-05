@@ -3,6 +3,25 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot, WandConfig, ConversationTurn } from "./types.js";
 
+interface SessionRow {
+  id: string;
+  command: string;
+  cwd: string;
+  mode: SessionSnapshot["mode"];
+  status: SessionSnapshot["status"];
+  exit_code: number | null;
+  started_at: string;
+  ended_at: string | null;
+  output: string;
+  archived: number;
+  archived_at: string | null;
+  claude_session_id: string | null;
+  messages: string | null;
+  resumed_from_session_id: string | null;
+  resumed_to_session_id: string | null;
+  auto_recovered: number;
+}
+
 function parseStoredMessages(raw: string | null): ConversationTurn[] | undefined {
   if (!raw) {
     return undefined;
@@ -246,24 +265,7 @@ export class WandStorage {
          FROM command_sessions
          WHERE id = ?`
       )
-      .get(id) as {
-        id: string;
-        command: string;
-        cwd: string;
-        mode: SessionSnapshot["mode"];
-        status: SessionSnapshot["status"];
-        exit_code: number | null;
-        started_at: string;
-        ended_at: string | null;
-        output: string;
-        archived: number;
-        archived_at: string | null;
-        claude_session_id: string | null;
-        messages: string | null;
-        resumed_from_session_id: string | null;
-        resumed_to_session_id: string | null;
-        auto_recovered: number;
-      } | undefined;
+      .get(id) as SessionRow | undefined;
 
     return row ? this.mapSessionRow(row) : null;
   }
@@ -278,24 +280,7 @@ export class WandStorage {
          ORDER BY started_at DESC
          LIMIT 1`
       )
-      .get(claudeSessionId) as {
-        id: string;
-        command: string;
-        cwd: string;
-        mode: SessionSnapshot["mode"];
-        status: SessionSnapshot["status"];
-        exit_code: number | null;
-        started_at: string;
-        ended_at: string | null;
-        output: string;
-        archived: number;
-        archived_at: string | null;
-        claude_session_id: string | null;
-        messages: string | null;
-        resumed_from_session_id: string | null;
-        resumed_to_session_id: string | null;
-        auto_recovered: number;
-      } | undefined;
+      .get(claudeSessionId) as SessionRow | undefined;
 
     return row ? this.mapSessionRow(row) : null;
   }
@@ -308,46 +293,12 @@ export class WandStorage {
          FROM command_sessions
          ORDER BY started_at DESC`
       )
-      .all() as Array<{
-      id: string;
-      command: string;
-      cwd: string;
-      mode: SessionSnapshot["mode"];
-      status: SessionSnapshot["status"];
-      exit_code: number | null;
-      started_at: string;
-      ended_at: string | null;
-      output: string;
-      archived: number;
-      archived_at: string | null;
-      claude_session_id: string | null;
-      messages: string | null;
-      resumed_from_session_id: string | null;
-      resumed_to_session_id: string | null;
-      auto_recovered: number;
-    }>;
+      .all() as unknown as SessionRow[];
 
     return rows.map((row) => this.mapSessionRow(row));
   }
 
-  private mapSessionRow(row: {
-    id: string;
-    command: string;
-    cwd: string;
-    mode: SessionSnapshot["mode"];
-    status: SessionSnapshot["status"];
-    exit_code: number | null;
-    started_at: string;
-    ended_at: string | null;
-    output: string;
-    archived: number;
-    archived_at: string | null;
-    claude_session_id: string | null;
-    messages: string | null;
-    resumed_from_session_id: string | null;
-    resumed_to_session_id: string | null;
-    auto_recovered: number;
-  }): SessionSnapshot {
+  private mapSessionRow(row: SessionRow): SessionSnapshot {
     return {
       id: row.id,
       command: row.command,
