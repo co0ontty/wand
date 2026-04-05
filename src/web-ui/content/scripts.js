@@ -173,6 +173,12 @@
         return (state.config && state.config.defaultCwd) || "/tmp";
       }
 
+      function resetChatRenderCache() {
+        state.lastRenderedHash = 0;
+        state.lastRenderedMsgCount = 0;
+        state.lastRenderedEmpty = null;
+      }
+
       function getEffectiveCwd() {
         return state.workingDir || getConfigCwd();
       }
@@ -324,9 +330,7 @@
 
         app.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
         // Reset chat render tracking since DOM was fully replaced
-        state.lastRenderedHash = 0;
-        state.lastRenderedMsgCount = 0;
-        state.lastRenderedEmpty = null;
+        resetChatRenderCache();
         attachEventListeners();
         updateDrawerState();
         syncComposerModeSelect();
@@ -3587,9 +3591,7 @@
       function selectSession(id) {
         state.selectedId = id;
         persistSelectedId();
-        state.lastRenderedHash = 0;
-        state.lastRenderedMsgCount = 0;
-        state.lastRenderedEmpty = null;
+        resetChatRenderCache();
         state.currentMessages = [];
         if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
         // Reset todo progress bar
@@ -4176,9 +4178,7 @@
           state.selectedId = data.id;
           persistSelectedId();
           state.drafts[data.id] = "";
-          state.lastRenderedHash = 0;
-          state.lastRenderedMsgCount = 0;
-          state.lastRenderedEmpty = null;
+          resetChatRenderCache();
           return refreshAll();
         })
         .then(function() { focusInputBox(true); })
@@ -4221,9 +4221,7 @@
           state.selectedId = data.id;
           persistSelectedId();
           state.drafts[data.id] = "";
-          state.lastRenderedHash = 0;
-          state.lastRenderedMsgCount = 0;
-          state.lastRenderedEmpty = null;
+          resetChatRenderCache();
           closeSessionModal();
           closeSessionsDrawer();
           return refreshAll();
@@ -4653,9 +4651,7 @@
           state.selectedId = data.id;
           persistSelectedId();
           state.drafts[data.id] = "";
-          state.lastRenderedHash = 0;
-          state.lastRenderedMsgCount = 0;
-          state.lastRenderedEmpty = null;
+          resetChatRenderCache();
           switchToSessionView(data.id);
           updateSessionSnapshot(data);
           updateSessionsList();
@@ -4711,9 +4707,7 @@
           state.selectedId = data.id;
           persistSelectedId();
           state.drafts[data.id] = "";
-          state.lastRenderedHash = 0;
-          state.lastRenderedMsgCount = 0;
-          state.lastRenderedEmpty = null;
+          resetChatRenderCache();
           if (inputBox) inputBox.value = "";
           if (welcomeInput) welcomeInput.value = "";
           switchToSessionView(data.id);
@@ -5601,9 +5595,7 @@
 
       function activateSession(data) {
         if (!data || !data.id) return Promise.resolve();
-        state.lastRenderedHash = 0;
-        state.lastRenderedMsgCount = 0;
-        state.lastRenderedEmpty = null;
+        resetChatRenderCache();
         switchToSessionView(data.id);
         updateSessionSnapshot(data);
         updateSessionsList();

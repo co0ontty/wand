@@ -15,15 +15,11 @@ import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
 import {
   getResumeCommandSessionId,
-  hasLiveProjectConversation,
   hasRealConversationMessages,
-  hasStoredProjectConversation,
   isResumeProjectConversation,
   isUiProjectConversation,
-  shouldAllowResume,
   shouldBackfillFromStoredHistory,
   shouldBindClaudeSessionId,
-  shouldDisplayResumeAction,
 } from "./resume-policy.js";
 
 /** Check if the current process is running as root (UID 0). */
@@ -68,21 +64,6 @@ export interface ClaudeHistorySession {
   hasConversation: boolean;
   managedByWand: boolean;
 }
-
-const PROMPT_PATTERNS = [
-  /(?:^|\b)(?:press\s+)?(?:y|yes)\s*(?:\/|\bor\b)\s*(?:n|no)(?:\b|$)/i,
-  /\[(?:y|yes)\s*\/\s*(?:n|no)\]/i,
-  /\((?:y|yes)\s*\/\s*(?:n|no)\)/i,
-  /\((?:y|yes)\s*\/\s*(?:n|no)\s*\/\s*always\)/i,
-  /\bcontinue\?\s*(?:\((?:y|yes)\s*\/\s*(?:n|no)\))?/i,
-  /\bare you sure\??/i,
-  /\bdo you want to continue\??/i,
-  /\bdo you want to (?:create|write|delete|modify|execute)\b/i,
-  /\bconfirm(?:\s+execution|\s+changes|\s+action)?\??/i,
-  /\bproceed\?\s*(?:\((?:y|yes)\s*\/\s*(?:n|no)\))?/i,
-  /\benter to confirm\b/i,
-  /\bgrant\b.*\bpermission\b/i,
-];
 
 interface SessionRecord extends SessionSnapshot {
   processId: number | null;
@@ -195,174 +176,6 @@ function readClaudeProjectSessionDetails(filePath: string, id: string): ClaudePr
   } catch {
     return null;
   }
-}
-
-function hasVisibleProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return shouldDisplayResumeAction(messages);
-}
-
-function hasRecoverableProjectConversation(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAllowResume({ claudeSessionId: "resume-candidate", messages });
-}
-
-function shouldBindLiveProjectSessionId(messages: ConversationTurn[] | undefined): boolean {
-  return hasLiveProjectConversation(messages);
-}
-
-function shouldBackfillStoredProjectSessionId(messages: ConversationTurn[] | undefined): boolean {
-  return hasStoredProjectConversation(messages);
-}
-
-function shouldDisplayVisibleProjectSessionId(messages: ConversationTurn[] | undefined): boolean {
-  return hasVisibleProjectConversation(messages);
-}
-
-function shouldResumeRecoverableProjectSessionId(messages: ConversationTurn[] | undefined): boolean {
-  return hasRecoverableProjectConversation(messages);
-}
-
-function canBindLiveProjectSession(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldBindLiveProjectSessionId(record.messages);
-}
-
-function canBackfillStoredProjectSession(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldBackfillStoredProjectSessionId(record.messages);
-}
-
-function canDisplayVisibleProjectSession(messages: ConversationTurn[] | undefined): boolean {
-  return shouldDisplayVisibleProjectSessionId(messages);
-}
-
-function canResumeRecoverableProjectSession(messages: ConversationTurn[] | undefined): boolean {
-  return shouldResumeRecoverableProjectSessionId(messages);
-}
-
-function shouldAdoptProjectSessionDuringRuntime(record: Pick<SessionRecord, "messages">): boolean {
-  return canBindLiveProjectSession(record);
-}
-
-function shouldAdoptProjectSessionDuringBackfill(record: Pick<SessionRecord, "messages">): boolean {
-  return canBackfillStoredProjectSession(record);
-}
-
-function shouldAdoptProjectSessionForUi(messages: ConversationTurn[] | undefined): boolean {
-  return canDisplayVisibleProjectSession(messages);
-}
-
-function shouldAdoptProjectSessionForResume(messages: ConversationTurn[] | undefined): boolean {
-  return canResumeRecoverableProjectSession(messages);
-}
-
-function hasRuntimeProjectAdoption(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAdoptProjectSessionForUi(messages);
-}
-
-function hasBackfillProjectAdoption(messages: ConversationTurn[] | undefined): boolean {
-  return shouldBackfillStoredProjectSessionId(messages);
-}
-
-function hasUiProjectAdoption(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAdoptProjectSessionForUi(messages);
-}
-
-function hasResumeProjectAdoption(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAdoptProjectSessionForResume(messages);
-}
-
-function shouldAdoptProjectSession(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldAdoptProjectSessionDuringRuntime(record);
-}
-
-function shouldAdoptStoredProjectSession(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldAdoptProjectSessionDuringBackfill(record);
-}
-
-function shouldAdoptUiProjectSession(messages: ConversationTurn[] | undefined): boolean {
-  return hasUiProjectAdoption(messages);
-}
-
-function shouldAdoptResumeProjectSession(messages: ConversationTurn[] | undefined): boolean {
-  return hasResumeProjectAdoption(messages);
-}
-
-function canUseProjectSessionAtRuntime(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldAdoptProjectSession(record);
-}
-
-function canUseProjectSessionAtBackfill(record: Pick<SessionRecord, "messages">): boolean {
-  return shouldAdoptStoredProjectSession(record);
-}
-
-function canUseProjectSessionAtUi(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAdoptUiProjectSession(messages);
-}
-
-function canUseProjectSessionAtResume(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAdoptResumeProjectSession(messages);
-}
-
-function hasProjectSessionRuntimeEligibility(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAdoptProjectSessionDuringRuntime({ messages: messages ?? [] });
-}
-
-function hasProjectSessionBackfillEligibility(messages: ConversationTurn[] | undefined): boolean {
-  return shouldAdoptProjectSessionDuringBackfill({ messages: messages ?? [] });
-}
-
-function hasProjectSessionUiEligibility(messages: ConversationTurn[] | undefined): boolean {
-  return canUseProjectSessionAtUi(messages);
-}
-
-function hasProjectSessionResumeEligibility(messages: ConversationTurn[] | undefined): boolean {
-  return canUseProjectSessionAtResume(messages);
-}
-
-function shouldClaimProjectSessionDuringRuntime(messages: ConversationTurn[] | undefined): boolean {
-  return hasProjectSessionRuntimeEligibility(messages);
-}
-
-function shouldClaimProjectSessionDuringBackfill(messages: ConversationTurn[] | undefined): boolean {
-  return hasProjectSessionBackfillEligibility(messages);
-}
-
-function shouldClaimProjectSessionForUi(messages: ConversationTurn[] | undefined): boolean {
-  return hasProjectSessionUiEligibility(messages);
-}
-
-function shouldClaimProjectSessionForResume(messages: ConversationTurn[] | undefined): boolean {
-  return hasProjectSessionResumeEligibility(messages);
-}
-
-function hasClaimableProjectSessionRuntime(messages: ConversationTurn[] | undefined): boolean {
-  return shouldClaimProjectSessionDuringRuntime(messages);
-}
-
-function hasClaimableProjectSessionBackfill(messages: ConversationTurn[] | undefined): boolean {
-  return shouldClaimProjectSessionDuringBackfill(messages);
-}
-
-function hasClaimableProjectSessionUi(messages: ConversationTurn[] | undefined): boolean {
-  return shouldClaimProjectSessionForUi(messages);
-}
-
-function hasClaimableProjectSessionResume(messages: ConversationTurn[] | undefined): boolean {
-  return shouldClaimProjectSessionForResume(messages);
-}
-
-function isClaimableProjectSessionRuntime(messages: ConversationTurn[] | undefined): boolean {
-  return hasClaimableProjectSessionRuntime(messages);
-}
-
-function isClaimableProjectSessionBackfill(messages: ConversationTurn[] | undefined): boolean {
-  return hasClaimableProjectSessionBackfill(messages);
-}
-
-function isClaimableProjectSessionUi(messages: ConversationTurn[] | undefined): boolean {
-  return hasClaimableProjectSessionUi(messages);
-}
-
-function isClaimableProjectSessionResume(messages: ConversationTurn[] | undefined): boolean {
-  return hasClaimableProjectSessionResume(messages);
 }
 
 function listClaudeProjectSessionCandidates(cwd: string): ClaudeProjectSessionCandidate[] {
@@ -1769,8 +1582,7 @@ export class ProcessManager extends EventEmitter {
       || claudeConfirmPrompt
       || toolPermissionPrompt
       || (hasExplicitConfirmSyntax(normalized)
-        && hasPermissionActionContext(normalized)
-        && PROMPT_PATTERNS.some((pattern) => pattern.test(normalized)));
+        && hasPermissionActionContext(normalized));
 
     if (shouldConfirm) {
       record.lastAutoConfirmAt = now;
