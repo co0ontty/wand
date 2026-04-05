@@ -102,6 +102,8 @@ interface SessionRecord extends SessionSnapshot {
   initialInputTimer?: NodeJS.Timeout | null;
   /** Claude project jsonl mtimes visible before this session started */
   knownClaudeProjectMtimes?: Map<string, number>;
+  /** Auto-approval stats per session */
+  approvalStats: { tool: number; command: number; file: number; total: number };
 }
 
 interface ClaudeProjectSessionCandidate {
@@ -592,7 +594,8 @@ export class ProcessManager extends EventEmitter {
           knownClaudeTaskIds: undefined,
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
-          claudeSessionId: resumeCommandSessionId ?? updated.claudeSessionId
+          claudeSessionId: resumeCommandSessionId ?? updated.claudeSessionId,
+          approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
         });
         this.lifecycleManager.register(snapshot.id, "idle");
         console.error(`[ProcessManager] Restored session ${snapshot.id} marked as exited (PTY orphaned)`);
@@ -623,7 +626,8 @@ export class ProcessManager extends EventEmitter {
           knownClaudeTaskIds: undefined,
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(snapshot.cwd) : undefined,
-          claudeSessionId: resumeCommandSessionId ?? snapshot.claudeSessionId
+          claudeSessionId: resumeCommandSessionId ?? snapshot.claudeSessionId,
+          approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
         });
         this.lifecycleManager.register(snapshot.id, "archived");
       }
@@ -742,7 +746,8 @@ export class ProcessManager extends EventEmitter {
       lastEmittedTask: null,
       knownClaudeTaskIds: knownClaudeTaskIds ?? undefined,
       claudeTaskDiscoveryTimer: null,
-      knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined
+      knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
+      approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
     };
 
     // Create PTY bridge for this session
@@ -1305,7 +1310,8 @@ export class ProcessManager extends EventEmitter {
       messages: messages.length > 0 ? messages : undefined,
       resumedFromSessionId: record.resumedFromSessionId ?? undefined,
       resumedToSessionId: record.resumedToSessionId ?? undefined,
-      autoRecovered: record.autoRecovered ?? false
+      autoRecovered: record.autoRecovered ?? false,
+      approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined
     };
   }
 
@@ -1655,15 +1661,47 @@ export class ProcessManager extends EventEmitter {
         break;
       }
 
-      case "permission.resolved":
+      case "permission.resolved": {
+        // Increment approval stats before clearing pendingEscalation
+        const resolvedScope = record.pendingEscalation?.scope;
+        if (resolvedScope) {
+          if (resolvedScope === "run_command" || resolvedScope === "dangerous_shell") {
+            record.approvalStats.command++;
+          } else if (resolvedScope === "write_file") {
+            record.approvalStats.file++;
+          } else {
+            record.approvalStats.tool++;
+          }
+          record.approvalStats.total++;
+        }
         record.pendingEscalation = null;
         record.ptyPermissionBlocked = false;
         this.emitEvent({
           type: "status",
           sessionId: event.sessionId,
-          data: { permissionBlocked: false },
+          data: {
+            permissionBlocked: false,
+            approvalStats: record.approvalStats,
+          },
         });
+        // Log auto-approve events to shortcut-interactions.jsonl for analysis
+        const resolvedData = event.data as Record<string, unknown> | undefined;
+        if (resolvedData?.autoApproved) {
+          const outputLines = record.output.split("\n");
+          const tailLines = outputLines.slice(-8).join("\n");
+          this.logger.appendShortcutLog(record.id, "auto_approve", tailLines, {
+            mode: record.mode,
+            autoApprove: record.autoApprovePermissions,
+            permissionBlocked: true,
+            input: "\r",
+            approveType: resolvedData.approveType as string | undefined,
+            score: resolvedData.score as number | undefined,
+            matched: resolvedData.matched as string[] | undefined,
+            falsePositive: resolvedData.falsePositive as boolean | undefined,
+          });
+        }
         break;
+      }
 
       case "session.id":
         // Claude session ID captured - already handled in onData

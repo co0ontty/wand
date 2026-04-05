@@ -179,6 +179,8 @@ export interface SessionSnapshot {
   resumedToSessionId?: string | null;
   /** 服务器重启时是否自动恢复 */
   autoRecovered?: boolean;
+  /** 自动批准统计（按类别分） */
+  approvalStats?: { tool: number; command: number; file: number; total: number };
 }
 
 // ── Session Lifecycle ──
