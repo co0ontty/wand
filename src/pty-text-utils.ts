@@ -56,8 +56,10 @@ const EXPLICIT_CONFIRM_PATTERNS = [
   /\[(?:y|yes)\s*\/\s*(?:n|no)\]/i,
   /\((?:y|yes)\s*\/\s*(?:n|no)\)/i,
   /\((?:y|yes)\s*\/\s*(?:n|no)\s*\/\s*always\)/i,
-  /\byes\b.*\bno\b/i,
+  /\byes\b[\s\S]*\bno\b/i,
   /\benter to confirm\b/i,
+  // Claude CLI numbered selection menus: "❯ 1. Yes" + "N. No"
+  /❯\s*1\.\s*yes\b/i,
 ];
 
 const PERMISSION_ACTION_PATTERNS = [
@@ -73,6 +75,53 @@ export function hasExplicitConfirmSyntax(normalized: string): boolean {
 
 export function hasPermissionActionContext(normalized: string): boolean {
   return PERMISSION_ACTION_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+// ── Weighted keyword scoring for fallback permission detection ──
+
+interface PermissionScore {
+  score: number;
+  matched: string[];
+}
+
+const PERMISSION_KEYWORD_WEIGHTS: Array<{ pattern: RegExp; weight: number; label: string }> = [
+  { pattern: /\bdo you want to proceed\b/i, weight: 5, label: "do you want to proceed" },
+  { pattern: /\bwould you like to proceed\b/i, weight: 5, label: "would you like to proceed" },
+  { pattern: /\bdo you want to\b/i, weight: 4, label: "do you want to" },
+  { pattern: /\bwould you like to\b/i, weight: 4, label: "would you like to" },
+  { pattern: /\benter to confirm\b/i, weight: 4, label: "enter to confirm" },
+  { pattern: /\bgrant\b[\s\S]*\bpermission\b/i, weight: 4, label: "grant permission" },
+  { pattern: /❯\s*1\./i, weight: 3, label: "❯ 1." },
+  { pattern: /\b1\.\s*yes\b/i, weight: 3, label: "1. yes" },
+  { pattern: /\bdon'?t ask again\b/i, weight: 2, label: "don't ask again" },
+  { pattern: /\b(?:bash|shell)\s*command\b/i, weight: 2, label: "bash/shell command" },
+  { pattern: /\b(?:run|read|write|edit)\s+(?:file|command|shell)\b/i, weight: 2, label: "run/read/write action" },
+  { pattern: /\ballow\b.*\breading\b/i, weight: 2, label: "allow reading" },
+];
+
+/** Minimum score threshold for fallback permission detection */
+export const FALLBACK_SCORE_THRESHOLD = 8;
+
+/**
+ * Score how likely the recent output contains a permission prompt.
+ * Evaluates the last few lines of normalized text against weighted keywords.
+ */
+export function scorePermissionLikelihood(normalized: string): PermissionScore {
+  // Take the last ~5 lines
+  const lines = normalized.split("\n");
+  const tail = lines.slice(-8).join("\n");
+
+  let score = 0;
+  const matched: string[] = [];
+
+  for (const { pattern, weight, label } of PERMISSION_KEYWORD_WEIGHTS) {
+    if (pattern.test(tail)) {
+      score += weight;
+      matched.push(label);
+    }
+  }
+
+  return { score, matched };
 }
 
 /** Normalize prompt text for permission detection (strip ANSI, collapse whitespace). */

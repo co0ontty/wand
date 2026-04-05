@@ -21,7 +21,7 @@ import type {
   SessionEndData,
   RawOutputData,
 } from "./types.js";
-import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitConfirmSyntax, hasPermissionActionContext } from "./pty-text-utils.js";
+import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitConfirmSyntax, hasPermissionActionContext, scorePermissionLikelihood, FALLBACK_SCORE_THRESHOLD } from "./pty-text-utils.js";
 
 // ── Constants ──
 
@@ -29,6 +29,12 @@ const OUTPUT_MAX_SIZE = 120000;
 const SESSION_ID_WINDOW_SIZE = 16384;
 const PERMISSION_WINDOW_SIZE = 2000;
 const AUTO_APPROVE_DELAY_MS = 150;
+/** How long to monitor output after fallback auto-approve for false-positive detection */
+const FALLBACK_VERIFY_WINDOW_MS = 600;
+/** How long a session must be idle (no user input, no new output) before sending a probe */
+const IDLE_PROBE_DELAY_MS = 3000;
+/** Minimum time between idle probes */
+const IDLE_PROBE_COOLDOWN_MS = 5000;
 
 const UUID_PATTERN = "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})";
 const CLAUDE_SESSION_ID_PATTERNS = [
@@ -66,6 +72,12 @@ interface PermissionState {
   lastAutoConfirmAt: number;
   /** Timer for delayed auto-approve (gives CLI time to be ready) */
   pendingAutoApproveTimer: ReturnType<typeof setTimeout> | null;
+  /** Fallback auto-approve: verification deadline timestamp */
+  fallbackVerifyUntil: number;
+  /** Fallback auto-approve: context for logging */
+  fallbackContext: { score: number; matched: string[]; text: string } | null;
+  /** Output length snapshot taken right before fallback auto-approve fires */
+  fallbackOutputLenAtApprove: number;
 }
 
 /** Permission resolution result */
@@ -144,6 +156,12 @@ export class ClaudePtyBridge extends EventEmitter {
   private rememberedScopes: Set<EscalationScope> = new Set();
   private rememberedTargets: Set<string> = new Set();
 
+  // Idle probe state (last-resort robustness)
+  private lastOutputAt: number;
+  private lastUserInputAt: number;
+  private idleProbeTimer: ReturnType<typeof setTimeout> | null;
+  private lastIdleProbeAt: number;
+
   constructor(options: ClaudePtyBridgeOptions) {
     super();
     this.sessionId = options.sessionId;
@@ -170,9 +188,16 @@ export class ClaudePtyBridge extends EventEmitter {
       lastTarget: null,
       lastAutoConfirmAt: 0,
       pendingAutoApproveTimer: null,
+      fallbackVerifyUntil: 0,
+      fallbackContext: null,
+      fallbackOutputLenAtApprove: 0,
     };
 
     this.sessionIdWindow = "";
+    this.lastOutputAt = 0;
+    this.lastUserInputAt = 0;
+    this.idleProbeTimer = null;
+    this.lastIdleProbeAt = 0;
   }
 
   // ── Core API ──
@@ -187,6 +212,7 @@ export class ClaudePtyBridge extends EventEmitter {
 
     // 1. Append to raw output
     this.rawOutput = appendWindow(this.rawOutput, normalizePtyOutput(chunk), OUTPUT_MAX_SIZE);
+    this.lastOutputAt = Date.now();
 
     // 2. Emit raw output event (for terminal view)
     this.emitEvent({
@@ -207,6 +233,11 @@ export class ClaudePtyBridge extends EventEmitter {
       this.chatState.buffer += chunk;
       this.parseChatResponse();
     }
+
+    // 6. Reset idle probe timer on new output
+    if (this.autoApprove && this.isClaudeCommand) {
+      this.resetIdleProbeTimer();
+    }
   }
 
   /**
@@ -217,14 +248,14 @@ export class ClaudePtyBridge extends EventEmitter {
     // Guard against post-exit calls
     if (this._exited) return;
 
+    this.lastUserInputAt = Date.now();
+
     // Filter out non-chat input (control chars, etc.)
     if (!this.isRealChatInput(input)) {
-      process.stderr.write(`[Bridge] Input filtered as non-chat: ${input.substring(0, 50)}\n`);
       return;
     }
 
     const cleanInput = input.replace(/[\r\n]+$/, "").trim();
-    process.stderr.write(`[Bridge] Starting chat tracking for: ${cleanInput.substring(0, 50)}\n`);
 
     // Add user message
     this.messages.push({
@@ -281,6 +312,7 @@ export class ClaudePtyBridge extends EventEmitter {
 
     // Clear permission state — prevents stale blocked state after exit
     this.cancelPendingAutoApprove();
+    this.clearIdleProbeTimer();
     this.permissionState.isBlocked = false;
     this.permissionState.lastPrompt = null;
     this.permissionState.lastScope = null;
@@ -453,7 +485,77 @@ export class ClaudePtyBridge extends EventEmitter {
     );
 
     const normalized = normalizePromptText(this.permissionState.window);
+
+    // ── Fallback false-positive detection ──
+    // After a fallback auto-approve, monitor output for signs it was wrong
+    if (this.permissionState.fallbackContext) {
+      const now = Date.now();
+      if (now < this.permissionState.fallbackVerifyUntil) {
+        // Check if the output grew with a prompt echo (false positive: \r was consumed as input)
+        const outputGrew = this.rawOutput.length > this.permissionState.fallbackOutputLenAtApprove;
+        if (outputGrew) {
+          // Check if the new output looks like Claude echoed our empty input (prompt re-appeared)
+          const newOutput = this.rawOutput.slice(this.permissionState.fallbackOutputLenAtApprove);
+          const stripped = stripAnsi(newOutput).trim();
+          // If we see a bare prompt symbol and no permission keywords → likely false positive
+          const looksLikeFalsePositive = /^❯\s*$/.test(stripped)
+            || (stripped.includes("❯") && !this.isPermissionPromptDetected(normalized));
+          if (looksLikeFalsePositive) {
+            const ctx = this.permissionState.fallbackContext;
+            this.emitEvent({
+              type: "permission.resolved",
+              sessionId: this.sessionId,
+              timestamp: now,
+              data: {
+                resolution: "approve_once",
+                autoApproved: true,
+                approveType: "fallback",
+                falsePositive: true,
+                score: ctx.score,
+                matched: ctx.matched,
+                tail: ctx.text,
+              },
+            });
+            this.permissionState.fallbackContext = null;
+            return;
+          }
+        }
+      } else {
+        // Verification window expired — assume it was correct
+        const ctx = this.permissionState.fallbackContext;
+        this.emitEvent({
+          type: "permission.resolved",
+          sessionId: this.sessionId,
+          timestamp: now,
+          data: {
+            resolution: "approve_once",
+            autoApproved: true,
+            approveType: "fallback",
+            falsePositive: false,
+            score: ctx.score,
+            matched: ctx.matched,
+            tail: ctx.text,
+          },
+        });
+        this.permissionState.fallbackContext = null;
+      }
+    }
+
     const blocked = this.isPermissionPromptDetected(normalized);
+
+    // ── Fallback: weighted keyword scoring ──
+    // If strict detection missed but auto-approve is on, try scoring
+    if (!blocked && !this.permissionState.isBlocked && this.autoApprove) {
+      const { score, matched } = scorePermissionLikelihood(normalized);
+      if (score >= FALLBACK_SCORE_THRESHOLD) {
+        const target = this.extractPermissionTarget(normalized);
+        const scope = this.inferScope(normalized, target);
+        const lines = normalized.split("\n");
+        const tailText = lines.slice(-8).join("\n");
+        this.scheduleFallbackAutoApprove(scope, target, { score, matched, text: tailText });
+        return;
+      }
+    }
 
     // If state hasn't changed, check if a new distinct prompt appeared while already blocked
     if (this.permissionState.isBlocked === blocked) {
@@ -533,13 +635,11 @@ export class ClaudePtyBridge extends EventEmitter {
     if (this.permissionState.pendingAutoApproveTimer) return;
 
     this.permissionState.lastAutoConfirmAt = now;
-    process.stderr.write(`[wand] Scheduling auto-confirm for ${scope}${target ? `: ${target}` : ""} (${AUTO_APPROVE_DELAY_MS}ms)\n`);
 
     this.permissionState.pendingAutoApproveTimer = setTimeout(() => {
       this.permissionState.pendingAutoApproveTimer = null;
       if (this._exited) return;
 
-      process.stderr.write(`[wand] Auto-confirming permission for ${scope}${target ? `: ${target}` : ""}\n`);
       if (this.ptyWrite) {
         this.ptyWrite("\r");
       }
@@ -554,8 +654,45 @@ export class ClaudePtyBridge extends EventEmitter {
         type: "permission.resolved",
         sessionId: this.sessionId,
         timestamp: Date.now(),
-        data: { resolution: "approve_once", autoApproved: true },
+        data: { resolution: "approve_once", autoApproved: true, approveType: "strict" },
       });
+    }, AUTO_APPROVE_DELAY_MS);
+  }
+
+  /**
+   * Schedule a fallback auto-approve with false-positive verification.
+   * Similar to scheduleAutoApprove but sets up post-approve monitoring.
+   */
+  private scheduleFallbackAutoApprove(
+    scope: EscalationScope,
+    target: string | undefined,
+    context: { score: number; matched: string[]; text: string }
+  ): void {
+    const now = Date.now();
+    if (now - this.permissionState.lastAutoConfirmAt < 500) return;
+    if (this.permissionState.pendingAutoApproveTimer) return;
+
+    this.permissionState.lastAutoConfirmAt = now;
+
+    this.permissionState.pendingAutoApproveTimer = setTimeout(() => {
+      this.permissionState.pendingAutoApproveTimer = null;
+      if (this._exited) return;
+
+      // Snapshot output length before sending \r for false-positive detection
+      this.permissionState.fallbackOutputLenAtApprove = this.rawOutput.length;
+      this.permissionState.fallbackVerifyUntil = Date.now() + FALLBACK_VERIFY_WINDOW_MS;
+      this.permissionState.fallbackContext = context;
+
+      if (this.ptyWrite) {
+        this.ptyWrite("\r");
+      }
+
+      // Don't clear isBlocked/window here — let the verification logic in detectPermission handle it
+      this.permissionState.isBlocked = false;
+      this.permissionState.window = "";
+      this.permissionState.lastPrompt = null;
+      this.permissionState.lastScope = null;
+      this.permissionState.lastTarget = null;
     }, AUTO_APPROVE_DELAY_MS);
   }
 
@@ -564,6 +701,68 @@ export class ClaudePtyBridge extends EventEmitter {
       clearTimeout(this.permissionState.pendingAutoApproveTimer);
       this.permissionState.pendingAutoApproveTimer = null;
     }
+  }
+
+  // ── Idle Probe (last-resort robustness) ──
+
+  /**
+   * Reset the idle probe timer. Called on every new output chunk.
+   * If the terminal goes idle (no output for IDLE_PROBE_DELAY_MS) while
+   * auto-approve is enabled and no permission is currently detected,
+   * we send a speculative \r to catch prompts that all detection layers missed.
+   */
+  private resetIdleProbeTimer(): void {
+    this.clearIdleProbeTimer();
+    this.idleProbeTimer = setTimeout(() => {
+      this.idleProbeTimer = null;
+      this.maybeIdleProbe();
+    }, IDLE_PROBE_DELAY_MS);
+  }
+
+  private clearIdleProbeTimer(): void {
+    if (this.idleProbeTimer) {
+      clearTimeout(this.idleProbeTimer);
+      this.idleProbeTimer = null;
+    }
+  }
+
+  /**
+   * Idle probe: the terminal has been quiet for a while. If conditions suggest
+   * a stuck permission prompt, send a speculative \r and monitor the result.
+   */
+  private maybeIdleProbe(): void {
+    if (this._exited || !this.autoApprove || !this.ptyWrite) return;
+    // Don't probe if permission is already detected or fallback is pending verification
+    if (this.permissionState.isBlocked) return;
+    if (this.permissionState.fallbackContext) return;
+    if (this.permissionState.pendingAutoApproveTimer) return;
+
+    const now = Date.now();
+    // Cooldown between probes
+    if (now - this.lastIdleProbeAt < IDLE_PROBE_COOLDOWN_MS) return;
+    // Don't probe if user recently sent input (they're actively interacting)
+    if (now - this.lastUserInputAt < IDLE_PROBE_DELAY_MS) return;
+    // Only probe if output stopped recently (not ancient idle sessions)
+    if (now - this.lastOutputAt > 15000) return;
+
+    // Quick heuristic: check if recent output has ANY permission-like keywords
+    const normalized = normalizePromptText(this.permissionState.window);
+    const { score, matched } = scorePermissionLikelihood(normalized);
+    // Lower threshold than fallback — we're being speculative
+    if (score < 4) return;
+
+    this.lastIdleProbeAt = now;
+
+    // Snapshot output before probe
+    this.permissionState.fallbackOutputLenAtApprove = this.rawOutput.length;
+    this.permissionState.fallbackVerifyUntil = now + FALLBACK_VERIFY_WINDOW_MS;
+    this.permissionState.fallbackContext = {
+      score,
+      matched,
+      text: normalized.split("\n").slice(-8).join("\n"),
+    };
+
+    this.ptyWrite("\r");
   }
 
   private isPermissionPromptDetected(normalized: string): boolean {
@@ -630,11 +829,9 @@ export class ClaudePtyBridge extends EventEmitter {
 
       this.chatState.echoSkipped = true;
       this.chatState.buffer = clean.slice(echoEndIndex);
-      process.stderr.write(`[Bridge] Echo skipped, remaining length: ${this.chatState.buffer.length}\n`);
     }
 
     if (this.detectCompletion(this.chatState.buffer)) {
-      process.stderr.write("[Bridge] Completion detected, finalizing\n");
       this.finalizeResponse();
       return;
     }

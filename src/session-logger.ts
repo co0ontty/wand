@@ -7,12 +7,22 @@ import type { ConversationTurn, ExecutionMode } from "./types.js";
 export interface ShortcutLogContext {
   /** Execution mode the session is running in (e.g. "managed", "full-access") */
   mode: ExecutionMode;
+  /** Permission scope that was approved (e.g. "run_command", "write_file") */
+  scope?: string;
   /** Whether auto-approve is active for this session */
   autoApprove: boolean;
   /** Whether a permission prompt was blocking at the time of the keypress */
   permissionBlocked: boolean;
   /** The actual input string sent to PTY */
   input: string;
+  /** Auto-approve detection type: "strict" | "fallback" | "idle_probe" */
+  approveType?: string;
+  /** Fallback detection score */
+  score?: number;
+  /** Fallback detection matched keywords */
+  matched?: string[];
+  /** Whether the auto-approve was a false positive */
+  falsePositive?: boolean;
 }
 
 // ── Constants ──
