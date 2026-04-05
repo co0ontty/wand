@@ -145,7 +145,7 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
       const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
       const resumeCommand = `${command} --resume ${claudeSessionId}`;
       const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { resumedFromSessionId: sessionId });
-      storage.saveSession({ ...existingSession, resumedToSessionId: newSnapshot.id });
+      storage.saveSession({ ...existingSession, resumedToSessionId: newSnapshot.id, archived: true });
       res.status(201).json({ resumedFromSessionId: sessionId, ...newSnapshot });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
@@ -174,7 +174,7 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
         const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
         const resumeCommand = `${command} --resume ${claudeSessionId}`;
         const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { resumedFromSessionId: existingSession.id });
-        storage.saveSession({ ...existingSession, resumedToSessionId: newSnapshot.id });
+        storage.saveSession({ ...existingSession, resumedToSessionId: newSnapshot.id, archived: true });
         res.status(201).json({ resumedFromSessionId: existingSession.id, resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
       } else {
         const cwd = body.cwd?.trim();
