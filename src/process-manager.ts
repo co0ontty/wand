@@ -672,7 +672,7 @@ function snapshotMessages(record: Pick<SessionRecord, "ptyBridge" | "messages">)
   return record.ptyBridge?.getMessages() ?? record.messages;
 }
 
-const MAX_SESSIONS = 50;
+const MAX_SESSIONS = 200;
 const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
 const CONFIRM_WINDOW_SIZE = 800;
 
@@ -833,34 +833,43 @@ export class ProcessManager extends EventEmitter {
   }
 
   private cleanupOldSessions(): void {
-    // Remove oldest finished sessions if we're at the limit
+    // Only clean up when well over the limit
     if (this.sessions.size < MAX_SESSIONS) return;
 
-    const finishedIds: string[] = [];
+    const now = Date.now();
+    const STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+    const removable: string[] = [];
+
     for (const [id, record] of this.sessions) {
-      if (record.status !== "running") {
-        finishedIds.push(id);
+      // Only remove archived, non-running sessions older than 7 days
+      if (record.status === "running") continue;
+      if (!record.archived) continue;
+      const ref = record.endedAt ?? record.startedAt;
+      const refMs = Date.parse(ref);
+      if (Number.isFinite(refMs) && now - refMs > STALE_MS) {
+        removable.push(id);
       }
     }
 
-    // Remove oldest finished sessions first
-    finishedIds
+    // Sort oldest first and remove enough to get back under the limit
+    const toRemove = removable
       .sort((a, b) => {
         const ra = this.sessions.get(a);
         const rb = this.sessions.get(b);
         return (ra?.endedAt || "").localeCompare(rb?.endedAt || "");
       })
-      .slice(0, this.sessions.size - MAX_SESSIONS + 1)
-      .forEach((id) => {
-        const record = this.sessions.get(id);
-        if (record) {
-          this.logger.deleteSession(id);
-          this.deleteClaudeCache(record);
-        }
-        this.sessions.delete(id);
-        this.lastPersistedMessageCount.delete(id);
-        this.storage.deleteSession(id);
-      });
+      .slice(0, this.sessions.size - MAX_SESSIONS + 1);
+
+    for (const id of toRemove) {
+      const record = this.sessions.get(id);
+      if (record) {
+        this.logger.deleteSession(id);
+        this.deleteClaudeCache(record);
+      }
+      this.sessions.delete(id);
+      this.lastPersistedMessageCount.delete(id);
+      this.storage.deleteSession(id);
+    }
   }
 
   start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean }): SessionSnapshot {
@@ -1204,7 +1213,10 @@ export class ProcessManager extends EventEmitter {
   get(id: string): SessionSnapshot | null {
     this.archiveExpiredSessions();
     const record = this.sessions.get(id);
-    if (!record) return null;
+    if (!record) {
+      // Fallback: check SQLite for sessions that were evicted from memory
+      return this.storage.getSession(id) ?? null;
+    }
     // For sessions loaded from storage on startup, in-memory output starts empty.
     // Prefer in-memory output (live PTY data), fall back to stored output.
     if (!record.output && record.storedOutput) {

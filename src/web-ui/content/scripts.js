@@ -3561,6 +3561,15 @@
         return fetch("/api/sessions/" + id, { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
+            if (data.error) {
+              // Session no longer exists — deselect and refresh list
+              if (state.selectedId === id) {
+                state.selectedId = null;
+                persistSelectedId();
+              }
+              loadSessions();
+              return;
+            }
             updateSessionSnapshot(data);
             updateShellChrome();
 
@@ -5825,11 +5834,26 @@
 
       function handleInputBoxBlur() {
         resetInputPanelViewportSpacing();
-        // Restore app container height when keyboard closes
-        var appContainer = document.querySelector('.app-container');
-        if (appContainer) {
-          appContainer.style.height = '';
-        }
+        // Restore app container height when keyboard closes.
+        // Use a short delay because on iOS the visualViewport may not
+        // have updated yet at the moment blur fires.
+        setTimeout(function() {
+          var appContainer = document.querySelector('.app-container');
+          if (appContainer) {
+            // Only clear if keyboard is actually closed now
+            var vv = window.visualViewport;
+            if (vv) {
+              var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
+              if (offsetBottom <= 50) {
+                appContainer.style.height = '';
+              }
+            } else {
+              appContainer.style.height = '';
+            }
+          }
+          // Scroll the window back to top to fix any residual offset
+          window.scrollTo(0, 0);
+        }, 100);
       }
 
       function adjustInputBoxSelection(inputBox) {
@@ -6542,13 +6566,16 @@
           var isKeyboardOpen = offsetBottom > 50;
           var heightChanged = Math.abs(vv.height - lastHeight) > 8;
 
-          // In PWA standalone mode, dynamically resize the app container
-          // because 100dvh does NOT shrink when keyboard appears in standalone PWA
+          // Dynamically resize the app container to match visible viewport.
+          // This is needed because 100dvh does NOT shrink when the keyboard
+          // appears in PWA standalone mode, and on some browsers the layout
+          // viewport doesn't update on keyboard dismiss without this.
           var appContainer = document.querySelector('.app-container');
           if (appContainer) {
             if (isKeyboardOpen) {
               appContainer.style.height = vv.height + 'px';
-            } else {
+            } else if (keyboardOpen) {
+              // Keyboard just closed — clear forced height
               appContainer.style.height = '';
             }
           }
@@ -6571,6 +6598,9 @@
         }
 
         vv.addEventListener('resize', debouncedUpdate);
+        // Also listen to scroll — on iOS, keyboard dismiss sometimes only
+        // fires a scroll event (viewport scrolls back) without a resize event.
+        vv.addEventListener('scroll', debouncedUpdate);
 
         updateViewport();
       }
@@ -7856,8 +7886,12 @@
         if (!state.terminalDomView || !state.serializeAddon) return;
 
         try {
+          // Serialize the entire buffer including scrollback history
+          var buf = state.terminal.buffer.active;
+          var totalRows = buf.length;
           var html = state.serializeAddon.serializeAsHTML({
-            includeGlobalBackground: true
+            includeGlobalBackground: true,
+            range: { start: 0, end: totalRows }
           });
 
           // Extract the <pre>...</pre> portion
