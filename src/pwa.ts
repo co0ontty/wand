@@ -51,7 +51,8 @@ const STATIC_ASSETS = [
   '/icon-512.png',
   '/vendor/xterm/css/xterm.css',
   '/vendor/xterm/lib/xterm.js',
-  '/vendor/xterm-addon-fit/lib/addon-fit.js'
+  '/vendor/xterm-addon-fit/lib/addon-fit.js',
+  '/vendor/xterm-addon-serialize/lib/xterm-addon-serialize.js'
 ];
 
 self.addEventListener('install', (event) => {

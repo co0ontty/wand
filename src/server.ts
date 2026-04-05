@@ -329,6 +329,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   app.use(express.json({ limit: "1mb" }));
   app.use("/vendor/xterm", express.static(path.join(nodeModulesDir, "xterm")));
   app.use("/vendor/xterm-addon-fit", express.static(path.join(nodeModulesDir, "@xterm", "addon-fit")));
+  app.use("/vendor/xterm-addon-serialize", express.static(path.join(nodeModulesDir, "xterm-addon-serialize")));
 
   // ── Web UI and PWA endpoints ──
 
@@ -428,6 +429,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
+      experimentalDomTerminal: config.experimentalDomTerminal ?? false,
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
       currentVersion: PKG_VERSION,
@@ -454,7 +456,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.post("/api/settings/config", async (req, res) => {
     const body = req.body as Partial<WandConfig>;
-    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell"] as const;
+    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "experimentalDomTerminal"] as const;
     let changed = false;
 
     for (const field of allowedFields) {
@@ -480,6 +482,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           config.defaultCwd = String(body.defaultCwd);
         } else if (field === "shell") {
           config.shell = String(body.shell);
+        } else if (field === "experimentalDomTerminal") {
+          config.experimentalDomTerminal = body.experimentalDomTerminal === true;
         }
         changed = true;
       }
