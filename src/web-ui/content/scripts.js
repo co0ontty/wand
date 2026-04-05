@@ -94,8 +94,8 @@
         modalOpen: false,
         presetValue: "",
         cwdValue: "",
-        modeValue: "full-access",
-        chatMode: "full-access",
+        modeValue: "managed",
+        chatMode: "managed",
         sessionTool: "claude",
         preferredCommand: "claude",
         lastResize: { cols: 0, rows: 0 },
@@ -1659,11 +1659,11 @@
       }
       function renderModeCards(selectedMode) {
         var modes = [
-          { id: "default",     label: "标准",     desc: "逐步确认操作" },
+          { id: "managed",     label: "托管",     desc: "全自动完成任务" },
           { id: "full-access", label: "全权限",   desc: "自动确认权限" },
           { id: "auto-edit",   label: "自动编辑", desc: "自动确认修改" },
-          { id: "native",      label: "原生",     desc: "结构化单轮输出" },
-          { id: "managed",     label: "托管",     desc: "全自动完成任务" }
+          { id: "default",     label: "标准",     desc: "逐步确认操作" },
+          { id: "native",      label: "原生",     desc: "结构化单轮输出" }
         ];
         return modes.map(function(m) {
           var active = m.id === selectedMode ? " active" : "";
@@ -4585,7 +4585,7 @@
         welcomeInput.value = "";
         welcomeInput.placeholder = "正在启动会话...";
         welcomeInput.disabled = true;
-        var mode = state.chatMode || "full-access";
+        var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
@@ -4645,7 +4645,7 @@
         }
 
         // No selected session, create a new one
-        var mode = state.chatMode || "full-access";
+        var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
@@ -5592,7 +5592,7 @@
         if (!welcomeInput) return;
         welcomeInput.placeholder = "Claude 正在思考，请稍候...";
         welcomeInput.disabled = true;
-        var mode = state.chatMode || "full-access";
+        var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
@@ -5628,7 +5628,7 @@
       }
 
       function createSessionFromInput(value, inputBox, welcomeInput) {
-        var mode = state.chatMode || "full-access";
+        var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
         fetch("/api/commands", {
