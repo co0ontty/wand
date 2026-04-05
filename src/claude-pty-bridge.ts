@@ -27,7 +27,8 @@ import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitC
 
 const OUTPUT_MAX_SIZE = 120000;
 const SESSION_ID_WINDOW_SIZE = 16384;
-const PERMISSION_WINDOW_SIZE = 800;
+const PERMISSION_WINDOW_SIZE = 2000;
+const AUTO_APPROVE_DELAY_MS = 150;
 
 const UUID_PATTERN = "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})";
 const CLAUDE_SESSION_ID_PATTERNS = [
@@ -63,6 +64,8 @@ interface PermissionState {
   lastTarget: string | null;
   /** Timestamp of last auto-confirm to prevent rapid repeats */
   lastAutoConfirmAt: number;
+  /** Timer for delayed auto-approve (gives CLI time to be ready) */
+  pendingAutoApproveTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Permission resolution result */
@@ -166,6 +169,7 @@ export class ClaudePtyBridge extends EventEmitter {
       lastScope: null,
       lastTarget: null,
       lastAutoConfirmAt: 0,
+      pendingAutoApproveTimer: null,
     };
 
     this.sessionIdWindow = "";
@@ -276,6 +280,7 @@ export class ClaudePtyBridge extends EventEmitter {
     }
 
     // Clear permission state — prevents stale blocked state after exit
+    this.cancelPendingAutoApprove();
     this.permissionState.isBlocked = false;
     this.permissionState.lastPrompt = null;
     this.permissionState.lastScope = null;
@@ -343,6 +348,9 @@ export class ClaudePtyBridge extends EventEmitter {
       }
     }
 
+    // Cancel any pending auto-approve timer (user resolved manually)
+    this.cancelPendingAutoApprove();
+
     // Send approval/denial to PTY
     if (this.ptyWrite) {
       if (resolution === "deny") {
@@ -388,6 +396,7 @@ export class ClaudePtyBridge extends EventEmitter {
    * Clear permission blocked state (called when permission is resolved externally).
    */
   clearPermissionBlocked(): void {
+    this.cancelPendingAutoApprove();
     this.permissionState.isBlocked = false;
     this.permissionState.window = "";
     this.permissionState.lastPrompt = null;
@@ -460,24 +469,7 @@ export class ClaudePtyBridge extends EventEmitter {
 
           const shouldAutoApprove = this.autoApprove || this.shouldAutoApprove(scope, target);
           if (shouldAutoApprove) {
-            const now = Date.now();
-            if (now - this.permissionState.lastAutoConfirmAt < 500) return;
-            this.permissionState.lastAutoConfirmAt = now;
-            process.stderr.write(`[wand] Auto-confirming permission for ${scope}${target ? `: ${target}` : ""}\n`);
-            if (this.ptyWrite) {
-              this.ptyWrite("\r");
-            }
-            this.permissionState.isBlocked = false;
-            this.permissionState.window = "";
-            this.permissionState.lastPrompt = null;
-            this.permissionState.lastScope = null;
-            this.permissionState.lastTarget = null;
-            this.emitEvent({
-              type: "permission.resolved",
-              sessionId: this.sessionId,
-              timestamp: Date.now(),
-              data: { resolution: "approve_once", autoApproved: true },
-            });
+            this.scheduleAutoApprove(scope, target);
           } else {
             this.emitEvent({
               type: "permission.prompt",
@@ -506,31 +498,7 @@ export class ClaudePtyBridge extends EventEmitter {
       const shouldAutoApprove = this.autoApprove || this.shouldAutoApprove(scope, target);
 
       if (shouldAutoApprove) {
-        // Debounce auto-confirm to avoid rapid repeats
-        const now = Date.now();
-        if (now - this.permissionState.lastAutoConfirmAt < 500) return;
-
-        this.permissionState.lastAutoConfirmAt = now;
-        process.stderr.write(`[wand] Auto-confirming permission for ${scope}${target ? `: ${target}` : ""}\n`);
-
-        // Send approval to PTY
-        if (this.ptyWrite) {
-          this.ptyWrite("\r");
-        }
-
-        // Clear blocked state immediately
-        this.permissionState.isBlocked = false;
-        this.permissionState.window = "";
-        this.permissionState.lastPrompt = null;
-        this.permissionState.lastScope = null;
-        this.permissionState.lastTarget = null;
-
-        this.emitEvent({
-          type: "permission.resolved",
-          sessionId: this.sessionId,
-          timestamp: Date.now(),
-          data: { resolution: "approve_once", autoApproved: true },
-        });
+        this.scheduleAutoApprove(scope, target);
       } else {
         // Emit permission prompt event for UI to handle
         this.emitEvent({
@@ -554,6 +522,50 @@ export class ClaudePtyBridge extends EventEmitter {
     }
   }
 
+  /**
+   * Schedule a delayed auto-approve. The delay gives the Claude CLI's interactive
+   * selection prompt time to fully render and enter its input loop before we send \r.
+   */
+  private scheduleAutoApprove(scope: EscalationScope, target?: string): void {
+    // Debounce: skip if another auto-approve was recently sent or is pending
+    const now = Date.now();
+    if (now - this.permissionState.lastAutoConfirmAt < 500) return;
+    if (this.permissionState.pendingAutoApproveTimer) return;
+
+    this.permissionState.lastAutoConfirmAt = now;
+    process.stderr.write(`[wand] Scheduling auto-confirm for ${scope}${target ? `: ${target}` : ""} (${AUTO_APPROVE_DELAY_MS}ms)\n`);
+
+    this.permissionState.pendingAutoApproveTimer = setTimeout(() => {
+      this.permissionState.pendingAutoApproveTimer = null;
+      if (this._exited) return;
+
+      process.stderr.write(`[wand] Auto-confirming permission for ${scope}${target ? `: ${target}` : ""}\n`);
+      if (this.ptyWrite) {
+        this.ptyWrite("\r");
+      }
+
+      this.permissionState.isBlocked = false;
+      this.permissionState.window = "";
+      this.permissionState.lastPrompt = null;
+      this.permissionState.lastScope = null;
+      this.permissionState.lastTarget = null;
+
+      this.emitEvent({
+        type: "permission.resolved",
+        sessionId: this.sessionId,
+        timestamp: Date.now(),
+        data: { resolution: "approve_once", autoApproved: true },
+      });
+    }, AUTO_APPROVE_DELAY_MS);
+  }
+
+  private cancelPendingAutoApprove(): void {
+    if (this.permissionState.pendingAutoApproveTimer) {
+      clearTimeout(this.permissionState.pendingAutoApproveTimer);
+      this.permissionState.pendingAutoApproveTimer = null;
+    }
+  }
+
   private isPermissionPromptDetected(normalized: string): boolean {
     const hasIntent = /\bdo you want to\b/i.test(normalized)
       || /\bwould you like to\b/i.test(normalized)
@@ -563,10 +575,16 @@ export class ClaudePtyBridge extends EventEmitter {
     const hasConfirmSyntax = hasExplicitConfirmSyntax(normalized);
     const hasActionCtx = hasPermissionActionContext(normalized);
 
+    // For numbered selection prompts (Claude CLI v2+), require the readiness marker
+    // "Esc to cancel" / "Tab to amend" which appears only after the full menu is rendered
+    // and the input handler is active
+    const hasReadyMarker = /\besc\b.*\bcancel\b/i.test(normalized)
+      || /\btab\b.*\bamend\b/i.test(normalized);
+
     // Intent phrase + explicit confirm syntax (e.g. "Do you want to proceed? (yes/no)")
     if (hasIntent && hasConfirmSyntax) return true;
-    // Intent phrase + action keyword (e.g. "Do you want to execute this command?")
-    if (hasIntent && hasActionCtx) return true;
+    // Intent phrase + action keyword + readiness marker (numbered selection prompts)
+    if (hasIntent && hasActionCtx && hasReadyMarker) return true;
     // Standalone confirm syntax + action keyword (e.g. "[y/n] Allow bash command")
     if (hasConfirmSyntax && hasActionCtx) return true;
 

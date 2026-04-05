@@ -48,6 +48,8 @@ export interface WandConfig {
   commandPresets: CommandPreset[];
   /** Max total size (bytes) for shortcut interaction logs per session (default: 10 MB). Set 0 to disable logging. */
   shortcutLogMaxBytes?: number;
+  /** Experimental: use DOM-based terminal rendering on mobile for native text selection (default: false) */
+  experimentalDomTerminal?: boolean;
 }
 
 export interface CommandRequest {

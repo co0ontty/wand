@@ -16,7 +16,7 @@ export function renderApp(configPath: string): string {
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>Wand Console</title>
   <meta name="description" content="Local CLI Console for Vibe Coding - Manage terminal sessions from your browser" />
   <meta name="theme-color" content="#f6f1e8" media="(prefers-color-scheme: light)" />
@@ -41,6 +41,7 @@ ${cssStyles}
   <div id="app"></div>
 ${scriptOpen} src="/vendor/xterm/lib/xterm.js">${scriptClose}
 ${scriptOpen} src="/vendor/xterm-addon-fit/lib/addon-fit.js">${scriptClose}
+${scriptOpen} src="/vendor/xterm-addon-serialize/lib/xterm-addon-serialize.js">${scriptClose}
 ${scriptOpen}>
 ${scriptContent}
 ${scriptClose}

@@ -6700,6 +6700,9 @@
         }
         state.fitAddon = null;
         state.serializeAddon = null;
+        if (state.terminalDomView && state.terminalDomView.parentNode) {
+          state.terminalDomView.parentNode.removeChild(state.terminalDomView);
+        }
         state.terminalDomView = null;
         state._lastDomHtml = "";
         if (state.terminalDomUpdateTimer) {
@@ -7811,18 +7814,16 @@
         domView.className = "terminal-dom-view active";
         container.appendChild(domView);
 
-        // Apply current scale
-        if (state.terminalScale !== 1) {
-          domView.style.fontSize = (state.terminalBaseFontSize * state.terminalScale) + "px";
-        }
+        // Always set font-size explicitly to match xterm
+        domView.style.fontSize = (state.terminalBaseFontSize * state.terminalScale) + "px";
 
-        // Hide xterm rendering layer but preserve layout for FitAddon
-        // Use visibility:hidden instead of display:none so fit() can compute cols/rows
+        // Hide xterm canvas but keep it in layout for FitAddon sizing.
+        // Use opacity:0 + pointer-events:none so the element still occupies
+        // space in the flex container and fit() can compute cols/rows correctly.
         setTimeout(function() {
           var xtermEl = container.querySelector(".xterm");
           if (xtermEl) {
-            xtermEl.style.visibility = "hidden";
-            xtermEl.style.position = "absolute";
+            xtermEl.style.opacity = "0";
             xtermEl.style.pointerEvents = "none";
           }
         }, 100);
@@ -7863,6 +7864,11 @@
           var match = html.match(/<pre[\s\S]*<\/pre>/);
           var preHtml = match ? match[0] : "";
 
+          // Strip inline font-size/font-family from the serialized HTML
+          // so our CSS controls sizing and font consistently
+          preHtml = preHtml.replace(/font-size:\s*[^;"']+;?/g, "");
+          preHtml = preHtml.replace(/font-family:\s*[^;"']+;?/g, "");
+
           // Fix colors for dark background
           preHtml = fixDarkTerminalColors(preHtml);
 
@@ -7891,7 +7897,7 @@
               if (line) lines.push(line.translateToString(true));
             }
             var text = lines.join("\n").replace(/\n+$/, "");
-            state.terminalDomView.innerHTML = '<pre>' + escapeHtml(text) + '</pre>';
+            state.terminalDomView.innerHTML = '<pre><div style="padding:8px 12px">' + escapeHtml(text) + '</div></pre>';
             if (state.terminalAutoFollow) {
               state.terminalDomView.scrollTop = state.terminalDomView.scrollHeight;
             }
@@ -7907,23 +7913,23 @@
           /color:\s*#000000;\s*background-color:\s*#BFBFBF/g,
           "color: #f5eadc; background-color: #625347"
         );
-        // 2. Fix colors inside style attributes that are too dark to read on #1f1b17 background
-        html = html.replace(/style='([^']*)'/g, function(match, styles) {
-          // Extract the color value (not background-color)
-          return "style='" + styles.replace(
-            /\bcolor:\s*(#[0-9a-fA-F]{6})\b/g,
-            function(colorMatch, hex) {
-              // Check if this is actually a background-color (skip it)
-              var beforeColor = styles.substring(0, styles.indexOf(colorMatch));
-              if (beforeColor.lastIndexOf("background-") > beforeColor.lastIndexOf(";")) {
-                return colorMatch; // This is background-color, leave it
+        // 2. Fix foreground colors that are too dark to read on #1f1b17 background.
+        //    Process each style attribute: split into declarations, fix only "color:" (not "background-color:").
+        html = html.replace(/style='([^']*)'/g, function(_match, styles) {
+          var parts = styles.split(";");
+          for (var i = 0; i < parts.length; i++) {
+            var decl = parts[i].trim();
+            // Skip background-color declarations
+            if (/^background-color\s*:/.test(decl)) continue;
+            // Match standalone color declaration
+            if (/^color\s*:/.test(decl)) {
+              var hexMatch = decl.match(/#([0-9a-fA-F]{6})\b/);
+              if (hexMatch && isColorTooDark("#" + hexMatch[1])) {
+                parts[i] = parts[i].replace(/#[0-9a-fA-F]{6}/, "#625347");
               }
-              if (isColorTooDark(hex)) {
-                return "color: #625347"; // Use brightBlack
-              }
-              return colorMatch;
             }
-          ) + "'";
+          }
+          return "style='" + parts.join(";") + "'";
         });
         return html;
       }

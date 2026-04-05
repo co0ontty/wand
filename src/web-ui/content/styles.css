@@ -2211,6 +2211,18 @@
     .chat-message:hover {
       transform: translateY(-1px);
     }
+    @media (hover: none) {
+      .chat-message:hover {
+        transform: none;
+      }
+      .chat-message:hover .chat-message-bubble {
+        box-shadow: var(--shadow-sm);
+      }
+      .chat-message.assistant:hover .chat-message-bubble {
+        border-color: var(--border-subtle);
+        box-shadow: var(--shadow-sm);
+      }
+    }
 
     .chat-message.user {
       align-self: flex-end;
@@ -7175,6 +7187,104 @@
     @keyframes placeholderWave {
       0% { background-position: 200% 0; }
       100% { background-position: -200% 0; }
+    }
+
+    /* ===== 移动端文本选择与复制优化 ===== */
+    .chat-message-bubble {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+
+    /* 消息气泡复制按钮 */
+    .msg-copy-btn {
+      display: none;
+      position: absolute;
+      top: -32px;
+      right: 4px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-md);
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      z-index: 10;
+      white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .msg-copy-btn.visible {
+      display: block;
+    }
+    .msg-copy-btn.copied {
+      background: var(--success-muted);
+      color: var(--success);
+      border-color: var(--success);
+    }
+    .chat-message {
+      position: relative;
+    }
+
+    /* ===== 移动端 DOM 终端视图 ===== */
+    .terminal-dom-view {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      background: var(--bg-terminal);
+      z-index: 1;
+      font-size: 13px;
+    }
+
+    .terminal-dom-view.active {
+      display: block;
+    }
+
+    .terminal-dom-view pre {
+      margin: 0;
+      padding: 0;
+      background: transparent !important;
+      font-family: "Geist Mono", "SF Mono", monospace !important;
+      font-size: inherit !important;
+      line-height: 1.5 !important;
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      word-break: normal;
+      -webkit-user-select: text;
+      user-select: text;
+    }
+
+    /* serializeAsHTML 外层 div 携带主题色，直接继承 */
+    .terminal-dom-view pre > div {
+      font-family: "Geist Mono", "SF Mono", monospace !important;
+      font-size: inherit !important;
+      line-height: 1.5 !important;
+      padding: 8px 12px;
+    }
+
+    /* serializeAsHTML 每行 div */
+    .terminal-dom-view pre > div > div {
+      min-height: 1.5em;
+    }
+
+    /* span 继承终端字体 */
+    .terminal-dom-view span {
+      font-family: inherit !important;
+      font-size: inherit !important;
+      line-height: inherit !important;
+    }
+
+    /* 确保按钮在 DOM 视图之上 */
+    .terminal-jump-bottom {
+      z-index: 20;
     }
 
     /* 结束标记 */
