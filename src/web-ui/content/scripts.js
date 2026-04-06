@@ -159,6 +159,76 @@
         })()
       };
 
+      // ── Structured session status bar (in-flight timer) ──
+      var _statusBarTimerId = null;
+      var _statusBarStartTime = 0;
+
+      function renderStructuredStatusBar(chatMessages, session) {
+        // Remove stale bar if session changed or not structured
+        var existing = chatMessages.querySelector(".structured-status-bar");
+        if (!session || !isStructuredSession(session)) {
+          if (existing) existing.remove();
+          clearInterval(_statusBarTimerId);
+          _statusBarTimerId = null;
+          return;
+        }
+
+        var isInFlight = session.structuredState && session.structuredState.inFlight;
+
+        if (isInFlight) {
+          // Start timer if not already running
+          if (!_statusBarTimerId) {
+            _statusBarStartTime = Date.now();
+          }
+
+          if (!existing) {
+            var bar = document.createElement("div");
+            bar.className = "structured-status-bar";
+            bar.innerHTML =
+              '<span class="status-bar-label">回复中</span>' +
+              '<div class="status-bar-track"><div class="status-bar-fill"></div></div>' +
+              '<span class="status-bar-timer">0.0s</span>';
+            // column-reverse: first child = visual bottom
+            chatMessages.insertBefore(bar, chatMessages.firstChild);
+            existing = bar;
+          } else if (existing.classList.contains("completed")) {
+            // Was completed, now in-flight again — reset
+            existing.classList.remove("completed");
+            existing.style.animation = "none";
+            existing.querySelector(".status-bar-label").textContent = "回复中";
+            _statusBarStartTime = Date.now();
+          }
+
+          // Start interval to update timer
+          if (!_statusBarTimerId) {
+            _statusBarTimerId = setInterval(function() {
+              var bar = document.querySelector(".structured-status-bar:not(.completed)");
+              if (!bar) { clearInterval(_statusBarTimerId); _statusBarTimerId = null; return; }
+              var elapsed = ((Date.now() - _statusBarStartTime) / 1000).toFixed(1);
+              var timerEl = bar.querySelector(".status-bar-timer");
+              if (timerEl) timerEl.textContent = elapsed + "s";
+            }, 100);
+          }
+        } else {
+          // Not in-flight: show completion or remove
+          clearInterval(_statusBarTimerId);
+          _statusBarTimerId = null;
+
+          if (existing && !existing.classList.contains("completed")) {
+            // Just finished — transition to completed state
+            var elapsed = _statusBarStartTime ? ((Date.now() - _statusBarStartTime) / 1000).toFixed(1) : "0.0";
+            existing.classList.add("completed");
+            existing.querySelector(".status-bar-label").textContent = "完成";
+            existing.querySelector(".status-bar-timer").textContent = elapsed + "s";
+            _statusBarStartTime = 0;
+            // Remove after animation ends
+            setTimeout(function() {
+              if (existing.parentNode) existing.remove();
+            }, 3000);
+          }
+        }
+      }
+
       // Helper function to persist selected session ID to localStorage
       function persistSelectedId() {
         try {
@@ -3709,6 +3779,16 @@
               }
             }
             updateShellChrome();
+
+            // For structured sessions, loadOutput is needed to fetch messages
+            // (the sessions list endpoint doesn't include them).
+            // On page refresh this is the only place that can trigger it.
+            if (state.selectedId) {
+              var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
+              if (isStructuredSession(sel)) {
+                loadOutput(state.selectedId);
+              }
+            }
           })
           .catch(function(e) {
             console.error("[wand] loadSessions failed:", e);
@@ -3806,7 +3886,12 @@
           clearTimeout(chatRenderTimer);
           chatRenderTimer = null;
         }
-        return fetch("/api/sessions/" + id, { credentials: "same-origin" })
+        var sess = state.sessions.find(function(s) { return s.id === id; });
+        var url = "/api/sessions/" + id;
+        if (isStructuredSession(sess)) {
+          url += "?format=chat";
+        }
+        return fetch(url, { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
             if (data.error) {
@@ -7135,15 +7220,18 @@
             state.fitAddon.fit();
             maybeScrollTerminalToBottom("resize");
             if (state.selectedId && state.terminal) {
-              var nextSize = { cols: state.terminal.cols, rows: state.terminal.rows };
-              if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
-                state.lastResize = nextSize;
-                fetch("/api/sessions/" + state.selectedId + "/resize", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  credentials: "same-origin",
-                  body: JSON.stringify(nextSize)
-                }).catch(function() {});
+              var selectedSess = state.sessions.find(function(s) { return s.id === state.selectedId; });
+              if (!isStructuredSession(selectedSess)) {
+                var nextSize = { cols: state.terminal.cols, rows: state.terminal.rows };
+                if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
+                  state.lastResize = nextSize;
+                  fetch("/api/sessions/" + state.selectedId + "/resize", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify(nextSize)
+                  }).catch(function() {});
+                }
               }
             }
           } else if (attempt < maxAttempts) {
@@ -7182,6 +7270,10 @@
         };
 
         if (!state.selectedId) return;
+
+        // Skip resize for structured sessions (no PTY)
+        var resizeSess = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (isStructuredSession(resizeSess)) return;
 
         // Only send resize API call if dimensions actually changed
         if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
@@ -7336,6 +7428,8 @@
               var endedSendBtn = document.getElementById("send-input-button");
               if (endedSendBtn) endedSendBtn.disabled = false;
               updateInputHint("Enter 发送 · Shift+Enter 换行");
+              // Trigger status bar completion animation
+              scheduleChatRender(true);
             }
             // Notify user when a session completes (browser + in-app if backgrounded or not viewing)
             var endedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
@@ -7903,6 +7997,10 @@
         // Force full render if message count changed or explicitly requested
         var forceRender = forceFullRender || msgCount !== state.lastRenderedMsgCount;
         if (!forceRender && msgCount === state.lastRenderedMsgCount && outputHash === state.lastRenderedHash) {
+          // Even if message content hasn't changed, update the status bar
+          // (inFlight state may have changed without new message content)
+          var chatMessages = chatOutput.querySelector(".chat-messages");
+          if (chatMessages) renderStructuredStatusBar(chatMessages, selectedSession);
           return;
         }
         var prevHash = state.lastRenderedHash;
@@ -8055,6 +8153,9 @@
         } else if (msgCount < existingCount) {
           fullRenderChat();
         }
+
+        // Update structured session status bar (in-flight / completed indicator)
+        renderStructuredStatusBar(chatMessages, selectedSession);
 
         // Update todo progress bar from latest messages
         updateTodoProgress(messages);
