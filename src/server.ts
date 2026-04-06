@@ -304,9 +304,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
 
   app.use(express.json({ limit: "1mb" }));
-  app.use("/vendor/xterm", express.static(path.join(nodeModulesDir, "xterm")));
+  app.use("/vendor/xterm", express.static(path.join(nodeModulesDir, "@xterm", "xterm")));
   app.use("/vendor/xterm-addon-fit", express.static(path.join(nodeModulesDir, "@xterm", "addon-fit")));
-  app.use("/vendor/xterm-addon-serialize", express.static(path.join(nodeModulesDir, "xterm-addon-serialize")));
+  app.use("/vendor/xterm-addon-serialize", express.static(path.join(nodeModulesDir, "@xterm", "addon-serialize")));
 
   // ── Web UI and PWA endpoints ──
 
