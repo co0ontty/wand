@@ -100,7 +100,7 @@
         cwdValue: "",
         modeValue: "managed",
         chatMode: "managed",
-        sessionCreateKind: "pty",
+        sessionCreateKind: "structured",
         sessionTool: "claude",
         preferredCommand: "claude",
         structuredRunner: "claude-cli-print",
@@ -1815,7 +1815,7 @@
           { id: "full-access", label: "全权限",   desc: "自动确认权限" },
           { id: "auto-edit",   label: "自动编辑", desc: "自动确认修改" },
           { id: "default",     label: "标准",     desc: "逐步确认操作" },
-          { id: "native",      label: "原生",     desc: "结构化单轮输出" }
+          { id: "native",      label: "原生",     desc: "原生结构化输出" }
         ];
         return modes.map(function(m) {
           var active = m.id === selectedMode ? " active" : "";
@@ -1828,8 +1828,8 @@
 
       function renderSessionKindOptions(selectedKind) {
         var kinds = [
-          { id: "pty", label: "PTY", desc: "交互式终端会话" },
-          { id: "structured", label: "Structured", desc: "单轮结构化输出" }
+          { id: "structured", label: "结构化", desc: "智能对话模式" },
+          { id: "pty", label: "PTY", desc: "交互式终端会话" }
         ];
         return kinds.map(function(kind) {
           var active = kind.id === selectedKind ? " active" : "";
@@ -1842,15 +1842,15 @@
 
       function getSessionKindHint(kind) {
         if (kind === "structured") {
-          return "直接使用 claude -p 获取结构化单轮结果。";
+          return "结构化聊天界面，支持多轮对话、流式输出和工具调用展示。";
         }
-        return "默认 PTY 会话，支持持续交互、终端视图和权限流。";
+        return "原始 PTY 终端会话，支持持续交互、终端视图和权限流。";
       }
 
       function renderSessionModal() {
         var modalTool = getPreferredTool();
         var modalMode = getSafeModeForTool(modalTool, state.modeValue || state.chatMode || "default");
-        var sessionKind = state.sessionCreateKind || "pty";
+        var sessionKind = state.sessionCreateKind || "structured";
         return '<section id="session-modal" class="modal-backdrop hidden">' +
           '<div class="modal session-modal">' +
             '<div class="modal-header">' +
@@ -3462,7 +3462,7 @@
           return "保留交互式会话，同时更偏向直接编辑代码。";
         }
         if (mode === "native") {
-          return "按单轮消息调用 Claude 原生输出，适合快速问答或一次性生成。";
+          return "调用 Claude 原生 API 输出，适合快速问答或一次性生成。";
         }
         if (mode === "managed") {
           return "AI 自动完成所有工作，无需中途确认，适合有明确目标的任务。";
@@ -3612,7 +3612,7 @@
         var modeHint = document.getElementById("mode-description");
         var kindHint = document.getElementById("session-kind-description");
         var tool = "claude";
-        var sessionKind = state.sessionCreateKind || "pty";
+        var sessionKind = state.sessionCreateKind || "structured";
 
         state.sessionTool = tool;
         state.modeValue = getSafeModeForTool(tool, state.modeValue || state.chatMode || "default");
@@ -4007,7 +4007,7 @@
           modal.classList.remove("hidden");
           lastFocusedElement = document.activeElement;
           state.sessionTool = getPreferredTool();
-          state.sessionCreateKind = "pty";
+          state.sessionCreateKind = "structured";
           state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
           syncSessionModalUI();
           loadRecentPathBubbles();
@@ -4535,7 +4535,7 @@
         var cwdEl = document.getElementById("cwd");
         var errorEl = document.getElementById("modal-error");
         var command = getPreferredTool();
-        var sessionKind = state.sessionCreateKind || "pty";
+        var sessionKind = state.sessionCreateKind || "structured";
 
         hideError(errorEl);
 
