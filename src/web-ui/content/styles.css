@@ -2876,6 +2876,65 @@
       border-radius: 2px;
     }
 
+    /* ── Tool Group (连续同类调用折叠) ── */
+    .tool-group {
+      margin: 2px 0;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle, rgba(127,127,127,0.1));
+      overflow: hidden;
+    }
+    .tool-group-summary {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      user-select: none;
+      transition: background var(--transition-fast);
+    }
+    .tool-group-summary:hover {
+      background: var(--bg-hover, rgba(127,127,127,0.06));
+    }
+    .tool-group-status {
+      font-size: 0.6875rem;
+      flex-shrink: 0;
+      width: 14px;
+      text-align: center;
+    }
+    .tool-group[data-status="done"] .tool-group-status { color: var(--success, #22c55e); }
+    .tool-group[data-status="error"] .tool-group-status { color: var(--error, #ef4444); }
+    .tool-group[data-status="pending"] .tool-group-status { color: var(--text-muted); }
+    .tool-group-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tool-group-count {
+      flex-shrink: 0;
+      font-size: 0.625rem;
+      color: var(--text-muted);
+    }
+    .tool-group-chevron {
+      flex-shrink: 0;
+      transition: transform 0.2s ease;
+      color: var(--text-muted);
+    }
+    .tool-group[data-expanded="true"] .tool-group-chevron {
+      transform: rotate(180deg);
+    }
+    .tool-group-body {
+      display: none;
+      padding: 2px 6px 4px;
+      border-top: 1px solid var(--border-subtle, rgba(127,127,127,0.08));
+    }
+    .tool-group[data-expanded="true"] .tool-group-body {
+      display: block;
+    }
+
     /* ── Inline Tool Display (Read, Glob, Grep, WebFetch, WebSearch, TodoRead) ── */
     .inline-tool {
       display: flex;
@@ -7522,13 +7581,61 @@
     }
 
     /* ── 结构化会话状态条 ── */
+    /* ── 输入框顶部波浪脉冲（回复中） ── */
+    .input-composer.in-flight {
+      border-color: transparent;
+    }
+    .input-composer.in-flight::before {
+      content: "";
+      position: absolute;
+      top: -2px;
+      left: -60%;
+      width: 220%;
+      height: 3px;
+      border-radius: 14px 14px 0 0;
+      background:
+        radial-gradient(ellipse 280px 4px,
+          rgba(var(--accent-rgb, 197, 101, 61), 0.45) 0%,
+          rgba(var(--accent-rgb, 197, 101, 61), 0.12) 35%,
+          transparent 60%)
+        no-repeat;
+      background-size: 280px 4px;
+      animation: composerWaveSlide 7s cubic-bezier(0.35, 0, 0.65, 1) infinite;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .input-composer.in-flight::after {
+      content: "";
+      position: absolute;
+      top: -2px;
+      left: -60%;
+      width: 220%;
+      height: 3px;
+      border-radius: 14px 14px 0 0;
+      background:
+        radial-gradient(ellipse 220px 3px,
+          rgba(var(--accent-rgb, 197, 101, 61), 0.25) 0%,
+          rgba(var(--accent-rgb, 197, 101, 61), 0.06) 35%,
+          transparent 60%)
+        no-repeat;
+      background-size: 220px 3px;
+      animation: composerWaveSlide 9s cubic-bezier(0.35, 0, 0.65, 1) infinite reverse;
+      z-index: 2;
+      pointer-events: none;
+    }
+    @keyframes composerWaveSlide {
+      0%   { background-position: 0% center; }
+      100% { background-position: 100% center; }
+    }
+
+    /* ── 结构化会话状态条（输入框右上角） ── */
     .structured-status-bar {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin: 0;
-      padding: 4px 10px;
-      border-radius: var(--radius-sm);
+      justify-content: flex-end;
+      gap: 5px;
+      margin: 0 4px 2px 0;
+      padding: 0;
       background: transparent;
       border: none;
       font-size: 0.6875rem;
@@ -7537,35 +7644,25 @@
       overflow: hidden;
     }
 
+    .structured-status-bar .status-bar-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: rgba(var(--accent-rgb, 197, 101, 61), 0.8);
+      animation: statusDotPulse 1.2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes statusDotPulse {
+      0%, 100% { opacity: 0.4; transform: scale(0.9); }
+      50%      { opacity: 1;   transform: scale(1.1); }
+    }
+
     .structured-status-bar .status-bar-label {
       flex-shrink: 0;
       font-weight: 500;
       color: var(--text-muted);
-    }
-
-    .structured-status-bar .status-bar-track {
-      flex: 1;
-      height: 2px;
-      border-radius: 1px;
-      background: rgba(var(--accent-rgb, 99, 102, 241), 0.08);
-      overflow: hidden;
-      position: relative;
-    }
-
-    .structured-status-bar .status-bar-fill {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 30%;
-      height: 100%;
-      border-radius: 1px;
-      background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
-      animation: marqueeScroll 1.5s ease-in-out infinite;
-    }
-
-    @keyframes marqueeScroll {
-      0%   { left: -40%; }
-      100% { left: 100%; }
+      font-size: 0.625rem;
     }
 
     .structured-status-bar .status-bar-timer {
@@ -7578,8 +7675,6 @@
 
     /* 完成态 */
     .structured-status-bar.completed {
-      background: transparent;
-      border-color: transparent;
       animation: statusBarFadeOut 2s ease-out 1s forwards;
     }
 
@@ -7587,22 +7682,10 @@
       color: var(--success);
     }
 
-    .structured-status-bar.completed .status-bar-track {
-      background: rgba(79, 122, 88, 0.1);
-    }
-
-    .structured-status-bar.completed .status-bar-fill {
-      width: 100%;
-      background: var(--success);
-      opacity: 0.5;
-      animation: none;
-      left: 0;
-    }
-
     @keyframes statusBarFadeOut {
-      0%   { opacity: 1; max-height: 30px; margin: 0; padding: 4px 10px; }
-      70%  { opacity: 0; max-height: 30px; margin: 0; padding: 4px 10px; }
-      100% { opacity: 0; max-height: 0; margin: 0; padding: 0 10px; border-width: 0; }
+      0%   { opacity: 1; max-height: 20px; }
+      70%  { opacity: 0; max-height: 20px; }
+      100% { opacity: 0; max-height: 0; margin: 0; }
     }
 
     /* 结束标记 */
