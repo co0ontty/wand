@@ -11,6 +11,15 @@ export type EscalationRunner = "json" | "pty";
 export type EscalationResolution = "approve_once" | "approve_turn" | "deny" | "fallback_manual";
 export type EscalationSource = "tool_permission_request" | "sandbox_hard_block" | "workspace_policy_limit" | "cli_capability_limit" | "unknown";
 
+/** WebSocket / ProcessManager event envelope used throughout the app. */
+export interface ProcessEvent {
+  type: "output" | "status" | "started" | "ended" | "usage" | "task" | "notification";
+  sessionId: string;
+  data?: unknown;
+}
+
+export type ProcessEventHandler = (event: ProcessEvent) => void;
+
 export interface EscalationRequest {
   requestId: string;
   scope: EscalationScope;

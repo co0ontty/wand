@@ -3943,15 +3943,23 @@
       function selectSession(id) {
         var foundSession = state.sessions.find(function(item) { return item.id === id; });
         console.log("[WAND] selectSession id:", id, "found:", !!foundSession, "sessionKind:", foundSession && foundSession.sessionKind, "runner:", foundSession && foundSession.runner, "isStructured:", isStructuredSession(foundSession));
+        if (!foundSession) {
+          console.warn("[WAND] selectSession: session not found, skipping", id);
+          return;
+        }
         state.selectedId = id;
         persistSelectedId();
+        // Clear queued inputs from the previous session to prevent cross-session leaks
+        state.messageQueue = [];
+        state.pendingMessages = [];
+        updateQueueCounter();
         resetChatRenderCache();
         state.currentMessages = [];
         if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
         // Reset todo progress bar
         var todoEl = document.getElementById("todo-progress");
         if (todoEl) todoEl.classList.add("hidden");
-        var session = state.sessions.find(function(item) { return item.id === id; });
+        var session = foundSession;
         state.preferredCommand = getPreferredTool();
         state.chatMode = getSafeModeForTool("claude", session && session.mode ? session.mode : state.chatMode);
         if (state.terminalInteractive && session && session.status !== "running") {
@@ -4010,6 +4018,8 @@
       var focusTrapHandler = null;
 
       function openSessionModal() {
+        // Close settings modal first if open (mutual exclusion)
+        closeSettingsModal();
         state.modalOpen = true;
         state.sessionsDrawerOpen = false;
         updateDrawerState();
@@ -4084,6 +4094,8 @@
       }
 
       function openSettingsModal() {
+        // Close session modal first if open (mutual exclusion)
+        closeSessionModal();
         var modal = document.getElementById("settings-modal");
         if (modal) {
           modal.classList.remove("hidden");
@@ -4542,7 +4554,10 @@
         });
       }
 
+      var _sessionCreating = false;
+
       function runCommand() {
+        if (_sessionCreating) return;
         var cwdEl = document.getElementById("cwd");
         var errorEl = document.getElementById("modal-error");
         var command = getPreferredTool();
@@ -4564,6 +4579,7 @@
 
       function startStructuredSessionFromModal(cwd, mode, errorEl) {
         console.log("[WAND] startStructuredSessionFromModal cwd:", cwd, "mode:", mode);
+        _sessionCreating = true;
         state.modeValue = mode;
         state.chatMode = mode;
         state.sessionTool = "claude";
@@ -4579,11 +4595,13 @@
           .then(function() { focusInputBox(true); })
           .catch(function(error) {
             showError(errorEl, (error && error.message) || "无法启动结构化会话，请确认 Claude 已正确安装。");
-          });
+          })
+          .finally(function() { _sessionCreating = false; });
       }
 
       function runPtyCommandFromModal(command, cwd, mode, errorEl) {
         console.log("[WAND] runPtyCommandFromModal command:", command, "cwd:", cwd, "mode:", mode);
+        _sessionCreating = true;
         state.modeValue = mode;
         state.chatMode = mode;
         state.sessionTool = command;
@@ -4626,7 +4644,8 @@
         })
         .catch(function() {
           showError(errorEl, "无法启动会话，请确认 Claude 已正确安装。");
-        });
+        })
+        .finally(function() { _sessionCreating = false; });
       }
 
       function initBlankChatCwd() {
@@ -6012,9 +6031,12 @@
         });
       }
 
+      var _resumeInProgress = false;
+
       function resumeSession(sessionId, errorEl) {
         console.log("[WAND] resumeSession sessionId:", sessionId);
-        if (!sessionId) return Promise.resolve(null);
+        if (!sessionId || _resumeInProgress) return Promise.resolve(null);
+        _resumeInProgress = true;
         return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/resume", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -6040,7 +6062,8 @@
           if (errorEl) showError(errorEl, message);
           else showToast(message, "error");
           return null;
-        });
+        })
+        .finally(function() { _resumeInProgress = false; });
       }
 
       function resumeClaudeSessionById(claudeSessionId, errorEl) {
@@ -8177,12 +8200,16 @@
             smartScrollToBottom(chatMessages);
           });
         } else if (msgCount === existingCount && outputHash !== prevHash) {
-          // Same message count but content changed (streaming update). Re-render in place
-          // by index so assistant growth, tool cards, and retroactive message fixes all show up.
+          // Same message count but content changed (streaming update).
+          // Optimization: only re-render the newest N messages (column-reverse: first children)
+          // that actually differ, starting from the top (newest). Most streaming updates only
+          // touch the latest assistant turn, so we can skip scanning all older messages.
           var existingEls = Array.from(chatMessages.querySelectorAll(".chat-message"));
           var reversedMessages = messages.slice().reverse();
           var replacedAny = false;
-          for (var mi = 0; mi < reversedMessages.length && mi < existingEls.length; mi++) {
+          // Scan from newest (index 0 in reversed) up to MAX_STREAMING_SCAN messages
+          var MAX_STREAMING_SCAN = Math.min(4, reversedMessages.length, existingEls.length);
+          for (var mi = 0; mi < MAX_STREAMING_SCAN; mi++) {
             var currentEl = existingEls[mi];
             var tmpWrap = document.createElement("div");
             var srOrigIdx = reversedMessages.length - 1 - mi;
@@ -8193,7 +8220,15 @@
               chatMessages.replaceChild(replacementEl, currentEl);
               attachCopyHandler(replacementEl);
               replacedAny = true;
+            } else if (mi > 0) {
+              // Once we hit an unchanged older message, stop scanning
+              break;
             }
+          }
+          // Fallback: if hash changed but no visible diff found in the top N messages,
+          // the change is deeper — trigger a full render to avoid stale display.
+          if (!replacedAny && reversedMessages.length > MAX_STREAMING_SCAN) {
+            fullRenderChat();
           }
           if (replacedAny) {
             requestAnimationFrame(function() {

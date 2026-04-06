@@ -5,8 +5,10 @@
 
 import { WebSocketServer, WebSocket } from "ws";
 import { EventEmitter } from "node:events";
-import type { SessionSnapshot } from "./types.js";
+import type { SessionSnapshot, ProcessEvent } from "./types.js";
 import { validateSession } from "./auth.js";
+
+export type { ProcessEvent } from "./types.js";
 
 // ── Constants ──
 
@@ -14,12 +16,6 @@ const MAX_QUEUE_SIZE = 500;
 const OUTPUT_DEBOUNCE_MS = 16;
 
 // ── Types ──
-
-export interface ProcessEvent {
-  type: "output" | "status" | "started" | "ended" | "usage" | "task" | "notification";
-  sessionId: string;
-  data?: unknown;
-}
 
 interface WsClient {
   ws: WebSocket;
