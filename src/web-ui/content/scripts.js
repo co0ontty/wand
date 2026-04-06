@@ -164,10 +164,13 @@
       var _statusBarStartTime = 0;
 
       function renderStructuredStatusBar(chatMessages, session) {
-        // Remove stale bar if session changed or not structured
-        var existing = chatMessages.querySelector(".structured-status-bar");
+        // Status bar now lives above the input-composer, inside .input-panel
+        var inputPanel = document.querySelector(".input-panel");
+        var existing = document.querySelector(".structured-status-bar");
+        var composer = document.querySelector(".input-composer");
         if (!session || !isStructuredSession(session)) {
           if (existing) existing.remove();
+          if (composer) composer.classList.remove("in-flight");
           clearInterval(_statusBarTimerId);
           _statusBarTimerId = null;
           return;
@@ -181,21 +184,26 @@
             _statusBarStartTime = Date.now();
           }
 
-          if (!existing) {
+          // Add glow to input composer
+          if (composer) composer.classList.add("in-flight");
+
+          if (!existing && inputPanel && composer) {
             var bar = document.createElement("div");
             bar.className = "structured-status-bar";
             bar.innerHTML =
+              '<span class="status-bar-dot"></span>' +
               '<span class="status-bar-label">回复中</span>' +
-              '<div class="status-bar-track"><div class="status-bar-fill"></div></div>' +
               '<span class="status-bar-timer">0.0s</span>';
-            // column-reverse: first child = visual bottom
-            chatMessages.insertBefore(bar, chatMessages.firstChild);
+            // Insert right before the input-composer element
+            inputPanel.insertBefore(bar, composer);
             existing = bar;
-          } else if (existing.classList.contains("completed")) {
+          } else if (existing && existing.classList.contains("completed")) {
             // Was completed, now in-flight again — reset
             existing.classList.remove("completed");
             existing.style.animation = "none";
             existing.querySelector(".status-bar-label").textContent = "回复中";
+            var dot = existing.querySelector(".status-bar-dot");
+            if (dot) dot.style.display = "";
             _statusBarStartTime = Date.now();
           }
 
@@ -214,12 +222,17 @@
           clearInterval(_statusBarTimerId);
           _statusBarTimerId = null;
 
+          // Remove glow from input composer
+          if (composer) composer.classList.remove("in-flight");
+
           if (existing && !existing.classList.contains("completed")) {
             // Just finished — transition to completed state
             var elapsed = _statusBarStartTime ? ((Date.now() - _statusBarStartTime) / 1000).toFixed(1) : "0.0";
             existing.classList.add("completed");
             existing.querySelector(".status-bar-label").textContent = "完成";
             existing.querySelector(".status-bar-timer").textContent = elapsed + "s";
+            var dot = existing.querySelector(".status-bar-dot");
+            if (dot) dot.style.display = "none";
             _statusBarStartTime = 0;
             // Remove after animation ends
             setTimeout(function() {
@@ -471,6 +484,8 @@
         if (!state.selectedId) return "";
         var isTerminal = state.currentView === "terminal";
         if (!isTerminal) return "";
+        var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (sel && isStructuredSession(sel)) return "";
         var keys = renderShortcutKeys();
         var arrow = state.shortcutsExpanded ? '›' : '‹';
         return '<div class="inline-shortcuts-wrap' + (state.shortcutsExpanded ? ' expanded' : '') + '">' +
@@ -484,6 +499,8 @@
         if (!state.selectedId) return "";
         var isTerminal = state.currentView === "terminal";
         if (!isTerminal) return "";
+        var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (sel && isStructuredSession(sel)) return "";
         return '<div class="inline-shortcuts-expanded-row' + (state.shortcutsExpanded ? ' visible' : '') + '">' + renderShortcutKeys() + '</div>';
       }
 
@@ -700,12 +717,11 @@
                     '<span id="session-mode-display" class="session-mode-display">' + (selectedSession ? getModeLabel(selectedSession.mode) : '默认') + '</span>' +
                     (selectedSession && selectedSession.autoApprovePermissions ? '<span class="session-info-separator">|</span><span id="auto-approve-toggle" class="auto-approve-indicator active" title="自动批准已启用 — 点击关闭">🛡 自动批准</span>' : '<span class="session-info-separator">|</span><span id="auto-approve-toggle" class="auto-approve-indicator" title="自动批准已关闭 — 点击开启">🛡 手动</span>') +
                     '<span class="session-info-separator">|</span>' +
-                    '<span id="session-kind-display" class="session-kind-display">' + (selectedSession ? (isStructuredSession(selectedSession) ? 'Structured' : 'PTY') : 'PTY') + '</span>' +
+                    '<span id="session-kind-display" class="session-kind-display">' + (selectedSession ? getSessionKindLabel(selectedSession) : '终端') + '</span>' +
                     '<span class="session-info-separator">|</span>' +
                     '<span id="session-status-display" class="session-status-display">' + (selectedSession ? getSessionStatusLabel(selectedSession) : '-') + '</span>' +
                     (selectedSession && selectedSession.claudeSessionId ? '<span class="session-info-separator">|</span><span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>' : '') +
-                    '<span class="session-info-separator">|</span>' +
-                    '<span id="session-exit-display" class="session-exit-display">exit=' + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : 'n/a') + '</span>' +
+                    (selectedSession && !isStructuredSession(selectedSession) ? '<span class="session-info-separator">|</span><span id="session-exit-display" class="session-exit-display">退出码=' + (selectedSession.exitCode !== undefined ? selectedSession.exitCode : 'n/a') + '</span>' : '') +
                   '</div>' +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
@@ -1743,7 +1759,15 @@
         if (!session) return "";
         if (session.archived) return "已归档";
         if (session.permissionBlocked) return "等待授权";
-        return session.status;
+        var statusMap = {
+          "stopped": "已停止",
+          "running": "运行中",
+          "idle": "空闲",
+          "thinking": "思考中",
+          "waiting-input": "等待输入",
+          "initializing": "启动中"
+        };
+        return statusMap[session.status] || session.status;
       }
 
       function getSessionStatusClass(session) {
@@ -2312,19 +2336,6 @@
         var selectedIndex = -1;
         var folderItems = [];
 
-        function saveWorkingDir(path) {
-          state.workingDir = path;
-          try {
-            localStorage.setItem("wand-working-dir", path);
-          } catch (e) {
-            // Ignore localStorage errors
-          }
-          // Also add to recent paths (defined later, will be called after function is available)
-          if (typeof addRecentPath === "function") {
-            addRecentPath(path);
-          }
-        }
-
         // Helper functions for path validation feedback
         function showValidationError(message) {
           if (folderPickerInput) {
@@ -2349,21 +2360,7 @@
         }
 
         // Helper functions for recent paths (single source: backend API)
-        function fetchRecentPaths(callback) {
-          fetch("/api/recent-paths", { credentials: "same-origin" })
-            .then(function(res) { return res.json(); })
-            .then(function(items) { callback(items || []); })
-            .catch(function() { callback([]); });
-        }
-
-        function addRecentPath(path) {
-          return fetch("/api/recent-paths", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify({ path: path })
-          }).catch(function() {});
-        }
+        // NOTE: fetchRecentPaths and addRecentPath are defined at outer scope
 
         function renderRecentPathsHtml(items) {
           if (!items.length) return "";
@@ -2688,6 +2685,32 @@
         initTerminal();
         setupMobileKeyboardHandlers();
         setupVisualViewportHandlers();
+      }
+
+      function saveWorkingDir(path) {
+        state.workingDir = path;
+        try {
+          localStorage.setItem("wand-working-dir", path);
+        } catch (e) {
+          // Ignore localStorage errors
+        }
+        addRecentPath(path);
+      }
+
+      function fetchRecentPaths(callback) {
+        fetch("/api/recent-paths", { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(items) { callback(items || []); })
+          .catch(function() { callback([]); });
+      }
+
+      function addRecentPath(path) {
+        return fetch("/api/recent-paths", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ path: path })
+        }).catch(function() {});
       }
 
       function activateSessionItem(sessionId) {
@@ -3490,13 +3513,13 @@
       }
 
       function getSessionKindLabel(session) {
-        return isStructuredSession(session) ? "Structured" : "PTY";
+        return isStructuredSession(session) ? "结构化" : "终端";
       }
 
       function getSessionKindDescription(session) {
         return isStructuredSession(session)
-          ? "Structured · block transcript"
-          : "PTY · terminal session";
+          ? "结构化 · 块级记录"
+          : "终端 · PTY 会话";
       }
 
       function isRecoverableToolError(toolResult, nextResult) {
@@ -3830,8 +3853,9 @@
         var exitEl = document.getElementById("session-exit-display");
         var cwdText = selectedSession && selectedSession.cwd ? selectedSession.cwd : "未设置目录";
         var modeText = selectedSession ? getModeLabel(selectedSession.mode) : "默认";
-        var kindText = selectedSession ? getSessionKindLabel(selectedSession) : "PTY";
-        var exitText = "exit=" + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : "n/a");
+        var kindText = selectedSession ? getSessionKindLabel(selectedSession) : "终端";
+        var isStructured = selectedSession && isStructuredSession(selectedSession);
+        var exitText = isStructured ? "" : "退出码=" + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : "n/a");
         if (cwdEl && cwdEl.textContent !== cwdText) cwdEl.textContent = cwdText;
         if (modeEl && modeEl.textContent !== modeText) modeEl.textContent = modeText;
         if (kindEl && kindEl.textContent !== kindText) kindEl.textContent = kindText;
@@ -5626,10 +5650,12 @@
           }
         });
         // Inline keyboard visibility follows current view
-        var inlineKeyboard = document.getElementById("inline-keyboard");
+        var inlineKeyboard = document.querySelector(".inline-shortcuts-wrap");
         if (inlineKeyboard) inlineKeyboard.classList.toggle("hidden", structured || state.currentView !== "terminal");
+        var expandedRow = document.querySelector(".inline-shortcuts-expanded-row");
+        if (expandedRow) expandedRow.classList.toggle("hidden", structured || state.currentView !== "terminal");
         var inputHint = document.querySelector(".input-hint");
-        if (inputHint) inputHint.classList.toggle("hidden", structured ? false : state.currentView === "terminal");
+        if (inputHint) inputHint.classList.toggle("hidden", structured ? true : state.currentView === "terminal");
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
       }
@@ -8955,6 +8981,98 @@
         return '<div class="structured-tool-hint">已自动恢复一次 ' + escapeHtml(getToolDisplayName(toolName)) + ' 参数问题</div>';
       }
 
+      // ── 连续同类工具调用分组 ──
+      var GROUPABLE_TOOLS = { Read: 1, Glob: 1, Grep: 1, WebFetch: 1, WebSearch: 1, TodoRead: 1 };
+
+      function groupConsecutiveTools(content) {
+        var groups = [];
+        var i = 0;
+        while (i < content.length) {
+          var block = content[i];
+          if (block.type === "tool_result") { i++; continue; }
+          if (block.type === "tool_use" && GROUPABLE_TOOLS[block.name]) {
+            var run = [{ block: block, index: i }];
+            var j = i + 1;
+            while (j < content.length) {
+              if (content[j].type === "tool_result") { j++; continue; }
+              if (content[j].type === "tool_use" && GROUPABLE_TOOLS[content[j].name]) {
+                run.push({ block: content[j], index: j });
+                j++;
+              } else { break; }
+            }
+            if (run.length >= 2) {
+              groups.push({ type: "group", items: run, endIndex: j });
+            } else {
+              groups.push({ type: "single", block: block, index: i });
+            }
+            i = j;
+          } else {
+            groups.push({ type: "single", block: block, index: i });
+            i++;
+          }
+        }
+        return groups;
+      }
+
+      var TOOL_GROUP_LABELS = { Read: "读取", Glob: "搜索", Grep: "搜索", WebFetch: "抓取", WebSearch: "搜索", TodoRead: "待办" };
+
+      function renderToolGroup(items, role, toolResults) {
+        // Count by tool name
+        var counts = {};
+        for (var k = 0; k < items.length; k++) {
+          var n = items[k].block.name;
+          counts[n] = (counts[n] || 0) + 1;
+        }
+        // Check if all done or still pending
+        var allDone = true;
+        var anyError = false;
+        for (var k = 0; k < items.length; k++) {
+          var b = items[k].block;
+          var tr = pickToolResultForDisplay(toolResults, b.id);
+          if (!tr) { allDone = false; }
+          else if (tr.is_error) { anyError = true; }
+        }
+        var statusIcon = !allDone ? "…" : (anyError ? "✗" : "✓");
+        var statusClass = !allDone ? "pending" : (anyError ? "error" : "done");
+        // Summary text
+        var parts = [];
+        for (var name in counts) {
+          parts.push(counts[name] + " " + (TOOL_GROUP_LABELS[name] || name));
+        }
+        var summaryText = parts.join(" · ");
+
+        // Render each item's inline-tool card
+        var innerHtml = "";
+        for (var k = 0; k < items.length; k++) {
+          try {
+            innerHtml += renderContentBlock(items[k].block, role, toolResults, items[k].index);
+          } catch (e) {
+            innerHtml += '<div class="render-error">工具渲染失败</div>';
+          }
+        }
+
+        return '<div class="tool-group" data-expanded="false" data-status="' + statusClass + '">' +
+          '<div class="tool-group-summary" onclick="__toolGroupToggle(this.parentNode)">' +
+            '<span class="tool-group-status">' + statusIcon + '</span>' +
+            '<span class="tool-group-text">' + escapeHtml(summaryText) + '</span>' +
+            '<span class="tool-group-count">' + items.length + ' 个调用</span>' +
+            '<svg class="tool-group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
+          '</div>' +
+          '<div class="tool-group-body">' + innerHtml + '</div>' +
+        '</div>';
+      }
+
+      // global toggle
+      window.__toolGroupToggle = function(el) {
+        if (!el) return;
+        var expanded = el.getAttribute("data-expanded") === "true";
+        el.setAttribute("data-expanded", expanded ? "false" : "true");
+        var body = el.querySelector(".tool-group-body");
+        if (body) body.style.display = expanded ? "none" : "block";
+        var chevron = el.querySelector(".tool-group-chevron");
+        if (chevron) chevron.style.transform = expanded ? "" : "rotate(180deg)";
+      };
+
       function renderStructuredMessage(msg, roundUsage) {
         var role = msg.role;
         var avatar = role === "assistant" ? '<div class="chat-message-avatar">赛博虎妞</div>' : "";
@@ -8973,10 +9091,15 @@
         var blocksHtml = "";
 
         try {
-          for (var i = 0; i < msg.content.length; i++) {
-            var block = msg.content[i];
+          var groups = groupConsecutiveTools(msg.content);
+          for (var g = 0; g < groups.length; g++) {
+            var grp = groups[g];
             try {
-              blocksHtml += renderContentBlock(block, role, toolResults, i);
+              if (grp.type === "group") {
+                blocksHtml += renderToolGroup(grp.items, role, toolResults);
+              } else {
+                blocksHtml += renderContentBlock(grp.block, role, toolResults, grp.index);
+              }
             } catch (e) {
               blocksHtml += '<div class="render-error">消息块渲染失败</div>';
             }
@@ -8989,17 +9112,6 @@
         }
 
         var usageHtml = "";
-        if (role === "assistant" && roundUsage) {
-          var u = roundUsage;
-          var parts = [];
-          if (u.inputTokens > 0) parts.push("输入 " + u.inputTokens);
-          if (u.outputTokens > 0) parts.push("输出 " + u.outputTokens);
-          if (u.cacheReadInputTokens > 0) parts.push("缓存 " + u.cacheReadInputTokens);
-          if (u.totalCostUsd > 0) parts.push("$" + u.totalCostUsd.toFixed(4));
-          if (parts.length > 0) {
-            usageHtml = '<div class="message-usage">' + parts.join(" · ") + '</div>';
-          }
-        }
 
         return '<div class="chat-message ' + role + '">' +
           avatar +
