@@ -678,7 +678,6 @@
                   '</div>' +
                   '<div class="todo-progress-body hidden" id="todo-progress-body">' +
                     '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
-                    '<div id="recent-actions" class="recent-actions"></div>' +
                   '</div>' +
                 '</div>' +
                 '<div class="input-composer">' +
@@ -1816,7 +1815,9 @@
             '<div class="session-item-row">' +
               checkbox +
               '<div class="session-main">' +
-                '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '') : session.command) + '</div>' +
+                (session.summary
+                  ? '<div class="session-title">' + escapeHtml(session.summary) + '</div>'
+                  : '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '') : session.command) + '</div>') +
                 '<div class="session-meta">' +
                   modeBadge +
                   '<span>' + escapeHtml(modeName) + '</span>' +
@@ -8375,40 +8376,6 @@
           list.innerHTML = html;
         }
 
-        // Extract recent important actions for key points summary
-        var recentActions = [];
-        var actionTools = ["Write", "Edit", "Bash", "WebFetch", "WebSearch"];
-        var msgCount = messages.length;
-        for (var ai = 0; ai < msgCount && recentActions.length < 5; ai++) {
-          var m = messages[ai];
-          if (!m.content || !Array.isArray(m.content)) continue;
-          for (var bi = 0; bi < m.content.length && recentActions.length < 5; bi++) {
-            var blk = m.content[bi];
-            if (blk.type !== "tool_use") continue;
-            var toolName = blk.name || "";
-            if (actionTools.indexOf(toolName) === -1) continue;
-            var desc = blk.description || generateInputSummary(toolName, blk.input) || toolName;
-            if (desc && desc.length > 50) desc = desc.slice(0, 47) + "...";
-            var icon = getToolIcon(toolName);
-            recentActions.push({ icon: icon, text: desc });
-          }
-        }
-
-        var actionsEl = document.getElementById("recent-actions");
-        if (actionsEl) {
-          if (recentActions.length > 0) {
-            var actionsHtml = '<div class="recent-actions-label">最近操作</div>';
-            actionsHtml += '<div class="recent-actions-list">';
-            for (var ri = 0; ri < recentActions.length; ri++) {
-              var a = recentActions[ri];
-              actionsHtml += '<span class="recent-action-pill">' + a.icon + ' ' + escapeHtml(a.text) + '</span>';
-            }
-            actionsHtml += '</div>';
-            actionsEl.innerHTML = actionsHtml;
-          } else {
-            actionsEl.innerHTML = '';
-          }
-        }
       }
 
       function updateQueueCounter() {
@@ -8944,6 +8911,67 @@
         return messages;
       }
 
+      // ── 像素风猫咪头像 ──
+      var PIXEL_AVATAR = (function() {
+        var _ = "transparent";
+        function buildSvg(grid, size) {
+          var s = size || 3;
+          var w = grid[0].length * s;
+          var h = grid.length * s;
+          var rects = "";
+          for (var y = 0; y < grid.length; y++) {
+            for (var x = 0; x < grid[y].length; x++) {
+              if (grid[y][x] !== _) {
+                rects += '<rect x="' + (x * s) + '" y="' + (y * s) + '" width="' + s + '" height="' + s + '" fill="' + grid[y][x] + '"/>';
+              }
+            }
+          }
+          return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '" class="pixel-avatar-svg">' + rects + '</svg>';
+        }
+        // 加菲猫 (勤劳初二 / AI) — 橙色系
+        var o = "#F0923A", d = "#C46A1A", w = "#FFFFFF", k = "#2D2D2D", p = "#F28B9A", n = "#E87D5A";
+        var garfield = [
+          [_,d,_,_,_,_,_,_,d,_],
+          [d,o,d,_,_,_,_,d,o,d],
+          [d,o,o,o,o,o,o,o,o,d],
+          [o,o,w,k,o,o,w,k,o,o],
+          [o,o,w,w,o,o,w,w,o,o],
+          [o,o,o,o,p,p,o,o,o,o],
+          [o,d,o,n,o,o,n,o,d,o],
+          [_,o,o,o,o,o,o,o,o,_],
+          [_,_,o,d,o,o,d,o,_,_],
+          [_,_,_,o,_,_,o,_,_,_],
+        ];
+        // 美短 (赛博虎妞 / 用户) — 灰色系
+        var g = "#9EAAB8", dg = "#6B7B8D", lg = "#C5CED8", gn = "#7EC88B";
+        var shorthair = [
+          [_,dg,_,_,_,_,_,_,dg,_],
+          [dg,g,dg,_,_,_,_,dg,g,dg],
+          [dg,g,g,g,g,g,g,g,g,dg],
+          [g,g,w,gn,g,g,w,gn,g,g],
+          [g,g,w,w,g,g,w,w,g,g],
+          [g,g,g,g,p,p,g,g,g,g],
+          [g,dg,g,lg,g,g,lg,g,dg,g],
+          [_,g,g,g,g,g,g,g,g,_],
+          [_,_,g,dg,g,g,dg,g,_,_],
+          [_,_,_,g,_,_,g,_,_,_],
+        ];
+        return {
+          assistant: buildSvg(garfield),
+          user: buildSvg(shorthair)
+        };
+      })();
+
+      function chatAvatar(role) {
+        var isUser = role === "user";
+        var svg = isUser ? PIXEL_AVATAR.user : PIXEL_AVATAR.assistant;
+        var name = isUser ? "赛博虎妞" : "勤劳初二";
+        return '<div class="chat-message-avatar ' + role + '">' +
+          '<div class="pixel-avatar">' + svg + '</div>' +
+          '<span class="avatar-name">' + name + '</span>' +
+        '</div>';
+      }
+
       function renderChatMessage(msg, roundUsage) {
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
@@ -8972,7 +9000,7 @@
         }
 
         // Legacy string content (from PTY parsing)
-        var avatar = msg.role === "assistant" ? '<div class="chat-message-avatar">赛博虎妞</div>' : "";
+        var avatar = chatAvatar(msg.role);
         var bubbleContent = msg.role === "assistant" ? renderMarkdown(msg.content) : escapeHtml(msg.content);
         return '<div class="chat-message ' + msg.role + '">' +
           avatar +
@@ -9117,7 +9145,7 @@
 
       function renderStructuredMessage(msg, roundUsage) {
         var role = msg.role;
-        var avatar = role === "assistant" ? '<div class="chat-message-avatar">赛博虎妞</div>' : "";
+        var avatar = chatAvatar(role);
 
         if (!msg.content || msg.content.length === 0) {
           if (role === "assistant") {

@@ -30,6 +30,22 @@ function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0 || process.geteuid?.() === 0;
 }
 
+/** Enrich a snapshot with a derived summary from the first user message. */
+function withSummary(snapshot: SessionSnapshot): SessionSnapshot {
+  if (snapshot.summary) return snapshot;
+  const messages = snapshot.messages ?? [];
+  for (const msg of messages) {
+    if (msg.role !== "user") continue;
+    for (const block of msg.content) {
+      if (block.type === "text" && block.text.trim()) {
+        return { ...snapshot, summary: block.text.trim().slice(0, 120) };
+      }
+    }
+    break;
+  }
+  return snapshot;
+}
+
 /** Should we auto-approve permissions for this mode? */
 function shouldAutoApproveForMode(mode: ExecutionMode): boolean {
   return mode === "full-access" || mode === "managed" || mode === "auto-edit";
@@ -71,11 +87,14 @@ export class StructuredSessionManager {
   }
 
   list(): SessionSnapshot[] {
-    return Array.from(this.sessions.values()).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    return Array.from(this.sessions.values())
+      .map(withSummary)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
 
   get(id: string): SessionSnapshot | null {
-    return this.sessions.get(id) ?? null;
+    const s = this.sessions.get(id);
+    return s ? withSummary(s) : null;
   }
 
   createSession(options: CreateStructuredSessionOptions): SessionSnapshot {
