@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SessionSnapshot, WandConfig, ConversationTurn } from "./types.js";
+import { SessionSnapshot, WandConfig, ConversationTurn, SessionKind, SessionRunner, StructuredSessionState } from "./types.js";
 
 interface SessionRow {
   id: string;
+  session_kind: SessionKind | null;
+  runner: SessionRunner | null;
   command: string;
   cwd: string;
   mode: SessionSnapshot["mode"];
@@ -17,6 +19,7 @@ interface SessionRow {
   archived_at: string | null;
   claude_session_id: string | null;
   messages: string | null;
+  structured_state: string | null;
   resumed_from_session_id: string | null;
   resumed_to_session_id: string | null;
   auto_recovered: number;
@@ -29,6 +32,18 @@ function parseStoredMessages(raw: string | null): ConversationTurn[] | undefined
 
   try {
     return JSON.parse(raw) as ConversationTurn[];
+  } catch {
+    return undefined;
+  }
+}
+
+function parseStructuredState(raw: string | null): StructuredSessionState | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(raw) as StructuredSessionState;
   } catch {
     return undefined;
   }
@@ -63,7 +78,14 @@ const INIT_SQL = `
     output TEXT NOT NULL,
     archived INTEGER NOT NULL DEFAULT 0,
     archived_at TEXT,
-    claude_session_id TEXT
+    claude_session_id TEXT,
+    session_kind TEXT NOT NULL DEFAULT 'pty',
+    runner TEXT,
+    messages TEXT,
+    structured_state TEXT,
+    resumed_from_session_id TEXT,
+    resumed_to_session_id TEXT,
+    auto_recovered INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS app_config (
@@ -178,9 +200,9 @@ export class WandStorage {
         .prepare(
           `INSERT INTO command_sessions (
            id, command, cwd, mode, status, exit_code, started_at, ended_at, output
-             , archived, archived_at, claude_session_id, messages
+             , archived, archived_at, claude_session_id, session_kind, runner, messages, structured_state
              , resumed_from_session_id, resumed_to_session_id, auto_recovered
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              command = excluded.command,
              cwd = excluded.cwd,
@@ -193,7 +215,10 @@ export class WandStorage {
              archived = excluded.archived,
              archived_at = excluded.archived_at,
              claude_session_id = excluded.claude_session_id,
+             session_kind = excluded.session_kind,
+             runner = excluded.runner,
              messages = excluded.messages,
+             structured_state = excluded.structured_state,
              resumed_from_session_id = excluded.resumed_from_session_id,
              resumed_to_session_id = excluded.resumed_to_session_id,
              auto_recovered = excluded.auto_recovered`
@@ -211,7 +236,10 @@ export class WandStorage {
           snapshot.archived ? 1 : 0,
           snapshot.archivedAt,
           snapshot.claudeSessionId,
+          snapshot.sessionKind ?? "pty",
+          snapshot.runner ?? null,
           snapshot.messages ? JSON.stringify(snapshot.messages) : null,
+          snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
           snapshot.resumedFromSessionId ?? null,
           snapshot.resumedToSessionId ?? null,
           snapshot.autoRecovered ? 1 : 0
@@ -235,6 +263,7 @@ export class WandStorage {
            command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
            started_at = ?, ended_at = ?, output = ?,
            archived = ?, archived_at = ?, claude_session_id = ?,
+           session_kind = ?, runner = ?, structured_state = ?,
            resumed_from_session_id = ?, resumed_to_session_id = ?, auto_recovered = ?
          WHERE id = ?`
       )
@@ -250,6 +279,9 @@ export class WandStorage {
         snapshot.archived ? 1 : 0,
         snapshot.archivedAt,
         snapshot.claudeSessionId,
+        snapshot.sessionKind ?? "pty",
+        snapshot.runner ?? null,
+        snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
         snapshot.resumedFromSessionId ?? null,
         snapshot.resumedToSessionId ?? null,
         snapshot.autoRecovered ? 1 : 0,
@@ -260,7 +292,7 @@ export class WandStorage {
   getSession(id: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
-        `SELECT id, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages
+        `SELECT id, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, structured_state
              , resumed_from_session_id, resumed_to_session_id, auto_recovered
          FROM command_sessions
          WHERE id = ?`
@@ -273,7 +305,7 @@ export class WandStorage {
   getLatestSessionByClaudeSessionId(claudeSessionId: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
-        `SELECT id, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages
+        `SELECT id, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, structured_state
              , resumed_from_session_id, resumed_to_session_id, auto_recovered
          FROM command_sessions
          WHERE claude_session_id = ?
@@ -288,7 +320,7 @@ export class WandStorage {
   loadSessions(): SessionSnapshot[] {
     const rows = this.db
       .prepare(
-        `SELECT id, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages
+        `SELECT id, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, structured_state
              , resumed_from_session_id, resumed_to_session_id, auto_recovered
          FROM command_sessions
          ORDER BY started_at DESC`
@@ -301,6 +333,8 @@ export class WandStorage {
   private mapSessionRow(row: SessionRow): SessionSnapshot {
     return {
       id: row.id,
+      sessionKind: row.session_kind ?? "pty",
+      runner: row.runner ?? undefined,
       command: row.command,
       cwd: row.cwd,
       mode: row.mode,
@@ -313,6 +347,7 @@ export class WandStorage {
       archivedAt: row.archived_at,
       claudeSessionId: row.claude_session_id,
       messages: parseStoredMessages(row.messages),
+      structuredState: parseStructuredState(row.structured_state),
       resumedFromSessionId: row.resumed_from_session_id ?? undefined,
       resumedToSessionId: row.resumed_to_session_id ?? undefined,
       autoRecovered: Boolean(row.auto_recovered)
@@ -336,8 +371,17 @@ function ensureCommandSessionSchema(db: DatabaseSync): void {
   if (!names.has("claude_session_id")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN claude_session_id TEXT");
   }
+  if (!names.has("session_kind")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'pty'");
+  }
+  if (!names.has("runner")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN runner TEXT");
+  }
   if (!names.has("messages")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN messages TEXT");
+  }
+  if (!names.has("structured_state")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN structured_state TEXT");
   }
   if (!names.has("resumed_from_session_id")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN resumed_from_session_id TEXT");

@@ -28,7 +28,7 @@ import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitC
 const OUTPUT_MAX_SIZE = 120000;
 const SESSION_ID_WINDOW_SIZE = 16384;
 const PERMISSION_WINDOW_SIZE = 2000;
-const AUTO_APPROVE_DELAY_MS = 150;
+const AUTO_APPROVE_DELAY_MS = 350;
 /** How long to monitor output after fallback auto-approve for false-positive detection */
 const FALLBACK_VERIFY_WINDOW_MS = 600;
 /** How long a session must be idle (no user input, no new output) before sending a probe */
@@ -78,6 +78,8 @@ interface PermissionState {
   fallbackContext: { score: number; matched: string[]; text: string } | null;
   /** Output length snapshot taken right before fallback auto-approve fires */
   fallbackOutputLenAtApprove: number;
+  /** Consecutive auto-approve attempts for the same prompt without resolution */
+  retryCount: number;
 }
 
 /** Permission resolution result */
@@ -191,6 +193,7 @@ export class ClaudePtyBridge extends EventEmitter {
       fallbackVerifyUntil: 0,
       fallbackContext: null,
       fallbackOutputLenAtApprove: 0,
+      retryCount: 0,
     };
 
     this.sessionIdWindow = "";
@@ -357,6 +360,25 @@ export class ClaudePtyBridge extends EventEmitter {
    */
   setPtyWrite(fn: (input: string) => void): void {
     this.ptyWrite = fn;
+  }
+
+  /**
+   * Toggle auto-approve at runtime.
+   */
+  setAutoApprove(enabled: boolean): void {
+    this.autoApprove = enabled;
+    if (!enabled) {
+      // Cancel any pending auto-approve timer
+      if (this.permissionState.pendingAutoApproveTimer) {
+        clearTimeout(this.permissionState.pendingAutoApproveTimer);
+        this.permissionState.pendingAutoApproveTimer = null;
+      }
+      // Cancel idle probe
+      if (this.idleProbeTimer) {
+        clearTimeout(this.idleProbeTimer);
+        this.idleProbeTimer = null;
+      }
+    }
   }
 
   // ── Permission Resolution ──
@@ -656,6 +678,23 @@ export class ClaudePtyBridge extends EventEmitter {
         timestamp: Date.now(),
         data: { resolution: "approve_once", autoApproved: true, approveType: "strict" },
       });
+
+      // Schedule a retry check: if the prompt re-appears shortly after,
+      // the \r may have arrived before the CLI was ready. Retry with a
+      // longer delay to handle slow-rendering selection menus.
+      if (this.permissionState.retryCount < 3) {
+        const retryDelay = 800 + this.permissionState.retryCount * 400;
+        setTimeout(() => {
+          if (this._exited) return;
+          if (this.permissionState.isBlocked && this.autoApprove) {
+            this.permissionState.retryCount++;
+            this.permissionState.lastAutoConfirmAt = 0; // allow immediate retry
+            this.scheduleAutoApprove(scope, target);
+          } else {
+            this.permissionState.retryCount = 0;
+          }
+        }, retryDelay);
+      }
     }, AUTO_APPROVE_DELAY_MS);
   }
 

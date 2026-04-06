@@ -2,8 +2,9 @@ import express, { Express } from "express";
 
 import { parseMessages } from "./message-parser.js";
 import { ProcessManager, SessionInputError } from "./process-manager.js";
+import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
-import { ExecutionMode, InputRequest, ResizeRequest } from "./types.js";
+import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner } from "./types.js";
 
 export function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -72,9 +73,63 @@ function removeFromHiddenClaudeSessionIds(storage: WandStorage, ids: string[]): 
   }
 }
 
-export function registerSessionRoutes(app: Express, processes: ProcessManager, storage: WandStorage, defaultMode: ExecutionMode): void {
+function getSessionById(processes: ProcessManager, structured: StructuredSessionManager, id: string) {
+  return structured.get(id) ?? processes.get(id);
+}
+
+function listAllSessions(processes: ProcessManager, structured: StructuredSessionManager) {
+  return [...structured.list(), ...processes.list()]
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+export function registerSessionRoutes(
+  app: Express,
+  processes: ProcessManager,
+  structured: StructuredSessionManager,
+  storage: WandStorage,
+  defaultMode: ExecutionMode
+): void {
   app.get("/api/sessions", (_req, res) => {
-    res.json(processes.list());
+    const all = listAllSessions(processes, structured);
+    console.log("[WAND] GET /api/sessions count:", all.length, "sessions:", all.map(s => ({ id: s.id.substring(0, 8), kind: s.sessionKind, runner: s.runner, status: s.status })));
+    res.json(all);
+  });
+
+  app.post("/api/structured-sessions", express.json(), async (req, res) => {
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner };
+    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, hasPrompt: !!body.prompt }));
+    try {
+      const snapshot = structured.createSession({
+        cwd: body.cwd?.trim() || process.cwd(),
+        mode: normalizeMode(body.mode, defaultMode),
+        prompt: body.prompt,
+        runner: body.runner ?? "claude-cli-print",
+      });
+      console.log("[WAND] structured session created:", JSON.stringify({ id: snapshot.id, sessionKind: snapshot.sessionKind, runner: snapshot.runner, status: snapshot.status }));
+      res.status(201).json(snapshot);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法启动结构化会话。") });
+    }
+  });
+
+  app.get("/api/structured-sessions/:id/messages", (req, res) => {
+    const snapshot = structured.get(req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该结构化会话。" });
+      return;
+    }
+    res.json({ id: snapshot.id, messages: snapshot.messages ?? [] });
+  });
+
+  app.post("/api/structured-sessions/:id/messages", express.json(), async (req, res) => {
+    const input = String(req.body?.input ?? "");
+    console.log("[WAND] POST /api/structured-sessions/:id/messages id:", req.params.id, "input:", input.substring(0, 50));
+    try {
+      const snapshot = await structured.sendMessage(req.params.id, input);
+      res.json(snapshot);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法发送结构化消息。") });
+    }
   });
 
   app.post("/api/sessions/batch-delete", express.json(), (req, res) => {
@@ -92,7 +147,11 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
 
     for (const sessionId of sessionIds) {
       try {
-        processes.delete(sessionId);
+        if (structured.get(sessionId)) {
+          structured.delete(sessionId);
+        } else {
+          processes.delete(sessionId);
+        }
         deleted += 1;
       } catch {
         failed.push(sessionId);
@@ -108,15 +167,18 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
   });
 
   app.get("/api/sessions/:id", (req, res) => {
-    const snapshot = processes.get(req.params.id);
+    const snapshot = getSessionById(processes, structured, req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
     }
     if (req.query.format === "chat") {
+      const allowFallback = (snapshot.sessionKind ?? "pty") === "pty";
       const messages = snapshot.messages && snapshot.messages.length > 0
         ? snapshot.messages
-        : parseMessages(snapshot.output);
+        : allowFallback
+          ? parseMessages(snapshot.output)
+          : [];
       res.json({ ...snapshot, messages });
     } else {
       res.json(snapshot);
@@ -126,10 +188,16 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
   app.post("/api/sessions/:id/resume", (req, res) => {
     const sessionId = req.params.id;
     const body = req.body as { mode?: ExecutionMode; view?: "chat" | "terminal" };
+    console.log("[WAND] POST /api/sessions/:id/resume sessionId:", sessionId);
     try {
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
+      console.log("[WAND] resume lookup: found:", !!existingSession, "sessionKind:", existingSession?.sessionKind, "claudeSessionId:", existingSession?.claudeSessionId);
       if (!existingSession) {
         res.status(404).json({ error: "会话不存在。" });
+        return;
+      }
+      if ((existingSession.sessionKind ?? "pty") !== "pty") {
+        res.status(400).json({ error: "结构化会话不支持 Claude CLI resume。" });
         return;
       }
       const claudeSessionId = existingSession.claudeSessionId;
@@ -155,6 +223,7 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
   app.post("/api/claude-sessions/:claudeSessionId/resume", (req, res) => {
     const claudeSessionId = String(req.params.claudeSessionId || "").trim();
     const body = req.body as { mode?: ExecutionMode; cwd?: string };
+    console.log("[WAND] POST /api/claude-sessions/:claudeSessionId/resume claudeSessionId:", claudeSessionId, "cwd:", body.cwd);
     try {
       if (!claudeSessionId) {
         res.status(400).json({ error: "Claude 会话 ID 不能为空。" });
@@ -163,6 +232,10 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
       const existingSession = storage.getLatestSessionByClaudeSessionId(claudeSessionId);
       if (existingSession) {
         const command = existingSession.command.trim();
+        if ((existingSession.sessionKind ?? "pty") !== "pty") {
+          res.status(400).json({ error: "结构化会话不支持按 Claude Session ID 恢复。" });
+          return;
+        }
         if (!/^claude\b/.test(command)) {
           res.status(400).json({ error: "只有 Claude 命令支持按 Claude Session ID 恢复。" });
           return;
@@ -192,13 +265,18 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
     }
   });
 
-  app.post("/api/sessions/:id/input", (req, res) => {
+  app.post("/api/sessions/:id/input", async (req, res) => {
     const body = req.body as InputRequest;
     const sessionId = req.params.id;
     const input = body.input ?? "";
     const view = body.view;
     const shortcutKey = body.shortcutKey;
     try {
+      if (structured.get(sessionId)) {
+        const snapshot = await structured.sendMessage(sessionId, input);
+        res.json(snapshot);
+        return;
+      }
       const snapshot = processes.sendInput(sessionId, input, view, shortcutKey);
       res.json(snapshot);
     } catch (error) {
@@ -215,6 +293,10 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
   app.post("/api/sessions/:id/resize", (req, res) => {
     const body = req.body as ResizeRequest;
     try {
+      if (structured.get(req.params.id)) {
+        res.status(400).json({ error: "结构化会话不支持调整终端大小。" });
+        return;
+      }
       const snapshot = processes.resize(req.params.id, body.cols ?? 0, body.rows ?? 0);
       res.json(snapshot);
     } catch (error) {
@@ -224,6 +306,10 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
 
   app.post("/api/sessions/:id/approve-permission", (req, res) => {
     try {
+      if (structured.get(req.params.id)) {
+        res.json(structured.approvePermission(req.params.id));
+        return;
+      }
       res.json(processes.approvePermission(req.params.id));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法批准该授权请求。") });
@@ -232,9 +318,25 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
 
   app.post("/api/sessions/:id/deny-permission", (req, res) => {
     try {
+      if (structured.get(req.params.id)) {
+        res.json(structured.denyPermission(req.params.id));
+        return;
+      }
       res.json(processes.denyPermission(req.params.id));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法拒绝该授权请求。") });
+    }
+  });
+
+  app.post("/api/sessions/:id/toggle-auto-approve", (req, res) => {
+    try {
+      if (structured.get(req.params.id)) {
+        res.json(structured.toggleAutoApprove(req.params.id));
+        return;
+      }
+      res.json(processes.toggleAutoApprove(req.params.id));
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法切换自动批准状态。") });
     }
   });
 
@@ -242,6 +344,10 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
     try {
       const { requestId } = req.params;
       const body = req.body as { resolution?: "approve_once" | "approve_turn" | "deny" };
+      if (structured.get(req.params.id)) {
+        res.json(structured.resolveEscalation(req.params.id, requestId, body.resolution));
+        return;
+      }
       res.json(processes.resolveEscalation(req.params.id, requestId, body.resolution));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法处理该授权请求。") });
@@ -250,6 +356,10 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
 
   app.post("/api/sessions/:id/stop", (req, res) => {
     try {
+      if (structured.get(req.params.id)) {
+        res.json(structured.stop(req.params.id));
+        return;
+      }
       res.json(processes.stop(req.params.id));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法停止会话。") });
@@ -258,7 +368,11 @@ export function registerSessionRoutes(app: Express, processes: ProcessManager, s
 
   app.delete("/api/sessions/:id", (req, res) => {
     try {
-      processes.delete(req.params.id);
+      if (structured.get(req.params.id)) {
+        structured.delete(req.params.id);
+      } else {
+        processes.delete(req.params.id);
+      }
       res.json({ ok: true });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法删除会话。") });

@@ -1,3 +1,7 @@
+export type SessionKind = "pty" | "structured";
+export type SessionCreateKind = "pty" | "structured";
+export type SessionRunner = "claude-cli" | "claude-cli-print" | "pty";
+
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
 
 export type AutonomyPolicy = "assist" | "agent" | "agent-max";
@@ -142,8 +146,18 @@ export interface ConversationTurn {
   };
 }
 
+export interface StructuredSessionState {
+  runner: SessionRunner;
+  model?: string;
+  lastError: string | null;
+  inFlight: boolean;
+  activeRequestId: string | null;
+}
+
 export interface SessionSnapshot {
   id: string;
+  sessionKind?: SessionKind;
+  runner?: SessionRunner;
   command: string;
   cwd: string;
   mode: ExecutionMode;
@@ -169,6 +183,7 @@ export interface SessionSnapshot {
   claudeSessionId: string | null;
   /** Structured conversation messages derived from PTY output. */
   messages?: ConversationTurn[];
+  structuredState?: StructuredSessionState;
   /** Session lifecycle state */
   lifecycleState?: "running" | "idle" | "archived";
   /** Last activity timestamp */
@@ -179,6 +194,8 @@ export interface SessionSnapshot {
   resumedToSessionId?: string | null;
   /** 服务器重启时是否自动恢复 */
   autoRecovered?: boolean;
+  /** 是否启用自动批准权限 */
+  autoApprovePermissions?: boolean;
   /** 自动批准统计（按类别分） */
   approvalStats?: { tool: number; command: number; file: number; total: number };
 }

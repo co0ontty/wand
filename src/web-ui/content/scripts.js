@@ -100,8 +100,10 @@
         cwdValue: "",
         modeValue: "managed",
         chatMode: "managed",
+        sessionCreateKind: "pty",
         sessionTool: "claude",
         preferredCommand: "claude",
+        structuredRunner: "claude-cli-print",
         lastResize: { cols: 0, rows: 0 },
         isOnline: navigator.onLine,
         deferredPrompt: null,
@@ -137,6 +139,7 @@
         shortcutsExpanded: false,
         modifiers: { ctrl: false, alt: false, shift: false },
         fileSearchQuery: "",
+        fileExplorerLoading: false,
         allFiles: [],
         claudeHistory: [],
         claudeHistoryLoaded: false,
@@ -276,7 +279,7 @@
                   body: "\u5f53\u524d " + (config.currentVersion || "-") + " \u2192 \u6700\u65b0 " + config.latestVersion,
                   type: "info",
                   icon: "\u2191",
-                  duration: 0,
+                  duration: 10000,
                   actionLabel: "\u53bb\u66f4\u65b0",
                   action: function() {
                     var settingsBtn = document.getElementById("open-settings-btn") || document.querySelector("[data-action='settings']");
@@ -319,7 +322,7 @@
         var app = document.getElementById("app");
         var isLoggedIn = state.config !== null;
         var wasModalOpen = state.modalOpen;
-        var shouldResetShell = !isLoggedIn || !document.getElementById("output");
+        var shouldResetShell = !isLoggedIn || !!document.getElementById("output");
 
         if (shouldResetShell) {
           teardownTerminal();
@@ -337,6 +340,9 @@
         applyCurrentView();
         if (!skipShellChrome) {
           updateShellChrome();
+        }
+        if (isLoggedIn && state.filePanelOpen) {
+          refreshFileExplorer();
         }
 
         // Force reflow then re-enable transitions after layout settles
@@ -554,10 +560,13 @@
                 '<div class="blank-chat-inner">' +
                   '<div class="blank-chat-logo">W</div>' +
                   '<h2 class="blank-chat-title">Wand</h2>' +
-                  '<p class="blank-chat-subtitle">当前仅保留原生终端模式，优先修复 PTY 交互与显示。</p>' +
+                  '<p class="blank-chat-subtitle">支持终端 PTY 会话与结构化 chat 会话，两种模式可并存。</p>' +
                   '<div class="blank-chat-tools">' +
                     '<button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button">' +
                       '<span class="tool-icon">🤖</span>新建终端会话' +
+                    '</button>' +
+                    '<button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button">' +
+                      '<span class="tool-icon">💬</span>新建结构化会话' +
                     '</button>' +
                   '</div>' +
                   '<div class="blank-chat-cwd-wrap">' +
@@ -619,6 +628,9 @@
                     '<span id="session-cwd-display" class="session-cwd-display">' + (selectedSession && selectedSession.cwd ? escapeHtml(selectedSession.cwd) : '未设置目录') + '</span>' +
                     '<span class="session-info-separator">|</span>' +
                     '<span id="session-mode-display" class="session-mode-display">' + (selectedSession ? getModeLabel(selectedSession.mode) : '默认') + '</span>' +
+                    (selectedSession && selectedSession.autoApprovePermissions ? '<span class="session-info-separator">|</span><span id="auto-approve-toggle" class="auto-approve-indicator active" title="自动批准已启用 — 点击关闭">🛡 自动批准</span>' : '<span class="session-info-separator">|</span><span id="auto-approve-toggle" class="auto-approve-indicator" title="自动批准已关闭 — 点击开启">🛡 手动</span>') +
+                    '<span class="session-info-separator">|</span>' +
+                    '<span id="session-kind-display" class="session-kind-display">' + (selectedSession ? (isStructuredSession(selectedSession) ? 'Structured' : 'PTY') : 'PTY') + '</span>' +
                     '<span class="session-info-separator">|</span>' +
                     '<span id="session-status-display" class="session-status-display">' + (selectedSession ? getSessionStatusLabel(selectedSession) : '-') + '</span>' +
                     (selectedSession && selectedSession.claudeSessionId ? '<span class="session-info-separator">|</span><span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>' : '') +
@@ -1256,13 +1268,21 @@
           explorer.innerHTML = '<div class="file-explorer empty">No working directory.</div>';
           return;
         }
+        state.fileExplorerLoading = true;
+        state.allFiles = [];
         explorer.innerHTML = '<div class="file-explorer"><div class="tree-loading" style="padding:12px;color:var(--text-muted);font-size:0.8125rem;">Loading...</div></div>';
         // Update the cwd display
         if (cwdEl) cwdEl.textContent = cwd;
         // Fetch with git status
         fetch("/api/directory?q=" + encodeURIComponent(cwd) + "&gitStatus=true", { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
+          .then(function(res) {
+            if (!res.ok) {
+              throw new Error("Failed to load directory.");
+            }
+            return res.json();
+          })
           .then(function(items) {
+            state.fileExplorerLoading = false;
             if (!items || items.length === 0) {
               explorer.innerHTML = '<div class="file-explorer empty">Empty directory or inaccessible.</div>';
               return;
@@ -1271,6 +1291,7 @@
             filterFileTree();
           })
           .catch(function() {
+            state.fileExplorerLoading = false;
             explorer.innerHTML = '<div class="file-explorer empty">Failed to load files.</div>';
           });
       }
@@ -1667,7 +1688,7 @@
         if (session.claudeSessionId) {
           var shortId = session.claudeSessionId.slice(0, 8);
           sessionIdDisplay = '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>';
-          if (session.status !== "running" && !state.sessionsManageMode) {
+          if (session.status !== "running" && !state.sessionsManageMode && !isStructuredSession(session)) {
             resumeButton = '<button class="session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="恢复会话" title="恢复 Claude 会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
           }
         }
@@ -1677,6 +1698,7 @@
         }
 
         var deleteButton = state.sessionsManageMode ? '' : '<button class="session-action-btn delete-btn" data-action="delete-session" data-session-id="' + session.id + '" type="button" aria-label="删除会话" title="删除此会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
+        var modeBadge = renderSessionKindBadge(session);
         var actionsHtml = '<span class="session-actions">' + resumeButton + deleteButton + '</span>';
 
         return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
@@ -1686,6 +1708,7 @@
               '<div class="session-main">' +
                 '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '') : session.command) + '</div>' +
                 '<div class="session-meta">' +
+                  modeBadge +
                   '<span>' + escapeHtml(modeName) + '</span>' +
                   '<span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + '</span>' +
                   sessionIdDisplay +
@@ -1697,6 +1720,15 @@
           '</div>' +
         '</div>';
       }
+
+      function renderSessionKindBadge(session) {
+        if (!session) return "";
+        if (isStructuredSession(session)) {
+          return '<span class="session-kind-badge structured">Structured</span>';
+        }
+        return '<span class="session-kind-badge pty">PTY</span>';
+      }
+
       function renderModeCards(selectedMode) {
         var modes = [
           { id: "managed",     label: "托管",     desc: "全自动完成任务" },
@@ -1714,19 +1746,48 @@
         }).join("");
       }
 
+      function renderSessionKindOptions(selectedKind) {
+        var kinds = [
+          { id: "pty", label: "PTY", desc: "交互式终端会话" },
+          { id: "structured", label: "Structured", desc: "单轮结构化输出" }
+        ];
+        return kinds.map(function(kind) {
+          var active = kind.id === selectedKind ? " active" : "";
+          return '<button type="button" class="mode-card session-kind-card' + active + '" data-session-kind="' + kind.id + '">' +
+            '<span class="mode-card-label">' + kind.label + '</span>' +
+            '<span class="mode-card-desc">' + kind.desc + '</span>' +
+          '</button>';
+        }).join("");
+      }
+
+      function getSessionKindHint(kind) {
+        if (kind === "structured") {
+          return "直接使用 claude -p 获取结构化单轮结果。";
+        }
+        return "默认 PTY 会话，支持持续交互、终端视图和权限流。";
+      }
+
       function renderSessionModal() {
         var modalTool = getPreferredTool();
         var modalMode = getSafeModeForTool(modalTool, state.modeValue || state.chatMode || "default");
+        var sessionKind = state.sessionCreateKind || "pty";
         return '<section id="session-modal" class="modal-backdrop hidden">' +
           '<div class="modal session-modal">' +
             '<div class="modal-header">' +
               '<div>' +
                 '<h2 class="modal-title">新对话</h2>' +
-                '<p class="modal-subtitle">启动 Claude 会话，选择模式和工作目录。</p>' +
+                '<p class="modal-subtitle">启动 Claude 会话，选择会话类型、模式和工作目录。</p>' +
               '</div>' +
               '<button id="close-modal-button" class="btn btn-ghost btn-icon">&times;</button>' +
             '</div>' +
             '<div class="modal-body">' +
+              '<div class="field">' +
+                '<label class="field-label">会话类型</label>' +
+                '<div id="session-kind-cards" class="mode-cards">' +
+                  renderSessionKindOptions(sessionKind) +
+                '</div>' +
+                '<p id="session-kind-description" class="field-hint">' + escapeHtml(getSessionKindHint(sessionKind)) + '</p>' +
+              '</div>' +
               '<div class="field">' +
                 '<label class="field-label">模式</label>' +
                 '<div id="mode-cards" class="mode-cards">' +
@@ -1899,6 +1960,16 @@
             quickStartSession();
           });
         }
+        var welcomeStructuredBtn = document.getElementById("welcome-tool-structured");
+        if (welcomeStructuredBtn) {
+          welcomeStructuredBtn.addEventListener("click", function() {
+            createStructuredSession().then(function() {
+              focusInputBox(true);
+            }).catch(function(error) {
+              showToast((error && error.message) || "无法启动结构化会话。", "error");
+            });
+          });
+        }
         initBlankChatCwd();
 
         var sessionsList = document.getElementById("sessions-list");
@@ -1910,6 +1981,17 @@
 
         // Claude session ID badge click-to-copy (event delegation on document)
         document.addEventListener("click", handleClaudeIdCopy);
+
+        var kindCardsEl = document.getElementById("session-kind-cards");
+        if (kindCardsEl) kindCardsEl.addEventListener("click", function(e) {
+          var card = e.target.closest(".session-kind-card");
+          if (!card) return;
+          var kind = card.getAttribute("data-session-kind");
+          if (kind) {
+            state.sessionCreateKind = kind;
+            syncSessionModalUI();
+          }
+        });
 
         var modeCardsEl = document.getElementById("mode-cards");
         if (modeCardsEl) modeCardsEl.addEventListener("click", function(e) {
@@ -1941,7 +2023,7 @@
           persistSelectedId();
           resetChatRenderCache();
           closeSessionsDrawer();
-          renderApp();
+          render();
         });
         var refreshBtn = document.getElementById("sidebar-refresh-btn");
         if (refreshBtn) refreshBtn.addEventListener("click", function() {
@@ -1996,6 +2078,8 @@
         if (approvePermissionBtn) approvePermissionBtn.addEventListener("click", approvePermission);
         var denyPermissionBtn = document.getElementById("deny-permission-btn");
         if (denyPermissionBtn) denyPermissionBtn.addEventListener("click", denyPermission);
+        var autoApproveToggle = document.getElementById("auto-approve-toggle");
+        if (autoApproveToggle) autoApproveToggle.addEventListener("click", toggleAutoApprove);
         var sendBtn = document.getElementById("send-input-button");
         if (sendBtn) sendBtn.addEventListener("click", function() {
           closeSessionsDrawer();
@@ -2256,7 +2340,7 @@
             state.selectedId = null;
             persistSelectedId();
             state.drafts = {};
-            renderApp();
+            render();
             // 聚焦到目录输入框
             setTimeout(function() {
               var folderInput = document.getElementById("folder-picker-input");
@@ -2539,7 +2623,7 @@
 
       function activateSessionItem(sessionId) {
         var session = state.sessions.find(function(s) { return s.id === sessionId; });
-        if (session && session.status !== "running") {
+        if (session && session.status !== "running" && !isStructuredSession(session)) {
           resumeSessionFromList(sessionId);
         } else {
           selectSession(sessionId);
@@ -3336,6 +3420,35 @@
         return hints[mode] || '';
       }
 
+      function getSessionKindLabel(session) {
+        return isStructuredSession(session) ? "Structured" : "PTY";
+      }
+
+      function getSessionKindDescription(session) {
+        return isStructuredSession(session)
+          ? "Structured · block transcript"
+          : "PTY · terminal session";
+      }
+
+      function isRecoverableToolError(toolResult, nextResult) {
+        if (!toolResult || !toolResult.is_error || !nextResult || nextResult.is_error) {
+          return false;
+        }
+        var currentText = extractToolResultText(toolResult.content).toLowerCase();
+        var nextText = extractToolResultText(nextResult.content).toLowerCase();
+        if (!currentText) return false;
+        if (currentText.indexOf("invalid pages parameter") !== -1 && nextText.length > 0) {
+          return true;
+        }
+        return false;
+      }
+
+      function isStructuredSession(session) {
+        var result = !!session && (session.sessionKind === "structured" || session.runner === "claude-cli-print");
+        if (session) console.log("[WAND] isStructuredSession id:", session.id, "sessionKind:", session.sessionKind, "runner:", session.runner, "=>", result);
+        return result;
+      }
+
       function syncComposerModeSelect() {
         var select = document.getElementById("chat-mode-select");
         if (!select) return;
@@ -3346,29 +3459,89 @@
         if (modeHint) modeHint.textContent = getModeHint(state.chatMode);
       }
 
+      function createStructuredSession(prompt, cwdOverride, modeOverride) {
+        var payload = {
+          cwd: cwdOverride || getEffectiveCwd(),
+          mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
+          runner: state.structuredRunner || "claude-cli-print",
+          prompt: prompt || undefined
+        };
+        console.log("[WAND] createStructuredSession payload:", JSON.stringify(payload));
+        return fetch("/api/structured-sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(payload)
+        })
+        .then(function(res) {
+          console.log("[WAND] createStructuredSession response status:", res.status);
+          return res.json();
+        })
+        .then(function(data) {
+          console.log("[WAND] createStructuredSession data:", JSON.stringify({ id: data.id, error: data.error, sessionKind: data.sessionKind, runner: data.runner, status: data.status }));
+          if (data.error) {
+            throw new Error(data.error);
+          }
+          state.selectedId = data.id;
+          persistSelectedId();
+          state.drafts[data.id] = "";
+          resetChatRenderCache();
+          updateSessionSnapshot(data);
+          updateSessionsList();
+          switchToSessionView(data.id);
+          subscribeToSession(data.id);
+          return loadOutput(data.id).then(function() { return data; });
+        });
+      }
+
       function applyCurrentView() {
         var hasSession = !!state.selectedId;
         var terminalBtn = document.getElementById("view-terminal-btn");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var structured = isStructuredSession(selectedSession);
+        var showTerminal = hasSession && !structured && state.currentView === "terminal";
+        var showChat = hasSession && (structured || state.currentView !== "terminal");
+        console.log("[WAND] applyCurrentView hasSession:", hasSession, "structured:", structured, "currentView:", state.currentView, "showTerminal:", showTerminal, "showChat:", showChat, "sessionKind:", selectedSession && selectedSession.sessionKind, "runner:", selectedSession && selectedSession.runner);
 
-        if (terminalBtn) terminalBtn.classList.add("active");
-        if (terminalContainer) terminalContainer.classList.toggle("active", hasSession);
+        if (structured) {
+          state.currentView = "chat";
+        } else if (!hasSession) {
+          state.currentView = "terminal";
+        }
+
+        if (terminalBtn) {
+          terminalBtn.classList.toggle("hidden", structured || !hasSession);
+          terminalBtn.classList.toggle("active", showTerminal);
+        }
+        if (terminalContainer) {
+          terminalContainer.classList.toggle("active", showTerminal);
+          terminalContainer.classList.toggle("hidden", !showTerminal);
+        }
         if (chatContainer) {
-          chatContainer.classList.remove("active");
-          chatContainer.classList.add("hidden");
+          chatContainer.classList.toggle("active", showChat);
+          chatContainer.classList.toggle("hidden", !showChat);
         }
         updateInteractiveControls();
       }
 
       function syncSessionModalUI() {
         var modeHint = document.getElementById("mode-description");
+        var kindHint = document.getElementById("session-kind-description");
         var tool = "claude";
+        var sessionKind = state.sessionCreateKind || "pty";
 
         state.sessionTool = tool;
         state.modeValue = getSafeModeForTool(tool, state.modeValue || state.chatMode || "default");
 
-        // Update mode cards active state
+        var kindCards = document.querySelectorAll("#session-kind-cards .session-kind-card");
+        if (kindCards.length) {
+          kindCards.forEach(function(card) {
+            card.classList.toggle("active", card.getAttribute("data-session-kind") === sessionKind);
+          });
+        }
+
         var modeCards = document.querySelectorAll("#mode-cards .mode-card");
         if (modeCards.length) {
           modeCards.forEach(function(card) {
@@ -3376,11 +3549,22 @@
           });
         }
 
+        if (kindHint) kindHint.textContent = getSessionKindHint(sessionKind);
         if (modeHint) modeHint.textContent = getToolModeHint(tool, state.modeValue);
       }
 
       function updateSessionSnapshot(snapshot) {
         if (!snapshot || !snapshot.id) return;
+        if (snapshot.id === state.selectedId || (snapshot.sessionKind === "structured") || snapshot.structuredState) {
+          console.log("[WAND] updateSessionSnapshot", snapshot.id, JSON.stringify({
+            status: snapshot.status,
+            exitCode: snapshot.exitCode,
+            sessionKind: snapshot.sessionKind,
+            runner: snapshot.runner,
+            inFlight: snapshot.structuredState && snapshot.structuredState.inFlight,
+            msgCount: snapshot.messages && snapshot.messages.length
+          }));
+        }
         var updated = false;
         var prevSession = null;
         state.sessions = state.sessions.map(function(session) {
@@ -3410,14 +3594,34 @@
         var localOutput = localSession.output || "";
         var serverOutput = serverSession.output || "";
         var keepLocalOutput = localOutput.length > serverOutput.length;
+        var localStructuredState = localSession.structuredState || null;
+        var serverStructuredState = serverSession.structuredState || null;
+        var localHasPendingAssistant = !!(localSession.messages && localSession.messages.length && (function() {
+          var last = localSession.messages[localSession.messages.length - 1];
+          return last && last.role === "assistant" && Array.isArray(last.content) && last.content.some(function(block) {
+            return block && block.__processing;
+          });
+        })());
+        var preserveLocalStructuredProgress = (localSession.sessionKind === "structured")
+          && !!localStructuredState
+          && localStructuredState.inFlight === true
+          && (!serverStructuredState || serverStructuredState.inFlight !== true)
+          && localHasPendingAssistant
+          && !!localStructuredState.activeRequestId
+          && (!serverStructuredState || !serverStructuredState.activeRequestId || serverStructuredState.activeRequestId === localStructuredState.activeRequestId);
 
         if (keepLocalOutput) {
           merged.output = localOutput;
         }
 
+        if (preserveLocalStructuredProgress) {
+          merged.status = localSession.status || merged.status;
+          merged.structuredState = Object.assign({}, serverStructuredState || {}, localStructuredState, { inFlight: true });
+          merged.messages = localSession.messages;
+        }
+
         if (localSession.id === state.selectedId) {
           if (localSession.permissionBlocked && serverSession.permissionBlocked === false) {
-            // server explicitly resolved it; keep resolved state
           } else if (localSession.permissionBlocked && !serverSession.permissionBlocked) {
             merged.permissionBlocked = true;
           }
@@ -3452,15 +3656,13 @@
 
       function getPreferredSessionId(sessions) {
         if (!sessions || !sessions.length) return null;
-        // Keep currently selected session as long as it still exists
         if (state.selectedId) {
           var stillExists = sessions.find(function(session) { return session.id === state.selectedId; });
           if (stillExists) return stillExists.id;
+          return null;
         }
-        // No selection — pick a running session, or fall back to most recent
         var runningSession = sessions.find(function(session) { return session.status === "running"; });
         if (runningSession) return runningSession.id;
-        // Fall back to most recent non-archived session (sessions are sorted newest first)
         var recent = sessions.find(function(session) { return !session.archived; });
         return recent ? recent.id : sessions[0].id;
       }
@@ -3487,7 +3689,10 @@
               return mergeServerSession(localSession, serverSession);
             });
 
-            state.selectedId = getPreferredSessionId(state.sessions);
+            var preferredSessionId = getPreferredSessionId(state.sessions);
+            if (preferredSessionId !== undefined) {
+              state.selectedId = preferredSessionId;
+            }
             persistSelectedId();
             if (state.modalOpen) {
               updateSessionsList();
@@ -3509,7 +3714,6 @@
             console.error("[wand] loadSessions failed:", e);
           });
       }
-
 
       function updateSessionsList() {
         var listEl = document.getElementById("sessions-list");
@@ -3538,22 +3742,23 @@
 
         if (summaryEl && summaryEl.textContent !== terminalTitle) summaryEl.textContent = terminalTitle;
         if (titleEl && titleEl.textContent !== terminalTitle) titleEl.textContent = terminalTitle;
-        if (infoEl && infoEl.textContent !== terminalInfo) {
-          infoEl.textContent = terminalInfo;
-        }
+        if (infoEl) infoEl.textContent = selectedSession ? (terminalInfo + " · " + getSessionKindDescription(selectedSession)) : terminalInfo;
 
-        // Update session info bar at bottom
         var cwdEl = document.getElementById("session-cwd-display");
         var modeEl = document.getElementById("session-mode-display");
+        var kindEl = document.getElementById("session-kind-display");
         var statusEl = document.getElementById("session-status-display");
         var exitEl = document.getElementById("session-exit-display");
         var cwdText = selectedSession && selectedSession.cwd ? selectedSession.cwd : "未设置目录";
         var modeText = selectedSession ? getModeLabel(selectedSession.mode) : "默认";
+        var kindText = selectedSession ? getSessionKindLabel(selectedSession) : "PTY";
         var exitText = "exit=" + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : "n/a");
         if (cwdEl && cwdEl.textContent !== cwdText) cwdEl.textContent = cwdText;
         if (modeEl && modeEl.textContent !== modeText) modeEl.textContent = modeText;
+        if (kindEl && kindEl.textContent !== kindText) kindEl.textContent = kindText;
         if (statusEl && statusEl.textContent !== terminalInfo) statusEl.textContent = terminalInfo;
         if (exitEl && exitEl.textContent !== exitText) exitEl.textContent = exitText;
+        updateAutoApproveIndicator();
 
         if (!state.terminal && terminalContainer && selectedSession) {
           initTerminal();
@@ -3628,6 +3833,8 @@
       }
 
       function selectSession(id) {
+        var foundSession = state.sessions.find(function(item) { return item.id === id; });
+        console.log("[WAND] selectSession id:", id, "found:", !!foundSession, "sessionKind:", foundSession && foundSession.sessionKind, "runner:", foundSession && foundSession.runner, "isStructured:", isStructuredSession(foundSession));
         state.selectedId = id;
         persistSelectedId();
         resetChatRenderCache();
@@ -3703,6 +3910,7 @@
           modal.classList.remove("hidden");
           lastFocusedElement = document.activeElement;
           state.sessionTool = getPreferredTool();
+          state.sessionCreateKind = "pty";
           state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
           syncSessionModalUI();
           loadRecentPathBubbles();
@@ -4230,13 +4438,45 @@
         var cwdEl = document.getElementById("cwd");
         var errorEl = document.getElementById("modal-error");
         var command = getPreferredTool();
+        var sessionKind = state.sessionCreateKind || "pty";
 
         hideError(errorEl);
 
         var defaultCwd = getEffectiveCwd();
+        var cwd = cwdEl.value.trim() || defaultCwd;
         var selectedMode = getSafeModeForTool(command, state.modeValue);
-        state.modeValue = selectedMode;
-        state.chatMode = selectedMode;
+
+        if (sessionKind === "structured") {
+          startStructuredSessionFromModal(cwd, selectedMode, errorEl);
+          return;
+        }
+
+        runPtyCommandFromModal(command, cwd, selectedMode, errorEl);
+      }
+
+      function startStructuredSessionFromModal(cwd, mode, errorEl) {
+        console.log("[WAND] startStructuredSessionFromModal cwd:", cwd, "mode:", mode);
+        state.modeValue = mode;
+        state.chatMode = mode;
+        state.sessionTool = "claude";
+        state.preferredCommand = "claude";
+        syncComposerModeSelect();
+        return createStructuredSession(undefined, cwd, mode)
+          .then(function(data) {
+            closeSessionModal();
+            closeSessionsDrawer();
+            return data;
+          })
+          .then(function() { focusInputBox(true); })
+          .catch(function(error) {
+            showError(errorEl, (error && error.message) || "无法启动结构化会话，请确认 Claude 已正确安装。");
+          });
+      }
+
+      function runPtyCommandFromModal(command, cwd, mode, errorEl) {
+        console.log("[WAND] runPtyCommandFromModal command:", command, "cwd:", cwd, "mode:", mode);
+        state.modeValue = mode;
+        state.chatMode = mode;
         state.sessionTool = command;
         state.preferredCommand = command;
         syncComposerModeSelect();
@@ -4247,8 +4487,8 @@
           credentials: "same-origin",
           body: JSON.stringify({
             command: command,
-            cwd: cwdEl.value.trim() || defaultCwd,
-            mode: selectedMode
+            cwd: cwd,
+            mode: mode
           })
         })
         .then(function(res) { return res.json(); })
@@ -4258,6 +4498,7 @@
             return;
           }
           state.selectedId = data.id;
+          console.log("[WAND] runPtyCommandFromModal created session:", data.id, "sessionKind:", data.sessionKind, "runner:", data.runner);
           persistSelectedId();
           state.drafts[data.id] = "";
           resetChatRenderCache();
@@ -4265,13 +4506,19 @@
           closeSessionsDrawer();
           return refreshAll();
         })
-        .then(function() { focusInputBox(true); })
+        .then(function() {
+          if (state.selectedId) {
+            console.log("[WAND] runPtyCommandFromModal calling selectSession:", state.selectedId);
+            selectSession(state.selectedId);
+          } else {
+            focusInputBox(true);
+          }
+        })
         .catch(function() {
           showError(errorEl, "无法启动会话，请确认 Claude 已正确安装。");
         });
       }
 
-      // Blank-chat CWD inline display + dropdown
       function initBlankChatCwd() {
         var cwdEl = document.getElementById("blank-chat-cwd");
         if (!cwdEl) return;
@@ -4691,11 +4938,13 @@
           persistSelectedId();
           state.drafts[data.id] = "";
           resetChatRenderCache();
-          switchToSessionView(data.id);
           updateSessionSnapshot(data);
           updateSessionsList();
+          switchToSessionView(data.id);
           subscribeToSession(data.id);
           loadOutput(data.id).then(function() {
+            welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+            welcomeInput.disabled = false;
             focusInputBox(true);
           });
         })
@@ -4749,9 +4998,9 @@
           resetChatRenderCache();
           if (inputBox) inputBox.value = "";
           if (welcomeInput) welcomeInput.value = "";
-          switchToSessionView(data.id);
           updateSessionSnapshot(data);
           updateSessionsList();
+          switchToSessionView(data.id);
           // Subscribe to new session via WebSocket
           subscribeToSession(data.id);
           return loadOutput(data.id);
@@ -4763,6 +5012,7 @@
 
       function switchToSessionView(sessionId) {
         var session = state.sessions.find(function(s) { return s.id === sessionId; });
+        console.log("[WAND] switchToSessionView id:", sessionId, "found:", !!session, "sessionKind:", session && session.sessionKind, "runner:", session && session.runner, "isStructured:", isStructuredSession(session), "currentView:", state.currentView);
         var blankChat = document.getElementById("blank-chat");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
@@ -4770,13 +5020,22 @@
         var terminalTitle = document.getElementById("terminal-title");
         var terminalInfo = document.getElementById("terminal-info");
         var sessionSummary = document.querySelector(".session-summary-value");
+        var structured = isStructuredSession(session);
 
         if (blankChat) blankChat.classList.add("hidden");
-        if (terminalContainer) terminalContainer.classList.remove("hidden");
+        if (terminalContainer) {
+          terminalContainer.classList.toggle("hidden", structured);
+        }
         if (chatContainer) {
           chatContainer.classList.remove("hidden");
         }
         if (stopBtn) stopBtn.classList.remove("hidden");
+
+        if (structured) {
+          state.currentView = "chat";
+        } else {
+          state.currentView = "terminal";
+        }
 
         var title = session ? shortCommand(session.command) : "Wand";
         var info = session ? getSessionStatusLabel(session) : "开始对话";
@@ -4784,14 +5043,13 @@
         if (terminalInfo) terminalInfo.textContent = info;
         if (sessionSummary) sessionSummary.textContent = title;
 
-        // Init terminal if not already done
-        if (!state.terminal) initTerminal();
-        applyCurrentView();
-        if (state.terminal && state.fitAddon) {
-          ensureTerminalFit();
+        if (!structured) {
+          if (!state.terminal) initTerminal();
+          if (state.terminal && state.fitAddon) {
+            ensureTerminalFit();
+          }
         }
-        // Don't call renderChat() here — loadOutput() always calls renderChat() after it resolves.
-        // Calling renderChat() prematurely would render with stale/empty messages.
+        applyCurrentView();
         focusInputBox();
       }
 
@@ -4806,9 +5064,12 @@
         var value = inputBox ? inputBox.value : "";
         var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; }) || null;
         if (value) {
-          console.log("[wand] sendInputFromBox", {
+          console.log("[WAND] sendInputFromBox", {
             sessionId: state.selectedId,
             sessionStatus: selectedSession ? selectedSession.status : null,
+            sessionKind: selectedSession ? selectedSession.sessionKind : null,
+            runner: selectedSession ? selectedSession.runner : null,
+            isStructured: isStructuredSession(selectedSession),
             view: state.currentView,
             wsConnected: state.wsConnected,
             terminalInteractive: state.terminalInteractive,
@@ -4817,6 +5078,11 @@
           // Clear todo progress bar at the start of a new user turn
           var todoEl = document.getElementById("todo-progress");
           if (todoEl) todoEl.classList.add("hidden");
+
+          if (isStructuredSession(selectedSession)) {
+            return postStructuredInput(value, inputBox, selectedSession);
+          }
+
           // Send text + Enter as a single call to avoid race conditions
           var combinedInput = value + getControlInput("enter");
           var isOffline = !state.wsConnected;
@@ -4855,6 +5121,79 @@
           });
         }
         return Promise.resolve();
+      }
+
+      function postStructuredInput(input, inputBox, session) {
+        console.log("[WAND] postStructuredInput selectedId:", state.selectedId, "input:", input && input.substring(0, 50), "session:", session && { id: session.id, sessionKind: session.sessionKind, runner: session.runner, status: session.status, inFlight: session.structuredState && session.structuredState.inFlight });
+        if (!state.selectedId || !input) return Promise.resolve();
+        if (!session) {
+          showToast("会话不存在，请重新选择或新建会话。", "error");
+          return Promise.resolve();
+        }
+        if (session.structuredState && session.structuredState.inFlight && session.status === "running") {
+          // Disable send button while processing, show subtle indicator
+          var sendBtn = document.getElementById("send-input-button");
+          if (sendBtn) sendBtn.disabled = true;
+          showToast("正在等待上一条消息处理完成…", "info");
+          return Promise.resolve();
+        }
+
+        // Immediately render user message with thinking indicator
+        var userTurn = { role: "user", content: [{ type: "text", text: input }] };
+        var thinkingTurn = { role: "assistant", content: [{ type: "text", text: "", __processing: true }] };
+        var userMsgs = Array.isArray(session.messages) ? session.messages.slice() : [];
+        userMsgs.push(userTurn);
+        userMsgs.push(thinkingTurn);
+        session.messages = userMsgs;
+        state.currentMessages = userMsgs;
+        // Mark inFlight optimistically to prevent double-send via WS updates
+        if (session.structuredState) {
+          session.structuredState.inFlight = true;
+        }
+        session.status = "running";
+        if (inputBox) {
+          inputBox.value = "";
+          autoResizeInput(inputBox);
+        }
+        // Disable send button so user can't double-send
+        var sendBtnEl = document.getElementById("send-input-button");
+        if (sendBtnEl) sendBtnEl.disabled = true;
+        updateInputHint("思考中…");
+        setDraftValue("");
+        renderChat(true);
+
+        return fetch("/api/structured-sessions/" + state.selectedId + "/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ input: input })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(snapshot) {
+          if (snapshot && snapshot.error) {
+            throw new Error(snapshot.error);
+          }
+          if (snapshot && snapshot.id) {
+            updateSessionSnapshot(snapshot);
+            if (snapshot.messages && snapshot.messages.length > 0) {
+              state.currentMessages = snapshot.messages;
+            }
+            renderChat(true);
+            updateInputHint("Enter 发送 · Shift+Enter 换行");
+          }
+        })
+        .catch(function(error) {
+          var errSendBtn = document.getElementById("send-input-button");
+          if (errSendBtn) errSendBtn.disabled = false;
+          updateInputHint("Enter 发送 · Shift+Enter 换行");
+          showToast((error && error.message) || "无法发送结构化消息。", "error");
+          throw error;
+        });
+      }
+
+      function updateInputHint(text) {
+        var hint = document.querySelector(".input-hint");
+        if (hint) hint.textContent = text;
       }
 
       function getInputErrorMessage(error) {
@@ -4908,6 +5247,7 @@
       }
 
       function ensureSessionReadyForInput(session, errorEl) {
+        console.log("[WAND] ensureSessionReadyForInput session:", session && { id: session.id, status: session.status, claudeSessionId: session.claudeSessionId, sessionKind: session.sessionKind, runner: session.runner });
         if (!session) {
           showToast("会话不存在，请重新选择或新建会话。", "error");
           return Promise.resolve(null);
@@ -5203,21 +5543,24 @@
       }
 
       function updateInteractiveControls() {
+        var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
+        var structured = isStructuredSession(selectedSession);
         // Update both toggle buttons (topbar and terminal-header)
         var toggles = ["terminal-interactive-toggle-top"];
         toggles.forEach(function(id) {
           var toggle = document.getElementById(id);
           if (toggle) {
             toggle.classList.toggle("active", state.terminalInteractive);
+            toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession);
           }
         });
         // Inline keyboard visibility follows current view
         var inlineKeyboard = document.getElementById("inline-keyboard");
-        if (inlineKeyboard) inlineKeyboard.classList.toggle("hidden", state.currentView !== "terminal");
+        if (inlineKeyboard) inlineKeyboard.classList.toggle("hidden", structured || state.currentView !== "terminal");
         var inputHint = document.querySelector(".input-hint");
-        if (inputHint) inputHint.classList.toggle("hidden", state.currentView === "terminal");
+        if (inputHint) inputHint.classList.toggle("hidden", structured ? false : state.currentView === "terminal");
         var container = document.getElementById("output");
-        if (container) container.classList.toggle("interactive", state.terminalInteractive);
+        if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
       }
 
       function captureTerminalInput(event) {
@@ -5573,6 +5916,7 @@
       }
 
       function resumeSession(sessionId, errorEl) {
+        console.log("[WAND] resumeSession sessionId:", sessionId);
         if (!sessionId) return Promise.resolve(null);
         return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/resume", {
           method: "POST",
@@ -5645,6 +5989,7 @@
       }
 
       function resumeSessionFromList(sessionId) {
+        console.log("[WAND] resumeSessionFromList sessionId:", sessionId);
         return resumeSession(sessionId).then(function(data) {
           if (!data) return null;
           return activateSession(data).then(function() {
@@ -5733,6 +6078,7 @@
       }
 
       function handleResumeAction(actionButton) {
+        console.log("[WAND] handleResumeAction sessionId:", actionButton.dataset.sessionId);
         actionButton.disabled = true;
         resumeSessionFromList(actionButton.dataset.sessionId)
           .finally(function() {
@@ -5743,6 +6089,7 @@
       function handleResumeHistoryAction(actionButton) {
         var claudeSessionId = actionButton.dataset.claudeSessionId;
         var cwd = actionButton.dataset.cwd;
+        console.log("[WAND] handleResumeHistoryAction claudeSessionId:", claudeSessionId, "cwd:", cwd);
         if (!claudeSessionId) return;
         actionButton.disabled = true;
         resumeClaudeHistorySession(claudeSessionId, cwd)
@@ -6930,6 +7277,17 @@
               updateSessionSnapshot(snapshot);
               if (msg.sessionId === state.selectedId) {
                 state.currentMessages = getPreferredMessages(snapshot, msg.data.output, false);
+                // Structured session with inFlight: keep __processing placeholder
+                // so the loading indicator stays visible until assistant content arrives
+                if (msg.data.sessionKind === 'structured') {
+                  var outSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+                  if (outSession && outSession.structuredState && outSession.structuredState.inFlight) {
+                    var lastCur = state.currentMessages[state.currentMessages.length - 1];
+                    if (!lastCur || lastCur.role !== 'assistant') {
+                      state.currentMessages.push({ role: "assistant", content: [{ type: "text", text: "", __processing: true }] });
+                    }
+                  }
+                }
                 updateTaskDisplay();
                 scheduleChatRender();
               }
@@ -6968,8 +7326,17 @@
             if (msg.data && msg.data.messages) {
               endedSnapshot.messages = msg.data.messages;
             }
+            if (msg.data && msg.data.structuredState) {
+              endedSnapshot.structuredState = msg.data.structuredState;
+            }
             updateSessionSnapshot(endedSnapshot);
 
+            // Re-enable send button when structured session finishes
+            if (msg.sessionId === state.selectedId) {
+              var endedSendBtn = document.getElementById("send-input-button");
+              if (endedSendBtn) endedSendBtn.disabled = false;
+              updateInputHint("Enter 发送 · Shift+Enter 换行");
+            }
             // Notify user when a session completes (browser + in-app if backgrounded or not viewing)
             var endedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
             var endedName = endedSession ? (endedSession.label || endedSession.command || msg.sessionId) : msg.sessionId;
@@ -7044,7 +7411,24 @@
             break;
           case 'status':
             if (msg.sessionId && msg.data) {
+              console.log('[WAND] ws status', msg.sessionId, JSON.stringify(msg.data));
               var statusUpdate = { id: msg.sessionId };
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'status')) {
+                statusUpdate.status = msg.data.status;
+              }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'exitCode')) {
+                statusUpdate.exitCode = msg.data.exitCode;
+              }
+              if (msg.data.structuredState) {
+                statusUpdate.structuredState = msg.data.structuredState;
+              } else if (Object.prototype.hasOwnProperty.call(msg.data, 'status')) {
+                var existingSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+                if (existingSession && existingSession.sessionKind === 'structured') {
+                  statusUpdate.structuredState = Object.assign({}, existingSession.structuredState || {}, {
+                    inFlight: msg.data.status === 'running'
+                  });
+                }
+              }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'permissionBlocked')) {
                 statusUpdate.permissionBlocked = !!msg.data.permissionBlocked;
               }
@@ -7096,6 +7480,10 @@
                 if (msg.data.approvalStats) {
                   updateApprovalStats();
                 }
+                // Re-render chat when structured session inFlight state changes
+                if (statusUpdate.structuredState) {
+                  scheduleChatRender();
+                }
               }
             }
             break;
@@ -7135,9 +7523,12 @@
         var isBlocked = pendingEscalation || (selectedSession && selectedSession.permissionBlocked);
 
         if (isBlocked) {
+          var isAutoApprove = selectedSession && selectedSession.autoApprovePermissions;
           // Show permission label in input composer area
           if (permissionLabel) {
-            if (pendingEscalation) {
+            if (isAutoApprove) {
+              permissionLabel.textContent = "自动批准中...";
+            } else if (pendingEscalation) {
               var reason = pendingEscalation.reason || "等待授权";
               var target = pendingEscalation.target ? " · " + pendingEscalation.target : "";
               permissionLabel.textContent = reason + target;
@@ -7145,7 +7536,14 @@
               permissionLabel.textContent = "等待授权";
             }
           }
-          if (permissionActionsEl) permissionActionsEl.classList.remove("hidden");
+          if (permissionActionsEl) {
+            permissionActionsEl.classList.remove("hidden");
+            // Hide approve/deny buttons when auto-approve is active
+            var approveBtn = document.getElementById("approve-permission-btn");
+            var denyBtn = document.getElementById("deny-permission-btn");
+            if (approveBtn) approveBtn.classList.toggle("hidden", !!isAutoApprove);
+            if (denyBtn) denyBtn.classList.toggle("hidden", !!isAutoApprove);
+          }
           // Hide top task bar — permission info is already shown in the composer
           taskEl.textContent = "";
           taskEl.classList.add("hidden");
@@ -7252,6 +7650,49 @@
             if (approveBtn) approveBtn.disabled = false;
             if (denyBtn) denyBtn.disabled = false;
           });
+      }
+
+      function toggleAutoApprove() {
+        if (!state.selectedId) return;
+        var toggle = document.getElementById("auto-approve-toggle");
+        if (toggle) toggle.style.opacity = "0.5";
+        fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/toggle-auto-approve", {
+          method: "POST",
+          credentials: "same-origin"
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && data.error) {
+              showToast(data.error, "error");
+              return;
+            }
+            updateSessionSnapshot(data);
+            updateAutoApproveIndicator();
+            var enabled = data.autoApprovePermissions;
+            showToast(enabled ? "自动批准已开启" : "自动批准已关闭", "info");
+          })
+          .catch(function(error) {
+            showToast((error && error.message) || "无法切换自动批准。", "error");
+          })
+          .finally(function() {
+            if (toggle) toggle.style.opacity = "";
+          });
+      }
+
+      function updateAutoApproveIndicator() {
+        var toggle = document.getElementById("auto-approve-toggle");
+        if (!toggle) return;
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var enabled = selectedSession && selectedSession.autoApprovePermissions;
+        if (enabled) {
+          toggle.className = "auto-approve-indicator active";
+          toggle.title = "自动批准已启用 — 点击关闭";
+          toggle.textContent = "🛡 自动批准";
+        } else {
+          toggle.className = "auto-approve-indicator";
+          toggle.title = "自动批准已关闭 — 点击开启";
+          toggle.textContent = "🛡 手动";
+        }
       }
 
       function updateTerminalOutput(output, sessionId, mode) {
@@ -8337,11 +8778,53 @@
         '</div>';
       }
 
+      function buildToolResultMap(contentBlocks) {
+        var toolResults = {};
+        if (!Array.isArray(contentBlocks)) return toolResults;
+        for (var i = 0; i < contentBlocks.length; i++) {
+          var block = contentBlocks[i];
+          if (block && block.type === "tool_result") {
+            var toolUseId = block.tool_use_id;
+            if (!toolUseId) continue;
+            if (!toolResults[toolUseId]) {
+              toolResults[toolUseId] = [];
+            }
+            toolResults[toolUseId].push(block);
+          }
+        }
+        return toolResults;
+      }
+
+      function pickToolResultForDisplay(toolResults, toolUseId) {
+        var entries = toolResults && toolUseId ? toolResults[toolUseId] : null;
+        if (!entries || !entries.length) return null;
+        for (var i = 0; i < entries.length - 1; i++) {
+          if (isRecoverableToolError(entries[i], entries[i + 1])) {
+            return entries[i + 1];
+          }
+        }
+        return entries[entries.length - 1];
+      }
+
+      function hasRecoveredToolNoise(toolResults, toolUseId) {
+        var entries = toolResults && toolUseId ? toolResults[toolUseId] : null;
+        if (!entries || entries.length < 2) return false;
+        for (var i = 0; i < entries.length - 1; i++) {
+          if (isRecoverableToolError(entries[i], entries[i + 1])) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      function renderRecoveredToolHint(toolName) {
+        return '<div class="structured-tool-hint">已自动恢复一次 ' + escapeHtml(getToolDisplayName(toolName)) + ' 参数问题</div>';
+      }
+
       function renderStructuredMessage(msg) {
         var role = msg.role;
         var avatar = role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
 
-        // Empty content array — streaming placeholder, show typing indicator
         if (!msg.content || msg.content.length === 0) {
           if (role === "assistant") {
             return '<div class="chat-message ' + role + '">' +
@@ -8352,18 +8835,7 @@
           return "";
         }
 
-        // 先建立 tool_use_id -> tool_result 的映射
-        var toolResults = {};
-        for (var i = 0; i < msg.content.length; i++) {
-          var block = msg.content[i];
-          if (block && block.type === "tool_result") {
-            var toolUseId = block.tool_use_id;
-            if (toolUseId) {
-              toolResults[toolUseId] = block;
-            }
-          }
-        }
-
+        var toolResults = buildToolResultMap(msg.content);
         var blocksHtml = "";
 
         try {
@@ -8372,19 +8844,16 @@
             try {
               blocksHtml += renderContentBlock(block, role, toolResults, i);
             } catch (e) {
-              // Render error for individual block
               blocksHtml += '<div class="render-error">消息块渲染失败</div>';
             }
           }
         } catch (e) {
-          // Render error for entire message
           return '<div class="chat-message ' + role + '">' +
             avatar +
             '<div class="chat-message-bubble"><div class="render-error">消息渲染失败</div></div>' +
           '</div>';
         }
 
-        // Build usage indicator for assistant messages
         var usageHtml = "";
         if (role === "assistant" && msg.usage) {
           var u = msg.usage;
@@ -8404,21 +8873,21 @@
           usageHtml +
         '</div>';
       }
-
       function renderContentBlock(block, role, toolResults, index) {
         if (!block || !block.type) return "";
 
         switch (block.type) {
           case "text":
+            if (role === "assistant" && block.__processing) {
+              return '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+            }
             return role === "assistant" ? renderMarkdown(block.text || "") : escapeHtml(block.text || "");
 
           case "thinking":
             var thinkingText = block.thinking || "";
-            // Compact display: brain icon + brief text, click to expand
             var preview = thinkingText.length > 60 ? thinkingText.slice(0, 57) + "…" : thinkingText;
             var isStreaming = block.thinking === undefined && block.type === "thinking";
             if (isStreaming) {
-              // During streaming: show 3-line scrollable area
               return '<div class="thinking-inline thinking-streaming" data-thinking="">' +
                 '<div class="thinking-streaming-inner">' +
                   '<span class="thinking-streaming-icon spinning">🧠</span>' +
@@ -8433,11 +8902,14 @@
             '</div>';
 
           case "tool_use":
-            var toolResult = toolResults[block.id];
-            return renderToolUseCard(block, toolResult, index);
+            var toolResult = pickToolResultForDisplay(toolResults, block.id);
+            var rendered = renderToolUseCard(block, toolResult, index);
+            if (hasRecoveredToolNoise(toolResults, block.id)) {
+              rendered = renderRecoveredToolHint(block.name || "工具") + rendered;
+            }
+            return rendered;
 
           case "tool_result":
-            // tool_result 已经在 tool_use 渲染时处理了，不再单独渲染
             return "";
 
           default:
@@ -8445,11 +8917,11 @@
         }
       }
 
-      // Lightweight inline display — used for Read, Glob, Grep, WebFetch, WebSearch, TodoRead
       function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo) {
         var toolId = block.id || "tool-" + toolName;
         var inputData = block.input || {};
-        var resultContent = (toolResult && toolResult.content) ? toolResult.content.trim() : "";
+        var resultContent = extractToolResultText(toolResult && toolResult.content);
+
         var isError = toolResult && toolResult.is_error;
         var hasResult = resultContent.length > 0;
         var statusIcon = isError ? "⚠️" : (hasResult ? "✅" : "⏳");
@@ -8552,7 +9024,8 @@
       function renderTerminalTool(block, toolResult, toolName) {
         var inputData = block.input || {};
         var command = inputData.command || inputData.cmd || "";
-        var resultContent = (toolResult && toolResult.content) ? toolResult.content.trim() : "";
+        var resultContent = extractToolResultText(toolResult && toolResult.content);
+
         var isError = toolResult && toolResult.is_error;
         var exitCode = inputData.exitCode;
         var hasResult = resultContent.length > 0;
@@ -8769,7 +9242,7 @@
 
         if (toolResult) {
           var isError = toolResult.is_error;
-          var content = toolResult.content || "";
+          var content = extractToolResultText(toolResult.content);
           statusClass = isError ? "error" : "success";
           headerIcon = getToolIcon(toolName);
           var hasContent = content && content.trim().length > 0;

@@ -6,9 +6,10 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 let storage: WandStorage | null = null;
 
 // Periodic cleanup every 10 minutes
-setInterval(() => {
+const sessionCleanupTimer = setInterval(() => {
   cleanupExpiredSessions();
 }, 1000 * 60 * 10);
+sessionCleanupTimer.unref();
 
 export function createSession(): string {
   const token = crypto.randomBytes(24).toString("hex");

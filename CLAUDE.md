@@ -35,6 +35,14 @@ npm run dev -- -c /tmp/wand-test/config.json
 ```
 This keeps config, database, and session artifacts under `/tmp/wand-test/`. The same `-c` flag also works with the compiled binary (`wand web -c /tmp/wand-test/config.json`).
 
+**IMPORTANT: Do NOT touch port 8443.** That is the live production instance. Never kill, restart, or bind to port 8443 during development or testing.
+
+**Testing server (use this for all QA / smoke tests):**
+```bash
+npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
+```
+The test config at `/tmp/wand-dev/config.json` should use port **9443** (edit the `port` field after first `init`). Working directory for test tasks: `/tmp/wand-dev/workspace/`. This keeps everything isolated from the production instance on 8443.
+
 **Manual browser QA / release verification:** Follow `RELEASE_CHECKLIST.md`.
 
 **Install flow from README:**
@@ -76,6 +84,8 @@ When debugging a user-visible session bug, trace the full chain: `cli.ts` -> `se
 - REST endpoints for auth, config/settings, sessions, path browsing/search, favorites/recent paths, command launch, resume, PTY input/resize, permission decisions, and updates
 - the `/ws` fanout used for live session state
 
+Session-specific HTTP routes live in `src/server-session-routes.ts`; `src/server.ts` remains the composition root that injects `ProcessManager`, storage, auth, and broadcast plumbing.
+
 Before adding a new abstraction, check whether the needed data can fit into an existing `/api/*` route or `ProcessEvent` payload.
 
 ### State and persistence
@@ -91,9 +101,10 @@ If persistence looks inconsistent, inspect both SQLite (`src/storage.ts`) and fi
 
 A session is not just a child process. `SessionSnapshot` in `src/types.ts` combines PTY state, buffered output, structured messages, lifecycle state, permission/escalation state, and optional Claude resume linkage (`claudeSessionId`, resumed-from/to fields, auto-recovery flags).
 
-Resume behavior is spread across multiple layers:
-- `ProcessManager` decides when a session is resumable and manages restored sessions
+Resume behavior is split across multiple layers:
+- `ProcessManager` decides when a session is resumable, restores snapshots, and scans Claude project JSONL history under `~/.claude/projects/`
 - `ClaudePtyBridge` captures Claude session UUIDs from PTY output
+- `resume-policy.ts` contains the heuristics for binding stored Claude history to wand sessions
 - `storage.ts` persists both raw output and structured messages
 - server routes expose session resume and Claude-history resume actions
 
@@ -103,20 +114,9 @@ If resume buttons, recovered sessions, or chat history look wrong, inspect those
 
 Two cross-cutting systems shape session behavior:
 - `src/session-lifecycle.ts` marks sessions as initializing/running/thinking/waiting-input/idle/archived and performs timeout-driven idle/archive transitions.
-- `ProcessManager` + `ClaudePtyBridge` detect permission prompts, track approval policy (`ask-every-time`, `approve-once`, `remember-this-turn`), and convert Claude CLI prompt text into structured escalation state for the UI.
+- `ProcessManager` + `ClaudePtyBridge` detect permission prompts, track approval policy (`ask-every-time`, `approve-once`, `remember-this-turn`), keep per-session approval stats, and convert Claude CLI prompt text into structured escalation state for the UI.
 
-A bug around blocked input or wrong session state is usually not just a UI issue; check lifecycle state and permission detection before changing rendering.
-
-### Session model
-
-A session is more than a child process. It combines:
-- PTY state and raw buffered terminal output
-- structured `ConversationTurn[]` for chat mode
-- Claude session ID detection for `--resume`
-- lifecycle/archival state from `src/session-lifecycle.ts`
-- permission escalation metadata and auto-approval behavior by execution mode
-
-If session recovery, resume buttons, or chat history look wrong, inspect `src/process-manager.ts`, `src/claude-pty-bridge.ts`, and `src/storage.ts` together.
+A bug around blocked input, idle/archive transitions, or wrong permission state is usually not just a UI issue; check lifecycle state and permission detection before changing rendering.
 
 ### UI structure
 
@@ -144,8 +144,10 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 |------|------|
 | `src/cli.ts` | CLI entrypoint and config-related commands |
 | `src/server.ts` | Express server, REST API, WebSocket, PWA/service worker endpoints |
+| `src/server-session-routes.ts` | Session/resume/history HTTP routes and shared API error helpers |
 | `src/process-manager.ts` | PTY session orchestration, input/output routing, permission handling, resume/archive logic |
 | `src/claude-pty-bridge.ts` | PTY output parser for structured chat, permissions, task tracking, and Claude session IDs |
+| `src/resume-policy.ts` | Heuristics for mapping Claude history/resume data back onto wand sessions |
 | `src/storage.ts` | SQLite persistence and additive schema migration helpers |
 | `src/config.ts` | Default config, merge logic, config path resolution |
 | `src/session-lifecycle.ts` | Idle/thinking/waiting/archive state machine |
@@ -159,7 +161,7 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 
 ### REST surface
 
-The server exposes login/logout, config, session control, PTY input/resize, file browser, favorites, and quick-path endpoints from `src/server.ts`. If a frontend feature needs data, look for an existing `/api/*` route there before adding a new abstraction.
+The server exposes login/logout, config, session control, PTY input/resize, file browser, favorites, and quick-path endpoints from `src/server.ts` plus resume/history routes from `src/server-session-routes.ts`. If a frontend feature needs data, look for an existing `/api/*` route there before adding a new abstraction.
 
 ## Code Style
 

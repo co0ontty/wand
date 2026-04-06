@@ -558,6 +558,9 @@ export class ProcessManager extends EventEmitter {
       },
     });
     for (const snapshot of this.storage.loadSessions()) {
+      if ((snapshot.sessionKind ?? "pty") !== "pty") {
+        continue;
+      }
       const isClaudeCmd = /^claude\b/.test(snapshot.command.trim());
       const resumeCommandSessionId = getResumeCommandSessionId(snapshot.command);
       // Sessions restored from storage have ptyProcess: null — the old server's PTY
@@ -1268,6 +1271,8 @@ export class ProcessManager extends EventEmitter {
     const messages = record.ptyBridge?.getMessages() ?? record.messages;
     return {
       id: record.id,
+      sessionKind: "pty",
+      runner: "pty",
       command: record.command,
       cwd: record.cwd,
       mode: record.mode,
@@ -1289,6 +1294,7 @@ export class ProcessManager extends EventEmitter {
       resumedFromSessionId: record.resumedFromSessionId ?? undefined,
       resumedToSessionId: record.resumedToSessionId ?? undefined,
       autoRecovered: record.autoRecovered ?? false,
+      autoApprovePermissions: record.autoApprovePermissions || undefined,
       approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined
     };
   }
@@ -1314,6 +1320,16 @@ export class ProcessManager extends EventEmitter {
 
   denyPermission(id: string): SessionSnapshot {
     return this.resolvePermission(id, "deny");
+  }
+
+  toggleAutoApprove(id: string): SessionSnapshot {
+    const record = this.mustGet(id);
+    record.autoApprovePermissions = !record.autoApprovePermissions;
+    if (record.ptyBridge) {
+      record.ptyBridge.setAutoApprove(record.autoApprovePermissions);
+    }
+    this.persist(record);
+    return this.snapshot(record);
   }
 
   /**
@@ -1759,11 +1775,27 @@ export class ProcessManager extends EventEmitter {
 
     let result = command;
 
-    // When running as root, Claude CLI refuses --permission-mode bypassPermissions.
-    // Use acceptEdits to let Claude auto-accept edits natively, reducing the number
-    // of permission prompts wand has to auto-approve.
-    if (isRunningAsRoot() && (mode === "managed" || mode === "full-access" || mode === "auto-edit")) {
-      result += " --permission-mode acceptEdits";
+    // Skip if command already contains --permission-mode
+    const hasPermFlag = /--permission-mode\s/.test(command);
+
+    if (!hasPermFlag) {
+      if (isRunningAsRoot()) {
+        // Root: Claude CLI refuses --permission-mode bypassPermissions.
+        // Use acceptEdits + --allowedTools to auto-approve all tool calls
+        // regardless of whether the target path is inside or outside the CWD.
+        if (mode === "managed" || mode === "full-access" || mode === "auto-edit") {
+          result += " --permission-mode acceptEdits";
+          result += " --allowedTools Bash Edit Write Read Glob Grep NotebookEdit WebFetch WebSearch";
+        }
+      } else {
+        // Non-root: use bypassPermissions for full-access (skips all prompts),
+        // acceptEdits for auto-edit (auto-accepts file writes, prompts for bash).
+        if (mode === "full-access" || mode === "managed") {
+          result += " --permission-mode bypassPermissions";
+        } else if (mode === "auto-edit") {
+          result += " --permission-mode acceptEdits";
+        }
+      }
     }
 
     // In managed mode, append a system prompt instructing Claude to act autonomously

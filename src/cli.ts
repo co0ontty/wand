@@ -2,8 +2,6 @@
 
 import process from "node:process";
 import { ensureConfig, hasConfigFile, isExecutionMode, resolveConfigPath, saveConfig } from "./config.js";
-import { startServer } from "./server.js";
-import { ensureDatabaseFile, resolveDatabasePath } from "./storage.js";
 import { WandConfig } from "./types.js";
 
 async function main(): Promise<void> {
@@ -18,6 +16,7 @@ async function main(): Promise<void> {
     }
     case "web": {
       const config = await ensureRequiredFiles(configPath);
+      const { startServer } = await import("./server.js");
       await startServer(config, configPath);
       break;
     }
@@ -75,6 +74,7 @@ Options:
 }
 
 async function ensureRequiredFiles(configPath: string): Promise<WandConfig> {
+  const { ensureDatabaseFile, resolveDatabasePath } = await import("./storage.js");
   const dbPath = resolveDatabasePath(configPath);
   const hadConfig = hasConfigFile(configPath);
   const config = await ensureConfig(configPath);
