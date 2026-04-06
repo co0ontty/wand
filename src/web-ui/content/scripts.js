@@ -2348,69 +2348,58 @@
           }
         }
 
-        // Helper functions for recent paths
-        function getRecentPaths() {
-          try {
-            var saved = localStorage.getItem("wand-recent-paths");
-            return saved ? JSON.parse(saved) : [];
-          } catch (e) {
-            return [];
-          }
+        // Helper functions for recent paths (single source: backend API)
+        function fetchRecentPaths(callback) {
+          fetch("/api/recent-paths", { credentials: "same-origin" })
+            .then(function(res) { return res.json(); })
+            .then(function(items) { callback(items || []); })
+            .catch(function() { callback([]); });
         }
 
         function addRecentPath(path) {
-          var recent = getRecentPaths();
-          // Remove if already exists
-          recent = recent.filter(function(p) { return p !== path; });
-          // Add to front
-          recent.unshift(path);
-          // Keep only last 5
-          recent = recent.slice(0, 5);
-          try {
-            localStorage.setItem("wand-recent-paths", JSON.stringify(recent));
-          } catch (e) {
-            // Ignore localStorage errors
-          }
+          return fetch("/api/recent-paths", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ path: path })
+          }).catch(function() {});
         }
 
-        function renderRecentPaths() {
-          var recent = getRecentPaths();
-          if (recent.length === 0) return "";
-
+        function renderRecentPathsHtml(items) {
+          if (!items.length) return "";
           var html = '<div class="folder-recent-section">' +
             '<div class="folder-recent-title">最近使用</div>';
-
-          recent.forEach(function(path) {
-            html += '<div class="folder-recent-item" data-path="' + escapeHtml(path) + '">' +
-              '<span class="folder-recent-item-icon">📁</span>' +
-              '<span class="folder-recent-item-path">' + escapeHtml(path) + '</span>' +
+          items.forEach(function(item) {
+            var p = item.path || item;
+            html += '<div class="folder-recent-item" data-path="' + escapeHtml(p) + '">' +
+              '<span class="folder-recent-item-path">' + escapeHtml(p) + '</span>' +
             '</div>';
           });
-
           html += '</div>';
           return html;
         }
 
         function showRecentPathsDropdown() {
           if (!folderPickerDropdown) return;
-          var recentHtml = renderRecentPaths();
-          if (recentHtml) {
-            folderPickerDropdown.innerHTML = recentHtml;
-            folderPickerDropdown.classList.remove("hidden");
-            // Add click handlers for recent paths
-            folderPickerDropdown.querySelectorAll(".folder-recent-item").forEach(function(item) {
-              item.addEventListener("click", function() {
-                var path = this.dataset.path;
-                if (folderPickerInput) {
-                  folderPickerInput.value = path;
-                  saveWorkingDir(path);
-                  loadFolderSuggestions(path);
-                }
+          fetchRecentPaths(function(items) {
+            var recentHtml = renderRecentPathsHtml(items);
+            if (recentHtml) {
+              folderPickerDropdown.innerHTML = recentHtml;
+              folderPickerDropdown.classList.remove("hidden");
+              folderPickerDropdown.querySelectorAll(".folder-recent-item").forEach(function(item) {
+                item.addEventListener("click", function() {
+                  var path = this.dataset.path;
+                  if (folderPickerInput) {
+                    folderPickerInput.value = path;
+                    saveWorkingDir(path);
+                    loadFolderSuggestions(path);
+                  }
+                });
               });
-            });
-          } else {
-            hideFolderDropdown();
-          }
+            } else {
+              hideFolderDropdown();
+            }
+          });
         }
 
         // Working directory indicator click handler for active sessions
@@ -2471,7 +2460,6 @@
                     var path = entry.fullPath;
                     folderPickerInput.value = path;
                     saveWorkingDir(path);
-                    addRecentPath(path);
                     loadFolderSuggestions(path);
                     break;
                   }
@@ -4559,6 +4547,7 @@
         syncComposerModeSelect();
         return createStructuredSession(undefined, cwd, mode)
           .then(function(data) {
+            saveWorkingDir(cwd);
             closeSessionModal();
             closeSessionsDrawer();
             return data;
@@ -4596,6 +4585,7 @@
           state.selectedId = data.id;
           console.log("[WAND] runPtyCommandFromModal created session:", data.id, "sessionKind:", data.sessionKind, "runner:", data.runner);
           persistSelectedId();
+          saveWorkingDir(cwd);
           state.drafts[data.id] = "";
           resetChatRenderCache();
           closeSessionModal();
@@ -4654,18 +4644,14 @@
       function loadBlankChatCwdDropdown(dropdown) {
         var defaultCwd = getConfigCwd();
         dropdown.innerHTML = '<div class="blank-chat-cwd-loading">加载中...</div>';
-        fetch("/api/recent-paths", { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(function(items) {
+        fetchRecentPaths(function(items) {
             var html = "";
-            // Default directory always first
             var currentDir = state.workingDir || defaultCwd;
             html += '<div class="blank-chat-cwd-item' + (currentDir === defaultCwd ? " active" : "") + '" data-path="' + escapeHtml(defaultCwd) + '">' +
               '<span class="blank-chat-cwd-item-label">默认</span>' +
               '<span class="blank-chat-cwd-item-path">' + escapeHtml(defaultCwd) + '</span>' +
             '</div>';
-            // Recent paths (exclude default to avoid duplicate)
-            if (items && items.length) {
+            if (items.length) {
               var seen = {};
               seen[defaultCwd] = true;
               items.forEach(function(item) {
@@ -4688,26 +4674,18 @@
                 dropdown.classList.add("hidden");
                 var arrow = document.getElementById("blank-chat-cwd-arrow");
                 if (arrow) arrow.textContent = "▼";
-                // Update folder picker input if exists
                 var fpInput = document.getElementById("folder-picker-input");
                 if (fpInput) fpInput.value = path;
               });
             });
-          })
-          .catch(function() {
-            dropdown.innerHTML = '<div class="blank-chat-cwd-item" data-path="' + escapeHtml(defaultCwd) + '">' +
-              '<span class="blank-chat-cwd-item-path">' + escapeHtml(defaultCwd) + '</span>' +
-            '</div>';
-          });
+        });
       }
 
       function loadRecentPathBubbles() {
         var container = document.getElementById("recent-paths-bubbles");
         if (!container) return;
-        fetch("/api/recent-paths", { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(function(items) {
-            if (!items || !items.length) {
+        fetchRecentPaths(function(items) {
+            if (!items.length) {
               container.innerHTML = "";
               return;
             }
@@ -4725,10 +4703,7 @@
                 }
               });
             });
-          })
-          .catch(function() {
-            if (container) container.innerHTML = "";
-          });
+        });
       }
 
       function schedulePathSuggestions() {

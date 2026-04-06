@@ -698,6 +698,26 @@ export class StructuredSessionManager {
           data: { status: finished.status, exitCode: 0, messages: finished.messages, sessionKind: "structured", structuredState: finished.structuredState },
         });
 
+        // Auto-continue after plan mode exit: when Claude calls ExitPlanMode,
+        // the `-p` process exits because stdin is "ignore" and it cannot get
+        // user confirmation.  Detect this and automatically resume execution
+        // so the plan is actually carried out.
+        const lastToolUse = [...turnState.blocks].reverse().find(
+          (b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use",
+        );
+        if (lastToolUse && lastToolUse.name === "ExitPlanMode" && turnState.sessionId) {
+          console.log("[WAND] ExitPlanMode detected – auto-continuing plan execution for session:", sessionId);
+          resolve();
+          // Schedule the continuation outside the current promise chain so it
+          // does not block the close handler.
+          setImmediate(() => {
+            this.sendMessage(sessionId, "Plan approved. Proceed with the implementation.").catch((err) => {
+              console.error("[WAND] Auto-continue after ExitPlanMode failed:", err);
+            });
+          });
+          return;
+        }
+
         resolve();
       });
     });

@@ -236,14 +236,7 @@ function wandWarn(message: string, hint?: string): void {
   if (hint) process.stderr.write(`  提示：${hint}\n`);
 }
 
-// ── Favorite / Recent path types ──
-
-interface FavoritePath {
-  path: string;
-  name: string;
-  icon?: string;
-  addedAt: string;
-}
+// ── Recent path types ──
 
 interface RecentPath {
   path: string;
@@ -682,58 +675,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       { path: process.cwd(), name: "当前目录", icon: "📂" },
       { path: "/", name: "根目录", icon: "📁" },
     ]);
-  });
-
-  app.get("/api/favorite-paths", (_req, res) => {
-    const stored = storage.getConfigValue("favorite_paths");
-    const favorites = parseStoredPathList<FavoritePath>(stored);
-    res.json(favorites.filter((f) => !isBlockedFolderPath(normalizeFolderPath(f.path))));
-  });
-
-  app.post("/api/favorite-paths", (req, res) => {
-    const { path: favPath, name, icon } = req.body as { path?: string; name?: string; icon?: string };
-    if (!favPath) {
-      res.status(400).json({ error: "路径不能为空。" });
-      return;
-    }
-    const resolvedFavoritePath = normalizeFolderPath(favPath);
-    if (isBlockedFolderPath(resolvedFavoritePath)) {
-      res.status(403).json({ error: "访问被拒绝：无法收藏系统敏感目录。" });
-      return;
-    }
-    const stored = storage.getConfigValue("favorite_paths");
-    const favorites = parseStoredPathList<FavoritePath>(stored);
-    if (favorites.some((f) => normalizeFolderPath(f.path) === resolvedFavoritePath)) {
-      res.status(400).json({ error: "该路径已在收藏列表中。" });
-      return;
-    }
-    const newFavorite: FavoritePath = {
-      path: resolvedFavoritePath,
-      name: name || path.basename(resolvedFavoritePath),
-      icon: icon || "⭐",
-      addedAt: new Date().toISOString(),
-    };
-    favorites.push(newFavorite);
-    storage.setConfigValue("favorite_paths", JSON.stringify(favorites));
-    res.status(201).json(newFavorite);
-  });
-
-  app.delete("/api/favorite-paths", (req, res) => {
-    const { path: delPath } = req.body as { path?: string };
-    if (!delPath) {
-      res.status(400).json({ error: "路径不能为空。" });
-      return;
-    }
-    const stored = storage.getConfigValue("favorite_paths");
-    const favorites = parseStoredPathList<FavoritePath>(stored);
-    const index = favorites.findIndex((f) => f.path === delPath);
-    if (index === -1) {
-      res.status(404).json({ error: "未找到该收藏路径。" });
-      return;
-    }
-    favorites.splice(index, 1);
-    storage.setConfigValue("favorite_paths", JSON.stringify(favorites));
-    res.json({ ok: true });
   });
 
   app.get("/api/recent-paths", (_req, res) => {
