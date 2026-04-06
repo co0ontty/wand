@@ -5684,6 +5684,7 @@
       .modal { max-height: 80vh; }
       .modal-header { padding: 8px 10px; min-height: 36px; }
       .modal-body { padding: 8px 10px; }
+      .field-row { grid-template-columns: 1fr; gap: 0; }
 
       .btn { min-height: 36px; padding: 8px 12px; }
       .btn-sm { min-height: 28px; padding: 4px 8px; }
@@ -6287,18 +6288,21 @@
       background: none;
       border: none;
       border-bottom: 2px solid transparent;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
       cursor: pointer;
-      transition: color 0.15s, border-color 0.15s;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
       white-space: nowrap;
     }
 
     .settings-tab:hover {
       color: var(--text-primary);
+      background: rgba(197, 101, 61, 0.06);
     }
 
     .settings-tab.active {
       color: var(--accent);
       border-bottom-color: var(--accent);
+      background: var(--accent-muted);
     }
 
     .settings-panel {
@@ -6312,8 +6316,11 @@
     .settings-about-info {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 0;
       margin-bottom: 18px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      padding: 2px 14px;
     }
 
     .settings-about-row {
@@ -6321,6 +6328,12 @@
       justify-content: space-between;
       align-items: center;
       font-size: 0.8125rem;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .settings-about-row:last-child {
+      border-bottom: none;
     }
 
     .settings-label {
@@ -6356,8 +6369,8 @@
     .settings-section-title {
       font-size: 0.8125rem;
       font-weight: 600;
-      color: var(--fg-primary);
-      margin-bottom: 10px;
+      color: var(--text-primary);
+      margin: 0 0 12px 0;
       letter-spacing: 0.02em;
     }
 
@@ -6365,13 +6378,6 @@
       display: flex;
       gap: 8px;
       margin-top: 10px;
-    }
-
-    .settings-section-title {
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin: 0 0 12px 0;
     }
 
     .settings-divider {
@@ -6395,6 +6401,49 @@
 
     .field-inline .field-label {
       margin-bottom: 0;
+    }
+
+    .field-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .field-row .field {
+      margin-bottom: 0;
+    }
+
+    .settings-card {
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .settings-card .field:last-of-type {
+      margin-bottom: 12px;
+    }
+    .settings-card .settings-section-title {
+      margin-top: 0;
+    }
+    .settings-card .field-input {
+      background: rgba(255, 255, 255, 0.6);
+    }
+    .settings-card .btn-block {
+      margin-bottom: 0;
+    }
+
+    .empty-state-compact {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 32px 16px;
+      color: var(--text-muted);
+      font-size: 0.8125rem;
+    }
+    .empty-state-compact .empty-icon {
+      font-size: 1.5rem;
+      opacity: 0.5;
     }
 
     .field-checkbox {

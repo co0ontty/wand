@@ -27,7 +27,7 @@ function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0 || process.geteuid?.() === 0;
 }
 
-export { ProcessEvent, ProcessEventHandler } from "./types.js";
+export type { ProcessEvent, ProcessEventHandler } from "./types.js";
 
 /** Human-readable task information for the UI */
 export interface TaskInfo {
