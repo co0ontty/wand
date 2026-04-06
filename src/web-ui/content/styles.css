@@ -7525,29 +7525,29 @@
     .structured-status-bar {
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin: 8px 0 4px;
-      padding: 8px 12px;
+      gap: 8px;
+      margin: 0;
+      padding: 4px 10px;
       border-radius: var(--radius-sm);
-      background: rgba(var(--accent-rgb, 99, 102, 241), 0.06);
-      border: 1px solid rgba(var(--accent-rgb, 99, 102, 241), 0.12);
-      font-size: 0.75rem;
-      color: var(--text-secondary);
+      background: transparent;
+      border: none;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
       transition: all 0.3s ease;
       overflow: hidden;
     }
 
     .structured-status-bar .status-bar-label {
       flex-shrink: 0;
-      font-weight: 600;
-      color: var(--accent-soft);
+      font-weight: 500;
+      color: var(--text-muted);
     }
 
     .structured-status-bar .status-bar-track {
       flex: 1;
-      height: 3px;
-      border-radius: 2px;
-      background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+      height: 2px;
+      border-radius: 1px;
+      background: rgba(var(--accent-rgb, 99, 102, 241), 0.08);
       overflow: hidden;
       position: relative;
     }
@@ -7556,9 +7556,9 @@
       position: absolute;
       top: 0;
       left: 0;
-      width: 40%;
+      width: 30%;
       height: 100%;
-      border-radius: 2px;
+      border-radius: 1px;
       background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
       animation: marqueeScroll 1.5s ease-in-out infinite;
     }
@@ -7572,14 +7572,14 @@
       flex-shrink: 0;
       font-variant-numeric: tabular-nums;
       font-family: var(--font-mono);
-      font-size: 0.6875rem;
+      font-size: 0.625rem;
       color: var(--text-muted);
     }
 
     /* 完成态 */
     .structured-status-bar.completed {
-      background: rgba(79, 122, 88, 0.06);
-      border-color: rgba(79, 122, 88, 0.15);
+      background: transparent;
+      border-color: transparent;
       animation: statusBarFadeOut 2s ease-out 1s forwards;
     }
 
@@ -7600,9 +7600,9 @@
     }
 
     @keyframes statusBarFadeOut {
-      0%   { opacity: 1; max-height: 50px; margin: 8px 0 4px; padding: 8px 12px; }
-      70%  { opacity: 0; max-height: 50px; margin: 8px 0 4px; padding: 8px 12px; }
-      100% { opacity: 0; max-height: 0; margin: 0; padding: 0 12px; border-width: 0; }
+      0%   { opacity: 1; max-height: 30px; margin: 0; padding: 4px 10px; }
+      70%  { opacity: 0; max-height: 30px; margin: 0; padding: 4px 10px; }
+      100% { opacity: 0; max-height: 0; margin: 0; padding: 0 10px; border-width: 0; }
     }
 
     /* 结束标记 */
