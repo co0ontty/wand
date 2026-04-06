@@ -3225,7 +3225,8 @@
     }
 
     /* Markdown Content */
-    .markdown-content { color: inherit; }
+    .markdown-content { color: inherit; white-space: normal; overflow-x: hidden; }
+    .markdown-content .code-block pre { overflow-x: auto; }
     .markdown-content p { margin: 0 0 8px 0; }
     .markdown-content p:last-child { margin-bottom: 0; }
     .markdown-content strong { font-weight: 600; }
@@ -7466,6 +7467,90 @@
     /* 确保按钮在 DOM 视图之上 */
     .terminal-jump-bottom {
       z-index: 20;
+    }
+
+    /* ── 结构化会话状态条 ── */
+    .structured-status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0 4px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      background: rgba(var(--accent-rgb, 99, 102, 241), 0.06);
+      border: 1px solid rgba(var(--accent-rgb, 99, 102, 241), 0.12);
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      transition: all 0.3s ease;
+      overflow: hidden;
+    }
+
+    .structured-status-bar .status-bar-label {
+      flex-shrink: 0;
+      font-weight: 600;
+      color: var(--accent-soft);
+    }
+
+    .structured-status-bar .status-bar-track {
+      flex: 1;
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .structured-status-bar .status-bar-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 40%;
+      height: 100%;
+      border-radius: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
+      animation: marqueeScroll 1.5s ease-in-out infinite;
+    }
+
+    @keyframes marqueeScroll {
+      0%   { left: -40%; }
+      100% { left: 100%; }
+    }
+
+    .structured-status-bar .status-bar-timer {
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+    }
+
+    /* 完成态 */
+    .structured-status-bar.completed {
+      background: rgba(79, 122, 88, 0.06);
+      border-color: rgba(79, 122, 88, 0.15);
+      animation: statusBarFadeOut 2s ease-out 1s forwards;
+    }
+
+    .structured-status-bar.completed .status-bar-label {
+      color: var(--success);
+    }
+
+    .structured-status-bar.completed .status-bar-track {
+      background: rgba(79, 122, 88, 0.1);
+    }
+
+    .structured-status-bar.completed .status-bar-fill {
+      width: 100%;
+      background: var(--success);
+      opacity: 0.5;
+      animation: none;
+      left: 0;
+    }
+
+    @keyframes statusBarFadeOut {
+      0%   { opacity: 1; max-height: 50px; margin: 8px 0 4px; padding: 8px 12px; }
+      70%  { opacity: 0; max-height: 50px; margin: 8px 0 4px; padding: 8px 12px; }
+      100% { opacity: 0; max-height: 0; margin: 0; padding: 0 12px; border-width: 0; }
     }
 
     /* 结束标记 */
