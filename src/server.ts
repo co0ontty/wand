@@ -401,7 +401,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
       structuredRunners: [{ label: "Claude Structured", runner: "claude-cli-print" }],
-      experimentalDomTerminal: config.experimentalDomTerminal ?? false,
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
       currentVersion: PKG_VERSION,
@@ -428,7 +427,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.post("/api/settings/config", async (req, res) => {
     const body = req.body as Partial<WandConfig>;
-    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "experimentalDomTerminal", "language"] as const;
+    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "language"] as const;
     let changed = false;
 
     for (const field of allowedFields) {
@@ -454,8 +453,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           config.defaultCwd = String(body.defaultCwd);
         } else if (field === "shell") {
           config.shell = String(body.shell);
-        } else if (field === "experimentalDomTerminal") {
-          config.experimentalDomTerminal = body.experimentalDomTerminal === true;
         } else if (field === "language") {
           config.language = typeof body.language === "string" ? body.language.trim() : "";
         }
