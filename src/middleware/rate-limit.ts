@@ -50,4 +50,5 @@ export function cleanupRateLimiter(): void {
 }
 
 // Cleanup expired entries every 5 minutes
-setInterval(cleanupRateLimiter, 5 * 60 * 1000);
+const rateLimitCleanupTimer = setInterval(cleanupRateLimiter, 5 * 60 * 1000);
+rateLimitCleanupTimer.unref();

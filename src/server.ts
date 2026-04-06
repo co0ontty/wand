@@ -69,6 +69,7 @@ import { createSession, revokeSession, setAuthStorage, validateSession } from ".
 import { ensureCertificates } from "./cert.js";
 import { isExecutionMode, resolveConfigDir, saveConfig } from "./config.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
+import { StructuredSessionManager } from "./structured-session-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
 import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
@@ -297,6 +298,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const configDir = resolveConfigDir(configPath);
   const avatarSeed = await ensureAvatarSeed(configDir);
   const processes = new ProcessManager(config, storage, configDir);
+  const structuredSessions = new StructuredSessionManager(storage);
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
   const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
@@ -398,6 +400,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
+      structuredRunners: [{ label: "Claude Structured", runner: "claude-cli-print" }],
       experimentalDomTerminal: config.experimentalDomTerminal ?? false,
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
@@ -526,7 +529,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
-  registerSessionRoutes(app, processes, storage, config.defaultMode);
+  registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode);
   registerClaudeHistoryRoutes(app, processes, storage);
 
   // ── Path suggestion ──
@@ -889,14 +892,15 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   const wss = new WebSocketServer({ server, path: "/ws" });
   const wsManager = new WsBroadcastManager(wss);
-  wsManager.setup((id) => processes.get(id));
+  wsManager.setup((id) => structuredSessions.get(id) ?? processes.get(id));
 
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
     wsManager.emitEvent(event);
   });
-
-  // ── Start listening ──
+  structuredSessions.setEventEmitter((event) => {
+    wsManager.emitEvent(event);
+  });
 
   await new Promise<void>((resolve, reject) => {
     server.listen(config.port, config.host, () => {
