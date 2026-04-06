@@ -41,7 +41,7 @@ ${cssStyles}
   <div id="app"></div>
 ${scriptOpen} src="/vendor/xterm/lib/xterm.js">${scriptClose}
 ${scriptOpen} src="/vendor/xterm-addon-fit/lib/addon-fit.js">${scriptClose}
-${scriptOpen} src="/vendor/xterm-addon-serialize/lib/xterm-addon-serialize.js">${scriptClose}
+${scriptOpen} src="/vendor/xterm-addon-serialize/lib/addon-serialize.js">${scriptClose}
 ${scriptOpen}>
 ${scriptContent}
 ${scriptClose}
