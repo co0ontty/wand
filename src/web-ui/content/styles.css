@@ -4802,7 +4802,7 @@
     .modal-backdrop {
       position: fixed;
       inset: 0;
-      z-index: 100;
+      z-index: 500;
       background: rgba(42, 28, 18, 0.52);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);

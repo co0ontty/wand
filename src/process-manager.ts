@@ -9,7 +9,7 @@ import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
 import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
-import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, SessionEvent, SessionSnapshot, WandConfig } from "./types.js";
+import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionSnapshot, WandConfig } from "./types.js";
 import { SessionLifecycleManager } from "./session-lifecycle.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
@@ -27,11 +27,7 @@ function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0 || process.geteuid?.() === 0;
 }
 
-export interface ProcessEvent {
-  type: "output" | "status" | "started" | "ended" | "usage" | "task" | "notification";
-  sessionId: string;
-  data?: unknown;
-}
+export { ProcessEvent, ProcessEventHandler } from "./types.js";
 
 /** Human-readable task information for the UI */
 export interface TaskInfo {
@@ -51,7 +47,6 @@ export class SessionInputError extends Error {
   }
 }
 
-export type ProcessEventHandler = (event: ProcessEvent) => void;
 
 /** A Claude Code session discovered by scanning ~/.claude/projects/ directories. */
 export interface ClaudeHistorySession {

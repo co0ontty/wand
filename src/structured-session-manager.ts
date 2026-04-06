@@ -4,10 +4,9 @@ import { spawn, ChildProcess } from "node:child_process";
 import { WandStorage } from "./storage.js";
 import {
   ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
-  ExecutionMode, SessionRunner, SessionSnapshot, StructuredSessionState,
+  ExecutionMode, ProcessEvent, SessionRunner, SessionSnapshot, StructuredSessionState,
   WandConfig,
 } from "./types.js";
-import { ProcessEvent } from "./ws-broadcast.js";
 
 interface CreateStructuredSessionOptions {
   cwd: string;
