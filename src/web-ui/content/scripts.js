@@ -8039,12 +8039,12 @@
         function fullRenderChat() {
           // Extract system info from PTY output
           var systemInfo = extractPtySystemInfo(selectedSession.output, messages);
-          
+
           // Build HTML with system info cards interleaved
           var html = '';
           var reversedMessages = messages.slice().reverse();
           var msgCount = messages.length;
-          
+
           for (var i = 0; i < reversedMessages.length; i++) {
             var msg = reversedMessages[i];
             var originalIndex = msgCount - 1 - i; // Original index in messages array
@@ -8069,7 +8069,7 @@
             }
             
             // Render message
-            html += renderChatMessage(msg);
+            html += renderChatMessage(msg, roundUsageByIndex[originalIndex] || null);
           }
           
           chatMessages.innerHTML = html;
@@ -8106,6 +8106,47 @@
           });
         }
 
+        // Pre-compute per-round cumulative usage.
+        // A "round" starts at a user message and includes all subsequent assistant turns
+        // until the next user message. Only the last assistant in each round shows the total.
+        var roundUsageByIndex = {};
+        (function() {
+          var acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0 };
+          var lastAssistantIdx = -1;
+          for (var mi = 0; mi < messages.length; mi++) {
+            var m = messages[mi];
+            if (m.role === "user") {
+              if (lastAssistantIdx >= 0 && (acc.inputTokens > 0 || acc.outputTokens > 0 || acc.totalCostUsd > 0)) {
+                roundUsageByIndex[lastAssistantIdx] = {
+                  inputTokens: acc.inputTokens,
+                  outputTokens: acc.outputTokens,
+                  cacheReadInputTokens: acc.cacheReadInputTokens,
+                  totalCostUsd: acc.totalCostUsd
+                };
+              }
+              acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0 };
+              lastAssistantIdx = -1;
+            } else if (m.role === "assistant" && m.usage) {
+              var u = m.usage;
+              acc.inputTokens += (u.inputTokens || 0);
+              acc.outputTokens += (u.outputTokens || 0);
+              acc.cacheReadInputTokens += (u.cacheReadInputTokens || 0);
+              acc.totalCostUsd += (u.totalCostUsd || 0);
+              lastAssistantIdx = mi;
+            } else if (m.role === "assistant") {
+              lastAssistantIdx = mi;
+            }
+          }
+          if (lastAssistantIdx >= 0 && (acc.inputTokens > 0 || acc.outputTokens > 0 || acc.totalCostUsd > 0)) {
+            roundUsageByIndex[lastAssistantIdx] = {
+              inputTokens: acc.inputTokens,
+              outputTokens: acc.outputTokens,
+              cacheReadInputTokens: acc.cacheReadInputTokens,
+              totalCostUsd: acc.totalCostUsd
+            };
+          }
+        })();
+
         if (needsFullRender) {
           fullRenderChat();
         } else if (msgCount > existingCount) {
@@ -8117,7 +8158,8 @@
           var insertedEls = [];
           for (var i = 0; i < newMessages.length; i++) {
             var div = document.createElement("div");
-            div.innerHTML = renderChatMessage(newMessages[i]);
+            var nmOrigIdx = existingCount + (newMessages.length - 1 - i);
+            div.innerHTML = renderChatMessage(newMessages[i], roundUsageByIndex[nmOrigIdx] || null);
             var el = div.firstElementChild;
             if (el) {
               el.classList.add("animate-in");
@@ -8142,7 +8184,8 @@
           for (var mi = 0; mi < reversedMessages.length && mi < existingEls.length; mi++) {
             var currentEl = existingEls[mi];
             var tmpWrap = document.createElement("div");
-            tmpWrap.innerHTML = renderChatMessage(reversedMessages[mi]);
+            var srOrigIdx = reversedMessages.length - 1 - mi;
+            tmpWrap.innerHTML = renderChatMessage(reversedMessages[mi], roundUsageByIndex[srOrigIdx] || null);
             var replacementEl = tmpWrap.firstElementChild;
             if (!replacementEl) continue;
             if (currentEl.innerHTML !== replacementEl.innerHTML || currentEl.className !== replacementEl.className) {
@@ -8858,7 +8901,7 @@
         return messages;
       }
 
-      function renderChatMessage(msg) {
+      function renderChatMessage(msg, roundUsage) {
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
           return '<div class="chat-message thinking">' +
@@ -8882,7 +8925,7 @@
 
         // Structured content blocks (from JSON chat mode)
         if (Array.isArray(msg.content)) {
-          return renderStructuredMessage(msg);
+          return renderStructuredMessage(msg, roundUsage);
         }
 
         // Legacy string content (from PTY parsing)
@@ -8937,7 +8980,7 @@
         return '<div class="structured-tool-hint">已自动恢复一次 ' + escapeHtml(getToolDisplayName(toolName)) + ' 参数问题</div>';
       }
 
-      function renderStructuredMessage(msg) {
+      function renderStructuredMessage(msg, roundUsage) {
         var role = msg.role;
         var avatar = role === "assistant" ? '<div class="chat-message-avatar">赛博虎妞</div>' : "";
 
@@ -8971,13 +9014,13 @@
         }
 
         var usageHtml = "";
-        if (role === "assistant" && msg.usage) {
-          var u = msg.usage;
+        if (role === "assistant" && roundUsage) {
+          var u = roundUsage;
           var parts = [];
-          if (u.inputTokens !== undefined) parts.push("输入 " + u.inputTokens);
-          if (u.outputTokens !== undefined) parts.push("输出 " + u.outputTokens);
-          if (u.cacheReadInputTokens !== undefined && u.cacheReadInputTokens > 0) parts.push("缓存 " + u.cacheReadInputTokens);
-          if (u.totalCostUsd !== undefined) parts.push("$" + u.totalCostUsd.toFixed(4));
+          if (u.inputTokens > 0) parts.push("输入 " + u.inputTokens);
+          if (u.outputTokens > 0) parts.push("输出 " + u.outputTokens);
+          if (u.cacheReadInputTokens > 0) parts.push("缓存 " + u.cacheReadInputTokens);
+          if (u.totalCostUsd > 0) parts.push("$" + u.totalCostUsd.toFixed(4));
           if (parts.length > 0) {
             usageHtml = '<div class="message-usage">' + parts.join(" · ") + '</div>';
           }
