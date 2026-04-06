@@ -298,7 +298,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const configDir = resolveConfigDir(configPath);
   const avatarSeed = await ensureAvatarSeed(configDir);
   const processes = new ProcessManager(config, storage, configDir);
-  const structuredSessions = new StructuredSessionManager(storage);
+  const structuredSessions = new StructuredSessionManager(storage, config);
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
   const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
@@ -428,7 +428,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.post("/api/settings/config", async (req, res) => {
     const body = req.body as Partial<WandConfig>;
-    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "experimentalDomTerminal"] as const;
+    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "experimentalDomTerminal", "language"] as const;
     let changed = false;
 
     for (const field of allowedFields) {
@@ -456,6 +456,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           config.shell = String(body.shell);
         } else if (field === "experimentalDomTerminal") {
           config.experimentalDomTerminal = body.experimentalDomTerminal === true;
+        } else if (field === "language") {
+          config.language = typeof body.language === "string" ? body.language.trim() : "";
         }
         changed = true;
       }

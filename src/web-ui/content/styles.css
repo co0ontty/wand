@@ -2231,6 +2231,7 @@
 
     .chat-message.assistant {
       align-self: flex-start;
+      max-width: 95%;
     }
 
     .chat-message.system-info {
@@ -2296,9 +2297,11 @@
     }
 
     .chat-message.assistant .chat-message-avatar {
-      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
-      color: var(--text-inverse);
-      box-shadow: 0 2px 8px rgba(197, 101, 61, 0.3);
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent);
+      padding: 0 2px 4px 2px;
+      letter-spacing: 0.03em;
     }
 
     /* ===== 消息气泡 ===== */
@@ -2351,23 +2354,44 @@
       box-shadow: var(--shadow-md);
     }
 
+    /* ===== 结构化消息内容（无气泡包裹） ===== */
+    .chat-message-content {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-width: 100%;
+      font-size: 0.875rem;
+      line-height: var(--line-height-relaxed);
+      word-wrap: break-word;
+      color: var(--text-primary);
+    }
+
+    .chat-message-content > .thinking-inline,
+    .chat-message-content > .inline-tool,
+    .chat-message-content > .terminal-tool,
+    .chat-message-content > .diff-tool,
+    .chat-message-content > .tool-use-card {
+      margin: 1px 0;
+    }
+
     /* ===== 消息使用量信息 ===== */
     .message-usage {
-      margin-top: 12px;
-      padding-top: 10px;
-      border-top: 1px dashed var(--border-subtle);
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid var(--border-subtle);
       font-family: var(--font-mono);
-      font-size: 0.6875rem;
-      color: var(--text-tertiary);
+      font-size: 0.625rem;
+      color: var(--text-muted);
       display: flex;
-      gap: 12px;
+      gap: 10px;
       align-items: center;
       flex-wrap: wrap;
+      opacity: 0.5;
     }
 
     .message-usage::before {
-      content: '✦';
-      color: var(--accent-soft);
+      content: '·';
+      color: var(--text-muted);
       font-size: 0.625rem;
     }
 
@@ -2488,9 +2512,9 @@
 
     /* Tool Use Card */
     .tool-use-card {
-      margin: 6px 0;
+      margin: 3px 0;
       border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-sm);
+      border-radius: 8px;
       overflow: hidden;
       width: 100%;
       box-sizing: border-box;
@@ -2498,9 +2522,8 @@
       transition: all 0.3s var(--ease-out-expo);
     }
     .tool-use-card:hover {
-      border-color: rgba(79, 122, 88, 0.3);
-      transform: translateX(4px);
-      box-shadow: -4px 4px 16px rgba(79, 122, 88, 0.08);
+      border-color: rgba(79, 122, 88, 0.25);
+      box-shadow: 0 2px 8px rgba(79, 122, 88, 0.06);
     }
     .tool-use-card.loading {
       border-color: rgba(79, 122, 88, 0.4);
@@ -2515,8 +2538,8 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 10px 12px;
-      background: rgba(79, 122, 88, 0.06);
+      padding: 8px 12px;
+      background: rgba(79, 122, 88, 0.04);
       cursor: pointer;
       font-size: 0.8125rem;
       user-select: none;
@@ -2524,7 +2547,7 @@
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
       transition: all 0.2s var(--ease-out-expo);
-      min-height: 44px;
+      min-height: 36px;
       flex-wrap: nowrap;
     }
     .tool-use-header:hover {
@@ -2543,12 +2566,18 @@
       background: rgba(178, 79, 69, 0.1);
     }
     .tool-use-icon {
-      font-size: 1.1rem;
+      font-size: 0.6875rem;
+      font-family: var(--font-mono);
+      font-weight: 600;
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      min-width: 20px;
+      min-width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      background: rgba(79, 122, 88, 0.1);
+      color: var(--success);
     }
     .tool-use-spinner {
       display: inline-block;
@@ -2745,22 +2774,22 @@
     .thinking-inline {
       display: flex;
       align-items: baseline;
-      gap: 6px;
-      margin: 8px 0;
-      padding: 6px 10px;
-      border-radius: var(--radius-sm);
-      background: rgba(138, 108, 178, 0.05);
+      gap: 5px;
+      margin: 2px 0;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(138, 108, 178, 0.04);
       cursor: pointer;
-      font-size: 0.8125rem;
-      line-height: 1.5;
-      color: rgba(138, 108, 178, 0.7);
+      font-size: 0.75rem;
+      line-height: 1.4;
+      color: rgba(138, 108, 178, 0.55);
       transition: background var(--transition-fast), color var(--transition-fast);
       word-break: break-word;
       overflow-wrap: break-word;
     }
     .thinking-inline:hover {
-      background: rgba(138, 108, 178, 0.1);
-      color: rgba(138, 108, 178, 0.9);
+      background: rgba(138, 108, 178, 0.08);
+      color: rgba(138, 108, 178, 0.8);
     }
     .thinking-inline.expanded {
       color: var(--text-secondary);
@@ -2771,7 +2800,7 @@
     }
     .thinking-inline-icon {
       flex-shrink: 0;
-      font-size: 0.875rem;
+      font-size: 0.625rem;
     }
     .thinking-inline-preview {
       flex: 1;
@@ -2786,42 +2815,42 @@
     }
     .thinking-inline-action {
       flex-shrink: 0;
-      font-size: 0.75rem;
-      color: rgba(138, 108, 178, 0.5);
-      padding: 1px 6px;
+      font-size: 0.625rem;
+      color: rgba(138, 108, 178, 0.4);
+      padding: 0 4px;
       border-radius: 3px;
-      background: rgba(138, 108, 178, 0.1);
+      background: rgba(138, 108, 178, 0.08);
       margin-left: auto;
     }
     .thinking-inline:hover .thinking-inline-action {
-      color: rgba(138, 108, 178, 0.8);
+      color: rgba(138, 108, 178, 0.7);
     }
     .thinking-inline.thinking-pty {
-      background: rgba(138, 108, 178, 0.05);
+      background: rgba(138, 108, 178, 0.03);
     }
 
     /* Streaming thinking: 3-line scrollable area during thinking */
     .thinking-streaming {
       display: flex;
       align-items: flex-start;
-      gap: 6px;
-      margin: 8px 0;
-      padding: 6px 10px;
-      border-radius: var(--radius-sm);
-      background: rgba(138, 108, 178, 0.06);
+      gap: 5px;
+      margin: 2px 0;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(138, 108, 178, 0.04);
       cursor: default;
-      font-size: 0.8125rem;
-      line-height: 1.5;
-      color: rgba(138, 108, 178, 0.7);
+      font-size: 0.75rem;
+      line-height: 1.4;
+      color: rgba(138, 108, 178, 0.55);
     }
     .thinking-streaming-inner {
       display: flex;
       align-items: flex-start;
-      gap: 6px;
+      gap: 5px;
       width: 100%;
     }
     .thinking-streaming-icon {
-      font-size: 0.875rem;
+      font-size: 0.625rem;
       flex-shrink: 0;
       margin-top: 1px;
     }
@@ -2851,33 +2880,38 @@
     .inline-tool {
       display: flex;
       flex-direction: column;
-      margin: 4px 0;
-      border-radius: var(--radius-sm);
+      margin: 1px 0;
+      border-radius: 6px;
       cursor: pointer;
       transition: background var(--transition-fast);
     }
     .inline-tool-row {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 4px 8px;
-      font-size: 0.8125rem;
+      gap: 5px;
+      padding: 2px 6px;
+      font-size: 0.6875rem;
       color: var(--text-muted);
       font-family: var(--font-mono);
-      line-height: 1.5;
+      line-height: 1.4;
+      opacity: 0.7;
     }
     .inline-tool:hover .inline-tool-row {
-      background: rgba(0, 0, 0, 0.03);
-      border-radius: var(--radius-sm);
+      opacity: 1;
+      background: rgba(0, 0, 0, 0.02);
+      border-radius: 6px;
     }
     .inline-tool-status {
-      font-size: 0.75rem;
+      font-size: 0.625rem;
       flex-shrink: 0;
     }
     .inline-tool-icon {
       flex-shrink: 0;
       color: var(--text-muted);
-      margin: 0 2px;
+      margin: 0 1px;
+      opacity: 0.6;
+      width: 12px;
+      height: 12px;
     }
     .inline-tool-title {
       flex: 1;
@@ -2885,13 +2919,13 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      color: var(--text-secondary);
+      color: var(--text-muted);
     }
     .inline-tool-meta {
       flex-shrink: 0;
-      font-size: 0.7rem;
+      font-size: 0.625rem;
       color: var(--text-muted);
-      opacity: 0.7;
+      opacity: 0.5;
       max-width: 200px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -2958,9 +2992,9 @@
 
     /* ── Inline Terminal Display (Bash) ── */
     .inline-terminal {
-      margin: 6px 0;
+      margin: 3px 0;
       border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: var(--radius-sm);
+      border-radius: 8px;
       background: #1a1714;
       overflow: hidden;
     }
@@ -2968,11 +3002,14 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 10px;
+      padding: 5px 10px;
       background: rgba(255, 255, 255, 0.03);
       font-size: 0.75rem;
       cursor: pointer;
       user-select: none;
+    }
+    .term-header:hover {
+      background: rgba(255, 255, 255, 0.05);
     }
     .term-status-dot {
       width: 6px;
@@ -2988,6 +3025,22 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.4; }
     }
+    .term-cmd-preview {
+      flex: 1;
+      min-width: 0;
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      color: rgba(255, 255, 255, 0.45);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .term-cmd-preview .term-prompt {
+      color: rgba(110, 224, 154, 0.6);
+      font-weight: 500;
+      margin-right: 4px;
+      font-size: 0.6875rem;
+    }
     .term-title {
       flex: 1;
       font-family: var(--font-mono);
@@ -2995,8 +3048,8 @@
       color: rgba(255, 255, 255, 0.3);
     }
     .term-toggle-icon {
-      font-size: 0.625rem;
-      color: rgba(255, 255, 255, 0.3);
+      font-size: 0.5rem;
+      color: rgba(255, 255, 255, 0.25);
       transition: transform var(--transition-fast);
     }
     .term-body {
@@ -3040,9 +3093,9 @@
 
     /* ── Inline Diff Display (Edit, Write, MultiEdit) ── */
     .inline-diff {
-      margin: 6px 0;
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: var(--radius-sm);
+      margin: 3px 0;
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      border-radius: 8px;
       overflow: hidden;
       background: var(--bg-secondary);
     }
@@ -3055,8 +3108,7 @@
       font-size: 0.75rem;
     }
     .diff-file-icon {
-      flex-shrink: 0;
-      font-size: 0.875rem;
+      display: none;
     }
     .diff-file-name {
       font-family: var(--font-mono);
@@ -5480,7 +5532,7 @@
       .btn-sm { min-height: 32px; }
 
       .chat-message-bubble { padding: 8px 10px; font-size: 0.75rem; }
-      .chat-message-avatar { width: 24px; height: 24px; font-size: 11px; }
+      .chat-message-avatar { font-size: 0.6875rem; }
 
       /* 模态框移动端优化 */
       .modal-backdrop {

@@ -1807,6 +1807,14 @@ export class ProcessManager extends EventEmitter {
       result += ` --append-system-prompt '${escaped}'`;
     }
 
+    // Append language preference if configured
+    const language = this.config.language?.trim();
+    if (language) {
+      const langPrompt = `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`;
+      const escaped = langPrompt.replace(/'/g, "'\\''");
+      result += ` --append-system-prompt '${escaped}'`;
+    }
+
     return result;
   }
 }
