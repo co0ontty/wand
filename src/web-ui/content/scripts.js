@@ -804,31 +804,50 @@
 
               // General config tab
               '<div class="settings-panel" id="settings-tab-general">' +
-                '<div class="field">' +
-                  '<label class="field-label" for="cfg-host">监听地址 (host)</label>' +
-                  '<input id="cfg-host" type="text" class="field-input" placeholder="127.0.0.1" />' +
-                '</div>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="cfg-port">端口 (port)</label>' +
-                  '<input id="cfg-port" type="number" class="field-input" placeholder="8443" min="1" max="65535" />' +
+                '<div class="field-row">' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="cfg-host">监听地址 (host)</label>' +
+                    '<input id="cfg-host" type="text" class="field-input" placeholder="127.0.0.1" />' +
+                  '</div>' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="cfg-port">端口 (port)</label>' +
+                    '<input id="cfg-port" type="number" class="field-input" placeholder="8443" min="1" max="65535" />' +
+                  '</div>' +
                 '</div>' +
                 '<div class="field field-inline">' +
-                  '<label class="field-label" for="cfg-https">启用 HTTPS</label>' +
                   '<input id="cfg-https" type="checkbox" class="field-checkbox" />' +
+                  '<label class="field-label" for="cfg-https">启用 HTTPS</label>' +
                 '</div>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="cfg-mode">默认执行模式</label>' +
-                  '<select id="cfg-mode" class="field-input">' +
-                    '<option value="default">default</option>' +
-                    '<option value="assist">assist</option>' +
-                    '<option value="agent">agent</option>' +
-                    '<option value="agent-max">agent-max</option>' +
-                    '<option value="auto-edit">auto-edit</option>' +
-                    '<option value="full-access">full-access</option>' +
-                    '<option value="native">native</option>' +
-                    '<option value="managed">managed</option>' +
-                  '</select>' +
+                '<div class="field-row">' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="cfg-mode">默认执行模式</label>' +
+                    '<select id="cfg-mode" class="field-input">' +
+                      '<option value="default">default</option>' +
+                      '<option value="assist">assist</option>' +
+                      '<option value="agent">agent</option>' +
+                      '<option value="agent-max">agent-max</option>' +
+                      '<option value="auto-edit">auto-edit</option>' +
+                      '<option value="full-access">full-access</option>' +
+                      '<option value="native">native</option>' +
+                      '<option value="managed">managed</option>' +
+                    '</select>' +
+                  '</div>' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="cfg-language">回复语言</label>' +
+                    '<select id="cfg-language" class="field-input">' +
+                      '<option value="">自动（不指定）</option>' +
+                      '<option value="中文">中文</option>' +
+                      '<option value="English">English</option>' +
+                      '<option value="日本語">日本語</option>' +
+                      '<option value="한국어">한국어</option>' +
+                      '<option value="Español">Español</option>' +
+                      '<option value="Français">Français</option>' +
+                      '<option value="Deutsch">Deutsch</option>' +
+                      '<option value="Русский">Русский</option>' +
+                    '</select>' +
+                  '</div>' +
                 '</div>' +
+                '<p class="field-hint" style="margin-top:-4px;">设置回复语言后，Claude 将尽量使用指定语言回复。</p>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-cwd">默认工作目录</label>' +
                   '<input id="cfg-cwd" type="text" class="field-input" placeholder="/home/user" />' +
@@ -837,52 +856,40 @@
                   '<label class="field-label" for="cfg-shell">Shell</label>' +
                   '<input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" />' +
                 '</div>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="cfg-language">回复语言</label>' +
-                  '<select id="cfg-language" class="field-input">' +
-                    '<option value="">自动（不指定）</option>' +
-                    '<option value="中文">中文</option>' +
-                    '<option value="English">English</option>' +
-                    '<option value="日本語">日本語</option>' +
-                    '<option value="한국어">한국어</option>' +
-                    '<option value="Español">Español</option>' +
-                    '<option value="Français">Français</option>' +
-                    '<option value="Deutsch">Deutsch</option>' +
-                    '<option value="Русский">Русский</option>' +
-                  '</select>' +
-                  '<p class="hint" style="margin-top:4px;margin-bottom:0;">设置后，Claude 将尽量使用指定语言回复。</p>' +
-                '</div>' +
                 '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
                 '<p id="config-message" class="hint hidden"></p>' +
               '</div>' +
 
               // Security tab
               '<div class="settings-panel" id="settings-tab-security">' +
-                '<h3 class="settings-section-title">修改密码</h3>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="new-password">新密码</label>' +
-                  '<input id="new-password" type="password" class="field-input" placeholder="输入新密码（至少 6 个字符）" autocomplete="new-password" />' +
+                '<div class="settings-card">' +
+                  '<h3 class="settings-section-title">\ud83d\udd12 修改密码</h3>' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="new-password">新密码</label>' +
+                    '<input id="new-password" type="password" class="field-input" placeholder="输入新密码（至少 6 个字符）" autocomplete="new-password" />' +
+                  '</div>' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="confirm-password">确认密码</label>' +
+                    '<input id="confirm-password" type="password" class="field-input" placeholder="再次输入新密码" autocomplete="new-password" />' +
+                  '</div>' +
+                  '<button id="save-password-button" class="btn btn-primary btn-block">保存密码</button>' +
+                  '<p id="settings-error" class="error-message hidden"></p>' +
+                  '<p id="settings-success" class="hint hidden" style="color: var(--success);"></p>' +
                 '</div>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="confirm-password">确认密码</label>' +
-                  '<input id="confirm-password" type="password" class="field-input" placeholder="再次输入新密码" autocomplete="new-password" />' +
+                '<div class="settings-card">' +
+                  '<h3 class="settings-section-title">\ud83d\udd10 SSL 证书</h3>' +
+                  '<p class="settings-hint" id="cert-status">加载中...</p>' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="cert-key-file">私钥文件 (.key)</label>' +
+                    '<input id="cert-key-file" type="file" class="field-input field-file" accept=".key,.pem" />' +
+                  '</div>' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="cert-cert-file">证书文件 (.crt/.pem)</label>' +
+                    '<input id="cert-cert-file" type="file" class="field-input field-file" accept=".crt,.pem,.cert" />' +
+                  '</div>' +
+                  '<button id="upload-cert-button" class="btn btn-primary btn-block">上传证书</button>' +
+                  '<p id="cert-message" class="hint hidden"></p>' +
                 '</div>' +
-                '<button id="save-password-button" class="btn btn-primary btn-block">保存密码</button>' +
-                '<p id="settings-error" class="error-message hidden"></p>' +
-                '<p id="settings-success" class="hint hidden" style="color: var(--success);"></p>' +
-                '<hr class="settings-divider" />' +
-                '<h3 class="settings-section-title">SSL 证书</h3>' +
-                '<p class="settings-hint" id="cert-status">加载中...</p>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="cert-key-file">私钥文件 (.key)</label>' +
-                  '<input id="cert-key-file" type="file" class="field-input field-file" accept=".key,.pem" />' +
-                '</div>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="cert-cert-file">证书文件 (.crt/.pem)</label>' +
-                  '<input id="cert-cert-file" type="file" class="field-input field-file" accept=".crt,.pem,.cert" />' +
-                '</div>' +
-                '<button id="upload-cert-button" class="btn btn-primary btn-block">上传证书</button>' +
-                '<p id="cert-message" class="hint hidden"></p>' +
               '</div>' +
 
               // Command presets tab
@@ -4252,7 +4259,7 @@
                   '<span class="preset-detail">' + escapeHtml(p.command) + (p.mode ? ' (' + escapeHtml(p.mode) + ')' : '') + '</span>' +
                 '</div>';
               }
-              if (!html) html = '<p class="settings-hint">没有命令预设。</p>';
+              if (!html) html = '<div class="empty-state-compact"><span class="empty-icon">\u2699</span><span>\u6ca1\u6709\u547d\u4ee4\u9884\u8bbe</span><span class="hint">\u5728 config.json \u7684 commandPresets \u4e2d\u914d\u7f6e</span></div>';
               presetsList.innerHTML = html;
             }
           })
