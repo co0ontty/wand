@@ -525,6 +525,23 @@ function getLatestClaudeTaskId(excludeIds: Set<string>): string | null {
   }
 }
 
+/** Derive a short summary for a session from user messages or current task. */
+function deriveSessionSummary(messages: ConversationTurn[], currentTaskTitle: string | null): string | undefined {
+  // Prefer first user message as summary
+  for (const msg of messages) {
+    if (msg.role !== "user") continue;
+    for (const block of msg.content) {
+      if (block.type === "text" && block.text.trim()) {
+        return block.text.trim().slice(0, 120);
+      }
+    }
+    break; // only check the first user turn
+  }
+  // Fallback to current task title
+  if (currentTaskTitle) return currentTaskTitle.slice(0, 120);
+  return undefined;
+}
+
 export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly logger: SessionLogger;
@@ -1290,7 +1307,8 @@ export class ProcessManager extends EventEmitter {
       resumedToSessionId: record.resumedToSessionId ?? undefined,
       autoRecovered: record.autoRecovered ?? false,
       autoApprovePermissions: record.autoApprovePermissions || undefined,
-      approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined
+      approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined,
+      summary: deriveSessionSummary(messages, record.currentTask?.title ?? null),
     };
   }
 

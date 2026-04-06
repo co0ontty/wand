@@ -207,6 +207,8 @@ export interface SessionSnapshot {
   autoApprovePermissions?: boolean;
   /** 自动批准统计（按类别分） */
   approvalStats?: { tool: number; command: number; file: number; total: number };
+  /** 会话摘要：从首条用户消息或当前任务提取 */
+  summary?: string;
 }
 
 // ── Session Lifecycle ──

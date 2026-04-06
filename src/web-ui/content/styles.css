@@ -1162,6 +1162,17 @@
       letter-spacing: -0.01em;
     }
 
+    .session-title {
+      font-weight: 600;
+      font-size: 0.8125rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+      line-height: 1.3;
+    }
+
     /* ===== 会话元信息 ===== */
     .session-meta {
       display: flex;
@@ -2292,16 +2303,51 @@
     }
 
     /* ===== 消息头像 ===== */
-    .chat-message.user .chat-message-avatar {
-      display: none;
+    .chat-message-avatar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 2px 4px 2px;
     }
 
-    .chat-message.assistant .chat-message-avatar {
-      font-size: 0.75rem;
+    .chat-message-avatar.assistant {
+      flex-direction: row;
+    }
+
+    .chat-message-avatar.user {
+      flex-direction: row-reverse;
+    }
+
+    .pixel-avatar {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--bg-tertiary);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    }
+
+    .pixel-avatar-svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+    }
+
+    .avatar-name {
+      font-size: 0.7rem;
       font-weight: 600;
-      color: var(--accent);
-      padding: 0 2px 4px 2px;
       letter-spacing: 0.03em;
+      line-height: 1;
+    }
+
+    .chat-message.assistant .avatar-name {
+      color: var(--accent);
+    }
+
+    .chat-message.user .avatar-name {
+      color: var(--text-tertiary);
     }
 
     /* ===== 消息气泡 ===== */
@@ -3904,39 +3950,6 @@
     .todo-item-icon.active { color: var(--accent); }
     .todo-item-icon.done { color: #4a7a4f; }
 
-    /* Recent actions key points section */
-    .recent-actions {
-      margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px solid var(--border-subtle);
-    }
-    .recent-actions-label {
-      font-size: 0.6875rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-      margin-bottom: 6px;
-    }
-    .recent-actions-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
-    .recent-action-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      padding: 3px 8px;
-      font-size: 0.6875rem;
-      color: var(--text-secondary);
-      background: rgba(79, 122, 88, 0.08);
-      border-radius: 10px;
-      white-space: nowrap;
-      max-width: 220px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
 
     @keyframes spin {
       to { transform: rotate(360deg); }
