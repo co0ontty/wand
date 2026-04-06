@@ -1030,14 +1030,13 @@
 
       function selectAllVisibleItems() {
         var nextSessionIds = {};
-        state.sessions.forEach(function(session) {
+        state.sessions.filter(function(session) {
+          return !session.resumedToSessionId;
+        }).forEach(function(session) {
           nextSessionIds[session.id] = true;
         });
-        var cutoff = Date.now() - 24 * 60 * 60 * 1000;
         var nextHistoryIds = {};
-        getVisibleClaudeHistorySessions().filter(function(session) {
-          return !session.timestamp || new Date(session.timestamp).getTime() <= cutoff;
-        }).forEach(function(session) {
+        getVisibleClaudeHistorySessions().forEach(function(session) {
           nextHistoryIds[session.claudeSessionId] = true;
         });
         state.selectedSessionIds = nextSessionIds;
