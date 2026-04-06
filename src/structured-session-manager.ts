@@ -5,6 +5,7 @@ import { WandStorage } from "./storage.js";
 import {
   ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
   ExecutionMode, SessionRunner, SessionSnapshot, StructuredSessionState,
+  WandConfig,
 } from "./types.js";
 import { ProcessEvent } from "./ws-broadcast.js";
 
@@ -40,7 +41,7 @@ export class StructuredSessionManager {
   private readonly pendingChildren = new Map<string, ChildProcess>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
 
-  constructor(private readonly storage: WandStorage) {
+  constructor(private readonly storage: WandStorage, private readonly config: WandConfig) {
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "stopped" : snapshot.status;
@@ -419,6 +420,15 @@ export class StructuredSessionManager {
         );
       }
 
+      // Append language preference if configured
+      const language = this.config.language?.trim();
+      if (language) {
+        args.push(
+          "--append-system-prompt",
+          `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`,
+        );
+      }
+
       if (session.claudeSessionId) {
         args.push("--resume", session.claudeSessionId);
       }
@@ -511,9 +521,9 @@ export class StructuredSessionManager {
           if (extracted.content.length > 0) {
             turnState.blocks.push(...extracted.content);
           }
-          if (extracted.usage) {
-            turnState.usage = extracted.usage;
-          }
+          // NOTE: usage from streaming "assistant" events contains partial/incremental
+          // token counts (e.g. output_tokens=1 during streaming) and is NOT accurate.
+          // We only use the authoritative usage from the final "result" event.
           syncSnapshot();
           scheduleEmit();
           return;

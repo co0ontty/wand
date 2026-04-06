@@ -19,6 +19,7 @@ export const defaultConfig = (): WandConfig => ({
   allowedCommandPrefixes: [],
   shortcutLogMaxBytes: 10 * 1024 * 1024,
   experimentalDomTerminal: false,
+  language: "",
   commandPresets: [
     {
       label: "Claude",
@@ -122,7 +123,8 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
             command: normalizePresetCommand(preset.command),
             mode: isExecutionMode(preset.mode) ? preset.mode : undefined
           }))
-      : defaults.commandPresets
+      : defaults.commandPresets,
+    language: typeof input.language === "string" ? input.language.trim() : defaults.language,
   };
 }
 

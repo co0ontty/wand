@@ -821,6 +821,21 @@
                   '<label class="field-label" for="cfg-shell">Shell</label>' +
                   '<input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" />' +
                 '</div>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="cfg-language">回复语言</label>' +
+                  '<select id="cfg-language" class="field-input">' +
+                    '<option value="">自动（不指定）</option>' +
+                    '<option value="中文">中文</option>' +
+                    '<option value="English">English</option>' +
+                    '<option value="日本語">日本語</option>' +
+                    '<option value="한국어">한국어</option>' +
+                    '<option value="Español">Español</option>' +
+                    '<option value="Français">Français</option>' +
+                    '<option value="Deutsch">Deutsch</option>' +
+                    '<option value="Русский">Русский</option>' +
+                  '</select>' +
+                  '<p class="hint" style="margin-top:4px;margin-bottom:0;">设置后，Claude 将尽量使用指定语言回复。</p>' +
+                '</div>' +
                 '<div class="field field-inline">' +
                   '<label class="field-label" for="cfg-dom-terminal">终端 DOM 渲染 <span style="font-size:0.7em;color:var(--warning);font-weight:600;">实验性</span></label>' +
                   '<input id="cfg-dom-terminal" type="checkbox" class="field-checkbox" />' +
@@ -1916,21 +1931,23 @@
         var statusSpan = el.querySelector(".inline-tool-status");
         if (statusSpan) {
           if (el.dataset.status === "error") {
-            statusSpan.textContent = "⚠️";
+            statusSpan.textContent = "✗";
           } else if (el.dataset.status === "done") {
-            statusSpan.textContent = expanded ? "✅" : "✅";
+            statusSpan.textContent = "✓";
           }
         }
       };
       // Toggle function for terminal tool blocks
       window.__terminalExpand = function(el) {
-        var body = el.querySelector(".term-body");
+        var container = el.closest(".inline-terminal");
+        if (!container) return;
+        var body = container.querySelector(".term-body");
         if (body) {
           var isHidden = body.style.display === "none";
           body.style.display = isHidden ? "block" : "none";
-          el.dataset.expanded = isHidden ? "true" : "false";
+          container.dataset.expanded = isHidden ? "true" : "false";
           var toggleIcon = el.querySelector(".term-toggle-icon");
-          if (toggleIcon) toggleIcon.textContent = isHidden ? "▼" : "▲";
+          if (toggleIcon) toggleIcon.textContent = isHidden ? "▼" : "▶";
         }
       };
       // Update streaming thinking content (called from WebSocket handler)
@@ -4196,6 +4213,8 @@
             if (modeEl) modeEl.value = cfg.defaultMode || "default";
             if (cwdEl) cwdEl.value = cfg.defaultCwd || "";
             if (shellEl) shellEl.value = cfg.shell || "";
+            var langEl = document.getElementById("cfg-language");
+            if (langEl) langEl.value = cfg.language || "";
             var domTermEl = document.getElementById("cfg-dom-terminal");
             if (domTermEl) domTermEl.checked = cfg.experimentalDomTerminal === true;
 
@@ -4235,6 +4254,7 @@
           defaultMode: (document.getElementById("cfg-mode") || {}).value,
           defaultCwd: (document.getElementById("cfg-cwd") || {}).value,
           shell: (document.getElementById("cfg-shell") || {}).value,
+          language: (document.getElementById("cfg-language") || {}).value || "",
           experimentalDomTerminal: (document.getElementById("cfg-dom-terminal") || {}).checked,
         };
 
@@ -8848,7 +8868,7 @@
         if (msg.role === "thinking") {
           return '<div class="chat-message thinking">' +
             '<div class="thinking-inline thinking-pty collapsed" data-thinking="" onclick="__thinkingToggle(this)">' +
-              '<span class="thinking-inline-icon">🧠</span>' +
+              '<span class="thinking-inline-icon">⦿</span>' +
               '<span class="thinking-inline-preview">' + escapeHtml(msg.content) + '</span>' +
               '<span class="thinking-inline-action">展开</span>' +
             '</div>' +
@@ -8859,7 +8879,7 @@
         if (msg.role === "prompt") {
           return '<div class="chat-message prompt">' +
             '<div class="prompt-card">' +
-              '<div class="prompt-icon">💡</div>' +
+              '<div class="prompt-icon">→</div>' +
               '<div class="prompt-content">试试：<span class="prompt-text">' + escapeHtml(msg.content) + '</span></div>' +
             '</div>' +
           '</div>';
@@ -8871,7 +8891,7 @@
         }
 
         // Legacy string content (from PTY parsing)
-        var avatar = msg.role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
+        var avatar = msg.role === "assistant" ? '<div class="chat-message-avatar">赛博虎妞</div>' : "";
         var bubbleContent = msg.role === "assistant" ? renderMarkdown(msg.content) : escapeHtml(msg.content);
         return '<div class="chat-message ' + msg.role + '">' +
           avatar +
@@ -8924,7 +8944,7 @@
 
       function renderStructuredMessage(msg) {
         var role = msg.role;
-        var avatar = role === "assistant" ? '<div class="chat-message-avatar">AI</div>' : "";
+        var avatar = role === "assistant" ? '<div class="chat-message-avatar">赛博虎妞</div>' : "";
 
         if (!msg.content || msg.content.length === 0) {
           if (role === "assistant") {
@@ -8951,7 +8971,7 @@
         } catch (e) {
           return '<div class="chat-message ' + role + '">' +
             avatar +
-            '<div class="chat-message-bubble"><div class="render-error">消息渲染失败</div></div>' +
+            '<div class="chat-message-content"><div class="render-error">消息渲染失败</div></div>' +
           '</div>';
         }
 
@@ -8970,7 +8990,7 @@
 
         return '<div class="chat-message ' + role + '">' +
           avatar +
-          '<div class="chat-message-bubble">' + blocksHtml + '</div>' +
+          '<div class="chat-message-content">' + blocksHtml + '</div>' +
           usageHtml +
         '</div>';
       }
@@ -8991,13 +9011,13 @@
             if (isStreaming) {
               return '<div class="thinking-inline thinking-streaming" data-thinking="">' +
                 '<div class="thinking-streaming-inner">' +
-                  '<span class="thinking-streaming-icon spinning">🧠</span>' +
+                  '<span class="thinking-streaming-icon spinning">⦿</span>' +
                   '<div class="thinking-streaming-text"></div>' +
                 '</div>' +
               '</div>';
             }
             return '<div class="thinking-inline collapsed" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
-              '<span class="thinking-inline-icon">🧠</span>' +
+              '<span class="thinking-inline-icon">⦿</span>' +
               '<span class="thinking-inline-preview">' + escapeHtml(preview) + '</span>' +
               '<span class="thinking-inline-action">展开</span>' +
             '</div>';
@@ -9025,7 +9045,7 @@
 
         var isError = toolResult && toolResult.is_error;
         var hasResult = resultContent.length > 0;
-        var statusIcon = isError ? "⚠️" : (hasResult ? "✅" : "⏳");
+        var statusIcon = isError ? "✗" : (hasResult ? "✓" : "…");
 
         // Build the inline preview line
         var icon = "";
@@ -9090,7 +9110,7 @@
         var fullResult = resultContent;
 
         var expandedHtml = "";
-        var shouldExpand = hasResult;
+        var shouldExpand = false;  // All inline tools collapsed by default
         if (hasResult) {
           expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + '</div>' +
@@ -9104,7 +9124,7 @@
 
         var extraInfoHtml = meta ? '<span class="inline-tool-meta">' + escapeHtml(meta) + '</span>' : '';
         var extraClass = isError ? 'inline-tool-error-inline' : '';
-        if (hasResult) extraClass += ' inline-tool-open';
+        if (shouldExpand) extraClass += ' inline-tool-open';
 
         return '<div class="inline-tool ' + extraClass + '" ' +
           'data-result="' + escapeHtml(fullResult) + '" ' +
@@ -9161,13 +9181,16 @@
           exitCodeHtml = '<div class="term-exit ' + codeClass + '">exit ' + exitCode + '</div>';
         }
 
-        return '<div class="inline-terminal" data-expanded="true">' +
+        // Show command preview in header (truncate long commands)
+        var cmdPreview = command.length > 80 ? command.slice(0, 77) + "…" : command;
+
+        return '<div class="inline-terminal" data-expanded="false">' +
           '<div class="term-header" onclick="__terminalExpand(this)">' +
             statusDot +
-            '<span class="term-title">执行命令</span>' +
-            '<span class="term-toggle-icon">▼</span>' +
+            '<span class="term-cmd-preview"><span class="term-prompt">$</span> ' + escapeHtml(cmdPreview) + '</span>' +
+            '<span class="term-toggle-icon">▶</span>' +
           '</div>' +
-          '<div class="term-body">' +
+          '<div class="term-body" style="display:none;">' +
             '<div class="term-command"><span class="term-prompt">$</span> ' + cmdDisplay + '</div>' +
             (outputHtml ? '<div class="term-output">' + outputHtml + '</div>' : '') +
             exitCodeHtml +
@@ -9230,15 +9253,15 @@
           if (isError) {
             statusClass = "diff-error";
             statusText = toolResultText.indexOf("haven't granted") !== -1 || toolResultText.indexOf("permission") !== -1
-              ? "⏸ 等待授权"
-              : "❌ 修改失败";
+              ? "等待授权"
+              : "失败";
           } else {
             statusClass = "diff-success";
-            statusText = "✅ 已修改";
+            statusText = "已修改";
           }
         } else {
           statusClass = "diff-pending";
-          statusText = "⏳ 执行中…";
+          statusText = "执行中";
         }
 
         // If only one column has content, show full width
@@ -9247,7 +9270,7 @@
 
         return '<div class="inline-diff" data-tool-name="' + escapeHtml(toolName) + '">' +
           '<div class="diff-header">' +
-            '<span class="diff-file-icon">📄</span>' +
+            '<span class="diff-file-icon"></span>' +
             '<span class="diff-file-name">' + escapeHtml(fileName) + '</span>' +
             '<span class="diff-path">' + escapeHtml(path) + '</span>' +
             '<span class="diff-status ' + statusClass + '">' + statusText + '</span>' +
@@ -9306,7 +9329,7 @@
             }
             return '<div class="tool-use-card ask-user" data-tool-use-id="' + escapeHtml(toolId) + '">' +
               '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
-                '<span class="tool-use-icon">❓</span>' +
+                '<span class="tool-use-icon">?</span>' +
                 '<span class="tool-use-name">提问</span>' +
               '</div>' +
               '<div class="tool-use-body ask-user-body">' +
@@ -9397,23 +9420,23 @@
 
       function getToolIcon(toolName) {
         var icons = {
-          "Read": "📄",
-          "Write": "✏️",
-          "Edit": "📝",
-          "MultiEdit": "📝",
-          "Bash": "💻",
-          "Grep": "🔍",
-          "Glob": "📂",
-          "WebFetch": "🌐",
-          "WebSearch": "🔎",
-          "Task": "📋",
-          "TodoWrite": "📝",
-          "TodoRead": "📋",
-          "NotebookEdit": "📓",
-          "Agent": "🤖",
-          "Exit": "🚪"
+          "Read": "R",
+          "Write": "W",
+          "Edit": "E",
+          "MultiEdit": "E",
+          "Bash": "$",
+          "Grep": "G",
+          "Glob": "F",
+          "WebFetch": "⇣",
+          "WebSearch": "⇢",
+          "Task": "T",
+          "TodoWrite": "☐",
+          "TodoRead": "☑",
+          "NotebookEdit": "N",
+          "Agent": "A",
+          "Exit": "×"
         };
-        return icons[toolName] || "🔧";
+        return icons[toolName] || "·";
       }
 
       function generateInputSummary(toolName, input) {
