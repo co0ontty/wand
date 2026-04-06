@@ -18,7 +18,6 @@ export const defaultConfig = (): WandConfig => ({
   startupCommands: [],
   allowedCommandPrefixes: [],
   shortcutLogMaxBytes: 10 * 1024 * 1024,
-  experimentalDomTerminal: false,
   language: "",
   commandPresets: [
     {

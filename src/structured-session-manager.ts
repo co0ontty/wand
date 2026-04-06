@@ -25,7 +25,7 @@ interface StreamingTurnState {
   usage?: ConversationTurn["usage"];
 }
 
-const STREAM_EMIT_DEBOUNCE_MS = 50;
+const STREAM_EMIT_DEBOUNCE_MS = 16;
 
 function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0 || process.geteuid?.() === 0;

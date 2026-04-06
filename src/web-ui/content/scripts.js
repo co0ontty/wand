@@ -836,11 +836,6 @@
                   '</select>' +
                   '<p class="hint" style="margin-top:4px;margin-bottom:0;">设置后，Claude 将尽量使用指定语言回复。</p>' +
                 '</div>' +
-                '<div class="field field-inline">' +
-                  '<label class="field-label" for="cfg-dom-terminal">终端 DOM 渲染 <span style="font-size:0.7em;color:var(--warning);font-weight:600;">实验性</span></label>' +
-                  '<input id="cfg-dom-terminal" type="checkbox" class="field-checkbox" />' +
-                '</div>' +
-                '<p class="hint" style="margin-top:-8px;margin-bottom:8px;">移动端使用 DOM 渲染终端，支持原生文本选择与复制。保存后刷新页面生效。</p>' +
                 '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
                 '<p id="config-message" class="hint hidden"></p>' +
               '</div>' +
@@ -4215,8 +4210,6 @@
             if (shellEl) shellEl.value = cfg.shell || "";
             var langEl = document.getElementById("cfg-language");
             if (langEl) langEl.value = cfg.language || "";
-            var domTermEl = document.getElementById("cfg-dom-terminal");
-            if (domTermEl) domTermEl.checked = cfg.experimentalDomTerminal === true;
 
             // Cert status
             var certStatus = document.getElementById("cert-status");
@@ -4255,7 +4248,6 @@
           defaultCwd: (document.getElementById("cfg-cwd") || {}).value,
           shell: (document.getElementById("cfg-shell") || {}).value,
           language: (document.getElementById("cfg-language") || {}).value || "",
-          experimentalDomTerminal: (document.getElementById("cfg-dom-terminal") || {}).checked,
         };
 
         fetch("/api/settings/config", {
@@ -7377,7 +7369,8 @@
         switch (msg.type) {
           case 'output':
             // Update session output (for terminal display and local message parsing)
-            if (msg.data && msg.data.output && msg.sessionId) {
+            // NOTE: For structured sessions, output may be "" during streaming — check messages too
+            if (msg.data && (msg.data.output || msg.data.messages) && msg.sessionId) {
               var snapshot = { id: msg.sessionId, output: msg.data.output };
               if (Object.prototype.hasOwnProperty.call(msg.data, 'permissionBlocked')) {
                 snapshot.permissionBlocked = !!msg.data.permissionBlocked;
@@ -7401,7 +7394,12 @@
                   }
                 }
                 updateTaskDisplay();
-                scheduleChatRender();
+                // Structured sessions: render immediately for responsiveness
+                if (msg.data.sessionKind === 'structured') {
+                  renderChat();
+                } else {
+                  scheduleChatRender();
+                }
               }
 
             }
@@ -8466,10 +8464,8 @@
       // ===== Terminal copy button for mobile =====
       // ===== Mobile DOM terminal view =====
       function initMobileDomTerminal(container) {
-        var isTouch = window.matchMedia("(pointer: coarse)").matches;
-        if (!isTouch) return;
-        // Gated by experimental config flag
-        if (!state.config || !state.config.experimentalDomTerminal) return;
+        // DOM terminal feature removed — always return
+        return;
 
         // Create DOM view container
         var domView = document.createElement("div");
