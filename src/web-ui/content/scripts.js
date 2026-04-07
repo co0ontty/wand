@@ -1998,23 +1998,23 @@
         var optionLabel = btnEl.dataset.optionLabel;
         if (optionLabel && state.selectedId) {
           btnEl.classList.add("selected");
-          var allOptions = document.querySelectorAll(".ask-user-option");
-          allOptions.forEach(function(opt) {
-            opt.classList.add("selected");
-            opt.style.pointerEvents = "none";
-          });
-          var cardBody = btnEl.closest(".tool-use-card.ask-user");
-          if (cardBody) {
+          // Only disable options within the same question group, not globally
+          var questionGroup = btnEl.closest(".ask-user-question-group");
+          if (questionGroup) {
+            questionGroup.querySelectorAll(".ask-user-option").forEach(function(opt) {
+              opt.classList.add("selected");
+              opt.style.pointerEvents = "none";
+            });
             var sentDiv = document.createElement("div");
             sentDiv.className = "ask-user-answer-sent";
-            sentDiv.innerHTML = "\\u2713 \\u5df2\\u53d1\\u9001: " + escapeHtml(optionLabel);
-            cardBody.appendChild(sentDiv);
+            sentDiv.innerHTML = "\u2713 \u5df2\u53d1\u9001: " + escapeHtml(optionLabel);
+            questionGroup.appendChild(sentDiv);
           }
           fetch("/api/sessions/" + state.selectedId + "/input", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
-            body: JSON.stringify({ input: optionLabel + "\\n", view: state.currentView })
+            body: JSON.stringify({ input: optionLabel + "\n", view: state.currentView })
           }).catch(function(err) {
             console.error("[wand] Error sending answer:", err);
           });
@@ -3953,6 +3953,9 @@
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
             state.currentMessages = getPreferredMessages(selectedSession, data.output, false);
+            if (selectedSession && selectedSession.sessionKind === "structured") {
+              appendQueuedPlaceholders(state.currentMessages);
+            }
 
             if (state.terminal) {
               syncTerminalBuffer(id, data.output || "", { mode: "replace" });
@@ -5511,6 +5514,14 @@
             autoResizeInput(inputBox);
           }
           setDraftValue("");
+          // Show the queued message in chat view with a "queued" marker
+          var queuedTurn = { role: "user", content: [{ type: "text", text: input, __queued: true }] };
+          var curMsgs = Array.isArray(state.currentMessages) ? state.currentMessages.slice() : [];
+          curMsgs.push(queuedTurn);
+          state.currentMessages = curMsgs;
+          // Also update session.messages so the queued turn survives WS updates
+          session.messages = curMsgs;
+          renderChat(true);
           showToast("已排队（第 " + state.structuredInputQueue.length + " 条），将在当前消息处理完成后自动发送。", "info");
           updateStructuredQueueCounter();
           return Promise.resolve();
@@ -5520,8 +5531,14 @@
         var userTurn = { role: "user", content: [{ type: "text", text: input }] };
         var thinkingTurn = { role: "assistant", content: [{ type: "text", text: "", __processing: true }] };
         var userMsgs = Array.isArray(session.messages) ? session.messages.slice() : [];
+        // Filter out __queued placeholders — they'll be re-appended after the new turns
+        userMsgs = userMsgs.filter(function(m) {
+          return !(m.role === "user" && m.content && m.content.some(function(b) { return b.__queued; }));
+        });
         userMsgs.push(userTurn);
         userMsgs.push(thinkingTurn);
+        // Re-append remaining queued messages after the current send
+        appendQueuedPlaceholders(userMsgs);
         session.messages = userMsgs;
         state.currentMessages = userMsgs;
         // Mark inFlight optimistically to prevent double-send via WS updates
@@ -5553,6 +5570,8 @@
             updateSessionSnapshot(snapshot);
             if (snapshot.messages && snapshot.messages.length > 0) {
               state.currentMessages = snapshot.messages;
+              // Re-append queued user messages
+              appendQueuedPlaceholders(state.currentMessages);
             }
             renderChat(true);
             updateInputHint("Enter 发送 · Shift+Enter 换行");
@@ -5594,6 +5613,16 @@
         }
       }
 
+      // Append queued user message placeholders to currentMessages so they
+      // remain visible across WS updates and re-renders.
+      function appendQueuedPlaceholders(messages) {
+        if (state.structuredInputQueue.length === 0) return messages;
+        for (var qi = 0; qi < state.structuredInputQueue.length; qi++) {
+          messages.push({ role: "user", content: [{ type: "text", text: state.structuredInputQueue[qi], __queued: true }] });
+        }
+        return messages;
+      }
+
       function flushStructuredInputQueue() {
         if (state.structuredInputQueue.length === 0) return;
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
@@ -5607,6 +5636,22 @@
         var nextInput = state.structuredInputQueue.shift();
         updateStructuredQueueCounter();
         if (nextInput) {
+          // Remove __queued marker from the matching user turn already in chat.
+          // postStructuredInput will find it's not inFlight now and do the
+          // normal send path, which re-adds the user turn + thinking turn.
+          // So we need to remove the queued placeholder first to avoid duplicates.
+          var msgs = Array.isArray(state.currentMessages) ? state.currentMessages : [];
+          for (var qi = msgs.length - 1; qi >= 0; qi--) {
+            var qm = msgs[qi];
+            if (qm.role === "user" && qm.content && qm.content.some(function(b) {
+              return b.__queued && b.text === nextInput;
+            })) {
+              msgs.splice(qi, 1);
+              break;
+            }
+          }
+          state.currentMessages = msgs;
+          if (session.messages) session.messages = msgs;
           // Pass null for inputBox to avoid clearing user's current typing
           postStructuredInput(nextInput, null, session);
         }
@@ -7705,6 +7750,10 @@
               updateSessionSnapshot(snapshot);
               if (msg.sessionId === state.selectedId) {
                 state.currentMessages = getPreferredMessages(snapshot, msg.data.output, false);
+                // Re-append queued user messages that haven't been sent yet
+                if (msg.data.sessionKind === 'structured') {
+                  appendQueuedPlaceholders(state.currentMessages);
+                }
                 // Structured session with inFlight: keep __processing placeholder
                 // so the loading indicator stays visible until assistant content arrives
                 if (msg.data.sessionKind === 'structured') {
@@ -7796,18 +7845,32 @@
               });
             }
 
-            // Clear stale queued inputs so they cannot race with the ended session.
-            // Each queued item's postInput will hit the server and get an error, but
-            // clearing the queues here prevents them from growing unbounded.
+            // Clear stale queued inputs for PTY sessions.
+            // For structured sessions, each "ended" means one turn completed (not
+            // the session terminated), so we must NOT clear the structured queue —
+            // instead, flush the next queued message.
             state.messageQueue = [];
             state.pendingMessages = [];
-            state.structuredInputQueue = [];
-            updateStructuredQueueCounter();
+
+            var endedSessionObj = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+            var isStructuredEnded = endedSessionObj && endedSessionObj.sessionKind === "structured";
+
+            if (isStructuredEnded && msg.sessionId === state.selectedId &&
+                state.structuredInputQueue.length > 0) {
+              // Structured session turn completed — flush next queued message
+              setTimeout(flushStructuredInputQueue, 50);
+            } else if (!isStructuredEnded) {
+              // PTY session ended — clear structured queue too
+              state.structuredInputQueue = [];
+              updateStructuredQueueCounter();
+            }
 
             // Disable terminal interactive mode immediately so the terminal stops
             // capturing keystrokes before loadSessions() completes.
             if (msg.sessionId === state.selectedId) {
-              setTerminalInteractive(false);
+              if (!isStructuredEnded) {
+                setTerminalInteractive(false);
+              }
               state.currentTask = null;
               updateTaskDisplay();
             }
@@ -7823,7 +7886,9 @@
               flushCrossSessionQueue();
             });
             if (msg.sessionId === state.selectedId) {
-              loadOutput(msg.sessionId);
+              if (!isStructuredEnded) {
+                loadOutput(msg.sessionId);
+              }
             }
             break;
           }
@@ -8196,6 +8261,9 @@
           var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (selectedSession) {
             state.currentMessages = getPreferredMessages(selectedSession, selectedSession.output, true);
+            if (selectedSession.sessionKind === "structured") {
+              appendQueuedPlaceholders(state.currentMessages);
+            }
           }
           renderChat();
         }, 30);
@@ -9435,6 +9503,9 @@
         var role = msg.role;
         var avatar = chatAvatar(role);
 
+        // Check if this is a queued user message
+        var isQueued = role === "user" && msg.content && msg.content.some(function(b) { return b.__queued; });
+
         if (!msg.content || msg.content.length === 0) {
           if (role === "assistant") {
             return '<div class="chat-message ' + role + '">' +
@@ -9470,10 +9541,12 @@
         }
 
         var usageHtml = "";
+        var queuedClass = isQueued ? " queued" : "";
+        var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
 
-        return '<div class="chat-message ' + role + '">' +
+        return '<div class="chat-message ' + role + queuedClass + '">' +
           avatar +
-          '<div class="chat-message-content">' + blocksHtml + '</div>' +
+          '<div class="chat-message-content">' + blocksHtml + queuedBadge + '</div>' +
           usageHtml +
         '</div>';
       }
@@ -9797,27 +9870,29 @@
         if (toolName === "AskUserQuestion" && block.input && block.input.questions) {
           var questions = block.input.questions;
           if (questions && questions.length > 0) {
-            var question = questions[0];
-            var questionText = question.question ? '<div class="ask-user-title">' + escapeHtml(question.question) + '</div>' : "";
-            var optionsHtml = "";
-            if (question.options && question.options.length > 0) {
-              optionsHtml = '<div class="ask-user-options">';
-              question.options.forEach(function(opt, idx) {
-                var label = opt.label ? escapeHtml(opt.label) : "选项 " + (idx + 1);
-                optionsHtml += '<button class="ask-user-option" data-option-index="' + idx + '" data-option-label="' + escapeHtml(label) + '" onclick="__askOption(this)">' +
-                  '<div class="ask-user-option-label">' + label + '</div>' +
-                '</button>';
-              });
-              optionsHtml += '</div>';
-            }
+            var questionsHtml = "";
+            questions.forEach(function(question, qIdx) {
+              var questionText = question.question ? '<div class="ask-user-title">' + escapeHtml(question.question) + '</div>' : "";
+              var optionsHtml = "";
+              if (question.options && question.options.length > 0) {
+                optionsHtml = '<div class="ask-user-options">';
+                question.options.forEach(function(opt, idx) {
+                  var label = opt.label ? escapeHtml(opt.label) : "选项 " + (idx + 1);
+                  optionsHtml += '<button class="ask-user-option" data-option-index="' + idx + '" data-question-index="' + qIdx + '" data-option-label="' + escapeHtml(label) + '" onclick="__askOption(this)">' +
+                    '<div class="ask-user-option-label">' + label + '</div>' +
+                  '</button>';
+                });
+                optionsHtml += '</div>';
+              }
+              questionsHtml += '<div class="ask-user-question-group">' + questionText + optionsHtml + '</div>';
+            });
             return '<div class="tool-use-card ask-user" data-tool-use-id="' + escapeHtml(toolId) + '">' +
               '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
                 '<span class="tool-use-icon">?</span>' +
                 '<span class="tool-use-name">提问</span>' +
               '</div>' +
               '<div class="tool-use-body ask-user-body">' +
-                questionText +
-                optionsHtml +
+                questionsHtml +
               '</div>' +
             '</div>';
           }

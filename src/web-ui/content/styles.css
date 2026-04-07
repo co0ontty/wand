@@ -2766,6 +2766,12 @@
     .ask-user-body {
       padding: 10px 12px;
     }
+    .ask-user-question-group {
+      margin-bottom: 10px;
+    }
+    .ask-user-question-group:last-child {
+      margin-bottom: 0;
+    }
     .ask-user-title {
       font-size: 0.875rem;
       font-weight: 500;
@@ -3768,6 +3774,22 @@
     @keyframes queuePulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.7; }
+    }
+
+    /* Queued message in chat view */
+    .chat-message.user.queued {
+      opacity: 0.6;
+    }
+    .queued-badge {
+      display: inline-block;
+      font-size: 0.625rem;
+      color: var(--accent);
+      background: var(--accent-muted);
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-weight: 600;
+      margin-top: 4px;
+      animation: queuePulse 1.5s ease-in-out infinite;
     }
 
     .input-hint {
