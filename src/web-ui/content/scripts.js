@@ -7896,6 +7896,15 @@
             // Initial state for subscribed session (after reconnect or subscription)
             if (msg.sessionId === state.selectedId && msg.data) {
               if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
+              updateSessionSnapshot(msg.data);
+              var initSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+              state.currentMessages = getPreferredMessages(initSession || msg.data, msg.data.output, false);
+              if (initSession && initSession.sessionKind === 'structured') {
+                appendQueuedPlaceholders(state.currentMessages);
+              }
+              renderChat(true);
+              updateTaskDisplay();
+              updateApprovalStats();
               updateTerminalOutput(msg.data.output || "", msg.sessionId, "replace");
               // Ensure terminal is properly fitted after receiving initial data
               scheduleTerminalResize(true);
