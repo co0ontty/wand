@@ -7750,4 +7750,125 @@
       100% { opacity: 0; max-height: 0; margin: 0; }
     }
 
+    /* ── 跨会话排队消息 ── */
+    .cross-session-queue {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin: 0 8px 4px 8px;
+    }
+
+    .queue-header {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 4px;
+      font-size: 0.6rem;
+      color: var(--text-muted);
+    }
+
+    .queue-header-label {
+      flex: 1;
+      opacity: 0.6;
+    }
+
+    .queue-header-clear {
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.5625rem;
+      padding: 1px 4px;
+      border-radius: 3px;
+      opacity: 0.5;
+      transition: color 0.15s, background 0.15s, opacity 0.15s;
+    }
+
+    .queue-header-clear:hover {
+      color: var(--error, #e55);
+      background: rgba(229, 85, 85, 0.12);
+      opacity: 1;
+    }
+
+    .queue-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      opacity: 0.7;
+      transition: opacity 0.15s ease;
+    }
+
+    .queue-item:hover {
+      opacity: 1;
+    }
+
+    .queue-item-dot {
+      flex-shrink: 0;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: rgba(var(--accent-rgb, 197, 101, 61), 0.6);
+      animation: statusDotPulse 1.2s ease-in-out infinite;
+    }
+
+    .queue-item-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+    }
+
+    .queue-item-age {
+      flex-shrink: 0;
+      font-size: 0.5625rem;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      opacity: 0.5;
+    }
+
+    .queue-item-send-now {
+      flex-shrink: 0;
+      border: 1px solid rgba(var(--accent-rgb, 197, 101, 61), 0.3);
+      background: transparent;
+      color: var(--accent, #c5653d);
+      cursor: pointer;
+      padding: 1px 8px;
+      border-radius: 4px;
+      font-size: 0.6rem;
+      line-height: 1.4;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+    }
+
+    .queue-item-send-now:hover {
+      color: var(--accent, #c5653d);
+      background: rgba(var(--accent-rgb, 197, 101, 61), 0.12);
+      border-color: rgba(var(--accent-rgb, 197, 101, 61), 0.5);
+    }
+
+    .queue-item-cancel {
+      flex-shrink: 0;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 0.6875rem;
+      line-height: 1;
+      opacity: 0.4;
+      transition: color 0.15s, background 0.15s, opacity 0.15s;
+    }
+
+    .queue-item-cancel:hover {
+      color: var(--error, #e55);
+      background: rgba(229, 85, 85, 0.12);
+      opacity: 1;
+    }
+
     /* 结束标记 */

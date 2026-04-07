@@ -90,6 +90,8 @@
         inputQueue: Promise.resolve(),
         pendingMessages: [], // WebSocket 断线期间的消息队列
         messageQueue: [], // 用户消息排队等待发送
+        crossSessionQueue: [], // 跨会话排队消息 [{ id, text, cwd, mode, tool }]
+        structuredInputQueue: [], // 结构化会话同会话排队消息
         drafts: {},
         isSyncingInputBox: false,
         loginPending: false,
@@ -3680,6 +3682,11 @@
           reconcileInteractiveState();
           updateTaskDisplay();
         }
+        // When a session transitions to a non-running state, try flushing cross-session queue
+        if (snapshot.status && snapshot.status !== "running" && state.crossSessionQueue.length > 0) {
+          // Use setTimeout(0) to let the current event processing complete first
+          setTimeout(flushCrossSessionQueue, 0);
+        }
       }
 
       function subscribeToSession(sessionId) {
@@ -3819,6 +3826,11 @@
                 loadOutput(state.selectedId);
               }
             }
+
+            // Try to flush cross-session queue on every session list refresh
+            if (state.crossSessionQueue.length > 0) {
+              flushCrossSessionQueue();
+            }
           })
           .catch(function(e) {
             console.error("[wand] loadSessions failed:", e);
@@ -3831,6 +3843,8 @@
         if (listEl) listEl.innerHTML = renderSessions();
         if (countEl) countEl.textContent = String(state.sessions.length);
         updateShellChrome();
+        // Re-render cross-session queue (container may have been destroyed by DOM rebuild)
+        if (state.crossSessionQueue.length > 0) renderCrossSessionQueue();
       }
 
       function updateShellChrome() {
@@ -3960,7 +3974,8 @@
         // Clear queued inputs from the previous session to prevent cross-session leaks
         state.messageQueue = [];
         state.pendingMessages = [];
-        updateQueueCounter();
+        state.structuredInputQueue = [];
+        updateStructuredQueueCounter();
         resetChatRenderCache();
         state.currentMessages = [];
         if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
@@ -5023,11 +5038,236 @@
         return !!selectedSession && selectedSession.status === "running";
       }
 
+      // ── 跨会话排队 ──
+
+      var _queueLaunching = false; // 防止并发 launch
+
+      function hasAnyBusySession() {
+        return state.sessions.some(function(s) {
+          return s.status === "running" && !s.archived;
+        });
+      }
+
+      function enqueueCrossSessionMessage(text) {
+        if (state.crossSessionQueue.length >= 10) {
+          showToast("排队消息已满（最多 10 条），请等待当前会话完成。", "warning");
+          return;
+        }
+        var id = "csq-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+        state.crossSessionQueue.push({
+          id: id,
+          text: text,
+          cwd: getEffectiveCwd(),
+          mode: state.chatMode || "managed",
+          tool: getPreferredTool(),
+          queuedAt: Date.now()
+        });
+        renderCrossSessionQueue();
+      }
+
+      function launchQueueItem(item) {
+        if (_queueLaunching) return;
+        _queueLaunching = true;
+        fetch("/api/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            command: item.tool,
+            cwd: item.cwd,
+            mode: item.mode,
+            initialInput: item.text
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          _queueLaunching = false;
+          if (data.error) {
+            showToast(data.error, "error");
+            // 失败回填队首，不丢消息
+            state.crossSessionQueue.unshift(item);
+            renderCrossSessionQueue();
+            return null;
+          }
+          return activateSession(data);
+        })
+        .catch(function(error) {
+          _queueLaunching = false;
+          showToast((error && error.message) || "无法启动排队会话。", "error");
+          state.crossSessionQueue.unshift(item);
+          renderCrossSessionQueue();
+        });
+      }
+
+      function sendQueueItemNow(queueId) {
+        var idx = state.crossSessionQueue.findIndex(function(q) { return q.id === queueId; });
+        if (idx < 0) return;
+        var item = state.crossSessionQueue.splice(idx, 1)[0];
+        renderCrossSessionQueue();
+        // 立即发送不受 _queueLaunching 限制
+        fetch("/api/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            command: item.tool,
+            cwd: item.cwd,
+            mode: item.mode,
+            initialInput: item.text
+          })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            showToast(data.error, "error");
+            return null;
+          }
+          return activateSession(data);
+        })
+        .catch(function(error) {
+          showToast((error && error.message) || "无法启动排队会话。", "error");
+        });
+      }
+
+      function cancelQueueItem(queueId) {
+        var idx = state.crossSessionQueue.findIndex(function(q) { return q.id === queueId; });
+        if (idx < 0) return;
+        state.crossSessionQueue.splice(idx, 1);
+        renderCrossSessionQueue();
+        if (state.crossSessionQueue.length === 0) {
+          showToast("排队已清空。", "info");
+        }
+      }
+
+      function flushCrossSessionQueue() {
+        if (state.crossSessionQueue.length === 0) return;
+        if (hasAnyBusySession()) return;
+        if (_queueLaunching) return;
+        var item = state.crossSessionQueue.shift();
+        renderCrossSessionQueue();
+        launchQueueItem(item);
+      }
+
+      function formatQueueAge(queuedAt) {
+        var sec = Math.floor((Date.now() - queuedAt) / 1000);
+        if (sec < 60) return sec + "s";
+        var min = Math.floor(sec / 60);
+        if (min < 60) return min + "m";
+        return Math.floor(min / 60) + "h";
+      }
+
+      function renderCrossSessionQueue() {
+        var container = document.querySelector(".cross-session-queue");
+        var inputPanel = document.querySelector(".input-panel");
+        var statusBar = document.querySelector(".structured-status-bar");
+        var composer = document.querySelector(".input-composer");
+        var blankChat = document.getElementById("blank-chat");
+
+        if (state.crossSessionQueue.length === 0) {
+          if (container) container.remove();
+          return;
+        }
+
+        // Determine parent: input-panel (session view) or blank-chat (welcome view)
+        var isInputPanelVisible = inputPanel && !inputPanel.classList.contains("hidden");
+        var parent = isInputPanelVisible ? inputPanel : blankChat;
+        // Insert above status bar if present, otherwise above composer
+        var insertBefore = isInputPanelVisible ? (statusBar || composer) : null;
+
+        if (!parent) return;
+
+        // If container exists but is in the wrong parent, move it
+        if (container && container.parentNode !== parent) {
+          container.remove();
+          container = null;
+        }
+
+        if (!container) {
+          container = document.createElement("div");
+          container.className = "cross-session-queue";
+          if (insertBefore) {
+            parent.insertBefore(container, insertBefore);
+          } else {
+            parent.appendChild(container);
+          }
+        } else if (isInputPanelVisible && insertBefore && container.nextSibling !== insertBefore) {
+          // Ensure queue stays above status bar
+          parent.insertBefore(container, insertBefore);
+        }
+
+        var total = state.crossSessionQueue.length;
+        var items = state.crossSessionQueue.map(function(item, i) {
+          var preview = item.text.length > 60 ? item.text.slice(0, 60) + "…" : item.text;
+          var age = formatQueueAge(item.queuedAt);
+          return '<div class="queue-item" data-queue-id="' + escapeHtml(item.id) + '">' +
+            '<span class="queue-item-dot"></span>' +
+            '<span class="queue-item-text" title="' + escapeHtml(item.text) + '">' + escapeHtml(preview) + '</span>' +
+            '<span class="queue-item-age">' + age + '</span>' +
+            '<button class="queue-item-send-now" data-queue-id="' + escapeHtml(item.id) + '" title="立即发送" type="button">发送</button>' +
+            '<button class="queue-item-cancel" data-queue-id="' + escapeHtml(item.id) + '" title="取消" type="button">×</button>' +
+          '</div>';
+        }).join("");
+
+        var header = total > 1
+          ? '<div class="queue-header">' +
+              '<span class="queue-header-label">排队 ' + total + ' 条</span>' +
+              '<button class="queue-header-clear" id="queue-clear-all" type="button" title="清空排队">清空</button>' +
+            '</div>'
+          : '';
+
+        container.innerHTML = header + items;
+      }
+
+      // 定时刷新排队项的等待时间 + 尝试 flush
+      setInterval(function() {
+        if (state.crossSessionQueue.length > 0) {
+          // 只更新 age 文本，不重建整个 DOM
+          var ages = document.querySelectorAll(".queue-item-age");
+          state.crossSessionQueue.forEach(function(item, i) {
+            if (ages[i]) ages[i].textContent = formatQueueAge(item.queuedAt);
+          });
+          // 尝试 flush 作为保底（防止 ended 事件 flush 失败）
+          flushCrossSessionQueue();
+        }
+      }, 5000);
+
+      // Delegate click events for cross-session queue items
+      document.addEventListener("click", function(e) {
+        if (e.target.closest("#queue-clear-all")) {
+          e.preventDefault();
+          state.crossSessionQueue = [];
+          renderCrossSessionQueue();
+          showToast("排队已清空。", "info");
+          return;
+        }
+        var sendNow = e.target.closest(".queue-item-send-now");
+        if (sendNow) {
+          e.preventDefault();
+          sendQueueItemNow(sendNow.dataset.queueId);
+          return;
+        }
+        var cancel = e.target.closest(".queue-item-cancel");
+        if (cancel) {
+          e.preventDefault();
+          cancelQueueItem(cancel.dataset.queueId);
+          return;
+        }
+      });
+
       // Send message from the welcome screen input
       function welcomeInputSend() {
         var welcomeInput = document.getElementById("welcome-input");
         var value = welcomeInput ? welcomeInput.value.trim() : "";
         if (!value) return;
+
+        // Cross-session queue: if any session is busy, queue instead of creating
+        if (hasAnyBusySession()) {
+          welcomeInput.value = "";
+          enqueueCrossSessionMessage(value);
+          showToast("已排队，将在当前会话完成后自动发送。", "info");
+          return;
+        }
+
         // Clear todo progress bar at the start of a new session
         var todoEl = document.getElementById("todo-progress");
         if (todoEl) todoEl.classList.add("hidden");
@@ -5093,7 +5333,14 @@
           return;
         }
 
-        // No selected session, create a new one
+        // No selected session, create a new one (or queue if busy)
+        if (value && hasAnyBusySession()) {
+          if (inputBox) inputBox.value = "";
+          if (welcomeInput) welcomeInput.value = "";
+          enqueueCrossSessionMessage(value);
+          showToast("已排队，将在当前会话完成后自动发送。", "info");
+          return;
+        }
         var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
@@ -5253,10 +5500,19 @@
           return Promise.resolve();
         }
         if (session.structuredState && session.structuredState.inFlight && session.status === "running") {
-          // Disable send button while processing, show subtle indicator
-          var sendBtn = document.getElementById("send-input-button");
-          if (sendBtn) sendBtn.disabled = true;
-          showToast("正在等待上一条消息处理完成…", "info");
+          // Queue the message for sending after current processing completes
+          if (state.structuredInputQueue.length >= 10) {
+            showToast("排队消息已满（最多 10 条），请等待当前消息处理完成。", "warning");
+            return Promise.resolve();
+          }
+          state.structuredInputQueue.push(input);
+          if (inputBox) {
+            inputBox.value = "";
+            autoResizeInput(inputBox);
+          }
+          setDraftValue("");
+          showToast("已排队（第 " + state.structuredInputQueue.length + " 条），将在当前消息处理完成后自动发送。", "info");
+          updateStructuredQueueCounter();
           return Promise.resolve();
         }
 
@@ -5277,9 +5533,7 @@
           inputBox.value = "";
           autoResizeInput(inputBox);
         }
-        // Disable send button so user can't double-send
-        var sendBtnEl = document.getElementById("send-input-button");
-        if (sendBtnEl) sendBtnEl.disabled = true;
+        // Keep send button enabled so user can queue more messages
         updateInputHint("思考中…");
         setDraftValue("");
         renderChat(true);
@@ -5305,17 +5559,57 @@
           }
         })
         .catch(function(error) {
-          var errSendBtn = document.getElementById("send-input-button");
-          if (errSendBtn) errSendBtn.disabled = false;
+          // Reset inFlight so user can send again
+          if (session.structuredState) {
+            session.structuredState.inFlight = false;
+          }
+          // Clear remaining queued messages since the session is likely broken
+          if (state.structuredInputQueue.length > 0) {
+            var dropped = state.structuredInputQueue.length;
+            state.structuredInputQueue = [];
+            updateStructuredQueueCounter();
+            showToast("发送失败，已清空 " + dropped + " 条排队消息。", "error");
+          } else {
+            showToast((error && error.message) || "无法发送结构化消息。", "error");
+          }
           updateInputHint("Enter 发送 · Shift+Enter 换行");
-          showToast((error && error.message) || "无法发送结构化消息。", "error");
-          throw error;
         });
       }
 
       function updateInputHint(text) {
         var hint = document.querySelector(".input-hint");
         if (hint) hint.textContent = text;
+      }
+
+      function updateStructuredQueueCounter() {
+        var counter = document.getElementById("queue-counter");
+        var count = state.structuredInputQueue.length;
+        if (counter) {
+          counter.textContent = "队列: " + count;
+          if (count > 0) {
+            counter.classList.remove("hidden");
+          } else {
+            counter.classList.add("hidden");
+          }
+        }
+      }
+
+      function flushStructuredInputQueue() {
+        if (state.structuredInputQueue.length === 0) return;
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!session || session.sessionKind !== "structured") {
+          state.structuredInputQueue = [];
+          updateStructuredQueueCounter();
+          return;
+        }
+        // Only flush if not inFlight
+        if (session.structuredState && session.structuredState.inFlight) return;
+        var nextInput = state.structuredInputQueue.shift();
+        updateStructuredQueueCounter();
+        if (nextInput) {
+          // Pass null for inputBox to avoid clearing user's current typing
+          postStructuredInput(nextInput, null, session);
+        }
       }
 
       function getInputErrorMessage(error) {
@@ -5399,12 +5693,10 @@
       function queueDirectInput(input, shortcutKey) {
         if (!input || !state.selectedId) return Promise.resolve();
         state.messageQueue.push(input);
-        updateQueueCounter();
         state.inputQueue = state.inputQueue.then(function() {
           return postInput(input, shortcutKey).finally(function() {
             var idx = state.messageQueue.indexOf(input);
             if (idx > -1) state.messageQueue.splice(idx, 1);
-            updateQueueCounter();
             scheduleMobileDomUpdate();
           });
         });
@@ -7472,10 +7764,7 @@
             }
             updateSessionSnapshot(endedSnapshot);
 
-            // Re-enable send button when structured session finishes
             if (msg.sessionId === state.selectedId) {
-              var endedSendBtn = document.getElementById("send-input-button");
-              if (endedSendBtn) endedSendBtn.disabled = false;
               updateInputHint("Enter 发送 · Shift+Enter 换行");
               // Trigger status bar completion animation
               scheduleChatRender(true);
@@ -7512,6 +7801,8 @@
             // clearing the queues here prevents them from growing unbounded.
             state.messageQueue = [];
             state.pendingMessages = [];
+            state.structuredInputQueue = [];
+            updateStructuredQueueCounter();
 
             // Disable terminal interactive mode immediately so the terminal stops
             // capturing keystrokes before loadSessions() completes.
@@ -7527,7 +7818,10 @@
               updateShellChrome();
             }
 
-            loadSessions();
+            loadSessions().then(function() {
+              // After sessions list is refreshed, try to flush cross-session queue
+              flushCrossSessionQueue();
+            });
             if (msg.sessionId === state.selectedId) {
               loadOutput(msg.sessionId);
             }
@@ -7626,6 +7920,11 @@
                 // Re-render chat when structured session inFlight state changes
                 if (statusUpdate.structuredState) {
                   scheduleChatRender();
+                  // Flush queued structured messages when inFlight clears
+                  if (!statusUpdate.structuredState.inFlight) {
+                    updateInputHint("Enter 发送 · Shift+Enter 换行");
+                    setTimeout(flushStructuredInputQueue, 50);
+                  }
                 }
               }
             }
@@ -8378,17 +8677,6 @@
 
       }
 
-      function updateQueueCounter() {
-        var counter = document.getElementById("queue-counter");
-        if (!counter) return;
-        var count = state.messageQueue.length;
-        if (count > 0) {
-          counter.textContent = "队列: " + count;
-          counter.classList.remove("hidden");
-        } else {
-          counter.classList.add("hidden");
-        }
-      }
 
       function attachCopyHandler(el) {
         el.querySelectorAll(".code-copy").forEach(function(btn) {
