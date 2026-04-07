@@ -1,0 +1,9 @@
+node_modules
+dist
+.wand
+after-send-snapshot.md
+claude_test_*.png
+auto-start-result.png
+final-verify.png
+fix1-layout.png
+page-screenshot*.png
