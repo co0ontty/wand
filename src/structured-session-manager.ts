@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { spawn, ChildProcess } from "node:child_process";
 
+import { prepareSessionWorktree } from "./git-worktree.js";
+
 import { WandStorage } from "./storage.js";
 import {
   ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
@@ -13,6 +15,7 @@ interface CreateStructuredSessionOptions {
   mode: ExecutionMode;
   prompt?: string;
   runner?: SessionRunner;
+  worktreeEnabled?: boolean;
 }
 
 /** Accumulated state while streaming a single claude -p response. */
@@ -101,13 +104,18 @@ export class StructuredSessionManager {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
     const prompt = options.prompt?.trim();
+    const worktreeSetup = options.worktreeEnabled
+      ? prepareSessionWorktree({ cwd: options.cwd, sessionId: id })
+      : null;
     const snapshot: SessionSnapshot = {
       id,
       sessionKind: "structured",
       runner: options.runner ?? "claude-cli-print",
       command: "claude -p --output-format stream-json",
-      cwd: options.cwd,
+      cwd: worktreeSetup?.cwd ?? options.cwd,
       mode: options.mode,
+      worktreeEnabled: Boolean(worktreeSetup),
+      worktree: worktreeSetup?.worktree ?? null,
       status: prompt ? "running" : "stopped",
       exitCode: null,
       startedAt,

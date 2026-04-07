@@ -953,7 +953,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         body.command,
         body.cwd,
         normalizeMode(body.mode, config.defaultMode),
-        initialInput || undefined
+        initialInput || undefined,
+        { worktreeEnabled: body.worktreeEnabled === true }
       );
       res.status(201).json(snapshot);
     } catch (error) {

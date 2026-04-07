@@ -4893,6 +4893,29 @@
     .modal-body { padding: 22px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
     .modal-body .field { margin-bottom: 14px; }
     .modal-body .field:last-of-type { margin-bottom: 16px; }
+    .session-kind-hint-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .session-kind-hint-row #session-kind-description {
+      flex: 1 1 auto;
+    }
+    .session-inline-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      color: var(--text-secondary);
+      cursor: pointer;
+      user-select: none;
+    }
+    .session-inline-toggle-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
     .field-hint {
       margin-top: 6px;
       font-size: 0.75rem;
@@ -5881,6 +5904,12 @@
       color: #d18b52;
       background: rgba(215, 122, 82, 0.10);
       border-color: rgba(215, 122, 82, 0.22);
+    }
+
+    .session-kind-badge.worktree {
+      color: #2f6f54;
+      background: rgba(79, 122, 88, 0.12);
+      border-color: rgba(79, 122, 88, 0.22);
     }
 
     .session-kind-display {

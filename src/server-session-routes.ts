@@ -96,14 +96,15 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", express.json(), async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner };
-    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, hasPrompt: !!body.prompt }));
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; worktreeEnabled?: boolean };
+    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, worktreeEnabled: body.worktreeEnabled === true, hasPrompt: !!body.prompt }));
     try {
       const snapshot = structured.createSession({
         cwd: body.cwd?.trim() || process.cwd(),
         mode: normalizeMode(body.mode, defaultMode),
         prompt: body.prompt,
         runner: body.runner ?? "claude-cli-print",
+        worktreeEnabled: body.worktreeEnabled === true,
       });
       console.log("[WAND] structured session created:", JSON.stringify({ id: snapshot.id, sessionKind: snapshot.sessionKind, runner: snapshot.runner, status: snapshot.status }));
       res.status(201).json(snapshot);

@@ -13,6 +13,7 @@ import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, Es
 import { SessionLifecycleManager } from "./session-lifecycle.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
+import { prepareSessionWorktree } from "./git-worktree.js";
 import {
   getResumeCommandSessionId,
   hasRealConversationMessages,
@@ -702,12 +703,18 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean }): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean }): SessionSnapshot {
     this.assertCommandAllowed(command);
 
-    const resolvedCwd = cwd
+    const baseCwd = cwd
       ? path.resolve(process.cwd(), cwd)
       : path.resolve(process.cwd(), this.config.defaultCwd);
+
+    const id = randomUUID();
+    const worktreeSetup = opts?.worktreeEnabled
+      ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id })
+      : null;
+    const resolvedCwd = worktreeSetup?.cwd ?? baseCwd;
 
     const isClaudeCmd = this.isClaudeCommand(command);
 
@@ -719,12 +726,13 @@ export class ProcessManager extends EventEmitter {
     const initialClaudeSessionId = resumeCommandSessionId ?? null;
     const startedAt = new Date().toISOString();
 
-    const id = randomUUID();
     const record: SessionRecord = {
       id,
       command,
       cwd: resolvedCwd,
       mode,
+      worktreeEnabled: Boolean(worktreeSetup),
+      worktree: worktreeSetup?.worktree ?? null,
       autonomyPolicy: this.defaultAutonomyPolicy(mode),
       approvalPolicy: "ask-every-time",
       allowedScopes: [],
@@ -1288,6 +1296,8 @@ export class ProcessManager extends EventEmitter {
       command: record.command,
       cwd: record.cwd,
       mode: record.mode,
+      worktreeEnabled: record.worktreeEnabled ?? false,
+      worktree: record.worktree ?? null,
       autonomyPolicy: record.autonomyPolicy,
       approvalPolicy: record.approvalPolicy,
       allowedScopes: record.allowedScopes,

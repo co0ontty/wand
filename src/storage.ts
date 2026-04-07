@@ -23,6 +23,8 @@ interface SessionRow {
   resumed_from_session_id: string | null;
   resumed_to_session_id: string | null;
   auto_recovered: number;
+  worktree_enabled: number;
+  worktree_info: string | null;
 }
 
 function parseStoredMessages(raw: string | null): ConversationTurn[] | undefined {
@@ -44,6 +46,18 @@ function parseStructuredState(raw: string | null): StructuredSessionState | unde
 
   try {
     return JSON.parse(raw) as StructuredSessionState;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseWorktreeInfo(raw: string | null): SessionSnapshot["worktree"] | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(raw) as NonNullable<SessionSnapshot["worktree"]>;
   } catch {
     return undefined;
   }
@@ -85,7 +99,9 @@ const INIT_SQL = `
     structured_state TEXT,
     resumed_from_session_id TEXT,
     resumed_to_session_id TEXT,
-    auto_recovered INTEGER NOT NULL DEFAULT 0
+    auto_recovered INTEGER NOT NULL DEFAULT 0,
+    worktree_enabled INTEGER NOT NULL DEFAULT 0,
+    worktree_info TEXT
   );
 
   CREATE TABLE IF NOT EXISTS app_config (
@@ -201,8 +217,8 @@ export class WandStorage {
           `INSERT INTO command_sessions (
            id, command, cwd, mode, status, exit_code, started_at, ended_at, output
              , archived, archived_at, claude_session_id, session_kind, runner, messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              command = excluded.command,
              cwd = excluded.cwd,
@@ -221,7 +237,9 @@ export class WandStorage {
              structured_state = excluded.structured_state,
              resumed_from_session_id = excluded.resumed_from_session_id,
              resumed_to_session_id = excluded.resumed_to_session_id,
-             auto_recovered = excluded.auto_recovered`
+             auto_recovered = excluded.auto_recovered,
+             worktree_enabled = excluded.worktree_enabled,
+             worktree_info = excluded.worktree_info`
         )
         .run(
           snapshot.id,
@@ -242,7 +260,9 @@ export class WandStorage {
           snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
           snapshot.resumedFromSessionId ?? null,
           snapshot.resumedToSessionId ?? null,
-          snapshot.autoRecovered ? 1 : 0
+          snapshot.autoRecovered ? 1 : 0,
+          snapshot.worktreeEnabled ? 1 : 0,
+          snapshot.worktree ? JSON.stringify(snapshot.worktree) : null
         );
       this.db.exec("COMMIT");
     } catch (error) {
@@ -264,7 +284,8 @@ export class WandStorage {
            started_at = ?, ended_at = ?, output = ?,
            archived = ?, archived_at = ?, claude_session_id = ?,
            session_kind = ?, runner = ?, structured_state = ?,
-           resumed_from_session_id = ?, resumed_to_session_id = ?, auto_recovered = ?
+           resumed_from_session_id = ?, resumed_to_session_id = ?, auto_recovered = ?,
+           worktree_enabled = ?, worktree_info = ?
          WHERE id = ?`
       )
       .run(
@@ -285,6 +306,8 @@ export class WandStorage {
         snapshot.resumedFromSessionId ?? null,
         snapshot.resumedToSessionId ?? null,
         snapshot.autoRecovered ? 1 : 0,
+        snapshot.worktreeEnabled ? 1 : 0,
+        snapshot.worktree ? JSON.stringify(snapshot.worktree) : null,
         snapshot.id
       );
   }
@@ -293,7 +316,7 @@ export class WandStorage {
     const row = this.db
       .prepare(
         `SELECT id, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
          FROM command_sessions
          WHERE id = ?`
       )
@@ -306,7 +329,7 @@ export class WandStorage {
     const row = this.db
       .prepare(
         `SELECT id, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
          FROM command_sessions
          WHERE claude_session_id = ?
          ORDER BY started_at DESC
@@ -321,7 +344,7 @@ export class WandStorage {
     const rows = this.db
       .prepare(
         `SELECT id, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
          FROM command_sessions
          ORDER BY started_at DESC`
       )
@@ -350,7 +373,9 @@ export class WandStorage {
       structuredState: parseStructuredState(row.structured_state),
       resumedFromSessionId: row.resumed_from_session_id ?? undefined,
       resumedToSessionId: row.resumed_to_session_id ?? undefined,
-      autoRecovered: Boolean(row.auto_recovered)
+      autoRecovered: Boolean(row.auto_recovered),
+      worktreeEnabled: Boolean(row.worktree_enabled),
+      worktree: parseWorktreeInfo(row.worktree_info) ?? null
     };
   }
 
@@ -389,7 +414,10 @@ function ensureCommandSessionSchema(db: DatabaseSync): void {
   if (!names.has("resumed_to_session_id")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN resumed_to_session_id TEXT");
   }
-  if (!names.has("auto_recovered")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN auto_recovered INTEGER NOT NULL DEFAULT 0");
+  if (!names.has("worktree_enabled")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN worktree_enabled INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!names.has("worktree_info")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN worktree_info TEXT");
   }
 }

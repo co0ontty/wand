@@ -76,11 +76,17 @@ export interface WandConfig {
   language?: string;
 }
 
+interface WorktreeInfo {
+  branch: string;
+  path: string;
+}
+
 export interface CommandRequest {
   command: string;
   cwd?: string;
   mode?: ExecutionMode;
   initialInput?: string;
+  worktreeEnabled?: boolean;
 }
 
 export interface InputRequest {
@@ -181,6 +187,8 @@ export interface SessionSnapshot {
   command: string;
   cwd: string;
   mode: ExecutionMode;
+  worktreeEnabled?: boolean;
+  worktree?: WorktreeInfo | null;
   autonomyPolicy?: AutonomyPolicy;
   approvalPolicy?: ApprovalPolicy;
   allowedScopes?: EscalationScope[];

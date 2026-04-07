@@ -90,12 +90,21 @@
         inputQueue: Promise.resolve(),
         pendingMessages: [], // WebSocket 断线期间的消息队列
         messageQueue: [], // 用户消息排队等待发送
-        crossSessionQueue: [], // 跨会话排队消息 [{ id, text, cwd, mode, tool }]
+        crossSessionQueue: (function() {
+          try {
+            var saved = localStorage.getItem("wand-cross-session-queue");
+            var parsed = saved ? JSON.parse(saved) : [];
+            return Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            return [];
+          }
+        })(), // 跨会话排队消息 [{ id, text, cwd, mode, tool }]
         structuredInputQueue: [], // 结构化会话同会话排队消息
         drafts: {},
         isSyncingInputBox: false,
         loginPending: false,
         loginChecked: false,
+        bootstrapping: true,
         sessionsDrawerOpen: false,
         modalOpen: false,
         presetValue: "",
@@ -103,6 +112,7 @@
         modeValue: "managed",
         chatMode: "managed",
         sessionCreateKind: "structured",
+        sessionCreateWorktree: false,
         sessionTool: "claude",
         preferredCommand: "claude",
         structuredRunner: "claude-cli-print",
@@ -252,6 +262,59 @@
           } else {
             localStorage.removeItem("wand-selected-session");
           }
+        } catch (e) {
+          // Ignore localStorage errors
+        }
+      }
+
+      function saveStructuredQueue() {
+        try {
+          if (!state.selectedId || state.structuredInputQueue.length === 0) {
+            return;
+          }
+          localStorage.setItem("wand-structured-queue", JSON.stringify({
+            sessionId: state.selectedId,
+            items: state.structuredInputQueue
+          }));
+        } catch (e) {
+          // Ignore localStorage errors
+        }
+      }
+
+      function clearStructuredQueuePersistence(sessionId) {
+        try {
+          var saved = localStorage.getItem("wand-structured-queue");
+          if (!saved) return;
+          var parsed = JSON.parse(saved);
+          if (!sessionId || !parsed || parsed.sessionId === sessionId) {
+            localStorage.removeItem("wand-structured-queue");
+          }
+        } catch (e) {
+          localStorage.removeItem("wand-structured-queue");
+        }
+      }
+
+      function restoreStructuredQueue() {
+        try {
+          var saved = localStorage.getItem("wand-structured-queue");
+          if (!saved) return;
+          var parsed = JSON.parse(saved);
+          if (!parsed || parsed.sessionId !== state.selectedId || !Array.isArray(parsed.items)) {
+            return;
+          }
+          state.structuredInputQueue = parsed.items.slice(0, 10);
+        } catch (e) {
+          state.structuredInputQueue = [];
+        }
+      }
+
+      function persistCrossSessionQueue() {
+        try {
+          if (state.crossSessionQueue.length === 0) {
+            localStorage.removeItem("wand-cross-session-queue");
+            return;
+          }
+          localStorage.setItem("wand-cross-session-queue", JSON.stringify(state.crossSessionQueue));
         } catch (e) {
           // Ignore localStorage errors
         }
@@ -1834,12 +1897,20 @@
         '</div>';
       }
 
+      function renderWorktreeBadge(session) {
+        if (!session || !session.worktreeEnabled) return "";
+        var title = session.worktree && session.worktree.branch
+          ? ' title="' + escapeHtml('Worktree: ' + session.worktree.branch) + '"'
+          : '';
+        return '<span class="session-kind-badge worktree"' + title + '>Worktree</span>';
+      }
+
       function renderSessionKindBadge(session) {
         if (!session) return "";
-        if (isStructuredSession(session)) {
-          return '<span class="session-kind-badge structured">Structured</span>';
-        }
-        return '<span class="session-kind-badge pty">PTY</span>';
+        var primary = isStructuredSession(session)
+          ? '<span class="session-kind-badge structured">Structured</span>'
+          : '<span class="session-kind-badge pty">PTY</span>';
+        return primary + renderWorktreeBadge(session);
       }
 
       function renderModeCards(selectedMode) {
@@ -1873,6 +1944,13 @@
         }).join("");
       }
 
+      function renderWorktreeToggle(enabled) {
+        return '<label class="session-inline-toggle" for="session-worktree-toggle">' +
+          '<input id="session-worktree-toggle" type="checkbox" class="field-checkbox"' + (enabled ? ' checked' : '') + ' />' +
+          '<span class="session-inline-toggle-label">Worktree 模式</span>' +
+        '</label>';
+      }
+
       function getSessionKindHint(kind) {
         if (kind === "structured") {
           return "结构化聊天界面，支持多轮对话、流式输出和工具调用展示。";
@@ -1884,6 +1962,7 @@
         var modalTool = getPreferredTool();
         var modalMode = getSafeModeForTool(modalTool, state.modeValue || state.chatMode || "default");
         var sessionKind = state.sessionCreateKind || "structured";
+        var worktreeEnabled = state.sessionCreateWorktree === true;
         return '<section id="session-modal" class="modal-backdrop hidden">' +
           '<div class="modal session-modal">' +
             '<div class="modal-header">' +
@@ -1899,7 +1978,10 @@
                 '<div id="session-kind-cards" class="mode-cards">' +
                   renderSessionKindOptions(sessionKind) +
                 '</div>' +
-                '<p id="session-kind-description" class="field-hint">' + escapeHtml(getSessionKindHint(sessionKind)) + '</p>' +
+                '<div class="field-hint session-kind-hint-row">' +
+                  '<span id="session-kind-description">' + escapeHtml(getSessionKindHint(sessionKind)) + '</span>' +
+                  renderWorktreeToggle(worktreeEnabled) +
+                '</div>' +
               '</div>' +
               '<div class="field">' +
                 '<label class="field-label">模式</label>' +
@@ -2117,6 +2199,10 @@
             state.modeValue = mode;
             syncSessionModalUI();
           }
+        });
+        var worktreeToggleEl = document.getElementById("session-worktree-toggle");
+        if (worktreeToggleEl) worktreeToggleEl.addEventListener("change", function() {
+          state.sessionCreateWorktree = this.checked;
         });
         var cwdEl = document.getElementById("cwd");
         if (cwdEl) {
@@ -3561,12 +3647,13 @@
         if (modeHint) modeHint.textContent = getModeHint(state.chatMode);
       }
 
-      function createStructuredSession(prompt, cwdOverride, modeOverride) {
+      function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled) {
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
           runner: state.structuredRunner || "claude-cli-print",
-          prompt: prompt || undefined
+          prompt: prompt || undefined,
+          worktreeEnabled: worktreeEnabled === true
         };
         console.log("[WAND] createStructuredSession payload:", JSON.stringify(payload));
         return fetch("/api/structured-sessions", {
@@ -3800,6 +3887,9 @@
             if (preferredSessionId !== undefined) {
               state.selectedId = preferredSessionId;
             }
+            restoreStructuredQueue();
+            updateStructuredQueueCounter();
+            state.bootstrapping = false;
             persistSelectedId();
             if (state.modalOpen) {
               updateSessionsList();
@@ -3831,6 +3921,7 @@
             if (state.crossSessionQueue.length > 0) {
               flushCrossSessionQueue();
             }
+            renderCrossSessionQueue();
           })
           .catch(function(e) {
             console.error("[wand] loadSessions failed:", e);
@@ -3978,6 +4069,7 @@
         state.messageQueue = [];
         state.pendingMessages = [];
         state.structuredInputQueue = [];
+        restoreStructuredQueue();
         updateStructuredQueueCounter();
         resetChatRenderCache();
         state.currentMessages = [];
@@ -4055,6 +4147,7 @@
           lastFocusedElement = document.activeElement;
           state.sessionTool = getPreferredTool();
           state.sessionCreateKind = "structured";
+          state.sessionCreateWorktree = false;
           state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
           syncSessionModalUI();
           loadRecentPathBubbles();
@@ -4588,6 +4681,7 @@
         var errorEl = document.getElementById("modal-error");
         var command = getPreferredTool();
         var sessionKind = state.sessionCreateKind || "structured";
+        var worktreeEnabled = state.sessionCreateWorktree === true;
 
         hideError(errorEl);
 
@@ -4596,22 +4690,22 @@
         var selectedMode = getSafeModeForTool(command, state.modeValue);
 
         if (sessionKind === "structured") {
-          startStructuredSessionFromModal(cwd, selectedMode, errorEl);
+          startStructuredSessionFromModal(cwd, selectedMode, worktreeEnabled, errorEl);
           return;
         }
 
-        runPtyCommandFromModal(command, cwd, selectedMode, errorEl);
+        runPtyCommandFromModal(command, cwd, selectedMode, worktreeEnabled, errorEl);
       }
 
-      function startStructuredSessionFromModal(cwd, mode, errorEl) {
-        console.log("[WAND] startStructuredSessionFromModal cwd:", cwd, "mode:", mode);
+      function startStructuredSessionFromModal(cwd, mode, worktreeEnabled, errorEl) {
+        console.log("[WAND] startStructuredSessionFromModal cwd:", cwd, "mode:", mode, "worktreeEnabled:", worktreeEnabled);
         _sessionCreating = true;
         state.modeValue = mode;
         state.chatMode = mode;
         state.sessionTool = "claude";
         state.preferredCommand = "claude";
         syncComposerModeSelect();
-        return createStructuredSession(undefined, cwd, mode)
+        return createStructuredSession(undefined, cwd, mode, worktreeEnabled)
           .then(function(data) {
             saveWorkingDir(cwd);
             closeSessionModal();
@@ -4625,8 +4719,8 @@
           .finally(function() { _sessionCreating = false; });
       }
 
-      function runPtyCommandFromModal(command, cwd, mode, errorEl) {
-        console.log("[WAND] runPtyCommandFromModal command:", command, "cwd:", cwd, "mode:", mode);
+      function runPtyCommandFromModal(command, cwd, mode, worktreeEnabled, errorEl) {
+        console.log("[WAND] runPtyCommandFromModal command:", command, "cwd:", cwd, "mode:", mode, "worktreeEnabled:", worktreeEnabled);
         _sessionCreating = true;
         state.modeValue = mode;
         state.chatMode = mode;
@@ -4641,7 +4735,8 @@
           body: JSON.stringify({
             command: command,
             cwd: cwd,
-            mode: mode
+            mode: mode,
+            worktreeEnabled: worktreeEnabled
           })
         })
         .then(function(res) { return res.json(); })
@@ -5065,6 +5160,7 @@
           tool: getPreferredTool(),
           queuedAt: Date.now()
         });
+        persistCrossSessionQueue();
         renderCrossSessionQueue();
       }
 
@@ -5089,6 +5185,7 @@
             showToast(data.error, "error");
             // 失败回填队首，不丢消息
             state.crossSessionQueue.unshift(item);
+            persistCrossSessionQueue();
             renderCrossSessionQueue();
             return null;
           }
@@ -5098,6 +5195,7 @@
           _queueLaunching = false;
           showToast((error && error.message) || "无法启动排队会话。", "error");
           state.crossSessionQueue.unshift(item);
+          persistCrossSessionQueue();
           renderCrossSessionQueue();
         });
       }
@@ -5106,6 +5204,7 @@
         var idx = state.crossSessionQueue.findIndex(function(q) { return q.id === queueId; });
         if (idx < 0) return;
         var item = state.crossSessionQueue.splice(idx, 1)[0];
+        persistCrossSessionQueue();
         renderCrossSessionQueue();
         // 立即发送不受 _queueLaunching 限制
         fetch("/api/commands", {
@@ -5123,12 +5222,18 @@
         .then(function(data) {
           if (data.error) {
             showToast(data.error, "error");
+            state.crossSessionQueue.splice(idx, 0, item);
+            persistCrossSessionQueue();
+            renderCrossSessionQueue();
             return null;
           }
           return activateSession(data);
         })
         .catch(function(error) {
           showToast((error && error.message) || "无法启动排队会话。", "error");
+          state.crossSessionQueue.splice(idx, 0, item);
+          persistCrossSessionQueue();
+          renderCrossSessionQueue();
         });
       }
 
@@ -5136,6 +5241,7 @@
         var idx = state.crossSessionQueue.findIndex(function(q) { return q.id === queueId; });
         if (idx < 0) return;
         state.crossSessionQueue.splice(idx, 1);
+        persistCrossSessionQueue();
         renderCrossSessionQueue();
         if (state.crossSessionQueue.length === 0) {
           showToast("排队已清空。", "info");
@@ -5168,6 +5274,7 @@
 
         if (state.crossSessionQueue.length === 0) {
           if (container) container.remove();
+          persistCrossSessionQueue();
           return;
         }
 
@@ -5239,6 +5346,7 @@
         if (e.target.closest("#queue-clear-all")) {
           e.preventDefault();
           state.crossSessionQueue = [];
+          persistCrossSessionQueue();
           renderCrossSessionQueue();
           showToast("排队已清空。", "info");
           return;
@@ -5509,6 +5617,7 @@
             return Promise.resolve();
           }
           state.structuredInputQueue.push(input);
+          saveStructuredQueue();
           if (inputBox) {
             inputBox.value = "";
             autoResizeInput(inputBox);
@@ -5582,13 +5691,24 @@
           if (session.structuredState) {
             session.structuredState.inFlight = false;
           }
-          // Clear remaining queued messages since the session is likely broken
+          var message = (error && error.message) || "";
+          var isTransientAbort =
+            message === "Failed to fetch" ||
+            message === "NetworkError when attempting to fetch resource." ||
+            message === "Load failed" ||
+            /aborted|aborterror|networkerror|failed to fetch/i.test(message);
+          // On page refresh / request abort, keep queued messages persisted.
           if (state.structuredInputQueue.length > 0) {
-            var dropped = state.structuredInputQueue.length;
-            state.structuredInputQueue = [];
-            updateStructuredQueueCounter();
-            showToast("发送失败，已清空 " + dropped + " 条排队消息。", "error");
-          } else {
+            if (isTransientAbort) {
+              updateStructuredQueueCounter();
+            } else {
+              var dropped = state.structuredInputQueue.length;
+              state.structuredInputQueue = [];
+              clearStructuredQueuePersistence(state.selectedId);
+              updateStructuredQueueCounter();
+              showToast("发送失败，已清空 " + dropped + " 条排队消息。", "error");
+            }
+          } else if (!isTransientAbort) {
             showToast((error && error.message) || "无法发送结构化消息。", "error");
           }
           updateInputHint("Enter 发送 · Shift+Enter 换行");
@@ -5628,6 +5748,7 @@
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session || session.sessionKind !== "structured") {
           state.structuredInputQueue = [];
+          clearStructuredQueuePersistence(state.selectedId);
           updateStructuredQueueCounter();
           return;
         }
@@ -5652,6 +5773,7 @@
           }
           state.currentMessages = msgs;
           if (session.messages) session.messages = msgs;
+          saveStructuredQueue();
           // Pass null for inputBox to avoid clearing user's current typing
           postStructuredInput(nextInput, null, session);
         }
@@ -7749,14 +7871,15 @@
               }
               updateSessionSnapshot(snapshot);
               if (msg.sessionId === state.selectedId) {
-                state.currentMessages = getPreferredMessages(snapshot, msg.data.output, false);
+                var updatedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; }) || snapshot;
+                state.currentMessages = getPreferredMessages(updatedSession, msg.data.output, false);
                 // Re-append queued user messages that haven't been sent yet
-                if (msg.data.sessionKind === 'structured') {
+                if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
                   appendQueuedPlaceholders(state.currentMessages);
                 }
                 // Structured session with inFlight: keep __processing placeholder
                 // so the loading indicator stays visible until assistant content arrives
-                if (msg.data.sessionKind === 'structured') {
+                if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
                   var outSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
                   if (outSession && outSession.structuredState && outSession.structuredState.inFlight) {
                     var lastCur = state.currentMessages[state.currentMessages.length - 1];
@@ -7767,7 +7890,7 @@
                 }
                 updateTaskDisplay();
                 // Structured sessions: render immediately for responsiveness
-                if (msg.data.sessionKind === 'structured') {
+                if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
                   renderChat();
                 } else {
                   scheduleChatRender();
@@ -7853,7 +7976,13 @@
             state.pendingMessages = [];
 
             var endedSessionObj = state.sessions.find(function(s) { return s.id === msg.sessionId; });
-            var isStructuredEnded = endedSessionObj && endedSessionObj.sessionKind === "structured";
+            var selectedSessionObj = msg.sessionId === state.selectedId
+              ? state.sessions.find(function(s) { return s.id === state.selectedId; })
+              : null;
+            var isStructuredEnded = !!(
+              (endedSessionObj && endedSessionObj.sessionKind === "structured") ||
+              (selectedSessionObj && selectedSessionObj.sessionKind === "structured")
+            );
 
             if (isStructuredEnded && msg.sessionId === state.selectedId &&
                 state.structuredInputQueue.length > 0) {
@@ -7862,6 +7991,7 @@
             } else if (!isStructuredEnded) {
               // PTY session ended — clear structured queue too
               state.structuredInputQueue = [];
+              clearStructuredQueuePersistence(state.selectedId);
               updateStructuredQueueCounter();
             }
 
