@@ -9318,13 +9318,51 @@
         };
       })();
 
+      var DEFAULT_CHAT_PERSONA = {
+        user: {
+          name: "赛博虎妞",
+          avatarSvg: PIXEL_AVATAR.user
+        },
+        assistant: {
+          name: "勤劳初二",
+          avatarSvg: PIXEL_AVATAR.assistant
+        }
+      };
+
+      function getStructuredChatPersona(role) {
+        var configPersona = state.config && state.config.structuredChatPersona;
+        var roleConfig = configPersona && configPersona[role] ? configPersona[role] : null;
+        var defaults = DEFAULT_CHAT_PERSONA[role] || DEFAULT_CHAT_PERSONA.assistant;
+        return {
+          name: roleConfig && typeof roleConfig.name === "string" && roleConfig.name.trim()
+            ? roleConfig.name.trim()
+            : defaults.name,
+          avatar: roleConfig && typeof roleConfig.avatar === "string" && roleConfig.avatar.trim()
+            ? roleConfig.avatar.trim()
+            : null,
+          avatarSvg: defaults.avatarSvg
+        };
+      }
+
+      function renderAvatarFallback(svg) {
+        return '<div class="pixel-avatar">' + svg + '</div>';
+      }
+
+      function handleChatAvatarImageError(img, role) {
+        if (!img || !img.parentNode) return;
+        var persona = getStructuredChatPersona(role === "user" ? "user" : "assistant");
+        img.outerHTML = renderAvatarFallback(persona.avatarSvg);
+      }
+
       function chatAvatar(role) {
-        var isUser = role === "user";
-        var svg = isUser ? PIXEL_AVATAR.user : PIXEL_AVATAR.assistant;
-        var name = isUser ? "赛博虎妞" : "勤劳初二";
+        var personaRole = role === "user" ? "user" : "assistant";
+        var persona = getStructuredChatPersona(personaRole);
+        var avatarInner = persona.avatar
+          ? '<img class="pixel-avatar-image" src="' + escapeHtml(persona.avatar) + '" alt="' + escapeHtml(persona.name) + '" onerror="handleChatAvatarImageError(this, ' + JSON.stringify(personaRole) + ')" />'
+          : renderAvatarFallback(persona.avatarSvg);
         return '<div class="chat-message-avatar ' + role + '">' +
-          '<div class="pixel-avatar">' + svg + '</div>' +
-          '<span class="avatar-name">' + name + '</span>' +
+          avatarInner +
+          '<span class="avatar-name">' + escapeHtml(persona.name) + '</span>' +
         '</div>';
       }
 

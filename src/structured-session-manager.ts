@@ -383,12 +383,15 @@ export class StructuredSessionManager {
   // ---------------------------------------------------------------------------
   // CLI argument construction
   // ---------------------------------------------------------------------------
-  private buildPermissionArgs(mode: ExecutionMode): string[] {
+  private buildPermissionArgs(mode: ExecutionMode, autoApprove: boolean): string[] {
+    const shouldBypass = autoApprove || mode === "full-access" || mode === "managed";
+    const shouldAcceptEdits = mode === "auto-edit";
+
     if (!isRunningAsRoot()) {
-      if (mode === "full-access" || mode === "managed") {
+      if (shouldBypass) {
         return ["--permission-mode", "bypassPermissions"];
       }
-      if (mode === "auto-edit") {
+      if (shouldAcceptEdits) {
         return ["--permission-mode", "acceptEdits"];
       }
       return [];
@@ -396,7 +399,7 @@ export class StructuredSessionManager {
 
     // Root: Claude CLI refuses bypassPermissions.
     // acceptEdits auto-approves within CWD; --allowedTools extends to all paths.
-    if (shouldAutoApproveForMode(mode)) {
+    if (shouldBypass || shouldAcceptEdits) {
       return [
         "--permission-mode", "acceptEdits",
         "--allowedTools", "Bash", "Edit", "Write", "Read", "Glob", "Grep",
@@ -426,8 +429,8 @@ export class StructuredSessionManager {
       const args = ["-p", "--verbose", "--output-format", "stream-json"];
       console.log("[WAND] runClaudeStreaming sessionId:", sessionId, "mode:", session.mode, "claudeSessionId:", session.claudeSessionId);
 
-      // Add permission args based on mode
-      const permArgs = this.buildPermissionArgs(session.mode);
+      // Add permission args based on mode + autoApprovePermissions toggle
+      const permArgs = this.buildPermissionArgs(session.mode, session.autoApprovePermissions ?? false);
       args.push(...permArgs);
 
       // In managed mode, append autonomous system prompt

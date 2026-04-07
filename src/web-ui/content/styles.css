@@ -2328,6 +2328,13 @@
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
     }
 
+    .pixel-avatar-image {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
     .pixel-avatar-svg {
       display: block;
       width: 100%;

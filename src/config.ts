@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { ExecutionMode, WandConfig } from "./types.js";
+import { ExecutionMode, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -89,6 +89,28 @@ export async function saveConfig(configPath: string, config: WandConfig): Promis
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
+function normalizeStructuredChatPersona(input: unknown): StructuredChatPersonaConfig | undefined {
+  if (!input || typeof input !== "object") return undefined;
+
+  const normalizeRole = (roleInput: unknown): StructuredChatPersonaConfig["user"] | undefined => {
+    if (!roleInput || typeof roleInput !== "object") return undefined;
+    const role = roleInput as Record<string, unknown>;
+    const normalized = {
+      name: typeof role.name === "string" ? role.name.trim() : undefined,
+      avatar: typeof role.avatar === "string" ? role.avatar.trim() : undefined,
+    };
+    if (!normalized.name && !normalized.avatar) return undefined;
+    return normalized;
+  };
+
+  const personaInput = input as Record<string, unknown>;
+  const user = normalizeRole(personaInput.user);
+  const assistant = normalizeRole(personaInput.assistant);
+
+  if (!user && !assistant) return undefined;
+  return { user, assistant };
+}
+
 function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
   const defaults = defaultConfig();
   return {
@@ -123,6 +145,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
             mode: isExecutionMode(preset.mode) ? preset.mode : undefined
           }))
       : defaults.commandPresets,
+    structuredChatPersona: normalizeStructuredChatPersona(input.structuredChatPersona),
     language: typeof input.language === "string" ? input.language.trim() : defaults.language,
   };
 }

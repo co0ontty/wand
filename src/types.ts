@@ -47,6 +47,16 @@ export interface CommandPreset {
   mode?: ExecutionMode;
 }
 
+export interface StructuredChatPersonaRoleConfig {
+  name?: string;
+  avatar?: string;
+}
+
+export interface StructuredChatPersonaConfig {
+  user?: StructuredChatPersonaRoleConfig;
+  assistant?: StructuredChatPersonaRoleConfig;
+}
+
 export interface WandConfig {
   host: string;
   port: number;
@@ -59,6 +69,7 @@ export interface WandConfig {
   startupCommands: string[];
   allowedCommandPrefixes: string[];
   commandPresets: CommandPreset[];
+  structuredChatPersona?: StructuredChatPersonaConfig;
   /** Max total size (bytes) for shortcut interaction logs per session (default: 10 MB). Set 0 to disable logging. */
   shortcutLogMaxBytes?: number;
   /** Preferred response language for Claude (e.g. "中文", "English"). Empty string means no override. */

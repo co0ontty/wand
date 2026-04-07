@@ -8,6 +8,30 @@ import { promisify } from "node:util";
 import path from "node:path";
 import process from "node:process";
 import { WebSocketServer } from "ws";
+import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
+import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
+import { ensureCertificates } from "./cert.js";
+import { isExecutionMode, resolveConfigDir, saveConfig } from "./config.js";
+import { ProcessManager, ProcessEvent } from "./process-manager.js";
+import { StructuredSessionManager } from "./structured-session-manager.js";
+import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
+import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { resolveDatabasePath, WandStorage } from "./storage.js";
+import { renderApp } from "./web-ui/index.js";
+import { WsBroadcastManager } from "./ws-broadcast.js";
+import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
+import { isPathWithinBase, isBlockedFolderPath, normalizeFolderPath } from "./middleware/path-safety.js";
+import {
+  CommandRequest,
+  ExecutionMode,
+  FileEntry,
+  GitFileStatus,
+  InputRequest,
+  PathSuggestion,
+  ResizeRequest,
+  StructuredChatPersonaConfig,
+  WandConfig
+} from "./types.js";
 
 const execAsync = promisify(exec);
 const SERVER_MODULE_DIR = path.dirname(new URL(import.meta.url).pathname);
@@ -64,29 +88,95 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
-import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
-import { ensureCertificates } from "./cert.js";
-import { isExecutionMode, resolveConfigDir, saveConfig } from "./config.js";
-import { ProcessManager, ProcessEvent } from "./process-manager.js";
-import { StructuredSessionManager } from "./structured-session-manager.js";
-import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
-import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
-import { resolveDatabasePath, WandStorage } from "./storage.js";
-import { renderApp } from "./web-ui/index.js";
-import { WsBroadcastManager } from "./ws-broadcast.js";
-import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
-import { isPathWithinBase, isBlockedFolderPath, normalizeFolderPath } from "./middleware/path-safety.js";
-import {
-  CommandRequest,
-  ExecutionMode,
-  FileEntry,
-  GitFileStatus,
-  InputRequest,
-  PathSuggestion,
-  ResizeRequest,
-  WandConfig
-} from "./types.js";
+function isExternalAvatarSource(value: string): boolean {
+  return /^(https?:|data:)/i.test(value);
+}
+
+function normalizePersonaName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function normalizePersonaAvatar(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function resolveStructuredChatPersona(
+  config: WandConfig
+): StructuredChatPersonaConfig | undefined {
+  const persona = config.structuredChatPersona;
+  if (!persona) return undefined;
+
+  const userName = normalizePersonaName(persona.user?.name);
+  const userAvatar = normalizePersonaAvatar(persona.user?.avatar);
+  const assistantName = normalizePersonaName(persona.assistant?.name);
+  const assistantAvatar = normalizePersonaAvatar(persona.assistant?.avatar);
+
+  if (!userName && !userAvatar && !assistantName && !assistantAvatar) {
+    return undefined;
+  }
+
+  return {
+    user: userName || userAvatar ? { name: userName, avatar: userAvatar } : undefined,
+    assistant: assistantName || assistantAvatar ? { name: assistantName, avatar: assistantAvatar } : undefined,
+  };
+}
+
+function resolveStructuredChatAvatarPath(
+  configPath: string,
+  config: WandConfig,
+  role: "user" | "assistant"
+): string | null {
+  const avatar = role === "user"
+    ? config.structuredChatPersona?.user?.avatar
+    : config.structuredChatPersona?.assistant?.avatar;
+  if (!avatar || isExternalAvatarSource(avatar)) {
+    return null;
+  }
+  const configDir = resolveConfigDir(configPath);
+  return path.isAbsolute(avatar) ? avatar : path.resolve(configDir, avatar);
+}
+
+async function buildStructuredChatPersonaPayload(
+  configPath: string,
+  config: WandConfig
+): Promise<StructuredChatPersonaConfig | undefined> {
+  const persona = resolveStructuredChatPersona(config);
+  if (!persona) return undefined;
+
+  const buildRole = async (role: "user" | "assistant"): Promise<StructuredChatPersonaConfig["user"] | undefined> => {
+    const roleConfig = role === "user" ? persona.user : persona.assistant;
+    if (!roleConfig) return undefined;
+
+    let avatar = roleConfig.avatar;
+    if (avatar && !isExternalAvatarSource(avatar)) {
+      const resolvedPath = resolveStructuredChatAvatarPath(configPath, config, role);
+      if (!resolvedPath) {
+        avatar = undefined;
+      } else {
+        try {
+          const fileStat = await stat(resolvedPath);
+          avatar = fileStat.isFile() ? `/api/structured-chat-avatar/${role}` : undefined;
+        } catch {
+          avatar = undefined;
+        }
+      }
+    }
+
+    if (!roleConfig.name && !avatar) return undefined;
+    return {
+      name: roleConfig.name,
+      avatar,
+    };
+  };
+
+  const [user, assistant] = await Promise.all([buildRole("user"), buildRole("assistant")]);
+  if (!user && !assistant) return undefined;
+  return { user, assistant };
+}
 
 // ── Git helpers ──
 
@@ -308,6 +398,54 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     res.type("html").send(renderApp(configPath));
   });
 
+  app.get("/api/structured-chat-avatar/:role", async (req, res) => {
+    const role = req.params.role === "user" || req.params.role === "assistant"
+      ? req.params.role
+      : null;
+    if (!role) {
+      res.status(404).end();
+      return;
+    }
+
+    const resolvedPath = resolveStructuredChatAvatarPath(configPath, config, role);
+    if (!resolvedPath) {
+      res.status(404).end();
+      return;
+    }
+
+    try {
+      const fileStat = await stat(resolvedPath);
+      if (!fileStat.isFile()) {
+        res.status(404).end();
+        return;
+      }
+
+      const ext = path.extname(resolvedPath).toLowerCase();
+      const contentType = ext === ".svg"
+        ? "image/svg+xml"
+        : ext === ".png"
+          ? "image/png"
+          : ext === ".jpg" || ext === ".jpeg"
+            ? "image/jpeg"
+            : ext === ".webp"
+              ? "image/webp"
+              : ext === ".gif"
+                ? "image/gif"
+                : ext === ".avif"
+                  ? "image/avif"
+                  : null;
+      if (!contentType) {
+        res.status(415).json({ error: "不支持的头像格式。" });
+        return;
+      }
+
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.type(contentType).sendFile(resolvedPath);
+    } catch {
+      res.status(404).end();
+    }
+  });
+
   app.get("/manifest.json", (_req, res) => {
     res.setHeader("Content-Type", "application/manifest+json");
     res.send(generatePwaManifest());
@@ -386,7 +524,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   // ── Config & Session info ──
 
-  app.get("/api/config", (_req, res) => {
+  app.get("/api/config", async (_req, res) => {
+    const structuredChatPersona = await buildStructuredChatPersonaPayload(configPath, config);
     res.json({
       host: config.host,
       port: config.port,
@@ -394,6 +533,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
       structuredRunners: [{ label: "Claude Structured", runner: "claude-cli-print" }],
+      structuredChatPersona,
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
       currentVersion: PKG_VERSION,
