@@ -2158,6 +2158,7 @@
 
     /* ===== 聊天容器 ===== */
     .chat-container {
+      position: relative;
       flex: 1;
       display: none;
       flex-direction: column;
@@ -2165,6 +2166,95 @@
       overflow: hidden;
       padding: 0 20px 16px;
       background: linear-gradient(180deg, rgba(255, 252, 248, 0.5) 0%, transparent 100%);
+    }
+
+    .chat-overlay-controls {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px;
+      border-radius: 7px;
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      background: rgba(255, 250, 242, 0.72);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 6px 18px rgba(89, 58, 32, 0.12);
+      opacity: 0.84;
+      transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+      z-index: 12;
+      pointer-events: auto;
+    }
+
+    .chat-container:hover .chat-overlay-controls,
+    .chat-overlay-controls:focus-within {
+      opacity: 1;
+      background: rgba(255, 250, 242, 0.88);
+      border-color: rgba(197, 101, 61, 0.16);
+    }
+
+    .chat-follow-toggle {
+      min-width: 52px;
+      padding: 0 10px;
+      font-size: 0.6875rem;
+      color: var(--text-secondary);
+      background: transparent;
+      border-color: transparent;
+    }
+
+    .chat-follow-toggle.active {
+      background: var(--accent-muted);
+      color: var(--accent);
+      border-color: rgba(197, 101, 61, 0.2);
+    }
+
+    .chat-follow-toggle:hover {
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .chat-follow-toggle.active:hover {
+      background: rgba(197, 101, 61, 0.18);
+    }
+
+    .chat-jump-bottom {
+      position: absolute;
+      right: 14px;
+      bottom: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-width: 78px;
+      height: 32px;
+      padding: 0 12px;
+      border: 1px solid rgba(125, 91, 57, 0.16);
+      border-radius: 999px;
+      background: rgba(255, 250, 242, 0.9);
+      color: var(--text-primary);
+      box-shadow: 0 10px 24px rgba(89, 58, 32, 0.16);
+      backdrop-filter: blur(10px);
+      cursor: pointer;
+      z-index: 13;
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+    }
+
+    .chat-jump-bottom.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    .chat-jump-bottom:hover {
+      background: rgba(255, 255, 255, 0.98);
+      border-color: rgba(197, 101, 61, 0.24);
+    }
+
+    .chat-jump-bottom:active {
+      transform: translateY(1px);
     }
 
     .chat-container.active { display: flex; }
@@ -4785,6 +4875,22 @@
     }
     .mode-card.active .mode-card-label {
       color: var(--accent);
+    }
+    .mode-card.disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    .mode-card.disabled:hover {
+      border-color: rgba(125, 91, 57, 0.2);
+      background: rgba(255, 255, 255, 0.6);
+    }
+    .mode-card.disabled .mode-card-label,
+    .mode-card.disabled .mode-card-desc {
+      color: var(--text-muted);
+    }
+    .mode-card.active.disabled {
+      box-shadow: none;
     }
     .password-input[data-error="true"],
     .password-input[aria-invalid="true"] {

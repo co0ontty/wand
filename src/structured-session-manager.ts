@@ -54,6 +54,16 @@ function shouldAutoApproveForMode(mode: ExecutionMode): boolean {
   return mode === "full-access" || mode === "managed" || mode === "auto-edit";
 }
 
+function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["data"] {
+  return {
+    output: snapshot.output,
+    messages: snapshot.messages,
+    queuedMessages: snapshot.queuedMessages,
+    sessionKind: "structured",
+    structuredState: snapshot.structuredState,
+  };
+}
+
 export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   private readonly pendingChildren = new Map<string, ChildProcess>();
@@ -66,13 +76,16 @@ export class StructuredSessionManager {
       const restored: SessionSnapshot = {
         ...snapshot,
         sessionKind: "structured",
+        provider: snapshot.provider ?? "claude",
         runner: snapshot.runner ?? "claude-cli-print",
         status: restoredStatus,
         autoApprovePermissions: snapshot.autoApprovePermissions ?? shouldAutoApproveForMode(snapshot.mode),
         approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
+        queuedMessages: snapshot.queuedMessages ?? [],
         pendingEscalation: null,
         permissionBlocked: false,
         structuredState: {
+          provider: snapshot.structuredState?.provider ?? snapshot.provider ?? "claude",
           runner: snapshot.runner ?? "claude-cli-print",
           model: snapshot.structuredState?.model,
           lastError: snapshot.structuredState?.lastError ?? null,
@@ -110,6 +123,7 @@ export class StructuredSessionManager {
     const snapshot: SessionSnapshot = {
       id,
       sessionKind: "structured",
+      provider: "claude",
       runner: options.runner ?? "claude-cli-print",
       command: "claude -p --output-format stream-json",
       cwd: worktreeSetup?.cwd ?? options.cwd,
@@ -125,7 +139,9 @@ export class StructuredSessionManager {
       archivedAt: null,
       claudeSessionId: null,
       messages: [],
+      queuedMessages: [],
       structuredState: {
+        provider: "claude",
         runner: options.runner ?? "claude-cli-print",
         inFlight: false,
         activeRequestId: null,
@@ -156,7 +172,6 @@ export class StructuredSessionManager {
       const child = this.pendingChildren.get(id);
       const childAlive = child && !child.killed && child.exitCode === null;
       if (!childAlive) {
-        // Auto-recover: inFlight is stuck but child process is gone or dead
         if (child) this.pendingChildren.delete(id);
         const recovered: SessionSnapshot = {
           ...session,
@@ -172,7 +187,18 @@ export class StructuredSessionManager {
         this.storage.saveSession(recovered);
         session = recovered;
       } else {
-        throw new Error("结构化会话正在处理中，请稍后再试。");
+        const queue = [...(session.queuedMessages ?? [])];
+        if (queue.length >= 10) {
+          throw new Error("排队消息已满（最多 10 条），请等待当前消息处理完成。");
+        }
+        const queued: SessionSnapshot = {
+          ...session,
+          queuedMessages: [...queue, prompt],
+        };
+        this.sessions.set(id, queued);
+        this.storage.saveSession(queued);
+        this.emitStructuredSnapshot(queued);
+        return queued;
       }
     }
 
@@ -183,12 +209,12 @@ export class StructuredSessionManager {
     const requestId = randomUUID();
     const updated: SessionSnapshot = {
       ...session,
-        status: "running",
-        exitCode: null,
-        endedAt: null,
+      status: "running",
+      exitCode: null,
+      endedAt: null,
       messages: [...(session.messages ?? []), userTurn],
       structuredState: {
-        ...(session.structuredState ?? { runner: "claude-cli-print", lastError: null, inFlight: false, activeRequestId: null }),
+        ...(session.structuredState ?? { provider: "claude", runner: "claude-cli-print", lastError: null, inFlight: false, activeRequestId: null }),
         inFlight: true,
         activeRequestId: requestId,
         lastError: null,
@@ -196,15 +222,11 @@ export class StructuredSessionManager {
     };
     this.sessions.set(id, updated);
     this.storage.saveSession(updated);
-    this.emit({
-      type: "output",
-      sessionId: id,
-      data: { output: updated.output, messages: updated.messages, sessionKind: "structured" },
-    });
+    this.emitStructuredSnapshot(updated);
     this.emit({
       type: "status",
       sessionId: id,
-      data: { status: "running", sessionKind: "structured" },
+      data: { status: "running", sessionKind: "structured", queuedMessages: updated.queuedMessages, structuredState: updated.structuredState },
     });
 
     try {
@@ -232,13 +254,9 @@ export class StructuredSessionManager {
       this.emit({
         type: "status",
         sessionId: id,
-        data: { status: failed.status, error: message, sessionKind: "structured" },
+        data: { status: failed.status, error: message, sessionKind: "structured", queuedMessages: failed.queuedMessages, structuredState: failed.structuredState },
       });
-      this.emit({
-        type: "ended",
-        sessionId: id,
-        data: { status: failed.status, exitCode: 1, messages: failed.messages, sessionKind: "structured", structuredState: failed.structuredState },
-      });
+      this.emitStructuredSnapshot(failed, "ended");
       throw error;
     }
   }
@@ -309,14 +327,14 @@ export class StructuredSessionManager {
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
-        ...(session.structuredState ?? { runner: "claude-cli-print", lastError: null, inFlight: false, activeRequestId: null }),
+        ...(session.structuredState ?? { provider: "claude", runner: "claude-cli-print", lastError: null, inFlight: false, activeRequestId: null }),
         inFlight: false,
         activeRequestId: null,
       },
     };
     this.sessions.set(id, stopped);
     this.storage.saveSession(stopped);
-    this.emit({ type: "ended", sessionId: id, data: { status: stopped.status, exitCode: null, messages: stopped.messages, sessionKind: "structured" } });
+      this.emitStructuredSnapshot(stopped, "ended");
     return stopped;
   }
 
@@ -340,6 +358,61 @@ export class StructuredSessionManager {
       throw new Error("未找到该结构化会话。");
     }
     return session;
+  }
+
+  private buildQueuedPlaceholderTurns(session: SessionSnapshot): ConversationTurn[] {
+    return (session.queuedMessages ?? []).map((text) => ({
+      role: "user",
+      content: [{ type: "text", text, __queued: true } as ContentBlock],
+    }));
+  }
+
+  private buildRenderableMessages(session: SessionSnapshot): ConversationTurn[] {
+    return [
+      ...(session.messages ?? []),
+      ...this.buildQueuedPlaceholderTurns(session),
+    ];
+  }
+
+  private emitStructuredSnapshot(session: SessionSnapshot, eventType: "output" | "ended" = "output"): void {
+    const payload = buildStructuredOutputPayload(session) as Record<string, unknown>;
+    const data = {
+      ...payload,
+      messages: this.buildRenderableMessages(session),
+      status: session.status,
+      exitCode: session.exitCode,
+    };
+    this.emit({
+      type: eventType,
+      sessionId: session.id,
+      data,
+    });
+  }
+
+  private async flushNextQueuedMessage(sessionId: string): Promise<void> {
+    const current = this.sessions.get(sessionId);
+    if (!current || (current.queuedMessages?.length ?? 0) === 0) {
+      return;
+    }
+    if (current.structuredState?.inFlight) {
+      return;
+    }
+    const [nextInput, ...restQueue] = current.queuedMessages ?? [];
+    if (!nextInput) {
+      return;
+    }
+    const nextSession: SessionSnapshot = {
+      ...current,
+      queuedMessages: restQueue,
+    };
+    this.sessions.set(sessionId, nextSession);
+    this.storage.saveSession(nextSession);
+    this.emitStructuredSnapshot(nextSession);
+    try {
+      await this.sendMessage(sessionId, nextInput);
+    } catch (error) {
+      console.error("[WAND] flushNextQueuedMessage failed:", error);
+    }
   }
 
   private emit(event: ProcessEvent): void {
@@ -495,7 +568,7 @@ export class StructuredSessionManager {
         this.emit({
           type: "output",
           sessionId,
-          data: { output: current.output, messages: current.messages, sessionKind: "structured" },
+          data: buildStructuredOutputPayload(current),
         });
       };
 
@@ -526,12 +599,16 @@ export class StructuredSessionManager {
           ...current,
           claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
           messages: msgs,
+          output: turnState.result || current.output,
           structuredState: {
             ...(current.structuredState as StructuredSessionState),
             model: turnState.model ?? current.structuredState?.model,
           },
         };
         this.sessions.set(sessionId, patched);
+        // Persist streaming progress so a server restart does not roll back the
+        // latest assistant turn to the pre-stream snapshot.
+        this.storage.saveSession(patched);
       };
 
       const processLine = (line: string): void => {
@@ -664,16 +741,8 @@ export class StructuredSessionManager {
           };
           this.sessions.set(sessionId, failed);
           this.storage.saveSession(failed);
-          this.emit({
-            type: "output",
-            sessionId,
-            data: { output: failed.output, messages: failed.messages, sessionKind: "structured" },
-          });
-          this.emit({
-            type: "ended",
-            sessionId,
-            data: { status: failed.status, exitCode: failed.exitCode, messages: failed.messages, sessionKind: "structured", structuredState: failed.structuredState },
-          });
+          this.emitStructuredSnapshot(failed);
+          this.emitStructuredSnapshot(failed, "ended");
           reject(new Error(errorText));
           return;
         }
@@ -716,16 +785,8 @@ export class StructuredSessionManager {
         this.sessions.set(sessionId, finished);
         this.storage.saveSession(finished);
 
-        this.emit({
-          type: "output",
-          sessionId,
-          data: { output: finished.output, messages: finished.messages, sessionKind: "structured" },
-        });
-        this.emit({
-          type: "ended",
-          sessionId,
-          data: { status: finished.status, exitCode: 0, messages: finished.messages, sessionKind: "structured", structuredState: finished.structuredState },
-        });
+        this.emitStructuredSnapshot(finished);
+        this.emitStructuredSnapshot(finished, "ended");
 
         // Auto-continue after plan mode exit: when Claude calls ExitPlanMode,
         // the `-p` process exits because stdin is "ignore" and it cannot get
@@ -737,8 +798,6 @@ export class StructuredSessionManager {
         if (lastToolUse && lastToolUse.name === "ExitPlanMode" && turnState.sessionId) {
           console.log("[WAND] ExitPlanMode detected – auto-continuing plan execution for session:", sessionId);
           resolve();
-          // Schedule the continuation outside the current promise chain so it
-          // does not block the close handler.
           setImmediate(() => {
             this.sendMessage(sessionId, "Plan approved. Proceed with the implementation.").catch((err) => {
               console.error("[WAND] Auto-continue after ExitPlanMode failed:", err);
@@ -748,8 +807,10 @@ export class StructuredSessionManager {
         }
 
         resolve();
-      });
-    });
+        setImmediate(() => {
+          void this.flushNextQueuedMessage(sessionId);
+        });
+      });    });
   }
 
   // ---------------------------------------------------------------------------

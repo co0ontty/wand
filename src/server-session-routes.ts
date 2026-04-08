@@ -96,9 +96,13 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", express.json(), async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; worktreeEnabled?: boolean };
-    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, worktreeEnabled: body.worktreeEnabled === true, hasPrompt: !!body.prompt }));
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean };
+    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, provider: body.provider, worktreeEnabled: body.worktreeEnabled === true, hasPrompt: !!body.prompt }));
     try {
+      if (body.provider && body.provider !== "claude") {
+        res.status(400).json({ error: "结构化会话当前仅支持 Claude provider。" });
+        return;
+      }
       const snapshot = structured.createSession({
         cwd: body.cwd?.trim() || process.cwd(),
         mode: normalizeMode(body.mode, defaultMode),
@@ -201,6 +205,10 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "结构化会话不支持 Claude CLI resume。" });
         return;
       }
+      if (existingSession.provider && existingSession.provider !== "claude") {
+        res.status(400).json({ error: "只有 Claude provider 支持恢复功能。" });
+        return;
+      }
       const claudeSessionId = existingSession.claudeSessionId;
       if (!claudeSessionId) {
         res.status(400).json({ error: "此会话没有 Claude 会话 ID，无法恢复。" });
@@ -232,6 +240,10 @@ export function registerSessionRoutes(
       }
       const existingSession = storage.getLatestSessionByClaudeSessionId(claudeSessionId);
       if (existingSession) {
+        if (existingSession.provider && existingSession.provider !== "claude") {
+          res.status(400).json({ error: "只有 Claude provider 支持按 Claude Session ID 恢复。" });
+          return;
+        }
         const command = existingSession.command.trim();
         if ((existingSession.sessionKind ?? "pty") !== "pty") {
           res.status(400).json({ error: "结构化会话不支持按 Claude Session ID 恢复。" });
@@ -308,7 +320,12 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/approve-permission", (req, res) => {
     try {
       if (structured.get(req.params.id)) {
-        res.json(structured.approvePermission(req.params.id));
+        res.status(400).json({ error: "结构化会话不需要终端权限操作。" });
+        return;
+      }
+      const snapshot = processes.get(req.params.id);
+      if (snapshot?.provider === "codex") {
+        res.status(400).json({ error: "Codex provider 不支持权限批准操作。" });
         return;
       }
       res.json(processes.approvePermission(req.params.id));
@@ -320,7 +337,12 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/deny-permission", (req, res) => {
     try {
       if (structured.get(req.params.id)) {
-        res.json(structured.denyPermission(req.params.id));
+        res.status(400).json({ error: "结构化会话不需要终端权限操作。" });
+        return;
+      }
+      const snapshot = processes.get(req.params.id);
+      if (snapshot?.provider === "codex") {
+        res.status(400).json({ error: "Codex provider 不支持权限拒绝操作。" });
         return;
       }
       res.json(processes.denyPermission(req.params.id));
@@ -332,7 +354,12 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/toggle-auto-approve", (req, res) => {
     try {
       if (structured.get(req.params.id)) {
-        res.json(structured.toggleAutoApprove(req.params.id));
+        res.status(400).json({ error: "结构化会话不需要切换终端自动批准。" });
+        return;
+      }
+      const snapshot = processes.get(req.params.id);
+      if (snapshot?.provider === "codex") {
+        res.status(400).json({ error: "Codex provider 不支持自动批准切换。" });
         return;
       }
       res.json(processes.toggleAutoApprove(req.params.id));

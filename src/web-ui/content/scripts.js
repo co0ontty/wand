@@ -58,6 +58,8 @@
 
     (function() {
       var configPath = "${escapeHtml(configPath)}";
+      var CHAT_EXPAND_STATE_STORAGE_KEY = "wand-chat-expand-state-v1";
+      var CHAT_AUTO_FOLLOW_STORAGE_KEY = "wand-chat-auto-follow";
 
       var state = {
         selectedId: (function() {
@@ -140,6 +142,21 @@
             return false;
           }
         })(),
+        chatAutoFollow: (function() {
+          try {
+            var saved = localStorage.getItem(CHAT_AUTO_FOLLOW_STORAGE_KEY);
+            return saved === null ? true : saved === "true";
+          } catch (e) {
+            return true;
+          }
+        })(),
+        showChatJumpToBottom: false,
+        chatScrollThreshold: 200,
+        chatIsProgrammaticScroll: false,
+        chatScrollElement: null,
+        chatScrollHandler: null,
+        lastForegroundSyncAt: 0,
+        foregroundSyncTimer: null,
         currentMessages: [],
         lastRenderedHash: 0,
         lastRenderedMsgCount: 0,
@@ -254,6 +271,120 @@
         }
       }
 
+      function persistChatAutoFollow() {
+        try {
+          localStorage.setItem(CHAT_AUTO_FOLLOW_STORAGE_KEY, state.chatAutoFollow ? "true" : "false");
+        } catch (e) {
+          // Ignore localStorage errors
+        }
+      }
+
+      function getChatScrollElement() {
+        var chatOutput = document.getElementById("chat-output");
+        if (!chatOutput) {
+          state.chatScrollElement = null;
+          return null;
+        }
+        var chatMessages = chatOutput.querySelector(".chat-messages");
+        if (chatMessages) {
+          state.chatScrollElement = chatMessages;
+          return chatMessages;
+        }
+        state.chatScrollElement = null;
+        return null;
+      }
+
+      function isChatNearBottom(chatMsgs) {
+        var el = chatMsgs || getChatScrollElement();
+        if (!el) return true;
+        return el.scrollTop < state.chatScrollThreshold;
+      }
+
+      function updateChatFollowToggleButton() {
+        var button = document.getElementById("chat-follow-toggle");
+        if (!button) return;
+        var enabled = !!state.chatAutoFollow;
+        button.classList.toggle("active", enabled);
+        button.setAttribute("aria-pressed", enabled ? "true" : "false");
+        button.setAttribute("title", enabled ? "追踪底部：开启" : "追踪底部：已暂停");
+        button.textContent = enabled ? "追底" : "暂停";
+      }
+
+      function updateChatJumpToBottomButton() {
+        var button = document.getElementById("chat-jump-bottom");
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var shouldShow = !!selectedSession
+          && state.currentView === "chat"
+          && !state.chatAutoFollow
+          && !isChatNearBottom();
+        state.showChatJumpToBottom = shouldShow;
+        if (button) {
+          button.classList.toggle("visible", shouldShow);
+        }
+      }
+
+      function scrollChatToBottom(smooth) {
+        var chatMsgs = getChatScrollElement();
+        if (!chatMsgs || !chatMsgs.isConnected) return;
+        state.chatIsProgrammaticScroll = true;
+        if (smooth && typeof chatMsgs.scrollTo === "function") {
+          chatMsgs.scrollTo({ top: 0, behavior: "smooth" });
+          setTimeout(function() {
+            state.chatIsProgrammaticScroll = false;
+            updateChatJumpToBottomButton();
+          }, 220);
+          return;
+        }
+        chatMsgs.scrollTop = 0;
+        requestAnimationFrame(function() {
+          state.chatIsProgrammaticScroll = false;
+          updateChatJumpToBottomButton();
+        });
+      }
+
+      function setChatAutoFollow(enabled, options) {
+        options = options || {};
+        state.chatAutoFollow = !!enabled;
+        persistChatAutoFollow();
+        updateChatFollowToggleButton();
+        if (state.chatAutoFollow && options.scrollNow !== false) {
+          scrollChatToBottom(!!options.smooth);
+        } else {
+          updateChatJumpToBottomButton();
+        }
+      }
+
+      function bindChatScrollListener() {
+        var chatMsgs = getChatScrollElement();
+        if (!chatMsgs || !chatMsgs.isConnected) return;
+        if (state.chatScrollElement === chatMsgs && state.chatScrollHandler) {
+          updateChatJumpToBottomButton();
+          return;
+        }
+        if (state.chatScrollElement && state.chatScrollHandler) {
+          state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);
+        }
+        state.chatScrollElement = chatMsgs;
+        state.chatScrollHandler = function() {
+          if (!chatMsgs.isConnected) return;
+          if (state.chatIsProgrammaticScroll) {
+            updateChatJumpToBottomButton();
+            return;
+          }
+          if (!isChatNearBottom(chatMsgs)) {
+            if (state.chatAutoFollow) {
+              setChatAutoFollow(false, { scrollNow: false });
+            } else {
+              updateChatJumpToBottomButton();
+            }
+            return;
+          }
+          updateChatJumpToBottomButton();
+        };
+        chatMsgs.addEventListener("scroll", state.chatScrollHandler, { passive: true });
+        updateChatJumpToBottomButton();
+      }
+
       // Helper function to persist selected session ID to localStorage
       function persistSelectedId() {
         try {
@@ -267,14 +398,32 @@
         }
       }
 
+      function getStructuredQueuedInputs(session) {
+        if (session && Array.isArray(session.queuedMessages)) {
+          return session.queuedMessages;
+        }
+        return state.structuredInputQueue;
+      }
+
+      function getSelectedStructuredQueuedInputs() {
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        return getStructuredQueuedInputs(session);
+      }
+
+      function syncStructuredQueueFromSession(session) {
+        var queued = getStructuredQueuedInputs(session);
+        state.structuredInputQueue = Array.isArray(queued) ? queued.slice() : [];
+      }
+
       function saveStructuredQueue() {
         try {
-          if (!state.selectedId || state.structuredInputQueue.length === 0) {
+          var queued = getSelectedStructuredQueuedInputs();
+          if (!state.selectedId || queued.length === 0) {
             return;
           }
           localStorage.setItem("wand-structured-queue", JSON.stringify({
             sessionId: state.selectedId,
-            items: state.structuredInputQueue
+            items: queued
           }));
         } catch (e) {
           // Ignore localStorage errors
@@ -295,6 +444,12 @@
       }
 
       function restoreStructuredQueue() {
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (selectedSession && Array.isArray(selectedSession.queuedMessages)) {
+          syncStructuredQueueFromSession(selectedSession);
+          saveStructuredQueue();
+          return;
+        }
         try {
           var saved = localStorage.getItem("wand-structured-queue");
           if (!saved) return;
@@ -324,10 +479,177 @@
         return (state.config && state.config.defaultCwd) || "/tmp";
       }
 
+      function loadChatExpandStateMap() {
+        try {
+          var saved = localStorage.getItem(CHAT_EXPAND_STATE_STORAGE_KEY);
+          if (!saved) return {};
+          var parsed = JSON.parse(saved);
+          return parsed && typeof parsed === "object" ? parsed : {};
+        } catch (e) {
+          return {};
+        }
+      }
+
+      function saveChatExpandStateMap(map) {
+        try {
+          if (!map || Object.keys(map).length === 0) {
+            localStorage.removeItem(CHAT_EXPAND_STATE_STORAGE_KEY);
+            return;
+          }
+          localStorage.setItem(CHAT_EXPAND_STATE_STORAGE_KEY, JSON.stringify(map));
+        } catch (e) {
+          // Ignore localStorage errors
+        }
+      }
+
+      function getCurrentChatExpandState() {
+        var sessionId = state.selectedId;
+        if (!sessionId) return {};
+        var map = loadChatExpandStateMap();
+        var sessionState = map[sessionId];
+        return sessionState && typeof sessionState === "object" ? sessionState : {};
+      }
+
+      function getPersistedExpandState(itemKey) {
+        if (!itemKey || !state.selectedId) return null;
+        var sessionState = getCurrentChatExpandState();
+        return typeof sessionState[itemKey] === "boolean" ? sessionState[itemKey] : null;
+      }
+
+      function setPersistedExpandState(itemKey, expanded) {
+        if (!itemKey || !state.selectedId) return;
+        var map = loadChatExpandStateMap();
+        var sessionId = state.selectedId;
+        var sessionState = map[sessionId];
+        if (!sessionState || typeof sessionState !== "object") {
+          sessionState = {};
+        }
+        sessionState[itemKey] = !!expanded;
+        map[sessionId] = sessionState;
+        saveChatExpandStateMap(map);
+      }
+
+      function getMessageKey(msg, fallbackIndex) {
+        if (!msg) {
+          return "msg:unknown-" + (typeof fallbackIndex === "number" ? fallbackIndex : 0);
+        }
+        if (msg.uuid) return "msg:" + msg.uuid;
+        if (msg.id) return "msg:" + msg.id;
+        if (msg.messageId) return "msg:" + msg.messageId;
+        if (msg.turnId) return "msg:" + msg.turnId;
+        return "msg:" + (typeof fallbackIndex === "number" ? fallbackIndex : 0);
+      }
+
+      function buildExpandKey(kind, parts) {
+        var filtered = [];
+        for (var i = 0; i < parts.length; i++) {
+          var part = parts[i];
+          if (part === undefined || part === null || part === "") continue;
+          filtered.push(String(part));
+        }
+        return kind + ":" + filtered.join(":");
+      }
+
+      function getElementExpandKey(el) {
+        if (!el || !el.dataset) return "";
+        return el.dataset.expandKey || "";
+      }
+
+      function isElementExpanded(el, kind) {
+        if (!el) return false;
+        switch (kind) {
+          case "tool-card":
+            return !el.classList.contains("collapsed");
+          case "thinking":
+            return el.classList.contains("expanded") && !el.classList.contains("collapsed");
+          case "inline-tool":
+            return el.classList.contains("inline-tool-open");
+          case "terminal": {
+            var body = el.querySelector(".term-body");
+            if (body) return body.style.display !== "none";
+            return el.dataset.expanded === "true";
+          }
+          case "tool-group":
+            return el.getAttribute("data-expanded") === "true";
+          default:
+            return false;
+        }
+      }
+
+      function applyExpandedState(el, kind, expanded) {
+        if (!el) return;
+        switch (kind) {
+          case "tool-card": {
+            el.classList.toggle("collapsed", !expanded);
+            break;
+          }
+          case "thinking": {
+            el.classList.toggle("collapsed", !expanded);
+            el.classList.toggle("expanded", !!expanded);
+            var previewEl = el.querySelector(".thinking-inline-preview");
+            if (previewEl) {
+              var fullText = el.dataset.thinking || "";
+              var preview = fullText.slice(0, 57) + (fullText.length > 60 ? "…" : "");
+              previewEl.textContent = expanded ? fullText : preview;
+            }
+            var actionEl = el.querySelector(".thinking-inline-action");
+            if (actionEl) actionEl.textContent = expanded ? "收起" : "展开";
+            break;
+          }
+          case "inline-tool": {
+            el.classList.toggle("inline-tool-open", !!expanded);
+            var inlineBody = el.querySelector(".inline-tool-expanded");
+            if (inlineBody) inlineBody.style.display = expanded ? "block" : "none";
+            break;
+          }
+          case "terminal": {
+            var body = el.querySelector(".term-body");
+            if (body) body.style.display = expanded ? "block" : "none";
+            el.dataset.expanded = expanded ? "true" : "false";
+            var toggleIcon = el.querySelector(".term-toggle-icon");
+            if (toggleIcon) toggleIcon.textContent = expanded ? "▼" : "▶";
+            break;
+          }
+          case "tool-group": {
+            el.setAttribute("data-expanded", expanded ? "true" : "false");
+            var groupBody = el.querySelector(".tool-group-body");
+            if (groupBody) groupBody.style.display = expanded ? "block" : "none";
+            var chevron = el.querySelector(".tool-group-chevron");
+            if (chevron) chevron.style.transform = expanded ? "rotate(180deg)" : "";
+            break;
+          }
+        }
+      }
+
+      function persistElementExpandState(el, kind) {
+        var itemKey = getElementExpandKey(el);
+        if (!itemKey) return;
+        setPersistedExpandState(itemKey, isElementExpanded(el, kind));
+      }
+
+      function applyPersistedExpandState(container) {
+        if (!container || !state.selectedId) return;
+        container.querySelectorAll("[data-expand-key]").forEach(function(el) {
+          var itemKey = getElementExpandKey(el);
+          var kind = el.dataset.expandKind || "";
+          var persisted = getPersistedExpandState(itemKey);
+          if (persisted === null || !kind) return;
+          applyExpandedState(el, kind, persisted);
+        });
+      }
+
       function resetChatRenderCache() {
         state.lastRenderedHash = 0;
         state.lastRenderedMsgCount = 0;
         state.lastRenderedEmpty = null;
+        state.renderPending = false;
+        if (state.chatScrollElement && state.chatScrollHandler) {
+          state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);
+        }
+        state.chatScrollElement = null;
+        state.chatScrollHandler = null;
+        state.showChatJumpToBottom = false;
+        state.chatIsProgrammaticScroll = false;
       }
 
       function getEffectiveCwd() {
@@ -377,9 +699,6 @@
         }
       }
 
-      renderBootLoading();
-      restoreLoginSession();
-
       function renderBootLoading() {
         var app = document.getElementById("app");
         if (!app) return;
@@ -387,9 +706,63 @@
           '<div class="boot-loading">' +
             '<div class="boot-loading-card">' +
               '<div class="boot-loading-spinner"></div>' +
-              '<div class="boot-loading-text">正在恢复会话…</div>' +
+              '<div class="boot-loading-text">正在连接 Wand…</div>' +
             '</div>' +
           '</div>';
+      }
+
+      function scheduleForegroundSync(reason) {
+        if (!state.config) return;
+        if (document.hidden) return;
+        var now = Date.now();
+        if (now - state.lastForegroundSyncAt < 1500) return;
+        state.lastForegroundSyncAt = now;
+        if (state.foregroundSyncTimer) {
+          clearTimeout(state.foregroundSyncTimer);
+        }
+        state.foregroundSyncTimer = setTimeout(function() {
+          state.foregroundSyncTimer = null;
+          syncOnForeground(reason);
+        }, 80);
+      }
+
+      function syncOnForeground(reason) {
+        if (!state.config) return Promise.resolve();
+        if (document.hidden) return Promise.resolve();
+        if (!state.ws || (state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING)) {
+          initWebSocket();
+        }
+        return loadSessions({ skipSelectedOutputReload: true }).then(function() {
+          if (state.selectedId) {
+            return loadOutput(state.selectedId);
+          }
+          scheduleChatRender(true);
+        }).catch(function(e) {
+          console.error("[wand] foreground sync failed:", reason, e);
+        });
+      }
+
+      function bindForegroundSyncListeners() {
+        if (window.__wandForegroundSyncBound) return;
+        window.__wandForegroundSyncBound = true;
+
+        document.addEventListener("visibilitychange", function() {
+          if (!document.hidden) {
+            scheduleForegroundSync("visibility");
+          }
+        });
+
+        window.addEventListener("focus", function() {
+          scheduleForegroundSync("focus");
+        });
+
+        window.addEventListener("pageshow", function() {
+          scheduleForegroundSync("pageshow");
+        });
+
+        window.addEventListener("resume", function() {
+          scheduleForegroundSync("resume");
+        });
       }
 
       function restoreLoginSession() {
@@ -407,20 +780,16 @@
             state.config = config;
             state.loginChecked = true;
             requestAnimationFrame(function() {
-              // Render the app shell first, THEN load session data into it.
-              // Skip updateShellChrome() here — sessions aren't loaded yet.
-              // refreshAll() will call updateShellChrome() after sessions arrive.
               try {
                 render({ skipShellChrome: true });
               } catch (_e) {
                 // render() may fail if external scripts (xterm.js) failed to load;
                 // continue with polling and session loading so the app remains functional
               }
+              bindForegroundSyncListeners();
               startPolling();
               refreshAll();
-              // Request browser notification permission after login
               requestNotificationPermission();
-              // Show update bubble if server reports an available update
               if (config.updateAvailable && config.latestVersion) {
                 showNotificationBubble({
                   title: "\u53d1\u73b0\u65b0\u7248\u672c",
@@ -436,7 +805,6 @@
                 });
                 sendBrowserNotification("Wand \u53d1\u73b0\u65b0\u7248\u672c", "\u5f53\u524d " + (config.currentVersion || "-") + " \u2192 \u6700\u65b0 " + config.latestVersion, { tag: "wand-update" });
               }
-              // Auto-load claude history since section defaults to expanded
               if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
                 loadClaudeHistory();
               }
@@ -444,7 +812,6 @@
           })
           .catch(function() {
             state.loginChecked = true;
-            // If offline (no network), show a friendly offline message instead of login
             if (!navigator.onLine) {
               var app = document.getElementById("app");
               if (app) {
@@ -457,13 +824,15 @@
                     '</div>' +
                   '</div>';
               }
-              // Retry when network comes back
               window.addEventListener('online', function() { location.reload(); }, { once: true });
               return;
             }
             render();
           });
       }
+
+      renderBootLoading();
+      restoreLoginSession();
 
       function render(options) {
         var skipShellChrome = options && options.skipShellChrome;
@@ -707,7 +1076,12 @@
                 '</div>' +
                 '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部">↓ 最新</button>' +
               '</div>' +
-              '<div id="chat-output" class="chat-container hidden"></div>' +
+              '<div id="chat-output" class="chat-container hidden">' +
+                '<div class="chat-overlay-controls">' +
+                  '<button id="chat-follow-toggle" class="chat-follow-toggle topbar-btn' + (state.chatAutoFollow ? ' active' : '') + '" type="button" aria-pressed="' + (state.chatAutoFollow ? 'true' : 'false') + '" title="' + (state.chatAutoFollow ? '追踪底部：开启' : '追踪底部：已暂停') + '">' + (state.chatAutoFollow ? '追底' : '暂停') + '</button>' +
+                '</div>' +
+                '<button id="chat-jump-bottom" class="chat-jump-bottom' + (state.showChatJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部并继续追底">↓ 最新</button>' +
+              '</div>' +
               '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
                 '<div class="blank-chat-inner">' +
                   '<div class="blank-chat-logo">W</div>' +
@@ -784,7 +1158,7 @@
                     '<span id="session-kind-display" class="session-kind-display">' + (selectedSession ? getSessionKindLabel(selectedSession) : '终端') + '</span>' +
                     '<span class="session-info-separator">|</span>' +
                     '<span id="session-status-display" class="session-status-display">' + (selectedSession ? getSessionStatusLabel(selectedSession) : '-') + '</span>' +
-                    (selectedSession && selectedSession.claudeSessionId ? '<span class="session-info-separator">|</span><span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>' : '') +
+                    (selectedSession && selectedSession.provider === "claude" && selectedSession.claudeSessionId ? '<span class="session-info-separator">|</span><span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>' : '') +
                     (selectedSession && !isStructuredSession(selectedSession) ? '<span class="session-info-separator">|</span><span id="session-exit-display" class="session-exit-display">退出码=' + (selectedSession.exitCode !== undefined ? selectedSession.exitCode : 'n/a') + '</span>' : '') +
                   '</div>' +
                 '</div>' +
@@ -1859,7 +2233,7 @@
         var recoveryHint = "";
         var checkbox = renderManageCheckbox("sessions", session.id, "选择会话 " + session.command);
 
-        if (session.claudeSessionId) {
+        if (session.provider === "claude" && session.claudeSessionId) {
           var shortId = session.claudeSessionId.slice(0, 8);
           sessionIdDisplay = '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>';
           if (session.status !== "running" && !state.sessionsManageMode && !isStructuredSession(session)) {
@@ -1930,6 +2304,20 @@
         }).join("");
       }
 
+      function renderProviderOptions(selectedTool) {
+        var tools = [
+          { id: "claude", label: "Claude", desc: "完整 Claude 会话能力" },
+          { id: "codex", label: "Codex", desc: "PTY 透传，全权限启动" }
+        ];
+        return tools.map(function(tool) {
+          var active = tool.id === selectedTool ? " active" : "";
+          return '<button type="button" class="mode-card provider-card' + active + '" data-provider="' + tool.id + '">' +
+            '<span class="mode-card-label">' + tool.label + '</span>' +
+            '<span class="mode-card-desc">' + tool.desc + '</span>' +
+          '</button>';
+        }).join("");
+      }
+
       function renderSessionKindOptions(selectedKind) {
         var kinds = [
           { id: "structured", label: "结构化", desc: "智能对话模式" },
@@ -1937,7 +2325,8 @@
         ];
         return kinds.map(function(kind) {
           var active = kind.id === selectedKind ? " active" : "";
-          return '<button type="button" class="mode-card session-kind-card' + active + '" data-session-kind="' + kind.id + '">' +
+          var disabled = (state.sessionTool === "codex" && kind.id === "structured") ? " disabled" : "";
+          return '<button type="button" class="mode-card session-kind-card' + active + disabled + '" data-session-kind="' + kind.id + '">' +
             '<span class="mode-card-label">' + kind.label + '</span>' +
             '<span class="mode-card-desc">' + kind.desc + '</span>' +
           '</button>';
@@ -1968,11 +2357,17 @@
             '<div class="modal-header">' +
               '<div>' +
                 '<h2 class="modal-title">新对话</h2>' +
-                '<p class="modal-subtitle">启动 Claude 会话，选择会话类型、模式和工作目录。</p>' +
+                '<p class="modal-subtitle">启动 Claude 或 Codex 会话，选择 provider、会话类型、模式和工作目录。</p>' +
               '</div>' +
               '<button id="close-modal-button" class="btn btn-ghost btn-icon">&times;</button>' +
             '</div>' +
             '<div class="modal-body">' +
+              '<div class="field">' +
+                '<label class="field-label">Provider</label>' +
+                '<div id="provider-cards" class="mode-cards">' +
+                  renderProviderOptions(modalTool) +
+                '</div>' +
+              '</div>' +
               '<div class="field">' +
                 '<label class="field-label">会话类型</label>' +
                 '<div id="session-kind-cards" class="mode-cards">' +
@@ -2009,7 +2404,10 @@
       // Global toggle function for tool card headers — called via onclick attribute
       window.__tcToggle = function(e, headerEl) {
         var card = headerEl.closest(".tool-use-card");
-        if (card) card.classList.toggle("collapsed");
+        if (card) {
+          card.classList.toggle("collapsed");
+          persistElementExpandState(card, "tool-card");
+        }
         if (e) { e.preventDefault(); e.stopPropagation(); }
       };
       // Toggle function for inline thinking blocks — called via onclick attribute
@@ -2029,6 +2427,7 @@
           var action = el.querySelector(".thinking-inline-action");
           if (action) action.textContent = "展开";
         }
+        persistElementExpandState(el, "thinking");
       };
       // Toggle function for inline tool rows (Read, Glob, Grep, etc.)
       window.__inlineToolToggle = function(el) {
@@ -2046,6 +2445,7 @@
             statusSpan.textContent = "✓";
           }
         }
+        persistElementExpandState(el, "inline-tool");
       };
       // Toggle function for terminal tool blocks
       window.__terminalExpand = function(el) {
@@ -2058,6 +2458,7 @@
           container.dataset.expanded = isHidden ? "true" : "false";
           var toggleIcon = el.querySelector(".term-toggle-icon");
           if (toggleIcon) toggleIcon.textContent = isHidden ? "▼" : "▶";
+          persistElementExpandState(container, "terminal");
         }
       };
       // Update streaming thinking content (called from WebSocket handler)
@@ -2179,10 +2580,26 @@
         // Claude session ID badge click-to-copy (event delegation on document)
         document.addEventListener("click", handleClaudeIdCopy);
 
+        var providerCardsEl = document.getElementById("provider-cards");
+        if (providerCardsEl) providerCardsEl.addEventListener("click", function(e) {
+          var card = e.target.closest(".provider-card");
+          if (!card || card.classList.contains("disabled")) return;
+          var provider = card.getAttribute("data-provider");
+          if (provider) {
+            state.sessionTool = provider;
+            state.preferredCommand = provider;
+            if (provider === "codex") {
+              state.sessionCreateKind = "pty";
+              state.modeValue = "full-access";
+            }
+            syncSessionModalUI();
+          }
+        });
+
         var kindCardsEl = document.getElementById("session-kind-cards");
         if (kindCardsEl) kindCardsEl.addEventListener("click", function(e) {
           var card = e.target.closest(".session-kind-card");
-          if (!card) return;
+          if (!card || card.classList.contains("disabled")) return;
           var kind = card.getAttribute("data-session-kind");
           if (kind) {
             state.sessionCreateKind = kind;
@@ -2305,6 +2722,9 @@
           inputBox.addEventListener("keydown", handleInputBoxKeydown);
           inputBox.addEventListener("paste", handleInputPaste);
           inputBox.addEventListener("input", function() {
+            if (handleInteractiveTextInput(inputBox)) {
+              return;
+            }
             refreshInputBoxState(inputBox);
             setDraftValue(inputBox.value, true);
           });
@@ -2398,8 +2818,18 @@
         if (jumpBottomBtn) jumpBottomBtn.addEventListener("click", function() {
           maybeScrollTerminalToBottom("force");
         });
-
-        // File explorer
+        var chatFollowToggle = document.getElementById("chat-follow-toggle");
+        if (chatFollowToggle) chatFollowToggle.addEventListener("click", function() {
+          if (state.chatAutoFollow) {
+            setChatAutoFollow(false, { scrollNow: false });
+          } else {
+            setChatAutoFollow(true, { scrollNow: true, smooth: false });
+          }
+        });
+        var chatJumpBottomBtn = document.getElementById("chat-jump-bottom");
+        if (chatJumpBottomBtn) chatJumpBottomBtn.addEventListener("click", function() {
+          setChatAutoFollow(true, { scrollNow: true, smooth: true });
+        });
         var fileRefresh = document.getElementById("file-explorer-refresh");
         if (fileRefresh) fileRefresh.addEventListener("click", refreshFileExplorer);
 
@@ -3553,14 +3983,18 @@
       }
 
       function getPreferredTool() {
-        return "claude";
+        return state.sessionTool || state.preferredCommand || "claude";
       }
 
       function getComposerTool() {
-        return "claude";
+        var selected = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        return (selected && selected.provider) || state.preferredCommand || "claude";
       }
 
       function getToolModeHint(tool, mode) {
+        if (tool === "codex") {
+          return "Codex 当前仅支持 PTY 透传，并固定以 full-access 启动。";
+        }
         if (mode === "full-access") {
           return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
         }
@@ -3577,6 +4011,9 @@
       }
 
       function getSupportedModes(tool) {
+        if (tool === "codex") {
+          return ["full-access"];
+        }
         return ["default", "full-access", "auto-edit", "native", "managed"];
       }
 
@@ -3609,7 +4046,8 @@
       }
 
       function getSessionKindLabel(session) {
-        return isStructuredSession(session) ? "结构化" : "终端";
+        var provider = session && session.provider ? session.provider : "claude";
+        return (isStructuredSession(session) ? "结构化" : "终端") + " · " + provider;
       }
 
       function getSessionKindDescription(session) {
@@ -3712,22 +4150,45 @@
           chatContainer.classList.toggle("active", showChat);
           chatContainer.classList.toggle("hidden", !showChat);
         }
+        if (chatContainer && showChat) {
+          ensureChatMessagesContainer(chatContainer);
+        }
+        bindChatScrollListener();
+        updateChatFollowToggleButton();
+        updateChatJumpToBottomButton();
         updateInteractiveControls();
       }
 
       function syncSessionModalUI() {
         var modeHint = document.getElementById("mode-description");
         var kindHint = document.getElementById("session-kind-description");
-        var tool = "claude";
+        var tool = state.sessionTool || "claude";
         var sessionKind = state.sessionCreateKind || "structured";
+
+        if (tool === "codex" && sessionKind === "structured") {
+          sessionKind = "pty";
+          state.sessionCreateKind = "pty";
+        }
 
         state.sessionTool = tool;
         state.modeValue = getSafeModeForTool(tool, state.modeValue || state.chatMode || "default");
 
+        var providerCards = document.querySelectorAll("#provider-cards .provider-card");
+        if (providerCards.length) {
+          providerCards.forEach(function(card) {
+            var provider = card.getAttribute("data-provider");
+            card.classList.toggle("active", provider === tool);
+            card.classList.remove("disabled");
+          });
+        }
+
         var kindCards = document.querySelectorAll("#session-kind-cards .session-kind-card");
         if (kindCards.length) {
           kindCards.forEach(function(card) {
-            card.classList.toggle("active", card.getAttribute("data-session-kind") === sessionKind);
+            var kind = card.getAttribute("data-session-kind");
+            var disabled = tool === "codex" && kind === "structured";
+            card.classList.toggle("active", kind === sessionKind);
+            card.classList.toggle("disabled", disabled);
           });
         }
 
@@ -3764,6 +4225,12 @@
         });
         if (!updated) {
           state.sessions.unshift(snapshot);
+        }
+        var updatedSession = state.sessions.find(function(session) { return session.id === snapshot.id; }) || snapshot;
+        if (updatedSession && Array.isArray(updatedSession.queuedMessages) && snapshot.id === state.selectedId) {
+          syncStructuredQueueFromSession(updatedSession);
+          saveStructuredQueue();
+          updateStructuredQueueCounter();
         }
         if (snapshot.id === state.selectedId) {
           reconcileInteractiveState();
@@ -3803,6 +4270,12 @@
           && localHasPendingAssistant
           && !!localStructuredState.activeRequestId
           && (!serverStructuredState || !serverStructuredState.activeRequestId || serverStructuredState.activeRequestId === localStructuredState.activeRequestId);
+        var localMessages = Array.isArray(localSession.messages) ? localSession.messages : [];
+        var serverMessages = Array.isArray(serverSession.messages) ? serverSession.messages : [];
+        var preserveLocalMessages = localMessages.length > serverMessages.length
+          || (localMessages.length > 0 && serverMessages.length > 0
+            && JSON.stringify(localMessages[localMessages.length - 1]) !== JSON.stringify(serverMessages[serverMessages.length - 1])
+            && JSON.stringify(localMessages).length > JSON.stringify(serverMessages).length);
 
         if (keepLocalOutput) {
           merged.output = localOutput;
@@ -3812,6 +4285,10 @@
           merged.status = localSession.status || merged.status;
           merged.structuredState = Object.assign({}, serverStructuredState || {}, localStructuredState, { inFlight: true });
           merged.messages = localSession.messages;
+        }
+
+        if (preserveLocalMessages) {
+          merged.messages = localMessages;
         }
 
         if (localSession.id === state.selectedId) {
@@ -3861,7 +4338,8 @@
         return recent ? recent.id : sessions[0].id;
       }
 
-      function loadSessions() {
+      function loadSessions(options) {
+        var opts = options || {};
         return fetch("/api/sessions", { credentials: "same-origin" })
           .then(function(res) {
             if (res.status === 401) {
@@ -3907,21 +4385,23 @@
             }
             updateShellChrome();
 
-            // For structured sessions, loadOutput is needed to fetch messages
-            // (the sessions list endpoint doesn't include them).
-            // On page refresh this is the only place that can trigger it.
-            if (state.selectedId) {
+            var reloadPromise = Promise.resolve();
+            if (!opts.skipSelectedOutputReload && state.selectedId) {
+              reloadPromise = loadOutput(state.selectedId);
+            } else if (state.selectedId) {
               var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
               if (isStructuredSession(sel)) {
-                loadOutput(state.selectedId);
+                resetChatRenderCache();
+                scheduleChatRender(true);
               }
             }
 
-            // Try to flush cross-session queue on every session list refresh
-            if (state.crossSessionQueue.length > 0) {
-              flushCrossSessionQueue();
-            }
-            renderCrossSessionQueue();
+            return reloadPromise.then(function() {
+              if (state.crossSessionQueue.length > 0) {
+                flushCrossSessionQueue();
+              }
+              renderCrossSessionQueue();
+            });
           })
           .catch(function(e) {
             console.error("[wand] loadSessions failed:", e);
@@ -4043,10 +4523,7 @@
             updateShellChrome();
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
-            state.currentMessages = getPreferredMessages(selectedSession, data.output, false);
-            if (selectedSession && selectedSession.sessionKind === "structured") {
-              appendQueuedPlaceholders(state.currentMessages);
-            }
+              state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, data.output, false));
 
             if (state.terminal) {
               syncTerminalBuffer(id, data.output || "", { mode: "replace" });
@@ -4068,7 +4545,7 @@
         // Clear queued inputs from the previous session to prevent cross-session leaks
         state.messageQueue = [];
         state.pendingMessages = [];
-        state.structuredInputQueue = [];
+        syncStructuredQueueFromSession(foundSession);
         restoreStructuredQueue();
         updateStructuredQueueCounter();
         resetChatRenderCache();
@@ -4146,7 +4623,8 @@
           modal.classList.remove("hidden");
           lastFocusedElement = document.activeElement;
           state.sessionTool = getPreferredTool();
-          state.sessionCreateKind = "structured";
+          state.preferredCommand = state.sessionTool;
+          state.sessionCreateKind = state.sessionTool === "codex" ? "pty" : "structured";
           state.sessionCreateWorktree = false;
           state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
           syncSessionModalUI();
@@ -4646,14 +5124,14 @@
       function quickStartSession() {
         var command = getPreferredTool();
         var defaultCwd = getEffectiveCwd();
-        var defaultMode = (state.config && state.config.defaultMode) ? state.config.defaultMode : "default";
+        var defaultMode = getSafeModeForTool(command, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
         state.preferredCommand = command;
         state.chatMode = getSafeModeForTool(command, state.chatMode);
         fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ command: command, cwd: defaultCwd, mode: defaultMode })
+          body: JSON.stringify({ command: command, provider: command, cwd: defaultCwd, mode: defaultMode })
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -4734,6 +5212,7 @@
           credentials: "same-origin",
           body: JSON.stringify({
             command: command,
+            provider: command,
             cwd: cwd,
             mode: mode,
             worktreeEnabled: worktreeEnabled
@@ -5052,10 +5531,25 @@
         }
       }
 
+      function handleInteractiveTextInput(inputBox) {
+        if (!state.terminalInteractive || !inputBox) return false;
+        var value = inputBox.value || "";
+        if (!value) return false;
+        queueDirectInput(value, "interactive_text").catch(function() {});
+        inputBox.value = "";
+        autoResizeInput(inputBox);
+        setDraftValue("", true);
+        return true;
+      }
+
       function handleInputPaste(event) {
         var pasted = event.clipboardData && event.clipboardData.getData("text");
         if (!pasted) return;
         event.preventDefault();
+        if (state.terminalInteractive) {
+          queueDirectInput(pasted, "paste").catch(function() {});
+          return;
+        }
         var inputBox = document.getElementById("input-box");
         if (inputBox) {
           var start = inputBox.selectionStart || 0;
@@ -5542,7 +6036,7 @@
 
         var inputBox = document.getElementById("input-box");
         var value = inputBox ? inputBox.value : "";
-        var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; }) || null;
+        var selectedSession = getSelectedSession();
         if (value) {
           console.log("[WAND] sendInputFromBox", {
             sessionId: state.selectedId,
@@ -5563,16 +6057,12 @@
             return postStructuredInput(value, inputBox, selectedSession);
           }
 
-          // Send text + Enter as a single call to avoid race conditions
-          var combinedInput = value + getControlInput("enter");
+          var submitChunks = getTerminalSubmitChunks(selectedSession, value);
           var isOffline = !state.wsConnected;
 
           if (isOffline) {
             // Offline: queue for flush on reconnect, clear input immediately
-            if (state.pendingMessages.length >= 100) {
-              state.pendingMessages.shift();
-            }
-            state.pendingMessages.push(combinedInput);
+            queueOfflineTerminalChunks(submitChunks);
             if (inputBox) {
               inputBox.value = "";
               autoResizeInput(inputBox);
@@ -5587,7 +6077,8 @@
               showToast("会话未就绪，将稍后重试。", "info");
               return null;
             }
-            return queueDirectInput(combinedInput, "enter_text").then(function() {
+            var submitDelay = readySession && readySession.provider === "codex" ? 220 : 0;
+            return sendTerminalChunks(submitChunks, "enter_text", submitDelay).then(function() {
               // Clear input only after the send succeeds
               if (inputBox && inputBox.value === value) {
                 inputBox.value = "";
@@ -5610,59 +6101,33 @@
           showToast("会话不存在，请重新选择或新建会话。", "error");
           return Promise.resolve();
         }
-        if (session.structuredState && session.structuredState.inFlight && session.status === "running") {
-          // Queue the message for sending after current processing completes
-          if (state.structuredInputQueue.length >= 10) {
-            showToast("排队消息已满（最多 10 条），请等待当前消息处理完成。", "warning");
-            return Promise.resolve();
+
+        var isQueueing = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
+        if (!isQueueing) {
+          // Immediately render user message with thinking indicator
+          var userTurn = { role: "user", content: [{ type: "text", text: input }] };
+          var thinkingTurn = { role: "assistant", content: [{ type: "text", text: "", __processing: true }] };
+          var userMsgs = Array.isArray(session.messages) ? session.messages.slice() : [];
+          userMsgs = userMsgs.filter(function(m) {
+            return !(m.role === "user" && m.content && m.content.some(function(b) { return b.__queued; }));
+          });
+          userMsgs.push(userTurn);
+          userMsgs.push(thinkingTurn);
+          session.messages = userMsgs;
+          state.currentMessages = userMsgs;
+          if (session.structuredState) {
+            session.structuredState.inFlight = true;
           }
-          state.structuredInputQueue.push(input);
-          saveStructuredQueue();
-          if (inputBox) {
-            inputBox.value = "";
-            autoResizeInput(inputBox);
-          }
-          setDraftValue("");
-          // Show the queued message in chat view with a "queued" marker
-          var queuedTurn = { role: "user", content: [{ type: "text", text: input, __queued: true }] };
-          var curMsgs = Array.isArray(state.currentMessages) ? state.currentMessages.slice() : [];
-          curMsgs.push(queuedTurn);
-          state.currentMessages = curMsgs;
-          // Also update session.messages so the queued turn survives WS updates
-          session.messages = curMsgs;
+          session.status = "running";
+          updateInputHint("思考中…");
           renderChat(true);
-          showToast("已排队（第 " + state.structuredInputQueue.length + " 条），将在当前消息处理完成后自动发送。", "info");
-          updateStructuredQueueCounter();
-          return Promise.resolve();
         }
 
-        // Immediately render user message with thinking indicator
-        var userTurn = { role: "user", content: [{ type: "text", text: input }] };
-        var thinkingTurn = { role: "assistant", content: [{ type: "text", text: "", __processing: true }] };
-        var userMsgs = Array.isArray(session.messages) ? session.messages.slice() : [];
-        // Filter out __queued placeholders — they'll be re-appended after the new turns
-        userMsgs = userMsgs.filter(function(m) {
-          return !(m.role === "user" && m.content && m.content.some(function(b) { return b.__queued; }));
-        });
-        userMsgs.push(userTurn);
-        userMsgs.push(thinkingTurn);
-        // Re-append remaining queued messages after the current send
-        appendQueuedPlaceholders(userMsgs);
-        session.messages = userMsgs;
-        state.currentMessages = userMsgs;
-        // Mark inFlight optimistically to prevent double-send via WS updates
-        if (session.structuredState) {
-          session.structuredState.inFlight = true;
-        }
-        session.status = "running";
         if (inputBox) {
           inputBox.value = "";
           autoResizeInput(inputBox);
         }
-        // Keep send button enabled so user can queue more messages
-        updateInputHint("思考中…");
         setDraftValue("");
-        renderChat(true);
 
         return fetch("/api/structured-sessions/" + state.selectedId + "/messages", {
           method: "POST",
@@ -5677,17 +6142,18 @@
           }
           if (snapshot && snapshot.id) {
             updateSessionSnapshot(snapshot);
-            if (snapshot.messages && snapshot.messages.length > 0) {
-              state.currentMessages = snapshot.messages;
-              // Re-append queued user messages
-              appendQueuedPlaceholders(state.currentMessages);
-            }
+            var refreshedSession = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
+            state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot.output, false));
             renderChat(true);
-            updateInputHint("Enter 发送 · Shift+Enter 换行");
+            if (isQueueing) {
+              var queuedCount = getStructuredQueuedInputs(refreshedSession).length;
+              showToast("已排队（第 " + queuedCount + " 条），将在当前消息处理完成后自动发送。", "info");
+            } else {
+              updateInputHint("Enter 发送 · Shift+Enter 换行");
+            }
           }
         })
         .catch(function(error) {
-          // Reset inFlight so user can send again
           if (session.structuredState) {
             session.structuredState.inFlight = false;
           }
@@ -5697,18 +6163,7 @@
             message === "NetworkError when attempting to fetch resource." ||
             message === "Load failed" ||
             /aborted|aborterror|networkerror|failed to fetch/i.test(message);
-          // On page refresh / request abort, keep queued messages persisted.
-          if (state.structuredInputQueue.length > 0) {
-            if (isTransientAbort) {
-              updateStructuredQueueCounter();
-            } else {
-              var dropped = state.structuredInputQueue.length;
-              state.structuredInputQueue = [];
-              clearStructuredQueuePersistence(state.selectedId);
-              updateStructuredQueueCounter();
-              showToast("发送失败，已清空 " + dropped + " 条排队消息。", "error");
-            }
-          } else if (!isTransientAbort) {
+          if (!isTransientAbort) {
             showToast((error && error.message) || "无法发送结构化消息。", "error");
           }
           updateInputHint("Enter 发送 · Shift+Enter 换行");
@@ -5722,7 +6177,7 @@
 
       function updateStructuredQueueCounter() {
         var counter = document.getElementById("queue-counter");
-        var count = state.structuredInputQueue.length;
+        var count = getSelectedStructuredQueuedInputs().length;
         if (counter) {
           counter.textContent = "队列: " + count;
           if (count > 0) {
@@ -5735,48 +6190,26 @@
 
       // Append queued user message placeholders to currentMessages so they
       // remain visible across WS updates and re-renders.
-      function appendQueuedPlaceholders(messages) {
-        if (state.structuredInputQueue.length === 0) return messages;
-        for (var qi = 0; qi < state.structuredInputQueue.length; qi++) {
-          messages.push({ role: "user", content: [{ type: "text", text: state.structuredInputQueue[qi], __queued: true }] });
+      function buildMessagesForRender(session, messages) {
+        var base = Array.isArray(messages) ? messages.slice() : [];
+        if (!session || session.sessionKind !== "structured") {
+          return base;
         }
-        return messages;
+        var queued = getStructuredQueuedInputs(session);
+        if (!queued || queued.length === 0) {
+          return base;
+        }
+        for (var qi = 0; qi < queued.length; qi++) {
+          base.push({ role: "user", content: [{ type: "text", text: queued[qi], __queued: true }] });
+        }
+        return base;
       }
 
+
       function flushStructuredInputQueue() {
-        if (state.structuredInputQueue.length === 0) return;
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (!session || session.sessionKind !== "structured") {
-          state.structuredInputQueue = [];
-          clearStructuredQueuePersistence(state.selectedId);
-          updateStructuredQueueCounter();
-          return;
-        }
-        // Only flush if not inFlight
-        if (session.structuredState && session.structuredState.inFlight) return;
-        var nextInput = state.structuredInputQueue.shift();
+        syncStructuredQueueFromSession(session);
         updateStructuredQueueCounter();
-        if (nextInput) {
-          // Remove __queued marker from the matching user turn already in chat.
-          // postStructuredInput will find it's not inFlight now and do the
-          // normal send path, which re-adds the user turn + thinking turn.
-          // So we need to remove the queued placeholder first to avoid duplicates.
-          var msgs = Array.isArray(state.currentMessages) ? state.currentMessages : [];
-          for (var qi = msgs.length - 1; qi >= 0; qi--) {
-            var qm = msgs[qi];
-            if (qm.role === "user" && qm.content && qm.content.some(function(b) {
-              return b.__queued && b.text === nextInput;
-            })) {
-              msgs.splice(qi, 1);
-              break;
-            }
-          }
-          state.currentMessages = msgs;
-          if (session.messages) session.messages = msgs;
-          saveStructuredQueue();
-          // Pass null for inputBox to avoid clearing user's current typing
-          postStructuredInput(nextInput, null, session);
-        }
       }
 
       function getInputErrorMessage(error) {
@@ -5826,7 +6259,7 @@
       }
 
       function canAutoResumeSession(session) {
-        return !!(session && session.status === "exited" && session.claudeSessionId && hasRealConversationHistory(session));
+        return !!(session && session.provider === "claude" && session.status === "exited" && session.claudeSessionId && hasRealConversationHistory(session));
       }
 
       function ensureSessionReadyForInput(session, errorEl) {
@@ -5854,6 +6287,43 @@
             focusInputBox(true);
             return data;
           });
+        });
+      }
+
+      function getTerminalSubmitChunks(session, text) {
+        if (session && session.provider === "codex") {
+          return [text, String.fromCharCode(13)];
+        }
+        return [text + String.fromCharCode(13)];
+      }
+
+      function sendTerminalChunks(chunks, shortcutKey, delayMs) {
+        var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) { return !!chunk; }) : [];
+        if (sequence.length === 0) {
+          return Promise.resolve();
+        }
+        var delay = typeof delayMs === "number" ? delayMs : 0;
+        return sequence.reduce(function(promise, chunk, index) {
+          return promise.then(function() {
+            if (index > 0 && delay > 0) {
+              return new Promise(function(resolve) {
+                setTimeout(resolve, delay);
+              }).then(function() {
+                return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined);
+              });
+            }
+            return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined);
+          });
+        }, Promise.resolve());
+      }
+
+      function queueOfflineTerminalChunks(chunks) {
+        var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) { return !!chunk; }) : [];
+        sequence.forEach(function(chunk) {
+          if (state.pendingMessages.length >= 100) {
+            state.pendingMessages.shift();
+          }
+          state.pendingMessages.push(chunk);
         });
       }
 
@@ -5954,6 +6424,14 @@
 
       function sendDirectInput(input) {
         return queueDirectInput(input);
+      }
+
+      function getSelectedSession() {
+        return state.sessions.find(function(session) { return session.id === state.selectedId; }) || null;
+      }
+
+      function getTerminalSubmitSequence(session) {
+        return session && session.provider === "codex" ? "\n" : String.fromCharCode(13);
       }
 
       function isTerminalInteractionAvailable() {
@@ -7467,6 +7945,10 @@
       }
 
       function focusInputFromTap() {
+        if (state.terminalInteractive) {
+          focusTerminalContainer();
+          return;
+        }
         var inputBox = document.getElementById('input-box');
         if (!inputBox || !state.selectedId || document.activeElement === inputBox) return;
         focusInputWithSelection(inputBox);
@@ -7477,6 +7959,10 @@
         if (!output) return;
         output.setAttribute("tabindex", "0");
         output.focus();
+        var terminalTextarea = output.querySelector(".xterm-helper-textarea");
+        if (terminalTextarea && typeof terminalTextarea.focus === "function") {
+          terminalTextarea.focus();
+        }
       }
 
       // Mobile keyboard handling
@@ -7869,14 +8355,16 @@
               if (msg.data.messages) {
                 snapshot.messages = msg.data.messages;
               }
+              if (msg.data.queuedMessages) {
+                snapshot.queuedMessages = msg.data.queuedMessages;
+              }
+              if (msg.data.structuredState) {
+                snapshot.structuredState = msg.data.structuredState;
+              }
               updateSessionSnapshot(snapshot);
               if (msg.sessionId === state.selectedId) {
                 var updatedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; }) || snapshot;
-                state.currentMessages = getPreferredMessages(updatedSession, msg.data.output, false);
-                // Re-append queued user messages that haven't been sent yet
-                if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
-                  appendQueuedPlaceholders(state.currentMessages);
-                }
+                state.currentMessages = buildMessagesForRender(updatedSession, getPreferredMessages(updatedSession, msg.data.output, false));
                 // Structured session with inFlight: keep __processing placeholder
                 // so the loading indicator stays visible until assistant content arrives
                 if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
@@ -7934,6 +8422,9 @@
             if (msg.data && msg.data.structuredState) {
               endedSnapshot.structuredState = msg.data.structuredState;
             }
+            if (msg.data && msg.data.queuedMessages) {
+              endedSnapshot.queuedMessages = msg.data.queuedMessages;
+            }
             updateSessionSnapshot(endedSnapshot);
 
             if (msg.sessionId === state.selectedId) {
@@ -7969,9 +8460,7 @@
             }
 
             // Clear stale queued inputs for PTY sessions.
-            // For structured sessions, each "ended" means one turn completed (not
-            // the session terminated), so we must NOT clear the structured queue —
-            // instead, flush the next queued message.
+            // For structured sessions, the queue is now managed by the server snapshot.
             state.messageQueue = [];
             state.pendingMessages = [];
 
@@ -7984,12 +8473,9 @@
               (selectedSessionObj && selectedSessionObj.sessionKind === "structured")
             );
 
-            if (isStructuredEnded && msg.sessionId === state.selectedId &&
-                state.structuredInputQueue.length > 0) {
-              // Structured session turn completed — flush next queued message
-              setTimeout(flushStructuredInputQueue, 50);
+            if (isStructuredEnded && msg.sessionId === state.selectedId) {
+              flushStructuredInputQueue();
             } else if (!isStructuredEnded) {
-              // PTY session ended — clear structured queue too
               state.structuredInputQueue = [];
               clearStructuredQueuePersistence(state.selectedId);
               updateStructuredQueueCounter();
@@ -8028,10 +8514,7 @@
               if (chatRenderTimer) { clearTimeout(chatRenderTimer); chatRenderTimer = null; }
               updateSessionSnapshot(msg.data);
               var initSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
-              state.currentMessages = getPreferredMessages(initSession || msg.data, msg.data.output, false);
-              if (initSession && initSession.sessionKind === 'structured') {
-                appendQueuedPlaceholders(state.currentMessages);
-              }
+              state.currentMessages = buildMessagesForRender(initSession || msg.data, getPreferredMessages(initSession || msg.data, msg.data.output, false));
               renderChat(true);
               updateTaskDisplay();
               updateApprovalStats();
@@ -8399,10 +8882,7 @@
           // Re-parse messages from the latest session output (fallback for edge cases)
           var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (selectedSession) {
-            state.currentMessages = getPreferredMessages(selectedSession, selectedSession.output, true);
-            if (selectedSession.sessionKind === "structured") {
-              appendQueuedPlaceholders(state.currentMessages);
-            }
+              state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, selectedSession.output, true));
           }
           renderChat();
         }, 30);
@@ -8492,6 +8972,26 @@
         return systemInfo;
       }
 
+      function ensureChatMessagesContainer(chatOutput) {
+        if (!chatOutput) return null;
+        var chatMessages = chatOutput.querySelector(".chat-messages");
+        if (chatMessages) return chatMessages;
+        chatMessages = document.createElement("div");
+        chatMessages.className = "chat-messages";
+        chatOutput.appendChild(chatMessages);
+        return chatMessages;
+      }
+
+      function renderChatEmptyState(chatOutput, html) {
+        var chatMessages = ensureChatMessagesContainer(chatOutput);
+        if (!chatMessages) return null;
+        chatMessages.innerHTML = html;
+        bindChatScrollListener();
+        updateChatFollowToggleButton();
+        updateChatJumpToBottomButton();
+        return chatMessages;
+      }
+
       function doRenderChat(forceFullRender) {
         var chatOutput = document.getElementById("chat-output");
         if (!chatOutput) return;
@@ -8499,7 +8999,7 @@
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!selectedSession) {
           if (state.lastRenderedEmpty !== "none") {
-            chatOutput.innerHTML = '<div class="empty-state"><strong>未选择会话</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
+            renderChatEmptyState(chatOutput, '<div class="empty-state"><strong>未选择会话</strong><br>点击上方「新对话」开始你的第一次对话。</div>');
             state.lastRenderedEmpty = "none";
             state.lastRenderedMsgCount = 0;
           }
@@ -8510,7 +9010,7 @@
 
         if (messages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
-            chatOutput.innerHTML = '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>';
+            renderChatEmptyState(chatOutput, '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>');
             state.lastRenderedEmpty = "empty";
             state.lastRenderedMsgCount = 0;
           }
@@ -8563,12 +9063,8 @@
         state.lastRenderedMsgCount = msgCount;
         state.lastRenderedHash = outputHash;
 
-        var chatMessages = chatOutput.querySelector(".chat-messages");
-        if (!chatMessages) {
-          // First render - create container
-          chatOutput.innerHTML = '<div class="chat-messages"></div>';
-          chatMessages = chatOutput.querySelector(".chat-messages");
-        }
+        var chatMessages = ensureChatMessagesContainer(chatOutput);
+        if (!chatMessages) return;
 
         var existingCount = chatMessages.querySelectorAll(".chat-message").length;
         // Full render when: forced, no existing messages, or message count decreased/changed
@@ -8586,7 +9082,7 @@
           for (var i = 0; i < reversedMessages.length; i++) {
             var msg = reversedMessages[i];
             var originalIndex = msgCount - 1 - i; // Original index in messages array
-            
+
             // Find system info for this message position
             var sysInfo = null;
             for (var j = 0; j < systemInfo.length; j++) {
@@ -8595,7 +9091,7 @@
                 break;
               }
             }
-            
+
             // Render system info card if exists
             if (sysInfo) {
               html += '<div class="chat-message system-info">' +
@@ -8605,21 +9101,30 @@
                 '</div>' +
               '</div>';
             }
-            
+
             // Render message
-            html += renderChatMessage(msg, roundUsageByIndex[originalIndex] || null);
+            html += renderChatMessage(msg, roundUsageByIndex[originalIndex] || null, originalIndex);
           }
-          
+
           chatMessages.innerHTML = html;
           attachAllCopyHandlers(chatMessages);
+          bindChatScrollListener();
+          applyPersistedExpandState(chatMessages);
           // Only expand the single newest tool card (first chat-message = newest due to column-reverse)
           var firstMsg = chatMessages.querySelector(".chat-message:not(.system-info)");
           if (firstMsg) {
             var cards = firstMsg.querySelectorAll(".tool-use-card");
             if (cards.length > 0) {
-              cards[0].classList.remove("collapsed");
+              var firstCard = cards[0];
+              var firstCardKey = getElementExpandKey(firstCard);
+              if (getPersistedExpandState(firstCardKey) === null) {
+                firstCard.classList.remove("collapsed");
+              }
               for (var ci = 1; ci < cards.length; ci++) {
-                cards[ci].classList.add("collapsed");
+                var cardKey = getElementExpandKey(cards[ci]);
+                if (getPersistedExpandState(cardKey) === null) {
+                  cards[ci].classList.add("collapsed");
+                }
               }
             }
           }
@@ -8634,6 +9139,8 @@
         function collapseOldToolCards(container, newEls) {
           var allCards = container.querySelectorAll(".tool-use-card");
           allCards.forEach(function(c) {
+            var cardKey = getElementExpandKey(c);
+            if (getPersistedExpandState(cardKey) !== null) return;
             // Keep expanded if this card is inside a newly added message
             if (newEls) {
               for (var i = 0; i < newEls.length; i++) {
@@ -8697,7 +9204,7 @@
           for (var i = 0; i < newMessages.length; i++) {
             var div = document.createElement("div");
             var nmOrigIdx = existingCount + (newMessages.length - 1 - i);
-            div.innerHTML = renderChatMessage(newMessages[i], roundUsageByIndex[nmOrigIdx] || null);
+            div.innerHTML = renderChatMessage(newMessages[i], roundUsageByIndex[nmOrigIdx] || null, nmOrigIdx);
             var el = div.firstElementChild;
             if (el) {
               el.classList.add("animate-in");
@@ -8706,7 +9213,9 @@
             }
           }
           chatMessages.insertBefore(fragment, chatMessages.firstChild);
+          bindChatScrollListener();
           attachAllCopyHandlers(chatMessages);
+          applyPersistedExpandState(chatMessages);
           // Collapse all existing cards; new cards (with animate-in) stay expanded
           collapseOldToolCards(chatMessages, insertedEls);
           // Scroll to bottom (newest message) - column-reverse: scrollTop=0 is visual bottom
@@ -8727,7 +9236,7 @@
             var currentEl = existingEls[mi];
             var tmpWrap = document.createElement("div");
             var srOrigIdx = reversedMessages.length - 1 - mi;
-            tmpWrap.innerHTML = renderChatMessage(reversedMessages[mi], roundUsageByIndex[srOrigIdx] || null);
+            tmpWrap.innerHTML = renderChatMessage(reversedMessages[mi], roundUsageByIndex[srOrigIdx] || null, srOrigIdx);
             var replacementEl = tmpWrap.firstElementChild;
             if (!replacementEl) continue;
             if (currentEl.innerHTML !== replacementEl.innerHTML || currentEl.className !== replacementEl.className) {
@@ -8745,6 +9254,8 @@
             fullRenderChat();
           }
           if (replacedAny) {
+            bindChatScrollListener();
+            applyPersistedExpandState(chatMessages);
             requestAnimationFrame(function() {
               smartScrollToBottom(chatMessages);
             });
@@ -8752,6 +9263,8 @@
             var allCards = chatMessages.querySelectorAll(".tool-use-card");
             var newestCard = null;
             allCards.forEach(function(c) {
+              var cardKey = getElementExpandKey(c);
+              if (getPersistedExpandState(cardKey) !== null) return;
               if (newestMsgEl && newestMsgEl.contains(c)) {
                 if (!newestCard) newestCard = c;
                 else c.classList.add("collapsed");
@@ -8774,14 +9287,15 @@
       // Smart scroll: only auto-scroll if user is near bottom
       // column-reverse: scrollTop near 0 = visual bottom (newest messages)
       function smartScrollToBottom(container) {
-        var chatMsgs = container.querySelector ? container.querySelector(".chat-messages") : container;
-        if (!chatMsgs) chatMsgs = container;
-        var threshold = 200;
-        // column-reverse: scrollTop=0 is the visual bottom; positive = scrolled up
-        var isNearBottom = chatMsgs.scrollTop < threshold;
-        if (isNearBottom) {
-          chatMsgs.scrollTop = 0;
+        if (!state.chatAutoFollow) {
+          updateChatJumpToBottomButton();
+          return;
         }
+        var chatMsgs = container && container.classList && container.classList.contains("chat-messages")
+          ? container
+          : getChatScrollElement();
+        if (!chatMsgs || !chatMsgs.isConnected) return;
+        scrollChatToBottom(false);
       }
 
       // --- Todo progress bar ---
@@ -9505,14 +10019,16 @@
         '</div>';
       }
 
-      function renderChatMessage(msg, roundUsage) {
+      function renderChatMessage(msg, roundUsage, messageIndex) {
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
+          var thinkingKey = buildExpandKey("thinking", [getMessageKey(msg, messageIndex), "pty"]);
+          var thinkingExpanded = getPersistedExpandState(thinkingKey) === true;
           return '<div class="chat-message thinking">' +
-            '<div class="thinking-inline thinking-pty collapsed" data-thinking="" onclick="__thinkingToggle(this)">' +
+            '<div class="thinking-inline thinking-pty ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">⦿</span>' +
               '<span class="thinking-inline-preview">' + escapeHtml(msg.content) + '</span>' +
-              '<span class="thinking-inline-action">展开</span>' +
+              '<span class="thinking-inline-action">' + (thinkingExpanded ? '收起' : '展开') + '</span>' +
             '</div>' +
           '</div>';
         }
@@ -9529,7 +10045,7 @@
 
         // Structured content blocks (from JSON chat mode)
         if (Array.isArray(msg.content)) {
-          return renderStructuredMessage(msg, roundUsage);
+          return renderStructuredMessage(msg, roundUsage, messageIndex);
         }
 
         // Legacy string content (from PTY parsing)
@@ -9619,7 +10135,7 @@
 
       var TOOL_GROUP_LABELS = { Read: "读取", Glob: "搜索", Grep: "搜索", WebFetch: "抓取", WebSearch: "搜索", TodoRead: "待办" };
 
-      function renderToolGroup(items, role, toolResults) {
+      function renderToolGroup(items, role, toolResults, messageKey) {
         // Count by tool name
         var counts = {};
         for (var k = 0; k < items.length; k++) {
@@ -9643,27 +10159,31 @@
           parts.push(counts[name] + " " + (TOOL_GROUP_LABELS[name] || name));
         }
         var summaryText = parts.join(" · ");
+        var groupKey = buildExpandKey("tool-group", [messageKey, items[0] && items[0].index, items.length]);
+        var persistedExpanded = getPersistedExpandState(groupKey);
+        var shouldExpand = persistedExpanded === null ? false : persistedExpanded;
 
         // Render each item's inline-tool card
         var innerHtml = "";
         for (var k = 0; k < items.length; k++) {
           try {
-            innerHtml += renderContentBlock(items[k].block, role, toolResults, items[k].index);
+            innerHtml += renderContentBlock(items[k].block, role, toolResults, items[k].index, messageKey);
           } catch (e) {
             innerHtml += '<div class="render-error">工具渲染失败</div>';
           }
         }
 
-        return '<div class="tool-group" data-expanded="false" data-status="' + statusClass + '">' +
+        return '<div class="tool-group" data-expand-kind="tool-group" data-expand-key="' + escapeHtml(groupKey) + '" data-expanded="' + (shouldExpand ? 'true' : 'false') + '" data-status="' + statusClass + '">' +
           '<div class="tool-group-summary" onclick="__toolGroupToggle(this.parentNode)">' +
             '<span class="tool-group-status">' + statusIcon + '</span>' +
             '<span class="tool-group-text">' + escapeHtml(summaryText) + '</span>' +
             '<span class="tool-group-count">' + items.length + ' 个调用</span>' +
-            '<svg class="tool-group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
+            '<svg class="tool-group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform:' + (shouldExpand ? 'rotate(180deg)' : '') + '"><polyline points="6 9 12 15 18 9"/></svg>' +
           '</div>' +
-          '<div class="tool-group-body">' + innerHtml + '</div>' +
+          '<div class="tool-group-body" style="display:' + (shouldExpand ? 'block' : 'none') + ';">' + innerHtml + '</div>' +
         '</div>';
       }
+
 
       // global toggle
       window.__toolGroupToggle = function(el) {
@@ -9674,11 +10194,13 @@
         if (body) body.style.display = expanded ? "none" : "block";
         var chevron = el.querySelector(".tool-group-chevron");
         if (chevron) chevron.style.transform = expanded ? "" : "rotate(180deg)";
+        persistElementExpandState(el, "tool-group");
       };
 
-      function renderStructuredMessage(msg, roundUsage) {
+      function renderStructuredMessage(msg, roundUsage, messageIndex) {
         var role = msg.role;
         var avatar = chatAvatar(role);
+        var messageKey = getMessageKey(msg, messageIndex);
 
         // Check if this is a queued user message
         var isQueued = role === "user" && msg.content && msg.content.some(function(b) { return b.__queued; });
@@ -9702,9 +10224,9 @@
             var grp = groups[g];
             try {
               if (grp.type === "group") {
-                blocksHtml += renderToolGroup(grp.items, role, toolResults);
+                blocksHtml += renderToolGroup(grp.items, role, toolResults, messageKey);
               } else {
-                blocksHtml += renderContentBlock(grp.block, role, toolResults, grp.index);
+                blocksHtml += renderContentBlock(grp.block, role, toolResults, grp.index, messageKey);
               }
             } catch (e) {
               blocksHtml += '<div class="render-error">消息块渲染失败</div>';
@@ -9721,13 +10243,13 @@
         var queuedClass = isQueued ? " queued" : "";
         var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
 
-        return '<div class="chat-message ' + role + queuedClass + '">' +
+        return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
           avatar +
           '<div class="chat-message-content">' + blocksHtml + queuedBadge + '</div>' +
           usageHtml +
         '</div>';
       }
-      function renderContentBlock(block, role, toolResults, index) {
+      function renderContentBlock(block, role, toolResults, index, messageKey) {
         if (!block || !block.type) return "";
 
         switch (block.type) {
@@ -9749,15 +10271,17 @@
                 '</div>' +
               '</div>';
             }
-            return '<div class="thinking-inline collapsed" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
+            var thinkingKey = buildExpandKey("thinking", [messageKey, index]);
+            var thinkingExpanded = getPersistedExpandState(thinkingKey) === true;
+            return '<div class="thinking-inline ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">⦿</span>' +
-              '<span class="thinking-inline-preview">' + escapeHtml(preview) + '</span>' +
-              '<span class="thinking-inline-action">展开</span>' +
+              '<span class="thinking-inline-preview">' + escapeHtml(thinkingExpanded ? thinkingText : preview) + '</span>' +
+              '<span class="thinking-inline-action">' + (thinkingExpanded ? '收起' : '展开') + '</span>' +
             '</div>';
 
           case "tool_use":
             var toolResult = pickToolResultForDisplay(toolResults, block.id);
-            var rendered = renderToolUseCard(block, toolResult, index);
+            var rendered = renderToolUseCard(block, toolResult, index, messageKey);
             if (hasRecoveredToolNoise(toolResults, block.id)) {
               rendered = renderRecoveredToolHint(block.name || "工具") + rendered;
             }
@@ -9771,8 +10295,10 @@
         }
       }
 
-      function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo) {
+      function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index) {
         var toolId = block.id || "tool-" + toolName;
+        var expandKey = buildExpandKey("inline-tool", [messageKey, toolId || index, index]);
+        var persistedExpanded = getPersistedExpandState(expandKey);
         var inputData = block.input || {};
         var resultContent = extractToolResultText(toolResult && toolResult.content);
 
@@ -9843,16 +10369,16 @@
         var fullResult = resultContent;
 
         var expandedHtml = "";
-        var shouldExpand = false;  // All inline tools collapsed by default
+        var shouldExpand = persistedExpanded === null ? false : persistedExpanded;
         if (hasResult) {
           expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + '</div>' +
           '</div>';
         } else if (isError) {
-          expandedHtml = '<div class="inline-tool-expanded" style="display: none;"><div class="inline-tool-result inline-tool-error">' +
+          expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';"><div class="inline-tool-result inline-tool-error">' +
             escapeHtml(resultContent || "操作失败") + '</div></div>';
         } else if (!toolResult) {
-          expandedHtml = '<div class="inline-tool-expanded" style="display: none;"><div class="inline-tool-loading">等待响应…</div></div>';
+          expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';"><div class="inline-tool-loading">等待响应…</div></div>';
         }
 
         var extraInfoHtml = meta ? '<span class="inline-tool-meta">' + escapeHtml(meta) + '</span>' : '';
@@ -9860,6 +10386,8 @@
         if (shouldExpand) extraClass += ' inline-tool-open';
 
         return '<div class="inline-tool ' + extraClass + '" ' +
+          'data-expand-kind="inline-tool" ' +
+          'data-expand-key="' + escapeHtml(expandKey) + '" ' +
           'data-result="' + escapeHtml(fullResult) + '" ' +
           'data-preview="' + previewDataAttr + '" ' +
           'data-status="' + (isError ? 'error' : (hasResult ? 'done' : 'pending')) + '" ' +
@@ -9875,10 +10403,13 @@
       }
 
       // Terminal-style display for Bash commands
-      function renderTerminalTool(block, toolResult, toolName) {
+      function renderTerminalTool(block, toolResult, toolName, messageKey, index) {
         var inputData = block.input || {};
         var command = inputData.command || inputData.cmd || "";
         var resultContent = extractToolResultText(toolResult && toolResult.content);
+        var toolId = block.id || "tool-" + toolName;
+        var expandKey = buildExpandKey("terminal", [messageKey, toolId || index, index]);
+        var persistedExpanded = getPersistedExpandState(expandKey);
 
         var isError = toolResult && toolResult.is_error;
         var exitCode = inputData.exitCode;
@@ -9916,22 +10447,21 @@
 
         // Show command preview in header (truncate long commands)
         var cmdPreview = command.length > 80 ? command.slice(0, 77) + "…" : command;
+        var shouldExpand = persistedExpanded === null ? false : persistedExpanded;
 
-        return '<div class="inline-terminal" data-expanded="false">' +
+        return '<div class="inline-terminal" data-expand-kind="terminal" data-expand-key="' + escapeHtml(expandKey) + '" data-expanded="' + (shouldExpand ? 'true' : 'false') + '">' +
           '<div class="term-header" onclick="__terminalExpand(this)">' +
             statusDot +
             '<span class="term-cmd-preview"><span class="term-prompt">$</span> ' + escapeHtml(cmdPreview) + '</span>' +
-            '<span class="term-toggle-icon">▶</span>' +
+            '<span class="term-toggle-icon">' + (shouldExpand ? '▼' : '▶') + '</span>' +
           '</div>' +
-          '<div class="term-body" style="display:none;">' +
+          '<div class="term-body" style="display:' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="term-command"><span class="term-prompt">$</span> ' + cmdDisplay + '</div>' +
             (outputHtml ? '<div class="term-output">' + outputHtml + '</div>' : '') +
             exitCodeHtml +
           '</div>' +
         '</div>';
       }
-
-      // GitHub-style diff display for Edit/Write/MultiEdit
       function extractToolResultText(content) {
         if (!content) return "";
         if (typeof content === "string") return content;
@@ -10022,7 +10552,7 @@
         return '<pre class="inline-tool-result-text" style="max-height: 300px; overflow-y: auto;">' + escapeHtml(content) + '</pre>';
       }
 
-      function renderToolUseCard(block, toolResult, index) {
+      function renderToolUseCard(block, toolResult, index, messageKey) {
         var toolName = block.name || "unknown";
         var toolId = block.id || "tool-" + toolName + "-" + (typeof index === "number" ? index : 0);
         var fileInfo = extractFileInfo(toolName, block.input);
@@ -10030,12 +10560,12 @@
         // ── Lightweight inline tools: Read, Glob, Grep, WebFetch, WebSearch, TodoRead
         if (toolName === "Read" || toolName === "Glob" || toolName === "Grep" ||
             toolName === "WebFetch" || toolName === "WebSearch" || toolName === "TodoRead") {
-          return renderInlineTool(block, toolResult, toolName, fileInfo, "");
+          return renderInlineTool(block, toolResult, toolName, fileInfo, "", messageKey, index);
         }
 
         // ── Terminal-style: Bash
         if (toolName === "Bash") {
-          return renderTerminalTool(block, toolResult, toolName);
+          return renderTerminalTool(block, toolResult, toolName, messageKey, index);
         }
 
         // ── Diff-style: Edit, Write, MultiEdit
@@ -10114,9 +10644,12 @@
           headerIcon = getToolIcon(toolName);
         }
 
-        var collapsedClass = statusClass !== "loading" ? " collapsed" : "";
+        var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
+        var persistedExpanded = getPersistedExpandState(expandKey);
+        var shouldExpand = persistedExpanded === null ? statusClass === "loading" : persistedExpanded;
+        var collapsedClass = shouldExpand ? "" : " collapsed";
         var toggleHtml = '<span class="tool-use-toggle">▼</span>';
-        return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +
+        return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +
           '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
             '<span class="tool-use-icon">' + headerIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(titleText) + '</span>' +

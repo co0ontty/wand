@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SessionSnapshot, WandConfig, ConversationTurn, SessionKind, SessionRunner, StructuredSessionState } from "./types.js";
+import { SessionSnapshot, WandConfig, ConversationTurn, SessionKind, SessionProvider, SessionRunner, StructuredSessionState } from "./types.js";
 
 interface SessionRow {
   id: string;
+  provider: SessionProvider | null;
   session_kind: SessionKind | null;
   runner: SessionRunner | null;
   command: string;
@@ -19,6 +20,7 @@ interface SessionRow {
   archived_at: string | null;
   claude_session_id: string | null;
   messages: string | null;
+  queued_messages: string | null;
   structured_state: string | null;
   resumed_from_session_id: string | null;
   resumed_to_session_id: string | null;
@@ -39,6 +41,19 @@ function parseStoredMessages(raw: string | null): ConversationTurn[] | undefined
   }
 }
 
+function parseQueuedMessages(raw: string | null): string[] | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function parseStructuredState(raw: string | null): StructuredSessionState | undefined {
   if (!raw) {
     return undefined;
@@ -51,16 +66,36 @@ function parseStructuredState(raw: string | null): StructuredSessionState | unde
   }
 }
 
+function inferSessionProvider(row: Pick<SessionRow, "provider" | "runner" | "command">): SessionProvider | undefined {
+  if (row.provider === "claude" || row.provider === "codex") {
+    return row.provider;
+  }
+  if (row.runner === "claude-cli" || row.runner === "claude-cli-print") {
+    return "claude";
+  }
+  return /^claude\b/.test(row.command.trim()) ? "claude" : undefined;
+}
+
 function parseWorktreeInfo(raw: string | null): SessionSnapshot["worktree"] | undefined {
   if (!raw) {
     return undefined;
   }
 
   try {
-    return JSON.parse(raw) as NonNullable<SessionSnapshot["worktree"]>;
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed
+      && typeof parsed === "object"
+      && typeof (parsed as { branch?: unknown }).branch === "string"
+      && typeof (parsed as { path?: unknown }).path === "string"
+    ) {
+      return parsed as NonNullable<SessionSnapshot["worktree"]>;
+    }
   } catch {
     return undefined;
   }
+
+  return undefined;
 }
 
 export const DEFAULT_DB_FILE = "wand.db";
@@ -93,9 +128,11 @@ const INIT_SQL = `
     archived INTEGER NOT NULL DEFAULT 0,
     archived_at TEXT,
     claude_session_id TEXT,
+    provider TEXT,
     session_kind TEXT NOT NULL DEFAULT 'pty',
     runner TEXT,
     messages TEXT,
+    queued_messages TEXT,
     structured_state TEXT,
     resumed_from_session_id TEXT,
     resumed_to_session_id TEXT,
@@ -216,9 +253,9 @@ export class WandStorage {
         .prepare(
           `INSERT INTO command_sessions (
            id, command, cwd, mode, status, exit_code, started_at, ended_at, output
-             , archived, archived_at, claude_session_id, session_kind, runner, messages, structured_state
+             , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, structured_state
              , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              command = excluded.command,
              cwd = excluded.cwd,
@@ -231,9 +268,11 @@ export class WandStorage {
              archived = excluded.archived,
              archived_at = excluded.archived_at,
              claude_session_id = excluded.claude_session_id,
+             provider = excluded.provider,
              session_kind = excluded.session_kind,
              runner = excluded.runner,
              messages = excluded.messages,
+             queued_messages = excluded.queued_messages,
              structured_state = excluded.structured_state,
              resumed_from_session_id = excluded.resumed_from_session_id,
              resumed_to_session_id = excluded.resumed_to_session_id,
@@ -254,9 +293,11 @@ export class WandStorage {
           snapshot.archived ? 1 : 0,
           snapshot.archivedAt,
           snapshot.claudeSessionId,
+          snapshot.provider ?? null,
           snapshot.sessionKind ?? "pty",
           snapshot.runner ?? null,
           snapshot.messages ? JSON.stringify(snapshot.messages) : null,
+          snapshot.queuedMessages ? JSON.stringify(snapshot.queuedMessages) : null,
           snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
           snapshot.resumedFromSessionId ?? null,
           snapshot.resumedToSessionId ?? null,
@@ -283,7 +324,7 @@ export class WandStorage {
            command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
            started_at = ?, ended_at = ?, output = ?,
            archived = ?, archived_at = ?, claude_session_id = ?,
-           session_kind = ?, runner = ?, structured_state = ?,
+           provider = ?, session_kind = ?, runner = ?, structured_state = ?,
            resumed_from_session_id = ?, resumed_to_session_id = ?, auto_recovered = ?,
            worktree_enabled = ?, worktree_info = ?
          WHERE id = ?`
@@ -300,6 +341,7 @@ export class WandStorage {
         snapshot.archived ? 1 : 0,
         snapshot.archivedAt,
         snapshot.claudeSessionId,
+        snapshot.provider ?? null,
         snapshot.sessionKind ?? "pty",
         snapshot.runner ?? null,
         snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
@@ -315,7 +357,7 @@ export class WandStorage {
   getSession(id: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
-        `SELECT id, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, structured_state
+        `SELECT id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
              , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
          FROM command_sessions
          WHERE id = ?`
@@ -328,7 +370,7 @@ export class WandStorage {
   getLatestSessionByClaudeSessionId(claudeSessionId: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
-        `SELECT id, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, structured_state
+        `SELECT id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
              , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
          FROM command_sessions
          WHERE claude_session_id = ?
@@ -343,7 +385,7 @@ export class WandStorage {
   loadSessions(): SessionSnapshot[] {
     const rows = this.db
       .prepare(
-        `SELECT id, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, structured_state
+        `SELECT id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
              , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
          FROM command_sessions
          ORDER BY started_at DESC`
@@ -354,9 +396,11 @@ export class WandStorage {
   }
 
   private mapSessionRow(row: SessionRow): SessionSnapshot {
+    const provider = inferSessionProvider(row);
     return {
       id: row.id,
       sessionKind: row.session_kind ?? "pty",
+      provider,
       runner: row.runner ?? undefined,
       command: row.command,
       cwd: row.cwd,
@@ -370,6 +414,7 @@ export class WandStorage {
       archivedAt: row.archived_at,
       claudeSessionId: row.claude_session_id,
       messages: parseStoredMessages(row.messages),
+      queuedMessages: parseQueuedMessages(row.queued_messages),
       structuredState: parseStructuredState(row.structured_state),
       resumedFromSessionId: row.resumed_from_session_id ?? undefined,
       resumedToSessionId: row.resumed_to_session_id ?? undefined,
@@ -396,6 +441,9 @@ function ensureCommandSessionSchema(db: DatabaseSync): void {
   if (!names.has("claude_session_id")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN claude_session_id TEXT");
   }
+  if (!names.has("provider")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN provider TEXT");
+  }
   if (!names.has("session_kind")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'pty'");
   }
@@ -404,6 +452,9 @@ function ensureCommandSessionSchema(db: DatabaseSync): void {
   }
   if (!names.has("messages")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN messages TEXT");
+  }
+  if (!names.has("queued_messages")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN queued_messages TEXT");
   }
   if (!names.has("structured_state")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN structured_state TEXT");

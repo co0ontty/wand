@@ -9,7 +9,7 @@ import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
 import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
-import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionSnapshot, WandConfig } from "./types.js";
+import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 import { SessionLifecycleManager } from "./session-lifecycle.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
@@ -23,9 +23,12 @@ import {
   shouldBindClaudeSessionId,
 } from "./resume-policy.js";
 
-/** Check if the current process is running as root (UID 0). */
+function resolveProviderFromCommand(command: string): SessionProvider {
+  return /^codex\b/.test(command.trim()) ? "codex" : "claude";
+}
+
 function isRunningAsRoot(): boolean {
-  return process.getuid?.() === 0 || process.geteuid?.() === 0;
+  return typeof process.getuid === "function" && process.getuid() === 0;
 }
 
 export type { ProcessEvent, ProcessEventHandler } from "./types.js";
@@ -62,6 +65,7 @@ export interface ClaudeHistorySession {
 }
 
 interface SessionRecord extends SessionSnapshot {
+  provider: SessionProvider;
   processId: number | null;
   ptyProcess: IPty | null;
   stopRequested: boolean;
@@ -116,6 +120,11 @@ interface ResumeEligibility {
   hasClaudeSessionId: boolean;
   hasRealConversation: boolean;
   eligible: boolean;
+}
+
+interface PersistedMessageState {
+  count: number;
+  signature: string;
 }
 
 const REAL_CONVERSATION_MIN_LINES = 2;
@@ -527,6 +536,39 @@ function getLatestClaudeTaskId(excludeIds: Set<string>): string | null {
 }
 
 /** Derive a short summary for a session from user messages or current task. */
+function getLastMessageSignature(messages: ConversationTurn[]): string {
+  const last = messages[messages.length - 1];
+  if (!last) {
+    return "";
+  }
+  const lastContent = JSON.stringify(last.content ?? []);
+  return `${last.role}:${lastContent}`;
+}
+
+function getPersistedMessageState(messages: ConversationTurn[]): PersistedMessageState {
+  return {
+    count: messages.length,
+    signature: getLastMessageSignature(messages),
+  };
+}
+
+function shouldPersistMessages(
+  lastState: PersistedMessageState | undefined,
+  nextMessages: ConversationTurn[]
+): boolean {
+  if (nextMessages.length === 0) {
+    return false;
+  }
+  const nextState = getPersistedMessageState(nextMessages);
+  return !lastState
+    || lastState.count !== nextState.count
+    || lastState.signature !== nextState.signature;
+}
+
+function recoverMessagesFromSnapshot(snapshot: SessionSnapshot): ConversationTurn[] {
+  return snapshot.messages ?? [];
+}
+
 function deriveSessionSummary(messages: ConversationTurn[], currentTaskTitle: string | null): string | undefined {
   // Prefer first user message as summary
   for (const msg of messages) {
@@ -536,12 +578,12 @@ function deriveSessionSummary(messages: ConversationTurn[], currentTaskTitle: st
         return block.text.trim().slice(0, 120);
       }
     }
-    break; // only check the first user turn
+    break;
   }
-  // Fallback to current task title
   if (currentTaskTitle) return currentTaskTitle.slice(0, 120);
   return undefined;
 }
+
 
 export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
@@ -549,8 +591,8 @@ export class ProcessManager extends EventEmitter {
   private readonly lifecycleManager: SessionLifecycleManager;
   /** Per-session debounce timers for throttled persist calls */
   private readonly persistDebounceTimers = new Map<string, NodeJS.Timeout>();
-  /** Last persisted message count per session — used to skip redundant file writes */
-  private readonly lastPersistedMessageCount = new Map<string, number>();
+  /** Last persisted message state per session — used to skip redundant message writes */
+  private readonly lastPersistedMessageState = new Map<string, PersistedMessageState>();
 
   constructor(
     private readonly config: WandConfig,
@@ -574,23 +616,31 @@ export class ProcessManager extends EventEmitter {
       if ((snapshot.sessionKind ?? "pty") !== "pty") {
         continue;
       }
-      const isClaudeCmd = /^claude\b/.test(snapshot.command.trim());
-      const resumeCommandSessionId = getResumeCommandSessionId(snapshot.command);
+      const provider = snapshot.provider ?? resolveProviderFromCommand(snapshot.command);
+      const isClaudeCmd = provider === "claude";
+      const resumeCommandSessionId = isClaudeCmd ? getResumeCommandSessionId(snapshot.command) : null;
       // Sessions restored from storage have ptyProcess: null — the old server's PTY
       // belongs to a dead process. Mark running sessions as exited so the UI
       // reflects reality and users can start fresh sessions.
       if (snapshot.status === "running") {
-        const updated = { ...snapshot, status: "exited" as const, endedAt: new Date().toISOString() };
+        const recoveredMessages = recoverMessagesFromSnapshot(snapshot);
+        const updated = {
+          ...snapshot,
+          status: "exited" as const,
+          endedAt: new Date().toISOString(),
+          messages: recoveredMessages.length > 0 ? recoveredMessages : snapshot.messages,
+        };
         this.storage.saveSession(updated);
         this.sessions.set(snapshot.id, {
           ...updated,
+          provider,
           processId: null,
           ptyProcess: null,
           stopRequested: false,
           confirmWindow: "",
           ptyPermissionBlocked: false,
           lastAutoConfirmAt: 0,
-          autoApprovePermissions: this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode),
+          autoApprovePermissions: this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode, provider),
           pendingEscalation: snapshot.pendingEscalation ?? null,
           lastEscalationResult: snapshot.lastEscalationResult ?? null,
           autonomyPolicy: snapshot.autonomyPolicy ?? this.defaultAutonomyPolicy(snapshot.mode),
@@ -616,13 +666,14 @@ export class ProcessManager extends EventEmitter {
       } else {
         this.sessions.set(snapshot.id, {
           ...snapshot,
+          provider,
           processId: null,
           ptyProcess: null,
           stopRequested: false,
           confirmWindow: "",
           ptyPermissionBlocked: false,
           lastAutoConfirmAt: 0,
-          autoApprovePermissions: this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode),
+          autoApprovePermissions: this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode, provider),
           pendingEscalation: snapshot.pendingEscalation ?? null,
           lastEscalationResult: snapshot.lastEscalationResult ?? null,
           autonomyPolicy: snapshot.autonomyPolicy ?? this.defaultAutonomyPolicy(snapshot.mode),
@@ -698,12 +749,12 @@ export class ProcessManager extends EventEmitter {
         this.deleteClaudeCache(record);
       }
       this.sessions.delete(id);
-      this.lastPersistedMessageCount.delete(id);
+      this.lastPersistedMessageState.delete(id);
       this.storage.deleteSession(id);
     }
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean }): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider }): SessionSnapshot {
     this.assertCommandAllowed(command);
 
     const baseCwd = cwd
@@ -715,25 +766,27 @@ export class ProcessManager extends EventEmitter {
       ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id })
       : null;
     const resolvedCwd = worktreeSetup?.cwd ?? baseCwd;
-
-    const isClaudeCmd = this.isClaudeCommand(command);
-
-    // For full-access mode with claude, add permission flags
-    const processedCommand = this.processCommandForMode(command, mode);
-    const resumeCommandSessionId = getResumeCommandSessionId(processedCommand) ?? getResumeCommandSessionId(command);
-    const knownClaudeTaskIds = isClaudeCmd ? new Set(listRecentClaudeProjectSessionIds(resolvedCwd, new Date().toISOString())) : null;
-    const knownClaudeProjectMtimes = isClaudeCmd ? listClaudeProjectSessionMtimes(resolvedCwd) : null;
-    const initialClaudeSessionId = resumeCommandSessionId ?? null;
+    const provider = opts?.provider ?? resolveProviderFromCommand(command);
+    const effectiveMode = provider === "codex" ? "full-access" : mode;
+    const isClaudeProvider = provider === "claude";
+    const processedCommand = this.processCommandForMode(command, effectiveMode, provider);
+    const resumeCommandSessionId = isClaudeProvider
+      ? getResumeCommandSessionId(processedCommand) ?? getResumeCommandSessionId(command)
+      : null;
+    const knownClaudeTaskIds = isClaudeProvider ? new Set(listRecentClaudeProjectSessionIds(resolvedCwd, new Date().toISOString())) : null;
+    const knownClaudeProjectMtimes = isClaudeProvider ? listClaudeProjectSessionMtimes(resolvedCwd) : null;
+    const initialClaudeSessionId = isClaudeProvider ? resumeCommandSessionId ?? null : null;
     const startedAt = new Date().toISOString();
 
     const record: SessionRecord = {
       id,
+      provider,
       command,
       cwd: resolvedCwd,
-      mode,
+      mode: effectiveMode,
       worktreeEnabled: Boolean(worktreeSetup),
       worktree: worktreeSetup?.worktree ?? null,
-      autonomyPolicy: this.defaultAutonomyPolicy(mode),
+      autonomyPolicy: this.defaultAutonomyPolicy(effectiveMode),
       approvalPolicy: "ask-every-time",
       allowedScopes: [],
       status: "running",
@@ -753,7 +806,7 @@ export class ProcessManager extends EventEmitter {
       confirmWindow: "",
       ptyPermissionBlocked: false,
       lastAutoConfirmAt: 0,
-      autoApprovePermissions: this.shouldAutoApprovePermissions(command, mode),
+      autoApprovePermissions: this.shouldAutoApprovePermissions(command, effectiveMode, provider),
       resumedFromSessionId: opts?.resumedFromSessionId ?? null,
       autoRecovered: opts?.autoRecovered ?? false,
       rememberedEscalationScopes: new Set(),
@@ -771,25 +824,24 @@ export class ProcessManager extends EventEmitter {
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
     };
 
-    // Create PTY bridge for this session
-    record.ptyBridge = new ClaudePtyBridge({
-      sessionId: id,
-      isClaudeCommand: isClaudeCmd,
-      autoApprove: record.autoApprovePermissions,
-      approvalPolicy: record.approvalPolicy,
-    });
-    record.ptyBridge.on("event", (event: SessionEvent) => {
-      this.handleBridgeEvent(record, event);
-    });
+    if (isClaudeProvider) {
+      record.ptyBridge = new ClaudePtyBridge({
+        sessionId: id,
+        isClaudeCommand: true,
+        autoApprove: record.autoApprovePermissions,
+        approvalPolicy: record.approvalPolicy,
+      });
+      record.ptyBridge.on("event", (event: SessionEvent) => {
+        this.handleBridgeEvent(record, event);
+      });
+    }
 
     this.sessions.set(id, record);
     this.persist(record);
     this.cleanupOldSessions();
 
-    // Register lifecycle
     this.lifecycleManager.register(id, "initializing");
 
-    // All modes use PTY execution — JSON turns are only used for internal recovery
     const shellArgs = this.buildShellArgs(processedCommand);
     let child: import("node-pty").IPty;
     try {
@@ -797,9 +849,9 @@ export class ProcessManager extends EventEmitter {
         cwd: resolvedCwd,
         env: {
           ...process.env,
-          WAND_MODE: mode,
-          WAND_AUTO_CONFIRM: mode === "full-access" ? "1" : "0",
-          WAND_AUTO_EDIT: mode === "auto-edit" ? "1" : "0"
+          WAND_MODE: effectiveMode,
+          WAND_AUTO_CONFIRM: effectiveMode === "full-access" ? "1" : "0",
+          WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0"
         },
         name: "xterm-color",
         cols: 120,
@@ -821,10 +873,6 @@ export class ProcessManager extends EventEmitter {
     record.status = "running";
     this.lifecycleManager.setState(id, "running");
 
-    // Register exit handler AFTER ptyProcess is assigned — node-pty's EventEmitter
-    // fires 'exit' synchronously when the child has already exited (e.g. "command
-    // not found"). If we register first, onExit fires with ptyProcess still null and
-    // status never updates. By assigning first, onExit always sees a consistent state.
     child.onExit(({ exitCode }) => {
       const current = this.sessions.get(id);
       if (!current) return;
@@ -848,15 +896,10 @@ export class ProcessManager extends EventEmitter {
       current.ptyProcess = null;
       this.lifecycleManager.archive(id, `Session ${current.status}`, current.stopRequested ? "user" : "error");
       this.flushPersist(current);
-      // Final full snapshot with messages to SQLite (persist() only saves metadata)
       this.storage.saveSession(this.snapshot(current));
       this.emitEvent({ type: "ended", sessionId: id, data: this.snapshot(current) });
     });
 
-    // Set PTY write function for bridge (for permission approval).
-    // Write directly to record.ptyProcess — the status guard in sendInput() already
-    // ensures no input is sent when the session is not running, so we just guard
-    // the PTY write itself against a null process.
     if (record.ptyBridge) {
       record.ptyBridge.setPtyWrite((input: string) => {
         if (record.ptyProcess) {
@@ -865,7 +908,6 @@ export class ProcessManager extends EventEmitter {
       });
     }
 
-    // Emit started event AFTER PTY is fully set up so clients receive a consistent snapshot.
     this.emitEvent({ type: "started", sessionId: id, data: this.snapshot(record) });
 
     let initialInputSent = false;
@@ -879,13 +921,11 @@ export class ProcessManager extends EventEmitter {
       }
       process.stderr.write(`[wand] Sending initial input (${initialInput.length} chars)\n`);
 
-      // Track initial input via bridge for Chat mode
       if (current.ptyBridge) {
         current.ptyBridge.onUserInput(initialInput);
       }
 
       current.ptyProcess.write(initialInput);
-      // \n advances to a new line so subsequent output doesn't overwrite this input
       current.ptyProcess.write("\n");
     };
 
@@ -893,18 +933,15 @@ export class ProcessManager extends EventEmitter {
       const rec = this.sessions.get(id);
       if (!rec) return;
 
-      // Route chunk through PTY bridge
       if (rec.ptyBridge) {
         rec.ptyBridge.processChunk(chunk);
+        rec.output = rec.ptyBridge.getRawOutput();
+      } else {
+        rec.output = appendWindow(rec.output, chunk, 200_000);
       }
 
-      // Update legacy output field for backward compatibility
-      rec.output = rec.ptyBridge?.getRawOutput() ?? "";
-
-      // Log raw PTY output for analysis
       this.logger.appendPtyOutput(id, chunk);
 
-      // Update Claude session ID from bridge
       const bridgeSessionId = rec.ptyBridge?.getClaudeSessionId();
       if (bridgeSessionId && bridgeSessionId !== rec.claudeSessionId) {
         rec.claudeSessionId = bridgeSessionId;
@@ -926,8 +963,7 @@ export class ProcessManager extends EventEmitter {
         }
       }
 
-      // Auto-confirm for full-access mode (legacy path for non-Claude sessions without ptyBridge)
-      if (rec.autoApprovePermissions && !rec.ptyBridge) {
+      if (rec.autoApprovePermissions && !rec.ptyBridge && rec.provider === "claude") {
         this.autoConfirmWithRecord(rec, chunk, child);
       }
 
@@ -977,6 +1013,7 @@ export class ProcessManager extends EventEmitter {
 
     return this.snapshot(record);
   }
+
 
   list(): SessionSnapshot[] {
     this.archiveExpiredSessions();
@@ -1252,7 +1289,7 @@ export class ProcessManager extends EventEmitter {
     this.logger.deleteSession(id);
     this.deleteClaudeCache(record);
     this.sessions.delete(id);
-    this.lastPersistedMessageCount.delete(id);
+      this.lastPersistedMessageState.delete(id);
     this.lifecycleManager.unregister(id);
   }
 
@@ -1292,6 +1329,7 @@ export class ProcessManager extends EventEmitter {
     return {
       id: record.id,
       sessionKind: "pty",
+      provider: record.provider,
       runner: "pty",
       command: record.command,
       cwd: record.cwd,
@@ -1407,8 +1445,16 @@ export class ProcessManager extends EventEmitter {
     if (messages !== record.messages) {
       record.messages = messages;
     }
-    // Use lightweight metadata-only write (skips large messages JSON)
-    this.storage.saveSessionMetadata(this.snapshot(record));
+    const snapshot = this.snapshot(record);
+    const shouldSaveMessages = shouldPersistMessages(this.lastPersistedMessageState.get(record.id), messages);
+    // Persist full messages as soon as the structured conversation changes so
+    // service restarts cannot roll the session back to an older tail message.
+    if (shouldSaveMessages) {
+      this.storage.saveSession(snapshot);
+      this.lastPersistedMessageState.set(record.id, getPersistedMessageState(messages));
+    } else {
+      this.storage.saveSessionMetadata(snapshot);
+    }
     this.logger.saveMetadata(record.id, {
       id: record.id,
       command: record.command,
@@ -1420,13 +1466,8 @@ export class ProcessManager extends EventEmitter {
       resumedToSessionId: record.resumedToSessionId ?? null,
       autoRecovered: record.autoRecovered ?? false,
     });
-    // Save structured messages to file only when count changes
-    if (messages.length > 0) {
-      const lastCount = this.lastPersistedMessageCount.get(record.id) ?? 0;
-      if (messages.length !== lastCount) {
-        this.lastPersistedMessageCount.set(record.id, messages.length);
-        this.logger.saveMessages(record.id, messages);
-      }
+    if (shouldSaveMessages) {
+      this.logger.saveMessages(record.id, messages);
     }
   }
 
@@ -1771,12 +1812,15 @@ export class ProcessManager extends EventEmitter {
     return ["-lc", command];
   }
 
-  private shouldAutoApprovePermissions(command: string, mode: ExecutionMode): boolean {
+  private shouldAutoApprovePermissions(command: string, mode: ExecutionMode, provider: SessionProvider): boolean {
+    if (provider !== "claude") {
+      return false;
+    }
+
     if (!/^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command)) {
       return false;
     }
 
-    // Root mode: always auto-approve (Claude CLI refuses --permission-mode bypassPermissions under root)
     if (isRunningAsRoot()) {
       return true;
     }
@@ -1792,27 +1836,31 @@ export class ProcessManager extends EventEmitter {
     return false;
   }
 
-  private processCommandForMode(command: string, mode: ExecutionMode): string {
+  private processCommandForMode(command: string, mode: ExecutionMode, provider: SessionProvider): string {
+    if (provider === "codex") {
+      if (mode !== "full-access") {
+        return command;
+      }
+      if (/--dangerously-bypass-approvals-and-sandbox(?:\s|$)/.test(command)) {
+        return command;
+      }
+      return `${command} --dangerously-bypass-approvals-and-sandbox`;
+    }
+
     const isClaudeCmd = /^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command);
     if (!isClaudeCmd) return command;
 
     let result = command;
 
-    // Skip if command already contains --permission-mode
     const hasPermFlag = /--permission-mode\s/.test(command);
 
     if (!hasPermFlag) {
       if (isRunningAsRoot()) {
-        // Root: Claude CLI refuses --permission-mode bypassPermissions.
-        // Use acceptEdits + --allowedTools to auto-approve all tool calls
-        // regardless of whether the target path is inside or outside the CWD.
         if (mode === "managed" || mode === "full-access" || mode === "auto-edit") {
           result += " --permission-mode acceptEdits";
           result += " --allowedTools Bash Edit Write Read Glob Grep NotebookEdit WebFetch WebSearch";
         }
       } else {
-        // Non-root: use bypassPermissions for full-access (skips all prompts),
-        // acceptEdits for auto-edit (auto-accepts file writes, prompts for bash).
         if (mode === "full-access" || mode === "managed") {
           result += " --permission-mode bypassPermissions";
         } else if (mode === "auto-edit") {
@@ -1821,16 +1869,12 @@ export class ProcessManager extends EventEmitter {
       }
     }
 
-    // In managed mode, append a system prompt instructing Claude to act autonomously
-    // without asking the user for confirmation, since the user may not be monitoring.
     if (mode === "managed") {
       const autonomousPrompt = "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.";
-      // Escape single quotes for shell safety
       const escaped = autonomousPrompt.replace(/'/g, "'\\''");
       result += ` --append-system-prompt '${escaped}'`;
     }
 
-    // Append language preference if configured
     const language = this.config.language?.trim();
     if (language) {
       const langPrompt = `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`;

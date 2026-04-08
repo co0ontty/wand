@@ -1,5 +1,6 @@
 export type SessionKind = "pty" | "structured";
 export type SessionCreateKind = "pty" | "structured";
+export type SessionProvider = "claude" | "codex";
 export type SessionRunner = "claude-cli" | "claude-cli-print" | "pty";
 
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
@@ -83,6 +84,7 @@ interface WorktreeInfo {
 
 export interface CommandRequest {
   command: string;
+  provider?: SessionProvider;
   cwd?: string;
   mode?: ExecutionMode;
   initialInput?: string;
@@ -173,6 +175,7 @@ export interface ConversationTurn {
 }
 
 export interface StructuredSessionState {
+  provider?: SessionProvider;
   runner: SessionRunner;
   model?: string;
   lastError: string | null;
@@ -183,6 +186,7 @@ export interface StructuredSessionState {
 export interface SessionSnapshot {
   id: string;
   sessionKind?: SessionKind;
+  provider?: SessionProvider;
   runner?: SessionRunner;
   command: string;
   cwd: string;
@@ -211,6 +215,8 @@ export interface SessionSnapshot {
   claudeSessionId: string | null;
   /** Structured conversation messages derived from PTY output. */
   messages?: ConversationTurn[];
+  /** Pending structured user inputs queued while an assistant response is in flight. */
+  queuedMessages?: string[];
   structuredState?: StructuredSessionState;
   /** Session lifecycle state */
   lifecycleState?: "running" | "idle" | "archived";
