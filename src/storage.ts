@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SessionSnapshot, WandConfig, ConversationTurn, SessionKind, SessionProvider, SessionRunner, StructuredSessionState } from "./types.js";
+import { SessionSnapshot, WandConfig, ConversationTurn, SessionKind, SessionProvider, SessionRunner, StructuredSessionState, WorktreeMergeInfo } from "./types.js";
 
 interface SessionRow {
   id: string;
@@ -27,6 +27,8 @@ interface SessionRow {
   auto_recovered: number;
   worktree_enabled: number;
   worktree_info: string | null;
+  worktree_merge_status: SessionSnapshot["worktreeMergeStatus"] | null;
+  worktree_merge_info: string | null;
 }
 
 function parseStoredMessages(raw: string | null): ConversationTurn[] | undefined {
@@ -98,6 +100,196 @@ function parseWorktreeInfo(raw: string | null): SessionSnapshot["worktree"] | un
   return undefined;
 }
 
+function parseWorktreeMergeInfo(raw: string | null): WorktreeMergeInfo | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") {
+      return parsed as WorktreeMergeInfo;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function serializeWorktreeMergeInfo(info: SessionSnapshot["worktreeMergeInfo"]): string | null {
+  return info ? JSON.stringify(info) : null;
+}
+
+function serializeWorktreeInfo(info: SessionSnapshot["worktree"]): string | null {
+  return info ? JSON.stringify(info) : null;
+}
+
+function normalizeWorktreeMergeStatus(raw: string | null | undefined): SessionSnapshot["worktreeMergeStatus"] | undefined {
+  if (raw === "ready" || raw === "checking" || raw === "merging" || raw === "merged" || raw === "failed") {
+    return raw;
+  }
+  return undefined;
+}
+
+function getWorktreeMergeStatusValue(snapshot: SessionSnapshot): string | null {
+  return snapshot.worktreeMergeStatus ?? null;
+}
+
+function getWorktreeMergeInfoValue(snapshot: SessionSnapshot): string | null {
+  return serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo);
+}
+
+function getWorktreeInfoValue(snapshot: SessionSnapshot): string | null {
+  return serializeWorktreeInfo(snapshot.worktree);
+}
+
+function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktreeMergeStatus" | "worktreeMergeInfo"> {
+  return {
+    worktreeMergeStatus: normalizeWorktreeMergeStatus(row.worktree_merge_status),
+    worktreeMergeInfo: parseWorktreeMergeInfo(row.worktree_merge_info) ?? null,
+  };
+}
+
+function sessionSelectFields(): string {
+  return `id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info`;
+}
+
+function sessionPersistFields(): string {
+  return `id, command, cwd, mode, status, exit_code, started_at, ended_at, output
+             , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, structured_state
+             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info`;
+}
+
+function sessionPersistAssignments(): string {
+  return `command = excluded.command,
+             cwd = excluded.cwd,
+             mode = excluded.mode,
+             status = excluded.status,
+             exit_code = excluded.exit_code,
+             started_at = excluded.started_at,
+             ended_at = excluded.ended_at,
+             output = excluded.output,
+             archived = excluded.archived,
+             archived_at = excluded.archived_at,
+             claude_session_id = excluded.claude_session_id,
+             provider = excluded.provider,
+             session_kind = excluded.session_kind,
+             runner = excluded.runner,
+             messages = excluded.messages,
+             queued_messages = excluded.queued_messages,
+             structured_state = excluded.structured_state,
+             resumed_from_session_id = excluded.resumed_from_session_id,
+             resumed_to_session_id = excluded.resumed_to_session_id,
+             auto_recovered = excluded.auto_recovered,
+             worktree_enabled = excluded.worktree_enabled,
+             worktree_info = excluded.worktree_info,
+             worktree_merge_status = excluded.worktree_merge_status,
+             worktree_merge_info = excluded.worktree_merge_info`;
+}
+
+function sessionMetadataAssignments(): string {
+  return `command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
+           started_at = ?, ended_at = ?, output = ?,
+           archived = ?, archived_at = ?, claude_session_id = ?,
+           provider = ?, session_kind = ?, runner = ?, structured_state = ?,
+           resumed_from_session_id = ?, resumed_to_session_id = ?, auto_recovered = ?,
+           worktree_enabled = ?, worktree_info = ?, worktree_merge_status = ?, worktree_merge_info = ?`;
+}
+
+function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number | null> {
+  return [
+    snapshot.id,
+    snapshot.command,
+    snapshot.cwd,
+    snapshot.mode,
+    snapshot.status,
+    snapshot.exitCode,
+    snapshot.startedAt,
+    snapshot.endedAt,
+    snapshot.output,
+    snapshot.archived ? 1 : 0,
+    snapshot.archivedAt,
+    snapshot.claudeSessionId,
+    snapshot.provider ?? null,
+    snapshot.sessionKind ?? "pty",
+    snapshot.runner ?? null,
+    snapshot.messages ? JSON.stringify(snapshot.messages) : null,
+    snapshot.queuedMessages ? JSON.stringify(snapshot.queuedMessages) : null,
+    snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
+    snapshot.resumedFromSessionId ?? null,
+    snapshot.resumedToSessionId ?? null,
+    snapshot.autoRecovered ? 1 : 0,
+    snapshot.worktreeEnabled ? 1 : 0,
+    getWorktreeInfoValue(snapshot),
+    getWorktreeMergeStatusValue(snapshot),
+    getWorktreeMergeInfoValue(snapshot),
+  ];
+}
+
+function sessionMetadataValues(snapshot: SessionSnapshot): Array<string | number | null> {
+  return [
+    snapshot.command,
+    snapshot.cwd,
+    snapshot.mode,
+    snapshot.status,
+    snapshot.exitCode,
+    snapshot.startedAt,
+    snapshot.endedAt,
+    snapshot.output,
+    snapshot.archived ? 1 : 0,
+    snapshot.archivedAt,
+    snapshot.claudeSessionId,
+    snapshot.provider ?? null,
+    snapshot.sessionKind ?? "pty",
+    snapshot.runner ?? null,
+    snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
+    snapshot.resumedFromSessionId ?? null,
+    snapshot.resumedToSessionId ?? null,
+    snapshot.autoRecovered ? 1 : 0,
+    snapshot.worktreeEnabled ? 1 : 0,
+    getWorktreeInfoValue(snapshot),
+    getWorktreeMergeStatusValue(snapshot),
+    getWorktreeMergeInfoValue(snapshot),
+    snapshot.id,
+  ];
+}
+
+function mapSessionCore(row: SessionRow): SessionSnapshot {
+  const provider = inferSessionProvider(row);
+  return {
+    id: row.id,
+    sessionKind: row.session_kind ?? "pty",
+    provider,
+    runner: row.runner ?? undefined,
+    command: row.command,
+    cwd: row.cwd,
+    mode: row.mode,
+    status: row.status,
+    exitCode: row.exit_code,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    output: row.output,
+    archived: Boolean(row.archived),
+    archivedAt: row.archived_at,
+    claudeSessionId: row.claude_session_id,
+    messages: parseStoredMessages(row.messages),
+    queuedMessages: parseQueuedMessages(row.queued_messages),
+    structuredState: parseStructuredState(row.structured_state),
+    resumedFromSessionId: row.resumed_from_session_id ?? undefined,
+    resumedToSessionId: row.resumed_to_session_id ?? undefined,
+    autoRecovered: Boolean(row.auto_recovered),
+    worktreeEnabled: Boolean(row.worktree_enabled),
+    worktree: parseWorktreeInfo(row.worktree_info) ?? null,
+    ...mapWorktreeMergeFields(row),
+  };
+}
+
+function sessionRowQuery(base: string): string {
+  return `${base} ${sessionSelectFields()}`;
+}
+
 export const DEFAULT_DB_FILE = "wand.db";
 
 export interface PersistedAuthSession {
@@ -138,7 +330,9 @@ const INIT_SQL = `
     resumed_to_session_id TEXT,
     auto_recovered INTEGER NOT NULL DEFAULT 0,
     worktree_enabled INTEGER NOT NULL DEFAULT 0,
-    worktree_info TEXT
+    worktree_info TEXT,
+    worktree_merge_status TEXT,
+    worktree_merge_info TEXT
   );
 
   CREATE TABLE IF NOT EXISTS app_config (
@@ -252,59 +446,12 @@ export class WandStorage {
       this.db
         .prepare(
           `INSERT INTO command_sessions (
-           id, command, cwd, mode, status, exit_code, started_at, ended_at, output
-             , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ${sessionPersistFields()}
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
-             command = excluded.command,
-             cwd = excluded.cwd,
-             mode = excluded.mode,
-             status = excluded.status,
-             exit_code = excluded.exit_code,
-             started_at = excluded.started_at,
-             ended_at = excluded.ended_at,
-             output = excluded.output,
-             archived = excluded.archived,
-             archived_at = excluded.archived_at,
-             claude_session_id = excluded.claude_session_id,
-             provider = excluded.provider,
-             session_kind = excluded.session_kind,
-             runner = excluded.runner,
-             messages = excluded.messages,
-             queued_messages = excluded.queued_messages,
-             structured_state = excluded.structured_state,
-             resumed_from_session_id = excluded.resumed_from_session_id,
-             resumed_to_session_id = excluded.resumed_to_session_id,
-             auto_recovered = excluded.auto_recovered,
-             worktree_enabled = excluded.worktree_enabled,
-             worktree_info = excluded.worktree_info`
+             ${sessionPersistAssignments()}`
         )
-        .run(
-          snapshot.id,
-          snapshot.command,
-          snapshot.cwd,
-          snapshot.mode,
-          snapshot.status,
-          snapshot.exitCode,
-          snapshot.startedAt,
-          snapshot.endedAt,
-          snapshot.output,
-          snapshot.archived ? 1 : 0,
-          snapshot.archivedAt,
-          snapshot.claudeSessionId,
-          snapshot.provider ?? null,
-          snapshot.sessionKind ?? "pty",
-          snapshot.runner ?? null,
-          snapshot.messages ? JSON.stringify(snapshot.messages) : null,
-          snapshot.queuedMessages ? JSON.stringify(snapshot.queuedMessages) : null,
-          snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
-          snapshot.resumedFromSessionId ?? null,
-          snapshot.resumedToSessionId ?? null,
-          snapshot.autoRecovered ? 1 : 0,
-          snapshot.worktreeEnabled ? 1 : 0,
-          snapshot.worktree ? JSON.stringify(snapshot.worktree) : null
-        );
+        .run(...sessionPersistValues(snapshot));
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -321,44 +468,16 @@ export class WandStorage {
     this.db
       .prepare(
         `UPDATE command_sessions SET
-           command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
-           started_at = ?, ended_at = ?, output = ?,
-           archived = ?, archived_at = ?, claude_session_id = ?,
-           provider = ?, session_kind = ?, runner = ?, structured_state = ?,
-           resumed_from_session_id = ?, resumed_to_session_id = ?, auto_recovered = ?,
-           worktree_enabled = ?, worktree_info = ?
+           ${sessionMetadataAssignments()}
          WHERE id = ?`
       )
-      .run(
-        snapshot.command,
-        snapshot.cwd,
-        snapshot.mode,
-        snapshot.status,
-        snapshot.exitCode,
-        snapshot.startedAt,
-        snapshot.endedAt,
-        snapshot.output,
-        snapshot.archived ? 1 : 0,
-        snapshot.archivedAt,
-        snapshot.claudeSessionId,
-        snapshot.provider ?? null,
-        snapshot.sessionKind ?? "pty",
-        snapshot.runner ?? null,
-        snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
-        snapshot.resumedFromSessionId ?? null,
-        snapshot.resumedToSessionId ?? null,
-        snapshot.autoRecovered ? 1 : 0,
-        snapshot.worktreeEnabled ? 1 : 0,
-        snapshot.worktree ? JSON.stringify(snapshot.worktree) : null,
-        snapshot.id
-      );
+      .run(...sessionMetadataValues(snapshot));
   }
 
   getSession(id: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
-        `SELECT id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
+        `${sessionRowQuery("SELECT")}
          FROM command_sessions
          WHERE id = ?`
       )
@@ -370,8 +489,7 @@ export class WandStorage {
   getLatestSessionByClaudeSessionId(claudeSessionId: string): SessionSnapshot | null {
     const row = this.db
       .prepare(
-        `SELECT id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
+        `${sessionRowQuery("SELECT")}
          FROM command_sessions
          WHERE claude_session_id = ?
          ORDER BY started_at DESC
@@ -385,8 +503,7 @@ export class WandStorage {
   loadSessions(): SessionSnapshot[] {
     const rows = this.db
       .prepare(
-        `SELECT id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info
+        `${sessionRowQuery("SELECT")}
          FROM command_sessions
          ORDER BY started_at DESC`
       )
@@ -396,32 +513,21 @@ export class WandStorage {
   }
 
   private mapSessionRow(row: SessionRow): SessionSnapshot {
-    const provider = inferSessionProvider(row);
-    return {
-      id: row.id,
-      sessionKind: row.session_kind ?? "pty",
-      provider,
-      runner: row.runner ?? undefined,
-      command: row.command,
-      cwd: row.cwd,
-      mode: row.mode,
-      status: row.status,
-      exitCode: row.exit_code,
-      startedAt: row.started_at,
-      endedAt: row.ended_at,
-      output: row.output,
-      archived: Boolean(row.archived),
-      archivedAt: row.archived_at,
-      claudeSessionId: row.claude_session_id,
-      messages: parseStoredMessages(row.messages),
-      queuedMessages: parseQueuedMessages(row.queued_messages),
-      structuredState: parseStructuredState(row.structured_state),
-      resumedFromSessionId: row.resumed_from_session_id ?? undefined,
-      resumedToSessionId: row.resumed_to_session_id ?? undefined,
-      autoRecovered: Boolean(row.auto_recovered),
-      worktreeEnabled: Boolean(row.worktree_enabled),
-      worktree: parseWorktreeInfo(row.worktree_info) ?? null
+    return mapSessionCore(row);
+  }
+
+  updateSessionWorktreeMergeState(id: string, status: SessionSnapshot["worktreeMergeStatus"], info: SessionSnapshot["worktreeMergeInfo"]): SessionSnapshot | null {
+    const current = this.getSession(id);
+    if (!current) {
+      return null;
+    }
+    const updated: SessionSnapshot = {
+      ...current,
+      worktreeMergeStatus: status,
+      worktreeMergeInfo: info,
     };
+    this.saveSessionMetadata(updated);
+    return updated;
   }
 
   deleteSession(id: string): void {
@@ -470,5 +576,11 @@ function ensureCommandSessionSchema(db: DatabaseSync): void {
   }
   if (!names.has("worktree_info")) {
     db.exec("ALTER TABLE command_sessions ADD COLUMN worktree_info TEXT");
+  }
+  if (!names.has("worktree_merge_status")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN worktree_merge_status TEXT");
+  }
+  if (!names.has("worktree_merge_info")) {
+    db.exec("ALTER TABLE command_sessions ADD COLUMN worktree_merge_info TEXT");
   }
 }

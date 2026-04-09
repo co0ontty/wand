@@ -4,7 +4,8 @@ import { parseMessages } from "./message-parser.js";
 import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
-import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner } from "./types.js";
+import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnapshot } from "./types.js";
+import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
 
 export function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -82,6 +83,83 @@ function listAllSessions(processes: ProcessManager, structured: StructuredSessio
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
+function requireWorktreeSession(snapshot: SessionSnapshot | null): SessionSnapshot {
+  if (!snapshot) {
+    throw new Error("未找到该会话。");
+  }
+  if (!snapshot.worktreeEnabled || !snapshot.worktree?.branch || !snapshot.worktree?.path) {
+    throw new Error("该会话未启用 worktree 模式。 ");
+  }
+  return snapshot;
+}
+
+function buildWorktreeMergeInfo(
+  current: SessionSnapshot,
+  status: SessionSnapshot["worktreeMergeStatus"],
+  info: SessionSnapshot["worktreeMergeInfo"]
+): SessionSnapshot["worktreeMergeInfo"] {
+  return {
+    ...(current.worktreeMergeInfo ?? null),
+    ...(info ?? null),
+    lastError: info?.lastError,
+    conflict: info?.conflict,
+  };
+}
+
+function saveWorktreeMergeState(
+  storage: WandStorage,
+  current: SessionSnapshot,
+  status: SessionSnapshot["worktreeMergeStatus"],
+  info: SessionSnapshot["worktreeMergeInfo"]
+): SessionSnapshot {
+  const mergedInfo = buildWorktreeMergeInfo(current, status, info);
+  const updated: SessionSnapshot = {
+    ...current,
+    worktreeMergeStatus: status,
+    worktreeMergeInfo: mergedInfo,
+  };
+  storage.saveSessionMetadata(updated);
+  return updated;
+}
+
+function getWorktreeMergeResponseStatus(error: unknown): number {
+  const code = getWorktreeMergeErrorCode(error);
+  if (!code) {
+    return 400;
+  }
+  if (code === "WORKTREE_MERGE_CONFLICT") {
+    return 409;
+  }
+  return 400;
+}
+
+function getWorktreeMergePayload(error: unknown, fallback: string) {
+  if (error instanceof WorktreeMergeError) {
+    return {
+      error: error.message,
+      errorCode: error.code,
+      result: error.result ?? null,
+    };
+  }
+  return {
+    error: getErrorMessage(error, fallback),
+    errorCode: getWorktreeMergeErrorCode(error) ?? null,
+    result: null,
+  };
+}
+
+function getLatestSessionSnapshot(processes: ProcessManager, structured: StructuredSessionManager, storage: WandStorage, id: string): SessionSnapshot | null {
+  return getSessionById(processes, structured, id) ?? storage.getSession(id);
+}
+
+function canMergeSession(snapshot: SessionSnapshot): boolean {
+  return Boolean(snapshot.worktreeEnabled && snapshot.worktree?.branch && snapshot.worktree?.path);
+}
+
+function isMergeActionAllowed(snapshot: SessionSnapshot): boolean {
+  return snapshot.status !== "running";
+}
+
 export function registerSessionRoutes(
   app: Express,
   processes: ProcessManager,
@@ -134,6 +212,98 @@ export function registerSessionRoutes(
       res.json(snapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法发送结构化消息。") });
+    }
+  });
+
+  app.post("/api/sessions/:id/worktree/merge/check", (req, res) => {
+    try {
+      const current = requireWorktreeSession(getLatestSessionSnapshot(processes, structured, storage, req.params.id));
+      if (!isMergeActionAllowed(current)) {
+        res.status(409).json({ error: "会话仍在运行，请结束后再合并。", errorCode: "SESSION_STILL_RUNNING" });
+        return;
+      }
+      const checking = saveWorktreeMergeState(storage, current, "checking", {
+        ...(current.worktreeMergeInfo ?? null),
+        targetBranch: current.worktreeMergeInfo?.targetBranch,
+        lastError: undefined,
+        conflict: false,
+      });
+      const result = checkSessionWorktreeMergeability({
+        worktree: checking.worktree as NonNullable<SessionSnapshot["worktree"]>,
+        targetBranch: current.worktreeMergeInfo?.targetBranch,
+      });
+      const nextStatus: SessionSnapshot["worktreeMergeStatus"] = result.ok ? "ready" : "failed";
+      const updated = saveWorktreeMergeState(storage, checking, nextStatus, {
+        targetBranch: result.targetBranch,
+        conflict: result.hasConflicts,
+        lastError: result.ok ? undefined : result.reason,
+      });
+      res.json({ session: updated, result });
+    } catch (error) {
+      res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法检查 worktree 合并状态。"));
+    }
+  });
+
+  app.post("/api/sessions/:id/worktree/merge", express.json(), (req, res) => {
+    try {
+      const current = requireWorktreeSession(getLatestSessionSnapshot(processes, structured, storage, req.params.id));
+      if (!isMergeActionAllowed(current)) {
+        res.status(409).json({ error: "会话仍在运行，请结束后再合并。", errorCode: "SESSION_STILL_RUNNING" });
+        return;
+      }
+      const merging = saveWorktreeMergeState(storage, current, "merging", {
+        ...(current.worktreeMergeInfo ?? null),
+        lastError: undefined,
+        conflict: false,
+      });
+      const result = mergeSessionWorktree({
+        worktree: merging.worktree as NonNullable<SessionSnapshot["worktree"]>,
+        targetBranch: current.worktreeMergeInfo?.targetBranch,
+      });
+      const updated = saveWorktreeMergeState(storage, merging, "merged", {
+        targetBranch: result.targetBranch,
+        mergedAt: result.mergedAt,
+        mergeCommit: result.mergeCommit,
+        cleanupDone: result.cleanupDone,
+        lastError: undefined,
+        conflict: false,
+      });
+      res.json({ session: updated, result });
+    } catch (error) {
+      const current = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+      if (current && canMergeSession(current)) {
+        const payload = getWorktreeMergePayload(error, "无法合并 worktree。") as { error: string; errorCode: string | null; result: Partial<import("./types.js").WorktreeMergeResult> | null };
+        saveWorktreeMergeState(storage, current, "failed", {
+          ...(current.worktreeMergeInfo ?? null),
+          targetBranch: payload.result?.targetBranch ?? current.worktreeMergeInfo?.targetBranch,
+          mergedAt: payload.result?.mergedAt,
+          mergeCommit: payload.result?.mergeCommit,
+          cleanupDone: payload.result?.cleanupDone,
+          lastError: payload.error,
+          conflict: payload.result?.conflict === true,
+        });
+      }
+      res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法合并 worktree。"));
+    }
+  });
+
+  app.post("/api/sessions/:id/worktree/cleanup", (req, res) => {
+    try {
+      const current = requireWorktreeSession(getLatestSessionSnapshot(processes, structured, storage, req.params.id));
+      if (current.worktreeMergeStatus !== "merged" || current.worktreeMergeInfo?.cleanupDone !== false) {
+        res.status(400).json({ error: "当前 worktree 无需补偿清理。", errorCode: "WORKTREE_CLEANUP_NOT_NEEDED" });
+        return;
+      }
+      cleanupSessionWorktree({ worktree: current.worktree as NonNullable<SessionSnapshot["worktree"]> });
+      const updated = saveWorktreeMergeState(storage, current, "merged", {
+        ...(current.worktreeMergeInfo ?? null),
+        cleanupDone: true,
+        lastError: undefined,
+        conflict: false,
+      });
+      res.json({ session: updated, ok: true });
+    } catch (error) {
+      res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法清理 worktree。"));
     }
   });
 

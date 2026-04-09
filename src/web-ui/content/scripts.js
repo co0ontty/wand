@@ -117,6 +117,11 @@
         sessionCreateKind: "structured",
         sessionCreateWorktree: false,
         sessionTool: "claude",
+        activeWorktreeMergeSessionId: null,
+        worktreeMergeCheckResult: null,
+        worktreeMergeLoading: false,
+        worktreeMergeSubmitting: false,
+        worktreeMergeError: "",
         preferredCommand: "claude",
         structuredRunner: "claude-cli-print",
         lastResize: { cols: 0, rows: 0 },
@@ -1239,7 +1244,29 @@
               '</section>' +
             '</main>' +
           '</div>' +
-        '</div>' + renderSessionModal() + renderSettingsModal();
+        '</div>' + renderSessionModal() + renderWorktreeMergeModal() + renderSettingsModal();
+      }
+
+      function renderWorktreeMergeModal() {
+        return '<section id="worktree-merge-modal" class="modal-backdrop hidden">' +
+          '<div class="modal worktree-merge-modal">' +
+            '<div class="modal-header">' +
+              '<div>' +
+                '<h2 class="modal-title">合并 Worktree</h2>' +
+                '<p class="modal-subtitle">检查当前任务分支并快捷合并到主分支。</p>' +
+              '</div>' +
+              '<button id="close-worktree-merge-button" class="btn btn-ghost btn-icon">&times;</button>' +
+            '</div>' +
+            '<div class="modal-body">' +
+              '<div id="worktree-merge-content" class="worktree-merge-content"></div>' +
+              '<p id="worktree-merge-error" class="error-message hidden"></p>' +
+              '<div class="worktree-merge-actions">' +
+                '<button id="worktree-merge-cancel-button" class="btn btn-secondary">取消</button>' +
+                '<button id="worktree-merge-confirm-button" class="btn btn-primary">确认合并并清理</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</section>';
       }
 
       function renderSettingsModal() {
@@ -2296,9 +2323,18 @@
           recoveryHint = '<span class="session-id" title="自动恢复的会话">自动恢复</span>';
         }
 
+        var canOpenMerge = !state.sessionsManageMode && session.worktreeEnabled && session.worktree && session.worktree.branch && session.worktree.path;
+        var needsCleanup = session.worktreeMergeStatus === "merged" && session.worktreeMergeInfo && session.worktreeMergeInfo.cleanupDone === false;
+        var mergeDisabled = session.status === "running" || session.worktreeMergeStatus === "merging";
+        var mergeTitle = needsCleanup ? "重试清理 worktree" : "合并到主分支";
+        var mergeButton = canOpenMerge && session.worktreeMergeStatus !== "merged"
+          ? '<button class="session-action-btn merge-btn" data-action="worktree-merge" data-session-id="' + session.id + '" type="button" aria-label="' + escapeHtml(mergeTitle) + '" title="' + escapeHtml(mergeTitle) + '"' + (mergeDisabled ? ' disabled' : '') + '><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h10"/><path d="M5 7l-2 2 2 2"/><path d="M19 15l2 2-2 2"/></svg></button>'
+          : needsCleanup
+            ? '<button class="session-action-btn merge-btn" data-action="worktree-cleanup" data-session-id="' + session.id + '" type="button" aria-label="重试清理 worktree" title="重试清理 worktree"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>'
+            : "";
         var deleteButton = state.sessionsManageMode ? '' : '<button class="session-action-btn delete-btn" data-action="delete-session" data-session-id="' + session.id + '" type="button" aria-label="删除会话" title="删除此会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
         var modeBadge = renderSessionKindBadge(session);
-        var actionsHtml = '<span class="session-actions">' + resumeButton + deleteButton + '</span>';
+        var actionsHtml = '<span class="session-actions">' + resumeButton + mergeButton + deleteButton + '</span>';
 
         return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
           '<div class="session-item-content">' +
@@ -2322,12 +2358,35 @@
         '</div>';
       }
 
+      function getWorktreeMergeStatusLabel(session) {
+        if (!session || !session.worktreeMergeStatus) return "";
+        var labels = {
+          ready: "可合并",
+          checking: "检查中",
+          merging: "合并中",
+          merged: session.worktreeMergeInfo && session.worktreeMergeInfo.cleanupDone === false ? "已合并待清理" : "已合并",
+          failed: "合并失败"
+        };
+        return labels[session.worktreeMergeStatus] || "";
+      }
+
+      function renderWorktreeMergeBadge(session) {
+        var label = getWorktreeMergeStatusLabel(session);
+        if (!label) return "";
+        return '<span class="session-kind-badge worktree-merge ' + escapeHtml(session.worktreeMergeStatus || "") + '">' + escapeHtml(label) + '</span>';
+      }
+
       function renderWorktreeBadge(session) {
         if (!session || !session.worktreeEnabled) return "";
-        var title = session.worktree && session.worktree.branch
-          ? ' title="' + escapeHtml('Worktree: ' + session.worktree.branch) + '"'
-          : '';
-        return '<span class="session-kind-badge worktree"' + title + '>Worktree</span>';
+        var titleParts = [];
+        if (session.worktree && session.worktree.branch) {
+          titleParts.push('Worktree: ' + session.worktree.branch);
+        }
+        if (session.worktree && session.worktree.path) {
+          titleParts.push('Path: ' + session.worktree.path);
+        }
+        var title = titleParts.length > 0 ? ' title="' + escapeHtml(titleParts.join('\n')) + '"' : '';
+        return '<span class="session-kind-badge worktree"' + title + '>Worktree</span>' + renderWorktreeMergeBadge(session);
       }
 
       function renderSessionKindBadge(session) {
@@ -2754,6 +2813,12 @@
         if (drawerNewSessBtn) drawerNewSessBtn.addEventListener("click", openSessionModal);
         var closeModalBtn = document.getElementById("close-modal-button");
         if (closeModalBtn) closeModalBtn.addEventListener("click", closeSessionModal);
+        var closeWorktreeMergeBtn = document.getElementById("close-worktree-merge-button");
+        if (closeWorktreeMergeBtn) closeWorktreeMergeBtn.addEventListener("click", closeWorktreeMergeModal);
+        var worktreeMergeCancelBtn = document.getElementById("worktree-merge-cancel-button");
+        if (worktreeMergeCancelBtn) worktreeMergeCancelBtn.addEventListener("click", closeWorktreeMergeModal);
+        var worktreeMergeConfirmBtn = document.getElementById("worktree-merge-confirm-button");
+        if (worktreeMergeConfirmBtn) worktreeMergeConfirmBtn.addEventListener("click", confirmWorktreeMerge);
         var runBtn = document.getElementById("run-button");
         if (runBtn) runBtn.addEventListener("click", runCommand);
         var approvePermissionBtn = document.getElementById("approve-permission-btn");
@@ -2778,6 +2843,7 @@
         var sessionModal = document.getElementById("session-modal");
         if (sessionModal) sessionModal.addEventListener("click", function(e) {
           if (e.target.id === "session-modal") closeSessionModal();
+          if (e.target.id === "worktree-merge-modal") closeWorktreeMergeModal();
         });
 
         var inputBox = document.getElementById("input-box");
@@ -3371,6 +3437,10 @@
             handleResumeAction(actionButton);
           } else if (actionButton.dataset.action === "resume-history" && actionButton.dataset.claudeSessionId) {
             handleResumeHistoryAction(actionButton);
+          } else if (actionButton.dataset.action === "worktree-merge" && actionButton.dataset.sessionId) {
+            openWorktreeMergeModal(actionButton.dataset.sessionId);
+          } else if (actionButton.dataset.action === "worktree-cleanup" && actionButton.dataset.sessionId) {
+            retryWorktreeCleanup(actionButton.dataset.sessionId);
           }
           return;
         }
@@ -4793,6 +4863,162 @@
         };
 
         document.addEventListener("keydown", focusTrapHandler);
+      }
+
+      function getActiveWorktreeMergeSession() {
+        if (!state.activeWorktreeMergeSessionId) return null;
+        return state.sessions.find(function(session) { return session.id === state.activeWorktreeMergeSessionId; }) || null;
+      }
+
+      function renderWorktreeMergeContent() {
+        var container = document.getElementById("worktree-merge-content");
+        var confirmBtn = document.getElementById("worktree-merge-confirm-button");
+        var errorEl = document.getElementById("worktree-merge-error");
+        var session = getActiveWorktreeMergeSession();
+        var result = state.worktreeMergeCheckResult;
+        if (!container || !confirmBtn) return;
+        if (!session || !session.worktree) {
+          container.innerHTML = '<p class="field-hint">未找到可合并的 worktree 会话。</p>';
+          confirmBtn.disabled = true;
+          return;
+        }
+        if (errorEl) {
+          if (state.worktreeMergeError) {
+            showError(errorEl, state.worktreeMergeError);
+          } else {
+            hideError(errorEl);
+          }
+        }
+        var rows = [
+          '<div class="worktree-merge-row"><span>来源分支</span><strong>' + escapeHtml(session.worktree.branch || "-") + '</strong></div>',
+          '<div class="worktree-merge-row"><span>工作目录</span><strong>' + escapeHtml(session.worktree.path || "-") + '</strong></div>'
+        ];
+        if (result) {
+          rows.push('<div class="worktree-merge-row"><span>目标分支</span><strong>' + escapeHtml(result.targetBranch || "-") + '</strong></div>');
+          rows.push('<div class="worktree-merge-row"><span>待合并提交</span><strong>' + escapeHtml(String(result.aheadCount || 0)) + '</strong></div>');
+          rows.push('<div class="worktree-merge-row"><span>未提交改动</span><strong>' + escapeHtml(result.hasUncommittedChanges ? "有" : "无") + '</strong></div>');
+          rows.push('<div class="worktree-merge-row"><span>冲突风险</span><strong>' + escapeHtml(result.hasConflicts ? "有" : "无") + '</strong></div>');
+          if (result.reason) {
+            rows.push('<p class="field-hint">' + escapeHtml(result.reason) + '</p>');
+          }
+        } else if (state.worktreeMergeLoading) {
+          rows.push('<p class="field-hint">正在检查 worktree 合并状态…</p>');
+        }
+        container.innerHTML = rows.join("");
+        confirmBtn.disabled = state.worktreeMergeLoading || state.worktreeMergeSubmitting || !result || result.ok !== true;
+        confirmBtn.textContent = state.worktreeMergeSubmitting ? "合并中..." : "确认合并并清理";
+      }
+
+      function openWorktreeMergeModal(sessionId) {
+        state.activeWorktreeMergeSessionId = sessionId;
+        state.worktreeMergeCheckResult = null;
+        state.worktreeMergeLoading = true;
+        state.worktreeMergeSubmitting = false;
+        state.worktreeMergeError = "";
+        closeSessionModal();
+        closeSettingsModal();
+        var modal = document.getElementById("worktree-merge-modal");
+        if (modal) {
+          modal.classList.remove("hidden");
+          lastFocusedElement = document.activeElement;
+          setupFocusTrap(modal);
+        }
+        renderWorktreeMergeContent();
+        fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/worktree/merge/check", {
+          method: "POST",
+          credentials: "same-origin"
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && data.error) {
+              throw new Error(data.error);
+            }
+            if (data && data.session) {
+              updateSessionSnapshot(data.session);
+            }
+            state.worktreeMergeCheckResult = data.result || null;
+            state.worktreeMergeError = "";
+          })
+          .catch(function(error) {
+            state.worktreeMergeError = (error && error.message) || "无法检查 worktree 合并状态。";
+          })
+          .finally(function() {
+            state.worktreeMergeLoading = false;
+            renderWorktreeMergeContent();
+          });
+      }
+
+      function closeWorktreeMergeModal() {
+        var modal = document.getElementById("worktree-merge-modal");
+        state.activeWorktreeMergeSessionId = null;
+        state.worktreeMergeCheckResult = null;
+        state.worktreeMergeLoading = false;
+        state.worktreeMergeSubmitting = false;
+        state.worktreeMergeError = "";
+        if (modal) {
+          modal.classList.add("hidden");
+        }
+        if (focusTrapHandler) {
+          document.removeEventListener("keydown", focusTrapHandler);
+          focusTrapHandler = null;
+        }
+        if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+          lastFocusedElement.focus();
+        }
+      }
+
+      function confirmWorktreeMerge() {
+        if (!state.activeWorktreeMergeSessionId || state.worktreeMergeSubmitting) return;
+        state.worktreeMergeSubmitting = true;
+        state.worktreeMergeError = "";
+        renderWorktreeMergeContent();
+        fetch("/api/sessions/" + encodeURIComponent(state.activeWorktreeMergeSessionId) + "/worktree/merge", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && data.error) {
+              throw new Error(data.error);
+            }
+            if (data && data.session) {
+              updateSessionSnapshot(data.session);
+            }
+            showToast("已合并到 " + escapeHtml((data.result && data.result.targetBranch) || "主分支") + ((data.result && data.result.cleanupDone === false) ? "，但工作树待清理。" : "。"), "info");
+            closeWorktreeMergeModal();
+            return refreshAll();
+          })
+          .catch(function(error) {
+            state.worktreeMergeError = (error && error.message) || "无法合并 worktree。";
+            renderWorktreeMergeContent();
+          })
+          .finally(function() {
+            state.worktreeMergeSubmitting = false;
+            renderWorktreeMergeContent();
+          });
+      }
+
+      function retryWorktreeCleanup(sessionId) {
+        fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/worktree/cleanup", {
+          method: "POST",
+          credentials: "same-origin"
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && data.error) {
+              throw new Error(data.error);
+            }
+            if (data && data.session) {
+              updateSessionSnapshot(data.session);
+            }
+            showToast("已完成 worktree 清理。", "info");
+            return refreshAll();
+          })
+          .catch(function(error) {
+            showToast((error && error.message) || "无法清理 worktree。", "error");
+          });
       }
 
       function openSettingsModal() {

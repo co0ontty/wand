@@ -82,6 +82,41 @@ interface WorktreeInfo {
   path: string;
 }
 
+export interface WorktreeMergeInfo {
+  targetBranch?: string;
+  mergedAt?: string;
+  mergeCommit?: string;
+  cleanupDone?: boolean;
+  lastError?: string;
+  conflict?: boolean;
+}
+
+export interface WorktreeMergeCheckResult {
+  ok: boolean;
+  sourceBranch: string;
+  targetBranch: string;
+  worktreePath: string;
+  repoRoot: string;
+  hasUncommittedChanges: boolean;
+  aheadCount: number;
+  hasConflicts: boolean;
+  recommendedAction: "merge" | "noop" | "resolve-conflict";
+  reason?: string;
+}
+
+export interface WorktreeMergeResult {
+  ok: boolean;
+  sourceBranch: string;
+  targetBranch: string;
+  repoRoot: string;
+  mergeCommit?: string;
+  mergedAt?: string;
+  cleanupDone: boolean;
+  conflict: boolean;
+  errorCode?: string;
+  reason?: string;
+}
+
 export interface CommandRequest {
   command: string;
   provider?: SessionProvider;
@@ -193,6 +228,8 @@ export interface SessionSnapshot {
   mode: ExecutionMode;
   worktreeEnabled?: boolean;
   worktree?: WorktreeInfo | null;
+  worktreeMergeStatus?: "ready" | "checking" | "merging" | "merged" | "failed";
+  worktreeMergeInfo?: WorktreeMergeInfo | null;
   autonomyPolicy?: AutonomyPolicy;
   approvalPolicy?: ApprovalPolicy;
   allowedScopes?: EscalationScope[];
