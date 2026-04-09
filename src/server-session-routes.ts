@@ -177,16 +177,20 @@ export function registerSessionRoutes(
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
     }
+    const transcriptOutput = (snapshot.sessionKind ?? "pty") === "pty"
+      ? processes.getPtyTranscript(snapshot.id) ?? snapshot.output
+      : snapshot.output;
     if (req.query.format === "chat") {
       const allowFallback = (snapshot.sessionKind ?? "pty") === "pty";
+      const fallbackOutput = allowFallback ? transcriptOutput : "";
       const messages = snapshot.messages && snapshot.messages.length > 0
         ? snapshot.messages
         : allowFallback
-          ? parseMessages(snapshot.output)
+          ? parseMessages(fallbackOutput, snapshot.command)
           : [];
-      res.json({ ...snapshot, messages });
+      res.json({ ...snapshot, output: transcriptOutput, messages });
     } else {
-      res.json(snapshot);
+      res.json({ ...snapshot, output: transcriptOutput });
     }
   });
 

@@ -942,6 +942,18 @@ export class ProcessManager extends EventEmitter {
 
       this.logger.appendPtyOutput(id, chunk);
 
+      if (!rec.ptyBridge) {
+        this.emitEvent({
+          type: "output",
+          sessionId: id,
+          data: {
+            chunk,
+            output: rec.output,
+            permissionBlocked: this.isPermissionBlocked(rec),
+          },
+        });
+      }
+
       const bridgeSessionId = rec.ptyBridge?.getClaudeSessionId();
       if (bridgeSessionId && bridgeSessionId !== rec.claudeSessionId) {
         rec.claudeSessionId = bridgeSessionId;
@@ -1099,6 +1111,10 @@ export class ProcessManager extends EventEmitter {
       record.output = record.storedOutput;
     }
     return this.snapshot(record);
+  }
+
+  getPtyTranscript(id: string): string | null {
+    return this.logger.readPtyOutput(id);
   }
 
   sendInput(id: string, input: string, view?: "chat" | "terminal", shortcutKey?: string): SessionSnapshot {

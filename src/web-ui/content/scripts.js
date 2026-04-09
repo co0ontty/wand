@@ -77,6 +77,7 @@
         _lastDomHtml: "",
         terminalSessionId: null,
         terminalOutput: "",
+        terminalLiveStreamSessions: {},
         terminalViewportSize: { width: 0, height: 0 },
         terminalAutoFollow: true,
         terminalScrollIdleTimer: null,
@@ -413,6 +414,50 @@
       function syncStructuredQueueFromSession(session) {
         var queued = getStructuredQueuedInputs(session);
         state.structuredInputQueue = Array.isArray(queued) ? queued.slice() : [];
+      }
+
+      function hasRenderOnlyStructuredBlock(message, marker) {
+        return !!(message && Array.isArray(message.content) && message.content.some(function(block) {
+          return block && typeof block === "object" && block[marker];
+        }));
+      }
+
+      function isQueuedStructuredMessage(message) {
+        return !!(message && message.role === "user" && hasRenderOnlyStructuredBlock(message, "__queued"));
+      }
+
+      function isProcessingStructuredMessage(message) {
+        return !!(message && message.role === "assistant" && hasRenderOnlyStructuredBlock(message, "__processing"));
+      }
+
+      function stripRenderOnlyStructuredMessages(messages) {
+        if (!Array.isArray(messages)) return [];
+        var removed = false;
+        var filtered = [];
+        for (var i = 0; i < messages.length; i++) {
+          var message = messages[i];
+          if (isQueuedStructuredMessage(message) || isProcessingStructuredMessage(message)) {
+            removed = true;
+            continue;
+          }
+          filtered.push(message);
+        }
+        return removed ? filtered : messages;
+      }
+
+      function normalizeStructuredSnapshot(snapshot, existingSession) {
+        if (!snapshot || !Array.isArray(snapshot.messages)) {
+          return snapshot;
+        }
+        var sessionKind = snapshot.sessionKind || (existingSession && existingSession.sessionKind);
+        if (sessionKind !== "structured") {
+          return snapshot;
+        }
+        var sanitizedMessages = stripRenderOnlyStructuredMessages(snapshot.messages);
+        if (sanitizedMessages === snapshot.messages) {
+          return snapshot;
+        }
+        return Object.assign({}, snapshot, { messages: sanitizedMessages });
       }
 
       function saveStructuredQueue() {
@@ -1045,7 +1090,10 @@
             '</aside>' +
             '<main class="main-content">' +
               '<span class="current-task hidden" id="current-task"></span>' +
-              '' +
+              '<div class="view-toggle-bar' + (state.selectedId ? '' : ' hidden') + '" id="view-toggle-bar">' +
+                '<button id="view-terminal-btn" class="topbar-btn' + (state.currentView === "terminal" ? ' active' : '') + '" type="button" title="查看原始终端输出">终端</button>' +
+                '<button id="view-chat-btn" class="topbar-btn' + (state.currentView !== "terminal" ? ' active' : '') + '" type="button" title="查看聊天解析视图">聊天</button>' +
+              '</div>' +
               // File panel backdrop (mobile)
               '<div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div>' +
               // File side panel
@@ -1091,6 +1139,9 @@
                     '<button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button">' +
                       '<span class="tool-icon">🤖</span>新建终端会话' +
                     '</button>' +
+                    '<button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button">' +
+                      '<span class="tool-icon">⌘</span>新建 Codex 会话' +
+                    '</button>' +
                     '<button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button">' +
                       '<span class="tool-icon">💬</span>新建结构化会话' +
                     '</button>' +
@@ -1120,7 +1171,7 @@
                   '</div>' +
                 '</div>' +
                 '<div class="input-composer">' +
-                  '<textarea id="input-box" class="input-textarea" placeholder="' + (state.terminalInteractive ? "终端交互模式开启中，请直接在终端中输入" : "输入消息...") + '" rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                  '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
                   '<div class="input-composer-bar">' +
                     '<div class="input-composer-left">' +
                       '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
@@ -2341,8 +2392,12 @@
       }
 
       function getSessionKindHint(kind) {
+        var tool = state.sessionTool || "claude";
         if (kind === "structured") {
           return "结构化聊天界面，支持多轮对话、流式输出和工具调用展示。";
+        }
+        if (tool === "codex") {
+          return "Codex 仅支持 PTY；terminal 是原始输出，chat 是解析后的阅读视图。";
         }
         return "原始 PTY 终端会话，支持持续交互、终端视图和权限流。";
       }
@@ -2558,6 +2613,15 @@
             quickStartSession();
           });
         }
+        var welcomeCodexBtn = document.getElementById("welcome-tool-codex");
+        if (welcomeCodexBtn) {
+          welcomeCodexBtn.addEventListener("click", function() {
+            state.sessionTool = "codex";
+            state.preferredCommand = "codex";
+            state.modeValue = "full-access";
+            quickStartSession();
+          });
+        }
         var welcomeStructuredBtn = document.getElementById("welcome-tool-structured");
         if (welcomeStructuredBtn) {
           welcomeStructuredBtn.addEventListener("click", function() {
@@ -2739,6 +2803,8 @@
         // View toggle handlers
         var viewTermBtn = document.getElementById("view-terminal-btn");
         if (viewTermBtn) viewTermBtn.addEventListener("click", function() { setView("terminal"); });
+        var viewChatBtn = document.getElementById("view-chat-btn");
+        if (viewChatBtn) viewChatBtn.addEventListener("click", function() { setView("chat"); });
         // Terminal interactive toggle (both topbar and terminal-header)
         var terminalInteractiveToggles = ["terminal-interactive-toggle-top"];
         terminalInteractiveToggles.forEach(function(id) {
@@ -3475,8 +3541,8 @@
 
       function setTerminalManualScrollActive() {
         state.terminalAutoFollow = false;
+        clearTerminalScrollIdleTimer();
         updateTerminalJumpToBottomButton();
-        scheduleTerminalResumeFollow();
       }
 
       function maybeScrollTerminalToBottom(reason) {
@@ -3687,6 +3753,7 @@
         var shouldScroll = opts.scroll !== false;
         var sessionChanged = state.terminalSessionId !== nextSessionId;
         var currentOutput = state.terminalOutput || "";
+        var liveChunkStream = !!(nextSessionId && state.terminalLiveStreamSessions[nextSessionId]);
         var wrote = false;
 
         if (normalizedOutput === currentOutput && !sessionChanged) {
@@ -3714,6 +3781,10 @@
           }
         } else if (normalizedOutput.length < currentOutput.length && !sessionChanged) {
           // Ignore regressive snapshots for the active session; wait for an explicit replace.
+          return false;
+        } else if (liveChunkStream && !sessionChanged && mode !== "replace" && currentOutput && !normalizedOutput.startsWith(currentOutput)) {
+          // When a session is already streaming live chunks, do not let polled snapshots
+          // rewrite the terminal unless they are strict appends of what we've rendered.
           return false;
         } else if (normalizedOutput.startsWith(currentOutput)) {
           var delta = normalizedOutput.slice(currentOutput.length);
@@ -3868,7 +3939,7 @@
         if (state.selectedId) {
           var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (session) {
-            syncTerminalBuffer(session.id, session.output || "", { mode: "replace", scroll: false });
+            syncTerminalBuffer(session.id, session.output || "", { mode: "append", scroll: false });
           }
         } else {
           state.terminal.writeln("点击上方「新对话」开始你的第一次对话。");
@@ -3991,6 +4062,26 @@
         return (selected && selected.provider) || state.preferredCommand || "claude";
       }
 
+      function getComposerPlaceholder(session, terminalInteractive) {
+        if (terminalInteractive) {
+          return "终端交互模式开启中，请直接在终端中输入";
+        }
+        if (session && session.provider === "codex") {
+          if (session.status !== "running") {
+            return "Codex 会话已结束，无法继续发送";
+          }
+          return state.currentView === "terminal"
+            ? "向 Codex 发送输入；terminal 为原始 TUI 输出"
+            : "向 Codex 发送输入；chat 为解析后的阅读视图";
+        }
+        if (session && !isStructuredSession(session) && session.status !== "running") {
+          return "会话已结束，无法继续发送";
+        }
+        return session && isStructuredSession(session) && session.structuredState && session.structuredState.inFlight
+          ? "思考中，可继续发送，消息会自动排队"
+          : "输入消息...";
+      }
+
       function getToolModeHint(tool, mode) {
         if (tool === "codex") {
           return "Codex 当前仅支持 PTY 透传，并固定以 full-access 启动。";
@@ -4053,7 +4144,14 @@
       function getSessionKindDescription(session) {
         return isStructuredSession(session)
           ? "结构化 · 块级记录"
-          : "终端 · PTY 会话";
+          : (session && session.provider === "codex"
+            ? "终端 · Codex PTY（chat 为解析视图）"
+            : "终端 · PTY 会话");
+      }
+
+      function shouldRequestChatFormat(session) {
+        if (!session) return false;
+        return isStructuredSession(session) || session.provider === "codex";
       }
 
       function isRecoverableToolError(toolResult, nextResult) {
@@ -4070,9 +4168,7 @@
       }
 
       function isStructuredSession(session) {
-        var result = !!session && (session.sessionKind === "structured" || session.runner === "claude-cli-print");
-        if (session) console.log("[WAND] isStructuredSession id:", session.id, "sessionKind:", session.sessionKind, "runner:", session.runner, "=>", result);
-        return result;
+        return !!session && (session.sessionKind === "structured" || session.runner === "claude-cli-print");
       }
 
       function syncComposerModeSelect() {
@@ -4124,23 +4220,30 @@
       function applyCurrentView() {
         var hasSession = !!state.selectedId;
         var terminalBtn = document.getElementById("view-terminal-btn");
+        var chatBtn = document.getElementById("view-chat-btn");
+        var toggleBar = document.getElementById("view-toggle-bar");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var structured = isStructuredSession(selectedSession);
         var showTerminal = hasSession && !structured && state.currentView === "terminal";
         var showChat = hasSession && (structured || state.currentView !== "terminal");
-        console.log("[WAND] applyCurrentView hasSession:", hasSession, "structured:", structured, "currentView:", state.currentView, "showTerminal:", showTerminal, "showChat:", showChat, "sessionKind:", selectedSession && selectedSession.sessionKind, "runner:", selectedSession && selectedSession.runner);
-
         if (structured) {
           state.currentView = "chat";
         } else if (!hasSession) {
           state.currentView = "terminal";
         }
 
+        if (toggleBar) {
+          toggleBar.classList.toggle("hidden", !hasSession);
+        }
         if (terminalBtn) {
           terminalBtn.classList.toggle("hidden", structured || !hasSession);
           terminalBtn.classList.toggle("active", showTerminal);
+        }
+        if (chatBtn) {
+          chatBtn.classList.toggle("hidden", !hasSession);
+          chatBtn.classList.toggle("active", showChat);
         }
         if (terminalContainer) {
           terminalContainer.classList.toggle("active", showTerminal);
@@ -4205,39 +4308,31 @@
 
       function updateSessionSnapshot(snapshot) {
         if (!snapshot || !snapshot.id) return;
-        if (snapshot.id === state.selectedId || (snapshot.sessionKind === "structured") || snapshot.structuredState) {
-          console.log("[WAND] updateSessionSnapshot", snapshot.id, JSON.stringify({
-            status: snapshot.status,
-            exitCode: snapshot.exitCode,
-            sessionKind: snapshot.sessionKind,
-            runner: snapshot.runner,
-            inFlight: snapshot.structuredState && snapshot.structuredState.inFlight,
-            msgCount: snapshot.messages && snapshot.messages.length
-          }));
-        }
+        var currentSession = state.sessions.find(function(session) { return session.id === snapshot.id; }) || null;
+        var normalizedSnapshot = normalizeStructuredSnapshot(snapshot, currentSession);
         var updated = false;
         var prevSession = null;
         state.sessions = state.sessions.map(function(session) {
-          if (session.id !== snapshot.id) return session;
+          if (session.id !== normalizedSnapshot.id) return session;
           prevSession = session;
           updated = true;
-          return Object.assign({}, session, snapshot);
+          return Object.assign({}, session, normalizedSnapshot);
         });
         if (!updated) {
-          state.sessions.unshift(snapshot);
+          state.sessions.unshift(normalizedSnapshot);
         }
-        var updatedSession = state.sessions.find(function(session) { return session.id === snapshot.id; }) || snapshot;
-        if (updatedSession && Array.isArray(updatedSession.queuedMessages) && snapshot.id === state.selectedId) {
+        var updatedSession = state.sessions.find(function(session) { return session.id === normalizedSnapshot.id; }) || normalizedSnapshot;
+        if (updatedSession && Array.isArray(updatedSession.queuedMessages) && normalizedSnapshot.id === state.selectedId) {
           syncStructuredQueueFromSession(updatedSession);
           saveStructuredQueue();
           updateStructuredQueueCounter();
         }
-        if (snapshot.id === state.selectedId) {
+        if (normalizedSnapshot.id === state.selectedId) {
           reconcileInteractiveState();
           updateTaskDisplay();
         }
         // When a session transitions to a non-running state, try flushing cross-session queue
-        if (snapshot.status && snapshot.status !== "running" && state.crossSessionQueue.length > 0) {
+        if (normalizedSnapshot.status && normalizedSnapshot.status !== "running" && state.crossSessionQueue.length > 0) {
           // Use setTimeout(0) to let the current event processing complete first
           setTimeout(flushCrossSessionQueue, 0);
         }
@@ -4257,6 +4352,7 @@
         var keepLocalOutput = localOutput.length > serverOutput.length;
         var localStructuredState = localSession.structuredState || null;
         var serverStructuredState = serverSession.structuredState || null;
+        var structuredSession = (localSession.sessionKind === "structured") || (serverSession.sessionKind === "structured");
         var localHasPendingAssistant = !!(localSession.messages && localSession.messages.length && (function() {
           var last = localSession.messages[localSession.messages.length - 1];
           return last && last.role === "assistant" && Array.isArray(last.content) && last.content.some(function(block) {
@@ -4270,8 +4366,12 @@
           && localHasPendingAssistant
           && !!localStructuredState.activeRequestId
           && (!serverStructuredState || !serverStructuredState.activeRequestId || serverStructuredState.activeRequestId === localStructuredState.activeRequestId);
-        var localMessages = Array.isArray(localSession.messages) ? localSession.messages : [];
-        var serverMessages = Array.isArray(serverSession.messages) ? serverSession.messages : [];
+        var localMessages = Array.isArray(localSession.messages)
+          ? (structuredSession ? stripRenderOnlyStructuredMessages(localSession.messages) : localSession.messages)
+          : [];
+        var serverMessages = Array.isArray(serverSession.messages)
+          ? (structuredSession ? stripRenderOnlyStructuredMessages(serverSession.messages) : serverSession.messages)
+          : [];
         var preserveLocalMessages = localMessages.length > serverMessages.length
           || (localMessages.length > 0 && serverMessages.length > 0
             && JSON.stringify(localMessages[localMessages.length - 1]) !== JSON.stringify(serverMessages[serverMessages.length - 1])
@@ -4312,6 +4412,9 @@
       function getPreferredMessages(session, fallbackOutput, allowFallback) {
         if (session && session.messages && session.messages.length > 0) {
           return session.messages;
+        }
+        if (session && session.sessionKind === "structured") {
+          return [];
         }
         if (!allowFallback) {
           return [];
@@ -4404,7 +4507,15 @@
             });
           })
           .catch(function(e) {
-            console.error("[wand] loadSessions failed:", e);
+            var message = (e && e.message) || "";
+            var isTransientAbort =
+              message === "Failed to fetch" ||
+              message === "NetworkError when attempting to fetch resource." ||
+              message === "Load failed" ||
+              /aborted|aborterror|networkerror|failed to fetch/i.test(message);
+            if (!isTransientAbort) {
+              console.error("[wand] loadSessions failed:", e);
+            }
           });
       }
 
@@ -4467,7 +4578,7 @@
         }
 
         if (selectedSession && state.terminal) {
-          syncTerminalBuffer(selectedSession.id, selectedSession.output || "", { mode: "replace" });
+          syncTerminalBuffer(selectedSession.id, selectedSession.output || "", { mode: "append", scroll: false });
         } else if (!selectedSession) {
           state.terminalSessionId = null;
           state.terminalOutput = "";
@@ -4504,7 +4615,7 @@
         }
         var sess = state.sessions.find(function(s) { return s.id === id; });
         var url = "/api/sessions/" + id;
-        if (isStructuredSession(sess)) {
+        if (shouldRequestChatFormat(sess)) {
           url += "?format=chat";
         }
         return fetch(url, { credentials: "same-origin" })
@@ -4525,19 +4636,13 @@
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
               state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, data.output, false));
 
-            if (state.terminal) {
-              syncTerminalBuffer(id, data.output || "", { mode: "replace" });
-            }
-
             renderChat(false);
           });
       }
 
       function selectSession(id) {
         var foundSession = state.sessions.find(function(item) { return item.id === id; });
-        console.log("[WAND] selectSession id:", id, "found:", !!foundSession, "sessionKind:", foundSession && foundSession.sessionKind, "runner:", foundSession && foundSession.runner, "isStructured:", isStructuredSession(foundSession));
         if (!foundSession) {
-          console.warn("[WAND] selectSession: session not found, skipping", id);
           return;
         }
         state.selectedId = id;
@@ -5243,7 +5348,9 @@
           }
         })
         .catch(function() {
-          showError(errorEl, "无法启动会话，请确认 Claude 已正确安装。");
+          showError(errorEl, command === "codex"
+            ? "无法启动 Codex 会话，请确认 codex 已正确安装并可在终端中执行。"
+            : "无法启动 Claude 会话，请确认 Claude 已正确安装。");
         })
         .finally(function() { _sessionCreating = false; });
       }
@@ -5888,6 +5995,7 @@
           credentials: "same-origin",
           body: JSON.stringify({
             command: preferredTool,
+            provider: preferredTool,
             cwd: defaultCwd,
             mode: mode,
             initialInput: value
@@ -5916,7 +6024,9 @@
           });
         })
         .catch(function(error) {
-          showToast((error && error.message) || "无法启动会话。", "error");
+          showToast((error && error.message) || (preferredTool === "codex"
+            ? "无法启动 Codex 会话。"
+            : "无法启动 Claude 会话。"), "error");
           welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
           welcomeInput.disabled = false;
         });
@@ -5955,6 +6065,7 @@
           credentials: "same-origin",
           body: JSON.stringify({
             command: preferredTool,
+            provider: preferredTool,
             cwd: defaultCwd,
             mode: mode,
             initialInput: value || undefined
@@ -5980,7 +6091,9 @@
           return loadOutput(data.id);
         })
         .catch(function(error) {
-          showToast((error && error.message) || "无法启动会话。", "error");
+          showToast((error && error.message) || (preferredTool === "codex"
+            ? "无法启动 Codex 会话。"
+            : "无法启动 Claude 会话。"), "error");
         });
       }
 
@@ -6077,8 +6190,11 @@
               showToast("会话未就绪，将稍后重试。", "info");
               return null;
             }
-            var submitDelay = readySession && readySession.provider === "codex" ? 220 : 0;
-            return sendTerminalChunks(submitChunks, "enter_text", submitDelay).then(function() {
+            var submitView = state.currentView;
+            if (readySession && readySession.provider === "codex" && state.selectedId !== readySession.id) {
+              throw new Error("Codex session changed before input send.");
+            }
+            return sendTerminalChunks(submitChunks, "enter_text", 0, submitView).then(function() {
               // Clear input only after the send succeeds
               if (inputBox && inputBox.value === value) {
                 inputBox.value = "";
@@ -6106,19 +6222,18 @@
         if (!isQueueing) {
           // Immediately render user message with thinking indicator
           var userTurn = { role: "user", content: [{ type: "text", text: input }] };
-          var thinkingTurn = { role: "assistant", content: [{ type: "text", text: "", __processing: true }] };
-          var userMsgs = Array.isArray(session.messages) ? session.messages.slice() : [];
-          userMsgs = userMsgs.filter(function(m) {
-            return !(m.role === "user" && m.content && m.content.some(function(b) { return b.__queued; }));
-          });
+          var userMsgs = stripRenderOnlyStructuredMessages(Array.isArray(session.messages) ? session.messages.slice() : []);
           userMsgs.push(userTurn);
-          userMsgs.push(thinkingTurn);
-          session.messages = userMsgs;
-          state.currentMessages = userMsgs;
-          if (session.structuredState) {
-            session.structuredState.inFlight = true;
-          }
-          session.status = "running";
+          var optimisticStructuredState = Object.assign({}, session.structuredState || {}, { inFlight: true });
+          updateSessionSnapshot({
+            id: session.id,
+            status: "running",
+            structuredState: optimisticStructuredState,
+          });
+          state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
+            status: "running",
+            structuredState: optimisticStructuredState,
+          }), userMsgs);
           updateInputHint("思考中…");
           renderChat(true);
         }
@@ -6154,9 +6269,10 @@
           }
         })
         .catch(function(error) {
-          if (session.structuredState) {
-            session.structuredState.inFlight = false;
-          }
+          updateSessionSnapshot({
+            id: session.id,
+            structuredState: Object.assign({}, session.structuredState || {}, { inFlight: false }),
+          });
           var message = (error && error.message) || "";
           var isTransientAbort =
             message === "Failed to fetch" ||
@@ -6191,16 +6307,22 @@
       // Append queued user message placeholders to currentMessages so they
       // remain visible across WS updates and re-renders.
       function buildMessagesForRender(session, messages) {
-        var base = Array.isArray(messages) ? messages.slice() : [];
+        var sanitized = Array.isArray(messages) ? stripRenderOnlyStructuredMessages(messages) : [];
+        var base = Array.isArray(sanitized) ? sanitized.slice() : [];
         if (!session || session.sessionKind !== "structured") {
           return base;
         }
         var queued = getStructuredQueuedInputs(session);
-        if (!queued || queued.length === 0) {
-          return base;
+        if (queued && queued.length > 0) {
+          for (var qi = 0; qi < queued.length; qi++) {
+            base.push({ role: "user", content: [{ type: "text", text: queued[qi], __queued: true }] });
+          }
         }
-        for (var qi = 0; qi < queued.length; qi++) {
-          base.push({ role: "user", content: [{ type: "text", text: queued[qi], __queued: true }] });
+        if (session.structuredState && session.structuredState.inFlight) {
+          var last = base[base.length - 1];
+          if (!last || last.role !== "assistant") {
+            base.push({ role: "assistant", content: [{ type: "text", text: "", __processing: true }] });
+          }
         }
         return base;
       }
@@ -6213,13 +6335,19 @@
       }
 
       function getInputErrorMessage(error) {
+        var selectedSession = getSelectedSession();
+        var isCodex = selectedSession && selectedSession.provider === "codex";
         if (error && (error.errorCode === "SESSION_NOT_RUNNING" || error.errorCode === "SESSION_NO_PTY")) {
-          return "会话已结束；若存在 Claude 历史会话，将在你下次发送消息时自动恢复。";
+          return isCodex
+            ? "Codex 会话已结束，请新建会话后继续。"
+            : "会话已结束；若存在 Claude 历史会话，将在你下次发送消息时自动恢复。";
         }
         if (error && error.errorCode === "SESSION_NOT_FOUND") {
           return "会话不存在，请重新选择或新建会话。";
         }
-        return (error && error.message) || "会话暂不可用；若存在 Claude 历史会话，将自动尝试恢复。";
+        return (error && error.message) || (isCodex
+          ? "Codex 会话暂不可用，请检查终端视图或新建会话。"
+          : "会话暂不可用；若存在 Claude 历史会话，将自动尝试恢复。");
       }
 
       function buildInputError(payload) {
@@ -6297,7 +6425,7 @@
         return [text + String.fromCharCode(13)];
       }
 
-      function sendTerminalChunks(chunks, shortcutKey, delayMs) {
+      function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride) {
         var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) { return !!chunk; }) : [];
         if (sequence.length === 0) {
           return Promise.resolve();
@@ -6309,10 +6437,10 @@
               return new Promise(function(resolve) {
                 setTimeout(resolve, delay);
               }).then(function() {
-                return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined);
+                return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined, viewOverride);
               });
             }
-            return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined);
+            return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined, viewOverride);
           });
         }, Promise.resolve());
       }
@@ -6327,11 +6455,11 @@
         });
       }
 
-      function queueDirectInput(input, shortcutKey) {
+      function queueDirectInput(input, shortcutKey, viewOverride) {
         if (!input || !state.selectedId) return Promise.resolve();
         state.messageQueue.push(input);
         state.inputQueue = state.inputQueue.then(function() {
-          return postInput(input, shortcutKey).finally(function() {
+          return postInput(input, shortcutKey, viewOverride).finally(function() {
             var idx = state.messageQueue.indexOf(input);
             if (idx > -1) state.messageQueue.splice(idx, 1);
             scheduleMobileDomUpdate();
@@ -6340,8 +6468,9 @@
         return state.inputQueue;
       }
 
-      function postInput(input, shortcutKey) {
+      function postInput(input, shortcutKey, viewOverride) {
         if (!state.selectedId) return Promise.resolve();
+        var effectiveView = viewOverride || state.currentView;
 
         // Pre-check: don't send if session is not running
         if (!isSelectedSessionRunning()) {
@@ -6380,7 +6509,7 @@
         console.log("[wand] postInput: sending", {
           sessionId: state.selectedId,
           inputLength: input.length,
-          view: state.currentView,
+          view: effectiveView,
           wsConnected: state.wsConnected
         });
 
@@ -6388,7 +6517,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ input: input, view: state.currentView, shortcutKey: shortcutKey || undefined })
+          body: JSON.stringify({ input: input, view: effectiveView, shortcutKey: shortcutKey || undefined })
         })
         .then(function(res) {
           if (!res.ok) {
@@ -6604,6 +6733,9 @@
       function updateInteractiveControls() {
         var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
         var structured = isStructuredSession(selectedSession);
+        var isCodex = selectedSession && selectedSession.provider === "codex";
+        var isRunning = !!selectedSession && selectedSession.status === "running";
+        var composer = document.getElementById("input-box");
         // Update both toggle buttons (topbar and terminal-header)
         var toggles = ["terminal-interactive-toggle-top"];
         toggles.forEach(function(id) {
@@ -6619,7 +6751,27 @@
         var expandedRow = document.querySelector(".inline-shortcuts-expanded-row");
         if (expandedRow) expandedRow.classList.toggle("hidden", structured || state.currentView !== "terminal");
         var inputHint = document.querySelector(".input-hint");
-        if (inputHint) inputHint.classList.toggle("hidden", structured ? true : state.currentView === "terminal");
+        if (inputHint) {
+          inputHint.classList.toggle("hidden", structured ? true : state.currentView === "terminal");
+          if (!structured && selectedSession) {
+            inputHint.textContent = isCodex
+              ? "Enter 发送 · chat 为解析视图，terminal 为原始输出"
+              : "Enter 发送 · Shift+Enter 换行";
+          }
+        }
+        var disableStructuredInput = !!selectedSession && structured && isCodex && !isRunning;
+        if (composer) {
+          composer.placeholder = getComposerPlaceholder(selectedSession, state.terminalInteractive);
+          composer.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning);
+          composer.setAttribute("aria-disabled", composer.disabled ? "true" : "false");
+        }
+        var sendBtn = document.getElementById("send-input-button");
+        if (sendBtn) {
+          sendBtn.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning);
+          sendBtn.setAttribute("title", isCodex
+            ? (isRunning ? "发送给 Codex" : "Codex 会话已结束")
+            : (structured ? "发送" : (!selectedSession || isRunning ? "发送" : "会话已结束")));
+        }
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
       }
@@ -8058,7 +8210,7 @@
 
       function initTerminalResizeHandle() {
         // 终端容器拖动调整大小功能
-        var container = document.getElementById("terminal-container");
+        var container = document.getElementById("output");
         if (!container) return;
 
         // 创建拖动手柄
@@ -8365,17 +8517,6 @@
               if (msg.sessionId === state.selectedId) {
                 var updatedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; }) || snapshot;
                 state.currentMessages = buildMessagesForRender(updatedSession, getPreferredMessages(updatedSession, msg.data.output, false));
-                // Structured session with inFlight: keep __processing placeholder
-                // so the loading indicator stays visible until assistant content arrives
-                if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
-                  var outSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
-                  if (outSession && outSession.structuredState && outSession.structuredState.inFlight) {
-                    var lastCur = state.currentMessages[state.currentMessages.length - 1];
-                    if (!lastCur || lastCur.role !== 'assistant') {
-                      state.currentMessages.push({ role: "assistant", content: [{ type: "text", text: "", __processing: true }] });
-                    }
-                  }
-                }
                 updateTaskDisplay();
                 // Structured sessions: render immediately for responsiveness
                 if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
@@ -8391,10 +8532,13 @@
               if (msg.data.chunk && (!state.terminalSessionId || state.terminalSessionId === msg.sessionId)) {
                 // Fast path: write chunk directly to avoid full-output comparison
                 // which can trigger terminal.reset() and cause screen flicker.
+                state.terminalLiveStreamSessions[msg.sessionId] = true;
                 state.terminal.write(msg.data.chunk);
                 state.terminalSessionId = msg.sessionId;
                 if (msg.data.output) {
                   state.terminalOutput = normalizeTerminalOutput(msg.data.output);
+                } else {
+                  state.terminalOutput = normalizeTerminalOutput((state.terminalOutput || "") + msg.data.chunk);
                 }
                 maybeScrollTerminalToBottom("output");
                 updateTerminalJumpToBottomButton();
@@ -8518,7 +8662,7 @@
               renderChat(true);
               updateTaskDisplay();
               updateApprovalStats();
-              updateTerminalOutput(msg.data.output || "", msg.sessionId, "replace");
+              updateTerminalOutput(msg.data.output || "", msg.sessionId, "append");
               // Ensure terminal is properly fitted after receiving initial data
               scheduleTerminalResize(true);
             }
@@ -8535,7 +8679,6 @@
             break;
           case 'status':
             if (msg.sessionId && msg.data) {
-              console.log('[WAND] ws status', msg.sessionId, JSON.stringify(msg.data));
               var statusUpdate = { id: msg.sessionId };
               if (Object.prototype.hasOwnProperty.call(msg.data, 'status')) {
                 statusUpdate.status = msg.data.status;
@@ -8648,8 +8791,14 @@
         var permissionLabel = document.getElementById("permission-actions-label");
         if (!taskEl) return;
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (selectedSession && selectedSession.provider === "codex") {
+          if (permissionActionsEl) permissionActionsEl.classList.add("hidden");
+          taskEl.classList.remove("permission-blocked");
+        }
         var pendingEscalation = selectedSession && selectedSession.pendingEscalation ? selectedSession.pendingEscalation : null;
-        var isBlocked = pendingEscalation || (selectedSession && selectedSession.permissionBlocked);
+        var isBlocked = selectedSession && selectedSession.provider !== "codex"
+          ? (pendingEscalation || selectedSession.permissionBlocked)
+          : false;
 
         if (isBlocked) {
           var isAutoApprove = selectedSession && selectedSession.autoApprovePermissions;
@@ -8783,6 +8932,11 @@
 
       function toggleAutoApprove() {
         if (!state.selectedId) return;
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (selectedSession && selectedSession.provider === "codex") {
+          showToast("Codex 会话固定以 full-access PTY 启动，不支持切换自动批准。", "info");
+          return;
+        }
         var toggle = document.getElementById("auto-approve-toggle");
         if (toggle) toggle.style.opacity = "0.5";
         fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/toggle-auto-approve", {
@@ -8812,6 +8966,12 @@
         var toggle = document.getElementById("auto-approve-toggle");
         if (!toggle) return;
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (selectedSession && selectedSession.provider === "codex") {
+          toggle.className = "auto-approve-indicator active";
+          toggle.title = "Codex 固定以 full-access PTY 启动，不支持切换自动批准";
+          toggle.textContent = "🛡 Codex 固定全权限";
+          return;
+        }
         var enabled = selectedSession && selectedSession.autoApprovePermissions;
         if (enabled) {
           toggle.className = "auto-approve-indicator active";
@@ -8844,6 +9004,10 @@
         }
         applyCurrentView();
         reconcileInteractiveState();
+        var selectedSession = getSelectedSession();
+        if (selectedSession) {
+          state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, selectedSession.output, true));
+        }
         updateTerminalJumpToBottomButton();
         if (state.currentView === "terminal") {
           state.terminalViewportSize = { width: 0, height: 0 };
@@ -9679,6 +9843,74 @@
         }, 150);
       }
 
+      function isNoiseLine(line) {
+        if (!line) return false;
+        var trimmed = String(line).trim();
+        if (!trimmed) return false;
+        if (trimmed.indexOf("────") === 0) return true;
+        if (trimmed === "❯" || trimmed === "›") return true;
+        if (/^[╭╰│┌└┐┘├┤┬┴┼─═]{2,}$/.test(trimmed)) return true;
+        if (/^[▁▂▃▄▅▆▇█▔▕▏▐]+$/.test(trimmed)) return true;
+        if (trimmed.indexOf("esc to interrupt") !== -1) return true;
+        if (trimmed.indexOf("Claude Code v") !== -1) return true;
+        if (/^Sonnet\b/.test(trimmed)) return true;
+        if (trimmed.indexOf("Failed to install Anthropic") !== -1) return true;
+        if (trimmed.indexOf("Claude Code has switched") !== -1) return true;
+        if (trimmed.indexOf("? for shortcuts") !== -1) return true;
+        if (trimmed.indexOf("Claude is waiting") !== -1) return true;
+        if (trimmed.indexOf("[wand]") !== -1) return true;
+        if (trimmed.indexOf("0;") === 0 || trimmed.indexOf("9;") === 0) return true;
+        if (trimmed.indexOf("ctrl+g") !== -1) return true;
+        if (trimmed.indexOf("/effort") !== -1) return true;
+        if (/^Using .* for .* session/.test(trimmed)) return true;
+        if (trimmed.indexOf("Press ") === 0 && trimmed.indexOf(" for") !== -1) return true;
+        if (trimmed.indexOf("type ") === 0 && trimmed.indexOf(" to ") !== -1) return true;
+        if (trimmed.indexOf("auto mode is unavailable") !== -1) return true;
+        if (/MCP server.*failed/i.test(trimmed)) return true;
+        if (trimmed.indexOf("Germinating") !== -1 || trimmed.indexOf("Doodling") !== -1 || trimmed.indexOf("Brewing") !== -1) return true;
+        if (trimmed.indexOf("Permissions") !== -1 && trimmed.indexOf("mode") !== -1) return true;
+        if (trimmed.indexOf("●") === 0 && trimmed.indexOf("·") !== -1) return true;
+        if (trimmed.indexOf("[>") === 0 || trimmed.indexOf("[<") === 0) return true;
+        if (trimmed.indexOf("Captured Claude session ID") !== -1) return true;
+        if (/^>_\s*OpenAI Codex\b/.test(trimmed)) return true;
+        if (/^OpenAI Codex\b/i.test(trimmed)) return true;
+        if (/^(model|directory):\s+/i.test(trimmed)) return true;
+        if (/^(tip|context):\s+/i.test(trimmed)) return true;
+        if (/^work(tree|space):\s+/i.test(trimmed)) return true;
+        if (/^(approvals?|sandbox|provider|session id):\s+/i.test(trimmed)) return true;
+        if (/^(thinking|working)(\.\.\.|…)?$/i.test(trimmed)) return true;
+        if (/^[•◦·]\s+Working\b/i.test(trimmed)) return true;
+        if (/^[•◦·]\s+(Running|Planning|Applying|Reading|Searching)\b/i.test(trimmed)) return true;
+        if (/^[•◦·]\s+(Inspecting|Reviewing|Summarizing|Editing|Updating|Writing)\b/i.test(trimmed)) return true;
+        if (/^[•◦·]\s+Completed\b/i.test(trimmed)) return true;
+        if (/^(ctrl|enter|tab|shift|esc|alt)\+/i.test(trimmed)) return true;
+        if (/\b(open|close|toggle) (chat|terminal)\b/i.test(trimmed)) return true;
+        if (/\b(approve|deny)\b.*\b(permission|approval)\b/i.test(trimmed)) return true;
+        if (/^(use|press) .* (to|for) .*/i.test(trimmed)) return true;
+        if (/^(?:token|context window|remaining context|conversation):\s+/i.test(trimmed)) return true;
+        if (/^(?:cwd|path):\s+\//i.test(trimmed)) return true;
+        if (/^[<>│┆╎].*[<>│┆╎]$/.test(trimmed) && trimmed.length < 8) return true;
+        return false;
+      }
+
+      function stripAnsi(text) {
+        return String(text || "")
+          .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")
+          .replace(/\x1b\[(\d+)C/g, function(_match, count) { return " ".repeat(Number(count) || 1); })
+          .replace(/\x1b\[[0-9;?]*[AB]/g, "\n")
+          .replace(/\x1b\[[0-9;?]*[su]/g, "")
+          .replace(/\x1b\[[0-9;?]*[HfJKr]/g, "\n")
+          .replace(/\x1bM/g, "\n")
+          .replace(/\x1b\[[0-9;?]*[ST]/g, "\n")
+          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+          .replace(/\x1b[><=ePX^_]/g, "")
+          .replace(/[\u00a0\u200b-\u200d\ufeff]/g, " ")
+          .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+          .replace(/\r\n?/g, "\n")
+          .replace(/[ \t]+\n/g, "\n")
+          .replace(/\n{3,}/g, "\n\n");
+      }
+
       function parseMessages(output, command) {
         var messages = [];
         if (!output) return messages;
@@ -9687,6 +9919,269 @@
         var newline = String.fromCharCode(10);
         var carriageReturn = String.fromCharCode(13);
         var esc = String.fromCharCode(27);
+
+        if (/^codex\b/.test(String(command || "").trim())) {
+          var codexFooterRe = /\bgpt-\d+(?:\.\d+)?(?:\s+[a-z0-9.-]+)?\s+·\s+\d+%\s+left\s+·\s+(?:\/|~\/).+/i;
+          var codexActivityRe = /^(?:thinking|working|running|planning|applying|reading|searching|inspecting|reviewing|summarizing|editing|updating|writing|completed)\b/i;
+
+          function stripCodexSegment(raw) {
+            return String(raw || "")
+              .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")
+              .replace(/\x1b\[(\d+)C/g, function(_match, count) { return " ".repeat(Number(count) || 1); })
+              .replace(/\x1b\[[0-9;?]*[AB]/g, newline)
+              .replace(/\x1b\[[0-9;?]*[su]/g, "")
+              .replace(/\x1b\[[0-9;?]*[HfJKr]/g, newline)
+              .replace(/\x1bM/g, newline)
+              .replace(/\x1b\[[0-9;?]*[ST]/g, newline)
+              .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+              .replace(/\x1b[><=ePX^_]/g, "")
+              .replace(/[\u00a0\u200b-\u200d\ufeff]/g, " ")
+              .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+              .replace(/[ \t]+\n/g, newline);
+          }
+
+          function normalizeCodexText(value) {
+            return String(value || "")
+              .replace(/\s+/g, " ")
+              .replace(/[M]+$/g, "")
+              .trim();
+          }
+
+          function normalizeCodexPromptLine(line) {
+            return String(line || "")
+              .replace(/^›\s*/, "")
+              .replace(/^>\s*/, "")
+              .trim();
+          }
+
+          function shouldIgnoreCodexLine(line) {
+            var trimmed = String(line || "").trim();
+            if (!trimmed) return true;
+            if (isNoiseLine(trimmed)) return true;
+            if (codexFooterRe.test(trimmed)) return true;
+            if (/^[╭╰│┌└┐┘├┤┬┴┼─═]/.test(trimmed)) return true;
+            if (/^\[>[0-9;?]*u$/i.test(trimmed)) return true;
+            if (/^M+$/i.test(trimmed)) return true;
+            if (/^(?:OpenAI Codex|Codex)\b/i.test(trimmed)) return true;
+            if (/^(?:tokens?|context window|remaining context|approvals?|sandbox|provider|session id):\s*/i.test(trimmed)) return true;
+            if (/^(?:thinking|working)\s*(?:\.\.\.|…)?$/i.test(trimmed)) return true;
+            if (/^[•◦·]\s+(?:thinking|working|running|planning|applying|reading|searching|inspecting|reviewing|summarizing|editing|updating|writing|completed)\b/i.test(trimmed)) return true;
+            if (/^(?:model|directory|tip|context|cwd|path):\s+/i.test(trimmed)) return true;
+            return false;
+          }
+
+          function extractCodexPromptCandidate(line) {
+            var trimmed = String(line || "").trim();
+            if (!/^›(?:\s|$)/.test(trimmed)) return null;
+            if (codexFooterRe.test(trimmed)) return null;
+            var prompt = normalizeCodexText(normalizeCodexPromptLine(trimmed));
+            if (!prompt || shouldIgnoreCodexLine(prompt)) return null;
+            return prompt;
+          }
+
+          function extractCodexAssistantCandidate(line) {
+            var trimmed = String(line || "").trim();
+            if (!/^[•◦·⏺]/.test(trimmed)) return null;
+
+            var assistant = trimmed
+              .replace(/^[•◦·]\s*/, "")
+              .replace(/^⏺\s+/, "")
+              .replace(/^│\s*/, "")
+              .trim();
+            if (!assistant || /^[•◦·⏺]$/.test(assistant)) return null;
+
+            assistant = assistant
+              .replace(/\s*\(\d+[smh]?\s*•\s*esc to interrupt\)[\s\S]*$/i, "")
+              .replace(/(?:[a-z]{1,6})?›[\s\S]*$/, "")
+              .replace(/\s{2,}gpt-\d[\s\S]*$/i, "")
+              .replace(/\b(?:OpenAI Codex|model:|directory:|Tip:)\b[\s\S]*$/i, "");
+            assistant = normalizeCodexText(assistant);
+
+            if (!assistant || assistant.length < 2 || codexActivityRe.test(assistant) || shouldIgnoreCodexLine(assistant)) {
+              return null;
+            }
+            return assistant;
+          }
+
+          function extractCodexEchoCandidate(line) {
+            var trimmed = normalizeCodexText(line);
+            if (!trimmed || shouldIgnoreCodexLine(trimmed)) return null;
+            if (/^[•◦·⏺›]/.test(trimmed)) return null;
+            if (/^[\[\]<>0-9;?]+u?$/i.test(trimmed)) return null;
+            if (/^[╭╰│┌└┐┘├┤┬┴┼─═]/.test(trimmed)) return null;
+            if (trimmed.length > 500) return null;
+            return trimmed;
+          }
+
+          function isLikelyAssistantTailArtifact(longer, shorter) {
+            if (longer.indexOf(shorter) !== 0) return false;
+            var suffix = longer.slice(shorter.length);
+            return /^[a-z]{1,4}$/i.test(suffix);
+          }
+
+          function coalesceAssistantLines(lines) {
+            var collected = [];
+            for (var i = 0; i < lines.length; i++) {
+              var normalized = normalizeCodexText(lines[i]);
+              if (!normalized || normalized.length < 2 || shouldIgnoreCodexLine(normalized)) continue;
+
+              var previous = collected[collected.length - 1];
+              if (!previous) {
+                collected.push(normalized);
+                continue;
+              }
+              if (normalized === previous) continue;
+              if (normalized.indexOf(previous) === 0) {
+                collected[collected.length - 1] = normalized;
+                continue;
+              }
+              if (previous.indexOf(normalized) === 0) {
+                if (isLikelyAssistantTailArtifact(previous, normalized)) {
+                  collected[collected.length - 1] = normalized;
+                }
+                continue;
+              }
+              collected.push(normalized);
+            }
+            return collected.join(newline).trim();
+          }
+
+          function extractVisiblePrompt(lines) {
+            for (var i = 0; i < lines.length; i++) {
+              var line = String(lines[i] || "").trim();
+              if (!line) continue;
+
+              var inlinePrompt = extractCodexPromptCandidate(line);
+              if (inlinePrompt) return inlinePrompt;
+
+              if (line === "›") {
+                for (var j = i + 1; j < lines.length; j++) {
+                  var nextLine = normalizeCodexText(lines[j]);
+                  if (!nextLine || codexFooterRe.test(nextLine) || shouldIgnoreCodexLine(nextLine)) continue;
+                  return nextLine;
+                }
+              }
+            }
+            return null;
+          }
+
+          function extractVisibleAssistantLines(lines) {
+            var assistantLines = [];
+            var collecting = false;
+
+            for (var i = 0; i < lines.length; i++) {
+              var line = String(lines[i] || "").trim();
+              if (!line) {
+                if (collecting) break;
+                continue;
+              }
+
+              var assistant = extractCodexAssistantCandidate(line);
+              if (assistant) {
+                assistantLines.push(assistant);
+                collecting = true;
+                continue;
+              }
+
+              if (collecting) {
+                if (line === "›" || /^›(?:\s|$)/.test(line) || codexFooterRe.test(line) || shouldIgnoreCodexLine(line)) {
+                  break;
+                }
+                assistantLines.push(normalizeCodexText(line));
+              }
+            }
+
+            return assistantLines;
+          }
+
+          var rawCandidates = [];
+          var candidateOrder = 0;
+          var rawSegments = text.replace(/\r\n?/g, newline).split(newline);
+          for (var rs = 0; rs < rawSegments.length; rs++) {
+            var cleanedSegment = stripCodexSegment(rawSegments[rs]);
+            var pieces = cleanedSegment.split(newline);
+            for (var pi = 0; pi < pieces.length; pi++) {
+              var piece = String(pieces[pi] || "").trim();
+              if (!piece) continue;
+
+              var promptCandidate = extractCodexPromptCandidate(piece);
+              if (promptCandidate) {
+                rawCandidates.push({ kind: "user", order: candidateOrder++, text: promptCandidate });
+                continue;
+              }
+
+              var assistantCandidate = extractCodexAssistantCandidate(piece);
+              if (assistantCandidate) {
+                rawCandidates.push({ kind: "assistant", order: candidateOrder++, text: assistantCandidate });
+                continue;
+              }
+
+              var echoCandidate = extractCodexEchoCandidate(piece);
+              if (echoCandidate) {
+                rawCandidates.push({ kind: "echo", order: candidateOrder++, text: echoCandidate });
+              }
+            }
+          }
+
+          var candidates = rawCandidates.filter(function(candidate, index, list) {
+            var previous = list[index - 1];
+            return !previous || previous.kind !== candidate.kind || previous.text !== candidate.text;
+          });
+
+          var explicitUsers = candidates.filter(function(candidate) { return candidate.kind === "user"; });
+          var assistantCandidates = candidates.filter(function(candidate) { return candidate.kind === "assistant"; });
+          var echoCandidates = candidates.filter(function(candidate) { return candidate.kind === "echo"; });
+          var strippedOutput = stripAnsi(text);
+          var strippedLines = strippedOutput.split(newline).map(function(line) { return String(line || "").trimEnd(); });
+          var visiblePrompt = extractVisiblePrompt(strippedLines);
+          var latestExplicitUser = explicitUsers.length ? explicitUsers[explicitUsers.length - 1] : null;
+          var echoedUserCandidates = echoCandidates
+            .map(function(candidate) { return candidate.text; })
+            .filter(function(value) { return value.length >= 3; });
+          var latestEchoUser = null;
+          for (var eu = echoedUserCandidates.length - 1; eu >= 0; eu--) {
+            if (echoedUserCandidates[eu] !== visiblePrompt) {
+              latestEchoUser = echoedUserCandidates[eu];
+              break;
+            }
+          }
+          if (!latestEchoUser && echoedUserCandidates.length) {
+            latestEchoUser = echoedUserCandidates[echoedUserCandidates.length - 1];
+          }
+
+          var currentUser = latestExplicitUser ? latestExplicitUser.text : latestEchoUser;
+          var rawAssistantLines = assistantCandidates
+            .filter(function(candidate) { return !latestExplicitUser || candidate.order > latestExplicitUser.order; })
+            .map(function(candidate) { return candidate.text; });
+          var visibleAssistantFallback = [];
+          var bulletMatches = strippedOutput.match(/^[ \t]*[•◦·⏺][ \t]*(.+)$/gm) || [];
+          for (var bm = 0; bm < bulletMatches.length; bm++) {
+            var bulletContent = normalizeCodexText(bulletMatches[bm].replace(/^[ \t]*[•◦·⏺][ \t]*/, ""));
+            if (!bulletContent) continue;
+            if (codexActivityRe.test(bulletContent)) continue;
+            if (codexFooterRe.test(bulletContent)) continue;
+            if (/\b(?:OpenAI Codex|model:|directory:|Tip:|esc to interrupt)\b/i.test(bulletContent)) continue;
+            visibleAssistantFallback.push(bulletContent);
+          }
+
+          var assistantText = coalesceAssistantLines(rawAssistantLines)
+            || coalesceAssistantLines(extractVisibleAssistantLines(strippedLines))
+            || (visibleAssistantFallback.length ? visibleAssistantFallback[visibleAssistantFallback.length - 1] : null);
+
+          if (currentUser) {
+            messages.push({ role: "user", content: currentUser });
+          }
+          if (assistantText) {
+            messages.push({ role: "assistant", content: assistantText });
+          }
+          if (!messages.length && latestExplicitUser) {
+            messages.push({ role: "user", content: latestExplicitUser.text });
+          } else if (!messages.length && latestEchoUser) {
+            messages.push({ role: "user", content: latestEchoUser });
+          }
+
+          return messages;
+        }
 
         // Optimized ANSI escape sequence stripping
         // Handles: CSI sequences, OSC sequences, single-character escapes, control chars

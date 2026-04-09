@@ -120,6 +120,28 @@ export class SessionLogger {
     }
   }
 
+  /** Read the full PTY transcript including rotated logs, oldest first. */
+  readPtyOutput(sessionId: string): string | null {
+    try {
+      const dir = this.ensureDir(sessionId);
+      const parts: string[] = [];
+      for (let index = PTY_LOG_MAX_ROTATIONS; index >= 1; index -= 1) {
+        const rotatedPath = path.join(dir, `pty-output.log.${index}`);
+        if (existsSync(rotatedPath)) {
+          parts.push(readFileSync(rotatedPath, "utf8"));
+        }
+      }
+      const currentPath = path.join(dir, "pty-output.log");
+      if (existsSync(currentPath)) {
+        parts.push(readFileSync(currentPath, "utf8"));
+      }
+      if (parts.length === 0) return null;
+      return parts.join("");
+    } catch {
+      return null;
+    }
+  }
+
   /** Append a native mode NDJSON event */
   appendStreamEvent(sessionId: string, event: unknown): void {
     try {

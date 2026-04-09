@@ -7,41 +7,75 @@
 /** Strip ANSI escape sequences and control characters from raw PTY output. */
 export function stripAnsi(text: string): string {
   return text
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")       // CSI sequences
-    .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")    // OSC sequences
-    .replace(/\x1b[><=ePX^_]/g, "")                  // Single-char escapes
+    .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[(\d+)C/g, (_match, count) => " ".repeat(Number(count) || 1))
+    .replace(/\x1b\[[0-9;?]*[AB]/g, "\n")
+    .replace(/\x1b\[[0-9;?]*[su]/g, "")
+    .replace(/\x1b\[[0-9;?]*[HfJKr]/g, "\n")
+    .replace(/\x1bM/g, "\n")
+    .replace(/\x1b\[[0-9;?]*[ST]/g, "\n")
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+    .replace(/\x1b[><=ePX^_]/g, "")
+    .replace(/[\u00a0\u200b-\u200d\ufeff]/g, " ")
     // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")    // Control chars (keep \t \n \r)
-    .replace(/\r\n?/g, "\n");
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\t ]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 /** Lines considered as UI noise that should be excluded from chat view. */
 export function isNoiseLine(line: string): boolean {
   if (!line) return false;
-  if (line.startsWith("────")) return true;
-  if (line === "❯") return true;
-  if (line.includes("esc to interrupt")) return true;
-  if (line.includes("Claude Code v")) return true;
-  if (/^Sonnet\b/.test(line)) return true;
-  if (line.includes("Failed to install Anthropic")) return true;
-  if (line.includes("Claude Code has switched")) return true;
-  if (line.includes("? for shortcuts")) return true;
-  if (line.includes("Claude is waiting")) return true;
-  if (line.includes("[wand]")) return true;
-  if (line.startsWith("0;") || line.startsWith("9;")) return true;
-  if (line.includes("ctrl+g")) return true;
-  if (line.includes("/effort")) return true;
-  if (/^Using .* for .* session/.test(line)) return true;
-  if (line.startsWith("Press ") && line.includes(" for")) return true;
-  if (line.startsWith("type ") && line.includes(" to ")) return true;
-  if (line.includes("auto mode is unavailable")) return true;
-  if (/MCP server.*failed/i.test(line)) return true;
-  if (line.includes("Germinating") || line.includes("Doodling") || line.includes("Brewing")) return true;
-  if (line.includes("Permissions") && line.includes("mode")) return true;
-  if (line.startsWith("●") && line.includes("·")) return true;
-  if (line.startsWith("[>") || line.startsWith("[<")) return true;
-  if (line.includes("Captured Claude session ID")) return true;
-  if (line.includes("/effort")) return true;
+
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+
+  if (trimmed.startsWith("────")) return true;
+  if (trimmed === "❯" || trimmed === "›") return true;
+  if (/^[╭╰│┌└┐┘├┤┬┴┼─═]{2,}$/.test(trimmed)) return true;
+  if (/^[▁▂▃▄▅▆▇█▔▕▏▐]+$/.test(trimmed)) return true;
+  if (trimmed.includes("esc to interrupt")) return true;
+  if (trimmed.includes("Claude Code v")) return true;
+  if (/^Sonnet\b/.test(trimmed)) return true;
+  if (trimmed.includes("Failed to install Anthropic")) return true;
+  if (trimmed.includes("Claude Code has switched")) return true;
+  if (trimmed.includes("? for shortcuts")) return true;
+  if (trimmed.includes("Claude is waiting")) return true;
+  if (trimmed.includes("[wand]")) return true;
+  if (trimmed.startsWith("0;") || trimmed.startsWith("9;")) return true;
+  if (trimmed.includes("ctrl+g")) return true;
+  if (trimmed.includes("/effort")) return true;
+  if (/^Using .* for .* session/.test(trimmed)) return true;
+  if (trimmed.startsWith("Press ") && trimmed.includes(" for")) return true;
+  if (trimmed.startsWith("type ") && trimmed.includes(" to ")) return true;
+  if (trimmed.includes("auto mode is unavailable")) return true;
+  if (/MCP server.*failed/i.test(trimmed)) return true;
+  if (trimmed.includes("Germinating") || trimmed.includes("Doodling") || trimmed.includes("Brewing")) return true;
+  if (trimmed.includes("Permissions") && trimmed.includes("mode")) return true;
+  if (trimmed.startsWith("●") && trimmed.includes("·")) return true;
+  if (trimmed.startsWith("[>") || trimmed.startsWith("[<")) return true;
+  if (trimmed.includes("Captured Claude session ID")) return true;
+
+  if (/^>_\s*OpenAI Codex\b/.test(trimmed)) return true;
+  if (/^OpenAI Codex\b/i.test(trimmed)) return true;
+  if (/^(model|directory):\s+/i.test(trimmed)) return true;
+  if (/^(tip|context):\s+/i.test(trimmed)) return true;
+  if (/^work(tree|space):\s+/i.test(trimmed)) return true;
+  if (/^(approvals?|sandbox|provider|session id):\s+/i.test(trimmed)) return true;
+  if (/^(thinking|working)(\.\.\.|…)?$/i.test(trimmed)) return true;
+  if (/^[•◦·]\s+Working\b/i.test(trimmed)) return true;
+  if (/^[•◦·]\s+(Running|Planning|Applying|Reading|Searching)\b/i.test(trimmed)) return true;
+  if (/^[•◦·]\s+(Inspecting|Reviewing|Summarizing|Editing|Updating|Writing)\b/i.test(trimmed)) return true;
+  if (/^[•◦·]\s+Completed\b/i.test(trimmed)) return true;
+  if (/^(ctrl|enter|tab|shift|esc|alt)\+/i.test(trimmed)) return true;
+  if (/\b(open|close|toggle) (chat|terminal)\b/i.test(trimmed)) return true;
+  if (/\b(approve|deny)\b.*\b(permission|approval)\b/i.test(trimmed)) return true;
+  if (/^(use|press) .* (to|for) .*/i.test(trimmed)) return true;
+  if (/^(?:token|context window|remaining context|conversation):\s+/i.test(trimmed)) return true;
+  if (/^(?:cwd|path):\s+\//i.test(trimmed)) return true;
+  if (/^[<>│┆╎].*[<>│┆╎]$/.test(trimmed) && trimmed.length < 8) return true;
+
   return false;
 }
 
