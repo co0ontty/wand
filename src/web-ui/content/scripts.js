@@ -60,6 +60,335 @@
       var configPath = "${escapeHtml(configPath)}";
       var CHAT_EXPAND_STATE_STORAGE_KEY = "wand-chat-expand-state-v1";
       var CHAT_AUTO_FOLLOW_STORAGE_KEY = "wand-chat-auto-follow";
+      var DEFAULT_PANEL_STATE = {
+        sessionsDrawerOpen: false,
+        filePanelOpen: false,
+        shortcutsExpanded: false,
+        claudeHistoryExpanded: true,
+        chatMessageExpanded: true,
+        structuredThinkingExpanded: true,
+        structuredToolGroupExpanded: false,
+        structuredInlineToolExpanded: false,
+        structuredTerminalExpanded: false,
+        structuredToolCardExpanded: false,
+      };
+
+      function getConfiguredPanelDefaults(configOverride) {
+        var currentConfig = configOverride;
+        if (!currentConfig || typeof currentConfig !== "object") {
+          return {
+            sessionsDrawerOpen: DEFAULT_PANEL_STATE.sessionsDrawerOpen,
+            filePanelOpen: DEFAULT_PANEL_STATE.filePanelOpen,
+            shortcutsExpanded: DEFAULT_PANEL_STATE.shortcutsExpanded,
+            claudeHistoryExpanded: DEFAULT_PANEL_STATE.claudeHistoryExpanded,
+            chatMessageExpanded: DEFAULT_PANEL_STATE.chatMessageExpanded,
+            structuredThinkingExpanded: DEFAULT_PANEL_STATE.structuredThinkingExpanded,
+            structuredToolGroupExpanded: DEFAULT_PANEL_STATE.structuredToolGroupExpanded,
+            structuredInlineToolExpanded: DEFAULT_PANEL_STATE.structuredInlineToolExpanded,
+            structuredTerminalExpanded: DEFAULT_PANEL_STATE.structuredTerminalExpanded,
+            structuredToolCardExpanded: DEFAULT_PANEL_STATE.structuredToolCardExpanded,
+          };
+        }
+        var preferences = currentConfig.uiPreferences;
+        var configured = preferences && typeof preferences === "object" ? preferences.defaultPanelState : null;
+        return {
+          sessionsDrawerOpen: configured && typeof configured.sessionsDrawerOpen === "boolean" ? configured.sessionsDrawerOpen : DEFAULT_PANEL_STATE.sessionsDrawerOpen,
+          filePanelOpen: configured && typeof configured.filePanelOpen === "boolean" ? configured.filePanelOpen : DEFAULT_PANEL_STATE.filePanelOpen,
+          shortcutsExpanded: configured && typeof configured.shortcutsExpanded === "boolean" ? configured.shortcutsExpanded : DEFAULT_PANEL_STATE.shortcutsExpanded,
+          claudeHistoryExpanded: configured && typeof configured.claudeHistoryExpanded === "boolean" ? configured.claudeHistoryExpanded : DEFAULT_PANEL_STATE.claudeHistoryExpanded,
+          chatMessageExpanded: configured && typeof configured.chatMessageExpanded === "boolean" ? configured.chatMessageExpanded : DEFAULT_PANEL_STATE.chatMessageExpanded,
+          structuredThinkingExpanded: configured && typeof configured.structuredThinkingExpanded === "boolean" ? configured.structuredThinkingExpanded : DEFAULT_PANEL_STATE.structuredThinkingExpanded,
+          structuredToolGroupExpanded: configured && typeof configured.structuredToolGroupExpanded === "boolean" ? configured.structuredToolGroupExpanded : DEFAULT_PANEL_STATE.structuredToolGroupExpanded,
+          structuredInlineToolExpanded: configured && typeof configured.structuredInlineToolExpanded === "boolean" ? configured.structuredInlineToolExpanded : DEFAULT_PANEL_STATE.structuredInlineToolExpanded,
+          structuredTerminalExpanded: configured && typeof configured.structuredTerminalExpanded === "boolean" ? configured.structuredTerminalExpanded : DEFAULT_PANEL_STATE.structuredTerminalExpanded,
+          structuredToolCardExpanded: configured && typeof configured.structuredToolCardExpanded === "boolean" ? configured.structuredToolCardExpanded : DEFAULT_PANEL_STATE.structuredToolCardExpanded,
+        };
+      }
+
+      function getStoredBoolean(key) {
+        try {
+          var saved = localStorage.getItem(key);
+          if (saved === "true") return true;
+          if (saved === "false") return false;
+          return null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function getInitialPanelBoolean(key, fieldName) {
+        var stored = getStoredBoolean(key);
+        if (stored !== null) return stored;
+        return DEFAULT_PANEL_STATE[fieldName];
+      }
+
+      function persistPanelBoolean(key, value) {
+        try {
+          localStorage.setItem(key, String(!!value));
+        } catch (e) {}
+      }
+
+      function applyConfiguredPanelDefaults() {
+        var defaults = getConfiguredPanelDefaults((typeof state !== "undefined" && state) ? state.config : null);
+        if (getStoredBoolean("wand-sessions-drawer-open") === null) {
+          state.sessionsDrawerOpen = defaults.sessionsDrawerOpen;
+        }
+        if (getStoredBoolean("wand-file-panel-open") === null) {
+          state.filePanelOpen = defaults.filePanelOpen;
+        }
+        if (getStoredBoolean("wand-shortcuts-expanded") === null) {
+          state.shortcutsExpanded = defaults.shortcutsExpanded;
+        }
+        if (getStoredBoolean("wand-claude-history-expanded") === null) {
+          state.claudeHistoryExpanded = defaults.claudeHistoryExpanded;
+        }
+      }
+
+      function getPanelStateSettingsFormValues() {
+        return {
+          sessionsDrawerOpen: !!((document.getElementById("cfg-panel-sessions-drawer") || {}).checked),
+          filePanelOpen: !!((document.getElementById("cfg-panel-file") || {}).checked),
+          shortcutsExpanded: !!((document.getElementById("cfg-panel-shortcuts") || {}).checked),
+          claudeHistoryExpanded: !!((document.getElementById("cfg-panel-history") || {}).checked),
+          chatMessageExpanded: !!((document.getElementById("cfg-panel-chat-message") || {}).checked),
+          structuredThinkingExpanded: !!((document.getElementById("cfg-panel-structured-thinking") || {}).checked),
+          structuredToolGroupExpanded: !!((document.getElementById("cfg-panel-structured-tool-group") || {}).checked),
+          structuredInlineToolExpanded: !!((document.getElementById("cfg-panel-structured-inline-tool") || {}).checked),
+          structuredTerminalExpanded: !!((document.getElementById("cfg-panel-structured-terminal") || {}).checked),
+          structuredToolCardExpanded: !!((document.getElementById("cfg-panel-structured-tool-card") || {}).checked),
+        };
+      }
+
+      function syncPanelStateSettingsForm(panelDefaults) {
+        var defaults = panelDefaults || getConfiguredPanelDefaults();
+        var sessionsDrawerEl = document.getElementById("cfg-panel-sessions-drawer");
+        var filePanelEl = document.getElementById("cfg-panel-file");
+        var shortcutsEl = document.getElementById("cfg-panel-shortcuts");
+        var historyEl = document.getElementById("cfg-panel-history");
+        var chatMessageEl = document.getElementById("cfg-panel-chat-message");
+        var structuredThinkingEl = document.getElementById("cfg-panel-structured-thinking");
+        var structuredToolGroupEl = document.getElementById("cfg-panel-structured-tool-group");
+        var structuredInlineToolEl = document.getElementById("cfg-panel-structured-inline-tool");
+        var structuredTerminalEl = document.getElementById("cfg-panel-structured-terminal");
+        var structuredToolCardEl = document.getElementById("cfg-panel-structured-tool-card");
+        if (sessionsDrawerEl) sessionsDrawerEl.checked = !!defaults.sessionsDrawerOpen;
+        if (filePanelEl) filePanelEl.checked = !!defaults.filePanelOpen;
+        if (shortcutsEl) shortcutsEl.checked = !!defaults.shortcutsExpanded;
+        if (historyEl) historyEl.checked = !!defaults.claudeHistoryExpanded;
+        if (chatMessageEl) chatMessageEl.checked = !!defaults.chatMessageExpanded;
+        if (structuredThinkingEl) structuredThinkingEl.checked = !!defaults.structuredThinkingExpanded;
+        if (structuredToolGroupEl) structuredToolGroupEl.checked = !!defaults.structuredToolGroupExpanded;
+        if (structuredInlineToolEl) structuredInlineToolEl.checked = !!defaults.structuredInlineToolExpanded;
+        if (structuredTerminalEl) structuredTerminalEl.checked = !!defaults.structuredTerminalExpanded;
+        if (structuredToolCardEl) structuredToolCardEl.checked = !!defaults.structuredToolCardExpanded;
+      }
+
+      function applySettingsConfig(config) {
+        state.config = config || null;
+        applyConfiguredPanelDefaults();
+        updatePanelDefaultControls();
+      }
+
+      function renderSettingsNav() {
+        return '<div class="settings-nav">' +
+          '<button class="settings-tab active" data-tab="about">关于</button>' +
+          '<button class="settings-tab" data-tab="general">基本配置</button>' +
+          '<button class="settings-tab" data-tab="security">安全</button>' +
+          '<button class="settings-tab" data-tab="presets">命令预设</button>' +
+        '</div>';
+      }
+
+      function renderAppearanceSettingsCard() {
+        return '<div class="settings-card settings-card-accent">' +
+          '<div class="settings-card-header">' +
+            '<div>' +
+              '<h3 class="settings-section-title">界面偏好</h3>' +
+              '<p class="settings-hint">这些选项决定新页面或未保存本地偏好的默认展开状态。</p>' +
+            '</div>' +
+          '</div>' +
+          '<div class="settings-toggle-list">' +
+            '<label class="settings-toggle-item" for="cfg-panel-sessions-drawer">' +
+              '<div><span class="settings-toggle-title">默认展开会话侧栏</span><span class="settings-toggle-desc">进入页面时左侧会话列表默认展开。</span></div>' +
+              '<input id="cfg-panel-sessions-drawer" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+            '<label class="settings-toggle-item" for="cfg-panel-file">' +
+              '<div><span class="settings-toggle-title">默认展开文件面板</span><span class="settings-toggle-desc">右侧文件浏览器在初始状态下打开。</span></div>' +
+              '<input id="cfg-panel-file" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+            '<label class="settings-toggle-item" for="cfg-panel-shortcuts">' +
+              '<div><span class="settings-toggle-title">默认展开快捷键栏</span><span class="settings-toggle-desc">移动端快捷键面板首次显示时展开完整行。</span></div>' +
+              '<input id="cfg-panel-shortcuts" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+            '<label class="settings-toggle-item" for="cfg-panel-history">' +
+              '<div><span class="settings-toggle-title">默认展开 Claude 历史</span><span class="settings-toggle-desc">侧栏里的 Claude 历史分组默认展开。</span></div>' +
+              '<input id="cfg-panel-history" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+            '<label class="settings-toggle-item" for="cfg-panel-chat-message">' +
+              '<div><span class="settings-toggle-title">默认展开聊天详情</span><span class="settings-toggle-desc">当某条消息没有本地展开记录时，采用这里的默认值。</span></div>' +
+              '<input id="cfg-panel-chat-message" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+            '<label class="settings-toggle-item" for="cfg-panel-structured-thinking">' +
+              '<div><span class="settings-toggle-title">默认展开思考卡片</span><span class="settings-toggle-desc">结构化模式中的 thinking 块默认展开。</span></div>' +
+              '<input id="cfg-panel-structured-thinking" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+            '<label class="settings-toggle-item" for="cfg-panel-structured-tool-group">' +
+              '<div><span class="settings-toggle-title">默认展开工具组</span><span class="settings-toggle-desc">连续工具调用合并后的工具组默认展开。</span></div>' +
+              '<input id="cfg-panel-structured-tool-group" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+            '<label class="settings-toggle-item" for="cfg-panel-structured-inline-tool">' +
+              '<div><span class="settings-toggle-title">默认展开内联工具</span><span class="settings-toggle-desc">Read、Grep、Glob 等内联工具结果默认展开。</span></div>' +
+              '<input id="cfg-panel-structured-inline-tool" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+            '<label class="settings-toggle-item" for="cfg-panel-structured-terminal">' +
+              '<div><span class="settings-toggle-title">默认展开终端卡片</span><span class="settings-toggle-desc">Bash 等终端输出卡片默认展开。</span></div>' +
+              '<input id="cfg-panel-structured-terminal" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+            '<label class="settings-toggle-item" for="cfg-panel-structured-tool-card">' +
+              '<div><span class="settings-toggle-title">默认展开通用工具卡</span><span class="settings-toggle-desc">工具调用、计划类卡片等通用卡片默认展开。</span></div>' +
+              '<input id="cfg-panel-structured-tool-card" type="checkbox" class="field-checkbox" />' +
+            '</label>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function buildSettingsGeneralPanel() {
+        return '<div class="settings-panel" id="settings-tab-general">' +
+          '<div class="settings-card settings-card-accent">' +
+            '<div class="settings-card-header">' +
+              '<div>' +
+                '<h3 class="settings-section-title">基础运行配置</h3>' +
+                '<p class="settings-hint">影响服务器监听、默认模式和 CLI 行为。</p>' +
+              '</div>' +
+            '</div>' +
+            '<div class="field-row">' +
+              '<div class="field">' +
+                '<label class="field-label" for="cfg-host">监听地址 (host)</label>' +
+                '<input id="cfg-host" type="text" class="field-input" placeholder="127.0.0.1" />' +
+              '</div>' +
+              '<div class="field">' +
+                '<label class="field-label" for="cfg-port">端口 (port)</label>' +
+                '<input id="cfg-port" type="number" class="field-input" placeholder="8443" min="1" max="65535" />' +
+              '</div>' +
+            '</div>' +
+            '<div class="field field-inline">' +
+              '<input id="cfg-https" type="checkbox" class="field-checkbox" />' +
+              '<label class="field-label" for="cfg-https">启用 HTTPS</label>' +
+            '</div>' +
+            '<div class="field-row">' +
+              '<div class="field">' +
+                '<label class="field-label" for="cfg-mode">默认执行模式</label>' +
+                '<select id="cfg-mode" class="field-input">' +
+                  '<option value="default">default</option>' +
+                  '<option value="assist">assist</option>' +
+                  '<option value="agent">agent</option>' +
+                  '<option value="agent-max">agent-max</option>' +
+                  '<option value="auto-edit">auto-edit</option>' +
+                  '<option value="full-access">full-access</option>' +
+                  '<option value="native">native</option>' +
+                  '<option value="managed">managed</option>' +
+                '</select>' +
+              '</div>' +
+              '<div class="field">' +
+                '<label class="field-label" for="cfg-language">回复语言</label>' +
+                '<select id="cfg-language" class="field-input">' +
+                  '<option value="">自动（不指定）</option>' +
+                  '<option value="中文">中文</option>' +
+                  '<option value="English">English</option>' +
+                  '<option value="日本語">日本語</option>' +
+                  '<option value="한국어">한국어</option>' +
+                  '<option value="Español">Español</option>' +
+                  '<option value="Français">Français</option>' +
+                  '<option value="Deutsch">Deutsch</option>' +
+                  '<option value="Русский">Русский</option>' +
+                '</select>' +
+              '</div>' +
+            '</div>' +
+            '<p class="field-hint settings-inline-hint">设置回复语言后，Claude 将尽量使用指定语言回复。</p>' +
+            '<div class="field">' +
+              '<label class="field-label" for="cfg-cwd">默认工作目录</label>' +
+              '<input id="cfg-cwd" type="text" class="field-input" placeholder="/home/user" />' +
+            '</div>' +
+            '<div class="field">' +
+              '<label class="field-label" for="cfg-shell">Shell</label>' +
+              '<input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" />' +
+            '</div>' +
+          '</div>' +
+          renderAppearanceSettingsCard() +
+          '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
+          '<p id="config-message" class="hint hidden"></p>' +
+        '</div>';
+      }
+
+      function persistSettingsBackedUiState() {
+        persistPanelBoolean("wand-sessions-drawer-open", state.sessionsDrawerOpen);
+        persistPanelBoolean("wand-file-panel-open", state.filePanelOpen);
+        persistPanelBoolean("wand-shortcuts-expanded", state.shortcutsExpanded);
+        persistPanelBoolean("wand-claude-history-expanded", state.claudeHistoryExpanded);
+      }
+
+      function resetSettingsBackedUiStateToDefaults() {
+        var defaults = getConfiguredPanelDefaults();
+        state.sessionsDrawerOpen = defaults.sessionsDrawerOpen;
+        state.filePanelOpen = defaults.filePanelOpen;
+        state.shortcutsExpanded = defaults.shortcutsExpanded;
+        state.claudeHistoryExpanded = defaults.claudeHistoryExpanded;
+        persistSettingsBackedUiState();
+      }
+
+      function handleSettingsConfigSaved(nextConfig) {
+        applySettingsConfig(nextConfig || state.config);
+        syncPanelStateSettingsForm();
+        resetSettingsBackedUiStateToDefaults();
+        updateLayoutState();
+        updateSessionsList();
+        updateCurrentSession();
+      }
+
+      function updateSettingsActiveNav() {
+        var activeTab = document.querySelector(".settings-tab.active");
+        var nav = document.querySelector(".settings-nav");
+        if (!nav) return;
+        if (activeTab) {
+          nav.setAttribute("data-active-tab", activeTab.getAttribute("data-tab") || "");
+        }
+      }
+
+      function updateCollapsedShortcutsUi() {
+        var wrap = document.querySelector(".inline-shortcuts-wrap");
+        var row = document.querySelector(".inline-shortcuts-expanded-row");
+        var toggle = document.querySelector(".shortcuts-toggle");
+        if (wrap) wrap.classList.toggle("expanded", state.shortcutsExpanded);
+        if (row) row.classList.toggle("visible", state.shortcutsExpanded);
+        if (toggle) {
+          toggle.classList.toggle("active", state.shortcutsExpanded);
+          toggle.textContent = state.shortcutsExpanded ? "\u203a" : "\u2039";
+        }
+      }
+
+      function updatePanelDefaultControls() {
+        syncPanelStateSettingsForm();
+      }
+
+      function persistDrawerState() {
+        persistPanelBoolean("wand-sessions-drawer-open", state.sessionsDrawerOpen);
+      }
+
+      function persistHistoryPanelState() {
+        persistPanelBoolean("wand-claude-history-expanded", state.claudeHistoryExpanded);
+      }
+
+      function persistShortcutsExpandedState() {
+        persistPanelBoolean("wand-shortcuts-expanded", state.shortcutsExpanded);
+      }
+
+      function persistFilePanelState() {
+        persistPanelBoolean("wand-file-panel-open", state.filePanelOpen);
+      }
+
+      function refreshUiAfterPanelStateChange() {
+        updateLayoutState();
+        updateSessionsList();
+      }
 
       var state = {
         selectedId: (function() {
@@ -108,7 +437,7 @@
         loginPending: false,
         loginChecked: false,
         bootstrapping: true,
-        sessionsDrawerOpen: false,
+        sessionsDrawerOpen: getInitialPanelBoolean("wand-sessions-drawer-open", "sessionsDrawerOpen"),
         modalOpen: false,
         presetValue: "",
         cwdValue: "",
@@ -141,13 +470,7 @@
         })(),
         terminalBaseFontSize: 13,
         keyboardPopupOpen: false,
-        filePanelOpen: (function() {
-          try {
-            return localStorage.getItem("wand-file-panel-open") === "true";
-          } catch (e) {
-            return false;
-          }
-        })(),
+        filePanelOpen: getInitialPanelBoolean("wand-file-panel-open", "filePanelOpen"),
         chatAutoFollow: (function() {
           try {
             var saved = localStorage.getItem(CHAT_AUTO_FOLLOW_STORAGE_KEY);
@@ -171,14 +494,14 @@
         currentTask: null, // Current task title from Claude
         terminalInteractive: false,
         miniKeyboardVisible: false,
-        shortcutsExpanded: false,
+        shortcutsExpanded: getInitialPanelBoolean("wand-shortcuts-expanded", "shortcutsExpanded"),
         modifiers: { ctrl: false, alt: false, shift: false },
         fileSearchQuery: "",
         fileExplorerLoading: false,
         allFiles: [],
         claudeHistory: [],
         claudeHistoryLoaded: false,
-        claudeHistoryExpanded: true,
+        claudeHistoryExpanded: getInitialPanelBoolean("wand-claude-history-expanded", "claudeHistoryExpanded"),
         claudeHistoryExpandedDirs: {},
         sessionsManageMode: false,
         selectedSessionIds: {},
@@ -540,6 +863,56 @@
         }
       }
 
+      function getDefaultChatMessageExpanded() {
+        return getConfiguredPanelDefaults().chatMessageExpanded;
+      }
+
+      function getDefaultStructuredCardExpanded(cardType, fallbackValue) {
+        var defaults = getConfiguredPanelDefaults();
+        if (cardType === "thinking") {
+          return defaults.structuredThinkingExpanded;
+        }
+        if (cardType === "tool-group") {
+          return defaults.structuredToolGroupExpanded;
+        }
+        if (cardType === "inline-tool") {
+          return defaults.structuredInlineToolExpanded;
+        }
+        if (cardType === "terminal") {
+          return defaults.structuredTerminalExpanded;
+        }
+        if (cardType === "tool-card") {
+          return defaults.structuredToolCardExpanded;
+        }
+        if (typeof fallbackValue === "boolean") {
+          return fallbackValue;
+        }
+        return defaults.chatMessageExpanded;
+      }
+
+      function hasPersistedExpandState(itemKey) {
+        if (!itemKey || !state.selectedId) return false;
+        var sessionState = getCurrentChatExpandState();
+        return typeof sessionState[itemKey] === "boolean";
+      }
+
+      function getExpandState(itemKey, cardType, fallbackValue) {
+        if (!itemKey || !state.selectedId) {
+          if (typeof fallbackValue === "boolean") return fallbackValue;
+          return getDefaultStructuredCardExpanded(cardType, fallbackValue);
+        }
+        var sessionState = getCurrentChatExpandState();
+        if (typeof sessionState[itemKey] === "boolean") return sessionState[itemKey];
+        return getDefaultStructuredCardExpanded(cardType, fallbackValue);
+      }
+
+      function getPersistedExpandState(itemKey) {
+        if (!itemKey || !state.selectedId) return null;
+        var sessionState = getCurrentChatExpandState();
+        if (typeof sessionState[itemKey] === "boolean") return sessionState[itemKey];
+        return null;
+      }
+
       function saveChatExpandStateMap(map) {
         try {
           if (!map || Object.keys(map).length === 0) {
@@ -558,12 +931,6 @@
         var map = loadChatExpandStateMap();
         var sessionState = map[sessionId];
         return sessionState && typeof sessionState === "object" ? sessionState : {};
-      }
-
-      function getPersistedExpandState(itemKey) {
-        if (!itemKey || !state.selectedId) return null;
-        var sessionState = getCurrentChatExpandState();
-        return typeof sessionState[itemKey] === "boolean" ? sessionState[itemKey] : null;
       }
 
       function setPersistedExpandState(itemKey, expanded) {
@@ -682,9 +1049,8 @@
         container.querySelectorAll("[data-expand-key]").forEach(function(el) {
           var itemKey = getElementExpandKey(el);
           var kind = el.dataset.expandKind || "";
-          var persisted = getPersistedExpandState(itemKey);
-          if (persisted === null || !kind) return;
-          applyExpandedState(el, kind, persisted);
+          if (!kind || !hasPersistedExpandState(itemKey)) return;
+          applyExpandedState(el, kind, getPersistedExpandState(itemKey));
         });
       }
 
@@ -827,7 +1193,7 @@
           })
           .then(function(config) {
             if (!config) return;
-            state.config = config;
+            applySettingsConfig(config);
             state.loginChecked = true;
             requestAnimationFrame(function() {
               try {
@@ -1047,12 +1413,9 @@
         var preferredTool = getComposerTool();
         var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
+        var showTerminalHeaderControls = !!selectedSession && state.currentView === "terminal";
+        var showChatHeaderControls = !!selectedSession && state.currentView !== "terminal";
         return '<div class="app-container">' +
-          '<button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? ' active' : '') + '" aria-label="Toggle sidebar">' +
-            '<span class="hamburger-icon">' +
-              '<span></span><span></span><span></span>' +
-            '</span>' +
-          '</button>' +
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
           '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + '">' +
             '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
@@ -1094,11 +1457,37 @@
               '</div>' +
             '</aside>' +
             '<main class="main-content">' +
-              '<span class="current-task hidden" id="current-task"></span>' +
-              '<div class="view-toggle-bar' + (state.selectedId ? '' : ' hidden') + '" id="view-toggle-bar">' +
-                '<button id="view-terminal-btn" class="topbar-btn' + (state.currentView === "terminal" ? ' active' : '') + '" type="button" title="查看原始终端输出">终端</button>' +
-                '<button id="view-chat-btn" class="topbar-btn' + (state.currentView !== "terminal" ? ' active' : '') + '" type="button" title="查看聊天解析视图">聊天</button>' +
+              '<div class="main-content-header">' +
+                '<div class="main-content-header-left">' +
+                  '<button id="sessions-toggle-button" class="main-header-btn menu-toggle-btn' + (state.sessionsDrawerOpen ? ' active' : '') + '" type="button" aria-label="打开菜单" title="菜单">' +
+                    '<span class="hamburger-icon">' +
+                      '<span></span><span></span><span></span>' +
+                    '</span>' +
+                  '</button>' +
+                  '<span class="current-task hidden" id="current-task"></span>' +
+                '</div>' +
+                '<div class="main-content-header-center">' +
+                  '<div class="view-toggle-bar' + (state.selectedId ? '' : ' hidden') + '" id="view-toggle-bar">' +
+                    '<button id="view-terminal-btn" class="topbar-btn' + (state.currentView === "terminal" ? ' active' : '') + '" type="button" title="查看原始终端输出">终端</button>' +
+                    '<button id="view-chat-btn" class="topbar-btn' + (state.currentView !== "terminal" ? ' active' : '') + '" type="button" title="查看聊天解析视图">聊天</button>' +
+                  '</div>' +
+                '</div>' +
+                '<div class="main-content-header-right">' +
+                  '<div class="main-header-controls' + (showTerminalHeaderControls ? '' : ' hidden') + '" id="terminal-header-controls">' +
+                    '<button id="terminal-scale-down-top" class="main-header-btn terminal-scale-btn" type="button" title="缩小">−</button>' +
+                    '<span class="main-header-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
+                    '<button id="terminal-scale-up-top" class="main-header-btn terminal-scale-btn" type="button" title="放大">+</button>' +
+                    '<button id="page-refresh-btn" class="main-header-btn" type="button" title="刷新页面">↻</button>' +
+                    '<button id="terminal-jump-bottom" class="main-header-btn jump-latest-btn' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部">↓ 最新</button>' +
+                  '</div>' +
+                  '<div class="main-header-controls' + (showChatHeaderControls ? '' : ' hidden') + '" id="chat-header-controls">' +
+                    '<button id="chat-follow-toggle" class="chat-follow-toggle topbar-btn' + (state.chatAutoFollow ? ' active' : '') + '" type="button" aria-pressed="' + (state.chatAutoFollow ? 'true' : 'false') + '" title="' + (state.chatAutoFollow ? '追踪底部：开启' : '追踪底部：已暂停') + '">' + (state.chatAutoFollow ? '追底' : '暂停') + '</button>' +
+                    '<button id="chat-jump-bottom" class="main-header-btn jump-latest-btn' + (state.showChatJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部并继续追底">↓ 最新</button>' +
+                  '</div>' +
+                  '<button id="topbar-new-session-button" class="main-header-btn main-header-new-session" type="button" title="新对话">＋ 新对话</button>' +
+                '</div>' +
               '</div>' +
+              '<div class="main-content-body">' +
               // File panel backdrop (mobile)
               '<div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div>' +
               // File side panel
@@ -1119,22 +1508,8 @@
                   '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div>' +
                 '</div>' +
               '</div>' +
-              '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active">' +
-                '<div class="terminal-scale-overlay" aria-label="终端缩放控件">' +
-                  '<button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="缩小">−</button>' +
-                  '<span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
-                  '<button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大">+</button>' +
-                  '<span class="terminal-scale-overlay-divider"></span>' +
-                  '<button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面">↻</button>' +
-                '</div>' +
-                '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部">↓ 最新</button>' +
-              '</div>' +
-              '<div id="chat-output" class="chat-container hidden">' +
-                '<div class="chat-overlay-controls">' +
-                  '<button id="chat-follow-toggle" class="chat-follow-toggle topbar-btn' + (state.chatAutoFollow ? ' active' : '') + '" type="button" aria-pressed="' + (state.chatAutoFollow ? 'true' : 'false') + '" title="' + (state.chatAutoFollow ? '追踪底部：开启' : '追踪底部：已暂停') + '">' + (state.chatAutoFollow ? '追底' : '暂停') + '</button>' +
-                '</div>' +
-                '<button id="chat-jump-bottom" class="chat-jump-bottom' + (state.showChatJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部并继续追底">↓ 最新</button>' +
-              '</div>' +
+              '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"></div>' +
+              '<div id="chat-output" class="chat-container hidden"></div>' +
               '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
                 '<div class="blank-chat-inner">' +
                   '<div class="blank-chat-logo">W</div>' +
@@ -1276,16 +1651,9 @@
               '<h2 class="modal-title">设置</h2>' +
               '<button id="close-settings-button" class="btn btn-ghost btn-icon">×</button>' +
             '</div>' +
-            '<div class="modal-body">' +
-              // Tabs
-              '<div class="settings-tabs">' +
-                '<button class="settings-tab active" data-tab="about">关于</button>' +
-                '<button class="settings-tab" data-tab="general">基本配置</button>' +
-                '<button class="settings-tab" data-tab="security">安全</button>' +
-                '<button class="settings-tab" data-tab="presets">命令预设</button>' +
-              '</div>' +
-
-              // About tab
+            '<div class="modal-body settings-layout">' +
+              renderSettingsNav() +
+              '<div class="settings-content">' +
               '<div class="settings-panel active" id="settings-tab-about">' +
                 '<div class="settings-about-info">' +
                   '<div class="settings-about-row"><span class="settings-label">包名</span><span class="settings-value" id="settings-pkg-name">-</span></div>' +
@@ -1318,63 +1686,7 @@
                 '</div>' +
               '</div>' +
 
-              // General config tab
-              '<div class="settings-panel" id="settings-tab-general">' +
-                '<div class="field-row">' +
-                  '<div class="field">' +
-                    '<label class="field-label" for="cfg-host">监听地址 (host)</label>' +
-                    '<input id="cfg-host" type="text" class="field-input" placeholder="127.0.0.1" />' +
-                  '</div>' +
-                  '<div class="field">' +
-                    '<label class="field-label" for="cfg-port">端口 (port)</label>' +
-                    '<input id="cfg-port" type="number" class="field-input" placeholder="8443" min="1" max="65535" />' +
-                  '</div>' +
-                '</div>' +
-                '<div class="field field-inline">' +
-                  '<input id="cfg-https" type="checkbox" class="field-checkbox" />' +
-                  '<label class="field-label" for="cfg-https">启用 HTTPS</label>' +
-                '</div>' +
-                '<div class="field-row">' +
-                  '<div class="field">' +
-                    '<label class="field-label" for="cfg-mode">默认执行模式</label>' +
-                    '<select id="cfg-mode" class="field-input">' +
-                      '<option value="default">default</option>' +
-                      '<option value="assist">assist</option>' +
-                      '<option value="agent">agent</option>' +
-                      '<option value="agent-max">agent-max</option>' +
-                      '<option value="auto-edit">auto-edit</option>' +
-                      '<option value="full-access">full-access</option>' +
-                      '<option value="native">native</option>' +
-                      '<option value="managed">managed</option>' +
-                    '</select>' +
-                  '</div>' +
-                  '<div class="field">' +
-                    '<label class="field-label" for="cfg-language">回复语言</label>' +
-                    '<select id="cfg-language" class="field-input">' +
-                      '<option value="">自动（不指定）</option>' +
-                      '<option value="中文">中文</option>' +
-                      '<option value="English">English</option>' +
-                      '<option value="日本語">日本語</option>' +
-                      '<option value="한국어">한국어</option>' +
-                      '<option value="Español">Español</option>' +
-                      '<option value="Français">Français</option>' +
-                      '<option value="Deutsch">Deutsch</option>' +
-                      '<option value="Русский">Русский</option>' +
-                    '</select>' +
-                  '</div>' +
-                '</div>' +
-                '<p class="field-hint" style="margin-top:-4px;">设置回复语言后，Claude 将尽量使用指定语言回复。</p>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="cfg-cwd">默认工作目录</label>' +
-                  '<input id="cfg-cwd" type="text" class="field-input" placeholder="/home/user" />' +
-                '</div>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="cfg-shell">Shell</label>' +
-                  '<input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" />' +
-                '</div>' +
-                '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
-                '<p id="config-message" class="hint hidden"></p>' +
-              '</div>' +
+              buildSettingsGeneralPanel() +
 
               // Security tab
               '<div class="settings-panel" id="settings-tab-security">' +
@@ -1411,6 +1723,7 @@
               // Command presets tab
               '<div class="settings-panel" id="settings-tab-presets">' +
                 '<div id="presets-list" class="presets-list"></div>' +
+              '</div>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -1774,9 +2087,7 @@
 
       function setFilePanelOpen(nextOpen) {
         state.filePanelOpen = nextOpen;
-        try {
-          localStorage.setItem("wand-file-panel-open", String(state.filePanelOpen));
-        } catch (e) {}
+        persistFilePanelState();
         if (state.filePanelOpen && isMobileLayout()) {
           state.sessionsDrawerOpen = false;
         }
@@ -2782,15 +3093,7 @@
         });
         var savePassBtn = document.getElementById("save-password-button");
         if (savePassBtn) savePassBtn.addEventListener("click", savePassword);
-        // Settings tab clicks
-        var settingsTabs = document.querySelectorAll(".settings-tab");
-        for (var ti = 0; ti < settingsTabs.length; ti++) {
-          settingsTabs[ti].addEventListener("click", function(e) {
-            switchSettingsTab(e.target.getAttribute("data-tab"));
-          });
-        }
-        var saveConfigBtn = document.getElementById("save-config-button");
-        if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
+        bindSettingsModalEvents();
         var uploadCertBtn = document.getElementById("upload-cert-button");
         if (uploadCertBtn) uploadCertBtn.addEventListener("click", uploadCertificates);
         var checkUpdateBtn = document.getElementById("check-update-button");
@@ -2887,15 +3190,8 @@
         if (shortcutsToggleBtn) shortcutsToggleBtn.addEventListener("click", function(e) {
           e.stopPropagation();
           state.shortcutsExpanded = !state.shortcutsExpanded;
-          var wrap = document.querySelector(".inline-shortcuts-wrap");
-          var toggle = document.querySelector(".shortcuts-toggle");
-          var row = document.querySelector(".inline-shortcuts-expanded-row");
-          if (wrap) wrap.classList.toggle("expanded", state.shortcutsExpanded);
-          if (row) row.classList.toggle("visible", state.shortcutsExpanded);
-          if (toggle) {
-            toggle.classList.toggle("active", state.shortcutsExpanded);
-            toggle.textContent = state.shortcutsExpanded ? "\u203a" : "\u2039";
-          }
+          persistShortcutsExpandedState();
+          updateCollapsedShortcutsUi();
         });
         // Close shortcuts strip on outside click
         document.addEventListener("click", function(e) {
@@ -2905,13 +3201,8 @@
           var clickedInsideRow = expandedRow && expandedRow.contains(e.target);
           if (wrap && !wrap.contains(e.target) && !clickedInsideRow) {
             state.shortcutsExpanded = false;
-            wrap.classList.remove("expanded");
-            if (expandedRow) expandedRow.classList.remove("visible");
-            var toggle = document.querySelector(".shortcuts-toggle");
-            if (toggle) {
-              toggle.classList.remove("active");
-              toggle.textContent = "\u2039";
-            }
+            persistShortcutsExpandedState();
+            updateCollapsedShortcutsUi();
           }
         });
 
@@ -3390,6 +3681,7 @@
           event.preventDefault();
           event.stopPropagation();
           state.claudeHistoryExpanded = !state.claudeHistoryExpanded;
+          persistHistoryPanelState();
           if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
             loadClaudeHistory();
           }
@@ -4061,7 +4353,7 @@
         })
         .then(function(res) { return res.json(); })
         .then(function(config) {
-          state.config = config;
+          applySettingsConfig(config);
           var statusDot = document.getElementById("status-dot");
           var statusText = document.getElementById("status-text");
           if (statusDot) statusDot.classList.add("active");
@@ -4099,9 +4391,16 @@
         state.sessions = [];
         state.claudeHistory = [];
         state.claudeHistoryLoaded = false;
-        state.claudeHistoryExpanded = true;
+        state.claudeHistoryExpanded = getConfiguredPanelDefaults().claudeHistoryExpanded;
+        persistHistoryPanelState();
         state.claudeHistoryExpandedDirs = {};
-        state.sessionsDrawerOpen = false;
+        state.sessionsDrawerOpen = getConfiguredPanelDefaults().sessionsDrawerOpen;
+        persistDrawerState();
+        state.filePanelOpen = getConfiguredPanelDefaults().filePanelOpen;
+        persistFilePanelState();
+        state.shortcutsExpanded = getConfiguredPanelDefaults().shortcutsExpanded;
+        persistShortcutsExpandedState();
+        updateCollapsedShortcutsUi();
         render();
       }
 
@@ -4767,11 +5066,10 @@
 
       function toggleSessionsDrawer() {
         state.sessionsDrawerOpen = !state.sessionsDrawerOpen;
+        persistDrawerState();
         if (state.sessionsDrawerOpen && isMobileLayout()) {
           state.filePanelOpen = false;
-          try {
-            localStorage.setItem("wand-file-panel-open", "false");
-          } catch (e) {}
+          persistFilePanelState();
         }
         updateLayoutState();
       }
@@ -4780,6 +5078,7 @@
         if (!state.sessionsDrawerOpen) return;
         closeSwipedItem();
         state.sessionsDrawerOpen = false;
+        persistDrawerState();
         updateLayoutState();
       }
 
@@ -5024,6 +5323,7 @@
       function openSettingsModal() {
         // Close session modal first if open (mutual exclusion)
         closeSessionModal();
+        refreshSettingsModalUi();
         var modal = document.getElementById("settings-modal");
         if (modal) {
           modal.classList.remove("hidden");
@@ -5034,9 +5334,8 @@
           if (confirmEl) confirmEl.value = "";
           hideSettingsMessages();
           setupFocusTrap(modal);
-          // Activate first tab
+          bindSettingsModalEvents();
           switchSettingsTab("about");
-          // Load settings data
           loadSettingsData();
         }
       }
@@ -5127,62 +5426,120 @@
             panels[j].classList.remove("active");
           }
         }
+        updateSettingsActiveNav();
+      }
+
+      function refreshSettingsGeneralPanel() {
+        var existingPanel = document.getElementById("settings-tab-general");
+        if (!existingPanel) return;
+        var wrapper = document.createElement("div");
+        wrapper.innerHTML = buildSettingsGeneralPanel();
+        var nextPanel = wrapper.firstChild;
+        if (!nextPanel) return;
+        existingPanel.replaceWith(nextPanel);
+        var saveConfigBtn = document.getElementById("save-config-button");
+        if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
+        syncPanelStateSettingsForm();
+      }
+
+      function bindSettingsTabEvents() {
+        var settingsTabs = document.querySelectorAll(".settings-tab");
+        for (var ti = 0; ti < settingsTabs.length; ti++) {
+          settingsTabs[ti].addEventListener("click", function(e) {
+            switchSettingsTab(e.target.getAttribute("data-tab"));
+          });
+        }
+      }
+
+      function bindSettingsConfigActions() {
+        var saveConfigBtn = document.getElementById("save-config-button");
+        if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
+      }
+
+      function bindSettingsModalEvents() {
+        bindSettingsTabEvents();
+        bindSettingsConfigActions();
+      }
+
+      function refreshSettingsModalUi() {
+        refreshSettingsGeneralPanel();
+        updateSettingsActiveNav();
+      }
+
+      function normalizePanelStateSettings(cfg) {
+        var panelState = cfg && cfg.uiPreferences && cfg.uiPreferences.defaultPanelState;
+        var defaults = getConfiguredPanelDefaults(cfg);
+        return {
+          sessionsDrawerOpen: panelState && typeof panelState.sessionsDrawerOpen === "boolean" ? panelState.sessionsDrawerOpen : defaults.sessionsDrawerOpen,
+          filePanelOpen: panelState && typeof panelState.filePanelOpen === "boolean" ? panelState.filePanelOpen : defaults.filePanelOpen,
+          shortcutsExpanded: panelState && typeof panelState.shortcutsExpanded === "boolean" ? panelState.shortcutsExpanded : defaults.shortcutsExpanded,
+          claudeHistoryExpanded: panelState && typeof panelState.claudeHistoryExpanded === "boolean" ? panelState.claudeHistoryExpanded : defaults.claudeHistoryExpanded,
+          chatMessageExpanded: panelState && typeof panelState.chatMessageExpanded === "boolean" ? panelState.chatMessageExpanded : defaults.chatMessageExpanded,
+          structuredThinkingExpanded: panelState && typeof panelState.structuredThinkingExpanded === "boolean" ? panelState.structuredThinkingExpanded : defaults.structuredThinkingExpanded,
+          structuredToolGroupExpanded: panelState && typeof panelState.structuredToolGroupExpanded === "boolean" ? panelState.structuredToolGroupExpanded : defaults.structuredToolGroupExpanded,
+          structuredInlineToolExpanded: panelState && typeof panelState.structuredInlineToolExpanded === "boolean" ? panelState.structuredInlineToolExpanded : defaults.structuredInlineToolExpanded,
+          structuredTerminalExpanded: panelState && typeof panelState.structuredTerminalExpanded === "boolean" ? panelState.structuredTerminalExpanded : defaults.structuredTerminalExpanded,
+          structuredToolCardExpanded: panelState && typeof panelState.structuredToolCardExpanded === "boolean" ? panelState.structuredToolCardExpanded : defaults.structuredToolCardExpanded,
+        };
+      }
+
+      function applyLoadedSettingsData(data) {
+        var cfg = data.config || {};
+        applySettingsConfig(cfg);
+
+        var nameEl = document.getElementById("settings-pkg-name");
+        var verEl = document.getElementById("settings-version");
+        var nodeEl = document.getElementById("settings-node-req");
+        var repoEl = document.getElementById("settings-repo-url");
+        if (nameEl) nameEl.textContent = data.packageName || "-";
+        if (verEl) verEl.textContent = data.version || "-";
+        if (nodeEl) nodeEl.textContent = data.nodeVersion || "-";
+        if (repoEl && data.repoUrl) {
+          repoEl.innerHTML = '<a href="' + escapeHtml(data.repoUrl) + '" target="_blank" rel="noopener">' + escapeHtml(data.repoUrl) + '</a>';
+        }
+
+        var hostEl = document.getElementById("cfg-host");
+        var portEl = document.getElementById("cfg-port");
+        var httpsEl = document.getElementById("cfg-https");
+        var modeEl = document.getElementById("cfg-mode");
+        var cwdEl = document.getElementById("cfg-cwd");
+        var shellEl = document.getElementById("cfg-shell");
+        if (hostEl) hostEl.value = cfg.host || "";
+        if (portEl) portEl.value = cfg.port || "";
+        if (httpsEl) httpsEl.checked = cfg.https === true;
+        if (modeEl) modeEl.value = cfg.defaultMode || "default";
+        if (cwdEl) cwdEl.value = cfg.defaultCwd || "";
+        if (shellEl) shellEl.value = cfg.shell || "";
+        var langEl = document.getElementById("cfg-language");
+        if (langEl) langEl.value = cfg.language || "";
+        syncPanelStateSettingsForm(normalizePanelStateSettings(cfg));
+
+        var certStatus = document.getElementById("cert-status");
+        if (certStatus) {
+          certStatus.textContent = data.hasCert ? "已安装 SSL 证书" : "未安装证书（使用自签名或 HTTP）";
+          certStatus.style.color = data.hasCert ? "var(--success)" : "var(--text-secondary)";
+        }
+
+        var presetsList = document.getElementById("presets-list");
+        if (presetsList && cfg.commandPresets) {
+          var html = "";
+          for (var i = 0; i < cfg.commandPresets.length; i++) {
+            var p = cfg.commandPresets[i];
+            html += '<div class="preset-item">' +
+              '<span class="preset-label">' + escapeHtml(p.label) + '</span>' +
+              '<span class="preset-detail">' + escapeHtml(p.command) + (p.mode ? ' (' + escapeHtml(p.mode) + ')' : '') + '</span>' +
+            '</div>';
+          }
+          if (!html) html = '<div class="empty-state-compact"><span class="empty-icon">\u2699</span><span>没有命令预设</span><span class="hint">在 config.json 的 commandPresets 中配置</span></div>';
+          presetsList.innerHTML = html;
+        }
       }
 
       function loadSettingsData() {
         fetch("/api/settings", { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
-            // About
-            var nameEl = document.getElementById("settings-pkg-name");
-            var verEl = document.getElementById("settings-version");
-            var nodeEl = document.getElementById("settings-node-req");
-            var repoEl = document.getElementById("settings-repo-url");
-            if (nameEl) nameEl.textContent = data.packageName || "-";
-            if (verEl) verEl.textContent = data.version || "-";
-            if (nodeEl) nodeEl.textContent = data.nodeVersion || "-";
-            if (repoEl && data.repoUrl) {
-              repoEl.innerHTML = '<a href="' + escapeHtml(data.repoUrl) + '" target="_blank" rel="noopener">' + escapeHtml(data.repoUrl) + '</a>';
-            }
-
-            // Config fields
-            var cfg = data.config || {};
-            var hostEl = document.getElementById("cfg-host");
-            var portEl = document.getElementById("cfg-port");
-            var httpsEl = document.getElementById("cfg-https");
-            var modeEl = document.getElementById("cfg-mode");
-            var cwdEl = document.getElementById("cfg-cwd");
-            var shellEl = document.getElementById("cfg-shell");
-            if (hostEl) hostEl.value = cfg.host || "";
-            if (portEl) portEl.value = cfg.port || "";
-            if (httpsEl) httpsEl.checked = cfg.https === true;
-            if (modeEl) modeEl.value = cfg.defaultMode || "default";
-            if (cwdEl) cwdEl.value = cfg.defaultCwd || "";
-            if (shellEl) shellEl.value = cfg.shell || "";
-            var langEl = document.getElementById("cfg-language");
-            if (langEl) langEl.value = cfg.language || "";
-
-            // Cert status
-            var certStatus = document.getElementById("cert-status");
-            if (certStatus) {
-              certStatus.textContent = data.hasCert ? "已安装 SSL 证书" : "未安装证书（使用自签名或 HTTP）";
-              certStatus.style.color = data.hasCert ? "var(--success)" : "var(--text-secondary)";
-            }
-
-            // Presets
-            var presetsList = document.getElementById("presets-list");
-            if (presetsList && cfg.commandPresets) {
-              var html = "";
-              for (var i = 0; i < cfg.commandPresets.length; i++) {
-                var p = cfg.commandPresets[i];
-                html += '<div class="preset-item">' +
-                  '<span class="preset-label">' + escapeHtml(p.label) + '</span>' +
-                  '<span class="preset-detail">' + escapeHtml(p.command) + (p.mode ? ' (' + escapeHtml(p.mode) + ')' : '') + '</span>' +
-                '</div>';
-              }
-              if (!html) html = '<div class="empty-state-compact"><span class="empty-icon">\u2699</span><span>\u6ca1\u6709\u547d\u4ee4\u9884\u8bbe</span><span class="hint">\u5728 config.json \u7684 commandPresets \u4e2d\u914d\u7f6e</span></div>';
-              presetsList.innerHTML = html;
-            }
+            applyLoadedSettingsData(data);
           })
           .catch(function() {});
       }
@@ -5199,6 +5556,9 @@
           defaultCwd: (document.getElementById("cfg-cwd") || {}).value,
           shell: (document.getElementById("cfg-shell") || {}).value,
           language: (document.getElementById("cfg-language") || {}).value || "",
+          uiPreferences: {
+            defaultPanelState: getPanelStateSettingsFormValues(),
+          }
         };
 
         fetch("/api/settings/config", {
@@ -5216,6 +5576,7 @@
             } else {
               msgEl.textContent = "配置已保存，部分更改需要重启后生效。";
               msgEl.style.color = "var(--success)";
+              handleSettingsConfigSaved(data.config);
             }
             msgEl.classList.remove("hidden");
           }
@@ -5228,6 +5589,7 @@
           }
         });
       }
+
 
       function uploadCertificates() {
         var keyFile = document.getElementById("cert-key-file");
@@ -9507,12 +9869,12 @@
             if (cards.length > 0) {
               var firstCard = cards[0];
               var firstCardKey = getElementExpandKey(firstCard);
-              if (getPersistedExpandState(firstCardKey) === null) {
+              if (!hasPersistedExpandState(firstCardKey) && !getConfiguredPanelDefaults().structuredToolCardExpanded) {
                 firstCard.classList.remove("collapsed");
               }
               for (var ci = 1; ci < cards.length; ci++) {
                 var cardKey = getElementExpandKey(cards[ci]);
-                if (getPersistedExpandState(cardKey) === null) {
+                if (!hasPersistedExpandState(cardKey) && !getConfiguredPanelDefaults().structuredToolCardExpanded) {
                   cards[ci].classList.add("collapsed");
                 }
               }
@@ -9530,7 +9892,7 @@
           var allCards = container.querySelectorAll(".tool-use-card");
           allCards.forEach(function(c) {
             var cardKey = getElementExpandKey(c);
-            if (getPersistedExpandState(cardKey) !== null) return;
+            if (hasPersistedExpandState(cardKey) || getConfiguredPanelDefaults().structuredToolCardExpanded) return;
             // Keep expanded if this card is inside a newly added message
             if (newEls) {
               for (var i = 0; i < newEls.length; i++) {
@@ -9654,7 +10016,7 @@
             var newestCard = null;
             allCards.forEach(function(c) {
               var cardKey = getElementExpandKey(c);
-              if (getPersistedExpandState(cardKey) !== null) return;
+              if (hasPersistedExpandState(cardKey) || getConfiguredPanelDefaults().structuredToolCardExpanded) return;
               if (newestMsgEl && newestMsgEl.contains(c)) {
                 if (!newestCard) newestCard = c;
                 else c.classList.add("collapsed");
@@ -10744,7 +11106,7 @@
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
           var thinkingKey = buildExpandKey("thinking", [getMessageKey(msg, messageIndex), "pty"]);
-          var thinkingExpanded = getPersistedExpandState(thinkingKey) === true;
+          var thinkingExpanded = getExpandState(thinkingKey, "thinking");
           return '<div class="chat-message thinking">' +
             '<div class="thinking-inline thinking-pty ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">⦿</span>' +
@@ -10881,8 +11243,7 @@
         }
         var summaryText = parts.join(" · ");
         var groupKey = buildExpandKey("tool-group", [messageKey, items[0] && items[0].index, items.length]);
-        var persistedExpanded = getPersistedExpandState(groupKey);
-        var shouldExpand = persistedExpanded === null ? false : persistedExpanded;
+        var shouldExpand = getExpandState(groupKey, "tool-group");
 
         // Render each item's inline-tool card
         var innerHtml = "";
@@ -10993,7 +11354,7 @@
               '</div>';
             }
             var thinkingKey = buildExpandKey("thinking", [messageKey, index]);
-            var thinkingExpanded = getPersistedExpandState(thinkingKey) === true;
+            var thinkingExpanded = getExpandState(thinkingKey, "thinking");
             return '<div class="thinking-inline ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">⦿</span>' +
               '<span class="thinking-inline-preview">' + escapeHtml(thinkingExpanded ? thinkingText : preview) + '</span>' +
@@ -11019,7 +11380,6 @@
       function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index) {
         var toolId = block.id || "tool-" + toolName;
         var expandKey = buildExpandKey("inline-tool", [messageKey, toolId || index, index]);
-        var persistedExpanded = getPersistedExpandState(expandKey);
         var inputData = block.input || {};
         var resultContent = extractToolResultText(toolResult && toolResult.content);
 
@@ -11090,7 +11450,7 @@
         var fullResult = resultContent;
 
         var expandedHtml = "";
-        var shouldExpand = persistedExpanded === null ? false : persistedExpanded;
+        var shouldExpand = getExpandState(expandKey, "inline-tool");
         if (hasResult) {
           expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + '</div>' +
@@ -11130,7 +11490,6 @@
         var resultContent = extractToolResultText(toolResult && toolResult.content);
         var toolId = block.id || "tool-" + toolName;
         var expandKey = buildExpandKey("terminal", [messageKey, toolId || index, index]);
-        var persistedExpanded = getPersistedExpandState(expandKey);
 
         var isError = toolResult && toolResult.is_error;
         var exitCode = inputData.exitCode;
@@ -11168,7 +11527,7 @@
 
         // Show command preview in header (truncate long commands)
         var cmdPreview = command.length > 80 ? command.slice(0, 77) + "…" : command;
-        var shouldExpand = persistedExpanded === null ? false : persistedExpanded;
+        var shouldExpand = getExpandState(expandKey, "terminal");
 
         return '<div class="inline-terminal" data-expand-kind="terminal" data-expand-key="' + escapeHtml(expandKey) + '" data-expanded="' + (shouldExpand ? 'true' : 'false') + '">' +
           '<div class="term-header" onclick="__terminalExpand(this)">' +
@@ -11366,8 +11725,7 @@
         }
 
         var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
-        var persistedExpanded = getPersistedExpandState(expandKey);
-        var shouldExpand = persistedExpanded === null ? statusClass === "loading" : persistedExpanded;
+        var shouldExpand = getExpandState(expandKey, "tool-card", statusClass === "loading");
         var collapsedClass = shouldExpand ? "" : " collapsed";
         var toggleHtml = '<span class="tool-use-toggle">▼</span>';
         return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +

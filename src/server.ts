@@ -593,6 +593,41 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       }
     }
 
+    if (body.uiPreferences && typeof body.uiPreferences === "object") {
+      const defaultPanelStateInput = body.uiPreferences.defaultPanelState;
+      if (defaultPanelStateInput && typeof defaultPanelStateInput === "object") {
+        const nextDefaultPanelState = {
+          ...config.uiPreferences?.defaultPanelState,
+        };
+        let panelChanged = false;
+        const panelFields = [
+          "sessionsDrawerOpen",
+          "filePanelOpen",
+          "shortcutsExpanded",
+          "claudeHistoryExpanded",
+          "chatMessageExpanded",
+          "structuredThinkingExpanded",
+          "structuredToolGroupExpanded",
+          "structuredInlineToolExpanded",
+          "structuredTerminalExpanded",
+          "structuredToolCardExpanded"
+        ] as const;
+        for (const field of panelFields) {
+          if (field in defaultPanelStateInput && typeof defaultPanelStateInput[field] === "boolean") {
+            nextDefaultPanelState[field] = defaultPanelStateInput[field];
+            panelChanged = true;
+          }
+        }
+        if (panelChanged) {
+          config.uiPreferences = {
+            ...config.uiPreferences,
+            defaultPanelState: nextDefaultPanelState,
+          };
+          changed = true;
+        }
+      }
+    }
+
     if (!changed) {
       res.status(400).json({ error: "没有可更新的配置字段。" });
       return;

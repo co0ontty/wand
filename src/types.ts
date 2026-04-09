@@ -58,6 +58,23 @@ export interface StructuredChatPersonaConfig {
   assistant?: StructuredChatPersonaRoleConfig;
 }
 
+export interface DefaultPanelStateConfig {
+  sessionsDrawerOpen?: boolean;
+  filePanelOpen?: boolean;
+  shortcutsExpanded?: boolean;
+  claudeHistoryExpanded?: boolean;
+  chatMessageExpanded?: boolean;
+  structuredThinkingExpanded?: boolean;
+  structuredToolGroupExpanded?: boolean;
+  structuredInlineToolExpanded?: boolean;
+  structuredTerminalExpanded?: boolean;
+  structuredToolCardExpanded?: boolean;
+}
+
+export interface UiPreferencesConfig {
+  defaultPanelState?: DefaultPanelStateConfig;
+}
+
 export interface WandConfig {
   host: string;
   port: number;
@@ -75,6 +92,8 @@ export interface WandConfig {
   shortcutLogMaxBytes?: number;
   /** Preferred response language for Claude (e.g. "中文", "English"). Empty string means no override. */
   language?: string;
+  /** UI defaults used for initializing panel open/expanded state. */
+  uiPreferences?: UiPreferencesConfig;
 }
 
 interface WorktreeInfo {

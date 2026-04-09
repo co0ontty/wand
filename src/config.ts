@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { ExecutionMode, StructuredChatPersonaConfig, WandConfig } from "./types.js";
+import { DefaultPanelStateConfig, ExecutionMode, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -19,6 +19,20 @@ export const defaultConfig = (): WandConfig => ({
   allowedCommandPrefixes: [],
   shortcutLogMaxBytes: 10 * 1024 * 1024,
   language: "",
+  uiPreferences: {
+    defaultPanelState: {
+      sessionsDrawerOpen: false,
+      filePanelOpen: false,
+      shortcutsExpanded: false,
+      claudeHistoryExpanded: true,
+      chatMessageExpanded: true,
+      structuredThinkingExpanded: true,
+      structuredToolGroupExpanded: false,
+      structuredInlineToolExpanded: false,
+      structuredTerminalExpanded: false,
+      structuredToolCardExpanded: false,
+    }
+  },
   commandPresets: [
     {
       label: "Claude",
@@ -111,8 +125,26 @@ function normalizeStructuredChatPersona(input: unknown): StructuredChatPersonaCo
   return { user, assistant };
 }
 
+function normalizeDefaultPanelState(input: unknown): DefaultPanelStateConfig | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const state = input as Record<string, unknown>;
+  return {
+    sessionsDrawerOpen: typeof state.sessionsDrawerOpen === "boolean" ? state.sessionsDrawerOpen : undefined,
+    filePanelOpen: typeof state.filePanelOpen === "boolean" ? state.filePanelOpen : undefined,
+    shortcutsExpanded: typeof state.shortcutsExpanded === "boolean" ? state.shortcutsExpanded : undefined,
+    claudeHistoryExpanded: typeof state.claudeHistoryExpanded === "boolean" ? state.claudeHistoryExpanded : undefined,
+    chatMessageExpanded: typeof state.chatMessageExpanded === "boolean" ? state.chatMessageExpanded : undefined,
+    structuredThinkingExpanded: typeof state.structuredThinkingExpanded === "boolean" ? state.structuredThinkingExpanded : undefined,
+    structuredToolGroupExpanded: typeof state.structuredToolGroupExpanded === "boolean" ? state.structuredToolGroupExpanded : undefined,
+    structuredInlineToolExpanded: typeof state.structuredInlineToolExpanded === "boolean" ? state.structuredInlineToolExpanded : undefined,
+    structuredTerminalExpanded: typeof state.structuredTerminalExpanded === "boolean" ? state.structuredTerminalExpanded : undefined,
+    structuredToolCardExpanded: typeof state.structuredToolCardExpanded === "boolean" ? state.structuredToolCardExpanded : undefined,
+  };
+}
+
 function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
   const defaults = defaultConfig();
+  const normalizedPanelState = normalizeDefaultPanelState(input.uiPreferences?.defaultPanelState);
   return {
     ...defaults,
     ...input,
@@ -147,6 +179,14 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
       : defaults.commandPresets,
     structuredChatPersona: normalizeStructuredChatPersona(input.structuredChatPersona),
     language: typeof input.language === "string" ? input.language.trim() : defaults.language,
+    uiPreferences: {
+      ...defaults.uiPreferences,
+      ...(input.uiPreferences || {}),
+      defaultPanelState: {
+        ...defaults.uiPreferences?.defaultPanelState,
+        ...(normalizedPanelState || {}),
+      }
+    },
   };
 }
 
