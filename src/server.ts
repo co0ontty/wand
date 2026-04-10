@@ -89,6 +89,85 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
+// ── Android APK update check cache ──
+
+interface GitHubApkInfo {
+  version: string;
+  downloadUrl: string;
+  fileName: string;
+  size: number;
+}
+
+let cachedGitHubApk: GitHubApkInfo | null = null;
+let gitHubApkCacheTs = 0;
+const GITHUB_APK_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+async function fetchGitHubLatestApk(forceRefresh = false): Promise<GitHubApkInfo | null> {
+  const now = Date.now();
+  if (!forceRefresh && cachedGitHubApk && (now - gitHubApkCacheTs < GITHUB_APK_CACHE_TTL)) {
+    return cachedGitHubApk;
+  }
+  try {
+    const apiUrl = PKG_REPO_URL.replace("github.com", "api.github.com/repos") + "/releases/latest";
+    const resp = await fetch(apiUrl, {
+      headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "wand-server" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) return cachedGitHubApk ?? null;
+    const release = await resp.json() as {
+      tag_name: string;
+      assets: Array<{ name: string; browser_download_url: string; size: number }>;
+    };
+    const apkAsset = release.assets.find(a => a.name.toLowerCase().endsWith(".apk"));
+    if (!apkAsset) return cachedGitHubApk ?? null;
+    const version = extractAndroidApkVersion(release.tag_name) ?? release.tag_name.replace(/^v/, "");
+    cachedGitHubApk = {
+      version,
+      downloadUrl: apkAsset.browser_download_url,
+      fileName: apkAsset.name,
+      size: apkAsset.size,
+    };
+    gitHubApkCacheTs = now;
+    return cachedGitHubApk;
+  } catch {
+    return cachedGitHubApk ?? null;
+  }
+}
+
+interface ResolvedApkVersion {
+  version: string;
+  downloadUrl: string;
+  fileName: string;
+  size: number;
+  source: "local" | "github";
+}
+
+async function resolveLatestApkVersion(configDir: string, config: WandConfig): Promise<ResolvedApkVersion | null> {
+  // Priority 1: local APK file
+  const localApk = await resolveAndroidApkAsset(configDir, config);
+  if (localApk && localApk.version) {
+    return {
+      version: localApk.version,
+      downloadUrl: localApk.downloadUrl,
+      fileName: localApk.fileName,
+      size: localApk.size,
+      source: "local",
+    };
+  }
+  // Priority 2: GitHub Release
+  const ghApk = await fetchGitHubLatestApk();
+  if (ghApk) {
+    return {
+      version: ghApk.version,
+      downloadUrl: ghApk.downloadUrl,
+      fileName: ghApk.fileName,
+      size: ghApk.size,
+      source: "github",
+    };
+  }
+  return null;
+}
+
 function isExternalAvatarSource(value: string): boolean {
   return /^(https?:|data:)/i.test(value);
 }
@@ -276,46 +355,28 @@ function readSessionCookie(req: { headers: { cookie?: string } }): string | unde
 
 // ── App connection token helpers ──
 
-const APP_TOKEN_CIPHER = "aes-256-cbc";
-const APP_TOKEN_SECRET = "wand-app-conn-2026"; // obfuscation key, not security-critical
-
-function deriveAppTokenKey(): Buffer {
-  return crypto.createHash("sha256").update(APP_TOKEN_SECRET).digest();
+function generateAppToken(password: string, secret: string): string {
+  return crypto.createHmac("sha256", secret).update(password).digest("hex");
 }
 
-function generateAppToken(password: string): string {
-  return crypto.createHmac("sha256", APP_TOKEN_SECRET).update(password).digest("hex");
-}
-
-function verifyAppToken(token: string, password: string): boolean {
-  const expected = generateAppToken(password);
+function verifyAppToken(token: string, password: string, secret: string): boolean {
+  const expected = generateAppToken(password, secret);
   return crypto.timingSafeEqual(Buffer.from(token, "hex"), Buffer.from(expected, "hex"));
 }
 
-function encryptConnectionString(payload: { url: string; token: string }): string {
-  const key = deriveAppTokenKey();
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(APP_TOKEN_CIPHER, key, iv);
-  const json = JSON.stringify(payload);
-  const encrypted = Buffer.concat([cipher.update(json, "utf8"), cipher.final()]);
-  // iv(16) + encrypted -> base64
-  return Buffer.concat([iv, encrypted]).toString("base64");
+function encodeConnectCode(url: string, token: string): string {
+  return Buffer.from(`${url}#${token}`).toString("base64");
 }
 
-function decryptConnectionString(encoded: string): { url: string; token: string } | null {
+function decodeConnectCode(code: string): { url: string; token: string } | null {
   try {
-    const buf = Buffer.from(encoded, "base64");
-    if (buf.length < 17) return null;
-    const key = deriveAppTokenKey();
-    const iv = buf.subarray(0, 16);
-    const encrypted = buf.subarray(16);
-    const decipher = crypto.createDecipheriv(APP_TOKEN_CIPHER, key, iv);
-    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
-    const parsed = JSON.parse(decrypted);
-    if (typeof parsed.url === "string" && typeof parsed.token === "string") {
-      return parsed;
-    }
-    return null;
+    const decoded = Buffer.from(code, "base64").toString("utf8");
+    const hashIdx = decoded.lastIndexOf("#");
+    if (hashIdx < 1) return null;
+    const url = decoded.substring(0, hashIdx);
+    const token = decoded.substring(hashIdx + 1);
+    if (!url.startsWith("http") || token.length < 16) return null;
+    return { url, token };
   } catch {
     return null;
   }
@@ -613,7 +674,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     let authenticated = false;
     if (appToken) {
       try {
-        authenticated = verifyAppToken(appToken, effectivePassword);
+        authenticated = verifyAppToken(appToken, effectivePassword, config.appSecret ?? "");
       } catch {
         authenticated = false;
       }
@@ -720,6 +781,29 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     });
   });
 
+  app.get("/api/android-apk-update", async (req, res) => {
+    const currentVersion = (req.query.currentVersion as string)?.trim();
+    if (!currentVersion) {
+      res.status(400).json({ error: "Missing currentVersion query parameter." });
+      return;
+    }
+    const latest = await resolveLatestApkVersion(configDir, config);
+    if (!latest) {
+      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null });
+      return;
+    }
+    const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
+    res.json({
+      updateAvailable,
+      currentVersion,
+      latestVersion: latest.version,
+      downloadUrl: updateAvailable ? latest.downloadUrl : null,
+      fileName: updateAvailable ? latest.fileName : null,
+      size: updateAvailable ? latest.size : null,
+      source: latest.source,
+    });
+  });
+
   app.get("/android/download", async (_req, res) => {
     const androidApk = await resolveAndroidApkAsset(configDir, config);
     if (config.android?.enabled !== true) {
@@ -742,8 +826,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     const protocol = useHttps ? "https" : "http";
     const host = req.headers.host || `${config.host}:${config.port}`;
     const serverUrl = `${protocol}://${host}`;
-    const token = generateAppToken(effectivePassword);
-    const code = encryptConnectionString({ url: serverUrl, token });
+    const appSecret = config.appSecret ?? "";
+    const token = generateAppToken(effectivePassword, appSecret);
+    const code = encodeConnectCode(serverUrl, token);
     res.json({ code });
   });
 

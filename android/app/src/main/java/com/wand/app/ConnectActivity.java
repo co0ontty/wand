@@ -24,23 +24,15 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
+import java.util.Base64;
 import java.util.List;
 
-import javax.crypto.Cipher;
-import javax.crypto.spec.IvParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
-import java.security.MessageDigest;
-import java.util.Base64;
-
 public class ConnectActivity extends AppCompatActivity {
-
-    private static final String APP_TOKEN_SECRET = "wand-app-conn-2026";
-    private static final String APP_TOKEN_CIPHER = "AES/CBC/PKCS5Padding";
 
     private TextInputEditText urlInput;
     private MaterialButton connectButton;
@@ -61,10 +53,8 @@ public class ConnectActivity extends AppCompatActivity {
         recentList = findViewById(R.id.recentList);
         recentLabel = findViewById(R.id.recentLabel);
 
-        // Handle deep link: wand://connect?url=...
         handleDeepLink(getIntent());
 
-        // Prefill last URL
         String lastUrl = serverStore.getLastUrl();
         if (!TextUtils.isEmpty(lastUrl)) {
             urlInput.setText(lastUrl);
@@ -102,31 +92,19 @@ public class ConnectActivity extends AppCompatActivity {
     }
 
     /**
-     * Try to decrypt the input as an encrypted connection code.
-     * Returns a JSONObject with { url, token } on success, or null.
+     * Try to decode the input as a connect code (base64 encoded "URL#TOKEN").
+     * Returns a String[2] = {url, token} on success, or null.
      */
-    private JSONObject tryDecryptConnectCode(String input) {
+    private String[] tryDecodeConnectCode(String input) {
         try {
             byte[] buf = Base64.getDecoder().decode(input.trim());
-            if (buf.length < 17) return null;
-
-            MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            byte[] key = sha.digest(APP_TOKEN_SECRET.getBytes(StandardCharsets.UTF_8));
-
-            byte[] iv = new byte[16];
-            System.arraycopy(buf, 0, iv, 0, 16);
-            byte[] encrypted = new byte[buf.length - 16];
-            System.arraycopy(buf, 16, encrypted, 0, encrypted.length);
-
-            Cipher cipher = Cipher.getInstance(APP_TOKEN_CIPHER);
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"), new IvParameterSpec(iv));
-            byte[] decrypted = cipher.doFinal(encrypted);
-
-            JSONObject obj = new JSONObject(new String(decrypted, StandardCharsets.UTF_8));
-            if (obj.has("url") && obj.has("token")) {
-                return obj;
-            }
-            return null;
+            String decoded = new String(buf, StandardCharsets.UTF_8);
+            int hashIdx = decoded.lastIndexOf('#');
+            if (hashIdx < 1) return null;
+            String url = decoded.substring(0, hashIdx);
+            String token = decoded.substring(hashIdx + 1);
+            if (!url.startsWith("http") || token.length() < 16) return null;
+            return new String[]{url, token};
         } catch (Exception e) {
             return null;
         }
@@ -144,37 +122,27 @@ public class ConnectActivity extends AppCompatActivity {
         statusText.setVisibility(View.GONE);
 
         new Thread(() -> {
-            // First try decrypting as connect code
-            JSONObject decoded = tryDecryptConnectCode(rawInput);
+            // First try decoding as connect code
+            String[] decoded = tryDecodeConnectCode(rawInput);
 
             if (decoded != null) {
-                // Encrypted connect code: extract URL and token
-                try {
-                    String serverUrl = decoded.getString("url");
-                    String appToken = decoded.getString("token");
+                String serverUrl = decoded[0];
+                String appToken = decoded[1];
 
-                    // Test connection + login with token
-                    String error = testConnectionWithToken(serverUrl, appToken);
-                    runOnUiThread(() -> {
-                        connectButton.setEnabled(true);
-                        connectButton.setText(R.string.connect_button);
+                String error = testConnectionWithToken(serverUrl, appToken);
+                runOnUiThread(() -> {
+                    connectButton.setEnabled(true);
+                    connectButton.setText(R.string.connect_button);
 
-                        if (error == null) {
-                            serverStore.setLastUrl(rawInput);
-                            serverStore.addRecentUrl(rawInput);
-                            serverStore.setAppToken(appToken);
-                            launchWebView(serverUrl, appToken);
-                        } else {
-                            showStatus(error);
-                        }
-                    });
-                } catch (Exception e) {
-                    runOnUiThread(() -> {
-                        connectButton.setEnabled(true);
-                        connectButton.setText(R.string.connect_button);
-                        showStatus("连接码解析失败: " + e.getMessage());
-                    });
-                }
+                    if (error == null) {
+                        serverStore.setLastUrl(rawInput);
+                        serverStore.addRecentUrl(rawInput);
+                        serverStore.setAppToken(appToken);
+                        launchWebView(serverUrl, appToken);
+                    } else {
+                        showStatus(error);
+                    }
+                });
             } else {
                 // Plain URL fallback
                 String url = rawInput;
@@ -204,10 +172,6 @@ public class ConnectActivity extends AppCompatActivity {
         }).start();
     }
 
-    /**
-     * Test connection and login using appToken.
-     * Returns null on success, or an error message string.
-     */
     private String testConnectionWithToken(String baseUrl, String appToken) {
         HttpURLConnection conn = null;
         try {
@@ -231,13 +195,10 @@ public class ConnectActivity extends AppCompatActivity {
             }
 
             int code = conn.getResponseCode();
-
-            // Read the session cookie
             String setCookie = conn.getHeaderField("Set-Cookie");
             conn.disconnect();
 
             if (code == 200) {
-                // Store cookie for WebView
                 if (setCookie != null) {
                     android.webkit.CookieManager.getInstance().setCookie(baseUrl, setCookie);
                     android.webkit.CookieManager.getInstance().flush();
@@ -266,10 +227,6 @@ public class ConnectActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * Test plain URL connection (no token auth).
-     * Returns null on success, or an error message string.
-     */
     private String testConnection(String baseUrl) {
         try {
             URL url = new URL(baseUrl + "/api/config");
@@ -356,9 +313,8 @@ public class ConnectActivity extends AppCompatActivity {
             row.setPadding(0, dpToPx(8), 0, dpToPx(8));
 
             TextView urlText = new TextView(this);
-            // Show abbreviated text for encrypted codes
             String displayText = entry;
-            if (entry.length() > 60 && tryDecryptConnectCode(entry) != null) {
+            if (entry.length() > 60 && tryDecodeConnectCode(entry) != null) {
                 displayText = entry.substring(0, 16) + "..." + entry.substring(entry.length() - 8);
             }
             urlText.setText(displayText);

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -171,6 +172,9 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
       : defaults.commandPresets,
     structuredChatPersona: normalizeStructuredChatPersona(input.structuredChatPersona),
     language: typeof input.language === "string" ? input.language.trim() : defaults.language,
+    appSecret: typeof input.appSecret === "string" && input.appSecret.length >= 32
+      ? input.appSecret
+      : crypto.randomBytes(32).toString("hex"),
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
   };
 }

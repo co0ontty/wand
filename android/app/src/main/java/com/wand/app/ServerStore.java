@@ -70,6 +70,14 @@ public class ServerStore {
         prefs.edit().putString(KEY_RECENT, "[]").apply();
     }
 
+    public String getSkippedVersion() {
+        return prefs.getString("skipped_apk_version", "");
+    }
+
+    public void setSkippedVersion(String version) {
+        prefs.edit().putString("skipped_apk_version", version).apply();
+    }
+
     public String getAppToken() {
         return prefs.getString(KEY_APP_TOKEN, "");
     }

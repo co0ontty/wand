@@ -81,6 +81,8 @@ export interface WandConfig {
   shortcutLogMaxBytes?: number;
   /** Preferred response language for Claude (e.g. "中文", "English"). Empty string means no override. */
   language?: string;
+  /** Per-instance secret for app connection code encryption. Auto-generated on first run. */
+  appSecret?: string;
   android?: AndroidApkConfig;
 }
 
