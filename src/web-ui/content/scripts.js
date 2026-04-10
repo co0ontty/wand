@@ -4847,6 +4847,10 @@
           try {
             localStorage.setItem("wand-file-panel-open", "false");
           } catch (e) {}
+          var activeEl = document.activeElement;
+          if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+            activeEl.blur();
+          }
         }
         updateLayoutState();
       }
@@ -8560,6 +8564,16 @@
 
           if (isKeyboardOpen && (!keyboardOpen || heightChanged) && shouldAdjustForKeyboard(vv, inputBox)) {
             syncInputBoxScroll(inputBox);
+          }
+
+          // Adjust mini keyboard FAB position when system keyboard is open
+          var miniFab = document.querySelector('.mini-keyboard-fab');
+          var miniKeyboard = document.querySelector('.mini-keyboard');
+          if (isKeyboardOpen) {
+            if (miniFab) miniFab.style.display = 'none';
+            if (miniKeyboard) miniKeyboard.classList.add('hidden');
+          } else {
+            if (miniFab) miniFab.style.display = '';
           }
 
           keyboardOpen = isKeyboardOpen;
