@@ -1,6 +1,7 @@
+import crypto from "node:crypto";
 import express, { NextFunction, Request, Response } from "express";
-import { readdir, readFile, stat } from "node:fs/promises";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { exec, spawn } from "node:child_process";
@@ -273,8 +274,129 @@ function readSessionCookie(req: { headers: { cookie?: string } }): string | unde
   return match?.slice("wand_session=".length);
 }
 
+// ── App connection token helpers ──
+
+const APP_TOKEN_CIPHER = "aes-256-cbc";
+const APP_TOKEN_SECRET = "wand-app-conn-2026"; // obfuscation key, not security-critical
+
+function deriveAppTokenKey(): Buffer {
+  return crypto.createHash("sha256").update(APP_TOKEN_SECRET).digest();
+}
+
+function generateAppToken(password: string): string {
+  return crypto.createHmac("sha256", APP_TOKEN_SECRET).update(password).digest("hex");
+}
+
+function verifyAppToken(token: string, password: string): boolean {
+  const expected = generateAppToken(password);
+  return crypto.timingSafeEqual(Buffer.from(token, "hex"), Buffer.from(expected, "hex"));
+}
+
+function encryptConnectionString(payload: { url: string; token: string }): string {
+  const key = deriveAppTokenKey();
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv(APP_TOKEN_CIPHER, key, iv);
+  const json = JSON.stringify(payload);
+  const encrypted = Buffer.concat([cipher.update(json, "utf8"), cipher.final()]);
+  // iv(16) + encrypted -> base64
+  return Buffer.concat([iv, encrypted]).toString("base64");
+}
+
+function decryptConnectionString(encoded: string): { url: string; token: string } | null {
+  try {
+    const buf = Buffer.from(encoded, "base64");
+    if (buf.length < 17) return null;
+    const key = deriveAppTokenKey();
+    const iv = buf.subarray(0, 16);
+    const encrypted = buf.subarray(16);
+    const decipher = crypto.createDecipheriv(APP_TOKEN_CIPHER, key, iv);
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+    const parsed = JSON.parse(decrypted);
+    if (typeof parsed.url === "string" && typeof parsed.token === "string") {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeMode(input: string | undefined, fallback: ExecutionMode): ExecutionMode {
   return isExecutionMode(input) ? input : fallback;
+}
+
+interface AndroidApkAsset {
+  fileName: string;
+  filePath: string;
+  size: number;
+  updatedAt: string;
+  version: string | null;
+  downloadUrl: string;
+  source: "local";
+}
+
+function resolveAndroidApkDir(configDir: string, config: WandConfig): string {
+  const configuredDir = config.android?.apkDir?.trim();
+  if (!configuredDir) {
+    return path.join(configDir, "android");
+  }
+  return path.isAbsolute(configuredDir) ? configuredDir : path.resolve(configDir, configuredDir);
+}
+
+function extractAndroidApkVersion(fileName: string): string | null {
+  const match = fileName.match(/(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)/);
+  return match ? match[1] : null;
+}
+
+async function resolveAndroidApkAsset(configDir: string, config: WandConfig): Promise<AndroidApkAsset | null> {
+  if (config.android?.enabled !== true) return null;
+  const apkDir = resolveAndroidApkDir(configDir, config);
+  await mkdir(apkDir, { recursive: true });
+
+  const configuredFile = config.android?.currentApkFile?.trim();
+  if (configuredFile) {
+    const filePath = path.join(apkDir, path.basename(configuredFile));
+    try {
+      const fileStat = await stat(filePath);
+      if (!fileStat.isFile()) return null;
+      return {
+        fileName: path.basename(filePath),
+        filePath,
+        size: fileStat.size,
+        updatedAt: fileStat.mtime.toISOString(),
+        version: extractAndroidApkVersion(path.basename(filePath)),
+        downloadUrl: "/android/download",
+        source: "local",
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const entries = await readdir(apkDir, { withFileTypes: true });
+  const apkFiles = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".apk"));
+  if (apkFiles.length === 0) return null;
+
+  const candidates = await Promise.all(apkFiles.map(async (entry) => {
+    const filePath = path.join(apkDir, entry.name);
+    const fileStat = await stat(filePath);
+    return {
+      entry,
+      filePath,
+      fileStat,
+    };
+  }));
+  candidates.sort((a, b) => b.fileStat.mtimeMs - a.fileStat.mtimeMs);
+  const selected = candidates[0];
+  return {
+    fileName: selected.entry.name,
+    filePath: selected.filePath,
+    size: selected.fileStat.size,
+    updatedAt: selected.fileStat.mtime.toISOString(),
+    version: extractAndroidApkVersion(selected.entry.name),
+    downloadUrl: "/android/download",
+    source: "local",
+  };
 }
 
 async function listPathSuggestions(input: string, fallbackCwd: string): Promise<PathSuggestion[]> {
@@ -483,14 +605,27 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       return;
     }
 
-    const { password } = req.body as { password?: string };
+    const { password, appToken } = req.body as { password?: string; appToken?: string };
     const dbPassword = storage.getPassword();
     const effectivePassword = dbPassword ?? config.password;
 
-    if (password !== effectivePassword) {
-      recordFailedLogin(clientIp);
-      res.status(401).json({ error: "密码错误，请重试。" });
-      return;
+    // App token login — derived from password, so password change invalidates it
+    let authenticated = false;
+    if (appToken) {
+      try {
+        authenticated = verifyAppToken(appToken, effectivePassword);
+      } catch {
+        authenticated = false;
+      }
+    }
+
+    if (!authenticated) {
+      if (password !== effectivePassword) {
+        recordFailedLogin(clientIp);
+        res.status(401).json({ error: "密码错误，请重试。" });
+        return;
+      }
+      authenticated = true;
     }
 
     resetRateLimit(clientIp);
@@ -542,12 +677,13 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   // ── Settings endpoints ──
 
-  app.get("/api/settings", (_req, res) => {
+  app.get("/api/settings", async (_req, res) => {
     const certPaths = {
       keyPath: path.join(configDir, "server.key"),
       certPath: path.join(configDir, "server.crt"),
     };
     const { password: _pw, ...safeConfig } = config;
+    const androidApk = await resolveAndroidApkAsset(configDir, config);
     res.json({
       version: PKG_VERSION,
       packageName: PKG_NAME,
@@ -557,7 +693,58 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       hasCert: existsSync(certPaths.keyPath) && existsSync(certPaths.certPath),
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
+      androidApk: {
+        enabled: config.android?.enabled === true,
+        hasApk: Boolean(androidApk),
+        fileName: androidApk?.fileName ?? null,
+        version: androidApk?.version ?? null,
+        size: androidApk?.size ?? null,
+        updatedAt: androidApk?.updatedAt ?? null,
+        downloadUrl: androidApk?.downloadUrl ?? null,
+        source: androidApk?.source ?? null,
+      },
     });
+  });
+
+  app.get("/api/android-apk", async (_req, res) => {
+    const androidApk = await resolveAndroidApkAsset(configDir, config);
+    res.json({
+      enabled: config.android?.enabled === true,
+      hasApk: Boolean(androidApk),
+      fileName: androidApk?.fileName ?? null,
+      version: androidApk?.version ?? null,
+      size: androidApk?.size ?? null,
+      updatedAt: androidApk?.updatedAt ?? null,
+      downloadUrl: androidApk?.downloadUrl ?? null,
+      source: androidApk?.source ?? null,
+    });
+  });
+
+  app.get("/android/download", async (_req, res) => {
+    const androidApk = await resolveAndroidApkAsset(configDir, config);
+    if (config.android?.enabled !== true) {
+      res.status(404).json({ error: "Android APK 下载未启用。" });
+      return;
+    }
+    if (!androidApk) {
+      res.status(404).json({ error: "当前没有可下载的 APK 文件。" });
+      return;
+    }
+    res.setHeader("Content-Type", "application/vnd.android.package-archive");
+    res.setHeader("Content-Length", String(androidApk.size));
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(androidApk.fileName)}"`);
+    createReadStream(androidApk.filePath).pipe(res);
+  });
+
+  app.get("/api/app-connect-code", requireAuth, (req, res) => {
+    const dbPassword = storage.getPassword();
+    const effectivePassword = dbPassword ?? config.password;
+    const protocol = useHttps ? "https" : "http";
+    const host = req.headers.host || `${config.host}:${config.port}`;
+    const serverUrl = `${protocol}://${host}`;
+    const token = generateAppToken(effectivePassword);
+    const code = encryptConnectionString({ url: serverUrl, token });
+    res.json({ code });
   });
 
   app.post("/api/settings/config", async (req, res) => {

@@ -58,6 +58,12 @@ export interface StructuredChatPersonaConfig {
   assistant?: StructuredChatPersonaRoleConfig;
 }
 
+export interface AndroidApkConfig {
+  enabled?: boolean;
+  apkDir?: string;
+  currentApkFile?: string;
+}
+
 export interface WandConfig {
   host: string;
   port: number;
@@ -75,6 +81,7 @@ export interface WandConfig {
   shortcutLogMaxBytes?: number;
   /** Preferred response language for Claude (e.g. "中文", "English"). Empty string means no override. */
   language?: string;
+  android?: AndroidApkConfig;
 }
 
 interface WorktreeInfo {

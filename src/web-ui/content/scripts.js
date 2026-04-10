@@ -1305,6 +1305,24 @@
                   '</div>' +
                   '<p id="update-message" class="hint hidden"></p>' +
                 '</div>' +
+                '<div class="settings-update-section">' +
+                  '<div class="settings-about-row">' +
+                    '<span class="settings-label">Android APK</span>' +
+                    '<span class="settings-value" id="settings-android-apk-status">暂未提供</span>' +
+                  '</div>' +
+                  '<div class="settings-update-actions">' +
+                    '<a id="download-android-apk-button" class="btn btn-primary btn-sm hidden" href="#" download>下载 APK</a>' +
+                  '</div>' +
+                  '<p id="android-apk-message" class="hint">可将本地打包好的 APK 放到运行时目录供下载。</p>' +
+                '</div>' +
+                '<div class="settings-update-section" id="android-connect-section">' +
+                  '<div class="settings-section-title" style="margin-bottom:8px">App 连接码</div>' +
+                  '<div class="settings-connect-url-box">' +
+                    '<code id="android-connect-code" class="settings-connect-url-text" style="font-size:12px;word-break:break-all">-</code>' +
+                    '<button id="copy-connect-code-button" class="btn btn-ghost btn-sm" type="button" title="复制连接码">复制</button>' +
+                  '</div>' +
+                  '<p class="hint">复制此连接码粘贴到 Android App 即可自动连接，无需输入密码。修改密码后连接码自动失效。</p>' +
+                '</div>' +
               '</div>' +
 
               // Notifications tab
@@ -2868,6 +2886,11 @@
         if (doUpdateBtn) doUpdateBtn.addEventListener("click", performUpdate);
         var doRestartBtn = document.getElementById("do-restart-button");
         if (doRestartBtn) doRestartBtn.addEventListener("click", performSettingsRestart);
+        var copyConnectCodeBtn = document.getElementById("copy-connect-code-button");
+        if (copyConnectCodeBtn) copyConnectCodeBtn.addEventListener("click", function() {
+          var text = document.getElementById("android-connect-code");
+          if (text) copyToClipboard(text.textContent, copyConnectCodeBtn);
+        });
         // Notification preferences
         var notifSoundEl = document.getElementById("cfg-notif-sound");
         if (notifSoundEl) {
@@ -5210,6 +5233,46 @@
         }
       }
 
+      function copyToClipboard(text, triggerBtn) {
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(function() {
+          if (triggerBtn) {
+            var orig = triggerBtn.textContent;
+            triggerBtn.textContent = "已复制";
+            setTimeout(function() { triggerBtn.textContent = orig; }, 1500);
+          }
+        }).catch(function() {
+          // Fallback for non-secure contexts
+          var ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+          if (triggerBtn) {
+            var orig = triggerBtn.textContent;
+            triggerBtn.textContent = "已复制";
+            setTimeout(function() { triggerBtn.textContent = orig; }, 1500);
+          }
+        });
+      }
+
+      function formatBytes(value) {
+        if (typeof value !== "number" || !isFinite(value) || value < 0) return "-";
+        if (value < 1024) return value + " B";
+        var units = ["KB", "MB", "GB", "TB"];
+        var size = value / 1024;
+        var unitIndex = 0;
+        while (size >= 1024 && unitIndex < units.length - 1) {
+          size = size / 1024;
+          unitIndex += 1;
+        }
+        var display = size >= 10 ? size.toFixed(0) : size.toFixed(1);
+        return display + " " + units[unitIndex];
+      }
+
       function loadSettingsData() {
         fetch("/api/settings", { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
@@ -5234,6 +5297,55 @@
               if (data.updateAvailable && updateBtn) {
                 updateBtn.classList.remove("hidden");
               }
+            }
+
+            var androidApkStatusEl = document.getElementById("settings-android-apk-status");
+            var androidApkMessageEl = document.getElementById("android-apk-message");
+            var downloadAndroidApkBtn = document.getElementById("download-android-apk-button");
+            var androidApk = data.androidApk || {};
+            if (androidApk.enabled === true) {
+              if (androidApk.hasApk) {
+                var androidApkLabel = androidApk.version
+                  ? ("可下载（v" + androidApk.version + "）")
+                  : "可下载";
+                if (androidApkStatusEl) androidApkStatusEl.textContent = androidApkLabel;
+                if (androidApkMessageEl) {
+                  var apkMetaParts = [];
+                  if (androidApk.fileName) apkMetaParts.push(androidApk.fileName);
+                  if (typeof androidApk.size === "number") apkMetaParts.push(formatBytes(androidApk.size));
+                  androidApkMessageEl.textContent = apkMetaParts.length > 0
+                    ? apkMetaParts.join(" · ")
+                    : "已提供 Android APK 下载。";
+                }
+                if (downloadAndroidApkBtn && androidApk.downloadUrl) {
+                  downloadAndroidApkBtn.classList.remove("hidden");
+                  downloadAndroidApkBtn.setAttribute("href", androidApk.downloadUrl);
+                }
+              } else {
+                if (androidApkStatusEl) androidApkStatusEl.textContent = "暂未提供";
+                if (androidApkMessageEl) androidApkMessageEl.textContent = "请先将本地打包好的 APK 放到运行时目录。";
+                if (downloadAndroidApkBtn) {
+                  downloadAndroidApkBtn.classList.add("hidden");
+                  downloadAndroidApkBtn.setAttribute("href", "#");
+                }
+              }
+            } else {
+              if (androidApkStatusEl) androidApkStatusEl.textContent = "未启用";
+              if (androidApkMessageEl) androidApkMessageEl.textContent = "可在配置文件中开启 Android APK 下载能力。";
+              if (downloadAndroidApkBtn) {
+                downloadAndroidApkBtn.classList.add("hidden");
+                downloadAndroidApkBtn.setAttribute("href", "#");
+              }
+            }
+
+            // App connect code (encrypted)
+            var connectCodeEl = document.getElementById("android-connect-code");
+            if (connectCodeEl) {
+              connectCodeEl.textContent = "加载中...";
+              fetch("/api/app-connect-code").then(function(r) { return r.json(); }).then(function(d) {
+                if (d.code) connectCodeEl.textContent = d.code;
+                else connectCodeEl.textContent = "生成失败";
+              }).catch(function() { connectCodeEl.textContent = "获取失败"; });
             }
 
             // Config fields

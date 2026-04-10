@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { ExecutionMode, StructuredChatPersonaConfig, WandConfig } from "./types.js";
+import { AndroidApkConfig, ExecutionMode, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -19,6 +19,7 @@ export const defaultConfig = (): WandConfig => ({
   allowedCommandPrefixes: [],
   shortcutLogMaxBytes: 10 * 1024 * 1024,
   language: "",
+  android: defaultAndroidApkConfig(),
   commandPresets: [
     {
       label: "Claude",
@@ -89,6 +90,29 @@ export async function saveConfig(configPath: string, config: WandConfig): Promis
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
+function defaultAndroidApkConfig(): AndroidApkConfig {
+  return {
+    enabled: false,
+    apkDir: "android",
+    currentApkFile: "",
+  };
+}
+
+function normalizeAndroidApkConfig(input: unknown): AndroidApkConfig | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const defaults = defaultAndroidApkConfig();
+  const androidInput = input as Record<string, unknown>;
+  return {
+    enabled: typeof androidInput.enabled === "boolean" ? androidInput.enabled : defaults.enabled,
+    apkDir: typeof androidInput.apkDir === "string" && androidInput.apkDir.trim()
+      ? androidInput.apkDir.trim()
+      : defaults.apkDir,
+    currentApkFile: typeof androidInput.currentApkFile === "string"
+      ? androidInput.currentApkFile.trim()
+      : defaults.currentApkFile,
+  };
+}
+
 function normalizeStructuredChatPersona(input: unknown): StructuredChatPersonaConfig | undefined {
   if (!input || typeof input !== "object") return undefined;
 
@@ -147,6 +171,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
       : defaults.commandPresets,
     structuredChatPersona: normalizeStructuredChatPersona(input.structuredChatPersona),
     language: typeof input.language === "string" ? input.language.trim() : defaults.language,
+    android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
   };
 }
 

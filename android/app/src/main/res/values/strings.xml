@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Wand</string>
+    <string name="connect_title">连接 Wand 服务</string>
+    <string name="server_url_hint">粘贴连接码，或输入服务器地址</string>
+    <string name="connect_button">连接</string>
+    <string name="recent_servers">最近连接</string>
+    <string name="no_recent_servers">暂无最近连接记录</string>
+    <string name="connecting">正在连接…</string>
+    <string name="connection_failed">连接失败，请检查地址是否正确</string>
+    <string name="disconnected">服务器连接断开</string>
+    <string name="retry">重新连接</string>
+    <string name="back_to_connect">返回连接页</string>
+    <string name="clear_history">清除历史</string>
+</resources>

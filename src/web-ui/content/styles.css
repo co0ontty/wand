@@ -7267,6 +7267,27 @@
       margin-top: 10px;
     }
 
+    .settings-connect-url-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 6px 10px;
+      margin-top: 6px;
+    }
+
+    .settings-connect-url-text {
+      flex: 1;
+      font-family: var(--font-mono, monospace);
+      font-size: 13px;
+      color: var(--text-primary);
+      word-break: break-all;
+      user-select: all;
+      -webkit-user-select: all;
+    }
+
     .settings-divider {
       border: none;
       border-top: 1px solid var(--border-subtle);
