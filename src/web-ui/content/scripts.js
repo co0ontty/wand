@@ -190,6 +190,8 @@
         sessionsManageMode: false,
         selectedSessionIds: {},
         selectedClaudeHistoryIds: {},
+        askUserSelections: {},  // { toolUseId: { 0: [optIdx...], submitted: false } }
+        queueEpoch: 0,  // Monotonic counter for queue state freshness
         // Load last used working directory from localStorage
         workingDir: (function() {
           try {
@@ -334,6 +336,8 @@
         if (button) {
           button.classList.toggle("visible", shouldShow);
         }
+        var chatContainer = document.getElementById("chat-output");
+        if (chatContainer) chatContainer.classList.toggle("has-jump-btn", shouldShow);
       }
 
       function scrollChatToBottom(smooth) {
@@ -700,6 +704,7 @@
         state.lastRenderedMsgCount = 0;
         state.lastRenderedEmpty = null;
         state.renderPending = false;
+        state.askUserSelections = {};
         if (state.chatScrollElement && state.chatScrollHandler) {
           state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);
         }
@@ -1044,11 +1049,6 @@
         var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
         return '<div class="app-container">' +
-          '<button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? ' active' : '') + '" aria-label="Toggle sidebar">' +
-            '<span class="hamburger-icon">' +
-              '<span></span><span></span><span></span>' +
-            '</span>' +
-          '</button>' +
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
           '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + '">' +
             '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
@@ -1090,10 +1090,13 @@
               '</div>' +
             '</aside>' +
             '<main class="main-content">' +
-              '<span class="current-task hidden" id="current-task"></span>' +
-              '<div class="view-toggle-bar' + (state.selectedId ? '' : ' hidden') + '" id="view-toggle-bar">' +
-                '<button id="view-terminal-btn" class="topbar-btn' + (state.currentView === "terminal" ? ' active' : '') + '" type="button" title="查看原始终端输出">终端</button>' +
-                '<button id="view-chat-btn" class="topbar-btn' + (state.currentView !== "terminal" ? ' active' : '') + '" type="button" title="查看聊天解析视图">聊天</button>' +
+              '<div class="main-header-row">' +
+                '<button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? ' active' : '') + '" aria-label="切换会话侧栏" type="button">' +
+                  '<span class="hamburger-icon">' +
+                    '<span></span><span></span><span></span>' +
+                  '</span>' +
+                '</button>' +
+                '<span class="current-task hidden" id="current-task"></span>' +
               '</div>' +
               // File panel backdrop (mobile)
               '<div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div>' +
@@ -1325,6 +1328,7 @@
                   '</div>' +
                   '<div class="settings-update-actions">' +
                     '<button id="notification-request-btn" class="btn btn-ghost btn-sm hidden">\u6388\u6743\u901a\u77e5</button>' +
+                    '<button id="notification-reset-btn" class="btn btn-ghost btn-sm hidden">\u91cd\u65b0\u6388\u6743</button>' +
                     '<button id="notification-test-btn" class="btn btn-ghost btn-sm">\u53d1\u9001\u6d4b\u8bd5\u901a\u77e5</button>' +
                   '</div>' +
                   '<p id="notification-test-message" class="hint hidden"></p>' +
@@ -2603,32 +2607,84 @@
           }
         }
       }
-      // Global handler for ask-user option buttons — called via onclick
-      window.__askOption = function(btnEl) {
-        var optionLabel = btnEl.dataset.optionLabel;
-        if (optionLabel && state.selectedId) {
-          btnEl.classList.add("selected");
-          // Only disable options within the same question group, not globally
-          var questionGroup = btnEl.closest(".ask-user-question-group");
-          if (questionGroup) {
-            questionGroup.querySelectorAll(".ask-user-option").forEach(function(opt) {
-              opt.classList.add("selected");
-              opt.style.pointerEvents = "none";
-            });
-            var sentDiv = document.createElement("div");
-            sentDiv.className = "ask-user-answer-sent";
-            sentDiv.innerHTML = "\u2713 \u5df2\u53d1\u9001: " + escapeHtml(optionLabel);
-            questionGroup.appendChild(sentDiv);
-          }
-          fetch("/api/sessions/" + state.selectedId + "/input", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify({ input: optionLabel + "\n", view: state.currentView })
-          }).catch(function(err) {
-            console.error("[wand] Error sending answer:", err);
-          });
+      // ── AskUserQuestion handlers: select → render → submit ──
+      window.__askSelect = function(toolUseId, qIdx, optIdx, isMulti) {
+        var sel = state.askUserSelections[toolUseId];
+        if (!sel) {
+          sel = { submitted: false };
+          state.askUserSelections[toolUseId] = sel;
         }
+        if (sel.submitted) return;
+        var current = sel[qIdx] || [];
+        if (isMulti) {
+          var pos = current.indexOf(optIdx);
+          if (pos === -1) { current.push(optIdx); } else { current.splice(pos, 1); }
+        } else {
+          current = current[0] === optIdx ? [] : [optIdx];
+        }
+        sel[qIdx] = current;
+        window.__askRender(toolUseId);
+      };
+
+      window.__askRender = function(toolUseId) {
+        var card = document.querySelector('[data-tool-use-id="' + toolUseId + '"]');
+        if (!card) return;
+        var sel = state.askUserSelections[toolUseId] || {};
+        // Update option selected states
+        card.querySelectorAll(".ask-user-option").forEach(function(btn) {
+          var qIdx = parseInt(btn.dataset.questionIndex, 10);
+          var oIdx = parseInt(btn.dataset.optionIndex, 10);
+          var chosen = (sel[qIdx] || []).indexOf(oIdx) !== -1;
+          btn.classList.toggle("selected", chosen);
+        });
+        // Update submit button: enabled only when every question has at least one selection
+        var submitBtn = card.querySelector(".ask-user-submit");
+        if (submitBtn) {
+          var groups = card.querySelectorAll(".ask-user-question-group");
+          var allAnswered = true;
+          groups.forEach(function(g, i) {
+            if (!sel[i] || sel[i].length === 0) allAnswered = false;
+          });
+          submitBtn.disabled = !allAnswered || !!sel.submitted;
+          if (sel.submitted) {
+            submitBtn.textContent = "已提交...";
+            submitBtn.classList.add("ask-user-submitted");
+          }
+        }
+      };
+
+      window.__askSubmit = function(toolUseId) {
+        var sel = state.askUserSelections[toolUseId];
+        if (!sel || sel.submitted || !state.selectedId) return;
+        var card = document.querySelector('[data-tool-use-id="' + toolUseId + '"]');
+        if (!card) return;
+        var groups = card.querySelectorAll(".ask-user-question-group");
+        var lines = [];
+        var allAnswered = true;
+        groups.forEach(function(group, qIdx) {
+          var selected = sel[qIdx] || [];
+          if (selected.length === 0) { allAnswered = false; return; }
+          var labels = [];
+          selected.forEach(function(optIdx) {
+            var btn = group.querySelector('[data-option-index="' + optIdx + '"]');
+            if (btn) labels.push(btn.dataset.optionLabel);
+          });
+          lines.push(labels.join(", "));
+        });
+        if (!allAnswered) return;
+        sel.submitted = true;
+        window.__askRender(toolUseId);
+        var answerText = lines.join("\n");
+        fetch("/api/sessions/" + state.selectedId + "/input", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ input: answerText + "\n", view: state.currentView })
+        }).catch(function(err) {
+          console.error("[wand] Error sending answer:", err);
+          sel.submitted = false;
+          window.__askRender(toolUseId);
+        });
       };
       function attachEventListeners() {
 
@@ -2819,6 +2875,8 @@
           notifSoundEl.addEventListener("change", function() {
             state.notifSound = notifSoundEl.checked;
             try { localStorage.setItem("wand-notif-sound", String(state.notifSound)); } catch (e) {}
+            // Preview sound when toggling on
+            if (state.notifSound) _doPlaySound();
           });
         }
         var notifBubbleEl = document.getElementById("cfg-notif-bubble");
@@ -2836,6 +2894,8 @@
             Notification.requestPermission().then(function() { updateNotificationStatus(); });
           }
         });
+        var notifResetBtn = document.getElementById("notification-reset-btn");
+        if (notifResetBtn) notifResetBtn.addEventListener("click", resetNotificationPermission);
         var notifTestBtn = document.getElementById("notification-test-btn");
         if (notifTestBtn) notifTestBtn.addEventListener("click", testNotification);
         updateNotificationStatus();
@@ -2898,11 +2958,6 @@
           inputBox.addEventListener("blur", handleInputBoxBlur);
         }
 
-        // View toggle handlers
-        var viewTermBtn = document.getElementById("view-terminal-btn");
-        if (viewTermBtn) viewTermBtn.addEventListener("click", function() { setView("terminal"); });
-        var viewChatBtn = document.getElementById("view-chat-btn");
-        if (viewChatBtn) viewChatBtn.addEventListener("click", function() { setView("chat"); });
         // Terminal interactive toggle (both topbar and terminal-header)
         var terminalInteractiveToggles = ["terminal-interactive-toggle-top"];
         terminalInteractiveToggles.forEach(function(id) {
@@ -3591,6 +3646,8 @@
         if (button) {
           button.classList.toggle("visible", shouldShow);
         }
+        var termContainer = document.getElementById("output");
+        if (termContainer) termContainer.classList.toggle("has-jump-btn", shouldShow);
       }
 
       function isTerminalNearBottom() {
@@ -4321,9 +4378,6 @@
 
       function applyCurrentView() {
         var hasSession = !!state.selectedId;
-        var terminalBtn = document.getElementById("view-terminal-btn");
-        var chatBtn = document.getElementById("view-chat-btn");
-        var toggleBar = document.getElementById("view-toggle-bar");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
@@ -4336,17 +4390,6 @@
           state.currentView = "terminal";
         }
 
-        if (toggleBar) {
-          toggleBar.classList.toggle("hidden", !hasSession);
-        }
-        if (terminalBtn) {
-          terminalBtn.classList.toggle("hidden", structured || !hasSession);
-          terminalBtn.classList.toggle("active", showTerminal);
-        }
-        if (chatBtn) {
-          chatBtn.classList.toggle("hidden", !hasSession);
-          chatBtn.classList.toggle("active", showChat);
-        }
         if (terminalContainer) {
           terminalContainer.classList.toggle("active", showTerminal);
           terminalContainer.classList.toggle("hidden", !showTerminal);
@@ -5419,6 +5462,7 @@
       function updateNotificationStatus() {
         var statusEl = document.getElementById("notification-permission-status");
         var requestBtn = document.getElementById("notification-request-btn");
+        var resetBtn = document.getElementById("notification-reset-btn");
         var testMsgEl = document.getElementById("notification-test-message");
         if (!statusEl) return;
 
@@ -5426,6 +5470,7 @@
           statusEl.textContent = "\u4e0d\u652f\u6301";
           statusEl.style.color = "var(--fg-muted)";
           if (requestBtn) requestBtn.classList.add("hidden");
+          if (resetBtn) resetBtn.classList.add("hidden");
           return;
         }
 
@@ -5434,45 +5479,86 @@
           statusEl.textContent = "\u5df2\u6388\u6743 \u2713";
           statusEl.style.color = "var(--success)";
           if (requestBtn) requestBtn.classList.add("hidden");
+          if (resetBtn) resetBtn.classList.add("hidden");
         } else if (perm === "denied") {
           statusEl.textContent = "\u5df2\u62d2\u7edd";
           statusEl.style.color = "var(--danger)";
           if (requestBtn) requestBtn.classList.add("hidden");
-          if (testMsgEl) {
-            testMsgEl.textContent = "\u6d4f\u89c8\u5668\u5df2\u62d2\u7edd\u901a\u77e5\u6743\u9650\uff0c\u8bf7\u5728\u6d4f\u89c8\u5668\u8bbe\u7f6e\u4e2d\u624b\u52a8\u5f00\u542f";
-            testMsgEl.style.color = "var(--fg-muted)";
-            testMsgEl.classList.remove("hidden");
-          }
+          if (resetBtn) resetBtn.classList.remove("hidden");
         } else {
           statusEl.textContent = "\u672a\u6388\u6743";
           statusEl.style.color = "var(--warning)";
           if (requestBtn) requestBtn.classList.remove("hidden");
+          if (resetBtn) resetBtn.classList.remove("hidden");
         }
+      }
+
+      function resetNotificationPermission() {
+        var testMsgEl = document.getElementById("notification-test-message");
+        if (typeof Notification === "undefined") return;
+
+        // Always call requestPermission — this triggers the browser's native
+        // permission dialog when allowed. In "default" state it always works.
+        // In "denied" state, some browsers (newer Chrome) re-prompt, others don't.
+        Notification.requestPermission().then(function(result) {
+          updateNotificationStatus();
+          if (result === "granted") {
+            if (testMsgEl) {
+              testMsgEl.textContent = "\u2713 \u5df2\u6388\u6743";
+              testMsgEl.style.color = "var(--success)";
+              testMsgEl.classList.remove("hidden");
+            }
+          } else if (result === "denied") {
+            // Browser blocked re-prompting — show inline guide with site-settings shortcut
+            if (testMsgEl) {
+              var origin = location.origin;
+              testMsgEl.innerHTML =
+                "\u6d4f\u89c8\u5668\u5df2\u62e6\u622a\u6388\u6743\u5f39\u7a97\uff0c\u8bf7\u624b\u52a8\u91cd\u7f6e\uff1a<br>" +
+                '<span style="display:inline-flex;align-items:center;gap:4px;margin:4px 0">' +
+                  "\u2460 \u70b9\u51fb\u5730\u5740\u680f\u5de6\u4fa7\u7684 " +
+                  '<span style="display:inline-flex;align-items:center;justify-content:center;' +
+                    "width:16px;height:16px;border-radius:50%;border:1px solid var(--border);" +
+                    'font-size:11px;vertical-align:middle">i</span>' +
+                  " \u6216\u9501\u56fe\u6807" +
+                "</span><br>" +
+                "\u2461 \u627e\u5230\u300c\u901a\u77e5\u300d\u2192 \u6539\u4e3a\u300c\u5141\u8bb8\u300d<br>" +
+                "\u2462 \u5237\u65b0\u9875\u9762\u5373\u53ef";
+              testMsgEl.style.color = "var(--fg-muted)";
+              testMsgEl.classList.remove("hidden");
+            }
+          }
+        });
       }
 
       function testNotification() {
         var testMsgEl = document.getElementById("notification-test-message");
+        var results = [];
 
-        // Always show in-app bubble
+        // 1. Test sound playback
+        var soundOk = tryPlayNotificationSound();
+        results.push(soundOk ? "\u2713 \u63d0\u793a\u97f3" : "\u2717 \u63d0\u793a\u97f3\uff08\u65e0\u6cd5\u64ad\u653e\uff09");
+
+        // 2. Test in-app bubble
+        var bubbleEnabled = state.notifBubble;
         showNotificationBubble({
           title: "\u6d4b\u8bd5\u901a\u77e5",
-          body: "\u8fd9\u662f\u4e00\u6761\u6d4b\u8bd5\u901a\u77e5\uff0c\u5e94\u7528\u5185\u6c14\u6ce1\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002",
+          body: "\u8fd9\u662f\u4e00\u6761\u6d4b\u8bd5\u901a\u77e5\u3002",
           type: "info",
           icon: "\u266a",
           duration: 5000,
+          playSound: false, // sound already played above
         });
+        results.push(bubbleEnabled ? "\u2713 \u5e94\u7528\u5185\u6c14\u6ce1" : "\u2013 \u5e94\u7528\u5185\u6c14\u6ce1\uff08\u5df2\u5173\u95ed\uff09");
 
-        // Test browser notification
+        // 3. Test browser notification
         if (typeof Notification === "undefined") {
-          if (testMsgEl) {
-            testMsgEl.textContent = "\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u901a\u77e5 API\uff0c\u4ec5\u53ef\u4f7f\u7528\u5e94\u7528\u5185\u6c14\u6ce1\u901a\u77e5\u3002";
-            testMsgEl.style.color = "var(--fg-muted)";
-            testMsgEl.classList.remove("hidden");
-          }
+          results.push("\u2013 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u4e0d\u652f\u6301\uff09");
+          showTestResults(testMsgEl, results);
           return;
         }
 
-        if (Notification.permission === "granted") {
+        var perm = Notification.permission;
+        if (perm === "granted") {
           try {
             var n = new Notification("Wand \u6d4b\u8bd5\u901a\u77e5", {
               body: "\u6d4f\u89c8\u5668\u901a\u77e5\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002",
@@ -5480,33 +5566,35 @@
               tag: "wand-test",
             });
             setTimeout(function() { n.close(); }, 5000);
-            if (testMsgEl) {
-              testMsgEl.textContent = "\u2713 \u6d4f\u89c8\u5668\u901a\u77e5 + \u5e94\u7528\u5185\u6c14\u6ce1\u5747\u5df2\u53d1\u9001";
-              testMsgEl.style.color = "var(--success)";
-              testMsgEl.classList.remove("hidden");
-            }
+            results.push("\u2713 \u6d4f\u89c8\u5668\u901a\u77e5");
           } catch (_e) {
-            if (testMsgEl) {
-              testMsgEl.textContent = "\u6d4f\u89c8\u5668\u901a\u77e5\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u80fd\u9700\u8981 HTTPS";
-              testMsgEl.style.color = "var(--warning)";
-              testMsgEl.classList.remove("hidden");
-            }
+            results.push("\u2717 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u80fd\u9700\u8981 HTTPS\uff09");
           }
+          showTestResults(testMsgEl, results);
+        } else if (perm === "denied") {
+          results.push("\u2717 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u5df2\u62d2\u7edd\uff09");
+          showTestResults(testMsgEl, results);
         } else {
-          // permission is "default" or "denied" — always try requesting
+          // "default" — try requesting
           Notification.requestPermission().then(function(result) {
             updateNotificationStatus();
             if (result === "granted") {
-              testNotification();
-            } else if (result === "denied") {
-              if (testMsgEl) {
-                testMsgEl.textContent = "\u6d4f\u89c8\u5668\u5df2\u62d2\u7edd\u901a\u77e5\u6743\u9650\uff0c\u8bf7\u70b9\u51fb\u5730\u5740\u680f\u5de6\u4fa7\u9501\u56fe\u6807\u6216\u5728\u6d4f\u89c8\u5668\u8bbe\u7f6e\u4e2d\u624b\u52a8\u5f00\u542f";
-                testMsgEl.style.color = "var(--fg-muted)";
-                testMsgEl.classList.remove("hidden");
-              }
+              results.push("\u2713 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u5df2\u6388\u6743\uff09");
+            } else {
+              results.push("\u2717 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u672a\u6388\u6743\uff09");
             }
+            showTestResults(testMsgEl, results);
           });
         }
+      }
+
+      function showTestResults(el, results) {
+        if (!el) return;
+        el.innerHTML = results.map(function(r) { return escapeHtml(r); }).join("<br>");
+        // color based on whether all passed
+        var allOk = results.every(function(r) { return r.indexOf("\u2713") === 0 || r.indexOf("\u2013") === 0; });
+        el.style.color = allOk ? "var(--success)" : "var(--warning)";
+        el.classList.remove("hidden");
       }
 
       function quickStartSession() {
@@ -6508,13 +6596,17 @@
           var userMsgs = stripRenderOnlyStructuredMessages(Array.isArray(session.messages) ? session.messages.slice() : []);
           userMsgs.push(userTurn);
           var optimisticStructuredState = Object.assign({}, session.structuredState || {}, { inFlight: true });
+          // Write optimistic user turn into session.messages so WS updates
+          // that arrive before the HTTP response don't erase it.
           updateSessionSnapshot({
             id: session.id,
             status: "running",
+            messages: userMsgs,
             structuredState: optimisticStructuredState,
           });
           state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
             status: "running",
+            messages: userMsgs,
             structuredState: optimisticStructuredState,
           }), userMsgs);
           updateInputHint("思考中…");
@@ -6526,6 +6618,11 @@
           autoResizeInput(inputBox);
         }
         setDraftValue("");
+
+        // Capture queue epoch before the POST so we can detect whether
+        // a newer WS update has already refreshed the queue by the time
+        // the HTTP response arrives.
+        var epochBeforePost = state.queueEpoch;
 
         return fetch("/api/structured-sessions/" + state.selectedId + "/messages", {
           method: "POST",
@@ -6539,13 +6636,21 @@
             throw new Error(snapshot.error);
           }
           if (snapshot && snapshot.id) {
+            // If a WS update has already bumped the queue epoch, the HTTP
+            // response's queuedMessages is stale — drop it to avoid
+            // re-introducing already-dequeued items.
+            if (state.queueEpoch > epochBeforePost && snapshot.queuedMessages) {
+              delete snapshot.queuedMessages;
+            }
             updateSessionSnapshot(snapshot);
             var refreshedSession = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
             state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot.output, false));
             renderChat(true);
             if (isQueueing) {
               var queuedCount = getStructuredQueuedInputs(refreshedSession).length;
-              showToast("已排队（第 " + queuedCount + " 条），将在当前消息处理完成后自动发送。", "info");
+              if (queuedCount > 0) {
+                showToast("已排队（第 " + queuedCount + " 条），将在当前消息处理完成后自动发送。", "info");
+              }
             } else {
               updateInputHint("Enter 发送 · Shift+Enter 换行");
             }
@@ -6597,7 +6702,25 @@
         }
         var queued = getStructuredQueuedInputs(session);
         if (queued && queued.length > 0) {
+          // Collect recent user message texts to deduplicate against queued items.
+          // A queued message that already appears as a real user turn should not
+          // be rendered a second time with the "排队中" badge.
+          var existingUserTexts = {};
+          for (var ei = base.length - 1; ei >= 0 && Object.keys(existingUserTexts).length < queued.length + 5; ei--) {
+            var em = base[ei];
+            if (em && em.role === "user" && Array.isArray(em.content)) {
+              for (var ej = 0; ej < em.content.length; ej++) {
+                if (em.content[ej] && em.content[ej].type === "text" && em.content[ej].text) {
+                  existingUserTexts[em.content[ej].text] = (existingUserTexts[em.content[ej].text] || 0) + 1;
+                }
+              }
+            }
+          }
           for (var qi = 0; qi < queued.length; qi++) {
+            if (existingUserTexts[queued[qi]]) {
+              existingUserTexts[queued[qi]]--;
+              continue; // Skip — this queued text is already shown as a real message
+            }
             base.push({ role: "user", content: [{ type: "text", text: queued[qi], __queued: true }] });
           }
         }
@@ -7712,24 +7835,7 @@
 
       function handleInputBoxBlur() {
         resetInputPanelViewportSpacing();
-        // Restore app container height when keyboard closes.
-        // Use a short delay because on iOS the visualViewport may not
-        // have updated yet at the moment blur fires.
         setTimeout(function() {
-          var appContainer = document.querySelector('.app-container');
-          if (appContainer) {
-            // Only clear if keyboard is actually closed now
-            var vv = window.visualViewport;
-            if (vv) {
-              var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
-              if (offsetBottom <= 50) {
-                appContainer.style.height = '';
-              }
-            } else {
-              appContainer.style.height = '';
-            }
-          }
-          // Scroll the window back to top to fix any residual offset
           window.scrollTo(0, 0);
         }, 100);
       }
@@ -8452,20 +8558,6 @@
           var isKeyboardOpen = offsetBottom > 50;
           var heightChanged = Math.abs(vv.height - lastHeight) > 8;
 
-          // Dynamically resize the app container to match visible viewport.
-          // This is needed because 100dvh does NOT shrink when the keyboard
-          // appears in PWA standalone mode, and on some browsers the layout
-          // viewport doesn't update on keyboard dismiss without this.
-          var appContainer = document.querySelector('.app-container');
-          if (appContainer) {
-            if (isKeyboardOpen) {
-              appContainer.style.height = vv.height + 'px';
-            } else if (keyboardOpen) {
-              // Keyboard just closed — clear forced height
-              appContainer.style.height = '';
-            }
-          }
-
           if (isKeyboardOpen && (!keyboardOpen || heightChanged) && shouldAdjustForKeyboard(vv, inputBox)) {
             syncInputBoxScroll(inputBox);
           }
@@ -8790,8 +8882,9 @@
               if (msg.data.messages) {
                 snapshot.messages = msg.data.messages;
               }
-              if (msg.data.queuedMessages) {
-                snapshot.queuedMessages = msg.data.queuedMessages;
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'queuedMessages')) {
+                snapshot.queuedMessages = msg.data.queuedMessages || [];
+                state.queueEpoch++;
               }
               if (msg.data.structuredState) {
                 snapshot.structuredState = msg.data.structuredState;
@@ -8979,6 +9072,10 @@
                   });
                 }
               }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'queuedMessages')) {
+                statusUpdate.queuedMessages = msg.data.queuedMessages || [];
+                state.queueEpoch++;
+              }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'permissionBlocked')) {
                 statusUpdate.permissionBlocked = !!msg.data.permissionBlocked;
               }
@@ -9032,12 +9129,13 @@
                 }
                 // Re-render chat when structured session inFlight state changes
                 if (statusUpdate.structuredState) {
-                  scheduleChatRender();
-                  // Flush queued structured messages when inFlight clears
+                  // Flush queued structured messages synchronously before render
+                  // so the chat view uses up-to-date queue state.
                   if (!statusUpdate.structuredState.inFlight) {
                     updateInputHint("Enter 发送 · Shift+Enter 换行");
-                    setTimeout(flushStructuredInputQueue, 50);
+                    flushStructuredInputQueue();
                   }
+                  scheduleChatRender();
                 }
               }
             }
@@ -9729,7 +9827,7 @@
           updateChatJumpToBottomButton();
           return;
         }
-        var chatMsgs = container && container.classList && container.classList.contains("chat-messages")
+        var chatMsgs = (container && container.classList && container.classList.contains("chat-messages"))
           ? container
           : getChatScrollElement();
         if (!chatMsgs || !chatMsgs.isConnected) return;
@@ -11342,33 +11440,116 @@
           return renderDiffTool(block, toolResult, toolName);
         }
 
-        // ── AskUserQuestion tool — special card
+        // ── AskUserQuestion tool — special card with batch submit
         if (toolName === "AskUserQuestion" && block.input && block.input.questions) {
           var questions = block.input.questions;
           if (questions && questions.length > 0) {
+            var isAnswered = !!toolResult;
+            var sel = state.askUserSelections[toolId] || {};
+            var isSubmitted = !!sel.submitted;
+            var answerText = isAnswered ? extractToolResultText(toolResult.content) : "";
+            var answerLines = answerText ? answerText.trim().split("\n") : [];
+
+            // Build header summary
+            var headerLabel = "";
+            for (var hi = 0; hi < questions.length; hi++) {
+              if (questions[hi].header) { headerLabel = questions[hi].header; break; }
+            }
+            var headerSummary = headerLabel ? '<span class="tool-use-summary">' + escapeHtml(headerLabel) + '</span>' : "";
+
             var questionsHtml = "";
             questions.forEach(function(question, qIdx) {
+              var isMulti = !!question.multiSelect;
               var questionText = question.question ? '<div class="ask-user-title">' + escapeHtml(question.question) + '</div>' : "";
               var optionsHtml = "";
               if (question.options && question.options.length > 0) {
-                optionsHtml = '<div class="ask-user-options">';
+                optionsHtml = '<div class="ask-user-options" data-multi-select="' + isMulti + '">';
                 question.options.forEach(function(opt, idx) {
                   var label = opt.label ? escapeHtml(opt.label) : "选项 " + (idx + 1);
-                  optionsHtml += '<button class="ask-user-option" data-option-index="' + idx + '" data-question-index="' + qIdx + '" data-option-label="' + escapeHtml(label) + '" onclick="__askOption(this)">' +
-                    '<div class="ask-user-option-label">' + label + '</div>' +
-                  '</button>';
+                  var descHtml = opt.description ? '<div class="ask-user-option-desc">' + escapeHtml(opt.description) + '</div>' : "";
+
+                  if (isAnswered) {
+                    // Read-only: check if this option was the chosen answer
+                    var answerLine = answerLines[qIdx] || answerLines[0] || "";
+                    var chosenLabels = answerLine.split(",").map(function(s) { return s.trim(); });
+                    var isChosen = chosenLabels.indexOf(opt.label || "") !== -1;
+                    optionsHtml += '<div class="ask-user-option ask-user-option-readonly' + (isChosen ? ' ask-user-option-chosen' : '') + '">' +
+                      '<span class="ask-user-indicator"></span>' +
+                      '<div class="ask-user-option-content">' +
+                        '<div class="ask-user-option-label">' + label + '</div>' +
+                        descHtml +
+                      '</div>' +
+                    '</div>';
+                  } else {
+                    // Interactive: selection state from askUserSelections
+                    var isSelected = (sel[qIdx] || []).indexOf(idx) !== -1;
+                    var disabledAttr = isSubmitted ? ' disabled' : '';
+                    optionsHtml += '<button class="ask-user-option' + (isSelected ? ' selected' : '') + '"' +
+                      ' data-option-index="' + idx + '"' +
+                      ' data-question-index="' + qIdx + '"' +
+                      ' data-option-label="' + escapeHtml(opt.label || "选项 " + (idx + 1)) + '"' +
+                      ' onclick="__askSelect(\'' + escapeHtml(toolId) + '\',' + qIdx + ',' + idx + ',' + isMulti + ')"' +
+                      disabledAttr + '>' +
+                      '<span class="ask-user-indicator"></span>' +
+                      '<div class="ask-user-option-content">' +
+                        '<div class="ask-user-option-label">' + label + '</div>' +
+                        descHtml +
+                      '</div>' +
+                    '</button>';
+                  }
                 });
                 optionsHtml += '</div>';
               }
-              questionsHtml += '<div class="ask-user-question-group">' + questionText + optionsHtml + '</div>';
+              questionsHtml += '<div class="ask-user-question-group" data-question-index="' + qIdx + '">' + questionText + optionsHtml + '</div>';
             });
-            return '<div class="tool-use-card ask-user" data-tool-use-id="' + escapeHtml(toolId) + '">' +
+
+            // Submit button (only for interactive state)
+            var actionsHtml = "";
+            if (!isAnswered) {
+              var allAnsweredCheck = true;
+              for (var qi = 0; qi < questions.length; qi++) {
+                if (!sel[qi] || sel[qi].length === 0) { allAnsweredCheck = false; break; }
+              }
+              var submitDisabled = (!allAnsweredCheck || isSubmitted) ? " disabled" : "";
+              var submitClass = isSubmitted ? " ask-user-submitted" : "";
+              var submitText = isSubmitted ? "已提交..." : "确认提交";
+              actionsHtml = '<div class="ask-user-actions">' +
+                '<button class="ask-user-submit' + submitClass + '" data-tool-use-id="' + escapeHtml(toolId) + '"' +
+                  ' onclick="__askSubmit(\'' + escapeHtml(toolId) + '\')"' + submitDisabled + '>' +
+                  submitText +
+                '</button>' +
+              '</div>';
+            }
+
+            // Answered summary for header
+            var answeredSummary = "";
+            if (isAnswered && answerText) {
+              var shortAnswer = answerText.trim().replace(/\n/g, ", ");
+              if (shortAnswer.length > 40) shortAnswer = shortAnswer.slice(0, 37) + "...";
+              answeredSummary = '<span class="tool-use-file">' + escapeHtml(shortAnswer) + '</span>';
+            }
+
+            // Expand state: default expanded when unanswered, collapsed when answered
+            var askExpandKey = buildExpandKey("tool-card", [messageKey, toolId]);
+            var askPersisted = getPersistedExpandState(askExpandKey);
+            var askShouldExpand = askPersisted === null ? !isAnswered : askPersisted;
+            var askCollapsed = askShouldExpand ? "" : " collapsed";
+            var answeredClass = isAnswered ? " ask-user-answered" : "";
+
+            return '<div class="tool-use-card ask-user' + answeredClass + askCollapsed + '"' +
+              ' data-tool-use-id="' + escapeHtml(toolId) + '"' +
+              ' data-expand-kind="tool-card"' +
+              ' data-expand-key="' + escapeHtml(askExpandKey) + '">' +
               '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
-                '<span class="tool-use-icon">?</span>' +
+                '<span class="tool-use-icon">' + (isAnswered ? '✓' : '?') + '</span>' +
                 '<span class="tool-use-name">提问</span>' +
+                headerSummary +
+                answeredSummary +
+                '<span class="tool-use-toggle">▼</span>' +
               '</div>' +
               '<div class="tool-use-body ask-user-body">' +
                 questionsHtml +
+                actionsHtml +
               '</div>' +
             '</div>';
           }
@@ -11839,8 +12020,8 @@
 
       var notificationStack = [];
       var notificationIdCounter = 0;
-      var NOTIFICATION_GAP = 8;
-      var NOTIFICATION_TOP = 24;
+      var NOTIFICATION_GAP = 6;
+      var NOTIFICATION_TOP = 16;
 
       /**
        * Show an in-app notification bubble at bottom-right.
@@ -11855,10 +12036,11 @@
        * @returns {{ dismiss: function }} handle
        */
       function showNotificationBubble(opts) {
+        // Play sound for important notifications — independent of bubble setting
+        if (opts.actionLabel || opts.playSound) playNotificationSound();
+
         // Respect user preference (skip if bubbles disabled)
         if (!state.notifBubble) return { dismiss: function() {} };
-        // Play sound for important notifications (those with an action button)
-        if (opts.actionLabel) playNotificationSound();
 
         var id = ++notificationIdCounter;
         var type = opts.type || "info";
@@ -11976,10 +12158,26 @@
        */
       function playNotificationSound() {
         if (!state.notifSound) return;
+        _doPlaySound();
+      }
+
+      /**
+       * Try to play the notification sound regardless of user preference.
+       * Returns true if playback was initiated successfully.
+       * Used by the test function to always attempt playback.
+       */
+      function tryPlayNotificationSound() {
+        return _doPlaySound();
+      }
+
+      function _doPlaySound() {
         try {
           var AudioCtx = window.AudioContext || window.webkitAudioContext;
-          if (!AudioCtx) return;
+          if (!AudioCtx) return false;
           var ctx = new AudioCtx();
+
+          // Some browsers suspend AudioContext until user gesture — resume it
+          if (ctx.state === "suspended") ctx.resume();
 
           function tone(freq, start, dur) {
             var osc = ctx.createOscillator();
@@ -12001,8 +12199,10 @@
 
           // Clean up context after playback
           setTimeout(function() { ctx.close(); }, 600);
+          return true;
         } catch (_e) {
-          // Web Audio not available or blocked — silent fallback
+          // Web Audio not available or blocked
+          return false;
         }
       }
 

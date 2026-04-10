@@ -31,41 +31,18 @@ interface SessionRow {
   worktree_merge_info: string | null;
 }
 
-function parseStoredMessages(raw: string | null): ConversationTurn[] | undefined {
-  if (!raw) {
-    return undefined;
-  }
-
+function safeJsonParse<T>(raw: string | null): T | undefined {
+  if (!raw) return undefined;
   try {
-    return JSON.parse(raw) as ConversationTurn[];
+    return JSON.parse(raw) as T;
   } catch {
     return undefined;
   }
 }
 
 function parseQueuedMessages(raw: string | null): string[] | undefined {
-  if (!raw) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function parseStructuredState(raw: string | null): StructuredSessionState | undefined {
-  if (!raw) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(raw) as StructuredSessionState;
-  } catch {
-    return undefined;
-  }
+  const parsed = safeJsonParse<unknown>(raw);
+  return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : undefined;
 }
 
 function inferSessionProvider(row: Pick<SessionRow, "provider" | "runner" | "command">): SessionProvider | undefined {
@@ -79,42 +56,15 @@ function inferSessionProvider(row: Pick<SessionRow, "provider" | "runner" | "com
 }
 
 function parseWorktreeInfo(raw: string | null): SessionSnapshot["worktree"] | undefined {
-  if (!raw) {
-    return undefined;
+  const parsed = safeJsonParse<{ branch?: unknown; path?: unknown }>(raw);
+  if (parsed && typeof parsed.branch === "string" && typeof parsed.path === "string") {
+    return { branch: parsed.branch, path: parsed.path };
   }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      parsed
-      && typeof parsed === "object"
-      && typeof (parsed as { branch?: unknown }).branch === "string"
-      && typeof (parsed as { path?: unknown }).path === "string"
-    ) {
-      return parsed as NonNullable<SessionSnapshot["worktree"]>;
-    }
-  } catch {
-    return undefined;
-  }
-
   return undefined;
 }
 
 function parseWorktreeMergeInfo(raw: string | null): WorktreeMergeInfo | undefined {
-  if (!raw) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") {
-      return parsed as WorktreeMergeInfo;
-    }
-  } catch {
-    return undefined;
-  }
-
-  return undefined;
+  return safeJsonParse<WorktreeMergeInfo>(raw);
 }
 
 function serializeWorktreeMergeInfo(info: SessionSnapshot["worktreeMergeInfo"]): string | null {
@@ -132,17 +82,7 @@ function normalizeWorktreeMergeStatus(raw: string | null | undefined): SessionSn
   return undefined;
 }
 
-function getWorktreeMergeStatusValue(snapshot: SessionSnapshot): string | null {
-  return snapshot.worktreeMergeStatus ?? null;
-}
 
-function getWorktreeMergeInfoValue(snapshot: SessionSnapshot): string | null {
-  return serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo);
-}
-
-function getWorktreeInfoValue(snapshot: SessionSnapshot): string | null {
-  return serializeWorktreeInfo(snapshot.worktree);
-}
 
 function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktreeMergeStatus" | "worktreeMergeInfo"> {
   return {
@@ -222,9 +162,9 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     snapshot.resumedToSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
     snapshot.worktreeEnabled ? 1 : 0,
-    getWorktreeInfoValue(snapshot),
-    getWorktreeMergeStatusValue(snapshot),
-    getWorktreeMergeInfoValue(snapshot),
+    serializeWorktreeInfo(snapshot.worktree),
+    snapshot.worktreeMergeStatus ?? null,
+    serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo),
   ];
 }
 
@@ -249,9 +189,9 @@ function sessionMetadataValues(snapshot: SessionSnapshot): Array<string | number
     snapshot.resumedToSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
     snapshot.worktreeEnabled ? 1 : 0,
-    getWorktreeInfoValue(snapshot),
-    getWorktreeMergeStatusValue(snapshot),
-    getWorktreeMergeInfoValue(snapshot),
+    serializeWorktreeInfo(snapshot.worktree),
+    snapshot.worktreeMergeStatus ?? null,
+    serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo),
     snapshot.id,
   ];
 }
@@ -274,9 +214,9 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     archived: Boolean(row.archived),
     archivedAt: row.archived_at,
     claudeSessionId: row.claude_session_id,
-    messages: parseStoredMessages(row.messages),
+    messages: safeJsonParse<ConversationTurn[]>(row.messages),
     queuedMessages: parseQueuedMessages(row.queued_messages),
-    structuredState: parseStructuredState(row.structured_state),
+    structuredState: safeJsonParse<StructuredSessionState>(row.structured_state),
     resumedFromSessionId: row.resumed_from_session_id ?? undefined,
     resumedToSessionId: row.resumed_to_session_id ?? undefined,
     autoRecovered: Boolean(row.auto_recovered),
@@ -535,52 +475,31 @@ export class WandStorage {
   }
 }
 
+const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
+  ["archived", "ALTER TABLE command_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"],
+  ["archived_at", "ALTER TABLE command_sessions ADD COLUMN archived_at TEXT"],
+  ["claude_session_id", "ALTER TABLE command_sessions ADD COLUMN claude_session_id TEXT"],
+  ["provider", "ALTER TABLE command_sessions ADD COLUMN provider TEXT"],
+  ["session_kind", "ALTER TABLE command_sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'pty'"],
+  ["runner", "ALTER TABLE command_sessions ADD COLUMN runner TEXT"],
+  ["messages", "ALTER TABLE command_sessions ADD COLUMN messages TEXT"],
+  ["queued_messages", "ALTER TABLE command_sessions ADD COLUMN queued_messages TEXT"],
+  ["structured_state", "ALTER TABLE command_sessions ADD COLUMN structured_state TEXT"],
+  ["resumed_from_session_id", "ALTER TABLE command_sessions ADD COLUMN resumed_from_session_id TEXT"],
+  ["resumed_to_session_id", "ALTER TABLE command_sessions ADD COLUMN resumed_to_session_id TEXT"],
+  ["auto_recovered", "ALTER TABLE command_sessions ADD COLUMN auto_recovered INTEGER NOT NULL DEFAULT 0"],
+  ["worktree_enabled", "ALTER TABLE command_sessions ADD COLUMN worktree_enabled INTEGER NOT NULL DEFAULT 0"],
+  ["worktree_info", "ALTER TABLE command_sessions ADD COLUMN worktree_info TEXT"],
+  ["worktree_merge_status", "ALTER TABLE command_sessions ADD COLUMN worktree_merge_status TEXT"],
+  ["worktree_merge_info", "ALTER TABLE command_sessions ADD COLUMN worktree_merge_info TEXT"],
+];
+
 function ensureCommandSessionSchema(db: DatabaseSync): void {
   const columns = db.prepare("PRAGMA table_info(command_sessions)").all() as Array<{ name: string }>;
   const names = new Set(columns.map((column) => column.name));
-  if (!names.has("archived")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0");
-  }
-  if (!names.has("archived_at")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN archived_at TEXT");
-  }
-  if (!names.has("claude_session_id")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN claude_session_id TEXT");
-  }
-  if (!names.has("provider")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN provider TEXT");
-  }
-  if (!names.has("session_kind")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'pty'");
-  }
-  if (!names.has("runner")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN runner TEXT");
-  }
-  if (!names.has("messages")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN messages TEXT");
-  }
-  if (!names.has("queued_messages")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN queued_messages TEXT");
-  }
-  if (!names.has("structured_state")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN structured_state TEXT");
-  }
-  if (!names.has("resumed_from_session_id")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN resumed_from_session_id TEXT");
-  }
-  if (!names.has("resumed_to_session_id")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN resumed_to_session_id TEXT");
-  }
-  if (!names.has("worktree_enabled")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN worktree_enabled INTEGER NOT NULL DEFAULT 0");
-  }
-  if (!names.has("worktree_info")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN worktree_info TEXT");
-  }
-  if (!names.has("worktree_merge_status")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN worktree_merge_status TEXT");
-  }
-  if (!names.has("worktree_merge_info")) {
-    db.exec("ALTER TABLE command_sessions ADD COLUMN worktree_merge_info TEXT");
+  for (const [column, sql] of SCHEMA_MIGRATIONS) {
+    if (!names.has(column)) {
+      db.exec(sql);
+    }
   }
 }

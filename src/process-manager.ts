@@ -17,10 +17,6 @@ import { prepareSessionWorktree } from "./git-worktree.js";
 import {
   getResumeCommandSessionId,
   hasRealConversationMessages,
-  isResumeProjectConversation,
-  isUiProjectConversation,
-  shouldBackfillFromStoredHistory,
-  shouldBindClaudeSessionId,
 } from "./resume-policy.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {

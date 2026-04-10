@@ -14,14 +14,10 @@ function escapeHtml(value: string): string {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Cache the script content
-let _scriptCache: string | null = null;
-
 export function getScriptContent(configPath: string): string {
-  if (!_scriptCache) {
-    const scriptPath = path.join(__dirname, "content", "scripts.js");
-    _scriptCache = fs.readFileSync(scriptPath, "utf-8");
-  }
+  const scriptPath = path.join(__dirname, "content", "scripts.js");
+  const scriptContent = fs.readFileSync(scriptPath, "utf-8");
 
   // Inject the config path
-  return _scriptCache.replace("${escapeHtml(configPath)}", escapeHtml(configPath));
+  return scriptContent.replace("${escapeHtml(configPath)}", escapeHtml(configPath));
 }
