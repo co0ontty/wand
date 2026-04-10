@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import process from "node:process";
@@ -555,6 +555,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       repoUrl: PKG_REPO_URL,
       config: safeConfig,
       hasCert: existsSync(certPaths.keyPath) && existsSync(certPaths.certPath),
+      updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
+      latestVersion: cachedUpdateInfo?.latest ?? null,
     });
   });
 
@@ -984,6 +986,32 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
   structuredSessions.setEventEmitter((event) => {
     wsManager.emitEvent(event);
+  });
+
+  // ── Restart endpoint (needs server + wss in scope) ──
+
+  app.post("/api/restart", async (_req, res) => {
+    res.json({ ok: true, message: "服务正在重启..." });
+    wsManager.emitEvent({
+      type: "notification",
+      sessionId: "__system__",
+      data: { kind: "restart" },
+    });
+    setTimeout(() => {
+      // Close all WebSocket connections first
+      wss.clients.forEach((client) => client.close());
+      server.close(() => {
+        spawn(process.execPath, process.argv.slice(1), {
+          detached: true,
+          stdio: "inherit",
+          cwd: process.cwd(),
+          env: process.env,
+        }).unref();
+        process.exit(0);
+      });
+      // Force exit after 5s if graceful shutdown stalls
+      setTimeout(() => process.exit(0), 5000);
+    }, 600);
   });
 
   await new Promise<void>((resolve, reject) => {

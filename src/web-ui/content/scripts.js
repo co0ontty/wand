@@ -130,6 +130,13 @@
         showInstallPrompt: false,
         ws: null,
         wsConnected: false,
+        _updateBubbleShown: false,
+        notifSound: (function() {
+          try { var v = localStorage.getItem("wand-notif-sound"); return v === null ? true : v === "true"; } catch (e) { return true; }
+        })(),
+        notifBubble: (function() {
+          try { var v = localStorage.getItem("wand-notif-bubble"); return v === null ? true : v === "true"; } catch (e) { return true; }
+        })(),
         currentView: "terminal",
         terminalScale: (function() {
           try {
@@ -841,18 +848,7 @@
               refreshAll();
               requestNotificationPermission();
               if (config.updateAvailable && config.latestVersion) {
-                showNotificationBubble({
-                  title: "\u53d1\u73b0\u65b0\u7248\u672c",
-                  body: "\u5f53\u524d " + (config.currentVersion || "-") + " \u2192 \u6700\u65b0 " + config.latestVersion,
-                  type: "info",
-                  icon: "\u2191",
-                  duration: 10000,
-                  actionLabel: "\u53bb\u66f4\u65b0",
-                  action: function() {
-                    var settingsBtn = document.getElementById("open-settings-btn") || document.querySelector("[data-action='settings']");
-                    if (settingsBtn) settingsBtn.click();
-                  }
-                });
+                showUpdateBubble(config.currentVersion || "-", config.latestVersion);
                 sendBrowserNotification("Wand \u53d1\u73b0\u65b0\u7248\u672c", "\u5f53\u524d " + (config.currentVersion || "-") + " \u2192 \u6700\u65b0 " + config.latestVersion, { tag: "wand-update" });
               }
               if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
@@ -1279,10 +1275,11 @@
             '<div class="modal-body">' +
               // Tabs
               '<div class="settings-tabs">' +
-                '<button class="settings-tab active" data-tab="about">关于</button>' +
-                '<button class="settings-tab" data-tab="general">基本配置</button>' +
-                '<button class="settings-tab" data-tab="security">安全</button>' +
-                '<button class="settings-tab" data-tab="presets">命令预设</button>' +
+                '<button class="settings-tab active" data-tab="about">\u5173\u4e8e</button>' +
+                '<button class="settings-tab" data-tab="general">\u57fa\u672c\u914d\u7f6e</button>' +
+                '<button class="settings-tab" data-tab="notifications">\u901a\u77e5</button>' +
+                '<button class="settings-tab" data-tab="security">\u5b89\u5168</button>' +
+                '<button class="settings-tab" data-tab="presets">\u547d\u4ee4\u9884\u8bbe</button>' +
               '</div>' +
 
               // About tab
@@ -1299,15 +1296,31 @@
                     '<span class="settings-value" id="settings-latest-version">-</span>' +
                   '</div>' +
                   '<div class="settings-update-actions">' +
-                    '<button id="check-update-button" class="btn btn-ghost btn-sm">检查更新</button>' +
-                    '<button id="do-update-button" class="btn btn-primary btn-sm hidden">更新到最新版</button>' +
+                    '<button id="check-update-button" class="btn btn-ghost btn-sm">\u68c0\u67e5\u66f4\u65b0</button>' +
+                    '<button id="do-update-button" class="btn btn-primary btn-sm hidden">\u66f4\u65b0\u5230\u6700\u65b0\u7248</button>' +
+                    '<button id="do-restart-button" class="btn btn-success btn-sm hidden">\u91cd\u542f\u751f\u6548</button>' +
                   '</div>' +
                   '<p id="update-message" class="hint hidden"></p>' +
                 '</div>' +
-                '<div class="settings-notification-section">' +
-                  '<div class="settings-section-title">\u901a\u77e5\u72b6\u6001</div>' +
+              '</div>' +
+
+              // Notifications tab
+              '<div class="settings-panel" id="settings-tab-notifications">' +
+                '<div class="settings-section-title">\u901a\u77e5\u504f\u597d</div>' +
+                '<div class="field field-inline">' +
+                  '<input id="cfg-notif-sound" type="checkbox" class="field-checkbox" />' +
+                  '<label class="field-label" for="cfg-notif-sound">\u64ad\u653e\u63d0\u793a\u97f3</label>' +
+                '</div>' +
+                '<p class="hint" style="margin-top:0;margin-bottom:10px">\u91cd\u8981\u901a\u77e5\uff08\u7248\u672c\u66f4\u65b0\u3001\u6743\u9650\u7b49\u5f85\u7b49\uff09\u65f6\u64ad\u653e\u67d4\u548c\u7684\u63d0\u793a\u97f3</p>' +
+                '<div class="field field-inline">' +
+                  '<input id="cfg-notif-bubble" type="checkbox" class="field-checkbox" />' +
+                  '<label class="field-label" for="cfg-notif-bubble">\u5e94\u7528\u5185\u901a\u77e5\u6c14\u6ce1</label>' +
+                '</div>' +
+                '<p class="hint" style="margin-top:0;margin-bottom:10px">\u5728\u9875\u9762\u9876\u90e8\u5f39\u51fa\u6d6e\u52a8\u901a\u77e5\u6c14\u6ce1</p>' +
+                '<div class="settings-notification-section" style="margin-top:6px">' +
+                  '<div class="settings-section-title">\u6d4f\u89c8\u5668\u901a\u77e5</div>' +
                   '<div class="settings-about-row">' +
-                    '<span class="settings-label">\u6d4f\u89c8\u5668\u901a\u77e5</span>' +
+                    '<span class="settings-label">\u6388\u6743\u72b6\u6001</span>' +
                     '<span class="settings-value" id="notification-permission-status">-</span>' +
                   '</div>' +
                   '<div class="settings-update-actions">' +
@@ -2797,7 +2810,26 @@
         if (checkUpdateBtn) checkUpdateBtn.addEventListener("click", checkForUpdate);
         var doUpdateBtn = document.getElementById("do-update-button");
         if (doUpdateBtn) doUpdateBtn.addEventListener("click", performUpdate);
-        // Notification test section
+        var doRestartBtn = document.getElementById("do-restart-button");
+        if (doRestartBtn) doRestartBtn.addEventListener("click", performSettingsRestart);
+        // Notification preferences
+        var notifSoundEl = document.getElementById("cfg-notif-sound");
+        if (notifSoundEl) {
+          notifSoundEl.checked = state.notifSound;
+          notifSoundEl.addEventListener("change", function() {
+            state.notifSound = notifSoundEl.checked;
+            try { localStorage.setItem("wand-notif-sound", String(state.notifSound)); } catch (e) {}
+          });
+        }
+        var notifBubbleEl = document.getElementById("cfg-notif-bubble");
+        if (notifBubbleEl) {
+          notifBubbleEl.checked = state.notifBubble;
+          notifBubbleEl.addEventListener("change", function() {
+            state.notifBubble = notifBubbleEl.checked;
+            try { localStorage.setItem("wand-notif-bubble", String(state.notifBubble)); } catch (e) {}
+          });
+        }
+        // Browser notification section
         var notifRequestBtn = document.getElementById("notification-request-btn");
         if (notifRequestBtn) notifRequestBtn.addEventListener("click", function() {
           if (typeof Notification !== "undefined") {
@@ -5038,6 +5070,12 @@
           switchSettingsTab("about");
           // Load settings data
           loadSettingsData();
+          // Sync notification preferences
+          var soundEl = document.getElementById("cfg-notif-sound");
+          var bubbleEl = document.getElementById("cfg-notif-bubble");
+          if (soundEl) soundEl.checked = state.notifSound;
+          if (bubbleEl) bubbleEl.checked = state.notifBubble;
+          updateNotificationStatus();
         }
       }
 
@@ -5143,6 +5181,16 @@
             if (nodeEl) nodeEl.textContent = data.nodeVersion || "-";
             if (repoEl && data.repoUrl) {
               repoEl.innerHTML = '<a href="' + escapeHtml(data.repoUrl) + '" target="_blank" rel="noopener">' + escapeHtml(data.repoUrl) + '</a>';
+            }
+
+            // Prefill update info if available
+            var latestEl = document.getElementById("settings-latest-version");
+            var updateBtn = document.getElementById("do-update-button");
+            if (data.latestVersion && latestEl) {
+              latestEl.textContent = data.latestVersion;
+              if (data.updateAvailable && updateBtn) {
+                updateBtn.classList.remove("hidden");
+              }
             }
 
             // Config fields
@@ -5337,7 +5385,7 @@
         .then(function(res) { return res.json(); })
         .then(function(data) {
           if (msgEl) {
-            msgEl.textContent = data.message || data.error || "更新完成。";
+            msgEl.textContent = data.message || data.error || "\u66f4\u65b0\u5b8c\u6210\u3002";
             msgEl.style.color = data.error ? "var(--error)" : "var(--success)";
             msgEl.classList.remove("hidden");
           }
@@ -5345,16 +5393,25 @@
             updateBtn.disabled = false;
           } else {
             updateBtn.classList.add("hidden");
+            // Show restart button
+            var restartBtn = document.getElementById("do-restart-button");
+            if (restartBtn) restartBtn.classList.remove("hidden");
           }
         })
         .catch(function() {
           if (msgEl) {
-            msgEl.textContent = "更新失败。";
+            msgEl.textContent = "\u66f4\u65b0\u5931\u8d25\u3002";
             msgEl.style.color = "var(--error)";
             msgEl.classList.remove("hidden");
           }
           updateBtn.disabled = false;
         });
+      }
+
+      function performSettingsRestart() {
+        var restartBtn = document.getElementById("do-restart-button");
+        var msgEl = document.getElementById("update-message");
+        performRestart(restartBtn, msgEl);
       }
 
       // ── Notification Settings Helpers ──
@@ -8988,23 +9045,14 @@
           case 'notification':
             if (msg.data) {
               if (msg.data.kind === "update") {
-                showNotificationBubble({
-                  title: "\u53d1\u73b0\u65b0\u7248\u672c",
-                  body: "\u5f53\u524d " + (msg.data.current || "-") + " \u2192 \u6700\u65b0 " + (msg.data.latest || "-"),
-                  type: "info",
-                  icon: "\u2191",
-                  duration: 0,
-                  actionLabel: "\u53bb\u66f4\u65b0",
-                  action: function() {
-                    var settingsBtn = document.getElementById("open-settings-btn") || document.querySelector("[data-action='settings']");
-                    if (settingsBtn) settingsBtn.click();
-                  }
-                });
+                showUpdateBubble(msg.data.current || "-", msg.data.latest || "-");
                 sendBrowserNotification(
                   "Wand \u53d1\u73b0\u65b0\u7248\u672c",
                   "\u5f53\u524d " + (msg.data.current || "-") + " \u2192 \u6700\u65b0 " + (msg.data.latest || "-"),
                   { tag: "wand-update" }
                 );
+              } else if (msg.data.kind === "restart") {
+                showRestartOverlay();
               }
             }
             break;
@@ -11807,6 +11855,11 @@
        * @returns {{ dismiss: function }} handle
        */
       function showNotificationBubble(opts) {
+        // Respect user preference (skip if bubbles disabled)
+        if (!state.notifBubble) return { dismiss: function() {} };
+        // Play sound for important notifications (those with an action button)
+        if (opts.actionLabel) playNotificationSound();
+
         var id = ++notificationIdCounter;
         var type = opts.type || "info";
         var icon = opts.icon || (type === "warning" ? "!" : type === "success" ? "\u2713" : "i");
@@ -11915,6 +11968,203 @@
         } catch (_e) {
           // Notification constructor may fail in some contexts (e.g. insecure origin)
         }
+      }
+
+      /**
+       * Play a soft, rounded notification chime using Web Audio API.
+       * Two ascending sine tones with smooth gain envelope — gentle on the ears.
+       */
+      function playNotificationSound() {
+        if (!state.notifSound) return;
+        try {
+          var AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (!AudioCtx) return;
+          var ctx = new AudioCtx();
+
+          function tone(freq, start, dur) {
+            var osc = ctx.createOscillator();
+            var gain = ctx.createGain();
+            osc.type = "sine";
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0, ctx.currentTime + start);
+            gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + start + 0.04);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + start);
+            osc.stop(ctx.currentTime + start + dur);
+          }
+
+          // Two-tone ascending chime: C5 → E5, soft and brief
+          tone(523, 0, 0.25);
+          tone(659, 0.12, 0.3);
+
+          // Clean up context after playback
+          setTimeout(function() { ctx.close(); }, 600);
+        } catch (_e) {
+          // Web Audio not available or blocked — silent fallback
+        }
+      }
+
+      /**
+       * Show an interactive update bubble that allows updating and restarting
+       * directly from the notification, without navigating to settings.
+       */
+      function showUpdateBubble(currentVer, latestVer) {
+        // Prevent duplicate bubbles
+        if (state._updateBubbleShown) return;
+        state._updateBubbleShown = true;
+
+        playNotificationSound();
+
+        var id = ++notificationIdCounter;
+        var bubble = document.createElement("div");
+        bubble.className = "notification-bubble";
+        bubble.setAttribute("data-nid", id);
+
+        bubble.innerHTML =
+          '<div class="notification-bubble-header">' +
+            '<span class="notification-bubble-icon info">\u2191</span>' +
+            '<span class="notification-bubble-title">\u53d1\u73b0\u65b0\u7248\u672c</span>' +
+            '<button class="notification-bubble-close" title="\u5173\u95ed">\u00d7</button>' +
+          '</div>' +
+          '<div class="notification-bubble-body">' +
+            escapeHtml(currentVer) + ' \u2192 ' + escapeHtml(latestVer) +
+          '</div>' +
+          '<div class="notification-bubble-actions">' +
+            '<button class="primary" id="update-bubble-action">\u7acb\u5373\u66f4\u65b0</button>' +
+          '</div>';
+
+        document.body.appendChild(bubble);
+
+        var entry = { id: id, el: bubble };
+        notificationStack.push(entry);
+        repositionNotifications();
+
+        var closeBtn = bubble.querySelector(".notification-bubble-close");
+        if (closeBtn) closeBtn.onclick = function() {
+          dismissNotification(id);
+          state._updateBubbleShown = false;
+        };
+
+        var actionBtn = bubble.querySelector("#update-bubble-action");
+        var bodyEl = bubble.querySelector(".notification-bubble-body");
+
+        if (actionBtn) actionBtn.onclick = function() {
+          // Phase 1: Performing update
+          actionBtn.disabled = true;
+          actionBtn.textContent = "\u66f4\u65b0\u4e2d\u2026";
+          if (bodyEl) bodyEl.textContent = "\u6b63\u5728\u4e0b\u8f7d\u5e76\u5b89\u88c5\u65b0\u7248\u672c\u2026";
+
+          fetch("/api/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin"
+          })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data.error) {
+              // Update failed
+              if (bodyEl) {
+                bodyEl.textContent = data.error;
+                bodyEl.style.color = "var(--error)";
+              }
+              actionBtn.disabled = false;
+              actionBtn.textContent = "\u91cd\u8bd5";
+              return;
+            }
+            // Phase 2: Update succeeded, show restart button
+            if (bodyEl) {
+              bodyEl.textContent = data.message || "\u66f4\u65b0\u5b8c\u6210";
+              bodyEl.style.color = "var(--success)";
+            }
+            actionBtn.textContent = "\u91cd\u542f\u751f\u6548";
+            actionBtn.disabled = false;
+            actionBtn.className = "primary success";
+            actionBtn.onclick = function() {
+              performRestart(actionBtn, bodyEl);
+            };
+          })
+          .catch(function() {
+            if (bodyEl) {
+              bodyEl.textContent = "\u66f4\u65b0\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u8fde\u63a5\u3002";
+              bodyEl.style.color = "var(--error)";
+            }
+            actionBtn.disabled = false;
+            actionBtn.textContent = "\u91cd\u8bd5";
+          });
+        };
+      }
+
+      /**
+       * Call POST /api/restart and show the restart overlay.
+       */
+      function performRestart(btn, msgEl) {
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "\u6b63\u5728\u91cd\u542f\u2026";
+        }
+        if (msgEl) {
+          msgEl.textContent = "\u670d\u52a1\u6b63\u5728\u91cd\u542f\u2026";
+          msgEl.style.color = "var(--text-secondary)";
+        }
+
+        fetch("/api/restart", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin"
+        })
+        .then(function(res) { return res.json(); })
+        .then(function() {
+          showRestartOverlay();
+        })
+        .catch(function() {
+          // Network error likely means server already shut down — show overlay anyway
+          showRestartOverlay();
+        });
+      }
+
+      /**
+       * Full-screen overlay shown during server restart.
+       * Polls /api/config until the server comes back, then reloads the page.
+       */
+      function showRestartOverlay() {
+        // Avoid duplicates
+        if (document.getElementById("restart-overlay")) return;
+
+        var overlay = document.createElement("div");
+        overlay.id = "restart-overlay";
+        overlay.className = "restart-overlay";
+        overlay.innerHTML =
+          '<div class="restart-overlay-content">' +
+            '<div class="restart-spinner"></div>' +
+            '<div class="restart-title">\u670d\u52a1\u6b63\u5728\u91cd\u542f</div>' +
+            '<div class="restart-subtitle">\u7a0d\u540e\u5c06\u81ea\u52a8\u5237\u65b0\u9875\u9762\u2026</div>' +
+          '</div>';
+        document.body.appendChild(overlay);
+
+        var attempts = 0;
+        var maxAttempts = 20; // 20 * 2s = 40s
+        var timer = setInterval(function() {
+          attempts++;
+          fetch("/api/config", { credentials: "same-origin" })
+            .then(function(res) {
+              if (res.ok) {
+                clearInterval(timer);
+                location.reload();
+              }
+            })
+            .catch(function() {
+              // Server not ready yet
+            });
+          if (attempts >= maxAttempts) {
+            clearInterval(timer);
+            var subtitle = overlay.querySelector(".restart-subtitle");
+            if (subtitle) {
+              subtitle.innerHTML = '\u91cd\u542f\u8d85\u65f6\uff0c\u8bf7 <a href="javascript:location.reload()" style="color:var(--accent);text-decoration:underline">\u624b\u52a8\u5237\u65b0</a> \u9875\u9762\u3002';
+            }
+          }
+        }, 2000);
       }
 
       function escapeHtml(value) {
