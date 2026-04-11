@@ -9,7 +9,6 @@ import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.ComponentName;
 import android.content.pm.PackageManager;
-import android.media.AudioAttributes;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.net.http.SslError;
@@ -60,7 +59,8 @@ import javax.net.ssl.X509TrustManager;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String CHANNEL_ID_PREFIX = "wand_notif_";
+    private static final String CHANNEL_ID_SILENT = "wand_notif_silent";
+    private static final String CHANNEL_ID_PREFIX_LEGACY = "wand_notif_";
     private static final String CHANNEL_ID_LEGACY = "wand_notifications";
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
     private static final int NOTIFICATION_ID_BASE = 2000;
@@ -187,32 +187,40 @@ public class MainActivity extends AppCompatActivity {
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm == null) return;
 
-            // Remove legacy single channel
+            // Remove legacy channels (sound was baked in, can't change volume)
             nm.deleteNotificationChannel(CHANNEL_ID_LEGACY);
-
-            AudioAttributes audioAttr = new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build();
-
             for (String[] preset : SOUND_PRESETS) {
-                String channelId = CHANNEL_ID_PREFIX + preset[0];
-                // Skip if channel already exists (sound cannot be changed after creation)
-                if (nm.getNotificationChannel(channelId) != null) continue;
+                nm.deleteNotificationChannel(CHANNEL_ID_PREFIX_LEGACY + preset[0]);
+            }
 
+            // Single silent channel — sound is played manually with volume control
+            if (nm.getNotificationChannel(CHANNEL_ID_SILENT) == null) {
                 NotificationChannel channel = new NotificationChannel(
-                        channelId, "Wand · " + preset[1], NotificationManager.IMPORTANCE_DEFAULT);
-                channel.setDescription("Wand 通知 — " + preset[1] + "铃声");
-                Uri soundUri = Uri.parse("android.resource://" + getPackageName() + "/raw/notif_" + preset[0]);
-                channel.setSound(soundUri, audioAttr);
+                        CHANNEL_ID_SILENT, "Wand 通知", NotificationManager.IMPORTANCE_DEFAULT);
+                channel.setDescription("Wand 通知（铃声由应用内控制）");
+                channel.setSound(null, null);
                 nm.createNotificationChannel(channel);
             }
         }
     }
 
-    private String getActiveChannelId() {
+    private void playNotificationSound() {
         ServerStore store = new ServerStore(this);
-        return CHANNEL_ID_PREFIX + store.getNotificationSound();
+        String soundName = store.getNotificationSound();
+        float vol = store.getNotificationVolume() / 100f;
+        if (vol <= 0) return;
+
+        int resId = getResources().getIdentifier("notif_" + soundName, "raw", getPackageName());
+        if (resId == 0) return;
+
+        try {
+            MediaPlayer mp = MediaPlayer.create(this, resId);
+            if (mp != null) {
+                mp.setVolume(vol, vol);
+                mp.setOnCompletionListener(MediaPlayer::release);
+                mp.start();
+            }
+        } catch (Exception ignored) {}
     }
 
     // ── JS bridge ──
@@ -316,13 +324,14 @@ public class MainActivity extends AppCompatActivity {
                     MainActivity.this, requestCode, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this, getActiveChannelId())
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this, CHANNEL_ID_SILENT)
                     .setSmallIcon(R.drawable.ic_notification)
                     .setContentTitle(title != null ? title : "Wand")
                     .setContentText(body != null ? body : "")
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setContentIntent(pi)
-                    .setAutoCancel(true);
+                    .setAutoCancel(true)
+                    .setSilent(true);
 
             if (tag != null) {
                 NotificationManagerCompat.from(MainActivity.this).notify(tag, 0, builder.build());
@@ -330,6 +339,9 @@ public class MainActivity extends AppCompatActivity {
                 NotificationManagerCompat.from(MainActivity.this).notify(
                         NOTIFICATION_ID_BASE + (notificationCounter % 20), builder.build());
             }
+
+            // Play sound manually with volume control
+            playNotificationSound();
         }
 
         @JavascriptInterface
@@ -365,6 +377,16 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public int getNotificationVolume() {
+            return new ServerStore(MainActivity.this).getNotificationVolume();
+        }
+
+        @JavascriptInterface
+        public void setNotificationVolume(int volume) {
+            new ServerStore(MainActivity.this).setNotificationVolume(volume);
+        }
+
+        @JavascriptInterface
         public void previewSound(String name) {
             // Validate
             boolean valid = false;
@@ -379,6 +401,8 @@ public class MainActivity extends AppCompatActivity {
                     if (resId == 0) return;
                     MediaPlayer mp = MediaPlayer.create(MainActivity.this, resId);
                     if (mp != null) {
+                        float vol = new ServerStore(MainActivity.this).getNotificationVolume() / 100f;
+                        mp.setVolume(vol, vol);
                         mp.setOnCompletionListener(MediaPlayer::release);
                         mp.start();
                     }

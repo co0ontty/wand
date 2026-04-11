@@ -137,6 +137,9 @@
         notifSound: (function() {
           try { var v = localStorage.getItem("wand-notif-sound"); return v === null ? true : v === "true"; } catch (e) { return true; }
         })(),
+        notifVolume: (function() {
+          try { var v = localStorage.getItem("wand-notif-volume"); return v === null ? 80 : Math.max(0, Math.min(100, parseInt(v, 10) || 80)); } catch (e) { return 80; }
+        })(),
         notifBubble: (function() {
           try { var v = localStorage.getItem("wand-notif-bubble"); return v === null ? true : v === "true"; } catch (e) { return true; }
         })(),
@@ -1386,6 +1389,13 @@
                   '<label class="field-label" for="cfg-notif-sound">\u64ad\u653e\u63d0\u793a\u97f3</label>' +
                 '</div>' +
                 '<p class="hint" style="margin-top:0;margin-bottom:10px">\u91cd\u8981\u901a\u77e5\uff08\u7248\u672c\u66f4\u65b0\u3001\u6743\u9650\u7b49\u5f85\u7b49\uff09\u65f6\u64ad\u653e\u67d4\u548c\u7684\u63d0\u793a\u97f3</p>' +
+                '<div class="field" id="notif-volume-field" style="margin-bottom:10px">' +
+                  '<label class="field-label" style="margin-bottom:4px">\u97f3\u91cf</label>' +
+                  '<div style="display:flex;align-items:center;gap:8px">' +
+                    '<input id="cfg-notif-volume" type="range" min="0" max="100" step="5" style="flex:1;accent-color:var(--accent)" />' +
+                    '<span id="cfg-notif-volume-val" style="min-width:32px;text-align:right;font-size:12px;color:var(--text-secondary)">80%</span>' +
+                  '</div>' +
+                '</div>' +
                 '<div class="field field-inline">' +
                   '<input id="cfg-notif-bubble" type="checkbox" class="field-checkbox" />' +
                   '<label class="field-label" for="cfg-notif-bubble">\u5e94\u7528\u5185\u901a\u77e5\u6c14\u6ce1</label>' +
@@ -3235,6 +3245,33 @@
             try { localStorage.setItem("wand-notif-sound", String(state.notifSound)); } catch (e) {}
             // Preview sound when toggling on
             if (state.notifSound) _doPlaySound();
+            // Toggle volume slider visibility
+            var volField = document.getElementById("notif-volume-field");
+            if (volField) volField.style.display = state.notifSound ? "" : "none";
+          });
+        }
+        // Volume slider
+        var notifVolumeEl = document.getElementById("cfg-notif-volume");
+        var notifVolumeVal = document.getElementById("cfg-notif-volume-val");
+        if (notifVolumeEl) {
+          notifVolumeEl.value = state.notifVolume;
+          if (notifVolumeVal) notifVolumeVal.textContent = state.notifVolume + "%";
+          // Hide if sound is off
+          var volField = document.getElementById("notif-volume-field");
+          if (volField) volField.style.display = state.notifSound ? "" : "none";
+          var _volDebounce = null;
+          notifVolumeEl.addEventListener("input", function() {
+            state.notifVolume = parseInt(notifVolumeEl.value, 10);
+            if (notifVolumeVal) notifVolumeVal.textContent = state.notifVolume + "%";
+            try { localStorage.setItem("wand-notif-volume", String(state.notifVolume)); } catch (e) {}
+            // Also sync to native bridge if available
+            if (_hasNativeBridge && typeof WandNative.setNotificationVolume === "function") {
+              try { WandNative.setNotificationVolume(state.notifVolume); } catch (_e) {}
+            }
+          });
+          // Preview on release
+          notifVolumeEl.addEventListener("change", function() {
+            _doPlaySound();
           });
         }
         var notifBubbleEl = document.getElementById("cfg-notif-bubble");
@@ -5612,16 +5649,33 @@
           var bubbleEl = document.getElementById("cfg-notif-bubble");
           if (soundEl) soundEl.checked = state.notifSound;
           if (bubbleEl) bubbleEl.checked = state.notifBubble;
+          var volEl = document.getElementById("cfg-notif-volume");
+          var volValEl = document.getElementById("cfg-notif-volume-val");
+          if (volEl) {
+            volEl.value = state.notifVolume;
+            if (volValEl) volValEl.textContent = state.notifVolume + "%";
+          }
+          var volField = document.getElementById("notif-volume-field");
+          if (volField) volField.style.display = state.notifSound ? "" : "none";
           updateNotificationStatus();
           // Load current app icon selection (APK only)
           if (typeof WandNative !== "undefined" && typeof WandNative.getAppIcon === "function") {
             try { _updateAppIconSelection(WandNative.getAppIcon() || "shorthair"); } catch (_e) {}
           }
-          // Sync native notification sound selector (APK only)
+          // Sync native notification sound selector and volume (APK only)
           if (_hasNativeBridge && typeof WandNative.getNotificationSound === "function") {
             try {
               var nsSel = document.getElementById("native-sound-select");
               if (nsSel) nsSel.value = WandNative.getNotificationSound();
+            } catch (_e) {}
+          }
+          if (_hasNativeBridge && typeof WandNative.getNotificationVolume === "function") {
+            try {
+              var nativeVol = WandNative.getNotificationVolume();
+              state.notifVolume = nativeVol;
+              if (volEl) volEl.value = nativeVol;
+              if (volValEl) volValEl.textContent = nativeVol + "%";
+              try { localStorage.setItem("wand-notif-volume", String(nativeVol)); } catch (_e) {}
             } catch (_e) {}
           }
         }
@@ -5843,7 +5897,7 @@
                 apkMessageEl.classList.remove("hidden");
               }
             } else {
-              // ── 浏览器模式：只显示线上版本 + 下载按钮 ──
+              // ── 浏览器模式：显示线上版本 + 本地版本 + 下载按钮 ──
               if (androidApk.github && apkGithubRow && apkGithubEl) {
                 var ghLabel2 = androidApk.github.version ? ("v" + androidApk.github.version) : androidApk.github.fileName;
                 if (typeof androidApk.github.size === "number") ghLabel2 += " · " + formatBytes(androidApk.github.size);
@@ -5856,7 +5910,22 @@
                     window.open(androidApk.github.downloadUrl, "_blank");
                   };
                 }
-              } else if (apkMessageEl) {
+              }
+              // 本地版本
+              if (androidApk.local && apkLocalRow && apkLocalEl) {
+                var lcLabel2 = androidApk.local.version ? ("v" + androidApk.local.version) : androidApk.local.fileName;
+                if (typeof androidApk.local.size === "number") lcLabel2 += " · " + formatBytes(androidApk.local.size);
+                apkLocalEl.textContent = lcLabel2;
+                apkLocalRow.classList.remove("hidden");
+                if (apkLocalBtn) {
+                  apkLocalBtn.textContent = "下载";
+                  apkLocalBtn.classList.remove("hidden");
+                  apkLocalBtn.onclick = function() {
+                    window.open(androidApk.local.downloadUrl, "_self");
+                  };
+                }
+              }
+              if (!androidApk.github && !androidApk.local && apkMessageEl) {
                 apkMessageEl.textContent = "暂未提供";
                 apkMessageEl.classList.remove("hidden");
               }
@@ -13099,13 +13168,15 @@
           // Some browsers suspend AudioContext until user gesture — resume it
           if (ctx.state === "suspended") ctx.resume();
 
+          var vol = (state.notifVolume || 0) / 100;
+
           function tone(freq, start, dur) {
             var osc = ctx.createOscillator();
             var gain = ctx.createGain();
             osc.type = "sine";
             osc.frequency.value = freq;
             gain.gain.setValueAtTime(0, ctx.currentTime + start);
-            gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + start + 0.04);
+            gain.gain.linearRampToValueAtTime(0.5 * vol, ctx.currentTime + start + 0.04);
             gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
             osc.connect(gain);
             gain.connect(ctx.destination);
