@@ -60,6 +60,8 @@ import javax.net.ssl.X509TrustManager;
 public class MainActivity extends AppCompatActivity {
 
     private static final String CHANNEL_ID_SILENT = "wand_notif_silent";
+    private static final String CHANNEL_ID_TASKS = "wand_notif_tasks";
+    private static final String CHANNEL_ID_UPDATES = "wand_notif_updates";
     private static final String CHANNEL_ID_PREFIX_LEGACY = "wand_notif_";
     private static final String CHANNEL_ID_LEGACY = "wand_notifications";
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
@@ -193,11 +195,27 @@ public class MainActivity extends AppCompatActivity {
                 nm.deleteNotificationChannel(CHANNEL_ID_PREFIX_LEGACY + preset[0]);
             }
 
-            // Single silent channel — sound is played manually with volume control
+            // Silent checks / low-priority notices
             if (nm.getNotificationChannel(CHANNEL_ID_SILENT) == null) {
                 NotificationChannel channel = new NotificationChannel(
-                        CHANNEL_ID_SILENT, "Wand 通知", NotificationManager.IMPORTANCE_DEFAULT);
-                channel.setDescription("Wand 通知（铃声由应用内控制）");
+                        CHANNEL_ID_SILENT, "Wand 轻提醒", NotificationManager.IMPORTANCE_DEFAULT);
+                channel.setDescription("低优先级提醒（铃声由应用内控制）");
+                channel.setSound(null, null);
+                nm.createNotificationChannel(channel);
+            }
+
+            if (nm.getNotificationChannel(CHANNEL_ID_TASKS) == null) {
+                NotificationChannel channel = new NotificationChannel(
+                        CHANNEL_ID_TASKS, "Wand 任务", NotificationManager.IMPORTANCE_DEFAULT);
+                channel.setDescription("任务进展与权限提醒");
+                channel.setSound(null, null);
+                nm.createNotificationChannel(channel);
+            }
+
+            if (nm.getNotificationChannel(CHANNEL_ID_UPDATES) == null) {
+                NotificationChannel channel = new NotificationChannel(
+                        CHANNEL_ID_UPDATES, "Wand 更新", NotificationManager.IMPORTANCE_HIGH);
+                channel.setDescription("版本更新提醒");
                 channel.setSound(null, null);
                 nm.createNotificationChannel(channel);
             }
@@ -221,6 +239,26 @@ public class MainActivity extends AppCompatActivity {
                 mp.start();
             }
         } catch (Exception ignored) {}
+    }
+
+    private String resolveNotificationChannel(String tag) {
+        if (tag == null || tag.isEmpty()) {
+            return CHANNEL_ID_SILENT;
+        }
+        if (tag.startsWith("update:")) {
+            return CHANNEL_ID_UPDATES;
+        }
+        if (tag.startsWith("task:") || tag.startsWith("permission:") || tag.startsWith("task-ended:")) {
+            return CHANNEL_ID_TASKS;
+        }
+        return CHANNEL_ID_SILENT;
+    }
+
+    private int resolveNotificationPriority(String channelId) {
+        if (CHANNEL_ID_UPDATES.equals(channelId)) {
+            return NotificationCompat.PRIORITY_HIGH;
+        }
+        return NotificationCompat.PRIORITY_DEFAULT;
     }
 
     // ── JS bridge ──
@@ -324,17 +362,20 @@ public class MainActivity extends AppCompatActivity {
                     MainActivity.this, requestCode, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this, CHANNEL_ID_SILENT)
+            String channelId = resolveNotificationChannel(tag);
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this, channelId)
                     .setSmallIcon(R.drawable.ic_notification)
                     .setContentTitle(title != null ? title : "Wand")
                     .setContentText(body != null ? body : "")
-                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setStyle(new NotificationCompat.BigTextStyle().bigText(body != null ? body : ""))
+                    .setPriority(resolveNotificationPriority(channelId))
                     .setContentIntent(pi)
                     .setAutoCancel(true)
                     .setSilent(true);
 
-            if (tag != null) {
-                NotificationManagerCompat.from(MainActivity.this).notify(tag, 0, builder.build());
+            String notifyTag = tag;
+            if (notifyTag != null) {
+                NotificationManagerCompat.from(MainActivity.this).notify(notifyTag, 0, builder.build());
             } else {
                 NotificationManagerCompat.from(MainActivity.this).notify(
                         NOTIFICATION_ID_BASE + (notificationCounter % 20), builder.build());
@@ -479,7 +520,13 @@ public class MainActivity extends AppCompatActivity {
                 ServerStore store = new ServerStore(MainActivity.this);
                 if (latestVersion.equals(store.getSkippedVersion())) return;
 
-                runOnUiThread(() -> showUpdateDialog(cv, latestVersion, downloadUrl, fileName, size, source));
+                runOnUiThread(() -> {
+                    new NotificationBridge().sendNotification(
+                            "Wand 发现新版本",
+                            "当前 " + cv + " → 最新 " + latestVersion,
+                            "update:wand-update");
+                    showUpdateDialog(cv, latestVersion, downloadUrl, fileName, size, source);
+                });
 
             } catch (Exception e) {
                 // Silently ignore update check failures

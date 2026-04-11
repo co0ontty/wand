@@ -135,6 +135,8 @@
         ws: null,
         wsConnected: false,
         _updateBubbleShown: false,
+        notificationHistory: {},
+        delayedNotificationTimer: null,
         notifSound: (function() {
           try { var v = localStorage.getItem("wand-notif-sound"); return v === null ? true : v === "true"; } catch (e) { return true; }
         })(),
@@ -895,8 +897,7 @@
               refreshAll();
               requestNotificationPermission();
               if (config.updateAvailable && config.latestVersion) {
-                showUpdateBubble(config.currentVersion || "-", config.latestVersion);
-                sendBrowserNotification("Wand \u53d1\u73b0\u65b0\u7248\u672c", "\u5f53\u524d " + (config.currentVersion || "-") + " \u2192 \u6700\u65b0 " + config.latestVersion, { tag: "wand-update" });
+                notifyUpdateAvailable(config.currentVersion || "-", config.latestVersion);
               }
               if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
                 loadClaudeHistory();
@@ -1423,6 +1424,7 @@
                     '<button id="notification-request-btn" class="btn btn-ghost btn-sm hidden">\u6388\u6743\u901a\u77e5</button>' +
                     '<button id="notification-reset-btn" class="btn btn-ghost btn-sm hidden">\u91cd\u65b0\u6388\u6743</button>' +
                     '<button id="notification-test-btn" class="btn btn-ghost btn-sm">\u53d1\u9001\u6d4b\u8bd5\u901a\u77e5</button>' +
+                    '<button id="notification-test-delay-btn" class="btn btn-ghost btn-sm">10 \u79d2\u540e\u53d1\u9001</button>' +
                   '</div>' +
                   '<p id="notification-test-message" class="hint hidden"></p>' +
                 '</div>' +
@@ -3292,6 +3294,8 @@
         if (notifResetBtn) notifResetBtn.addEventListener("click", resetNotificationPermission);
         var notifTestBtn = document.getElementById("notification-test-btn");
         if (notifTestBtn) notifTestBtn.addEventListener("click", testNotification);
+        var notifTestDelayBtn = document.getElementById("notification-test-delay-btn");
+        if (notifTestDelayBtn) notifTestDelayBtn.addEventListener("click", scheduleTestNotification);
         updateNotificationStatus();
         // Native notification sound selector (APK only)
         if (_hasNativeBridge && typeof WandNative.getAvailableSounds === "function") {
@@ -6323,9 +6327,44 @@
         });
       }
 
+      function resetDelayedNotificationButton() {
+        var delayBtn = document.getElementById("notification-test-delay-btn");
+        if (!delayBtn) return;
+        delayBtn.disabled = false;
+        delayBtn.textContent = "10 秒后发送";
+      }
+
+      function scheduleTestNotification() {
+        var testMsgEl = document.getElementById("notification-test-message");
+        if (state.delayedNotificationTimer) {
+          clearTimeout(state.delayedNotificationTimer);
+          state.delayedNotificationTimer = null;
+        }
+        var delayBtn = document.getElementById("notification-test-delay-btn");
+        if (delayBtn) {
+          delayBtn.disabled = true;
+          delayBtn.textContent = "已安排（10s）";
+        }
+        if (testMsgEl) {
+          testMsgEl.innerHTML = "已安排 10 秒后发送测试通知，请切到后台等待。";
+          testMsgEl.style.color = "var(--text-secondary)";
+          testMsgEl.classList.remove("hidden");
+        }
+        state.delayedNotificationTimer = setTimeout(function() {
+          state.delayedNotificationTimer = null;
+          resetDelayedNotificationButton();
+          testNotification();
+        }, 10000);
+      }
+
       function testNotification() {
         var testMsgEl = document.getElementById("notification-test-message");
         var results = [];
+        if (state.delayedNotificationTimer) {
+          clearTimeout(state.delayedNotificationTimer);
+          state.delayedNotificationTimer = null;
+          resetDelayedNotificationButton();
+        }
 
         // 1. Test sound playback
         var soundOk = tryPlayNotificationSound();
@@ -9850,16 +9889,7 @@
             } else {
               endedNotifBody = endedSession ? (endedSession.command || msg.sessionId) : msg.sessionId;
             }
-            sendBrowserNotification(
-              endedNotifTitle,
-              endedNotifBody,
-              {
-                tag: "wand-ended-" + msg.sessionId,
-                onClick: function() {
-                  if (msg.sessionId !== state.selectedId) selectSession(msg.sessionId);
-                }
-              }
-            );
+            notifyTaskEnded(msg.sessionId, endedNotifTitle, endedNotifBody);
             if (msg.sessionId !== state.selectedId || document.hidden) {
               showNotificationBubble({
                 title: endedNotifTitle,
@@ -9945,6 +9975,7 @@
               state.currentTask = msg.data || null;
               updateTaskDisplay();
             }
+            notifyTaskProgress(msg.sessionId, msg.data || null);
             // Update session list to reflect current activity (debounced)
             scheduleSessionListUpdate();
             break;
@@ -9991,18 +10022,7 @@
                 } else {
                   permBody += "\n" + permDetail;
                 }
-                sendBrowserNotification(
-                  "需要你的授权",
-                  permBody,
-                  {
-                    tag: "wand-perm-" + msg.sessionId,
-                    onClick: function() {
-                      if (msg.sessionId !== state.selectedId) {
-                        selectSession(msg.sessionId);
-                      }
-                    }
-                  }
-                );
+                notifyPermissionRequest(msg.sessionId, permBody);
                 // In-app bubble if not currently viewing this session
                 if (msg.sessionId !== state.selectedId) {
                   showNotificationBubble({
@@ -10046,12 +10066,7 @@
           case 'notification':
             if (msg.data) {
               if (msg.data.kind === "update") {
-                showUpdateBubble(msg.data.current || "-", msg.data.latest || "-");
-                sendBrowserNotification(
-                  "Wand \u53d1\u73b0\u65b0\u7248\u672c",
-                  "\u5f53\u524d " + (msg.data.current || "-") + " \u2192 \u6700\u65b0 " + (msg.data.latest || "-"),
-                  { tag: "wand-update" }
-                );
+                notifyUpdateAvailable(msg.data.current || "-", msg.data.latest || "-");
               } else if (msg.data.kind === "restart") {
                 showRestartOverlay();
               }
@@ -13107,13 +13122,39 @@
         }
       }
 
+      function _shouldSendSystemNotification(opts) {
+        var options = opts || {};
+        if (options.onlyWhenHidden && !document.hidden) return false;
+        if (options.skipWhenSelectedSessionId && options.skipWhenSelectedSessionId === state.selectedId && !document.hidden) {
+          return false;
+        }
+        return true;
+      }
+
+      function _isNotificationThrottled(tag, minIntervalMs) {
+        if (!tag || !minIntervalMs || minIntervalMs <= 0) return false;
+        var lastAt = state.notificationHistory[tag] || 0;
+        var now = Date.now();
+        if (now - lastAt < minIntervalMs) return true;
+        state.notificationHistory[tag] = now;
+        return false;
+      }
+
       function sendBrowserNotification(title, body, opts) {
+        var options = opts || {};
+        var tag = options.tag || "";
+        if (!_shouldSendSystemNotification(options)) return;
+        if (_isNotificationThrottled(tag, options.minIntervalMs || 0)) return;
         // Native Android bridge path
         if (_hasNativeBridge) {
           var perm = _getNativePermission();
           if (perm !== "granted") return;
           try {
-            WandNative.sendNotification(title || "Wand", body || "", (opts && opts.tag) || "");
+            var nativeTag = tag;
+            if (options.kind) {
+              nativeTag = options.kind + (tag ? ":" + tag : "");
+            }
+            WandNative.sendNotification(title || "Wand", body || "", nativeTag || "");
           } catch (_e) {}
           return;
         }
@@ -13123,13 +13164,13 @@
         try {
           var n = new Notification(title, {
             body: body || "",
-            icon: (opts && opts.icon) || "/favicon.ico",
-            tag: (opts && opts.tag) || undefined,
+            icon: options.icon || "/favicon.ico",
+            tag: tag || undefined,
           });
           n.onclick = function() {
             window.focus();
             n.close();
-            if (opts && opts.onClick) opts.onClick();
+            if (options.onClick) options.onClick();
           };
           // Auto-close after 10s
           setTimeout(function() { n.close(); }, 10000);
@@ -13137,6 +13178,76 @@
           // Notification constructor may fail in some contexts (e.g. insecure origin)
         }
       }
+
+      function notifyTaskProgress(sessionId, task) {
+        if (!task || !task.title) return;
+        var session = state.sessions.find(function(s) { return s.id === sessionId; });
+        if (!session) return;
+        var sessionLabel = session.summary || session.command || sessionId;
+        sendBrowserNotification(
+          "任务进行中",
+          sessionLabel + "\n" + task.title,
+          {
+            kind: "task",
+            tag: "wand-task-" + sessionId + "-" + task.title,
+            minIntervalMs: 90000,
+            onlyWhenHidden: true,
+            skipWhenSelectedSessionId: sessionId,
+            onClick: function() {
+              if (sessionId !== state.selectedId) selectSession(sessionId);
+            }
+          }
+        );
+      }
+
+      function notifyUpdateAvailable(currentVersion, latestVersion) {
+        showUpdateBubble(currentVersion || "-", latestVersion || "-");
+        sendBrowserNotification(
+          "Wand 发现新版本",
+          "当前 " + (currentVersion || "-") + " → 最新 " + (latestVersion || "-"),
+          {
+            kind: "update",
+            tag: "wand-update",
+            minIntervalMs: 300000,
+          }
+        );
+      }
+
+      function notifyPermissionRequest(sessionId, body) {
+        sendBrowserNotification(
+          "需要你的授权",
+          body,
+          {
+            kind: "permission",
+            tag: "wand-perm-" + sessionId,
+            minIntervalMs: 60000,
+            onlyWhenHidden: true,
+            skipWhenSelectedSessionId: sessionId,
+            onClick: function() {
+              if (sessionId !== state.selectedId) {
+                selectSession(sessionId);
+              }
+            }
+          }
+        );
+      }
+
+      function notifyTaskEnded(sessionId, title, body) {
+        sendBrowserNotification(
+          title,
+          body,
+          {
+            kind: "task-ended",
+            tag: "wand-ended-" + sessionId,
+            minIntervalMs: 10000,
+            onClick: function() {
+              if (sessionId !== state.selectedId) selectSession(sessionId);
+            }
+          }
+        );
+      }
+
+      /**
 
       /**
        * Play a soft, rounded notification chime using Web Audio API.
