@@ -6068,8 +6068,8 @@
         gap: 1px;
       }
       .terminal-scale-overlay-btn {
-        min-width: 20px;
-        height: 20px;
+        min-width: 26px;
+        height: 26px;
         font-size: 0.75rem;
       }
       .terminal-scale-overlay-label {
@@ -6268,8 +6268,8 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 22px;
-        height: 22px;
+        width: 28px;
+        height: 28px;
         border: none;
         border-radius: 50%;
         background: transparent;
@@ -6303,14 +6303,14 @@
         display: none;
       }
       .inline-shortcuts-expanded-row .shortcut-key {
-        height: 22px;
-        min-width: 22px;
+        height: 28px;
+        min-width: 28px;
         font-size: 0.5625rem;
         padding: 0 4px;
         flex: 0 0 auto;
       }
       .inline-shortcuts-expanded-row .shortcut-key.shortcut-dir {
-        min-width: 20px;
+        min-width: 24px;
       }
 
       /* 回到底部按钮 - 紧凑 */
@@ -6342,7 +6342,7 @@
       .mini-keyboard-header { padding: 6px 10px 4px; }
       .mini-keyboard-body { padding: 6px; gap: 4px; }
       .mk-row { gap: 3px; }
-      .mk-key { min-width: 36px; height: 32px; font-size: 0.625rem; border-radius: 6px; }
+      .mk-key { min-width: 38px; height: 34px; font-size: 0.625rem; border-radius: 6px; }
 
       .floating-pad {
         right: 0;
@@ -6511,6 +6511,11 @@
       .blank-chat-hint { font-size: 0.6875rem; }
       .mode-btn-group { gap: 4px; margin-top: 8px; }
       .mode-btn { padding: 5px 10px; font-size: 0.6875rem; min-height: 36px; }
+
+      /* 防止小屏溢出 */
+      .notification-bubble { max-width: calc(100vw - 24px); }
+      .blank-chat-cwd-dropdown { min-width: 0; width: calc(100vw - 32px); max-width: 320px; }
+      .toast-message { max-width: calc(100vw - 32px); }
     }
 
     /* iPhone 14/15 等标准屏幕 (390px - 420px) - 使用基础移动端样式，略微调整 */
@@ -6532,8 +6537,8 @@
     @media (max-width: 390px) {
       /* 继承 max-width: 640px 的样式，此处仅做小屏微调 */
       .floating-sidebar-toggle {
-        width: 26px;
-        height: 26px;
+        width: 28px;
+        height: 28px;
       }
       .floating-sidebar-toggle .hamburger-icon { width: 11px; height: 8px; }
 
@@ -6555,15 +6560,15 @@
       }
 
       .input-composer { border-radius: 8px; }
-      .input-textarea { min-height: 28px; padding: 5px 6px 2px; font-size: 15px; }
+      .input-textarea { min-height: 28px; padding: 5px 6px 2px; font-size: 16px; }
 
-      .btn-circle { width: 24px; height: 24px; min-width: 24px; }
+      .btn-circle { width: 28px; height: 28px; min-width: 28px; }
 
       .session-item {
         padding: 6px 8px;
         min-height: 40px;
       }
-      .session-action-btn { width: 28px; height: 28px; min-width: 28px; min-height: 28px; }
+      .session-action-btn { width: 30px; height: 30px; min-width: 30px; min-height: 30px; }
 
       .sidebar { top: 0; width: min(240px, calc(100vw - 10px)); }
 
