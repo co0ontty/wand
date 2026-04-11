@@ -218,8 +218,6 @@ export interface ToolResultBlock {
   is_error?: boolean;
   /** When true, content has been truncated for transport. Client should fetch full content via API. */
   _truncated?: boolean;
-  /** Original content size in bytes, provided when truncated. */
-  _originalSize?: number;
 }
 
 export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;

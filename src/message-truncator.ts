@@ -45,7 +45,6 @@ export function truncateMessagesForTransport(
     // Never truncate the currently streaming turn
     if (turnIndex === streamingTurnIndex) return turn;
 
-    // Build tool_use_id → tool_name map from this turn's blocks
     const toolNameMap = new Map<string, string>();
     for (const block of turn.content) {
       if (block.type === "tool_use") {
@@ -73,7 +72,6 @@ export function truncateMessagesForTransport(
         ...result,
         content: contentStr.slice(0, SUMMARY_LENGTH) + "…",
         _truncated: true,
-        _originalSize: contentStr.length,
       } as ToolResultBlock;
     });
 

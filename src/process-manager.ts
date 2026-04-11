@@ -1384,38 +1384,11 @@ export class ProcessManager extends EventEmitter {
 
   /** Lightweight snapshot for list views — omits output and messages. */
   private snapshotSlim(record: SessionRecord): SessionSnapshot {
-    const messages = record.ptyBridge?.getMessages() ?? record.messages;
+    const snapshot = this.snapshot(record);
     return {
-      id: record.id,
-      sessionKind: "pty",
-      provider: record.provider,
-      runner: "pty",
-      command: record.command,
-      cwd: record.cwd,
-      mode: record.mode,
-      worktreeEnabled: record.worktreeEnabled ?? false,
-      worktree: record.worktree ?? null,
-      autonomyPolicy: record.autonomyPolicy,
-      approvalPolicy: record.approvalPolicy,
-      allowedScopes: record.allowedScopes,
-      status: record.status,
-      exitCode: record.exitCode,
-      startedAt: record.startedAt,
-      endedAt: record.endedAt,
+      ...snapshot,
       output: "",
-      archived: record.archived,
-      archivedAt: record.archivedAt,
-      permissionBlocked: this.isPermissionBlocked(record),
-      pendingEscalation: record.pendingEscalation || undefined,
-      lastEscalationResult: record.lastEscalationResult || undefined,
-      claudeSessionId: record.claudeSessionId || null,
-      resumedFromSessionId: record.resumedFromSessionId ?? undefined,
-      resumedToSessionId: record.resumedToSessionId ?? undefined,
-      autoRecovered: record.autoRecovered ?? false,
-      autoApprovePermissions: record.autoApprovePermissions || undefined,
-      approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined,
-      summary: deriveSessionSummary(messages, record.currentTask?.title ?? null),
-      currentTaskTitle: record.status === "running" ? record.currentTask?.title ?? undefined : undefined,
+      messages: undefined,
     };
   }
 
@@ -1720,43 +1693,31 @@ export class ProcessManager extends EventEmitter {
   private handleBridgeEvent(record: SessionRecord, event: SessionEvent): void {
     switch (event.type) {
       case "output.raw":
+      case "output.chat": {
         // Sync record.output from bridge before emitting so the event carries fresh data
         record.output = record.ptyBridge?.getRawOutput() ?? record.output;
-        {
-          const rawMessages = record.ptyBridge?.getMessages() ?? [];
-          const messages = truncateMessagesForTransport(rawMessages, this.config.cardDefaults ?? {}, rawMessages.length - 1);
-          // Emit output event for terminal view
-          this.emitEvent({
-            type: "output",
-            sessionId: event.sessionId,
-            data: {
-              chunk: (event.data as { chunk: string }).chunk,
-              output: record.output,
-              messages,
-              permissionBlocked: this.isPermissionBlocked(record),
-            },
-          });
+        const rawMessages = record.ptyBridge?.getMessages() ?? [];
+        const messages = truncateMessagesForTransport(rawMessages, this.config.cardDefaults ?? {}, rawMessages.length - 1);
+        const data: {
+          output: string;
+          messages: ConversationTurn[];
+          permissionBlocked: boolean;
+          chunk?: string;
+        } = {
+          output: record.output,
+          messages,
+          permissionBlocked: this.isPermissionBlocked(record),
+        };
+        if (event.type === "output.raw") {
+          data.chunk = (event.data as { chunk: string }).chunk;
         }
+        this.emitEvent({
+          type: "output",
+          sessionId: event.sessionId,
+          data,
+        });
         break;
-
-      case "output.chat":
-        // Sync record.output from bridge before emitting so the event carries fresh data
-        record.output = record.ptyBridge?.getRawOutput() ?? record.output;
-        {
-          const rawMessages = record.ptyBridge?.getMessages() ?? [];
-          const messages = truncateMessagesForTransport(rawMessages, this.config.cardDefaults ?? {}, rawMessages.length - 1);
-          // Emit output event with updated messages for chat view
-          this.emitEvent({
-            type: "output",
-            sessionId: event.sessionId,
-            data: {
-              output: record.output,
-              messages,
-              permissionBlocked: this.isPermissionBlocked(record),
-            },
-          });
-        }
-        break;
+      }
 
       case "permission.prompt": {
         const data = event.data as { prompt: string; scope: EscalationScope; target?: string };

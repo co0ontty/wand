@@ -71,6 +71,7 @@
         suggestionTimer: null,
         terminal: null,
         fitAddon: null,
+        terminalFitInProgress: false,
         serializeAddon: null,
         terminalDomView: null,
         terminalDomUpdateTimer: null,
@@ -2806,6 +2807,29 @@
           });
       }
 
+      function getCardDefault(key) {
+        return !!(state.config && state.config.cardDefaults && state.config.cardDefaults[key]);
+      }
+
+      function lazyLoadTruncatedToolContent(container, targetEl, renderContent, renderError) {
+        if (!container || container.dataset.truncated !== "true" || container.dataset.loaded === "true") return;
+        var toolUseId = container.dataset.toolUseId;
+        if (!toolUseId) return;
+        if (targetEl) targetEl.innerHTML = '<div class="tool-content-loading">加载中…</div>';
+        container.dataset.loaded = "loading";
+        __fetchToolContent(toolUseId, function(err, data) {
+          if (err) {
+            if (targetEl) targetEl.innerHTML = renderError || '<div class="tool-content-error">加载失败，点击重试</div>';
+            container.dataset.loaded = "";
+            return;
+          }
+          container.dataset.truncated = "false";
+          container.dataset.loaded = "true";
+          var content = typeof data.content === "string" ? data.content : JSON.stringify(data.content);
+          renderContent(content, data);
+        });
+      }
+
       window.__tcToggle = function(e, headerEl) {
         var card = headerEl.closest(".tool-use-card") || headerEl.closest(".inline-diff");
         if (card) {
@@ -2813,23 +2837,16 @@
           card.classList.toggle("collapsed");
           var expandKind = card.dataset.expandKind || "tool-card";
           persistElementExpandState(card, expandKind);
-          // Lazy-load truncated content on expand
-          if (wasCollapsed && card.dataset.truncated === "true" && card.dataset.loaded !== "true") {
-            var toolUseId = card.dataset.toolUseId;
+          if (wasCollapsed) {
             var resultDiv = card.querySelector(".tool-use-result");
-            if (resultDiv) resultDiv.innerHTML = '<div class="tool-content-loading">加载中…</div>';
-            card.dataset.loaded = "loading";
-            __fetchToolContent(toolUseId, function(err, data) {
-              if (err) {
-                if (resultDiv) resultDiv.innerHTML = '<div class="tool-content-error" onclick="__tcToggle(null, card.querySelector(\'.tool-use-header\'))">加载失败，点击重试</div>';
-                card.dataset.loaded = "";
-              } else {
-                card.dataset.truncated = "false";
-                card.dataset.loaded = "true";
-                var content = typeof data.content === "string" ? data.content : JSON.stringify(data.content);
+            lazyLoadTruncatedToolContent(
+              card,
+              resultDiv,
+              function(content) {
                 if (resultDiv) resultDiv.innerHTML = '<pre class="tool-use-result-content">' + escapeHtml(content) + '</pre>';
-              }
-            });
+              },
+              '<div class="tool-content-error" onclick="__tcToggle(null, this.closest(\'.tool-use-card,.inline-diff\').querySelector(\'.tool-use-header,.diff-header\'))">加载失败，点击重试</div>'
+            );
           }
         }
         if (e) { e.preventDefault(); e.stopPropagation(); }
@@ -2869,22 +2886,10 @@
             statusSpan.textContent = "✓";
           }
         }
-        // Lazy-load truncated content on expand
-        if (expanded && el.dataset.truncated === "true" && el.dataset.loaded !== "true") {
-          var toolUseId = el.dataset.toolUseId;
-          if (body) body.innerHTML = '<div class="tool-content-loading">加载中…</div>';
-          el.dataset.loaded = "loading";
-          __fetchToolContent(toolUseId, function(err, data) {
-            if (err) {
-              if (body) body.innerHTML = '<div class="tool-content-error">加载失败，点击重试</div>';
-              el.dataset.loaded = "";
-            } else {
-              el.dataset.truncated = "false";
-              el.dataset.loaded = "true";
-              var content = typeof data.content === "string" ? data.content : JSON.stringify(data.content);
-              el.dataset.result = content;
-              if (body) body.innerHTML = '<div class="inline-tool-result">' + formatInlineResult(content, "") + '</div>';
-            }
+        if (expanded) {
+          lazyLoadTruncatedToolContent(el, body, function(content) {
+            el.dataset.result = content;
+            if (body) body.innerHTML = '<div class="inline-tool-result">' + formatInlineResult(content, "") + '</div>';
           });
         }
         persistElementExpandState(el, "inline-tool");
@@ -2901,29 +2906,17 @@
           var toggleIcon = el.querySelector(".term-toggle-icon");
           if (toggleIcon) toggleIcon.textContent = isHidden ? "▼" : "▶";
           persistElementExpandState(container, "terminal");
-          // Lazy-load truncated content on expand
-          if (isHidden && container.dataset.truncated === "true" && container.dataset.loaded !== "true") {
-            var toolUseId = container.dataset.toolUseId;
+          if (isHidden) {
             var termOutput = body.querySelector(".term-output");
-            if (termOutput) termOutput.innerHTML = '<div class="tool-content-loading">加载中…</div>';
-            container.dataset.loaded = "loading";
-            __fetchToolContent(toolUseId, function(err, data) {
-              if (err) {
-                if (termOutput) termOutput.innerHTML = '<div class="tool-content-error">加载失败，点击重试</div>';
-                container.dataset.loaded = "";
-              } else {
-                container.dataset.truncated = "false";
-                container.dataset.loaded = "true";
-                var content = typeof data.content === "string" ? data.content : JSON.stringify(data.content);
-                if (termOutput) {
-                  var lines = content.split("\n");
-                  var html = "";
-                  for (var i = 0; i < lines.length; i++) {
-                    if (!lines[i] && i === lines.length - 1) continue;
-                    html += '<div class="term-line">' + escapeHtml(lines[i]) + '</div>';
-                  }
-                  termOutput.innerHTML = html;
+            lazyLoadTruncatedToolContent(container, termOutput, function(content) {
+              if (termOutput) {
+                var lines = content.split("\n");
+                var html = "";
+                for (var i = 0; i < lines.length; i++) {
+                  if (!lines[i] && i === lines.length - 1) continue;
+                  html += '<div class="term-line">' + escapeHtml(lines[i]) + '</div>';
                 }
+                termOutput.innerHTML = html;
               }
             });
           }
@@ -5277,7 +5270,6 @@
         }
         state.selectedId = id;
         persistSelectedId();
-        // Clear tool content cache on session switch
         state.toolContentCache = {};
         // Clear queued inputs from the previous session to prevent cross-session leaks
         state.messageQueue = [];
@@ -9618,8 +9610,13 @@
       }
 
       function ensureTerminalFit() {
+        if (state.terminalFitInProgress) return;
+        state.terminalFitInProgress = true;
         var maxAttempts = 20;
         var attempt = 0;
+        function finishFit() {
+          state.terminalFitInProgress = false;
+        }
         function tryFit() {
           attempt++;
           state.terminalViewportSize = { width: 0, height: 0 };
@@ -9629,20 +9626,20 @@
             if (state.terminal) {
               sendTerminalResize(state.terminal.cols, state.terminal.rows);
             }
-            // Validate: if the fitted cols look suspiciously small relative to
-            // the container width, schedule another attempt — the font metrics
-            // or layout may not have settled yet.
             var output = document.getElementById("output");
             if (output && state.terminal) {
               var containerW = output.getBoundingClientRect().width;
-              var expectedMinCols = Math.floor(containerW / 20); // very conservative estimate
+              var expectedMinCols = Math.floor(containerW / 20);
               if (state.terminal.cols < expectedMinCols && attempt < maxAttempts) {
                 requestAnimationFrame(tryFit);
                 return;
               }
             }
+            finishFit();
           } else if (attempt < maxAttempts) {
             requestAnimationFrame(tryFit);
+          } else {
+            finishFit();
           }
         }
         requestAnimationFrame(tryFit);
@@ -11823,7 +11820,7 @@
         if (msg.role === "thinking") {
           var thinkingKey = buildExpandKey("thinking", [getMessageKey(msg, messageIndex), "pty"]);
           var thinkingPersisted = getPersistedExpandState(thinkingKey);
-          var thinkingExpanded = thinkingPersisted === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.thinking) : thinkingPersisted;
+          var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
           return '<div class="chat-message thinking">' +
             '<div class="thinking-inline thinking-pty ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">⦿</span>' +
@@ -11961,7 +11958,7 @@
         var summaryText = parts.join(" · ");
         var groupKey = buildExpandKey("tool-group", [messageKey, items[0] && items[0].index, items.length]);
         var persistedExpanded = getPersistedExpandState(groupKey);
-        var shouldExpand = persistedExpanded === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.toolGroup) : persistedExpanded;
+        var shouldExpand = persistedExpanded === null ? getCardDefault("toolGroup") : persistedExpanded;
 
         // Render each item's inline-tool card
         var innerHtml = "";
@@ -12073,7 +12070,7 @@
             }
             var thinkingKey = buildExpandKey("thinking", [messageKey, index]);
             var thinkingPersisted = getPersistedExpandState(thinkingKey);
-          var thinkingExpanded = thinkingPersisted === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.thinking) : thinkingPersisted;
+          var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
             return '<div class="thinking-inline ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">⦿</span>' +
               '<span class="thinking-inline-preview">' + escapeHtml(thinkingExpanded ? thinkingText : preview) + '</span>' +
@@ -12170,7 +12167,7 @@
         var fullResult = resultContent;
 
         var expandedHtml = "";
-        var shouldExpand = persistedExpanded === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.inlineTools) : persistedExpanded;
+        var shouldExpand = persistedExpanded === null ? getCardDefault("inlineTools") : persistedExpanded;
         if (hasResult) {
           expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + '</div>' +
@@ -12255,7 +12252,7 @@
 
         // Show command preview in header (truncate long commands)
         var cmdPreview = command.length > 80 ? command.slice(0, 77) + "…" : command;
-        var shouldExpand = persistedExpanded === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.terminal) : persistedExpanded;
+        var shouldExpand = persistedExpanded === null ? getCardDefault("terminal") : persistedExpanded;
 
         var termTruncated = toolResult && toolResult._truncated === true;
         var termTruncAttrs = termTruncated
@@ -12344,7 +12341,7 @@
         // Expand state: respect cardDefaults.editCards and persisted state
         var expandKey = buildExpandKey("diff", [messageKey, toolId || index, index]);
         var persistedExpanded = getPersistedExpandState(expandKey);
-        var cardDefaultExpand = !!(state.config && state.config.cardDefaults && state.config.cardDefaults.editCards);
+        var cardDefaultExpand = getCardDefault("editCards");
         var shouldExpand = persistedExpanded === null ? (statusClass === "diff-pending" || cardDefaultExpand) : persistedExpanded;
         var collapsedClass = shouldExpand ? "" : " collapsed";
 
@@ -12553,7 +12550,7 @@
 
         var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
         var persistedExpanded = getPersistedExpandState(expandKey);
-        var cardDefaultExpand = !!(state.config && state.config.cardDefaults && state.config.cardDefaults.editCards);
+        var cardDefaultExpand = getCardDefault("editCards");
         var shouldExpand = persistedExpanded === null ? (statusClass === "loading" || cardDefaultExpand) : persistedExpanded;
         var tcTruncated = toolResult && toolResult._truncated === true;
         var collapsedClass = shouldExpand ? "" : " collapsed";
