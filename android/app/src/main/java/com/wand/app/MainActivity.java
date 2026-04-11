@@ -9,6 +9,8 @@ import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.ComponentName;
 import android.content.pm.PackageManager;
+import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
@@ -37,6 +39,7 @@ import androidx.core.content.FileProvider;
 
 import com.google.android.material.button.MaterialButton;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -57,9 +60,17 @@ import javax.net.ssl.X509TrustManager;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String CHANNEL_ID = "wand_notifications";
+    private static final String CHANNEL_ID_PREFIX = "wand_notif_";
+    private static final String CHANNEL_ID_LEGACY = "wand_notifications";
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
     private static final int NOTIFICATION_ID_BASE = 2000;
+
+    private static final String[][] SOUND_PRESETS = {
+        {"chime",  "叮咚"},
+        {"bubble", "气泡"},
+        {"meow",   "喵~"},
+        {"bell",   "铃声"},
+    };
 
     private WebView webView;
     private LinearLayout errorOverlay;
@@ -97,7 +108,7 @@ public class MainActivity extends AppCompatActivity {
 
         backButton.setOnClickListener(v -> finish());
 
-        createNotificationChannel();
+        createNotificationChannels();
         setupWebView();
         webView.loadUrl(serverUrl);
     }
@@ -169,16 +180,39 @@ public class MainActivity extends AppCompatActivity {
         webView.addJavascriptInterface(new NotificationBridge(), "WandNative");
     }
 
-    // ── Notification channel ──
+    // ── Notification channels ──
 
-    private void createNotificationChannel() {
+    private void createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID, "Wand 通知", NotificationManager.IMPORTANCE_DEFAULT);
-            channel.setDescription("会话状态与权限请求通知");
             NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) nm.createNotificationChannel(channel);
+            if (nm == null) return;
+
+            // Remove legacy single channel
+            nm.deleteNotificationChannel(CHANNEL_ID_LEGACY);
+
+            AudioAttributes audioAttr = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build();
+
+            for (String[] preset : SOUND_PRESETS) {
+                String channelId = CHANNEL_ID_PREFIX + preset[0];
+                // Skip if channel already exists (sound cannot be changed after creation)
+                if (nm.getNotificationChannel(channelId) != null) continue;
+
+                NotificationChannel channel = new NotificationChannel(
+                        channelId, "Wand · " + preset[1], NotificationManager.IMPORTANCE_DEFAULT);
+                channel.setDescription("Wand 通知 — " + preset[1] + "铃声");
+                Uri soundUri = Uri.parse("android.resource://" + getPackageName() + "/raw/notif_" + preset[0]);
+                channel.setSound(soundUri, audioAttr);
+                nm.createNotificationChannel(channel);
+            }
         }
+    }
+
+    private String getActiveChannelId() {
+        ServerStore store = new ServerStore(this);
+        return CHANNEL_ID_PREFIX + store.getNotificationSound();
     }
 
     // ── JS bridge ──
@@ -282,7 +316,7 @@ public class MainActivity extends AppCompatActivity {
                     MainActivity.this, requestCode, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this, CHANNEL_ID)
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this, getActiveChannelId())
                     .setSmallIcon(R.drawable.ic_notification)
                     .setContentTitle(title != null ? title : "Wand")
                     .setContentText(body != null ? body : "")
@@ -296,6 +330,60 @@ public class MainActivity extends AppCompatActivity {
                 NotificationManagerCompat.from(MainActivity.this).notify(
                         NOTIFICATION_ID_BASE + (notificationCounter % 20), builder.build());
             }
+        }
+
+        @JavascriptInterface
+        public String getNotificationSound() {
+            return new ServerStore(MainActivity.this).getNotificationSound();
+        }
+
+        @JavascriptInterface
+        public void setNotificationSound(String name) {
+            // Validate against known presets
+            boolean valid = false;
+            for (String[] preset : SOUND_PRESETS) {
+                if (preset[0].equals(name)) { valid = true; break; }
+            }
+            if (!valid) return;
+            new ServerStore(MainActivity.this).setNotificationSound(name);
+        }
+
+        @JavascriptInterface
+        public String getAvailableSounds() {
+            try {
+                JSONArray arr = new JSONArray();
+                for (String[] preset : SOUND_PRESETS) {
+                    JSONObject obj = new JSONObject();
+                    obj.put("id", preset[0]);
+                    obj.put("name", preset[1]);
+                    arr.put(obj);
+                }
+                return arr.toString();
+            } catch (Exception e) {
+                return "[]";
+            }
+        }
+
+        @JavascriptInterface
+        public void previewSound(String name) {
+            // Validate
+            boolean valid = false;
+            for (String[] preset : SOUND_PRESETS) {
+                if (preset[0].equals(name)) { valid = true; break; }
+            }
+            if (!valid) return;
+
+            runOnUiThread(() -> {
+                try {
+                    int resId = getResources().getIdentifier("notif_" + name, "raw", getPackageName());
+                    if (resId == 0) return;
+                    MediaPlayer mp = MediaPlayer.create(MainActivity.this, resId);
+                    if (mp != null) {
+                        mp.setOnCompletionListener(MediaPlayer::release);
+                        mp.start();
+                    }
+                } catch (Exception ignored) {}
+            });
         }
     }
 

@@ -19,6 +19,7 @@ public class ServerStore {
     private static final String KEY_LAST = "last_url";
     private static final String KEY_APP_TOKEN = "app_token";
     private static final String KEY_APP_ICON = "app_icon";
+    private static final String KEY_NOTIFICATION_SOUND = "notification_sound";
     private static final int MAX_RECENT = 5;
 
     private final SharedPreferences prefs;
@@ -97,5 +98,13 @@ public class ServerStore {
 
     public void setAppIcon(String iconName) {
         prefs.edit().putString(KEY_APP_ICON, iconName).apply();
+    }
+
+    public String getNotificationSound() {
+        return prefs.getString(KEY_NOTIFICATION_SOUND, "chime");
+    }
+
+    public void setNotificationSound(String soundName) {
+        prefs.edit().putString(KEY_NOTIFICATION_SOUND, soundName).apply();
     }
 }

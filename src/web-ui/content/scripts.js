@@ -1379,6 +1379,17 @@
                   '<label class="field-label" for="cfg-notif-bubble">\u5e94\u7528\u5185\u901a\u77e5\u6c14\u6ce1</label>' +
                 '</div>' +
                 '<p class="hint" style="margin-top:0;margin-bottom:10px">\u5728\u9875\u9762\u9876\u90e8\u5f39\u51fa\u6d6e\u52a8\u901a\u77e5\u6c14\u6ce1</p>' +
+                '<div id="native-sound-section" class="settings-notification-section hidden" style="margin-top:6px">' +
+                  '<div class="settings-section-title">\u7cfb\u7edf\u901a\u77e5\u94c3\u58f0</div>' +
+                  '<div class="settings-about-row">' +
+                    '<span class="settings-label">\u94c3\u58f0</span>' +
+                    '<div style="display:flex;align-items:center;gap:6px">' +
+                      '<select id="native-sound-select" class="field-select" style="min-width:100px"></select>' +
+                      '<button id="native-sound-preview" class="btn btn-ghost btn-sm">\u25b6 \u8bd5\u542c</button>' +
+                    '</div>' +
+                  '</div>' +
+                  '<p class="hint" style="margin-top:0">\u9009\u62e9 Android \u7cfb\u7edf\u901a\u77e5\u4f7f\u7528\u7684\u94c3\u58f0</p>' +
+                '</div>' +
                 '<div class="settings-notification-section" style="margin-top:6px">' +
                   '<div class="settings-section-title">\u6d4f\u89c8\u5668\u901a\u77e5</div>' +
                   '<div class="settings-about-row">' +
@@ -3237,6 +3248,35 @@
         var notifTestBtn = document.getElementById("notification-test-btn");
         if (notifTestBtn) notifTestBtn.addEventListener("click", testNotification);
         updateNotificationStatus();
+        // Native notification sound selector (APK only)
+        if (_hasNativeBridge && typeof WandNative.getAvailableSounds === "function") {
+          var nativeSoundSection = document.getElementById("native-sound-section");
+          var nativeSoundSelect = document.getElementById("native-sound-select");
+          var nativeSoundPreview = document.getElementById("native-sound-preview");
+          if (nativeSoundSection && nativeSoundSelect) {
+            nativeSoundSection.classList.remove("hidden");
+            try {
+              var sounds = JSON.parse(WandNative.getAvailableSounds());
+              var current = WandNative.getNotificationSound();
+              nativeSoundSelect.innerHTML = "";
+              for (var si = 0; si < sounds.length; si++) {
+                var opt = document.createElement("option");
+                opt.value = sounds[si].id;
+                opt.textContent = sounds[si].name;
+                if (sounds[si].id === current) opt.selected = true;
+                nativeSoundSelect.appendChild(opt);
+              }
+              nativeSoundSelect.addEventListener("change", function() {
+                try { WandNative.setNotificationSound(nativeSoundSelect.value); } catch (_e) {}
+              });
+              if (nativeSoundPreview) {
+                nativeSoundPreview.addEventListener("click", function() {
+                  try { WandNative.previewSound(nativeSoundSelect.value); } catch (_e) {}
+                });
+              }
+            } catch (_e) {}
+          }
+        }
         var newSessBtn = document.getElementById("topbar-new-session-button");
         if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
         var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
@@ -5471,6 +5511,13 @@
           // Load current app icon selection (APK only)
           if (typeof WandNative !== "undefined" && typeof WandNative.getAppIcon === "function") {
             try { _updateAppIconSelection(WandNative.getAppIcon() || "shorthair"); } catch (_e) {}
+          }
+          // Sync native notification sound selector (APK only)
+          if (_hasNativeBridge && typeof WandNative.getNotificationSound === "function") {
+            try {
+              var nsSel = document.getElementById("native-sound-select");
+              if (nsSel) nsSel.value = WandNative.getNotificationSound();
+            } catch (_e) {}
           }
         }
       }
