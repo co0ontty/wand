@@ -7952,6 +7952,13 @@
         resetInputPanelViewportSpacing();
         setTimeout(function() {
           window.scrollTo(0, 0);
+          // On mobile, force terminal refit + scroll after keyboard dismissal.
+          // The container height restores but xterm needs an explicit refit to
+          // fill the expanded space, and the scroll position needs resetting.
+          if (isTouchDevice()) {
+            ensureTerminalFit();
+            maybeScrollTerminalToBottom("force");
+          }
         }, 100);
       }
 
@@ -8675,6 +8682,15 @@
 
           if (isKeyboardOpen && (!keyboardOpen || heightChanged) && shouldAdjustForKeyboard(vv, inputBox)) {
             syncInputBoxScroll(inputBox);
+          }
+
+          // Keyboard just closed — force terminal refit and scroll to bottom
+          // after a delay so the keyboard dismiss animation and layout settle.
+          if (keyboardOpen && !isKeyboardOpen) {
+            setTimeout(function() {
+              ensureTerminalFit();
+              maybeScrollTerminalToBottom("force");
+            }, 200);
           }
 
           keyboardOpen = isKeyboardOpen;
