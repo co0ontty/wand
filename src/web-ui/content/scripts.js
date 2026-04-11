@@ -1337,23 +1337,22 @@
                   '</div>' +
                   '<p id="update-message" class="hint hidden"></p>' +
                 '</div>' +
-                '<div class="settings-update-section">' +
-                  '<div class="settings-about-row">' +
-                    '<span class="settings-label">Android APK</span>' +
-                    '<span class="settings-value" id="settings-android-apk-status">暂未提供</span>' +
+                '<div class="settings-update-section" id="android-apk-section">' +
+                  '<div id="android-apk-current-row" class="settings-about-row hidden">' +
+                    '<span class="settings-label">当前版本</span>' +
+                    '<span class="settings-value" id="settings-android-apk-current">-</span>' +
                   '</div>' +
                   '<div id="android-apk-github-row" class="settings-about-row hidden">' +
-                    '<span class="settings-label" style="color:var(--text-secondary)">GitHub 最新</span>' +
-                    '<span class="settings-value" id="settings-android-apk-github">-</span>' +
+                    '<span class="settings-label">线上版本</span>' +
+                    '<span class="settings-value" id="settings-android-apk-github" style="flex:1">-</span>' +
+                    '<button id="download-github-apk-btn" class="btn btn-ghost btn-sm hidden" type="button" style="margin-left:8px;flex-shrink:0">下载</button>' +
                   '</div>' +
                   '<div id="android-apk-local-row" class="settings-about-row hidden">' +
-                    '<span class="settings-label" style="color:var(--text-secondary)">本地最新</span>' +
-                    '<span class="settings-value" id="settings-android-apk-local">-</span>' +
+                    '<span class="settings-label">本地版本</span>' +
+                    '<span class="settings-value" id="settings-android-apk-local" style="flex:1">-</span>' +
+                    '<button id="download-local-apk-btn" class="btn btn-ghost btn-sm hidden" type="button" style="margin-left:8px;flex-shrink:0">下载</button>' +
                   '</div>' +
-                  '<div class="settings-update-actions">' +
-                    '<a id="download-android-apk-button" class="btn btn-primary btn-sm hidden" href="#" download>下载 APK</a>' +
-                  '</div>' +
-                  '<p id="android-apk-message" class="hint">可将本地打包好的 APK 放到运行时目录供下载。</p>' +
+                  '<p id="android-apk-message" class="hint hidden"></p>' +
                 '</div>' +
                 '<div class="settings-update-section" id="android-connect-section">' +
                   '<div class="settings-section-title" style="margin-bottom:8px">App 连接码</div>' +
@@ -5488,64 +5487,84 @@
               }
             }
 
-            var androidApkStatusEl = document.getElementById("settings-android-apk-status");
-            var androidApkMessageEl = document.getElementById("android-apk-message");
-            var downloadAndroidApkBtn = document.getElementById("download-android-apk-button");
-            var githubRowEl = document.getElementById("android-apk-github-row");
-            var githubVerEl = document.getElementById("settings-android-apk-github");
-            var localRowEl = document.getElementById("android-apk-local-row");
-            var localVerEl = document.getElementById("settings-android-apk-local");
+            // ── Android APK version display ──
+            var apkSection = document.getElementById("android-apk-section");
+            var apkCurrentRow = document.getElementById("android-apk-current-row");
+            var apkCurrentEl = document.getElementById("settings-android-apk-current");
+            var apkGithubRow = document.getElementById("android-apk-github-row");
+            var apkGithubEl = document.getElementById("settings-android-apk-github");
+            var apkGithubBtn = document.getElementById("download-github-apk-btn");
+            var apkLocalRow = document.getElementById("android-apk-local-row");
+            var apkLocalEl = document.getElementById("settings-android-apk-local");
+            var apkLocalBtn = document.getElementById("download-local-apk-btn");
+            var apkMessageEl = document.getElementById("android-apk-message");
             var androidApk = data.androidApk || {};
-            if (androidApk.enabled === true) {
-              // GitHub version row
-              if (androidApk.github && githubRowEl && githubVerEl) {
+            var isInApk = !!_apkVersion;
+
+            if (isInApk) {
+              // ── APK 内模式：显示当前版本 + 线上版本 + 本地版本 ──
+              if (apkCurrentRow && apkCurrentEl) {
+                apkCurrentEl.textContent = "v" + _apkVersion;
+                apkCurrentRow.classList.remove("hidden");
+              }
+              // 线上版本
+              if (androidApk.github && apkGithubRow && apkGithubEl) {
                 var ghLabel = androidApk.github.version ? ("v" + androidApk.github.version) : androidApk.github.fileName;
                 if (typeof androidApk.github.size === "number") ghLabel += " · " + formatBytes(androidApk.github.size);
-                githubVerEl.textContent = ghLabel;
-                githubRowEl.classList.remove("hidden");
+                apkGithubEl.textContent = ghLabel;
+                apkGithubRow.classList.remove("hidden");
+                if (apkGithubBtn) {
+                  apkGithubBtn.textContent = "下载安装";
+                  apkGithubBtn.classList.remove("hidden");
+                  apkGithubBtn.onclick = function() {
+                    try {
+                      WandNative.downloadUpdate(androidApk.github.downloadUrl, androidApk.github.fileName || "wand-update.apk", "github");
+                    } catch (e) {
+                      alert("调用下载失败: " + e.message);
+                    }
+                  };
+                }
               }
-              // Local version row
-              if (androidApk.local && localRowEl && localVerEl) {
+              // 本地版本
+              if (androidApk.local && apkLocalRow && apkLocalEl) {
                 var lcLabel = androidApk.local.version ? ("v" + androidApk.local.version) : androidApk.local.fileName;
                 if (typeof androidApk.local.size === "number") lcLabel += " · " + formatBytes(androidApk.local.size);
-                localVerEl.textContent = lcLabel;
-                localRowEl.classList.remove("hidden");
+                apkLocalEl.textContent = lcLabel;
+                apkLocalRow.classList.remove("hidden");
+                if (apkLocalBtn) {
+                  apkLocalBtn.textContent = "下载安装";
+                  apkLocalBtn.classList.remove("hidden");
+                  apkLocalBtn.onclick = function() {
+                    try {
+                      WandNative.downloadUpdate(androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", "local");
+                    } catch (e) {
+                      alert("调用下载失败: " + e.message);
+                    }
+                  };
+                }
               }
-              if (androidApk.hasApk) {
-                var sourceTag = androidApk.source === "github" ? "线上" : "本地";
-                var androidApkLabel = androidApk.version
-                  ? ("可下载（v" + androidApk.version + " · " + sourceTag + "）")
-                  : ("可下载（" + sourceTag + "）");
-                if (androidApkStatusEl) androidApkStatusEl.textContent = androidApkLabel;
-                if (androidApkMessageEl) {
-                  if (androidApk.apkDir) {
-                    androidApkMessageEl.textContent = "APK 目录: " + androidApk.apkDir;
-                  } else {
-                    androidApkMessageEl.textContent = "已提供 Android APK 下载。";
-                  }
-                }
-                if (downloadAndroidApkBtn && androidApk.downloadUrl) {
-                  downloadAndroidApkBtn.classList.remove("hidden");
-                  downloadAndroidApkBtn.setAttribute("href", androidApk.downloadUrl);
-                }
-              } else {
-                if (androidApkStatusEl) androidApkStatusEl.textContent = "暂未提供";
-                if (androidApkMessageEl) {
-                  androidApkMessageEl.textContent = androidApk.apkDir
-                    ? "将 APK 放到此目录即可下载: " + androidApk.apkDir
-                    : "请先将本地打包好的 APK 放到运行时目录。";
-                }
-                if (downloadAndroidApkBtn) {
-                  downloadAndroidApkBtn.classList.add("hidden");
-                  downloadAndroidApkBtn.setAttribute("href", "#");
-                }
+              // 都没有时
+              if (!androidApk.github && !androidApk.local && apkMessageEl) {
+                apkMessageEl.textContent = "暂无可用更新";
+                apkMessageEl.classList.remove("hidden");
               }
             } else {
-              if (androidApkStatusEl) androidApkStatusEl.textContent = "未启用";
-              if (androidApkMessageEl) androidApkMessageEl.textContent = "可在配置文件中开启 Android APK 下载能力。";
-              if (downloadAndroidApkBtn) {
-                downloadAndroidApkBtn.classList.add("hidden");
-                downloadAndroidApkBtn.setAttribute("href", "#");
+              // ── 浏览器模式：只显示线上版本 + 下载按钮 ──
+              if (androidApk.github && apkGithubRow && apkGithubEl) {
+                var ghLabel2 = androidApk.github.version ? ("v" + androidApk.github.version) : androidApk.github.fileName;
+                if (typeof androidApk.github.size === "number") ghLabel2 += " · " + formatBytes(androidApk.github.size);
+                apkGithubEl.textContent = ghLabel2;
+                apkGithubRow.classList.remove("hidden");
+                if (apkGithubBtn) {
+                  apkGithubBtn.textContent = "下载";
+                  apkGithubBtn.classList.remove("hidden");
+                  apkGithubBtn.onclick = function() {
+                    window.open(androidApk.github.downloadUrl, "_blank");
+                  };
+                }
+              } else if (apkMessageEl) {
+                apkMessageEl.textContent = "暂未提供";
+                apkMessageEl.classList.remove("hidden");
               }
             }
 
@@ -12594,6 +12613,9 @@
 
       // Detect Android APK native bridge
       var _hasNativeBridge = typeof WandNative !== "undefined" && typeof WandNative.sendNotification === "function";
+      // Detect if running inside APK and extract installed version from User-Agent
+      var _apkVersionMatch = navigator.userAgent.match(/WandApp\/([^\s]+)/);
+      var _apkVersion = _apkVersionMatch ? _apkVersionMatch[1] : null;
 
       function _getNativePermission() {
         if (_hasNativeBridge && typeof WandNative.getPermission === "function") {

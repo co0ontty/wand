@@ -249,6 +249,20 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public String getAppVersion() {
+            try {
+                return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
+        @JavascriptInterface
+        public void downloadUpdate(String url, String fileName, String source) {
+            runOnUiThread(() -> downloadAndInstall(url, fileName, source));
+        }
+
+        @JavascriptInterface
         public void sendNotification(String title, String body, String tag) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 if (ContextCompat.checkSelfPermission(MainActivity.this,
@@ -381,6 +395,15 @@ public class MainActivity extends AppCompatActivity {
 
     @SuppressWarnings("deprecation")
     private void downloadAndInstall(String downloadUrl, String fileName, String source) {
+        if (downloadUrl == null || downloadUrl.isEmpty()) {
+            Toast.makeText(this, "下载地址为空", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (fileName == null || fileName.isEmpty()) {
+            fileName = "wand-update.apk";
+        }
+        final String safeFileName = fileName;
+
         ProgressDialog progress = new ProgressDialog(this);
         progress.setMessage(getString(R.string.downloading_update));
         progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
@@ -389,16 +412,17 @@ public class MainActivity extends AppCompatActivity {
         progress.show();
 
         new Thread(() -> {
+            HttpURLConnection conn = null;
             try {
                 String fullUrl;
                 if (downloadUrl.startsWith("http")) {
-                    fullUrl = downloadUrl; // GitHub absolute URL
+                    fullUrl = downloadUrl;
                 } else {
-                    fullUrl = serverUrl + downloadUrl; // Local relative URL
+                    fullUrl = serverUrl + downloadUrl;
                 }
 
                 URL url = new URL(fullUrl);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn = (HttpURLConnection) url.openConnection();
                 trustSelfSigned(conn);
 
                 // Forward cookies for local downloads
@@ -408,11 +432,11 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 conn.setConnectTimeout(15000);
-                conn.setReadTimeout(60000);
+                conn.setReadTimeout(120000);
                 conn.setInstanceFollowRedirects(true);
 
                 int responseCode = conn.getResponseCode();
-                // Handle GitHub redirect (302)
+                // Handle redirect (301/302)
                 if (responseCode == 302 || responseCode == 301) {
                     String redirectUrl = conn.getHeaderField("Location");
                     conn.disconnect();
@@ -420,13 +444,18 @@ public class MainActivity extends AppCompatActivity {
                         url = new URL(redirectUrl);
                         conn = (HttpURLConnection) url.openConnection();
                         conn.setConnectTimeout(15000);
-                        conn.setReadTimeout(60000);
+                        conn.setReadTimeout(120000);
                         conn.setInstanceFollowRedirects(true);
+                        responseCode = conn.getResponseCode();
                     }
                 }
 
+                if (responseCode != 200) {
+                    throw new Exception("服务器返回 " + responseCode);
+                }
+
                 int fileLength = conn.getContentLength();
-                File outputFile = new File(getExternalFilesDir(null), fileName);
+                File outputFile = new File(getExternalFilesDir(null), safeFileName);
 
                 try (InputStream in = conn.getInputStream();
                      FileOutputStream out = new FileOutputStream(outputFile)) {
@@ -442,7 +471,10 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 }
-                conn.disconnect();
+
+                if (!outputFile.exists() || outputFile.length() == 0) {
+                    throw new Exception("下载文件为空");
+                }
 
                 runOnUiThread(() -> {
                     progress.dismiss();
@@ -450,12 +482,19 @@ public class MainActivity extends AppCompatActivity {
                 });
 
             } catch (Exception e) {
+                final String errMsg = e.getMessage() != null ? e.getMessage() : "未知错误";
                 runOnUiThread(() -> {
                     progress.dismiss();
-                    Toast.makeText(MainActivity.this,
-                            getString(R.string.download_failed) + ": " + e.getMessage(),
-                            Toast.LENGTH_LONG).show();
+                    new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("下载失败")
+                        .setMessage(errMsg)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
                 });
+            } finally {
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Exception ignored) {}
+                }
             }
         }).start();
     }
@@ -470,7 +509,11 @@ public class MainActivity extends AppCompatActivity {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
         } catch (Exception e) {
-            Toast.makeText(this, "安装失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            new AlertDialog.Builder(this)
+                .setTitle("安装失败")
+                .setMessage(e.getMessage())
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
         }
     }
 
