@@ -2,14 +2,20 @@ package com.wand.app;
 
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.ProgressDialog;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.net.http.SslError;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -22,6 +28,10 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 
 import com.google.android.material.button.MaterialButton;
@@ -46,6 +56,10 @@ import javax.net.ssl.X509TrustManager;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String CHANNEL_ID = "wand_notifications";
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
+    private static final int NOTIFICATION_ID_BASE = 2000;
+
     private WebView webView;
     private LinearLayout errorOverlay;
     private TextView errorMessage;
@@ -53,6 +67,7 @@ public class MainActivity extends AppCompatActivity {
     private String appToken;
     private boolean hasLoadedPage = false;
     private boolean updateCheckDone = false;
+    private int notificationCounter = 0;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -81,6 +96,7 @@ public class MainActivity extends AppCompatActivity {
 
         backButton.setOnClickListener(v -> finish());
 
+        createNotificationChannel();
         setupWebView();
         webView.loadUrl(serverUrl);
     }
@@ -147,6 +163,99 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.setWebChromeClient(new WebChromeClient());
+
+        // Register JS bridge for native notifications
+        webView.addJavascriptInterface(new NotificationBridge(), "WandNative");
+    }
+
+    // ── Notification channel ──
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID, "Wand 通知", NotificationManager.IMPORTANCE_DEFAULT);
+            channel.setDescription("会话状态与权限请求通知");
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            if (nm != null) nm.createNotificationChannel(channel);
+        }
+    }
+
+    // ── JS bridge ──
+
+    private class NotificationBridge {
+
+        @JavascriptInterface
+        public String getPermission() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                return "granted"; // Pre-Android 13 doesn't need runtime permission
+            }
+            int result = ContextCompat.checkSelfPermission(
+                    MainActivity.this, android.Manifest.permission.POST_NOTIFICATIONS);
+            if (result == PackageManager.PERMISSION_GRANTED) return "granted";
+            if (ActivityCompat.shouldShowRequestPermissionRationale(
+                    MainActivity.this, android.Manifest.permission.POST_NOTIFICATIONS)) {
+                return "denied";
+            }
+            return "default";
+        }
+
+        @JavascriptInterface
+        public void requestPermission() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                runOnUiThread(() -> ActivityCompat.requestPermissions(
+                        MainActivity.this,
+                        new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+                        NOTIFICATION_PERMISSION_REQUEST));
+            }
+        }
+
+        @JavascriptInterface
+        public void sendNotification(String title, String body, String tag) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(MainActivity.this,
+                        android.Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    return;
+                }
+            }
+
+            Intent intent = new Intent(MainActivity.this, MainActivity.class);
+            intent.putExtra("server_url", serverUrl);
+            if (appToken != null) intent.putExtra("app_token", appToken);
+            intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+            int requestCode = (tag != null ? tag.hashCode() : notificationCounter++) & 0x7FFFFFFF;
+            PendingIntent pi = PendingIntent.getActivity(
+                    MainActivity.this, requestCode, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this, CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setContentTitle(title != null ? title : "Wand")
+                    .setContentText(body != null ? body : "")
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setContentIntent(pi)
+                    .setAutoCancel(true);
+
+            if (tag != null) {
+                NotificationManagerCompat.from(MainActivity.this).notify(tag, 0, builder.build());
+            } else {
+                NotificationManagerCompat.from(MainActivity.this).notify(
+                        NOTIFICATION_ID_BASE + (notificationCounter % 20), builder.build());
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            String result = (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+                    ? "granted" : "denied";
+            webView.evaluateJavascript(
+                    "if(window._onNativePermissionResult) window._onNativePermissionResult('" + result + "');",
+                    null);
+        }
     }
 
     // ── Update check ──

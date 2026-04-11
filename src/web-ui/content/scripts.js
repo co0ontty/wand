@@ -2918,7 +2918,13 @@
         // Browser notification section
         var notifRequestBtn = document.getElementById("notification-request-btn");
         if (notifRequestBtn) notifRequestBtn.addEventListener("click", function() {
-          if (typeof Notification !== "undefined") {
+          if (_hasNativeBridge) {
+            window._onNativePermissionResult = function() {
+              updateNotificationStatus();
+              delete window._onNativePermissionResult;
+            };
+            try { WandNative.requestPermission(); } catch (_e) {}
+          } else if (typeof Notification !== "undefined") {
             Notification.requestPermission().then(function() { updateNotificationStatus(); });
           }
         });
@@ -5583,15 +5589,20 @@
         var testMsgEl = document.getElementById("notification-test-message");
         if (!statusEl) return;
 
-        if (typeof Notification === "undefined") {
-          statusEl.textContent = "\u4e0d\u652f\u6301";
-          statusEl.style.color = "var(--fg-muted)";
-          if (requestBtn) requestBtn.classList.add("hidden");
-          if (resetBtn) resetBtn.classList.add("hidden");
-          return;
+        // Determine permission state: native bridge or browser API
+        var perm = _getNativePermission();
+        if (perm === null) {
+          // No native bridge — fall back to browser Notification API
+          if (typeof Notification === "undefined") {
+            statusEl.textContent = "\u4e0d\u652f\u6301";
+            statusEl.style.color = "var(--fg-muted)";
+            if (requestBtn) requestBtn.classList.add("hidden");
+            if (resetBtn) resetBtn.classList.add("hidden");
+            return;
+          }
+          perm = Notification.permission;
         }
 
-        var perm = Notification.permission;
         if (perm === "granted") {
           statusEl.textContent = "\u5df2\u6388\u6743 \u2713";
           statusEl.style.color = "var(--success)";
@@ -5612,6 +5623,28 @@
 
       function resetNotificationPermission() {
         var testMsgEl = document.getElementById("notification-test-message");
+
+        // Native bridge path — trigger Android system permission dialog
+        if (_hasNativeBridge) {
+          // Listen for permission result callback from native
+          window._onNativePermissionResult = function(result) {
+            updateNotificationStatus();
+            if (testMsgEl) {
+              if (result === "granted") {
+                testMsgEl.textContent = "\u2713 \u5df2\u6388\u6743";
+                testMsgEl.style.color = "var(--success)";
+              } else {
+                testMsgEl.textContent = "\u2717 \u672a\u6388\u6743\uff0c\u8bf7\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u5f00\u542f Wand \u7684\u901a\u77e5\u6743\u9650";
+                testMsgEl.style.color = "var(--danger)";
+              }
+              testMsgEl.classList.remove("hidden");
+            }
+            delete window._onNativePermissionResult;
+          };
+          try { WandNative.requestPermission(); } catch (_e) {}
+          return;
+        }
+
         if (typeof Notification === "undefined") return;
 
         // Always call requestPermission — this triggers the browser's native
@@ -5667,9 +5700,44 @@
         });
         results.push(bubbleEnabled ? "\u2713 \u5e94\u7528\u5185\u6c14\u6ce1" : "\u2013 \u5e94\u7528\u5185\u6c14\u6ce1\uff08\u5df2\u5173\u95ed\uff09");
 
-        // 3. Test browser notification
+        // 3. Test system notification (native bridge or browser API)
+        if (_hasNativeBridge) {
+          var nativePerm = _getNativePermission();
+          if (nativePerm === "granted") {
+            try {
+              WandNative.sendNotification("Wand \u6d4b\u8bd5\u901a\u77e5", "\u7cfb\u7edf\u901a\u77e5\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002", "wand-test");
+              results.push("\u2713 \u7cfb\u7edf\u901a\u77e5");
+            } catch (_e) {
+              results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u53d1\u9001\u5931\u8d25\uff09");
+            }
+          } else if (nativePerm === "denied") {
+            results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u5df2\u62d2\u7edd\uff0c\u8bf7\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u5f00\u542f\uff09");
+          } else {
+            // "default" — request permission, then report
+            window._onNativePermissionResult = function(result) {
+              updateNotificationStatus();
+              if (result === "granted") {
+                try {
+                  WandNative.sendNotification("Wand \u6d4b\u8bd5\u901a\u77e5", "\u7cfb\u7edf\u901a\u77e5\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002", "wand-test");
+                  results.push("\u2713 \u7cfb\u7edf\u901a\u77e5\uff08\u5df2\u6388\u6743\uff09");
+                } catch (_e2) {
+                  results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u53d1\u9001\u5931\u8d25\uff09");
+                }
+              } else {
+                results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u672a\u6388\u6743\uff09");
+              }
+              showTestResults(testMsgEl, results);
+              delete window._onNativePermissionResult;
+            };
+            try { WandNative.requestPermission(); } catch (_e) {}
+            return; // async — results shown in callback
+          }
+          showTestResults(testMsgEl, results);
+          return;
+        }
+
         if (typeof Notification === "undefined") {
-          results.push("\u2013 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u4e0d\u652f\u6301\uff09");
+          results.push("\u2013 \u7cfb\u7edf\u901a\u77e5\uff08\u4e0d\u652f\u6301\uff09");
           showTestResults(testMsgEl, results);
           return;
         }
@@ -5678,27 +5746,27 @@
         if (perm === "granted") {
           try {
             var n = new Notification("Wand \u6d4b\u8bd5\u901a\u77e5", {
-              body: "\u6d4f\u89c8\u5668\u901a\u77e5\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002",
+              body: "\u7cfb\u7edf\u901a\u77e5\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002",
               icon: "/favicon.ico",
               tag: "wand-test",
             });
             setTimeout(function() { n.close(); }, 5000);
-            results.push("\u2713 \u6d4f\u89c8\u5668\u901a\u77e5");
+            results.push("\u2713 \u7cfb\u7edf\u901a\u77e5");
           } catch (_e) {
-            results.push("\u2717 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u80fd\u9700\u8981 HTTPS\uff09");
+            results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u80fd\u9700\u8981 HTTPS\uff09");
           }
           showTestResults(testMsgEl, results);
         } else if (perm === "denied") {
-          results.push("\u2717 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u5df2\u62d2\u7edd\uff09");
+          results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u5df2\u62d2\u7edd\uff09");
           showTestResults(testMsgEl, results);
         } else {
           // "default" — try requesting
           Notification.requestPermission().then(function(result) {
             updateNotificationStatus();
             if (result === "granted") {
-              results.push("\u2713 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u5df2\u6388\u6743\uff09");
+              results.push("\u2713 \u7cfb\u7edf\u901a\u77e5\uff08\u5df2\u6388\u6743\uff09");
             } else {
-              results.push("\u2717 \u6d4f\u89c8\u5668\u901a\u77e5\uff08\u672a\u6388\u6743\uff09");
+              results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u672a\u6388\u6743\uff09");
             }
             showTestResults(testMsgEl, results);
           });
@@ -12267,13 +12335,40 @@
 
       // ── Browser Notification API ──
 
+      // Detect Android APK native bridge
+      var _hasNativeBridge = typeof WandNative !== "undefined" && typeof WandNative.sendNotification === "function";
+
+      function _getNativePermission() {
+        if (_hasNativeBridge && typeof WandNative.getPermission === "function") {
+          try { return WandNative.getPermission(); } catch (_e) {}
+        }
+        return null;
+      }
+
       function requestNotificationPermission() {
+        if (_hasNativeBridge) {
+          var perm = _getNativePermission();
+          if (perm === "default" || perm === "denied") {
+            try { WandNative.requestPermission(); } catch (_e) {}
+          }
+          return;
+        }
         if (typeof Notification !== "undefined" && Notification.permission === "default") {
           Notification.requestPermission();
         }
       }
 
       function sendBrowserNotification(title, body, opts) {
+        // Native Android bridge path
+        if (_hasNativeBridge) {
+          var perm = _getNativePermission();
+          if (perm !== "granted") return;
+          try {
+            WandNative.sendNotification(title || "Wand", body || "", (opts && opts.tag) || "");
+          } catch (_e) {}
+          return;
+        }
+        // Browser Notification API path
         if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
         if (!document.hidden) return; // Only notify when tab is in background
         try {

@@ -716,6 +716,47 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     res.json({ ok: true });
   });
 
+  // ── Android APK update & download (no auth required) ──
+
+  app.get("/api/android-apk-update", async (req, res) => {
+    const currentVersion = (req.query.currentVersion as string)?.trim();
+    if (!currentVersion) {
+      res.status(400).json({ error: "Missing currentVersion query parameter." });
+      return;
+    }
+    const latest = await resolveLatestApkVersion(configDir, config);
+    if (!latest) {
+      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null });
+      return;
+    }
+    const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
+    res.json({
+      updateAvailable,
+      currentVersion,
+      latestVersion: latest.version,
+      downloadUrl: updateAvailable ? latest.downloadUrl : null,
+      fileName: updateAvailable ? latest.fileName : null,
+      size: updateAvailable ? latest.size : null,
+      source: latest.source,
+    });
+  });
+
+  app.get("/android/download", async (_req, res) => {
+    const androidApk = await resolveAndroidApkAsset(configDir, config);
+    if (config.android?.enabled !== true) {
+      res.status(404).json({ error: "Android APK 下载未启用。" });
+      return;
+    }
+    if (!androidApk) {
+      res.status(404).json({ error: "当前没有可下载的 APK 文件。" });
+      return;
+    }
+    res.setHeader("Content-Type", "application/vnd.android.package-archive");
+    res.setHeader("Content-Length", String(androidApk.size));
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(androidApk.fileName)}"`);
+    createReadStream(androidApk.filePath).pipe(res);
+  });
+
   app.use("/api", requireAuth);
 
   // ── Config & Session info ──
@@ -779,45 +820,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       downloadUrl: androidApk?.downloadUrl ?? null,
       source: androidApk?.source ?? null,
     });
-  });
-
-  app.get("/api/android-apk-update", async (req, res) => {
-    const currentVersion = (req.query.currentVersion as string)?.trim();
-    if (!currentVersion) {
-      res.status(400).json({ error: "Missing currentVersion query parameter." });
-      return;
-    }
-    const latest = await resolveLatestApkVersion(configDir, config);
-    if (!latest) {
-      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null });
-      return;
-    }
-    const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
-    res.json({
-      updateAvailable,
-      currentVersion,
-      latestVersion: latest.version,
-      downloadUrl: updateAvailable ? latest.downloadUrl : null,
-      fileName: updateAvailable ? latest.fileName : null,
-      size: updateAvailable ? latest.size : null,
-      source: latest.source,
-    });
-  });
-
-  app.get("/android/download", async (_req, res) => {
-    const androidApk = await resolveAndroidApkAsset(configDir, config);
-    if (config.android?.enabled !== true) {
-      res.status(404).json({ error: "Android APK 下载未启用。" });
-      return;
-    }
-    if (!androidApk) {
-      res.status(404).json({ error: "当前没有可下载的 APK 文件。" });
-      return;
-    }
-    res.setHeader("Content-Type", "application/vnd.android.package-archive");
-    res.setHeader("Content-Length", String(androidApk.size));
-    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(androidApk.fileName)}"`);
-    createReadStream(androidApk.filePath).pipe(res);
   });
 
   app.get("/api/app-connect-code", requireAuth, (req, res) => {

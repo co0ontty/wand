@@ -43,7 +43,7 @@
                 android:id="@+id/urlInput"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="textUri"
+                android:inputType="textNoSuggestions"
                 android:imeOptions="actionDone"
                 android:singleLine="true"
                 android:textSize="15sp" />

@@ -24,7 +24,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
-import java.util.Base64;
+import android.util.Base64;
 import java.util.List;
 
 import javax.net.ssl.HttpsURLConnection;
@@ -97,7 +97,10 @@ public class ConnectActivity extends AppCompatActivity {
      */
     private String[] tryDecodeConnectCode(String input) {
         try {
-            byte[] buf = Base64.getDecoder().decode(input.trim());
+            // Strip ALL whitespace (copy-paste may introduce spaces/newlines)
+            String cleaned = input.replaceAll("\\s+", "");
+            if (cleaned.isEmpty()) return null;
+            byte[] buf = Base64.decode(cleaned, Base64.DEFAULT | Base64.NO_WRAP | Base64.URL_SAFE);
             String decoded = new String(buf, StandardCharsets.UTF_8);
             int hashIdx = decoded.lastIndexOf('#');
             if (hashIdx < 1) return null;
