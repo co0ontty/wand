@@ -1321,23 +1321,55 @@
       function renderSettingsModal() {
         return '<section id="settings-modal" class="modal-backdrop hidden">' +
           '<div class="modal settings-modal">' +
-            '<div class="modal-header">' +
-              '<h2 class="modal-title">设置</h2>' +
+            '<div class="modal-header settings-modal-header">' +
+              '<div class="settings-modal-title-group">' +
+                '<h2 class="modal-title">设置</h2>' +
+                '<p class="settings-modal-subtitle">调整应用配置、通知、安全和显示偏好</p>' +
+              '</div>' +
               '<button id="close-settings-button" class="btn btn-ghost btn-icon">×</button>' +
             '</div>' +
-            '<div class="modal-body">' +
-              // Tabs
-              '<div class="settings-tabs">' +
-                '<button class="settings-tab active" data-tab="about">\u5173\u4e8e</button>' +
-                '<button class="settings-tab" data-tab="general">\u57fa\u672c\u914d\u7f6e</button>' +
-                '<button class="settings-tab" data-tab="notifications">\u901a\u77e5</button>' +
-                '<button class="settings-tab" data-tab="security">\u5b89\u5168</button>' +
-                '<button class="settings-tab" data-tab="presets">\u547d\u4ee4\u9884\u8bbe</button>' +
-                '<button class="settings-tab" data-tab="display">\u663e\u793a</button>' +
-              '</div>' +
+            '<div class="modal-body settings-modal-body">' +
+              '<div class="settings-layout">' +
+                '<aside class="settings-sidebar">' +
+                  '<div class="settings-sidebar-header">' +
+                    '<div class="settings-sidebar-title">偏好设置</div>' +
+                    '<div class="settings-sidebar-hint">左侧切换分区，右侧查看详细说明与选项。</div>' +
+                  '</div>' +
+                  '<div class="settings-tabs" role="tablist" aria-label="设置分组" aria-orientation="vertical">' +
+                    '<button class="settings-tab active" data-tab="about" role="tab" aria-selected="true" aria-controls="settings-tab-about">' +
+                      '<span class="settings-tab-main">关于</span>' +
+                      '<span class="settings-tab-meta">版本、更新与连接方式</span>' +
+                    '</button>' +
+                    '<button class="settings-tab" data-tab="general" role="tab" aria-selected="false" aria-controls="settings-tab-general">' +
+                      '<span class="settings-tab-main">基本配置</span>' +
+                      '<span class="settings-tab-meta">主机、模式、语言、目录</span>' +
+                    '</button>' +
+                    '<button class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="settings-tab-notifications">' +
+                      '<span class="settings-tab-main">通知</span>' +
+                      '<span class="settings-tab-meta">提示音与浏览器通知</span>' +
+                    '</button>' +
+                    '<button class="settings-tab" data-tab="security" role="tab" aria-selected="false" aria-controls="settings-tab-security">' +
+                      '<span class="settings-tab-main">安全</span>' +
+                      '<span class="settings-tab-meta">密码与证书</span>' +
+                    '</button>' +
+                    '<button class="settings-tab" data-tab="presets" role="tab" aria-selected="false" aria-controls="settings-tab-presets">' +
+                      '<span class="settings-tab-main">命令预设</span>' +
+                      '<span class="settings-tab-meta">查看已有预设</span>' +
+                    '</button>' +
+                    '<button class="settings-tab" data-tab="display" role="tab" aria-selected="false" aria-controls="settings-tab-display">' +
+                      '<span class="settings-tab-main">显示</span>' +
+                      '<span class="settings-tab-meta">卡片默认展开行为</span>' +
+                    '</button>' +
+                  '</div>' +
+                '</aside>' +
+                '<div class="settings-content">' +
 
               // About tab
-              '<div class="settings-panel active" id="settings-tab-about">' +
+              '<div class="settings-panel active" id="settings-tab-about" role="tabpanel">' +
+                '<div class="settings-panel-header">' +
+                  '<h3 class="settings-panel-title">关于 Wand</h3>' +
+                  '<p class="settings-panel-desc">查看版本信息、更新状态和 Android App 连接方式。</p>' +
+                '</div>' +
                 '<div class="settings-about-info">' +
                   '<div class="settings-about-row"><span class="settings-label">包名</span><span class="settings-value" id="settings-pkg-name">-</span></div>' +
                   '<div class="settings-about-row"><span class="settings-label">当前版本</span><span class="settings-value" id="settings-version">-</span></div>' +
@@ -1384,7 +1416,11 @@
               '</div>' +
 
               // Notifications tab
-              '<div class="settings-panel" id="settings-tab-notifications">' +
+              '<div class="settings-panel" id="settings-tab-notifications" role="tabpanel">' +
+                '<div class="settings-panel-header">' +
+                  '<h3 class="settings-panel-title">通知</h3>' +
+                  '<p class="settings-panel-desc">设置提示音、系统通知和浏览器通知的行为。</p>' +
+                '</div>' +
                 '<div class="settings-section-title">\u901a\u77e5\u504f\u597d</div>' +
                 '<div class="field field-inline">' +
                   '<input id="cfg-notif-sound" type="checkbox" class="field-checkbox" />' +
@@ -1431,7 +1467,11 @@
               '</div>' +
 
               // General config tab
-              '<div class="settings-panel" id="settings-tab-general">' +
+              '<div class="settings-panel" id="settings-tab-general" role="tabpanel">' +
+                '<div class="settings-panel-header">' +
+                  '<h3 class="settings-panel-title">基本配置</h3>' +
+                  '<p class="settings-panel-desc">配置服务监听地址、默认模式、语言和工作目录。</p>' +
+                '</div>' +
                 '<div class="field-row">' +
                   '<div class="field">' +
                     '<label class="field-label" for="cfg-host">监听地址 (host)</label>' +
@@ -1505,12 +1545,18 @@
                   '<p id="app-icon-message" class="hint hidden" style="margin-top:8px"></p>' +
                 '</div>'
                 : '') +
-                '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
-                '<p id="config-message" class="hint hidden"></p>' +
+                '<div class="settings-actions settings-actions-sticky">' +
+                  '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
+                '</div>' +
+                '<p id="config-message" class="hint hidden settings-status-message"></p>' +
               '</div>' +
 
               // Security tab
-              '<div class="settings-panel" id="settings-tab-security">' +
+              '<div class="settings-panel" id="settings-tab-security" role="tabpanel">' +
+                '<div class="settings-panel-header">' +
+                  '<h3 class="settings-panel-title">安全</h3>' +
+                  '<p class="settings-panel-desc">管理登录密码与 SSL 证书，敏感变更请确认后再保存。</p>' +
+                '</div>' +
                 '<div class="settings-card">' +
                   '<h3 class="settings-section-title">\ud83d\udd12 修改密码</h3>' +
                   '<div class="field">' +
@@ -1542,14 +1588,22 @@
               '</div>' +
 
               // Command presets tab
-              '<div class="settings-panel" id="settings-tab-presets">' +
+              '<div class="settings-panel" id="settings-tab-presets" role="tabpanel">' +
+                '<div class="settings-panel-header">' +
+                  '<h3 class="settings-panel-title">命令预设</h3>' +
+                  '<p class="settings-panel-desc">当前命令预设从 config.json 读取，可在这里快速查看已有配置。</p>' +
+                '</div>' +
                 '<div id="presets-list" class="presets-list"></div>' +
               '</div>' +
 
               // Display settings tab
-              '<div class="settings-panel" id="settings-tab-display">' +
+              '<div class="settings-panel" id="settings-tab-display" role="tabpanel">' +
+                '<div class="settings-panel-header">' +
+                  '<h3 class="settings-panel-title">显示</h3>' +
+                  '<p class="settings-panel-desc">控制聊天视图里不同卡片类型的默认展开状态。</p>' +
+                '</div>' +
                 '<div class="settings-section-title">卡片默认展开状态</div>' +
-                '<p class="hint" style="margin-top:-4px;margin-bottom:12px">设置结构化聊天视图中各类卡片的默认展开/折叠状态。手动操作的展开状态优先于此默认设置。</p>' +
+                '<p class="hint settings-inline-hint">设置结构化聊天视图中各类卡片的默认展开/折叠状态。手动操作的展开状态优先于此默认设置。</p>' +
                 '<div class="switch-card-list">' +
                   '<label class="switch-card" for="cfg-card-edit">' +
                     '<div class="switch-card-header">' +
@@ -1592,8 +1646,10 @@
                     '<div class="switch-card-desc">连续同类工具调用的折叠组</div>' +
                   '</label>' +
                 '</div>' +
-                '<button id="save-display-button" class="btn btn-primary btn-block" style="margin-top:16px">保存显示设置</button>' +
-                '<p id="display-message" class="hint hidden"></p>' +
+                '<div class="settings-actions settings-actions-sticky">' +
+                  '<button id="save-display-button" class="btn btn-primary btn-block">保存显示设置</button>' +
+                '</div>' +
+                '<p id="display-message" class="hint hidden settings-status-message"></p>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -5636,6 +5692,7 @@
           if (confirmEl) confirmEl.value = "";
           hideSettingsMessages();
           setupFocusTrap(modal);
+          bindSettingsTabKeyboardNavigation();
           // Activate first tab
           switchSettingsTab("about");
           // Load settings data
@@ -5750,20 +5807,75 @@
         var tabs = document.querySelectorAll(".settings-tab");
         var panels = document.querySelectorAll(".settings-panel");
         for (var i = 0; i < tabs.length; i++) {
-          if (tabs[i].getAttribute("data-tab") === tabName) {
+          var isActive = tabs[i].getAttribute("data-tab") === tabName;
+          if (isActive) {
             tabs[i].classList.add("active");
           } else {
             tabs[i].classList.remove("active");
           }
+          tabs[i].setAttribute("aria-selected", isActive ? "true" : "false");
+          tabs[i].setAttribute("tabindex", isActive ? "0" : "-1");
         }
         for (var j = 0; j < panels.length; j++) {
-          if (panels[j].id === "settings-tab-" + tabName) {
+          var isPanelActive = panels[j].id === "settings-tab-" + tabName;
+          if (isPanelActive) {
             panels[j].classList.add("active");
+            panels[j].removeAttribute("hidden");
           } else {
             panels[j].classList.remove("active");
+            panels[j].setAttribute("hidden", "hidden");
           }
         }
       }
+
+      function handleSettingsTabKeydown(event) {
+        if (!event) return;
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "Home" && event.key !== "End") {
+          return;
+        }
+        var tabs = Array.prototype.slice.call(document.querySelectorAll(".settings-tab"));
+        if (!tabs.length) return;
+        var currentIndex = tabs.indexOf(event.currentTarget);
+        if (currentIndex === -1) return;
+        event.preventDefault();
+        var nextIndex = currentIndex;
+        if (event.key === "ArrowUp") nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1;
+        if (event.key === "ArrowDown") nextIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0;
+        if (event.key === "Home") nextIndex = 0;
+        if (event.key === "End") nextIndex = tabs.length - 1;
+        var nextTab = tabs[nextIndex];
+        if (!nextTab) return;
+        var nextName = nextTab.getAttribute("data-tab");
+        if (nextName) switchSettingsTab(nextName);
+        if (typeof nextTab.focus === "function") nextTab.focus();
+      }
+
+      function bindSettingsTabKeyboardNavigation() {
+        var tabs = document.querySelectorAll(".settings-tab");
+        for (var i = 0; i < tabs.length; i++) {
+          tabs[i].removeEventListener("keydown", handleSettingsTabKeydown);
+          tabs[i].addEventListener("keydown", handleSettingsTabKeydown);
+        }
+      }
+
+      function updateSettingsSidebarStatus(data) {
+        if (!data) return;
+        var cfg = data.config || {};
+        var metaMap = {
+          about: data.version ? ("当前 v" + data.version) : "版本与更新信息",
+          general: [cfg.defaultMode || "default", cfg.language || "自动语言"].filter(Boolean).join(" · "),
+          notifications: state.notifSound ? ("提示音 " + state.notifVolume + "%") : "提示音已关闭",
+          security: data.hasCert ? "已安装 SSL 证书" : "密码与证书管理",
+          presets: cfg.commandPresets && cfg.commandPresets.length ? (cfg.commandPresets.length + " 条预设") : "暂无预设",
+          display: "控制卡片默认展开"
+        };
+        for (var key in metaMap) {
+          if (!Object.prototype.hasOwnProperty.call(metaMap, key)) continue;
+          var tab = document.querySelector('.settings-tab[data-tab="' + key + '"] .settings-tab-meta');
+          if (tab) tab.textContent = metaMap[key] || "";
+        }
+      }
+
 
       function copyToClipboard(text, triggerBtn) {
         if (!text) return;
@@ -5809,6 +5921,7 @@
         fetch("/api/settings", { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
+            updateSettingsSidebarStatus(data);
             // About
             var nameEl = document.getElementById("settings-pkg-name");
             var verEl = document.getElementById("settings-version");

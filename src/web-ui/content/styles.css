@@ -7325,49 +7325,391 @@
     /* ── Settings modal ── */
 
     .settings-modal {
-      max-width: 520px;
-      max-height: 80vh;
+      width: min(1080px, 100%);
+      max-width: 1080px;
+      height: min(88vh, 920px);
+      max-height: min(88vh, 920px);
+      min-height: min(88vh, 920px);
+      overflow: hidden;
+    }
+
+    .settings-modal-header {
+      align-items: flex-start;
+      gap: 16px;
+      padding-bottom: 14px;
+    }
+
+    .settings-modal-title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .settings-modal-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .settings-modal-body {
+      padding-top: 18px;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .settings-layout {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: 22px;
+      min-height: 0;
+      height: 100%;
+      align-items: stretch;
+    }
+
+    .settings-layout > * {
+      min-height: 0;
+    }
+
+    .settings-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-width: 0;
+      min-height: 0;
+      padding-right: 6px;
+      border-right: 1px solid var(--border-subtle);
+      overflow: hidden;
+    }
+
+    .settings-sidebar-header,
+    .settings-sidebar-title,
+    .settings-sidebar-hint {
+      flex-shrink: 0;
+    }
+
+    .settings-sidebar-header {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 2px 4px 0;
+    }
+
+    .settings-sidebar-title {
+      font-size: 0.875rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: 0.01em;
+    }
+
+    .settings-sidebar-hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      line-height: 1.5;
     }
 
     .settings-tabs {
       display: flex;
-      gap: 2px;
-      border-bottom: 1px solid var(--border-subtle);
-      margin-bottom: 16px;
-      padding-bottom: 0;
+      flex-direction: column;
+      gap: 8px;
+      margin: 0;
+      padding: 0 10px 0 0;
+      min-height: 0;
+      overflow: auto;
+      position: relative;
+      z-index: 2;
+      background: transparent;
+    }
+
+    .settings-tabs::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    .settings-tabs::-webkit-scrollbar-thumb {
+      background: rgba(150, 118, 85, 0.22);
+      border-radius: 999px;
+    }
+
+    .settings-tabs::-webkit-scrollbar-thumb:hover {
+      background: rgba(150, 118, 85, 0.36);
+    }
+
+    .settings-tabs {
+      scrollbar-width: thin;
     }
 
     .settings-tab {
-      padding: 8px 14px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      width: 100%;
+      padding: 12px 14px 12px 16px;
       font-size: 0.8125rem;
-      font-weight: 500;
+      font-weight: 600;
       color: var(--text-secondary);
-      background: none;
-      border: none;
-      border-bottom: 2px solid transparent;
-      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid transparent;
+      border-radius: 16px;
       cursor: pointer;
-      transition: color 0.15s, border-color 0.15s, background 0.15s;
-      white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s;
+      text-align: left;
+    }
+
+    .settings-tab::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 10px;
+      bottom: 10px;
+      width: 3px;
+      border-radius: 999px;
+      background: transparent;
+      transition: background 0.15s ease;
     }
 
     .settings-tab:hover {
       color: var(--text-primary);
-      background: rgba(197, 101, 61, 0.06);
+      background: rgba(197, 101, 61, 0.08);
+      border-color: rgba(197, 101, 61, 0.12);
+      transform: translateX(2px);
+    }
+
+    .settings-tab:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
 
     .settings-tab.active {
       color: var(--accent);
-      border-bottom-color: var(--accent);
-      background: var(--accent-muted);
+      border-color: rgba(197, 101, 61, 0.16);
+      background: linear-gradient(135deg, rgba(197, 101, 61, 0.12), rgba(197, 101, 61, 0.05));
+      box-shadow: inset 0 0 0 1px rgba(197, 101, 61, 0.08), var(--shadow-xs);
+    }
+
+    .settings-tab.active::before {
+      background: var(--accent);
+    }
+
+    .settings-tab-main {
+      font-size: 0.875rem;
+      font-weight: 700;
+      color: inherit;
+      line-height: 1.3;
+    }
+
+    .settings-tab-meta {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    .settings-tab.active .settings-tab-meta {
+      color: var(--text-secondary);
+    }
+
+    .settings-content {
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      overflow: auto;
+      padding-right: 4px;
     }
 
     .settings-panel {
       display: none;
+      min-height: 100%;
+      padding: 2px 2px 8px;
+    }
+
+    .settings-content::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .settings-content::-webkit-scrollbar-thumb {
+      background: rgba(150, 118, 85, 0.24);
+      border-radius: 999px;
+    }
+
+    .settings-content::-webkit-scrollbar-thumb:hover {
+      background: rgba(150, 118, 85, 0.38);
+    }
+
+    .settings-content {
+      scrollbar-width: thin;
     }
 
     .settings-panel.active {
       display: block;
+      animation: fade-in 0.18s ease;
+    }
+
+    .settings-panel-header {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin: 0 0 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(125, 91, 57, 0.12);
+    }
+
+    .settings-panel-title {
+      font-size: 1.0625rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+    }
+
+    .settings-panel-desc {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+
+    .settings-panel-intro {
+      margin: 0 0 14px;
+      padding: 11px 13px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, rgba(197, 101, 61, 0.08), rgba(197, 101, 61, 0.03));
+      border: 1px solid rgba(197, 101, 61, 0.12);
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+      line-height: 1.6;
+    }
+
+    .settings-panel > .settings-section-title {
+      margin-top: 18px;
+    }
+
+    .settings-panel > .settings-section-title:first-of-type {
+      margin-top: 0;
+    }
+
+    .settings-panel > .field-row,
+    .settings-panel > .field,
+    .settings-panel > .field-hint {
+      max-width: 760px;
+    }
+
+    .settings-panel > .switch-card-list,
+    .settings-panel > .settings-card,
+    .settings-panel > .settings-update-section,
+    .settings-panel > .settings-notification-section,
+    .settings-panel > #presets-list {
+      max-width: 860px;
+    }
+
+    .settings-panel > .settings-card + .settings-card,
+    .settings-panel > .settings-update-section + .settings-update-section,
+    .settings-panel > .settings-notification-section + .settings-notification-section {
+      margin-top: 14px;
+    }
+
+    .settings-panel[hidden] {
+      display: none !important;
+    }
+
+    .settings-panel-mixed-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    @media (min-width: 960px) {
+      .settings-panel-mixed-grid.two-column {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 900px) {
+      .settings-layout {
+        grid-template-columns: 220px minmax(0, 1fr);
+        gap: 18px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .settings-modal {
+        width: min(100%, 720px);
+        height: min(92vh, 920px);
+        max-height: min(92vh, 920px);
+        min-height: min(92vh, 920px);
+      }
+
+      .settings-layout {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 14px;
+      }
+
+      .settings-sidebar {
+        padding-right: 0;
+        border-right: none;
+      }
+
+      .settings-tabs {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding-right: 0;
+        padding-bottom: 4px;
+      }
+
+      .settings-tabs::-webkit-scrollbar {
+        display: none;
+      }
+
+      .settings-tab {
+        flex: 0 0 200px;
+        min-height: 72px;
+      }
+
+      .settings-tab:hover {
+        transform: none;
+      }
+
+      .settings-content {
+        overflow: visible;
+        padding-right: 0;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .settings-tab {
+        flex-basis: 180px;
+        padding: 10px 12px 10px 14px;
+      }
+
+      .settings-tab-main {
+        font-size: 0.8125rem;
+      }
+
+      .settings-tab-meta {
+        font-size: 0.6875rem;
+      }
+    }
+
+    @supports not (position: sticky) {
+      .settings-tabs,
+      .settings-actions-sticky {
+        position: static;
+      }
+    }
+
+    .settings-panel-intro {
+      margin: 0 0 14px;
+      padding: 11px 13px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, rgba(197, 101, 61, 0.08), rgba(197, 101, 61, 0.03));
+      border: 1px solid rgba(197, 101, 61, 0.12);
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+      line-height: 1.6;
     }
 
     .settings-about-info {
@@ -7375,17 +7717,20 @@
       flex-direction: column;
       gap: 0;
       margin-bottom: 18px;
-      background: var(--bg-secondary);
-      border-radius: var(--radius-md);
-      padding: 2px 14px;
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 4px 16px;
+      box-shadow: var(--shadow-xs);
     }
 
     .settings-about-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 14px;
       font-size: 0.8125rem;
-      padding: 9px 0;
+      padding: 12px 0;
       border-bottom: 1px solid var(--border-subtle);
     }
 
@@ -7395,13 +7740,17 @@
 
     .settings-label {
       color: var(--text-secondary);
-      font-weight: 500;
+      font-weight: 600;
+      flex: 0 0 112px;
     }
 
     .settings-value {
       color: var(--text-primary);
       font-family: var(--font-mono);
       font-size: 0.8rem;
+      min-width: 0;
+      text-align: right;
+      word-break: break-word;
     }
 
     .settings-value a {
@@ -7413,38 +7762,64 @@
       text-decoration: underline;
     }
 
-    .settings-update-section {
-      border-top: 1px solid var(--border-subtle);
-      padding-top: 14px;
+    .settings-update-section,
+    .settings-notification-section,
+    .settings-card,
+    .switch-card,
+    .preset-item {
+      box-shadow: var(--shadow-xs);
     }
 
+    .settings-update-section,
     .settings-notification-section {
-      border-top: 1px solid var(--border-subtle);
-      padding-top: 14px;
-      margin-top: 4px;
+      margin-top: 14px;
+      padding: 16px;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.48);
     }
+
     .settings-section-title {
-      font-size: 0.8125rem;
-      font-weight: 600;
+      font-size: 0.875rem;
+      font-weight: 700;
       color: var(--text-primary);
       margin: 0 0 12px 0;
-      letter-spacing: 0.02em;
+      letter-spacing: 0.01em;
     }
 
-    .settings-update-actions {
+    .settings-update-actions,
+    .settings-actions {
       display: flex;
-      gap: 8px;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .settings-actions-sticky {
+      position: sticky;
+      bottom: 0;
+      padding-top: 16px;
+      background: linear-gradient(180deg, rgba(255, 251, 245, 0), rgba(255, 251, 245, 0.98) 28px);
+      z-index: 1;
+    }
+
+    .settings-status-message {
       margin-top: 10px;
+    }
+
+    .settings-inline-hint {
+      margin-top: -4px;
+      margin-bottom: 12px;
     }
 
     .settings-connect-url-box {
       display: flex;
       align-items: center;
-      gap: 8px;
-      background: var(--bg-primary);
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.72);
       border: 1px solid var(--border-subtle);
-      border-radius: 6px;
-      padding: 6px 10px;
+      border-radius: 12px;
+      padding: 10px 12px;
       margin-top: 6px;
     }
 
@@ -7475,6 +7850,10 @@
       align-items: center;
       gap: 10px;
       flex-direction: row;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.38);
+      border: 1px solid rgba(125, 91, 57, 0.08);
     }
 
     .field-inline .field-label {
@@ -7483,8 +7862,8 @@
 
     .field-row {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
       margin-bottom: 14px;
     }
     .field-row .field {
@@ -7492,9 +7871,10 @@
     }
 
     .settings-card {
-      background: var(--bg-secondary);
-      border-radius: var(--radius-md);
-      padding: 16px;
+      background: rgba(255, 255, 255, 0.52);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 18px;
       margin-bottom: 14px;
     }
     .settings-card .field:last-of-type {
@@ -7504,10 +7884,149 @@
       margin-top: 0;
     }
     .settings-card .field-input {
-      background: rgba(255, 255, 255, 0.6);
+      background: rgba(255, 255, 255, 0.72);
     }
     .settings-card .btn-block {
       margin-bottom: 0;
+    }
+
+    .settings-panel .btn-block {
+      min-height: 44px;
+    }
+
+    .settings-panel .hint,
+    .settings-panel .field-hint {
+      line-height: 1.55;
+    }
+
+    .settings-panel input[type="range"] {
+      width: 100%;
+    }
+
+    .settings-panel code {
+      max-width: 100%;
+    }
+
+    .settings-panel .hidden + .hint {
+      margin-top: 0;
+    }
+
+    .settings-panel .field:not(.field-inline) {
+      margin-bottom: 16px;
+    }
+
+    .settings-panel .field-input,
+    .settings-panel .field-select,
+    .settings-panel .field-file {
+      width: 100%;
+    }
+
+    .settings-panel .btn-sm {
+      min-height: 34px;
+    }
+
+    .settings-panel .app-icon-option {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+
+    .settings-panel .app-icon-preview {
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .settings-panel .error-message,
+    .settings-panel .hint.hidden,
+    .settings-panel .error-message.hidden {
+      margin-top: 10px;
+    }
+
+    .settings-panel #presets-list:empty::before {
+      content: "加载中...";
+      display: block;
+      padding: 18px;
+      color: var(--text-muted);
+      text-align: center;
+      font-size: 0.8125rem;
+    }
+
+    @media (max-width: 768px) {
+      .settings-about-row {
+        align-items: flex-start;
+      }
+
+      .settings-update-actions,
+      .settings-actions {
+        flex-direction: column;
+      }
+
+      .settings-update-actions .btn,
+      .settings-actions .btn {
+        width: 100%;
+      }
+
+      .settings-connect-url-box {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .settings-modal-header {
+        gap: 10px;
+      }
+
+      .settings-modal-subtitle {
+        font-size: 0.6875rem;
+      }
+
+      .settings-panel {
+        padding-left: 0;
+        padding-right: 0;
+      }
+
+      .settings-about-info,
+      .settings-update-section,
+      .settings-notification-section,
+      .settings-card {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .settings-about-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+      }
+
+      .settings-label,
+      .settings-value {
+        flex: none;
+        text-align: left;
+      }
+
+      .field-inline {
+        align-items: flex-start;
+      }
+
+      .settings-panel .btn-icon {
+        min-width: 34px;
+        min-height: 34px;
+      }
+    }
+
+    @media (min-width: 769px) {
+      .settings-panel .btn-block {
+        width: auto;
+        min-width: 180px;
+      }
+    }
+
+    @supports not (position: sticky) {
+      .settings-tabs,
+      .settings-actions-sticky {
+        position: static;
+      }
     }
 
     .empty-state-compact {
@@ -7535,20 +8054,21 @@
     .switch-card-list {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
     }
     .switch-card {
       display: block;
-      background: var(--bg-secondary);
+      background: rgba(255, 255, 255, 0.5);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px 14px;
+      border-radius: 14px;
+      padding: 14px 16px;
       cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
+      transition: border-color 0.2s, background 0.2s, transform 0.2s;
       user-select: none;
     }
     .switch-card:hover {
       border-color: var(--text-muted);
+      transform: translateY(-1px);
     }
     .switch-card-header {
       display: flex;
@@ -7627,22 +8147,38 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 10px 12px;
-      background: var(--bg-secondary);
-      border-radius: 8px;
-      margin-bottom: 8px;
+      gap: 12px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.52);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      margin-bottom: 10px;
       font-size: 0.8125rem;
     }
 
     .preset-label {
-      font-weight: 500;
+      font-weight: 600;
       color: var(--text-primary);
     }
 
     .preset-detail {
+      min-width: 0;
+      text-align: right;
       color: var(--text-secondary);
       font-family: var(--font-mono);
       font-size: 0.75rem;
+      word-break: break-word;
+    }
+
+    @media (max-width: 640px) {
+      .preset-item {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .preset-detail {
+        text-align: left;
+      }
     }
 
     .file-preview-modal {
