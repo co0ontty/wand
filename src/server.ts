@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import compression from "compression";
 import express, { NextFunction, Request, Response } from "express";
 import { createReadStream, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
@@ -571,9 +572,12 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
 
   app.use(express.json({ limit: "1mb" }));
-  app.use("/vendor/xterm", express.static(path.join(nodeModulesDir, "@xterm", "xterm")));
-  app.use("/vendor/xterm-addon-fit", express.static(path.join(nodeModulesDir, "@xterm", "addon-fit")));
-  app.use("/vendor/xterm-addon-serialize", express.static(path.join(nodeModulesDir, "@xterm", "addon-serialize")));
+  app.use(compression({ threshold: 1024 }));
+
+  const vendorCacheOpts = { maxAge: "7d", immutable: true };
+  app.use("/vendor/xterm", express.static(path.join(nodeModulesDir, "@xterm", "xterm"), vendorCacheOpts));
+  app.use("/vendor/xterm-addon-fit", express.static(path.join(nodeModulesDir, "@xterm", "addon-fit"), vendorCacheOpts));
+  app.use("/vendor/xterm-addon-serialize", express.static(path.join(nodeModulesDir, "@xterm", "addon-serialize"), vendorCacheOpts));
 
   // ── Web UI and PWA endpoints ──
 
@@ -1282,7 +1286,15 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       })()
     : createHttpServer(app);
 
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  const wss = new WebSocketServer({
+    server,
+    path: "/ws",
+    perMessageDeflate: {
+      zlibDeflateOptions: { level: 1 },
+      threshold: 512,
+      concurrencyLimit: 10,
+    },
+  });
   const wsManager = new WsBroadcastManager(wss, () => config.cardDefaults ?? {});
   wsManager.setup((id) => structuredSessions.get(id) ?? processes.get(id));
 

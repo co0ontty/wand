@@ -7357,6 +7357,8 @@
       flex: 1 1 auto;
       min-height: 0;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
     .settings-layout {
@@ -7364,7 +7366,7 @@
       grid-template-columns: 260px minmax(0, 1fr);
       gap: 22px;
       min-height: 0;
-      height: 100%;
+      flex: 1 1 auto;
       align-items: stretch;
     }
 
@@ -7641,9 +7643,14 @@
         min-height: min(92vh, 920px);
       }
 
+      .settings-modal-body {
+        overflow-y: auto;
+      }
+
       .settings-layout {
         grid-template-columns: minmax(0, 1fr);
         gap: 14px;
+        flex: 0 0 auto;
       }
 
       .settings-sidebar {

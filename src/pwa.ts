@@ -2,8 +2,16 @@
  * PWA manifest and Service Worker generation.
  */
 
-/** Cache version is fixed per server process to avoid mid-session cache busting */
-const CACHE_VERSION = Date.now().toString(36);
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkgPath = path.join(__dirname, "..", "package.json");
+const pkgVersion = JSON.parse(readFileSync(pkgPath, "utf-8")).version ?? "0";
+/** Cache version derived from package version — only busts on actual releases */
+const CACHE_VERSION = createHash("md5").update(pkgVersion).digest("hex").slice(0, 8);
 
 export function generatePwaManifest(): string {
   return JSON.stringify({

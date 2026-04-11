@@ -944,8 +944,8 @@ export class ProcessManager extends EventEmitter {
           type: "output",
           sessionId: id,
           data: {
+            incremental: true,
             chunk,
-            output: rec.output,
             permissionBlocked: this.isPermissionBlocked(rec),
           },
         });
@@ -1697,17 +1697,25 @@ export class ProcessManager extends EventEmitter {
         // Sync record.output from bridge before emitting so the event carries fresh data
         record.output = record.ptyBridge?.getRawOutput() ?? record.output;
         const rawMessages = record.ptyBridge?.getMessages() ?? [];
-        const messages = truncateMessagesForTransport(rawMessages, this.config.cardDefaults ?? {}, rawMessages.length - 1);
-        const data: {
-          output: string;
-          messages: ConversationTurn[];
-          permissionBlocked: boolean;
-          chunk?: string;
-        } = {
-          output: record.output,
-          messages,
+        const isStreaming = record.status === "running";
+
+        const data: Record<string, unknown> = {
           permissionBlocked: this.isPermissionBlocked(record),
         };
+
+        if (isStreaming && rawMessages.length > 0) {
+          // Incremental mode: send only chunk + last (streaming) turn
+          data.incremental = true;
+          const lastTurn = rawMessages[rawMessages.length - 1];
+          const truncatedLast = truncateMessagesForTransport([lastTurn], this.config.cardDefaults ?? {}, 0);
+          data.lastMessage = truncatedLast[0];
+          data.messageCount = rawMessages.length;
+        } else {
+          // Full mode: non-streaming or empty messages
+          data.output = record.output;
+          data.messages = truncateMessagesForTransport(rawMessages, this.config.cardDefaults ?? {}, rawMessages.length - 1);
+        }
+
         if (event.type === "output.raw") {
           data.chunk = (event.data as { chunk: string }).chunk;
         }
@@ -1897,15 +1905,21 @@ export class ProcessManager extends EventEmitter {
       }
     }
 
+    const language = this.config.language?.trim();
+    const isChinese = language === "中文";
+
     if (mode === "managed") {
-      const autonomousPrompt = "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.";
+      const autonomousPrompt = isChinese
+        ? "你正在完全托管的自主模式下运行。用户可能无法及时回复问题或确认。你必须独立做出所有决策——自行选择最佳方案，而不是向用户询问偏好、确认或澄清。如果有多种可行方案，选择你认为最合适的并继续执行。除非任务本身存在根本性的歧义且无法合理推断，否则不要等待用户输入。果断行动，自主决策。"
+        : "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.";
       const escaped = autonomousPrompt.replace(/'/g, "'\\''");
       result += ` --append-system-prompt '${escaped}'`;
     }
 
-    const language = this.config.language?.trim();
     if (language) {
-      const langPrompt = `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`;
+      const langPrompt = isChinese
+        ? "请使用中文回复。所有解释、注释和对话文本都使用中文。"
+        : `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`;
       const escaped = langPrompt.replace(/'/g, "'\\''");
       result += ` --append-system-prompt '${escaped}'`;
     }

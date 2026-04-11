@@ -64,6 +64,18 @@ function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["
   };
 }
 
+function buildIncrementalStructuredPayload(snapshot: SessionSnapshot): ProcessEvent["data"] {
+  const messages = snapshot.messages ?? [];
+  return {
+    incremental: true,
+    queuedMessages: snapshot.queuedMessages,
+    sessionKind: "structured",
+    structuredState: snapshot.structuredState,
+    lastMessage: messages.length > 0 ? messages[messages.length - 1] : undefined,
+    messageCount: messages.length,
+  };
+}
+
 export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   private readonly pendingChildren = new Map<string, ChildProcess>();
@@ -525,20 +537,27 @@ export class StructuredSessionManager {
       const permArgs = this.buildPermissionArgs(session.mode, session.autoApprovePermissions ?? false);
       args.push(...permArgs);
 
+      // Append language-aware system prompts
+      const language = this.config.language?.trim();
+      const isChinese = language === "中文";
+
       // In managed mode, append autonomous system prompt
       if (session.mode === "managed") {
         args.push(
           "--append-system-prompt",
-          "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.",
+          isChinese
+            ? "你正在完全托管的自主模式下运行。用户可能无法及时回复问题或确认。你必须独立做出所有决策——自行选择最佳方案，而不是向用户询问偏好、确认或澄清。如果有多种可行方案，选择你认为最合适的并继续执行。除非任务本身存在根本性的歧义且无法合理推断，否则不要等待用户输入。果断行动，自主决策。"
+            : "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.",
         );
       }
 
       // Append language preference if configured
-      const language = this.config.language?.trim();
       if (language) {
         args.push(
           "--append-system-prompt",
-          `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`,
+          isChinese
+            ? "请使用中文回复。所有解释、注释和对话文本都使用中文。"
+            : `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`,
         );
       }
 
@@ -579,7 +598,7 @@ export class StructuredSessionManager {
         this.emit({
           type: "output",
           sessionId,
-          data: buildStructuredOutputPayload(current),
+          data: buildIncrementalStructuredPayload(current),
         });
       };
 

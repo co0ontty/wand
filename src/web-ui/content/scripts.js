@@ -9906,14 +9906,16 @@
           case 'output':
             // Update session output (for terminal display and local message parsing)
             // NOTE: For structured sessions, output may be "" during streaming — check messages too
-            if (msg.data && (msg.data.output || msg.data.messages) && msg.sessionId) {
-              var snapshot = { id: msg.sessionId, output: msg.data.output };
+            if (msg.data && msg.sessionId) {
+              var isIncremental = !!msg.data.incremental;
+              var snapshot = { id: msg.sessionId };
+
+              // Carry over small metadata fields present in both modes
+              if (!isIncremental && msg.data.output !== undefined) {
+                snapshot.output = msg.data.output;
+              }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'permissionBlocked')) {
                 snapshot.permissionBlocked = !!msg.data.permissionBlocked;
-              }
-              // Pass structured messages if available from JSON chat mode
-              if (msg.data.messages) {
-                snapshot.messages = msg.data.messages;
               }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'queuedMessages')) {
                 snapshot.queuedMessages = msg.data.queuedMessages || [];
@@ -9922,19 +9924,44 @@
               if (msg.data.structuredState) {
                 snapshot.structuredState = msg.data.structuredState;
               }
-              updateSessionSnapshot(snapshot);
-              if (msg.sessionId === state.selectedId) {
-                var updatedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; }) || snapshot;
-                state.currentMessages = buildMessagesForRender(updatedSession, getPreferredMessages(updatedSession, msg.data.output, false));
-                updateTaskDisplay();
-                // Structured sessions: render immediately for responsiveness
-                if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
-                  renderChat();
-                } else {
-                  scheduleChatRender();
-                }
+              if (msg.data.sessionKind) {
+                snapshot.sessionKind = msg.data.sessionKind;
               }
 
+              if (isIncremental && msg.data.lastMessage) {
+                // Incremental mode: merge lastMessage into existing session messages
+                var existingSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+                if (existingSession) {
+                  var msgs = Array.isArray(existingSession.messages) ? existingSession.messages.slice() : [];
+                  var expectedCount = msg.data.messageCount || 0;
+                  // Replace last turn if same role, or append if new turn
+                  if (msgs.length > 0 && msg.data.lastMessage.role && msgs[msgs.length - 1].role === msg.data.lastMessage.role) {
+                    msgs[msgs.length - 1] = msg.data.lastMessage;
+                  } else if (msgs.length < expectedCount) {
+                    msgs.push(msg.data.lastMessage);
+                  }
+                  snapshot.messages = msgs;
+                }
+              } else if (!isIncremental && msg.data.messages) {
+                // Full mode (backward compatible)
+                snapshot.messages = msg.data.messages;
+              }
+
+              // Only update if we have meaningful data
+              if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined) {
+                updateSessionSnapshot(snapshot);
+                if (msg.sessionId === state.selectedId) {
+                  var updatedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; }) || snapshot;
+                  state.currentMessages = buildMessagesForRender(updatedSession, getPreferredMessages(updatedSession, updatedSession.output, false));
+                  updateTaskDisplay();
+                  // Structured sessions: render immediately for responsiveness
+                  if (updatedSession.sessionKind === 'structured' || msg.data.sessionKind === 'structured') {
+                    renderChat();
+                  } else {
+                    scheduleChatRender();
+                  }
+                }
+              }
             }
             // Real-time terminal output
             if (msg.sessionId === state.selectedId && state.terminal && msg.data) {
@@ -9952,8 +9979,8 @@
                 maybeScrollTerminalToBottom("output");
                 updateTerminalJumpToBottomButton();
                 scheduleMobileDomUpdate();
-              } else if (Object.prototype.hasOwnProperty.call(msg.data, "output")) {
-                // Fallback: no chunk available, use full-output comparison
+              } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
+                // Fallback: no chunk available, use full-output comparison (only in full mode)
                 syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
               }
             }
