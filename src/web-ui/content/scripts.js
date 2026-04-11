@@ -109,6 +109,9 @@
         loginChecked: false,
         bootstrapping: true,
         sessionsDrawerOpen: false,
+        sidebarPinned: (function() {
+          try { return localStorage.getItem("wand-sidebar-pinned") === "true"; } catch (e) { return false; }
+        })(),
         modalOpen: false,
         presetValue: "",
         cwdValue: "",
@@ -934,6 +937,10 @@
         // Suppress CSS transitions during initial DOM build
         document.documentElement.classList.add("no-transition");
 
+        // Apply persisted pin state before rendering
+        if (state.sidebarPinned && !isMobileLayout()) {
+          state.sessionsDrawerOpen = true;
+        }
         app.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
         // Reset chat render tracking since DOM was fully replaced
         resetChatRenderCache();
@@ -1085,8 +1092,8 @@
 
         return '<div class="app-container">' +
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
-          '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + '">' +
-            '<aside id="sessions-drawer" class="sidebar' + drawerClass + '">' +
+          '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + (state.sidebarPinned && !isMobileLayout() ? ' sidebar-pinned' : '') + '">' +
+            '<aside id="sessions-drawer" class="sidebar' + drawerClass + (state.sidebarPinned && !isMobileLayout() ? ' pinned' : '') + '">' +
               '<div class="sidebar-header">' +
                 '<div class="sidebar-header-main">' +
                   '<div class="topbar-logo-icon">W</div>' +
@@ -1099,6 +1106,9 @@
                   '</button>' +
                   '<button id="sidebar-refresh-btn" class="btn btn-ghost btn-sm" type="button" title="刷新页面">' +
                     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>' +
+                  '</button>' +
+                  '<button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? ' pinned' : '') + '" type="button" title="' + (state.sidebarPinned ? '取消固定侧栏' : '固定侧栏') + '">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg>' +
                   '</button>' +
                   '<button id="close-drawer-button" class="btn btn-ghost btn-sm sidebar-close" type="button" aria-label="关闭菜单">×</button>' +
                 '</div>' +
@@ -3144,6 +3154,8 @@
         if (drawerBackdrop) drawerBackdrop.addEventListener("click", closeSessionsDrawer);
         var closeDrawerBtn = document.getElementById("close-drawer-button");
         if (closeDrawerBtn) closeDrawerBtn.addEventListener("click", closeSessionsDrawer);
+        var pinBtn = document.getElementById("sidebar-pin-btn");
+        if (pinBtn) pinBtn.addEventListener("click", toggleSidebarPin);
         var homeBtn = document.getElementById("sidebar-home-btn");
         if (homeBtn) homeBtn.addEventListener("click", function() {
           state.selectedId = null;
@@ -3846,7 +3858,9 @@
         } else {
           selectSession(sessionId);
         }
-        closeSessionsDrawer();
+        if (!state.sidebarPinned || isMobileLayout()) {
+          closeSessionsDrawer();
+        }
       }
 
       function handleSessionItemClick(event) {
@@ -4431,6 +4445,26 @@
         state.fitAddon = fitAddonConstructor ? new fitAddonConstructor() : null;
         if (state.fitAddon) {
           state.terminal.loadAddon(state.fitAddon);
+          // Patch: FitAddon subtracts 14px for a scrollbar that CSS hides;
+          // recalculate cols without the scrollbar deduction.
+          var _origPropose = state.fitAddon.proposeDimensions;
+          state.fitAddon.proposeDimensions = function() {
+            var result = _origPropose.call(state.fitAddon);
+            if (result && state.terminal) {
+              try {
+                var core = state.terminal._core;
+                var cellW = core._renderService.dimensions.css.cell.width;
+                var el = state.terminal.element;
+                if (cellW > 0 && el && el.parentElement) {
+                  var pw = Math.max(0, parseInt(window.getComputedStyle(el.parentElement).getPropertyValue("width")));
+                  var es = window.getComputedStyle(el);
+                  var ePad = parseInt(es.getPropertyValue("padding-left")) + parseInt(es.getPropertyValue("padding-right"));
+                  result.cols = Math.max(2, Math.floor((pw - ePad) / cellW));
+                }
+              } catch(e) {}
+            }
+            return result;
+          };
         } else {
           console.error("[wand] xterm fit addon failed to load; continuing without fit support.");
         }
@@ -5237,6 +5271,22 @@
         subscribeToSession(id);
       }
 
+      function updatePinState() {
+        var drawer = document.getElementById("sessions-drawer");
+        var mainLayout = document.querySelector(".main-layout");
+        var pinBtn = document.getElementById("sidebar-pin-btn");
+        if (drawer) {
+          drawer.classList.toggle("pinned", state.sidebarPinned && !isMobileLayout());
+        }
+        if (mainLayout) {
+          mainLayout.classList.toggle("sidebar-pinned", state.sidebarPinned && !isMobileLayout());
+        }
+        if (pinBtn) {
+          pinBtn.classList.toggle("pinned", state.sidebarPinned);
+          pinBtn.title = state.sidebarPinned ? "取消固定侧栏" : "固定侧栏";
+        }
+      }
+
       function updateDrawerState() {
         var drawer = document.getElementById("sessions-drawer");
         var backdrop = document.getElementById("sessions-drawer-backdrop");
@@ -5254,9 +5304,11 @@
         if (toggleBtn) {
           toggleBtn.classList.toggle("active", state.sessionsDrawerOpen);
         }
+        updatePinState();
       }
 
       function toggleSessionsDrawer() {
+        if (state.sidebarPinned && !isMobileLayout()) return;
         state.sessionsDrawerOpen = !state.sessionsDrawerOpen;
         if (state.sessionsDrawerOpen && isMobileLayout()) {
           state.filePanelOpen = false;
@@ -5268,10 +5320,36 @@
       }
 
       function closeSessionsDrawer() {
+        if (state.sidebarPinned && !isMobileLayout()) return;
         if (!state.sessionsDrawerOpen) return;
         closeSwipedItem();
         state.sessionsDrawerOpen = false;
         updateLayoutState();
+      }
+
+      function toggleSidebarPin() {
+        if (isMobileLayout()) return;
+        state.sidebarPinned = !state.sidebarPinned;
+        try {
+          localStorage.setItem("wand-sidebar-pinned", String(state.sidebarPinned));
+        } catch (e) {}
+        if (state.sidebarPinned) {
+          state.sessionsDrawerOpen = true;
+        }
+        updateLayoutState();
+        // Refit terminal after padding-left transition completes
+        var mainLayout = document.querySelector(".main-layout");
+        if (mainLayout) {
+          var onEnd = function(e) {
+            if (e.propertyName === "padding-left") {
+              mainLayout.removeEventListener("transitionend", onEnd);
+              scheduleTerminalResize(true);
+            }
+          };
+          mainLayout.addEventListener("transitionend", onEnd);
+        }
+        // Fallback refit in case transition doesn't fire
+        setTimeout(function() { scheduleTerminalResize(true); }, 350);
       }
 
       // Store last focused element for focus trap
@@ -9369,7 +9447,22 @@
           state.resizeObserver = new ResizeObserver(function() { scheduleTerminalResize(true); });
           state.resizeObserver.observe(output);
         }
-        state.resizeHandler = function() { scheduleTerminalResize(true); };
+        var lastKnownDesktop = !isMobileLayout();
+        state.resizeHandler = function() {
+          scheduleTerminalResize(true);
+          // Handle sidebar pin state across mobile/desktop breakpoint
+          var isDesktop = !isMobileLayout();
+          if (lastKnownDesktop !== isDesktop) {
+            lastKnownDesktop = isDesktop;
+            if (!isDesktop && state.sidebarPinned && state.sessionsDrawerOpen) {
+              state.sessionsDrawerOpen = false;
+              updateDrawerState();
+            } else if (isDesktop && state.sidebarPinned && !state.sessionsDrawerOpen) {
+              state.sessionsDrawerOpen = true;
+              updateDrawerState();
+            }
+          }
+        };
         window.addEventListener("resize", state.resizeHandler);
         // Also listen to visualViewport resize for pinch-zoom / browser zoom
         if (window.visualViewport) {

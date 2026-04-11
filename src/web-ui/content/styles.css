@@ -370,10 +370,18 @@
       transition: padding-left var(--transition-normal);
     }
     /* .sidebar-open class toggled for semantic purposes only; sidebar overlays without resizing main layout */
-    .sidebar-open .input-panel {
+    .sidebar-open:not(.sidebar-pinned) .input-panel {
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.2s ease;
+    }
+
+    /* ===== 侧边栏常驻 ===== */
+    .main-layout.sidebar-pinned {
+      padding-left: var(--sidebar-width);
+    }
+    .main-layout.sidebar-pinned .floating-sidebar-toggle {
+      display: none;
     }
 
     /* ===== 抽屉背景遮罩 ===== */
@@ -424,6 +432,27 @@
       box-shadow: 8px 0 40px rgba(89, 58, 32, 0.15);
       pointer-events: auto;
       opacity: 1;
+    }
+
+    .sidebar.pinned {
+      transform: translateX(0);
+      pointer-events: auto;
+      opacity: 1;
+      box-shadow: none;
+    }
+
+    .sidebar.pinned .sidebar-close {
+      display: none;
+    }
+
+    /* ===== 图钉按钮 ===== */
+    .sidebar-pin-toggle {
+      flex-shrink: 0;
+      transition: transform var(--transition-fast), color var(--transition-fast);
+    }
+    .sidebar-pin-toggle.pinned {
+      color: var(--primary);
+      transform: rotate(45deg);
     }
 
     /* ===== 侧边栏头部 ===== */
@@ -2139,7 +2168,6 @@
         radial-gradient(circle at top right, rgba(91, 58, 34, 0.2), transparent 35%),
         radial-gradient(circle at bottom left, rgba(197, 101, 61, 0.08), transparent 40%),
         linear-gradient(180deg, #2a221c 0%, #1f1b17 50%, #1a1613 100%);
-      padding: 10px;
       overflow: hidden;
       min-height: 0;
       min-width: 0;
@@ -6086,6 +6114,18 @@
 
     /* 平板适配 */
     @media (max-width: 768px) {
+      .sidebar-pin-toggle { display: none; }
+      .sidebar.pinned:not(.open) {
+        transform: translateX(-100%);
+        pointer-events: none;
+        opacity: 0;
+      }
+      .main-layout.sidebar-pinned {
+        padding-left: 0;
+      }
+      .main-layout.sidebar-pinned .floating-sidebar-toggle {
+        display: inline-flex;
+      }
       .app-container {
         --layout-main-file-panel-width: 0px;
       }
