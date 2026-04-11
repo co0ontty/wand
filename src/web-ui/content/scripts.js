@@ -2546,6 +2546,8 @@
                 '<p class="field-hint">留空则使用上方目录，支持路径自动补全。</p>' +
                 '<div id="recent-paths-bubbles" class="recent-paths-bubbles"></div>' +
               '</div>' +
+            '</div>' +
+            '<div class="modal-footer">' +
               '<button id="run-button" class="btn btn-primary btn-block">启动会话</button>' +
               '<p id="modal-error" class="error-message hidden"></p>' +
             '</div>' +

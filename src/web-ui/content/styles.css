@@ -5502,9 +5502,19 @@
     }
     .session-modal .modal-body {
       padding-top: 16px;
+      padding-bottom: 8px;
     }
     .session-modal .field:last-of-type {
-      margin-bottom: 14px;
+      margin-bottom: 6px;
+    }
+    .session-modal .modal-footer {
+      flex-shrink: 0;
+      padding: 12px 22px 18px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .session-modal .modal-footer .error-message {
+      margin-top: 8px;
+      margin-bottom: 0;
     }
     .mode-cards {
       display: flex;
@@ -6478,6 +6488,7 @@
       .modal-header { padding: 10px 12px; min-height: 40px; }
       .modal-body { padding: 10px 12px; }
       .modal-footer { padding: 8px 12px; }
+      .session-modal .modal-footer { padding: 10px 12px 14px; }
 
       .tool-card {
         padding: 10px;
@@ -6571,6 +6582,7 @@
       .modal { max-height: 80vh; }
       .modal-header { padding: 8px 10px; min-height: 36px; }
       .modal-body { padding: 8px 10px; }
+      .session-modal .modal-footer { padding: 8px 10px 12px; }
       .field-row { grid-template-columns: 1fr; gap: 0; }
 
       .btn { min-height: 36px; padding: 8px 12px; }
