@@ -7,6 +7,7 @@ output
 .playwright-cli
 debug-*.mjs
 *.png
+!docs/screenshots/*.png
 android/**/*.apk
 android/**/build/
 android/.gradle/

@@ -1,6 +1,15 @@
 # wand
 
-通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。专为 Claude Code 设计，支持终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览等功能。
+[![npm version](https://img.shields.io/npm/v/@co0ontty/wand.svg)](https://www.npmjs.com/package/@co0ontty/wand)
+[![license](https://img.shields.io/npm/l/@co0ontty/wand.svg)](https://github.com/co0ontty/wand/blob/master/LICENSE)
+[![node](https://img.shields.io/node/v/@co0ontty/wand.svg)](https://nodejs.org)
+[![GitHub last commit](https://img.shields.io/github/last-commit/co0ontty/wand)](https://github.com/co0ontty/wand/commits/master)
+
+通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。专为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [Codex](https://github.com/openai/codex) 设计，支持终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览、Android 客户端等功能。
+
+<p align="center">
+  <img src="docs/screenshots/chat-view.png" width="800" alt="结构化对话视图" />
+</p>
 
 ## 安装
 
@@ -22,6 +31,39 @@ wand web
 
 安装完成后打开浏览器访问终端中提示的地址即可。
 
+## 功能
+
+<p align="center">
+  <img src="docs/screenshots/home.png" width="800" alt="欢迎页" />
+</p>
+
+### 核心
+
+- **双视图模式** — 终端原始输出和结构化对话视图可随时切换，同一会话两种呈现
+- **多 Provider 支持** — 同时支持 Claude Code 和 Codex，可按需创建不同类型的会话
+- **会话管理** — 创建、归档、恢复会话；支持从 Claude 原生历史记录恢复；会话列表显示摘要，懒加载
+- **权限控制** — 可视化权限提示，支持逐次确认、单次批准、本轮记忆等策略；工具调用自动分组与审批统计
+
+### 交互体验
+
+- **结构化对话** — 代码块语法高亮、工具调用折叠/展开、多问题分组渲染、Token 用量按轮累计
+- **个性化角色** — 像素风猫咪头像（赛博虎妞 / 勤劳初二），支持自定义对话角色名称
+- **消息排队** — 在 AI 思考时可继续输入，消息自动排队发送
+- **文件浏览器** — 内置路径浏览和搜索功能
+
+### 部署与访问
+
+- **PWA 支持** — 可添加到主屏幕作为独立应用使用
+- **Android 客户端** — WebView 壳应用，支持加密连接码分发、APK 自动更新检查、原生通知推送、启动器图标切换
+- **HTTPS** — 可选自签证书，适合远程或移动端访问
+- **版本管理** — 内置更新检查与升级提示
+
+## 截图
+
+| 登录 | 对话视图 |
+|:---:|:---:|
+| <img src="docs/screenshots/login.png" width="400" alt="登录页" /> | <img src="docs/screenshots/chat-view.png" width="400" alt="对话视图" /> |
+
 ## 配置
 
 配置文件位于 `~/.wand/config.json`，首次 `wand init` 时自动生成。
@@ -42,17 +84,6 @@ wand config:set port 9443
 | `https` | `false` | 启用 HTTPS（自签证书自动生成） |
 | `password` | (随机生成) | 登录密码 |
 | `language` | `""` | Claude 回复语言偏好 |
-
-## 功能
-
-- **双视图模式** — 终端原始输出和结构化对话视图可随时切换
-- **会话管理** — 创建、归档、恢复会话；支持从 Claude 原生历史记录恢复；会话列表显示摘要
-- **权限控制** — 可视化权限提示，支持逐次确认、单次批准、本轮记忆等策略；工具调用自动分组
-- **文件浏览器** — 内置路径浏览和搜索功能
-- **多种运行模式** — full-access / default / auto-edit 等 Claude 运行模式
-- **个性化** — 像素风猫咪头像、回复语言偏好设置
-- **PWA 支持** — 可添加到主屏幕作为独立应用使用
-- **HTTPS** — 可选自签证书，适合远程或移动端访问
 
 ## 开发
 
@@ -84,6 +115,7 @@ src/
   session-logger.ts         # 文件日志 ~/.wand/sessions/
   resume-policy.ts          # Claude 历史绑定与恢复策略
   web-ui/                   # 服务端渲染的前端 HTML/CSS/JS
+android/                    # Android WebView 壳应用
 ```
 
 数据存储在 `~/.wand/` 下：`config.json`（配置）、`wand.db`（SQLite）、`sessions/`（日志）。
