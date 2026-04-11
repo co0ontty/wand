@@ -12,6 +12,7 @@ import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 import { SessionLifecycleManager } from "./session-lifecycle.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
+import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import {
@@ -1721,32 +1722,40 @@ export class ProcessManager extends EventEmitter {
       case "output.raw":
         // Sync record.output from bridge before emitting so the event carries fresh data
         record.output = record.ptyBridge?.getRawOutput() ?? record.output;
-        // Emit output event for terminal view
-        this.emitEvent({
-          type: "output",
-          sessionId: event.sessionId,
-          data: {
-            chunk: (event.data as { chunk: string }).chunk,
-            output: record.output,
-            messages: record.ptyBridge?.getMessages(),
-            permissionBlocked: this.isPermissionBlocked(record),
-          },
-        });
+        {
+          const rawMessages = record.ptyBridge?.getMessages() ?? [];
+          const messages = truncateMessagesForTransport(rawMessages, this.config.cardDefaults ?? {}, rawMessages.length - 1);
+          // Emit output event for terminal view
+          this.emitEvent({
+            type: "output",
+            sessionId: event.sessionId,
+            data: {
+              chunk: (event.data as { chunk: string }).chunk,
+              output: record.output,
+              messages,
+              permissionBlocked: this.isPermissionBlocked(record),
+            },
+          });
+        }
         break;
 
       case "output.chat":
         // Sync record.output from bridge before emitting so the event carries fresh data
         record.output = record.ptyBridge?.getRawOutput() ?? record.output;
-        // Emit output event with updated messages for chat view
-        this.emitEvent({
-          type: "output",
-          sessionId: event.sessionId,
-          data: {
-            output: record.output,
-            messages: record.ptyBridge?.getMessages(),
-            permissionBlocked: this.isPermissionBlocked(record),
-          },
-        });
+        {
+          const rawMessages = record.ptyBridge?.getMessages() ?? [];
+          const messages = truncateMessagesForTransport(rawMessages, this.config.cardDefaults ?? {}, rawMessages.length - 1);
+          // Emit output event with updated messages for chat view
+          this.emitEvent({
+            type: "output",
+            sessionId: event.sessionId,
+            data: {
+              output: record.output,
+              messages,
+              permissionBlocked: this.isPermissionBlocked(record),
+            },
+          });
+        }
         break;
 
       case "permission.prompt": {

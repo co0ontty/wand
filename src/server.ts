@@ -12,7 +12,7 @@ import { WebSocketServer } from "ws";
 import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
 import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
 import { ensureCertificates } from "./cert.js";
-import { isExecutionMode, resolveConfigDir, saveConfig } from "./config.js";
+import { isExecutionMode, normalizeCardDefaults, resolveConfigDir, saveConfig } from "./config.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
@@ -772,6 +772,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       commandPresets: config.commandPresets,
       structuredRunners: [{ label: "Claude Structured", runner: "claude-cli-print" }],
       structuredChatPersona,
+      cardDefaults: config.cardDefaults,
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
       currentVersion: PKG_VERSION,
@@ -891,15 +892,24 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       }
     }
 
+    // Handle cardDefaults separately (nested object, no restart needed)
+    if (body.cardDefaults !== undefined) {
+      config.cardDefaults = normalizeCardDefaults(body.cardDefaults);
+      changed = true;
+    }
+
     if (!changed) {
       res.status(400).json({ error: "没有可更新的配置字段。" });
       return;
     }
 
+    // cardDefaults-only changes don't need restart
+    const restartRequired = allowedFields.some((f) => f in body && body[f] !== undefined);
+
     try {
       await saveConfig(configPath, config);
       const { password: _pw, ...safeConfig } = config;
-      res.json({ ok: true, config: safeConfig, restartRequired: true });
+      res.json({ ok: true, config: safeConfig, restartRequired });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "保存配置失败。") });
     }
@@ -1273,7 +1283,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     : createHttpServer(app);
 
   const wss = new WebSocketServer({ server, path: "/ws" });
-  const wsManager = new WsBroadcastManager(wss);
+  const wsManager = new WsBroadcastManager(wss, () => config.cardDefaults ?? {});
   wsManager.setup((id) => structuredSessions.get(id) ?? processes.get(id));
 
   // Wire process events to WebSocket broadcast

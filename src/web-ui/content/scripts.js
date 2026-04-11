@@ -137,6 +137,7 @@
         notifBubble: (function() {
           try { var v = localStorage.getItem("wand-notif-bubble"); return v === null ? true : v === "true"; } catch (e) { return true; }
         })(),
+        toolContentCache: {},
         currentView: "terminal",
         terminalScale: (function() {
           try {
@@ -1315,6 +1316,7 @@
                 '<button class="settings-tab" data-tab="notifications">\u901a\u77e5</button>' +
                 '<button class="settings-tab" data-tab="security">\u5b89\u5168</button>' +
                 '<button class="settings-tab" data-tab="presets">\u547d\u4ee4\u9884\u8bbe</button>' +
+                '<button class="settings-tab" data-tab="display">\u663e\u793a</button>' +
               '</div>' +
 
               // About tab
@@ -1506,6 +1508,56 @@
               // Command presets tab
               '<div class="settings-panel" id="settings-tab-presets">' +
                 '<div id="presets-list" class="presets-list"></div>' +
+              '</div>' +
+
+              // Display settings tab
+              '<div class="settings-panel" id="settings-tab-display">' +
+                '<div class="settings-section-title">卡片默认展开状态</div>' +
+                '<p class="hint" style="margin-top:-4px;margin-bottom:12px">设置结构化聊天视图中各类卡片的默认展开/折叠状态。手动操作的展开状态优先于此默认设置。</p>' +
+                '<div class="switch-card-list">' +
+                  '<label class="switch-card" for="cfg-card-edit">' +
+                    '<div class="switch-card-header">' +
+                      '<span class="switch-card-title">编辑卡片 (Edit/Write)</span>' +
+                      '<input id="cfg-card-edit" type="checkbox" class="switch-toggle" />' +
+                      '<span class="switch-slider"></span>' +
+                    '</div>' +
+                    '<div class="switch-card-desc">文件编辑和写入操作的 diff 视图</div>' +
+                  '</label>' +
+                  '<label class="switch-card" for="cfg-card-inline">' +
+                    '<div class="switch-card-header">' +
+                      '<span class="switch-card-title">内联工具 (Read/Glob/Grep)</span>' +
+                      '<input id="cfg-card-inline" type="checkbox" class="switch-toggle" />' +
+                      '<span class="switch-slider"></span>' +
+                    '</div>' +
+                    '<div class="switch-card-desc">文件读取、搜索等工具的结果</div>' +
+                  '</label>' +
+                  '<label class="switch-card" for="cfg-card-terminal">' +
+                    '<div class="switch-card-header">' +
+                      '<span class="switch-card-title">终端输出 (Bash)</span>' +
+                      '<input id="cfg-card-terminal" type="checkbox" class="switch-toggle" />' +
+                      '<span class="switch-slider"></span>' +
+                    '</div>' +
+                    '<div class="switch-card-desc">命令行执行结果</div>' +
+                  '</label>' +
+                  '<label class="switch-card" for="cfg-card-thinking">' +
+                    '<div class="switch-card-header">' +
+                      '<span class="switch-card-title">思考过程 (Thinking)</span>' +
+                      '<input id="cfg-card-thinking" type="checkbox" class="switch-toggle" />' +
+                      '<span class="switch-slider"></span>' +
+                    '</div>' +
+                    '<div class="switch-card-desc">Claude 的思考过程块</div>' +
+                  '</label>' +
+                  '<label class="switch-card" for="cfg-card-toolgroup">' +
+                    '<div class="switch-card-header">' +
+                      '<span class="switch-card-title">工具组</span>' +
+                      '<input id="cfg-card-toolgroup" type="checkbox" class="switch-toggle" />' +
+                      '<span class="switch-slider"></span>' +
+                    '</div>' +
+                    '<div class="switch-card-desc">连续同类工具调用的折叠组</div>' +
+                  '</label>' +
+                '</div>' +
+                '<button id="save-display-button" class="btn btn-primary btn-block" style="margin-top:16px">保存显示设置</button>' +
+                '<p id="display-message" class="hint hidden"></p>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -2698,11 +2750,53 @@
       }
 
       // Global toggle function for tool card headers — called via onclick attribute
+      // Lazy-load tool content for truncated results
+      function __fetchToolContent(toolUseId, callback) {
+        if (!state.selectedId || !toolUseId) return;
+        var cacheKey = state.selectedId + ":" + toolUseId;
+        if (state.toolContentCache[cacheKey]) {
+          callback(null, state.toolContentCache[cacheKey]);
+          return;
+        }
+        fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/tool-content/" + encodeURIComponent(toolUseId), { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data.error) {
+              callback(data.error, null);
+            } else {
+              state.toolContentCache[cacheKey] = data;
+              callback(null, data);
+            }
+          })
+          .catch(function() {
+            callback("加载失败", null);
+          });
+      }
+
       window.__tcToggle = function(e, headerEl) {
         var card = headerEl.closest(".tool-use-card");
         if (card) {
+          var wasCollapsed = card.classList.contains("collapsed");
           card.classList.toggle("collapsed");
           persistElementExpandState(card, "tool-card");
+          // Lazy-load truncated content on expand
+          if (wasCollapsed && card.dataset.truncated === "true" && card.dataset.loaded !== "true") {
+            var toolUseId = card.dataset.toolUseId;
+            var resultDiv = card.querySelector(".tool-use-result");
+            if (resultDiv) resultDiv.innerHTML = '<div class="tool-content-loading">加载中…</div>';
+            card.dataset.loaded = "loading";
+            __fetchToolContent(toolUseId, function(err, data) {
+              if (err) {
+                if (resultDiv) resultDiv.innerHTML = '<div class="tool-content-error" onclick="__tcToggle(null, card.querySelector(\'.tool-use-header\'))">加载失败，点击重试</div>';
+                card.dataset.loaded = "";
+              } else {
+                card.dataset.truncated = "false";
+                card.dataset.loaded = "true";
+                var content = typeof data.content === "string" ? data.content : JSON.stringify(data.content);
+                if (resultDiv) resultDiv.innerHTML = '<pre class="tool-use-result-content">' + escapeHtml(content) + '</pre>';
+              }
+            });
+          }
         }
         if (e) { e.preventDefault(); e.stopPropagation(); }
       };
@@ -2741,6 +2835,24 @@
             statusSpan.textContent = "✓";
           }
         }
+        // Lazy-load truncated content on expand
+        if (expanded && el.dataset.truncated === "true" && el.dataset.loaded !== "true") {
+          var toolUseId = el.dataset.toolUseId;
+          if (body) body.innerHTML = '<div class="tool-content-loading">加载中…</div>';
+          el.dataset.loaded = "loading";
+          __fetchToolContent(toolUseId, function(err, data) {
+            if (err) {
+              if (body) body.innerHTML = '<div class="tool-content-error">加载失败，点击重试</div>';
+              el.dataset.loaded = "";
+            } else {
+              el.dataset.truncated = "false";
+              el.dataset.loaded = "true";
+              var content = typeof data.content === "string" ? data.content : JSON.stringify(data.content);
+              el.dataset.result = content;
+              if (body) body.innerHTML = '<div class="inline-tool-result">' + formatInlineResult(content, "") + '</div>';
+            }
+          });
+        }
         persistElementExpandState(el, "inline-tool");
       };
       // Toggle function for terminal tool blocks
@@ -2755,6 +2867,32 @@
           var toggleIcon = el.querySelector(".term-toggle-icon");
           if (toggleIcon) toggleIcon.textContent = isHidden ? "▼" : "▶";
           persistElementExpandState(container, "terminal");
+          // Lazy-load truncated content on expand
+          if (isHidden && container.dataset.truncated === "true" && container.dataset.loaded !== "true") {
+            var toolUseId = container.dataset.toolUseId;
+            var termOutput = body.querySelector(".term-output");
+            if (termOutput) termOutput.innerHTML = '<div class="tool-content-loading">加载中…</div>';
+            container.dataset.loaded = "loading";
+            __fetchToolContent(toolUseId, function(err, data) {
+              if (err) {
+                if (termOutput) termOutput.innerHTML = '<div class="tool-content-error">加载失败，点击重试</div>';
+                container.dataset.loaded = "";
+              } else {
+                container.dataset.truncated = "false";
+                container.dataset.loaded = "true";
+                var content = typeof data.content === "string" ? data.content : JSON.stringify(data.content);
+                if (termOutput) {
+                  var lines = content.split("\n");
+                  var html = "";
+                  for (var i = 0; i < lines.length; i++) {
+                    if (!lines[i] && i === lines.length - 1) continue;
+                    html += '<div class="term-line">' + escapeHtml(lines[i]) + '</div>';
+                  }
+                  termOutput.innerHTML = html;
+                }
+              }
+            });
+          }
         }
       };
       // Update streaming thinking content (called from WebSocket handler)
@@ -3025,6 +3163,8 @@
         }
         var saveConfigBtn = document.getElementById("save-config-button");
         if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
+        var saveDisplayBtn = document.getElementById("save-display-button");
+        if (saveDisplayBtn) saveDisplayBtn.addEventListener("click", saveDisplaySettings);
         // App icon picker (APK only)
         var appIconPicker = document.getElementById("app-icon-picker");
         if (appIconPicker) {
@@ -4999,6 +5139,8 @@
         }
         state.selectedId = id;
         persistSelectedId();
+        // Clear tool content cache on session switch
+        state.toolContentCache = {};
         // Clear queued inputs from the previous session to prevent cross-session leaks
         state.messageQueue = [];
         state.pendingMessages = [];
@@ -5616,6 +5758,19 @@
               if (!html) html = '<div class="empty-state-compact"><span class="empty-icon">\u2699</span><span>\u6ca1\u6709\u547d\u4ee4\u9884\u8bbe</span><span class="hint">\u5728 config.json \u7684 commandPresets \u4e2d\u914d\u7f6e</span></div>';
               presetsList.innerHTML = html;
             }
+
+            // Card expand defaults
+            var cd = cfg.cardDefaults || {};
+            var cdEditEl = document.getElementById("cfg-card-edit");
+            var cdInlineEl = document.getElementById("cfg-card-inline");
+            var cdTerminalEl = document.getElementById("cfg-card-terminal");
+            var cdThinkingEl = document.getElementById("cfg-card-thinking");
+            var cdToolgroupEl = document.getElementById("cfg-card-toolgroup");
+            if (cdEditEl) cdEditEl.checked = cd.editCards === true;
+            if (cdInlineEl) cdInlineEl.checked = cd.inlineTools === true;
+            if (cdTerminalEl) cdTerminalEl.checked = cd.terminal === true;
+            if (cdThinkingEl) cdThinkingEl.checked = cd.thinking === true;
+            if (cdToolgroupEl) cdToolgroupEl.checked = cd.toolGroup === true;
           })
           .catch(function() {});
       }
@@ -5651,6 +5806,52 @@
               msgEl.style.color = "var(--success)";
             }
             msgEl.classList.remove("hidden");
+          }
+        })
+        .catch(function() {
+          if (msgEl) {
+            msgEl.textContent = "保存失败。";
+            msgEl.style.color = "var(--error)";
+            msgEl.classList.remove("hidden");
+          }
+        });
+      }
+
+      function saveDisplaySettings() {
+        var msgEl = document.getElementById("display-message");
+        if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
+
+        var body = {
+          cardDefaults: {
+            editCards: !!(document.getElementById("cfg-card-edit") || {}).checked,
+            inlineTools: !!(document.getElementById("cfg-card-inline") || {}).checked,
+            terminal: !!(document.getElementById("cfg-card-terminal") || {}).checked,
+            thinking: !!(document.getElementById("cfg-card-thinking") || {}).checked,
+            toolGroup: !!(document.getElementById("cfg-card-toolgroup") || {}).checked,
+          }
+        };
+
+        fetch("/api/settings/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(body)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (msgEl) {
+            if (data.error) {
+              msgEl.textContent = data.error;
+              msgEl.style.color = "var(--error)";
+            } else {
+              msgEl.textContent = "显示设置已保存";
+              msgEl.style.color = "var(--success)";
+            }
+            msgEl.classList.remove("hidden");
+          }
+          // Update local config so card defaults take effect immediately
+          if (!data.error && state.config) {
+            state.config.cardDefaults = body.cardDefaults;
           }
         })
         .catch(function() {
@@ -11376,7 +11577,8 @@
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
           var thinkingKey = buildExpandKey("thinking", [getMessageKey(msg, messageIndex), "pty"]);
-          var thinkingExpanded = getPersistedExpandState(thinkingKey) === true;
+          var thinkingPersisted = getPersistedExpandState(thinkingKey);
+          var thinkingExpanded = thinkingPersisted === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.thinking) : thinkingPersisted;
           return '<div class="chat-message thinking">' +
             '<div class="thinking-inline thinking-pty ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">⦿</span>' +
@@ -11514,7 +11716,7 @@
         var summaryText = parts.join(" · ");
         var groupKey = buildExpandKey("tool-group", [messageKey, items[0] && items[0].index, items.length]);
         var persistedExpanded = getPersistedExpandState(groupKey);
-        var shouldExpand = persistedExpanded === null ? false : persistedExpanded;
+        var shouldExpand = persistedExpanded === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.toolGroup) : persistedExpanded;
 
         // Render each item's inline-tool card
         var innerHtml = "";
@@ -11625,7 +11827,8 @@
               '</div>';
             }
             var thinkingKey = buildExpandKey("thinking", [messageKey, index]);
-            var thinkingExpanded = getPersistedExpandState(thinkingKey) === true;
+            var thinkingPersisted = getPersistedExpandState(thinkingKey);
+          var thinkingExpanded = thinkingPersisted === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.thinking) : thinkingPersisted;
             return '<div class="thinking-inline ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">⦿</span>' +
               '<span class="thinking-inline-preview">' + escapeHtml(thinkingExpanded ? thinkingText : preview) + '</span>' +
@@ -11722,7 +11925,7 @@
         var fullResult = resultContent;
 
         var expandedHtml = "";
-        var shouldExpand = persistedExpanded === null ? false : persistedExpanded;
+        var shouldExpand = persistedExpanded === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.inlineTools) : persistedExpanded;
         if (hasResult) {
           expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + '</div>' +
@@ -11734,9 +11937,15 @@
           expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';"><div class="inline-tool-loading">等待响应…</div></div>';
         }
 
+        var isTruncated = toolResult && toolResult._truncated === true;
+
         var extraInfoHtml = meta ? '<span class="inline-tool-meta">' + escapeHtml(meta) + '</span>' : '';
         var extraClass = isError ? 'inline-tool-error-inline' : '';
         if (shouldExpand) extraClass += ' inline-tool-open';
+
+        var truncatedAttrs = isTruncated
+          ? 'data-truncated="true" data-tool-use-id="' + escapeHtml(block.id || "") + '" '
+          : '';
 
         return '<div class="inline-tool ' + extraClass + '" ' +
           'data-expand-kind="inline-tool" ' +
@@ -11744,6 +11953,7 @@
           'data-result="' + escapeHtml(fullResult) + '" ' +
           'data-preview="' + previewDataAttr + '" ' +
           'data-status="' + (isError ? 'error' : (hasResult ? 'done' : 'pending')) + '" ' +
+          truncatedAttrs +
           'onclick="__inlineToolToggle(this)">' +
           '<div class="inline-tool-row">' +
             '<span class="inline-tool-status">' + statusIcon + '</span>' +
@@ -11800,9 +12010,14 @@
 
         // Show command preview in header (truncate long commands)
         var cmdPreview = command.length > 80 ? command.slice(0, 77) + "…" : command;
-        var shouldExpand = persistedExpanded === null ? false : persistedExpanded;
+        var shouldExpand = persistedExpanded === null ? !!(state.config && state.config.cardDefaults && state.config.cardDefaults.terminal) : persistedExpanded;
 
-        return '<div class="inline-terminal" data-expand-kind="terminal" data-expand-key="' + escapeHtml(expandKey) + '" data-expanded="' + (shouldExpand ? 'true' : 'false') + '">' +
+        var termTruncated = toolResult && toolResult._truncated === true;
+        var termTruncAttrs = termTruncated
+          ? ' data-truncated="true" data-tool-use-id="' + escapeHtml(block.id || "") + '"'
+          : '';
+
+        return '<div class="inline-terminal" data-expand-kind="terminal" data-expand-key="' + escapeHtml(expandKey) + '" data-expanded="' + (shouldExpand ? 'true' : 'false') + '"' + termTruncAttrs + '>' +
           '<div class="term-header" onclick="__terminalExpand(this)">' +
             statusDot +
             '<span class="term-cmd-preview"><span class="term-prompt">$</span> ' + escapeHtml(cmdPreview) + '</span>' +
@@ -12082,10 +12297,12 @@
 
         var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
         var persistedExpanded = getPersistedExpandState(expandKey);
-        var shouldExpand = persistedExpanded === null ? statusClass === "loading" : persistedExpanded;
+        var cardDefaultExpand = !!(state.config && state.config.cardDefaults && state.config.cardDefaults.editCards);
+        var shouldExpand = persistedExpanded === null ? (statusClass === "loading" || cardDefaultExpand) : persistedExpanded;
+        var tcTruncated = toolResult && toolResult._truncated === true;
         var collapsedClass = shouldExpand ? "" : " collapsed";
         var toggleHtml = '<span class="tool-use-toggle">▼</span>';
-        return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '">' +
+        return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '"' + (tcTruncated ? ' data-truncated="true"' : '') + '>' +
           '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
             '<span class="tool-use-icon">' + headerIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(titleText) + '</span>' +

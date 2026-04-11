@@ -3936,6 +3936,38 @@
       font-style: italic;
     }
 
+    /* ── Tool content lazy-load states ── */
+    .tool-content-loading {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 8px 0;
+    }
+    .tool-content-loading::before {
+      content: "";
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid var(--text-muted);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: tool-content-spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes tool-content-spin {
+      to { transform: rotate(360deg); }
+    }
+    .tool-content-error {
+      font-size: 0.75rem;
+      color: var(--error);
+      padding: 8px 0;
+      cursor: pointer;
+    }
+    .tool-content-error:hover {
+      text-decoration: underline;
+    }
+
     /* ── Inline Terminal Display (Bash) ── */
     .inline-terminal {
       margin: 3px 0;
@@ -7439,6 +7471,93 @@
       height: 18px;
       accent-color: var(--accent);
       cursor: pointer;
+    }
+
+    /* Switch card list */
+    .switch-card-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .switch-card {
+      display: block;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      user-select: none;
+    }
+    .switch-card:hover {
+      border-color: var(--text-muted);
+    }
+    .switch-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .switch-card-title {
+      flex: 1;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .switch-card-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0;
+      max-height: 0;
+      overflow: hidden;
+      opacity: 0;
+      transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease;
+    }
+    /* When switch is ON, expand the description */
+    .switch-card:has(.switch-toggle:checked) .switch-card-desc {
+      max-height: 40px;
+      opacity: 1;
+      margin-top: 8px;
+    }
+    .switch-card:has(.switch-toggle:checked) {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 6%, var(--bg-secondary));
+    }
+
+    /* Switch toggle (iOS style) */
+    .switch-toggle {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
+    .switch-slider {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+      min-width: 40px;
+      background: #c4b8a8;
+      border-radius: 11px;
+      transition: background 0.25s;
+    }
+    .switch-slider::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 16px;
+      height: 16px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.25s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .switch-toggle:checked + .switch-slider {
+      background: var(--accent);
+    }
+    .switch-toggle:checked + .switch-slider::after {
+      transform: translateX(18px);
     }
 
     .field-file {

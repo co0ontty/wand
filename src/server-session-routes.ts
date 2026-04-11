@@ -221,6 +221,31 @@ export function registerSessionRoutes(
     }
   });
 
+  // ── Tool content lazy-load endpoint ──
+
+  app.get("/api/sessions/:id/tool-content/:toolUseId", (req, res) => {
+    const snapshot = getSessionById(processes, structured, req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    const toolUseId = req.params.toolUseId;
+    const messages = snapshot.messages ?? [];
+    for (const turn of messages) {
+      for (const block of turn.content) {
+        if (block.type === "tool_result" && block.tool_use_id === toolUseId) {
+          res.json({
+            tool_use_id: block.tool_use_id,
+            content: block.content,
+            is_error: block.is_error || false,
+          });
+          return;
+        }
+      }
+    }
+    res.status(404).json({ error: "未找到该工具结果。" });
+  });
+
   app.post("/api/sessions/:id/worktree/merge/check", (req, res) => {
     try {
       const current = requireWorktreeSession(getLatestSessionSnapshot(processes, structured, storage, req.params.id));

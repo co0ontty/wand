@@ -5,8 +5,9 @@
 
 import { WebSocketServer, WebSocket } from "ws";
 import { EventEmitter } from "node:events";
-import type { SessionSnapshot, ProcessEvent } from "./types.js";
+import type { CardExpandDefaults, SessionSnapshot, ProcessEvent } from "./types.js";
 import { validateSession } from "./auth.js";
+import { truncateMessagesForTransport } from "./message-truncator.js";
 
 export type { ProcessEvent } from "./types.js";
 
@@ -33,8 +34,11 @@ export class WsBroadcastManager {
   private outputDebounceCache = new Map<string, { event: ProcessEvent; timer: NodeJS.Timeout }>();
   private eventEmitter = new EventEmitter();
 
-  constructor(wss: WebSocketServer) {
+  private getCardDefaults: () => CardExpandDefaults;
+
+  constructor(wss: WebSocketServer, getCardDefaults?: () => CardExpandDefaults) {
     this.wss = wss;
+    this.getCardDefaults = getCardDefaults ?? (() => ({}));
   }
 
   /** Set up connection handling. Should be called once during server startup. */
@@ -70,10 +74,13 @@ export class WsBroadcastManager {
           if (msg.type === "subscribe" && msg.sessionId) {
             const snapshot = getSession(msg.sessionId);
             if (snapshot) {
+              const truncatedMessages = snapshot.messages
+                ? truncateMessagesForTransport(snapshot.messages, this.getCardDefaults())
+                : undefined;
               ws.send(JSON.stringify({
                 type: "init",
                 sessionId: msg.sessionId,
-                data: { ...snapshot, messages: snapshot.messages, output: snapshot.output },
+                data: { ...snapshot, messages: truncatedMessages, output: snapshot.output },
               }));
             } else {
               ws.send(JSON.stringify({

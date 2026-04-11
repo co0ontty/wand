@@ -58,6 +58,19 @@ export interface StructuredChatPersonaConfig {
   assistant?: StructuredChatPersonaRoleConfig;
 }
 
+export interface CardExpandDefaults {
+  /** Edit/Write/MultiEdit diff cards (default: false) */
+  editCards?: boolean;
+  /** Read/Glob/Grep/WebFetch/WebSearch inline tools (default: false) */
+  inlineTools?: boolean;
+  /** Bash terminal output (default: false) */
+  terminal?: boolean;
+  /** Thinking blocks (default: false) */
+  thinking?: boolean;
+  /** Tool groups (default: false) */
+  toolGroup?: boolean;
+}
+
 export interface AndroidApkConfig {
   enabled?: boolean;
   apkDir?: string;
@@ -84,6 +97,8 @@ export interface WandConfig {
   /** Per-instance secret for app connection code encryption. Auto-generated on first run. */
   appSecret?: string;
   android?: AndroidApkConfig;
+  /** Default expand/collapse state for card types in structured chat view */
+  cardDefaults?: CardExpandDefaults;
 }
 
 interface WorktreeInfo {
@@ -201,6 +216,10 @@ export interface ToolResultBlock {
   tool_use_id: string;
   content: string | Array<{ type: string; [key: string]: unknown }>;
   is_error?: boolean;
+  /** When true, content has been truncated for transport. Client should fetch full content via API. */
+  _truncated?: boolean;
+  /** Original content size in bytes, provided when truncated. */
+  _originalSize?: number;
 }
 
 export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;

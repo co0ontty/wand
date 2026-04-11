@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { AndroidApkConfig, ExecutionMode, StructuredChatPersonaConfig, WandConfig } from "./types.js";
+import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -21,6 +21,7 @@ export const defaultConfig = (): WandConfig => ({
   shortcutLogMaxBytes: 10 * 1024 * 1024,
   language: "",
   android: defaultAndroidApkConfig(),
+  cardDefaults: defaultCardExpandDefaults(),
   commandPresets: [
     {
       label: "Claude",
@@ -89,6 +90,28 @@ export async function ensureConfig(configPath: string): Promise<WandConfig> {
 export async function saveConfig(configPath: string, config: WandConfig): Promise<void> {
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function defaultCardExpandDefaults(): CardExpandDefaults {
+  return {
+    editCards: false,
+    inlineTools: false,
+    terminal: false,
+    thinking: false,
+    toolGroup: false,
+  };
+}
+
+export function normalizeCardDefaults(input: unknown): CardExpandDefaults {
+  if (!input || typeof input !== "object") return defaultCardExpandDefaults();
+  const raw = input as Record<string, unknown>;
+  return {
+    editCards: typeof raw.editCards === "boolean" ? raw.editCards : false,
+    inlineTools: typeof raw.inlineTools === "boolean" ? raw.inlineTools : false,
+    terminal: typeof raw.terminal === "boolean" ? raw.terminal : false,
+    thinking: typeof raw.thinking === "boolean" ? raw.thinking : false,
+    toolGroup: typeof raw.toolGroup === "boolean" ? raw.toolGroup : false,
+  };
 }
 
 function defaultAndroidApkConfig(): AndroidApkConfig {
@@ -176,6 +199,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
       ? input.appSecret
       : crypto.randomBytes(32).toString("hex"),
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
+    cardDefaults: normalizeCardDefaults(input.cardDefaults),
   };
 }
 

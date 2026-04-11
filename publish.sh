@@ -25,6 +25,16 @@ echo "==> package.json version 已更新为 $VERSION"
 echo "==> 开始构建..."
 npm run build
 
+# 编译 Android APK 并部署到生产目录
+APK_DIR="$HOME/.wand/android"
+mkdir -p "$APK_DIR"
+echo "==> 编译 Android APK (v$VERSION)..."
+(cd android && ./gradlew assembleDebug \
+  -PAPP_VERSION_NAME="$VERSION" \
+  -PAPP_VERSION_CODE=$(echo "$VERSION" | awk -F. '{printf "%d%02d%02d", $1, $2, $3}'))
+cp android/app/build/outputs/apk/debug/app-debug.apk "$APK_DIR/wand-v${VERSION}.apk"
+echo "==> APK 已部署到 $APK_DIR/wand-v${VERSION}.apk"
+
 # 发布
 echo "==> 发布 @co0ontty/wand@$VERSION 到 NPM..."
 npm publish --access public
