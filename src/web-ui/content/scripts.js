@@ -1874,7 +1874,10 @@
         } catch (e) {}
         applyTerminalScale();
         updateScaleLabel();
-        scheduleTerminalResize();
+        // Force refit: font size changed but container dimensions didn't,
+        // so ensureTerminalFit (which resets viewport tracking) is needed
+        // instead of scheduleTerminalResize (which skips when size unchanged).
+        ensureTerminalFit();
       }
 
       function applyTerminalScale() {
@@ -8778,6 +8781,11 @@
         }
         state.resizeHandler = function() { scheduleTerminalResize(true); };
         window.addEventListener("resize", state.resizeHandler);
+        // Also listen to visualViewport resize for pinch-zoom / browser zoom
+        if (window.visualViewport) {
+          state.visualViewportHandler = function() { scheduleTerminalResize(true); };
+          window.visualViewport.addEventListener("resize", state.visualViewportHandler);
+        }
         requestAnimationFrame(function() { scheduleTerminalResize(true); });
       }
 
@@ -8793,6 +8801,10 @@
         if (state.resizeHandler) {
           window.removeEventListener("resize", state.resizeHandler);
           state.resizeHandler = null;
+        }
+        if (state.visualViewportHandler && window.visualViewport) {
+          window.visualViewport.removeEventListener("resize", state.visualViewportHandler);
+          state.visualViewportHandler = null;
         }
         [["mousemove", "resizeMouseMove"], ["mouseup", "resizeMouseUp"],
          ["touchmove", "resizeTouchMove"], ["touchend", "resizeTouchEnd"]
