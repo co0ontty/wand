@@ -18,6 +18,7 @@ public class ServerStore {
     private static final String KEY_RECENT = "recent_urls";
     private static final String KEY_LAST = "last_url";
     private static final String KEY_APP_TOKEN = "app_token";
+    private static final String KEY_APP_ICON = "app_icon";
     private static final int MAX_RECENT = 5;
 
     private final SharedPreferences prefs;
@@ -88,5 +89,13 @@ public class ServerStore {
 
     public void clearAppToken() {
         prefs.edit().remove(KEY_APP_TOKEN).apply();
+    }
+
+    public String getAppIcon() {
+        return prefs.getString(KEY_APP_ICON, "shorthair");
+    }
+
+    public void setAppIcon(String iconName) {
+        prefs.edit().putString(KEY_APP_ICON, iconName).apply();
     }
 }

@@ -1080,6 +1080,46 @@
       padding-right: 64px;
     }
 
+    .session-title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .session-title-row .session-title,
+    .session-title-row .session-command {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .session-time {
+      flex-shrink: 0;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      line-height: 1.4;
+      padding-top: 1px;
+    }
+
+    .session-activity {
+      font-size: 0.6875rem;
+      color: var(--accent);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.3;
+      opacity: 0.85;
+    }
+
+    .session-recovery-hint {
+      font-size: 0.625rem;
+      color: var(--text-muted);
+      background: rgba(150, 118, 85, 0.08);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
     /* ===== 会话操作按钮 ===== */
     .session-actions {
       position: absolute;
@@ -2841,6 +2881,28 @@
       padding: 20px 4px 12px;
       min-height: 0;
       scrollbar-gutter: stable;
+    }
+
+    /* ===== 历史消息懒加载 ===== */
+    .chat-load-more {
+      display: flex;
+      justify-content: center;
+      padding: 8px 0;
+    }
+    .chat-load-more-btn {
+      background: var(--bg-hover);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+      padding: 6px 16px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .chat-load-more-btn:hover {
+      background: var(--accent-muted);
+      color: var(--accent);
+      border-color: var(--accent);
     }
 
     /* ===== 消息动画 ===== */
@@ -7044,6 +7106,11 @@
       color: var(--fg-secondary);
       line-height: 1.4;
       margin-bottom: 0;
+      max-height: 4.2em;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
     }
     .notification-bubble-actions {
       margin-top: 6px;

@@ -7,30 +7,30 @@
     <group
         android:translateX="24"
         android:translateY="24">
-        <!-- 赛博虎妞 (美短) pixel avatar — 10x10 grid, 6dp per cell -->
-        <!-- dg: dark gray outlines -->
+        <!-- 勤劳初二 (加菲猫) pixel avatar — 10x10 grid, 6dp per cell -->
+        <!-- d: dark orange outlines -->
         <path
-            android:fillColor="#6B7B8D"
+            android:fillColor="#C46A1A"
             android:pathData="M6,0h6v6h-6z M48,0h6v6h-6z M0,6h6v6h-6z M12,6h6v6h-6z M42,6h6v6h-6z M54,6h6v6h-6z M0,12h6v6h-6z M54,12h6v6h-6z M6,36h6v6h-6z M48,36h6v6h-6z M18,48h6v6h-6z M36,48h6v6h-6z" />
-        <!-- g: main gray body -->
+        <!-- o: main orange body -->
         <path
-            android:fillColor="#9EAAB8"
+            android:fillColor="#F0923A"
             android:pathData="M6,6h6v6h-6z M48,6h6v6h-6z M6,12h48v6h-48z M0,18h12v6h-12z M24,18h12v6h-12z M48,18h12v6h-12z M0,24h12v6h-12z M24,24h12v6h-12z M48,24h12v6h-12z M0,30h24v6h-24z M36,30h24v6h-24z M0,36h6v6h-6z M12,36h6v6h-6z M24,36h12v6h-12z M42,36h6v6h-6z M54,36h6v6h-6z M6,42h48v6h-48z M12,48h6v6h-6z M24,48h12v6h-12z M42,48h6v6h-6z M18,54h6v6h-6z M36,54h6v6h-6z" />
         <!-- w: white eyes -->
         <path
             android:fillColor="#FFFFFF"
             android:pathData="M12,18h6v6h-6z M36,18h6v6h-6z M12,24h12v6h-12z M36,24h12v6h-12z" />
-        <!-- gn: green pupils -->
+        <!-- k: black pupils -->
         <path
-            android:fillColor="#7EC88B"
+            android:fillColor="#2D2D2D"
             android:pathData="M18,18h6v6h-6z M42,18h6v6h-6z" />
         <!-- p: pink nose -->
         <path
             android:fillColor="#F28B9A"
             android:pathData="M24,30h12v6h-12z" />
-        <!-- lg: light gray whisker spots -->
+        <!-- n: cheek marks -->
         <path
-            android:fillColor="#C5CED8"
+            android:fillColor="#E87D5A"
             android:pathData="M18,36h6v6h-6z M36,36h6v6h-6z" />
     </group>
 </vector>

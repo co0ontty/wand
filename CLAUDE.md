@@ -58,6 +58,53 @@ The runtime config file is `~/.wand/config.json` by default.
 - `ensureConfig()` rewrites the config file with defaults merged in, so config-schema changes must also update `src/config.ts`.
 - `npm run build` must keep copying `src/web-ui/content/` into `dist/web-ui/`; the packaged app depends on those static assets.
 
+## Android APK Build & Deployment
+
+项目包含一个 Android WebView 壳应用，源码在 `android/` 目录。
+
+**编译 APK：**
+```bash
+cd android
+# 使用最新 git tag 作为版本号，加 debug 时间戳后缀
+./gradlew assembleDebug \
+  -PAPP_VERSION_NAME="$(git describe --tags --abbrev=0 | sed 's/^v//')-debug.$(date +%m%d%H%M)" \
+  -PAPP_VERSION_CODE=11302
+```
+产物：`android/app/build/outputs/apk/debug/app-debug.apk`
+
+**部署 APK 供下载：**
+
+服务端通过 `config.android.apkDir`（相对于 config 目录）查找 APK 文件，按修改时间取最新的。
+
+| 环境 | Config 目录 | APK 目录 | 端口 |
+|------|------------|---------|------|
+| 生产 | `~/.wand/` | `~/.wand/android/` | 8443 |
+| 开发 | `/tmp/wand-dev/` | `/tmp/wand-dev/android/` | 9443 |
+
+**两个目录都要放！** 用户连的是生产服务器（8443），所以 APK 必须放到 `~/.wand/android/`。开发目录只是隔离测试用。
+
+```bash
+# 编译后同时部署到两个目录
+cp android/app/build/outputs/apk/debug/app-debug.apk ~/.wand/android/wand-v<VERSION>.apk
+cp android/app/build/outputs/apk/debug/app-debug.apk /tmp/wand-dev/android/wand-<VERSION>.apk
+```
+
+**版本号规则：**
+- 文件名中必须包含语义化版本号（如 `wand-v1.13.2.apk`），服务端通过正则 `(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)` 提取
+- 版本号必须高于当前已安装版本，APK 端才会触发更新弹窗（`compareSemver` 比较）
+- 开发调试时用 `-debug.MMDDHHMM` 后缀区分构建
+
+**APK 下载来源优先级：**
+1. 本地文件（`apkDir` 目录中最新的 `.apk`）→ source: `"local"`
+2. GitHub Release 回退 → source: `"github"`
+
+设置页面会显示来源标签（本地/线上）。
+
+**图标切换：**
+APK 支持运行时切换启动器图标（赛博虎妞 / 勤劳初二），通过 `AndroidManifest.xml` 中的 `<activity-alias>` 和 `PackageManager.setComponentEnabledSetting` 实现。相关 drawable 资源：
+- `ic_launcher_foreground.xml` / `ic_launcher_background.xml` — 虎妞（灰猫）
+- `ic_launcher_foreground_garfield.xml` / `ic_launcher_background_garfield.xml` — 初二（橙猫）
+
 ## Additional References
 
 - `README.md` contains the end-user install/start flow (`npm install -g @co0ontty/wand`, `wand init`, `wand web`).

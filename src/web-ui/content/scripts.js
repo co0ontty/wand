@@ -175,6 +175,8 @@
         lastRenderedMsgCount: 0,
         lastRenderedEmpty: null,
         renderPending: false,
+        chatPageSize: 20,
+        chatRenderedCount: 20,
         currentTask: null, // Current task title from Claude
         terminalInteractive: false,
         miniKeyboardVisible: false,
@@ -400,6 +402,35 @@
         };
         chatMsgs.addEventListener("scroll", state.chatScrollHandler, { passive: true });
         updateChatJumpToBottomButton();
+      }
+
+      /** Load older messages by expanding the visible window */
+      function loadMoreChatMessages() {
+        if (state.chatRenderedCount >= state.currentMessages.length) return;
+        state.chatRenderedCount += state.chatPageSize;
+        renderChat(true);
+      }
+
+      // Observe the "load more" sentinel for auto-loading when scrolled into view
+      var _loadMoreObserver = null;
+      function observeLoadMoreSentinel() {
+        if (_loadMoreObserver) { _loadMoreObserver.disconnect(); _loadMoreObserver = null; }
+        var sentinel = document.getElementById("chat-load-more-sentinel");
+        if (!sentinel) return;
+        // Click handler for the button
+        var btn = sentinel.querySelector(".chat-load-more-btn");
+        if (btn) btn.onclick = function() { loadMoreChatMessages(); };
+        // IntersectionObserver for auto-load on scroll
+        if (typeof IntersectionObserver === "undefined") return;
+        _loadMoreObserver = new IntersectionObserver(function(entries) {
+          for (var i = 0; i < entries.length; i++) {
+            if (entries[i].isIntersecting) {
+              loadMoreChatMessages();
+              break;
+            }
+          }
+        }, { root: getChatScrollElement(), rootMargin: "200px" });
+        _loadMoreObserver.observe(sentinel);
       }
 
       // Helper function to persist selected session ID to localStorage
@@ -704,6 +735,7 @@
         state.lastRenderedMsgCount = 0;
         state.lastRenderedEmpty = null;
         state.renderPending = false;
+        state.chatRenderedCount = state.chatPageSize;
         state.askUserSelections = {};
         if (state.chatScrollElement && state.chatScrollHandler) {
           state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);
@@ -1310,6 +1342,14 @@
                     '<span class="settings-label">Android APK</span>' +
                     '<span class="settings-value" id="settings-android-apk-status">暂未提供</span>' +
                   '</div>' +
+                  '<div id="android-apk-github-row" class="settings-about-row hidden">' +
+                    '<span class="settings-label" style="color:var(--text-secondary)">GitHub 最新</span>' +
+                    '<span class="settings-value" id="settings-android-apk-github">-</span>' +
+                  '</div>' +
+                  '<div id="android-apk-local-row" class="settings-about-row hidden">' +
+                    '<span class="settings-label" style="color:var(--text-secondary)">本地最新</span>' +
+                    '<span class="settings-value" id="settings-android-apk-local">-</span>' +
+                  '</div>' +
                   '<div class="settings-update-actions">' +
                     '<a id="download-android-apk-button" class="btn btn-primary btn-sm hidden" href="#" download>下载 APK</a>' +
                   '</div>' +
@@ -1407,6 +1447,27 @@
                   '<label class="field-label" for="cfg-shell">Shell</label>' +
                   '<input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" />' +
                 '</div>' +
+                (typeof WandNative !== "undefined" && typeof WandNative.getAppIcon === "function" ?
+                '<div style="margin-bottom:16px">' +
+                  '<div class="settings-section-title">应用图标</div>' +
+                  '<p class="hint" style="margin-top:-4px;margin-bottom:10px">选择 App 启动器图标，返回桌面后生效</p>' +
+                  '<div id="app-icon-picker" style="display:flex;gap:16px">' +
+                    '<div class="app-icon-option" data-icon="shorthair" style="cursor:pointer;text-align:center">' +
+                      '<div class="app-icon-preview" style="width:56px;height:56px;border-radius:12px;overflow:hidden;border:3px solid transparent;background:var(--bg-tertiary);display:flex;align-items:center;justify-content:center;margin-bottom:4px">' +
+                        PIXEL_AVATAR.user +
+                      '</div>' +
+                      '<span style="font-size:0.72rem;color:var(--text-secondary)">赛博虎妞</span>' +
+                    '</div>' +
+                    '<div class="app-icon-option" data-icon="garfield" style="cursor:pointer;text-align:center">' +
+                      '<div class="app-icon-preview" style="width:56px;height:56px;border-radius:12px;overflow:hidden;border:3px solid transparent;background:var(--bg-tertiary);display:flex;align-items:center;justify-content:center;margin-bottom:4px">' +
+                        PIXEL_AVATAR.assistant +
+                      '</div>' +
+                      '<span style="font-size:0.72rem;color:var(--text-secondary)">勤劳初二</span>' +
+                    '</div>' +
+                  '</div>' +
+                  '<p id="app-icon-message" class="hint hidden" style="margin-top:8px"></p>' +
+                '</div>'
+                : '') +
                 '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
                 '<p id="config-message" class="hint hidden"></p>' +
               '</div>' +
@@ -2316,6 +2377,35 @@
         '</div>';
       }
 
+      function timeAgo(isoString) {
+        if (!isoString) return "";
+        var now = Date.now();
+        var then = new Date(isoString).getTime();
+        var diff = Math.max(0, now - then);
+        var seconds = Math.floor(diff / 1000);
+        if (seconds < 60) return "刚刚";
+        var minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return minutes + "分钟前";
+        var hours = Math.floor(minutes / 60);
+        if (hours < 24) return hours + "小时前";
+        var days = Math.floor(hours / 24);
+        if (days < 30) return days + "天前";
+        return Math.floor(days / 30) + "个月前";
+      }
+
+      function elapsedTime(isoString) {
+        if (!isoString) return "";
+        var now = Date.now();
+        var then = new Date(isoString).getTime();
+        var diff = Math.max(0, now - then);
+        var seconds = Math.floor(diff / 1000);
+        var minutes = Math.floor(seconds / 60);
+        var hours = Math.floor(minutes / 60);
+        if (hours > 0) return hours + "h" + (minutes % 60 > 0 ? (minutes % 60) + "m" : "");
+        if (minutes > 0) return minutes + "m";
+        return seconds + "s";
+      }
+
       function getSessionStatusLabel(session) {
         if (!session) return "";
         if (session.archived) return "已归档";
@@ -2338,27 +2428,53 @@
         return session.status || "";
       }
 
+      /** Get a human-readable activity description for a running session */
+      function getSessionActivityDesc(session) {
+        if (!session) return "";
+        if (session.permissionBlocked) return "等待你的授权";
+        if (session.status !== "running") return "";
+        // Check WebSocket-delivered currentTask first
+        if (session.id === state.selectedId && state.currentTask && state.currentTask.title) {
+          return state.currentTask.title;
+        }
+        // Fall back to snapshot-delivered currentTaskTitle
+        if (session.currentTaskTitle) return session.currentTaskTitle;
+        return "";
+      }
+
+      /** Get the last meaningful assistant text from messages for notification/display */
+      function getLastAssistantSummary(session) {
+        var msgs = session && session.messages;
+        if (!msgs || msgs.length === 0) return "";
+        for (var i = msgs.length - 1; i >= 0; i--) {
+          var msg = msgs[i];
+          if (msg.role !== "assistant") continue;
+          var blocks = msg.content || [];
+          for (var j = 0; j < blocks.length; j++) {
+            if (blocks[j].type === "text" && blocks[j].text && blocks[j].text.trim()) {
+              var text = blocks[j].text.trim();
+              // Strip markdown formatting for compact display
+              text = text.replace(/^#+\s+/gm, "").replace(/\*\*/g, "").replace(/`/g, "");
+              var firstLine = text.split("\n")[0].trim();
+              return firstLine.slice(0, 100);
+            }
+          }
+        }
+        return "";
+      }
+
       function renderSessionItem(session) {
         var activeClass = session.id === state.selectedId ? " active" : "";
         var selectedClass = state.sessionsManageMode && state.selectedSessionIds[session.id] ? " selected" : "";
         var metaStatus = getSessionStatusLabel(session);
         var metaStatusClass = getSessionStatusClass(session);
-        var modeName = session.mode === "full-access" ? "全权限" : session.mode === "default" ? "默认" : session.mode === "native" ? "原生" : session.mode === "auto-edit" ? "自动编辑" : session.mode;
         var resumeButton = "";
-        var sessionIdDisplay = "";
-        var recoveryHint = "";
         var checkbox = renderManageCheckbox("sessions", session.id, "选择会话 " + session.command);
 
         if (session.provider === "claude" && session.claudeSessionId) {
-          var shortId = session.claudeSessionId.slice(0, 8);
-          sessionIdDisplay = '<span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + '</span>';
           if (session.status !== "running" && !state.sessionsManageMode && !isStructuredSession(session)) {
             resumeButton = '<button class="session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="恢复会话" title="恢复 Claude 会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
           }
-        }
-
-        if (session.autoRecovered) {
-          recoveryHint = '<span class="session-id" title="自动恢复的会话">自动恢复</span>';
         }
 
         var canOpenMerge = !state.sessionsManageMode && session.worktreeEnabled && session.worktree && session.worktree.branch && session.worktree.path;
@@ -2371,23 +2487,50 @@
             ? '<button class="session-action-btn merge-btn" data-action="worktree-cleanup" data-session-id="' + session.id + '" type="button" aria-label="重试清理 worktree" title="重试清理 worktree"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>'
             : "";
         var deleteButton = state.sessionsManageMode ? '' : '<button class="session-action-btn delete-btn" data-action="delete-session" data-session-id="' + session.id + '" type="button" aria-label="删除会话" title="删除此会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
-        var modeBadge = renderSessionKindBadge(session);
         var actionsHtml = '<span class="session-actions">' + resumeButton + mergeButton + deleteButton + '</span>';
+
+        // Title: summary or command
+        var titleHtml = session.summary
+          ? '<div class="session-title">' + escapeHtml(session.summary) + '</div>'
+          : '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '') : session.command) + '</div>';
+
+        // Activity description for running sessions
+        var activityDesc = getSessionActivityDesc(session);
+        var activityHtml = "";
+        if (session.status === "running" && activityDesc) {
+          activityHtml = '<div class="session-activity">' + escapeHtml(activityDesc) + '</div>';
+        }
+
+        // Time display
+        var timeDisplay = "";
+        if (session.status === "running") {
+          timeDisplay = '<span class="session-time" title="已运行 ' + escapeHtml(elapsedTime(session.startedAt)) + '">' + escapeHtml(elapsedTime(session.startedAt)) + '</span>';
+        } else if (session.endedAt) {
+          timeDisplay = '<span class="session-time" title="' + escapeHtml(new Date(session.endedAt).toLocaleString()) + '">' + escapeHtml(timeAgo(session.endedAt)) + '</span>';
+        } else if (session.startedAt) {
+          timeDisplay = '<span class="session-time" title="' + escapeHtml(new Date(session.startedAt).toLocaleString()) + '">' + escapeHtml(timeAgo(session.startedAt)) + '</span>';
+        }
+
+        // Badges: worktree only (removed PTY/Structured and mode badges for cleaner look)
+        var badgesHtml = renderWorktreeBadge(session);
+
+        // Recovery hint
+        var recoveryHtml = session.autoRecovered ? '<span class="session-recovery-hint">自动恢复</span>' : '';
 
         return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +
               checkbox +
               '<div class="session-main">' +
-                (session.summary
-                  ? '<div class="session-title">' + escapeHtml(session.summary) + '</div>'
-                  : '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '') : session.command) + '</div>') +
+                '<div class="session-title-row">' +
+                  titleHtml +
+                  timeDisplay +
+                '</div>' +
+                activityHtml +
                 '<div class="session-meta">' +
-                  modeBadge +
-                  '<span>' + escapeHtml(modeName) + '</span>' +
                   '<span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + '</span>' +
-                  sessionIdDisplay +
-                  recoveryHint +
+                  badgesHtml +
+                  recoveryHtml +
                 '</div>' +
               '</div>' +
               actionsHtml +
@@ -2883,6 +3026,28 @@
         }
         var saveConfigBtn = document.getElementById("save-config-button");
         if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
+        // App icon picker (APK only)
+        var appIconPicker = document.getElementById("app-icon-picker");
+        if (appIconPicker) {
+          var appIconOpts = appIconPicker.querySelectorAll(".app-icon-option");
+          for (var ai = 0; ai < appIconOpts.length; ai++) {
+            appIconOpts[ai].addEventListener("click", function() {
+              var iconName = this.getAttribute("data-icon");
+              if (!iconName || typeof WandNative === "undefined" || typeof WandNative.setAppIcon !== "function") return;
+              try {
+                WandNative.setAppIcon(iconName);
+                _updateAppIconSelection(iconName);
+                var msgEl = document.getElementById("app-icon-message");
+                if (msgEl) {
+                  msgEl.textContent = "图标已切换，返回桌面后生效";
+                  msgEl.style.color = "var(--success)";
+                  msgEl.classList.remove("hidden");
+                  setTimeout(function() { msgEl.classList.add("hidden"); }, 3000);
+                }
+              } catch (_e) {}
+            });
+          }
+        }
         var uploadCertBtn = document.getElementById("upload-cert-button");
         if (uploadCertBtn) uploadCertBtn.addEventListener("click", uploadCertificates);
         var checkUpdateBtn = document.getElementById("check-update-button");
@@ -4698,6 +4863,15 @@
           });
       }
 
+      var _sessionListUpdateTimer = null;
+      function scheduleSessionListUpdate() {
+        if (_sessionListUpdateTimer) return;
+        _sessionListUpdateTimer = setTimeout(function() {
+          _sessionListUpdateTimer = null;
+          updateSessionsList();
+        }, 200);
+      }
+
       function updateSessionsList() {
         var listEl = document.getElementById("sessions-list");
         var countEl = document.getElementById("session-count");
@@ -5153,6 +5327,10 @@
           if (soundEl) soundEl.checked = state.notifSound;
           if (bubbleEl) bubbleEl.checked = state.notifBubble;
           updateNotificationStatus();
+          // Load current app icon selection (APK only)
+          if (typeof WandNative !== "undefined" && typeof WandNative.getAppIcon === "function") {
+            try { _updateAppIconSelection(WandNative.getAppIcon() || "shorthair"); } catch (_e) {}
+          }
         }
       }
 
@@ -5313,20 +5491,38 @@
             var androidApkStatusEl = document.getElementById("settings-android-apk-status");
             var androidApkMessageEl = document.getElementById("android-apk-message");
             var downloadAndroidApkBtn = document.getElementById("download-android-apk-button");
+            var githubRowEl = document.getElementById("android-apk-github-row");
+            var githubVerEl = document.getElementById("settings-android-apk-github");
+            var localRowEl = document.getElementById("android-apk-local-row");
+            var localVerEl = document.getElementById("settings-android-apk-local");
             var androidApk = data.androidApk || {};
             if (androidApk.enabled === true) {
+              // GitHub version row
+              if (androidApk.github && githubRowEl && githubVerEl) {
+                var ghLabel = androidApk.github.version ? ("v" + androidApk.github.version) : androidApk.github.fileName;
+                if (typeof androidApk.github.size === "number") ghLabel += " · " + formatBytes(androidApk.github.size);
+                githubVerEl.textContent = ghLabel;
+                githubRowEl.classList.remove("hidden");
+              }
+              // Local version row
+              if (androidApk.local && localRowEl && localVerEl) {
+                var lcLabel = androidApk.local.version ? ("v" + androidApk.local.version) : androidApk.local.fileName;
+                if (typeof androidApk.local.size === "number") lcLabel += " · " + formatBytes(androidApk.local.size);
+                localVerEl.textContent = lcLabel;
+                localRowEl.classList.remove("hidden");
+              }
               if (androidApk.hasApk) {
+                var sourceTag = androidApk.source === "github" ? "线上" : "本地";
                 var androidApkLabel = androidApk.version
-                  ? ("可下载（v" + androidApk.version + "）")
-                  : "可下载";
+                  ? ("可下载（v" + androidApk.version + " · " + sourceTag + "）")
+                  : ("可下载（" + sourceTag + "）");
                 if (androidApkStatusEl) androidApkStatusEl.textContent = androidApkLabel;
                 if (androidApkMessageEl) {
-                  var apkMetaParts = [];
-                  if (androidApk.fileName) apkMetaParts.push(androidApk.fileName);
-                  if (typeof androidApk.size === "number") apkMetaParts.push(formatBytes(androidApk.size));
-                  androidApkMessageEl.textContent = apkMetaParts.length > 0
-                    ? apkMetaParts.join(" · ")
-                    : "已提供 Android APK 下载。";
+                  if (androidApk.apkDir) {
+                    androidApkMessageEl.textContent = "APK 目录: " + androidApk.apkDir;
+                  } else {
+                    androidApkMessageEl.textContent = "已提供 Android APK 下载。";
+                  }
                 }
                 if (downloadAndroidApkBtn && androidApk.downloadUrl) {
                   downloadAndroidApkBtn.classList.remove("hidden");
@@ -5334,7 +5530,11 @@
                 }
               } else {
                 if (androidApkStatusEl) androidApkStatusEl.textContent = "暂未提供";
-                if (androidApkMessageEl) androidApkMessageEl.textContent = "请先将本地打包好的 APK 放到运行时目录。";
+                if (androidApkMessageEl) {
+                  androidApkMessageEl.textContent = androidApk.apkDir
+                    ? "将 APK 放到此目录即可下载: " + androidApk.apkDir
+                    : "请先将本地打包好的 APK 放到运行时目录。";
+                }
                 if (downloadAndroidApkBtn) {
                   downloadAndroidApkBtn.classList.add("hidden");
                   downloadAndroidApkBtn.setAttribute("href", "#");
@@ -5581,6 +5781,16 @@
       }
 
       // ── Notification Settings Helpers ──
+
+      function _updateAppIconSelection(activeIcon) {
+        var opts = document.querySelectorAll(".app-icon-option");
+        for (var i = 0; i < opts.length; i++) {
+          var preview = opts[i].querySelector(".app-icon-preview");
+          if (preview) {
+            preview.style.borderColor = opts[i].getAttribute("data-icon") === activeIcon ? "var(--accent)" : "transparent";
+          }
+        }
+      }
 
       function updateNotificationStatus() {
         var statusEl = document.getElementById("notification-permission-status");
@@ -9024,6 +9234,12 @@
         state.pollTimer = setInterval(refreshAll, 1600);
       }
 
+      // Periodically refresh session time displays (30s)
+      setInterval(function() {
+        var timeEls = document.querySelectorAll(".session-time");
+        if (timeEls.length > 0) scheduleSessionListUpdate();
+      }, 30000);
+
       function initWebSocket() {
         if (!window.WebSocket) return false;
 
@@ -9162,14 +9378,26 @@
               // Trigger status bar completion animation
               scheduleChatRender(true);
             }
-            // Notify user when a session completes (browser + in-app if backgrounded or not viewing)
+            // Notify user when a session completes — show what was accomplished
             var endedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
-            var endedName = endedSession ? (endedSession.label || endedSession.command || msg.sessionId) : msg.sessionId;
             var endedExitCode = msg.data && msg.data.exitCode;
             var endedIsError = endedExitCode !== null && endedExitCode !== undefined && endedExitCode !== 0;
+            // Build meaningful notification body
+            var endedTaskSummary = endedSession ? (endedSession.summary || "") : "";
+            var endedLastReply = endedSession ? getLastAssistantSummary(endedSession) : "";
+            var endedNotifTitle = endedIsError ? "任务异常结束" : "任务已完成";
+            var endedNotifBody = "";
+            if (endedTaskSummary) {
+              endedNotifBody = endedTaskSummary;
+              if (endedLastReply && !endedIsError) {
+                endedNotifBody += "\n" + endedLastReply;
+              }
+            } else {
+              endedNotifBody = endedSession ? (endedSession.command || msg.sessionId) : msg.sessionId;
+            }
             sendBrowserNotification(
-              endedIsError ? "\u4f1a\u8bdd\u5f02\u5e38\u7ed3\u675f" : "\u4f1a\u8bdd\u5df2\u5b8c\u6210",
-              endedName,
+              endedNotifTitle,
+              endedNotifBody,
               {
                 tag: "wand-ended-" + msg.sessionId,
                 onClick: function() {
@@ -9179,8 +9407,8 @@
             );
             if (msg.sessionId !== state.selectedId || document.hidden) {
               showNotificationBubble({
-                title: endedIsError ? "\u4f1a\u8bdd\u5f02\u5e38\u7ed3\u675f" : "\u4f1a\u8bdd\u5df2\u5b8c\u6210",
-                body: endedName,
+                title: endedNotifTitle,
+                body: endedNotifBody,
                 type: endedIsError ? "warning" : "success",
                 icon: endedIsError ? "!" : "\u2713",
                 duration: 6000,
@@ -9262,6 +9490,8 @@
               state.currentTask = msg.data || null;
               updateTaskDisplay();
             }
+            // Update session list to reflect current activity (debounced)
+            scheduleSessionListUpdate();
             break;
           case 'status':
             if (msg.sessionId && msg.data) {
@@ -9297,10 +9527,18 @@
                 };
                 // Browser notification for permission waiting (background tab)
                 var permSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
-                var permSessionName = permSession ? (permSession.label || permSession.command || msg.sessionId) : msg.sessionId;
+                var permTaskName = permSession ? (permSession.summary || permSession.command || msg.sessionId) : msg.sessionId;
+                var permDetail = msg.data.permissionRequest.prompt || "需要权限审批";
+                var permTarget = msg.data.permissionRequest.target;
+                var permBody = permTaskName;
+                if (permTarget) {
+                  permBody += "\n" + permDetail + " · " + permTarget;
+                } else {
+                  permBody += "\n" + permDetail;
+                }
                 sendBrowserNotification(
-                  "\u4f1a\u8bdd\u7b49\u5f85\u6388\u6743",
-                  permSessionName + " \u2014 " + (msg.data.permissionRequest.prompt || "\u9700\u8981\u6743\u9650\u5ba1\u6279"),
+                  "需要你的授权",
+                  permBody,
                   {
                     tag: "wand-perm-" + msg.sessionId,
                     onClick: function() {
@@ -9313,12 +9551,12 @@
                 // In-app bubble if not currently viewing this session
                 if (msg.sessionId !== state.selectedId) {
                   showNotificationBubble({
-                    title: "\u4f1a\u8bdd\u7b49\u5f85\u6388\u6743",
-                    body: permSessionName + " \u2014 " + (msg.data.permissionRequest.prompt || "\u9700\u8981\u6743\u9650\u5ba1\u6279"),
+                    title: "需要你的授权",
+                    body: permBody,
                     type: "warning",
                     icon: "!",
                     duration: 0,
-                    actionLabel: "\u67e5\u770b",
+                    actionLabel: "去处理",
                     action: function() {
                       selectSession(msg.sessionId);
                     }
@@ -9752,9 +9990,9 @@
           return;
         }
 
-        var messages = state.currentMessages;
+        var allMessages = state.currentMessages;
 
-        if (messages.length === 0) {
+        if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
             renderChatEmptyState(chatOutput, '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>');
             state.lastRenderedEmpty = "empty";
@@ -9762,6 +10000,16 @@
           }
           return;
         }
+
+        // Lazy loading: only render the most recent chatRenderedCount messages.
+        // Auto-expand when new messages arrive during active streaming to avoid hiding them.
+        var totalMsgCount = allMessages.length;
+        if (totalMsgCount > state.chatRenderedCount && state.chatAutoFollow) {
+          state.chatRenderedCount = totalMsgCount;
+        }
+        var visibleOffset = Math.max(0, totalMsgCount - state.chatRenderedCount);
+        var messages = visibleOffset > 0 ? allMessages.slice(visibleOffset) : allMessages;
+        var hasOlderMessages = visibleOffset > 0;
 
         // Check if messages actually changed
         var msgCount = messages.length;
@@ -9823,16 +10071,17 @@
           // Build HTML with system info cards interleaved
           var html = '';
           var reversedMessages = messages.slice().reverse();
-          var msgCount = messages.length;
+          var visibleCount = messages.length;
 
           for (var i = 0; i < reversedMessages.length; i++) {
             var msg = reversedMessages[i];
-            var originalIndex = msgCount - 1 - i; // Original index in messages array
+            var localIndex = visibleCount - 1 - i; // Index within visible slice
+            var originalIndex = localIndex + visibleOffset; // Index in full messages array
 
             // Find system info for this message position
             var sysInfo = null;
             for (var j = 0; j < systemInfo.length; j++) {
-              if (systemInfo[j].beforeMessage === originalIndex) {
+              if (systemInfo[j].beforeMessage === localIndex) {
                 sysInfo = systemInfo[j];
                 break;
               }
@@ -9850,6 +10099,13 @@
 
             // Render message
             html += renderChatMessage(msg, roundUsageByIndex[originalIndex] || null, originalIndex);
+          }
+
+          // Add sentinel for loading older messages (DOM end = visual top in column-reverse)
+          if (hasOlderMessages) {
+            html += '<div class="chat-load-more" id="chat-load-more-sentinel">' +
+              '<button class="chat-load-more-btn" type="button">加载更早的 ' + Math.min(state.chatPageSize, visibleOffset) + ' 条消息</button>' +
+            '</div>';
           }
 
           chatMessages.innerHTML = html;
@@ -9877,6 +10133,7 @@
           // Scroll to bottom (newest message) - column-reverse: scrollTop=0 is visual bottom
           requestAnimationFrame(function() {
             smartScrollToBottom(chatMessages);
+            observeLoadMoreSentinel();
           });
         }
 
@@ -9897,15 +10154,15 @@
           });
         }
 
-        // Pre-compute per-round cumulative usage.
+        // Pre-compute per-round cumulative usage using original (full array) indices.
         // A "round" starts at a user message and includes all subsequent assistant turns
         // until the next user message. Only the last assistant in each round shows the total.
         var roundUsageByIndex = {};
         (function() {
           var acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0 };
           var lastAssistantIdx = -1;
-          for (var mi = 0; mi < messages.length; mi++) {
-            var m = messages[mi];
+          for (var mi = 0; mi < allMessages.length; mi++) {
+            var m = allMessages[mi];
             if (m.role === "user") {
               if (lastAssistantIdx >= 0 && (acc.inputTokens > 0 || acc.outputTokens > 0 || acc.totalCostUsd > 0)) {
                 roundUsageByIndex[lastAssistantIdx] = {
@@ -9949,7 +10206,7 @@
           var insertedEls = [];
           for (var i = 0; i < newMessages.length; i++) {
             var div = document.createElement("div");
-            var nmOrigIdx = existingCount + (newMessages.length - 1 - i);
+            var nmOrigIdx = visibleOffset + existingCount + (newMessages.length - 1 - i);
             div.innerHTML = renderChatMessage(newMessages[i], roundUsageByIndex[nmOrigIdx] || null, nmOrigIdx);
             var el = div.firstElementChild;
             if (el) {
@@ -9981,7 +10238,7 @@
           for (var mi = 0; mi < MAX_STREAMING_SCAN; mi++) {
             var currentEl = existingEls[mi];
             var tmpWrap = document.createElement("div");
-            var srOrigIdx = reversedMessages.length - 1 - mi;
+            var srOrigIdx = visibleOffset + reversedMessages.length - 1 - mi;
             tmpWrap.innerHTML = renderChatMessage(reversedMessages[mi], roundUsageByIndex[srOrigIdx] || null, srOrigIdx);
             var replacementEl = tmpWrap.firstElementChild;
             if (!replacementEl) continue;
@@ -10027,7 +10284,7 @@
         renderStructuredStatusBar(chatMessages, selectedSession);
 
         // Update todo progress bar from latest messages
-        updateTodoProgress(messages);
+        updateTodoProgress(allMessages);
       }
 
       // Smart scroll: only auto-scroll if user is near bottom
@@ -12269,7 +12526,7 @@
           '</div>';
 
         var bodyHtml = opts.body
-          ? '<div class="notification-bubble-body">' + escapeHtml(opts.body) + '</div>'
+          ? '<div class="notification-bubble-body">' + escapeHtml(opts.body).replace(/\n/g, '<br>') + '</div>'
           : '';
 
         var actionsHtml = opts.actionLabel

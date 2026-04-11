@@ -280,6 +280,8 @@ export interface SessionSnapshot {
   approvalStats?: { tool: number; command: number; file: number; total: number };
   /** 会话摘要：从首条用户消息或当前任务提取 */
   summary?: string;
+  /** 当前正在执行的任务标题（用于会话列表展示） */
+  currentTaskTitle?: string;
 }
 
 // ── Session Lifecycle ──

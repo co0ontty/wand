@@ -83,6 +83,12 @@ function listAllSessions(processes: ProcessManager, structured: StructuredSessio
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
+/** Lightweight session list — omits output and messages to reduce payload. */
+function listAllSessionsSlim(processes: ProcessManager, structured: StructuredSessionManager) {
+  return [...structured.listSlim(), ...processes.listSlim()]
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
 function requireWorktreeSession(snapshot: SessionSnapshot | null): SessionSnapshot {
   if (!snapshot) {
     throw new Error("未找到该会话。");
@@ -168,7 +174,7 @@ export function registerSessionRoutes(
   defaultMode: ExecutionMode
 ): void {
   app.get("/api/sessions", (_req, res) => {
-    const all = listAllSessions(processes, structured);
+    const all = listAllSessionsSlim(processes, structured);
     console.log("[WAND] GET /api/sessions count:", all.length, "sessions:", all.map(s => ({ id: s.id.substring(0, 8), kind: s.sessionKind, runner: s.runner, status: s.status })));
     res.json(all);
   });

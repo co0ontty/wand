@@ -1030,6 +1030,14 @@ export class ProcessManager extends EventEmitter {
       .map((session) => this.snapshot(session));
   }
 
+  /** Return lightweight snapshots for the session list (no output/messages). */
+  listSlim(): SessionSnapshot[] {
+    this.archiveExpiredSessions();
+    return Array.from(this.sessions.values())
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+      .map((session) => this.snapshotSlim(session));
+  }
+
   hasClaudeSessionFile(cwd: string, claudeSessionId: string): boolean {
     return isClaudeSessionFileAvailable(cwd, claudeSessionId);
   }
@@ -1369,6 +1377,44 @@ export class ProcessManager extends EventEmitter {
       autoApprovePermissions: record.autoApprovePermissions || undefined,
       approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined,
       summary: deriveSessionSummary(messages, record.currentTask?.title ?? null),
+      currentTaskTitle: record.status === "running" ? record.currentTask?.title ?? undefined : undefined,
+    };
+  }
+
+  /** Lightweight snapshot for list views — omits output and messages. */
+  private snapshotSlim(record: SessionRecord): SessionSnapshot {
+    const messages = record.ptyBridge?.getMessages() ?? record.messages;
+    return {
+      id: record.id,
+      sessionKind: "pty",
+      provider: record.provider,
+      runner: "pty",
+      command: record.command,
+      cwd: record.cwd,
+      mode: record.mode,
+      worktreeEnabled: record.worktreeEnabled ?? false,
+      worktree: record.worktree ?? null,
+      autonomyPolicy: record.autonomyPolicy,
+      approvalPolicy: record.approvalPolicy,
+      allowedScopes: record.allowedScopes,
+      status: record.status,
+      exitCode: record.exitCode,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt,
+      output: "",
+      archived: record.archived,
+      archivedAt: record.archivedAt,
+      permissionBlocked: this.isPermissionBlocked(record),
+      pendingEscalation: record.pendingEscalation || undefined,
+      lastEscalationResult: record.lastEscalationResult || undefined,
+      claudeSessionId: record.claudeSessionId || null,
+      resumedFromSessionId: record.resumedFromSessionId ?? undefined,
+      resumedToSessionId: record.resumedToSessionId ?? undefined,
+      autoRecovered: record.autoRecovered ?? false,
+      autoApprovePermissions: record.autoApprovePermissions || undefined,
+      approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined,
+      summary: deriveSessionSummary(messages, record.currentTask?.title ?? null),
+      currentTaskTitle: record.status === "running" ? record.currentTask?.title ?? undefined : undefined,
     };
   }
 

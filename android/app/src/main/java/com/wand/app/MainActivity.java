@@ -7,6 +7,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.ProgressDialog;
 import android.content.Intent;
+import android.content.ComponentName;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.net.http.SslError;
@@ -206,6 +207,44 @@ public class MainActivity extends AppCompatActivity {
                         MainActivity.this,
                         new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
                         NOTIFICATION_PERMISSION_REQUEST));
+            }
+        }
+
+        @JavascriptInterface
+        public String getAppIcon() {
+            ServerStore store = new ServerStore(MainActivity.this);
+            return store.getAppIcon();
+        }
+
+        @JavascriptInterface
+        public void setAppIcon(String iconName) {
+            if (!"shorthair".equals(iconName) && !"garfield".equals(iconName)) return;
+
+            ServerStore store = new ServerStore(MainActivity.this);
+            String current = store.getAppIcon();
+            if (iconName.equals(current)) return;
+
+            store.setAppIcon(iconName);
+
+            PackageManager pm = getPackageManager();
+            String pkg = getPackageName();
+            ComponentName shorthairAlias = new ComponentName(pkg, pkg + ".ConnectActivity.Shorthair");
+            ComponentName garfieldAlias = new ComponentName(pkg, pkg + ".ConnectActivity.Garfield");
+
+            if ("garfield".equals(iconName)) {
+                pm.setComponentEnabledSetting(shorthairAlias,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP);
+                pm.setComponentEnabledSetting(garfieldAlias,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP);
+            } else {
+                pm.setComponentEnabledSetting(garfieldAlias,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP);
+                pm.setComponentEnabledSetting(shorthairAlias,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP);
             }
         }
 

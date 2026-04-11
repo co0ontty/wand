@@ -108,6 +108,17 @@ export class StructuredSessionManager {
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
 
+  /** Return lightweight snapshots for the session list (no output/messages). */
+  listSlim(): SessionSnapshot[] {
+    return Array.from(this.sessions.values())
+      .map((s) => {
+        const enriched = withSummary(s);
+        const { output: _o, messages: _m, ...slim } = enriched;
+        return { ...slim, output: "" } as SessionSnapshot;
+      })
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
   get(id: string): SessionSnapshot | null {
     const s = this.sessions.get(id);
     return s ? withSummary(s) : null;

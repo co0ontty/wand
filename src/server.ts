@@ -405,7 +405,8 @@ function resolveAndroidApkDir(configDir: string, config: WandConfig): string {
 }
 
 function extractAndroidApkVersion(fileName: string): string | null {
-  const match = fileName.match(/(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)/);
+  const nameWithoutExt = fileName.replace(/\.apk$/i, "");
+  const match = nameWithoutExt.match(/(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)/);
   return match ? match[1] : null;
 }
 
@@ -785,7 +786,15 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       certPath: path.join(configDir, "server.crt"),
     };
     const { password: _pw, ...safeConfig } = config;
-    const androidApk = await resolveAndroidApkAsset(configDir, config);
+    const localApk = await resolveAndroidApkAsset(configDir, config);
+    const ghApk = await fetchGitHubLatestApk();
+    const apkDir = resolveAndroidApkDir(configDir, config);
+    // Backward-compatible: pick best available for hasApk/version/downloadUrl
+    const resolvedApk = localApk
+      ? { hasApk: true, fileName: localApk.fileName, version: localApk.version, size: localApk.size, updatedAt: localApk.updatedAt, downloadUrl: localApk.downloadUrl, source: "local" as const }
+      : ghApk
+        ? { hasApk: true, fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, updatedAt: null, downloadUrl: ghApk.downloadUrl, source: "github" as const }
+        : null;
     res.json({
       version: PKG_VERSION,
       packageName: PKG_NAME,
@@ -797,28 +806,41 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       latestVersion: cachedUpdateInfo?.latest ?? null,
       androidApk: {
         enabled: config.android?.enabled === true,
-        hasApk: Boolean(androidApk),
-        fileName: androidApk?.fileName ?? null,
-        version: androidApk?.version ?? null,
-        size: androidApk?.size ?? null,
-        updatedAt: androidApk?.updatedAt ?? null,
-        downloadUrl: androidApk?.downloadUrl ?? null,
-        source: androidApk?.source ?? null,
+        apkDir,
+        hasApk: resolvedApk?.hasApk ?? false,
+        fileName: resolvedApk?.fileName ?? null,
+        version: resolvedApk?.version ?? null,
+        size: resolvedApk?.size ?? null,
+        updatedAt: resolvedApk?.updatedAt ?? null,
+        downloadUrl: resolvedApk?.downloadUrl ?? null,
+        source: resolvedApk?.source ?? null,
+        local: localApk ? { fileName: localApk.fileName, version: localApk.version, size: localApk.size, updatedAt: localApk.updatedAt, downloadUrl: localApk.downloadUrl } : null,
+        github: ghApk ? { fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, downloadUrl: ghApk.downloadUrl } : null,
       },
     });
   });
 
   app.get("/api/android-apk", async (_req, res) => {
-    const androidApk = await resolveAndroidApkAsset(configDir, config);
+    const localApk = await resolveAndroidApkAsset(configDir, config);
+    const ghApk = await fetchGitHubLatestApk();
+    const apkDir = resolveAndroidApkDir(configDir, config);
+    const resolvedApk = localApk
+      ? { hasApk: true, fileName: localApk.fileName, version: localApk.version, size: localApk.size, updatedAt: localApk.updatedAt, downloadUrl: localApk.downloadUrl, source: "local" as const }
+      : ghApk
+        ? { hasApk: true, fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, updatedAt: null, downloadUrl: ghApk.downloadUrl, source: "github" as const }
+        : null;
     res.json({
       enabled: config.android?.enabled === true,
-      hasApk: Boolean(androidApk),
-      fileName: androidApk?.fileName ?? null,
-      version: androidApk?.version ?? null,
-      size: androidApk?.size ?? null,
-      updatedAt: androidApk?.updatedAt ?? null,
-      downloadUrl: androidApk?.downloadUrl ?? null,
-      source: androidApk?.source ?? null,
+      apkDir,
+      hasApk: resolvedApk?.hasApk ?? false,
+      fileName: resolvedApk?.fileName ?? null,
+      version: resolvedApk?.version ?? null,
+      size: resolvedApk?.size ?? null,
+      updatedAt: resolvedApk?.updatedAt ?? null,
+      downloadUrl: resolvedApk?.downloadUrl ?? null,
+      source: resolvedApk?.source ?? null,
+      local: localApk ? { fileName: localApk.fileName, version: localApk.version, size: localApk.size, updatedAt: localApk.updatedAt, downloadUrl: localApk.downloadUrl } : null,
+      github: ghApk ? { fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, downloadUrl: ghApk.downloadUrl } : null,
     });
   });
 
