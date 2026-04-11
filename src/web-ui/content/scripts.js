@@ -652,6 +652,7 @@
         if (!el) return false;
         switch (kind) {
           case "tool-card":
+          case "diff":
             return !el.classList.contains("collapsed");
           case "thinking":
             return el.classList.contains("expanded") && !el.classList.contains("collapsed");
@@ -672,7 +673,8 @@
       function applyExpandedState(el, kind, expanded) {
         if (!el) return;
         switch (kind) {
-          case "tool-card": {
+          case "tool-card":
+          case "diff": {
             el.classList.toggle("collapsed", !expanded);
             break;
           }
@@ -2785,11 +2787,12 @@
       }
 
       window.__tcToggle = function(e, headerEl) {
-        var card = headerEl.closest(".tool-use-card");
+        var card = headerEl.closest(".tool-use-card") || headerEl.closest(".inline-diff");
         if (card) {
           var wasCollapsed = card.classList.contains("collapsed");
           card.classList.toggle("collapsed");
-          persistElementExpandState(card, "tool-card");
+          var expandKind = card.dataset.expandKind || "tool-card";
+          persistElementExpandState(card, expandKind);
           // Lazy-load truncated content on expand
           if (wasCollapsed && card.dataset.truncated === "true" && card.dataset.loaded !== "true") {
             var toolUseId = card.dataset.toolUseId;
@@ -4348,6 +4351,12 @@
         } else {
           updateTerminalJumpToBottomButton();
         }
+        // When switching sessions, re-fit the terminal so the PTY receives
+        // the correct dimensions for this client's viewport.
+        if (sessionChanged && state.fitAddon) {
+          state.terminalViewportSize = { width: 0, height: 0 };
+          scheduleTerminalResize(true);
+        }
         return wrote || sessionChanged;
       }
 
@@ -4440,6 +4449,24 @@
         // Retry-based fit: wait for browser to complete layout before measuring and fitting
         if (state.fitAddon) {
           ensureTerminalFit();
+          // Secondary fit after fonts are loaded — FitAddon measures character
+          // dimensions from the rendered font; if a custom web font (e.g. Geist
+          // Mono) hasn't loaded yet the initial fit() uses fallback metrics and
+          // computes too few columns.
+          if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(function() {
+              state.terminalViewportSize = { width: 0, height: 0 };
+              ensureTerminalFit();
+            });
+          }
+          // Safety-net fit after layout has fully stabilised (CSS transitions,
+          // deferred reflows, late font loads, etc.)
+          setTimeout(function() {
+            if (state.terminal && state.fitAddon) {
+              state.terminalViewportSize = { width: 0, height: 0 };
+              ensureTerminalFit();
+            }
+          }, 500);
         }
 
         var viewport = getTerminalViewport();
@@ -9412,8 +9439,24 @@
         updateTerminalJumpToBottomButton();
       }
 
+      function sendTerminalResize(cols, rows) {
+        if (!state.selectedId) return;
+        var selectedSess = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (isStructuredSession(selectedSess)) return;
+        var nextSize = { cols: cols, rows: rows };
+        if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
+          state.lastResize = nextSize;
+          fetch("/api/sessions/" + state.selectedId + "/resize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify(nextSize)
+          }).catch(function() {});
+        }
+      }
+
       function ensureTerminalFit() {
-        var maxAttempts = 10;
+        var maxAttempts = 20;
         var attempt = 0;
         function tryFit() {
           attempt++;
@@ -9421,19 +9464,19 @@
           if (shouldResizeTerminalViewport() && state.fitAddon) {
             state.fitAddon.fit();
             maybeScrollTerminalToBottom("resize");
-            if (state.selectedId && state.terminal) {
-              var selectedSess = state.sessions.find(function(s) { return s.id === state.selectedId; });
-              if (!isStructuredSession(selectedSess)) {
-                var nextSize = { cols: state.terminal.cols, rows: state.terminal.rows };
-                if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
-                  state.lastResize = nextSize;
-                  fetch("/api/sessions/" + state.selectedId + "/resize", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    credentials: "same-origin",
-                    body: JSON.stringify(nextSize)
-                  }).catch(function() {});
-                }
+            if (state.terminal) {
+              sendTerminalResize(state.terminal.cols, state.terminal.rows);
+            }
+            // Validate: if the fitted cols look suspiciously small relative to
+            // the container width, schedule another attempt — the font metrics
+            // or layout may not have settled yet.
+            var output = document.getElementById("output");
+            if (output && state.terminal) {
+              var containerW = output.getBoundingClientRect().width;
+              var expectedMinCols = Math.floor(containerW / 20); // very conservative estimate
+              if (state.terminal.cols < expectedMinCols && attempt < maxAttempts) {
+                requestAnimationFrame(tryFit);
+                return;
               }
             }
           } else if (attempt < maxAttempts) {
@@ -9466,27 +9509,7 @@
           maybeScrollTerminalToBottom("resize");
         }
 
-        var nextSize = {
-          cols: state.terminal.cols,
-          rows: state.terminal.rows
-        };
-
-        if (!state.selectedId) return;
-
-        // Skip resize for structured sessions (no PTY)
-        var resizeSess = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (isStructuredSession(resizeSess)) return;
-
-        // Only send resize API call if dimensions actually changed
-        if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
-          state.lastResize = nextSize;
-          fetch("/api/sessions/" + state.selectedId + "/resize", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify(nextSize)
-          }).catch(function() {});
-        }
+        sendTerminalResize(state.terminal.cols, state.terminal.rows);
       }
 
       function startPolling() {
@@ -9529,6 +9552,12 @@
             subscribeToSession(state.selectedId);
             // Flush pending messages after reconnection
             flushPendingMessages();
+            // Re-fit terminal on reconnect — the viewport may have changed
+            // while disconnected, and the PTY needs up-to-date dimensions.
+            if (state.terminal && state.fitAddon) {
+              state.terminalViewportSize = { width: 0, height: 0 };
+              ensureTerminalFit();
+            }
           };
 
           ws.onmessage = function(event) {
@@ -10382,7 +10411,7 @@
           // Only expand the single newest tool card (first chat-message = newest due to column-reverse)
           var firstMsg = chatMessages.querySelector(".chat-message:not(.system-info)");
           if (firstMsg) {
-            var cards = firstMsg.querySelectorAll(".tool-use-card");
+            var cards = firstMsg.querySelectorAll(".tool-use-card, .inline-diff[data-expand-key]");
             if (cards.length > 0) {
               var firstCard = cards[0];
               var firstCardKey = getElementExpandKey(firstCard);
@@ -10392,6 +10421,8 @@
               for (var ci = 1; ci < cards.length; ci++) {
                 var cardKey = getElementExpandKey(cards[ci]);
                 if (getPersistedExpandState(cardKey) === null) {
+                  // Never collapse unanswered AskUserQuestion cards
+                  if (cards[ci].classList.contains("ask-user") && !cards[ci].classList.contains("ask-user-answered")) continue;
                   cards[ci].classList.add("collapsed");
                 }
               }
@@ -10407,10 +10438,13 @@
         // Collapse all tool-use cards except those in the new message elements (marked with animate-in)
         // newEls: NodeList/Array of newly added message elements, or null to keep only the first card expanded
         function collapseOldToolCards(container, newEls) {
-          var allCards = container.querySelectorAll(".tool-use-card");
+          var allCards = container.querySelectorAll(".tool-use-card, .inline-diff[data-expand-key]");
           allCards.forEach(function(c) {
             var cardKey = getElementExpandKey(c);
             if (getPersistedExpandState(cardKey) !== null) return;
+            // Never collapse unanswered AskUserQuestion cards — the user
+            // needs to interact with the options.
+            if (c.classList.contains("ask-user") && !c.classList.contains("ask-user-answered")) return;
             // Keep expanded if this card is inside a newly added message
             if (newEls) {
               for (var i = 0; i < newEls.length; i++) {
@@ -10530,11 +10564,13 @@
               smartScrollToBottom(chatMessages);
             });
             var newestMsgEl = chatMessages.querySelector(".chat-message");
-            var allCards = chatMessages.querySelectorAll(".tool-use-card");
+            var allCards = chatMessages.querySelectorAll(".tool-use-card, .inline-diff[data-expand-key]");
             var newestCard = null;
             allCards.forEach(function(c) {
               var cardKey = getElementExpandKey(c);
               if (getPersistedExpandState(cardKey) !== null) return;
+              // Never collapse unanswered AskUserQuestion cards
+              if (c.classList.contains("ask-user") && !c.classList.contains("ask-user-answered")) return;
               if (newestMsgEl && newestMsgEl.contains(c)) {
                 if (!newestCard) newestCard = c;
                 else c.classList.add("collapsed");
@@ -12094,10 +12130,11 @@
         return "";
       }
 
-      function renderDiffTool(block, toolResult, toolName) {
+      function renderDiffTool(block, toolResult, toolName, messageKey, index) {
         var inputData = block.input || {};
         var path = inputData.file_path || inputData.path || "";
         var fileName = path.split("/").pop() || path;
+        var toolId = block.id || "tool-" + toolName + "-" + (typeof index === "number" ? index : 0);
 
         var oldStr = inputData.old_string || "";
         var newStr = inputData.new_string || inputData.content || "";
@@ -12142,16 +12179,26 @@
           statusText = "执行中";
         }
 
+        // Expand state: respect cardDefaults.editCards and persisted state
+        var expandKey = buildExpandKey("diff", [messageKey, toolId || index, index]);
+        var persistedExpanded = getPersistedExpandState(expandKey);
+        var cardDefaultExpand = !!(state.config && state.config.cardDefaults && state.config.cardDefaults.editCards);
+        var shouldExpand = persistedExpanded === null ? (statusClass === "diff-pending" || cardDefaultExpand) : persistedExpanded;
+        var collapsedClass = shouldExpand ? "" : " collapsed";
+
         // If only one column has content, show full width
         var bothCols = leftCol && rightCol;
         var colClass = bothCols ? "diff-col-half" : "diff-col-full";
 
-        return '<div class="inline-diff" data-tool-name="' + escapeHtml(toolName) + '">' +
-          '<div class="diff-header">' +
+        return '<div class="inline-diff' + collapsedClass + '" data-tool-name="' + escapeHtml(toolName) + '"' +
+          ' data-expand-kind="diff" data-expand-key="' + escapeHtml(expandKey) + '"' +
+          ' data-tool-use-id="' + escapeHtml(toolId) + '">' +
+          '<div class="diff-header" onclick="__tcToggle(event,this)">' +
             '<span class="diff-file-icon"></span>' +
             '<span class="diff-file-name">' + escapeHtml(fileName) + '</span>' +
             '<span class="diff-path">' + escapeHtml(path) + '</span>' +
             '<span class="diff-status ' + statusClass + '">' + statusText + '</span>' +
+            '<span class="diff-toggle">▼</span>' +
           '</div>' +
           '<div class="diff-body">' +
             '<div class="diff-columns">' +
@@ -12185,7 +12232,7 @@
 
         // ── Diff-style: Edit, Write, MultiEdit
         if (toolName === "Edit" || toolName === "Write" || toolName === "MultiEdit") {
-          return renderDiffTool(block, toolResult, toolName);
+          return renderDiffTool(block, toolResult, toolName, messageKey, index);
         }
 
         // ── AskUserQuestion tool — special card with batch submit

@@ -2165,8 +2165,6 @@
       left: 0;
       right: 0;
       bottom: 0;
-      width: 100%;
-      height: 100%;
       padding: 0;
       overflow: hidden;
     }
@@ -4084,6 +4082,26 @@
       padding: 6px 10px;
       background: rgba(0, 0, 0, 0.03);
       font-size: 0.75rem;
+      cursor: pointer;
+    }
+    .diff-header:hover {
+      background: rgba(0, 0, 0, 0.05);
+    }
+    .diff-toggle {
+      font-size: 0.625rem;
+      color: var(--text-muted);
+      transition: transform 0.3s var(--ease-spring);
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+    .inline-diff.collapsed .diff-toggle {
+      transform: rotate(-90deg);
+    }
+    .inline-diff.collapsed .diff-body {
+      max-height: 0;
+      overflow: hidden;
+      opacity: 0;
+      transition: max-height 0.35s var(--ease-out-expo), opacity 0.25s ease;
     }
     .diff-file-icon {
       display: none;
