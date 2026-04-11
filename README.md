@@ -64,6 +64,10 @@ wand web
 |:---:|:---:|
 | <img src="docs/screenshots/login.png" width="400" alt="登录页" /> | <img src="docs/screenshots/chat-view.png" width="400" alt="对话视图" /> |
 
+| 终端 PTY 视图 |
+|:---:|
+| <img src="docs/screenshots/terminal-pty.png" width="800" alt="终端 PTY 视图" /> |
+
 ## 配置
 
 配置文件位于 `~/.wand/config.json`，首次 `wand init` 时自动生成。
