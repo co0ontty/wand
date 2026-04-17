@@ -751,7 +751,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider }): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string }): SessionSnapshot {
     this.assertCommandAllowed(command);
 
     const baseCwd = cwd
@@ -766,7 +766,8 @@ export class ProcessManager extends EventEmitter {
     const provider = opts?.provider ?? resolveProviderFromCommand(command);
     const effectiveMode = provider === "codex" ? "full-access" : mode;
     const isClaudeProvider = provider === "claude";
-    const processedCommand = this.processCommandForMode(command, effectiveMode, provider);
+    const selectedModel = opts?.model?.trim() || undefined;
+    const processedCommand = this.processCommandForMode(command, effectiveMode, provider, selectedModel);
     const resumeCommandSessionId = isClaudeProvider
       ? getResumeCommandSessionId(processedCommand) ?? getResumeCommandSessionId(command)
       : null;
@@ -818,7 +819,8 @@ export class ProcessManager extends EventEmitter {
       knownClaudeTaskIds: knownClaudeTaskIds ?? undefined,
       claudeTaskDiscoveryTimer: null,
       knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
-      approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
+      approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
+      selectedModel: selectedModel ?? null,
     };
 
     if (isClaudeProvider) {
@@ -1122,6 +1124,27 @@ export class ProcessManager extends EventEmitter {
     return this.logger.readPtyOutput(id);
   }
 
+  /**
+   * Set the Claude model for an existing PTY session. Persists the selection
+   * and, when the session is live, pipes a `/model <id>` slash command into
+   * the PTY so Claude Code switches on the fly.
+   */
+  setSessionModel(id: string, model: string | null): SessionSnapshot {
+    const record = this.mustGet(id);
+    if (record.provider !== "claude") {
+      throw new Error("仅 Claude 会话支持切换模型。");
+    }
+    const normalized = model?.trim() || null;
+    record.selectedModel = normalized;
+    if (record.status === "running" && record.ptyProcess) {
+      const value = normalized && normalized !== "default" ? normalized : "default";
+      record.ptyProcess.write(`/model ${value}\r`);
+    }
+    this.persist(record);
+    this.emitEvent({ type: "status", sessionId: id, data: { selectedModel: normalized } });
+    return this.snapshot(record);
+  }
+
   sendInput(id: string, input: string, view?: "chat" | "terminal", shortcutKey?: string): SessionSnapshot {
     const record = this.mustGet(id);
 
@@ -1157,11 +1180,7 @@ export class ProcessManager extends EventEmitter {
       record.ptyBridge.onUserInput(input);
     }
 
-    // Ensure input advances to a new line so subsequent PTY output doesn't overwrite it
     record.ptyProcess.write(input);
-    if (view !== "terminal" && !input.endsWith("\n")) {
-      record.ptyProcess.write("\n");
-    }
     this.persist(record);
     return this.snapshot(record);
   }
@@ -1379,6 +1398,7 @@ export class ProcessManager extends EventEmitter {
       approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined,
       summary: deriveSessionSummary(messages, record.currentTask?.title ?? null),
       currentTaskTitle: record.status === "running" ? record.currentTask?.title ?? undefined : undefined,
+      selectedModel: record.selectedModel ?? null,
     };
   }
 
@@ -1872,7 +1892,7 @@ export class ProcessManager extends EventEmitter {
     return false;
   }
 
-  private processCommandForMode(command: string, mode: ExecutionMode, provider: SessionProvider): string {
+  private processCommandForMode(command: string, mode: ExecutionMode, provider: SessionProvider, model?: string): string {
     if (provider === "codex") {
       if (mode !== "full-access") {
         return command;
@@ -1887,6 +1907,12 @@ export class ProcessManager extends EventEmitter {
     if (!isClaudeCmd) return command;
 
     let result = command;
+
+    const trimmedModel = model?.trim();
+    if (trimmedModel && trimmedModel !== "default" && !/--model\s/.test(command)) {
+      const escapedModel = trimmedModel.replace(/'/g, "'\\''");
+      result += ` --model '${escapedModel}'`;
+    }
 
     const hasPermFlag = /--permission-mode\s/.test(command);
 

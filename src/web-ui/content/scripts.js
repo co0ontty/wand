@@ -118,6 +118,11 @@
         cwdValue: "",
         modeValue: "managed",
         chatMode: "managed",
+        chatModel: (function() {
+          try { return localStorage.getItem("wand-chat-model") || ""; } catch (e) { return ""; }
+        })(),
+        availableModels: [],
+        modelsRefreshing: false,
         sessionCreateKind: "structured",
         sessionCreateWorktree: false,
         sessionTool: "claude",
@@ -895,9 +900,14 @@
               bindForegroundSyncListeners();
               startPolling();
               refreshAll();
+              fetchAvailableModels();
               requestNotificationPermission();
               if (config.updateAvailable && config.latestVersion) {
                 notifyUpdateAvailable(config.currentVersion || "-", config.latestVersion);
+              }
+              // APK auto-update check on startup
+              if (_apkVersion) {
+                checkApkAutoUpdate();
               }
               if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
                 loadClaudeHistory();
@@ -952,6 +962,7 @@
         attachEventListeners();
         updateDrawerState();
         syncComposerModeSelect();
+        syncComposerModelSelect(getSelectedSession());
         applyCurrentView();
         if (!skipShellChrome) {
           updateShellChrome();
@@ -1231,6 +1242,9 @@
                       '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
                         renderModeOptions(preferredTool, composerMode) +
                       '</select>' +
+                      '<select id="chat-model-select" class="chat-mode-select chat-model-select" title="切换模型（对运行中会话发送 /model，对新会话作为 --model 启动）">' +
+                        renderChatModelOptions(getEffectiveModel(selectedSession)) +
+                      '</select>' +
                       '<button id="terminal-interactive-toggle-top" class="composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨</button>' +
                       '<span class="permission-actions hidden" id="permission-actions">' +
                         '<span class="permission-actions-divider"></span>' +
@@ -1387,6 +1401,14 @@
                     '<button id="do-restart-button" class="btn btn-success btn-sm hidden">\u91cd\u542f\u751f\u6548</button>' +
                   '</div>' +
                   '<p id="update-message" class="hint hidden"></p>' +
+                  '<div class="settings-auto-update-row" style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">' +
+                    '<span class="settings-label">自动更新</span>' +
+                    '<label style="position:relative;cursor:pointer">' +
+                      '<input type="checkbox" id="auto-update-web-toggle" class="switch-toggle">' +
+                      '<span class="switch-slider"></span>' +
+                    '</label>' +
+                  '</div>' +
+                  '<p class="hint" style="margin-top:2px">开启后，检测到新版本将自动下载安装并重启服务。</p>' +
                 '</div>' +
                 '<div class="settings-update-section" id="android-apk-section">' +
                   '<div id="android-apk-current-row" class="settings-about-row hidden">' +
@@ -1403,6 +1425,14 @@
                     '<span class="settings-value" id="settings-android-apk-local" style="flex:1">-</span>' +
                     '<button id="download-local-apk-btn" class="btn btn-ghost btn-sm hidden" type="button" style="margin-left:8px;flex-shrink:0">下载</button>' +
                   '</div>' +
+                  '<div id="android-auto-update-row" class="hidden" style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">' +
+                    '<span class="settings-label">自动更新</span>' +
+                    '<label style="position:relative;cursor:pointer">' +
+                      '<input type="checkbox" id="auto-update-apk-toggle" class="switch-toggle">' +
+                      '<span class="switch-slider"></span>' +
+                    '</label>' +
+                  '</div>' +
+                  '<p id="android-auto-update-hint" class="hint hidden" style="margin-top:2px">开启后，检测到新版 APK 将自动下载安装。</p>' +
                   '<p id="android-apk-message" class="hint hidden"></p>' +
                 '</div>' +
                 '<div class="settings-update-section" id="android-connect-section">' +
@@ -1516,6 +1546,16 @@
                   '</div>' +
                 '</div>' +
                 '<p class="field-hint" style="margin-top:-4px;">设置回复语言后，Claude 将尽量使用指定语言回复。</p>' +
+                '<div class="field">' +
+                  '<label class="field-label" for="cfg-default-model">默认模型</label>' +
+                  '<div style="display:flex;gap:8px;align-items:center;">' +
+                    '<select id="cfg-default-model" class="field-input" style="flex:1;">' +
+                      '<option value="">跟随 Claude Code 默认</option>' +
+                    '</select>' +
+                    '<button type="button" id="cfg-default-model-refresh" class="btn btn-ghost btn-sm" title="刷新模型列表">刷新</button>' +
+                  '</div>' +
+                  '<p class="field-hint" id="cfg-default-model-version" style="margin-top:4px;">新建会话时默认使用该模型；运行中的会话可在输入框切换。</p>' +
+                '</div>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-cwd">默认工作目录</label>' +
                   '<input id="cfg-cwd" type="text" class="field-input" placeholder="/home/user" />' +
@@ -3245,11 +3285,15 @@
         var settingsTabs = document.querySelectorAll(".settings-tab");
         for (var ti = 0; ti < settingsTabs.length; ti++) {
           settingsTabs[ti].addEventListener("click", function(e) {
-            switchSettingsTab(e.target.getAttribute("data-tab"));
+            var btn = e.currentTarget || this;
+            var tabName = btn && btn.getAttribute ? btn.getAttribute("data-tab") : null;
+            if (tabName) switchSettingsTab(tabName);
           });
         }
         var saveConfigBtn = document.getElementById("save-config-button");
         if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
+        var defaultModelRefreshBtn = document.getElementById("cfg-default-model-refresh");
+        if (defaultModelRefreshBtn) defaultModelRefreshBtn.addEventListener("click", refreshAvailableModels);
         var saveDisplayBtn = document.getElementById("save-display-button");
         if (saveDisplayBtn) saveDisplayBtn.addEventListener("click", saveDisplaySettings);
         // App icon picker (APK only)
@@ -3282,6 +3326,14 @@
         if (doUpdateBtn) doUpdateBtn.addEventListener("click", performUpdate);
         var doRestartBtn = document.getElementById("do-restart-button");
         if (doRestartBtn) doRestartBtn.addEventListener("click", performSettingsRestart);
+        var autoUpdateWebToggle = document.getElementById("auto-update-web-toggle");
+        if (autoUpdateWebToggle) autoUpdateWebToggle.addEventListener("change", function() {
+          toggleAutoUpdate("web", autoUpdateWebToggle.checked);
+        });
+        var autoUpdateApkToggle = document.getElementById("auto-update-apk-toggle");
+        if (autoUpdateApkToggle) autoUpdateApkToggle.addEventListener("change", function() {
+          toggleAutoUpdate("apk", autoUpdateApkToggle.checked);
+        });
         var copyConnectCodeBtn = document.getElementById("copy-connect-code-button");
         if (copyConnectCodeBtn) copyConnectCodeBtn.addEventListener("click", function() {
           var text = document.getElementById("android-connect-code");
@@ -3413,6 +3465,10 @@
         if (modeSelect) modeSelect.addEventListener("change", function() {
           state.chatMode = this.value;
           showToast("新会话模式已切换为：" + getModeLabel(this.value), "info");
+        });
+        var modelSelect = document.getElementById("chat-model-select");
+        if (modelSelect) modelSelect.addEventListener("change", function() {
+          onChatModelChange(this.value);
         });
 
         var sessionModal = document.getElementById("session-modal");
@@ -4869,13 +4925,138 @@
         if (modeHint) modeHint.textContent = getModeHint(state.chatMode);
       }
 
+      function getEffectiveModel(session) {
+        if (session && session.selectedModel) return session.selectedModel;
+        if (state.chatModel) return state.chatModel;
+        if (state.config && state.config.defaultModel) return state.config.defaultModel;
+        return "";
+      }
+
+      function renderChatModelOptions(selected) {
+        var models = state.availableModels || [];
+        var html = '<option value="">默认（跟随设置）</option>';
+        for (var i = 0; i < models.length; i++) {
+          var m = models[i];
+          var label = m.label || m.id;
+          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === selected ? " selected" : "") + '>' + escapeHtml(label) + '</option>';
+        }
+        // If selected is unknown (custom value), prepend it as a sticky option
+        if (selected && !models.some(function(m) { return m.id === selected; })) {
+          html += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(selected) + '（自定义）</option>';
+        }
+        return html;
+      }
+
+      function syncComposerModelSelect(session) {
+        var select = document.getElementById("chat-model-select");
+        if (!select) return;
+        var effective = getEffectiveModel(session);
+        select.innerHTML = renderChatModelOptions(effective);
+        select.value = effective;
+      }
+
+      function fetchAvailableModels() {
+        return fetch("/api/models", { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && Array.isArray(data.models)) {
+              state.availableModels = data.models;
+              syncComposerModelSelect(getSelectedSession());
+              updateSettingsDefaultModelSelect(data);
+            }
+            return data;
+          })
+          .catch(function() { return null; });
+      }
+
+      function refreshAvailableModels() {
+        if (state.modelsRefreshing) return Promise.resolve(null);
+        state.modelsRefreshing = true;
+        var btn = document.getElementById("cfg-default-model-refresh");
+        if (btn) { btn.disabled = true; btn.textContent = "刷新中..."; }
+        return fetch("/api/models/refresh", { method: "POST", credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && Array.isArray(data.models)) {
+              state.availableModels = data.models;
+              syncComposerModelSelect(getSelectedSession());
+              updateSettingsDefaultModelSelect(data);
+              if (typeof showToast === "function") {
+                showToast("模型列表已刷新" + (data.claudeVersion ? "（claude " + data.claudeVersion + "）" : ""), "success");
+              }
+            }
+            return data;
+          })
+          .catch(function() {
+            if (typeof showToast === "function") showToast("刷新模型列表失败", "error");
+            return null;
+          })
+          .finally(function() {
+            state.modelsRefreshing = false;
+            if (btn) { btn.disabled = false; btn.textContent = "刷新"; }
+          });
+      }
+
+      function updateSettingsDefaultModelSelect(data) {
+        var select = document.getElementById("cfg-default-model");
+        if (!select) return;
+        var previous = select.value;
+        var current = previous || state.configDefaultModel || (state.config && state.config.defaultModel) || "";
+        select.innerHTML = renderChatModelOptions(current);
+        select.value = current;
+        var versionEl = document.getElementById("cfg-default-model-version");
+        if (versionEl && data) {
+          versionEl.textContent = data.claudeVersion ? "已检测到 claude " + data.claudeVersion : "新建会话时默认使用该模型。";
+        }
+      }
+
+      function getSelectedSession() {
+        if (!state.selectedId) return null;
+        for (var i = 0; i < state.sessions.length; i++) {
+          if (state.sessions[i].id === state.selectedId) return state.sessions[i];
+        }
+        return null;
+      }
+
+      function onChatModelChange(value) {
+        var normalized = (value || "").trim();
+        state.chatModel = normalized;
+        try { localStorage.setItem("wand-chat-model", normalized); } catch (e) {}
+        var session = getSelectedSession();
+        if (!session) return;
+        if (session.provider && session.provider !== "claude") return;
+        fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ model: normalized || null })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data && data.error) {
+            showToast(data.error, "error");
+            return;
+          }
+          if (data && data.id) {
+            updateSessionSnapshot(data);
+            if (typeof showToast === "function") {
+              var display = normalized || "默认";
+              showToast("已切换模型 → " + display, "success");
+            }
+          }
+        })
+        .catch(function() { showToast("切换模型失败", "error"); });
+      }
+
       function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled) {
+        var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
           runner: state.structuredRunner || "claude-cli-print",
           prompt: prompt || undefined,
-          worktreeEnabled: worktreeEnabled === true
+          worktreeEnabled: worktreeEnabled === true,
+          model: modelPref || undefined
         };
         console.log("[WAND] createStructuredSession payload:", JSON.stringify(payload));
         return fetch("/api/structured-sessions", {
@@ -5286,6 +5467,7 @@
           if (inputPanel) inputPanel.classList.add("hidden");
         }
         syncComposerModeSelect();
+        syncComposerModelSelect(getSelectedSession());
         applyCurrentView();
         reconcileInteractiveState();
       }
@@ -5944,6 +6126,13 @@
               }
             }
 
+            // Auto-update toggles
+            var autoUpdate = data.autoUpdate || {};
+            var autoUpdateWebToggle = document.getElementById("auto-update-web-toggle");
+            if (autoUpdateWebToggle) autoUpdateWebToggle.checked = !!autoUpdate.web;
+            var autoUpdateApkToggle = document.getElementById("auto-update-apk-toggle");
+            if (autoUpdateApkToggle) autoUpdateApkToggle.checked = !!autoUpdate.apk;
+
             // ── Android APK version display ──
             var apkSection = document.getElementById("android-apk-section");
             var apkCurrentRow = document.getElementById("android-apk-current-row");
@@ -6005,6 +6194,11 @@
                 apkMessageEl.textContent = "暂无可用更新";
                 apkMessageEl.classList.remove("hidden");
               }
+              // Show APK auto-update toggle in APK mode
+              var apkAutoRow = document.getElementById("android-auto-update-row");
+              var apkAutoHint = document.getElementById("android-auto-update-hint");
+              if (apkAutoRow) apkAutoRow.classList.remove("hidden");
+              if (apkAutoHint) apkAutoHint.classList.remove("hidden");
             } else {
               // ── 浏览器模式：显示线上版本 + 本地版本 + 下载按钮 ──
               if (androidApk.github && apkGithubRow && apkGithubEl) {
@@ -6067,6 +6261,13 @@
             var langEl = document.getElementById("cfg-language");
             if (langEl) langEl.value = cfg.language || "";
 
+            // Default model
+            state.configDefaultModel = cfg.defaultModel || "";
+            updateSettingsDefaultModelSelect();
+            fetchAvailableModels().then(function() {
+              updateSettingsDefaultModelSelect();
+            }).catch(function() {});
+
             // Cert status
             var certStatus = document.getElementById("cert-status");
             if (certStatus) {
@@ -6117,6 +6318,7 @@
           defaultCwd: (document.getElementById("cfg-cwd") || {}).value,
           shell: (document.getElementById("cfg-shell") || {}).value,
           language: (document.getElementById("cfg-language") || {}).value || "",
+          defaultModel: (document.getElementById("cfg-default-model") || {}).value || "",
         };
 
         fetch("/api/settings/config", {
@@ -6328,6 +6530,48 @@
         var restartBtn = document.getElementById("do-restart-button");
         var msgEl = document.getElementById("update-message");
         performRestart(restartBtn, msgEl);
+      }
+
+      function checkApkAutoUpdate() {
+        fetch("/api/auto-update", { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(autoData) {
+            if (!autoData.apk) return;
+            // Auto-update is enabled, check for APK update
+            return fetch("/api/android-apk-update?currentVersion=" + encodeURIComponent(_apkVersion), { credentials: "same-origin" })
+              .then(function(res) { return res.json(); })
+              .then(function(data) {
+                if (!data.updateAvailable || !data.downloadUrl) return;
+                try {
+                  WandNative.downloadUpdate(data.downloadUrl, data.fileName || "wand-update.apk", data.source || "local");
+                } catch (_e) {}
+              });
+          })
+          .catch(function() {});
+      }
+
+      function toggleAutoUpdate(type, enabled) {
+        var body = {};
+        body[type] = enabled;
+        fetch("/api/auto-update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(body),
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          // Sync toggle state with server response
+          var webToggle = document.getElementById("auto-update-web-toggle");
+          var apkToggle = document.getElementById("auto-update-apk-toggle");
+          if (webToggle) webToggle.checked = !!data.web;
+          if (apkToggle) apkToggle.checked = !!data.apk;
+        })
+        .catch(function() {
+          // Revert toggle on failure
+          var toggle = document.getElementById("auto-update-" + type + "-toggle");
+          if (toggle) toggle.checked = !enabled;
+        });
       }
 
       // ── Notification Settings Helpers ──
@@ -6639,6 +6883,7 @@
         state.sessionTool = "claude";
         state.preferredCommand = "claude";
         syncComposerModeSelect();
+        syncComposerModelSelect(getSelectedSession());
         return createStructuredSession(undefined, cwd, mode, worktreeEnabled)
           .then(function(data) {
             saveWorkingDir(cwd);
@@ -7545,7 +7790,7 @@
             if (readySession && readySession.provider === "codex" && state.selectedId !== readySession.id) {
               throw new Error("Codex session changed before input send.");
             }
-            return sendTerminalChunks(submitChunks, "enter_text", 0, submitView).then(function() {
+            return sendTerminalChunks(submitChunks, "enter_text", 30, submitView).then(function() {
               // Clear input only after the send succeeds
               if (inputBox && inputBox.value === value) {
                 inputBox.value = "";
@@ -7805,10 +8050,9 @@
       }
 
       function getTerminalSubmitChunks(session, text) {
-        if (session && session.provider === "codex") {
-          return [text, String.fromCharCode(13)];
-        }
-        return [text + String.fromCharCode(13)];
+        // 文本与回车分两个 chunk 发，避免 CLI 的 bracketed paste 检测把末尾
+        // \r 并入粘贴内容导致只换行不提交。
+        return [text, String.fromCharCode(13)];
       }
 
       function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride) {
@@ -8491,6 +8735,7 @@
           state.preferredCommand = command;
           state.chatMode = getSafeModeForTool(command, state.chatMode);
         }
+        var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
         return fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -8498,7 +8743,8 @@
           body: JSON.stringify({
             command: command,
             cwd: cwd || "",
-            mode: state.chatMode || state.config.defaultMode || "default"
+            mode: state.chatMode || state.config.defaultMode || "default",
+            model: modelPref || undefined
           })
         })
         .then(function(res) { return res.json(); })
@@ -8618,6 +8864,7 @@
         var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
+        var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
         fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -8626,7 +8873,8 @@
             command: preferredTool,
             cwd: defaultCwd,
             mode: mode,
-            initialInput: value
+            initialInput: value,
+            model: modelPref || undefined
           })
         })
         .then(function(res) { return res.json(); })
@@ -8654,6 +8902,7 @@
         var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
+        var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
         fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -8662,7 +8911,8 @@
             command: preferredTool,
             cwd: defaultCwd,
             mode: mode,
-            initialInput: value || undefined
+            initialInput: value || undefined,
+            model: modelPref || undefined
           })
         })
         .then(function(res) { return res.json(); })
@@ -10030,6 +10280,7 @@
               endedNotifBody = endedSession ? (endedSession.command || msg.sessionId) : msg.sessionId;
             }
             notifyTaskEnded(msg.sessionId, endedNotifTitle, endedNotifBody);
+            clearSessionProgressNative(msg.sessionId);
             if (msg.sessionId !== state.selectedId || document.hidden) {
               showNotificationBubble({
                 title: endedNotifTitle,
@@ -10116,6 +10367,7 @@
               updateTaskDisplay();
             }
             notifyTaskProgress(msg.sessionId, msg.data || null);
+            syncSessionProgressToNative(msg.sessionId);
             // Update session list to reflect current activity (debounced)
             scheduleSessionListUpdate();
             break;
@@ -10185,6 +10437,7 @@
                 statusUpdate.approvalStats = msg.data.approvalStats;
               }
               updateSessionSnapshot(statusUpdate);
+              syncSessionProgressToNative(msg.sessionId);
               if (msg.sessionId === state.selectedId) {
                 updateTaskDisplay();
                 if (msg.data.approvalStats) {
@@ -10207,6 +10460,10 @@
             if (msg.data) {
               if (msg.data.kind === "update") {
                 notifyUpdateAvailable(msg.data.current || "-", msg.data.latest || "-");
+              } else if (msg.data.kind === "auto-update-start") {
+                showAutoUpdateOverlay(msg.data.current || "-", msg.data.latest || "-");
+              } else if (msg.data.kind === "auto-update-restart") {
+                showRestartOverlay();
               } else if (msg.data.kind === "restart") {
                 showRestartOverlay();
               }
@@ -11016,6 +11273,10 @@
           list.innerHTML = html;
         }
 
+        // Sync todo progress to native notification
+        if (state.selectedId) {
+          syncSessionProgressToNative(state.selectedId);
+        }
       }
 
 
@@ -13387,7 +13648,79 @@
         );
       }
 
-      /**
+      // ── Native Live Progress Sync ──
+
+      var _progressSyncTimers = {};
+      var _PROGRESS_SYNC_DEBOUNCE_MS = 300;
+
+      function syncSessionProgressToNative(sessionId) {
+        if (!_hasNativeBridge || typeof WandNative.updateSessionProgress !== "function") return;
+        if (!sessionId) return;
+        if (_progressSyncTimers[sessionId]) {
+          clearTimeout(_progressSyncTimers[sessionId]);
+        }
+        _progressSyncTimers[sessionId] = setTimeout(function() {
+          delete _progressSyncTimers[sessionId];
+          _doSyncSessionProgress(sessionId);
+        }, _PROGRESS_SYNC_DEBOUNCE_MS);
+      }
+
+      function _doSyncSessionProgress(sessionId) {
+        var session = state.sessions.find(function(s) { return s.id === sessionId; });
+        if (!session) return;
+
+        var sessionLabel = session.summary || session.command || sessionId;
+        var sessionStatus = session.status || "running";
+
+        // Clear notification for inactive sessions
+        if (sessionStatus === "idle" || sessionStatus === "archived" || sessionStatus === "exited") {
+          clearSessionProgressNative(sessionId);
+          return;
+        }
+
+        // Get latest todos from session messages
+        var todos = null;
+        var messages = session.messages || [];
+        for (var i = messages.length - 1; i >= 0; i--) {
+          var msg = messages[i];
+          if (!msg.content || !Array.isArray(msg.content)) continue;
+          for (var j = msg.content.length - 1; j >= 0; j--) {
+            var block = msg.content[j];
+            if (block.type === "tool_use" && block.name === "TodoWrite"
+                && block.input && block.input.todos) {
+              todos = block.input.todos;
+              break;
+            }
+          }
+          if (todos) break;
+        }
+
+        // Get current task
+        var currentTask = "";
+        if (sessionId === state.selectedId && state.currentTask && state.currentTask.title) {
+          currentTask = state.currentTask.title;
+        }
+
+        var data = {
+          sessionLabel: sessionLabel,
+          status: sessionStatus,
+          currentTask: currentTask,
+          todos: todos || []
+        };
+
+        try {
+          WandNative.updateSessionProgress(sessionId, JSON.stringify(data));
+        } catch (_e) {}
+      }
+
+      function clearSessionProgressNative(sessionId) {
+        if (!_hasNativeBridge || typeof WandNative.clearSessionProgress !== "function") return;
+        if (_progressSyncTimers[sessionId]) {
+          clearTimeout(_progressSyncTimers[sessionId]);
+          delete _progressSyncTimers[sessionId];
+        }
+        try { WandNative.clearSessionProgress(sessionId); } catch (_e) {}
+      }
 
       /**
        * Play a soft, rounded notification chime using Web Audio API.
@@ -13604,6 +13937,23 @@
             }
           }
         }, 2000);
+      }
+
+      function showAutoUpdateOverlay(currentVer, latestVer) {
+        if (document.getElementById("restart-overlay")) return;
+        var overlay = document.createElement("div");
+        overlay.id = "restart-overlay";
+        overlay.className = "restart-overlay";
+        overlay.innerHTML =
+          '<div class="restart-overlay-content">' +
+            '<div class="restart-spinner"></div>' +
+            '<div class="restart-title">\u81ea\u52a8\u66f4\u65b0\u4e2d</div>' +
+            '<div class="restart-subtitle">' +
+              escapeHtml(currentVer) + ' \u2192 ' + escapeHtml(latestVer) +
+              '<br>\u6b63\u5728\u4e0b\u8f7d\u5e76\u5b89\u88c5\u65b0\u7248\u672c\uff0c\u7a0d\u540e\u5c06\u81ea\u52a8\u91cd\u542f\u2026' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(overlay);
       }
 
       function escapeHtml(value) {

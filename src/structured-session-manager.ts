@@ -16,6 +16,8 @@ interface CreateStructuredSessionOptions {
   prompt?: string;
   runner?: SessionRunner;
   worktreeEnabled?: boolean;
+  /** 用户指定的 Claude 模型（别名或完整 ID）。留空则 spawn 时不加 --model。 */
+  model?: string;
 }
 
 /** Accumulated state while streaming a single claude -p response. */
@@ -99,11 +101,12 @@ export class StructuredSessionManager {
         structuredState: {
           provider: snapshot.structuredState?.provider ?? snapshot.provider ?? "claude",
           runner: snapshot.runner ?? "claude-cli-print",
-          model: snapshot.structuredState?.model,
+          model: snapshot.structuredState?.model ?? snapshot.selectedModel ?? undefined,
           lastError: snapshot.structuredState?.lastError ?? null,
           inFlight: false,
           activeRequestId: null,
         },
+        selectedModel: snapshot.selectedModel ?? null,
       };
       this.sessions.set(restored.id, restored);
       this.storage.saveSession(restored);
@@ -143,6 +146,7 @@ export class StructuredSessionManager {
     const worktreeSetup = options.worktreeEnabled
       ? prepareSessionWorktree({ cwd: options.cwd, sessionId: id })
       : null;
+    const selectedModel = options.model?.trim() || null;
     const snapshot: SessionSnapshot = {
       id,
       sessionKind: "structured",
@@ -166,6 +170,7 @@ export class StructuredSessionManager {
       structuredState: {
         provider: "claude",
         runner: options.runner ?? "claude-cli-print",
+        model: selectedModel ?? undefined,
         inFlight: false,
         activeRequestId: null,
         lastError: null,
@@ -173,6 +178,7 @@ export class StructuredSessionManager {
       autoRecovered: false,
       autoApprovePermissions: shouldAutoApproveForMode(options.mode),
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
+      selectedModel,
     };
 
     this.sessions.set(id, snapshot);
@@ -296,6 +302,28 @@ export class StructuredSessionManager {
   /** Deny a pending permission request. */
   denyPermission(sessionId: string): SessionSnapshot {
     return this.resolvePermission(sessionId, false);
+  }
+
+  /** Update the selected model for a structured session. Takes effect on the next spawn. */
+  setSessionModel(sessionId: string, model: string | null): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const normalized = model?.trim() || null;
+    const updated: SessionSnapshot = {
+      ...session,
+      selectedModel: normalized,
+      structuredState: {
+        ...(session.structuredState ?? { provider: "claude", runner: "claude-cli-print", inFlight: false, activeRequestId: null, lastError: null }),
+        model: normalized ?? undefined,
+      },
+    };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    this.emit({
+      type: "status",
+      sessionId,
+      data: { sessionKind: "structured", selectedModel: normalized, structuredState: updated.structuredState },
+    });
+    return updated;
   }
 
   /** Toggle auto-approve for the session. */
@@ -559,6 +587,11 @@ export class StructuredSessionManager {
             ? "请使用中文回复。所有解释、注释和对话文本都使用中文。"
             : `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`,
         );
+      }
+
+      const modelChoice = session.selectedModel?.trim();
+      if (modelChoice && modelChoice !== "default") {
+        args.push("--model", modelChoice);
       }
 
       if (session.claudeSessionId) {

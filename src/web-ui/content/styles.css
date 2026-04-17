@@ -391,7 +391,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      z-index: 24;
+      z-index: 44;
       background: var(--bg-overlay);
       opacity: 0;
       pointer-events: none;
@@ -411,7 +411,7 @@
       top: 0;
       left: 0;
       bottom: 0;
-      z-index: 25;
+      z-index: 45;
       width: min(var(--sidebar-width), calc(100vw - 20px));
       max-width: 90vw;
       background: rgba(255, 251, 245, 0.96);
@@ -621,7 +621,7 @@
       width: var(--file-panel-width);
       background: var(--bg-primary);
       border-left: 1px solid var(--border);
-      z-index: 35;
+      z-index: 55;
       transition: right 0.3s var(--ease-out-expo), box-shadow 0.3s ease;
       display: flex;
       flex-direction: column;
@@ -647,7 +647,7 @@
         right: 0;
         bottom: 0;
         background: rgba(42, 28, 18, 0.3);
-        z-index: 34;
+        z-index: 54;
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.3s ease;

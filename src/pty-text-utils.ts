@@ -111,6 +111,16 @@ export function hasPermissionActionContext(normalized: string): boolean {
   return PERMISSION_ACTION_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+/**
+ * Detect Claude CLI slash-command selection menus (/model, /effort, /output-style, etc.).
+ * These share "Enter to confirm" with permission prompts but are user-driven choices
+ * that must never be auto-approved. Distinguishing footer: "Esc to exit" (vs permission
+ * prompts' "Esc to cancel" / "Tab to amend").
+ */
+export function isSlashCommandMenu(normalized: string): boolean {
+  return /\besc\s+to\s+exit\b/i.test(normalized);
+}
+
 // ── Weighted keyword scoring for fallback permission detection ──
 
 interface PermissionScore {
@@ -144,6 +154,12 @@ export function scorePermissionLikelihood(normalized: string): PermissionScore {
   // Take the last ~5 lines
   const lines = normalized.split("\n");
   const tail = lines.slice(-8).join("\n");
+
+  // Slash-command menus are never permission prompts — zero the score so
+  // fallback auto-approve and idle-probe both skip them.
+  if (isSlashCommandMenu(tail)) {
+    return { score: 0, matched: [] };
+  }
 
   let score = 0;
   const matched: string[] = [];

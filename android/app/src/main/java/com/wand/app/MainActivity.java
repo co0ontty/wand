@@ -9,7 +9,11 @@ import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.ComponentName;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.media.AudioAttributes;
 import android.media.MediaPlayer;
+import android.os.Handler;
+import android.os.Looper;
 import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
@@ -48,6 +52,10 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
@@ -62,10 +70,12 @@ public class MainActivity extends AppCompatActivity {
     private static final String CHANNEL_ID_SILENT = "wand_notif_silent";
     private static final String CHANNEL_ID_TASKS = "wand_notif_tasks";
     private static final String CHANNEL_ID_UPDATES = "wand_notif_updates";
+    private static final String CHANNEL_ID_PROGRESS = "wand_notif_progress";
     private static final String CHANNEL_ID_PREFIX_LEGACY = "wand_notif_";
     private static final String CHANNEL_ID_LEGACY = "wand_notifications";
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
     private static final int NOTIFICATION_ID_BASE = 2000;
+    private static final long PROGRESS_UPDATE_DEBOUNCE_MS = 500;
 
     private static final String[][] SOUND_PRESETS = {
         {"chime",  "叮咚"},
@@ -82,6 +92,9 @@ public class MainActivity extends AppCompatActivity {
     private boolean hasLoadedPage = false;
     private boolean updateCheckDone = false;
     private int notificationCounter = 0;
+    private final Map<String, Long> progressUpdateTimestamps = new HashMap<>();
+    private final Map<String, Runnable> pendingProgressUpdates = new HashMap<>();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -219,8 +232,22 @@ public class MainActivity extends AppCompatActivity {
                 channel.setSound(null, null);
                 nm.createNotificationChannel(channel);
             }
+
+            if (nm.getNotificationChannel(CHANNEL_ID_PROGRESS) == null) {
+                NotificationChannel channel = new NotificationChannel(
+                        CHANNEL_ID_PROGRESS, "Wand 实时进度", NotificationManager.IMPORTANCE_LOW);
+                channel.setDescription("任务实时进度通知");
+                channel.setSound(null, null);
+                channel.setShowBadge(false);
+                nm.createNotificationChannel(channel);
+            }
         }
     }
+
+    private static final AudioAttributes NOTIF_AUDIO_ATTRS = new AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build();
 
     private void playNotificationSound() {
         ServerStore store = new ServerStore(this);
@@ -232,7 +259,7 @@ public class MainActivity extends AppCompatActivity {
         if (resId == 0) return;
 
         try {
-            MediaPlayer mp = MediaPlayer.create(this, resId);
+            MediaPlayer mp = MediaPlayer.create(this, resId, NOTIF_AUDIO_ATTRS, 0);
             if (mp != null) {
                 mp.setVolume(vol, vol);
                 mp.setOnCompletionListener(MediaPlayer::release);
@@ -440,7 +467,7 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     int resId = getResources().getIdentifier("notif_" + name, "raw", getPackageName());
                     if (resId == 0) return;
-                    MediaPlayer mp = MediaPlayer.create(MainActivity.this, resId);
+                    MediaPlayer mp = MediaPlayer.create(MainActivity.this, resId, NOTIF_AUDIO_ATTRS, 0);
                     if (mp != null) {
                         float vol = new ServerStore(MainActivity.this).getNotificationVolume() / 100f;
                         mp.setVolume(vol, vol);
@@ -450,6 +477,166 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {}
             });
         }
+
+        @JavascriptInterface
+        public void updateSessionProgress(String sessionId, String jsonData) {
+            if (sessionId == null || sessionId.isEmpty() || jsonData == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(MainActivity.this,
+                        android.Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    return;
+                }
+            }
+            long now = System.currentTimeMillis();
+            Long lastUpdate = progressUpdateTimestamps.get(sessionId);
+            if (lastUpdate != null && (now - lastUpdate) < PROGRESS_UPDATE_DEBOUNCE_MS) {
+                Runnable pending = pendingProgressUpdates.remove(sessionId);
+                if (pending != null) mainHandler.removeCallbacks(pending);
+                Runnable deferred = () -> {
+                    pendingProgressUpdates.remove(sessionId);
+                    progressUpdateTimestamps.put(sessionId, System.currentTimeMillis());
+                    doUpdateSessionProgress(sessionId, jsonData);
+                };
+                pendingProgressUpdates.put(sessionId, deferred);
+                mainHandler.postDelayed(deferred, PROGRESS_UPDATE_DEBOUNCE_MS);
+                return;
+            }
+            progressUpdateTimestamps.put(sessionId, now);
+            doUpdateSessionProgress(sessionId, jsonData);
+        }
+
+        @JavascriptInterface
+        public void clearSessionProgress(String sessionId) {
+            if (sessionId == null || sessionId.isEmpty()) return;
+            progressUpdateTimestamps.remove(sessionId);
+            Runnable pending = pendingProgressUpdates.remove(sessionId);
+            if (pending != null) mainHandler.removeCallbacks(pending);
+            NotificationManagerCompat.from(MainActivity.this).cancel("progress:" + sessionId, 0);
+        }
+    }
+
+    private void doUpdateSessionProgress(String sessionId, String jsonData) {
+        try {
+            JSONObject data = new JSONObject(jsonData);
+            String sessionLabel = data.optString("sessionLabel", sessionId);
+            String status = data.optString("status", "running");
+            String currentTask = data.optString("currentTask", "");
+            JSONArray todosArray = data.optJSONArray("todos");
+
+            int total = todosArray != null ? todosArray.length() : 0;
+            int completed = 0;
+            int inProgress = 0;
+            String activeForm = "";
+
+            if (todosArray != null) {
+                for (int i = 0; i < todosArray.length(); i++) {
+                    JSONObject todo = todosArray.getJSONObject(i);
+                    String todoStatus = todo.optString("status", "pending");
+                    if ("completed".equals(todoStatus)) {
+                        completed++;
+                    } else if ("in_progress".equals(todoStatus)) {
+                        inProgress++;
+                        if (activeForm.isEmpty()) {
+                            activeForm = todo.optString("activeForm",
+                                    todo.optString("content", ""));
+                        }
+                    }
+                }
+            }
+
+            String contentText = !activeForm.isEmpty() ? activeForm
+                    : !currentTask.isEmpty() ? currentTask
+                    : "运行中";
+
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.putExtra("server_url", serverUrl);
+            if (appToken != null) intent.putExtra("app_token", appToken);
+            intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            int requestCode = ("progress:" + sessionId).hashCode() & 0x7FFFFFFF;
+            PendingIntent pi = PendingIntent.getActivity(this, requestCode, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+            boolean isOngoing = "running".equals(status) || "thinking".equals(status)
+                    || "initializing".equals(status);
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID_PROGRESS)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setContentTitle(sessionLabel)
+                    .setContentText(contentText)
+                    .setContentIntent(pi)
+                    .setOngoing(isOngoing)
+                    .setOnlyAlertOnce(true)
+                    .setSilent(true)
+                    .setAutoCancel(!isOngoing);
+
+            if (Build.VERSION.SDK_INT >= 36 && total > 0) {
+                buildProgressStyleNotification(builder, todosArray, total, completed, inProgress);
+            } else if (total > 0) {
+                buildFallbackProgressNotification(builder, total, completed, inProgress,
+                        activeForm, currentTask);
+            } else {
+                builder.setStyle(new NotificationCompat.BigTextStyle().bigText(contentText));
+            }
+
+            if (total > 0) {
+                builder.setShortCriticalText(completed + "/" + total);
+            }
+            if (isOngoing) {
+                builder.setRequestPromotedOngoing(true);
+            }
+
+            NotificationManagerCompat.from(this).notify("progress:" + sessionId, 0, builder.build());
+        } catch (Exception ignored) {}
+    }
+
+    private void buildProgressStyleNotification(NotificationCompat.Builder builder,
+            JSONArray todosArray, int total, int completed, int inProgress) {
+        try {
+            NotificationCompat.ProgressStyle progressStyle = new NotificationCompat.ProgressStyle();
+            int currentProgress = completed * 100 + (inProgress > 0 ? 50 : 0);
+            progressStyle.setStyledByProgress(false);
+            progressStyle.setProgress(currentProgress);
+
+            int completedColor = Color.parseColor("#4CAF50");
+            int activeColor = Color.parseColor("#2196F3");
+            int pendingColor = Color.parseColor("#9E9E9E");
+
+            for (int i = 0; i < todosArray.length(); i++) {
+                JSONObject todo = todosArray.getJSONObject(i);
+                String todoStatus = todo.optString("status", "pending");
+                int color;
+                if ("completed".equals(todoStatus)) {
+                    color = completedColor;
+                } else if ("in_progress".equals(todoStatus)) {
+                    color = activeColor;
+                } else {
+                    color = pendingColor;
+                }
+                progressStyle.addProgressSegment(
+                        new NotificationCompat.ProgressStyle.Segment(100).setColor(color));
+            }
+
+            builder.setStyle(progressStyle);
+        } catch (Exception e) {
+            // Fallback if ProgressStyle API is unavailable at runtime
+            buildFallbackProgressNotification(builder, total, completed, inProgress, "", "");
+        }
+    }
+
+    private void buildFallbackProgressNotification(NotificationCompat.Builder builder,
+            int total, int completed, int inProgress, String activeForm, String currentTask) {
+        builder.setProgress(total, completed, false);
+        StringBuilder bigText = new StringBuilder();
+        bigText.append(completed).append("/").append(total).append(" 完成");
+        if (inProgress > 0 && !activeForm.isEmpty()) {
+            bigText.append(" · ").append(activeForm);
+        }
+        if (!currentTask.isEmpty()) {
+            bigText.append("\n").append(currentTask);
+        }
+        builder.setStyle(new NotificationCompat.BigTextStyle().bigText(bigText.toString()));
+        builder.setSubText(completed + "/" + total);
     }
 
     @Override
@@ -730,6 +917,13 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        NotificationManagerCompat nm = NotificationManagerCompat.from(this);
+        for (String sessionId : progressUpdateTimestamps.keySet()) {
+            nm.cancel("progress:" + sessionId, 0);
+        }
+        progressUpdateTimestamps.clear();
+        pendingProgressUpdates.clear();
+        mainHandler.removeCallbacksAndMessages(null);
         webView.destroy();
         super.onDestroy();
     }

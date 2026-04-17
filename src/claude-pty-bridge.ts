@@ -21,7 +21,7 @@ import type {
   SessionEndData,
   RawOutputData,
 } from "./types.js";
-import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitConfirmSyntax, hasPermissionActionContext, scorePermissionLikelihood, FALLBACK_SCORE_THRESHOLD } from "./pty-text-utils.js";
+import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitConfirmSyntax, hasPermissionActionContext, scorePermissionLikelihood, FALLBACK_SCORE_THRESHOLD, isSlashCommandMenu } from "./pty-text-utils.js";
 
 // ── Constants ──
 
@@ -805,6 +805,10 @@ export class ClaudePtyBridge extends EventEmitter {
   }
 
   private isPermissionPromptDetected(normalized: string): boolean {
+    // Slash-command selection menus (/model, /effort, /output-style …) share
+    // "Enter to confirm" with permission prompts but must be left alone.
+    if (isSlashCommandMenu(normalized)) return false;
+
     const hasIntent = /\bdo you want to\b/i.test(normalized)
       || /\bwould you like to\b/i.test(normalized)
       || /\benter to confirm\b/i.test(normalized)

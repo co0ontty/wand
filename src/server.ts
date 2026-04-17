@@ -14,6 +14,7 @@ import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
 import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
 import { ensureCertificates } from "./cert.js";
 import { isExecutionMode, normalizeCardDefaults, resolveConfigDir, saveConfig } from "./config.js";
+import { getCachedModels, refreshModels } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
@@ -809,6 +810,10 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       hasCert: existsSync(certPaths.keyPath) && existsSync(certPaths.certPath),
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
+      autoUpdate: {
+        web: storage.getConfigValue("autoUpdateWeb") === "true",
+        apk: storage.getConfigValue("autoUpdateApk") === "true",
+      },
       androidApk: {
         enabled: config.android?.enabled === true,
         apkDir,
@@ -863,7 +868,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.post("/api/settings/config", async (req, res) => {
     const body = req.body as Partial<WandConfig>;
-    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "language"] as const;
+    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "language", "defaultModel"] as const;
     let changed = false;
 
     for (const field of allowedFields) {
@@ -891,6 +896,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           config.shell = String(body.shell);
         } else if (field === "language") {
           config.language = typeof body.language === "string" ? body.language.trim() : "";
+        } else if (field === "defaultModel") {
+          config.defaultModel = typeof body.defaultModel === "string" ? body.defaultModel.trim() : "";
         }
         changed = true;
       }
@@ -916,6 +923,30 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.json({ ok: true, config: safeConfig, restartRequired });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "保存配置失败。") });
+    }
+  });
+
+  app.get("/api/models", (_req, res) => {
+    const cached = getCachedModels();
+    res.json({
+      models: cached.models,
+      claudeVersion: cached.claudeVersion,
+      refreshedAt: cached.refreshedAt,
+      defaultModel: config.defaultModel ?? "",
+    });
+  });
+
+  app.post("/api/models/refresh", async (_req, res) => {
+    try {
+      const refreshed = await refreshModels();
+      res.json({
+        models: refreshed.models,
+        claudeVersion: refreshed.claudeVersion,
+        refreshedAt: refreshed.refreshedAt,
+        defaultModel: config.defaultModel ?? "",
+      });
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "刷新模型列表失败。") });
     }
   });
 
@@ -993,10 +1024,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   app.get("/api/directory", async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q : "";
     const includeGitStatus = req.query.gitStatus === "true";
-    const targetPath = path.resolve(process.cwd(), q);
-    const allowedBase = process.cwd();
-    if (!isPathWithinBase(targetPath, allowedBase)) {
-      res.status(403).json({ error: "访问被拒绝：路径必须在项目目录内。" });
+    const targetPath = path.resolve(q || config.defaultCwd);
+    if (isBlockedFolderPath(targetPath)) {
+      res.status(403).json({ error: "访问被拒绝：无法访问系统敏感目录。" });
       return;
     }
 
@@ -1034,8 +1064,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
 
     const resolvedPath = path.resolve(filePath);
-    const allowedBase = process.cwd();
-    if (!isPathWithinBase(resolvedPath, allowedBase)) {
+    if (isBlockedFolderPath(resolvedPath)) {
       res.status(403).json({ error: "Access denied" });
       return;
     }
@@ -1261,6 +1290,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
     const initialInput = body.initialInput?.trim();
     try {
+      const rawModel = typeof body.model === "string" ? body.model.trim() : "";
+      const effectiveModel = rawModel || (config.defaultModel ?? "").trim() || undefined;
       const snapshot = processes.start(
         body.command,
         body.cwd,
@@ -1269,6 +1300,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         {
           worktreeEnabled: body.worktreeEnabled === true,
           provider: body.provider,
+          model: effectiveModel,
         }
       );
       res.status(201).json(snapshot);
@@ -1364,19 +1396,91 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   // Start configured background sessions after the server is already reachable.
   processes.runStartupCommands();
 
-  // Background update check on startup
-  checkNpmLatestVersion().then((info) => {
+  // ── Auto-update endpoints ──
+
+  app.get("/api/auto-update", (_req, res) => {
+    const web = storage.getConfigValue("autoUpdateWeb") === "true";
+    const apk = storage.getConfigValue("autoUpdateApk") === "true";
+    res.json({ web, apk });
+  });
+
+  app.post("/api/auto-update", express.json(), (req, res) => {
+    const { web, apk } = req.body as { web?: boolean; apk?: boolean };
+    if (typeof web === "boolean") {
+      storage.setConfigValue("autoUpdateWeb", String(web));
+    }
+    if (typeof apk === "boolean") {
+      storage.setConfigValue("autoUpdateApk", String(apk));
+    }
+    res.json({
+      web: storage.getConfigValue("autoUpdateWeb") === "true",
+      apk: storage.getConfigValue("autoUpdateApk") === "true",
+    });
+  });
+
+  // ── Auto-update logic ──
+
+  async function performAutoUpdate(): Promise<void> {
+    const info = await checkNpmLatestVersion(true);
     cachedUpdateInfo = info;
-    if (info.updateAvailable) {
+    if (!info.updateAvailable) return;
+
+    const autoEnabled = storage.getConfigValue("autoUpdateWeb") === "true";
+    if (!autoEnabled) {
+      // Not auto-updating, just notify
       process.stdout.write(
         `[wand] 发现新版本 ${info.latest}（当前 ${info.current}）。运行 npm install -g ${PKG_NAME}@latest 进行更新。\n`
       );
-      // Broadcast update notification to all connected WS clients
       wsManager.emitEvent({
         type: "notification",
         sessionId: "__system__",
         data: { kind: "update", current: info.current, latest: info.latest },
       });
+      return;
     }
-  }).catch(() => {});
+
+    // Auto-update: install and restart
+    process.stdout.write(
+      `[wand] 自动更新：正在从 ${info.current} 更新到 ${info.latest}...\n`
+    );
+    wsManager.emitEvent({
+      type: "notification",
+      sessionId: "__system__",
+      data: { kind: "auto-update-start", current: info.current, latest: info.latest },
+    });
+
+    try {
+      await execAsync(`npm install -g ${PKG_NAME}@latest`, { timeout: 120000 });
+      process.stdout.write(`[wand] 自动更新完成，正在重启...\n`);
+      wsManager.emitEvent({
+        type: "notification",
+        sessionId: "__system__",
+        data: { kind: "auto-update-restart", current: info.current, latest: info.latest },
+      });
+      // Restart after a brief delay
+      setTimeout(() => {
+        wss.clients.forEach((client) => client.close());
+        server.close(() => {
+          spawn(process.execPath, process.argv.slice(1), {
+            detached: true,
+            stdio: "inherit",
+            cwd: process.cwd(),
+            env: process.env,
+          }).unref();
+          process.exit(0);
+        });
+        setTimeout(() => process.exit(0), 5000);
+      }, 1000);
+    } catch (error) {
+      process.stdout.write(`[wand] 自动更新失败: ${getErrorMessage(error, "未知错误")}\n`);
+    }
+  }
+
+  // Background update check on startup
+  performAutoUpdate().catch(() => {});
+
+  // Periodic update check (every 30 minutes)
+  setInterval(() => {
+    performAutoUpdate().catch(() => {});
+  }, 30 * 60 * 1000);
 }

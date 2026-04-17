@@ -99,6 +99,19 @@ export interface WandConfig {
   android?: AndroidApkConfig;
   /** Default expand/collapse state for card types in structured chat view */
   cardDefaults?: CardExpandDefaults;
+  /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */
+  defaultModel?: string;
+}
+
+export interface ClaudeModelInfo {
+  /** 传给 --model 的值（别名或完整模型 ID） */
+  id: string;
+  /** UI 显示的友好标签 */
+  label: string;
+  /** 可选备注：例如 "当前默认"、"最新" */
+  note?: string;
+  /** 是否为别名（opus/sonnet 等）；完整 ID 为 false */
+  alias?: boolean;
 }
 
 interface WorktreeInfo {
@@ -148,6 +161,8 @@ export interface CommandRequest {
   mode?: ExecutionMode;
   initialInput?: string;
   worktreeEnabled?: boolean;
+  /** Claude 模型（别名或完整 ID）。仅对 claude provider 生效。留空则回落到 config.defaultModel。 */
+  model?: string;
 }
 
 export interface InputRequest {
@@ -299,6 +314,8 @@ export interface SessionSnapshot {
   summary?: string;
   /** 当前正在执行的任务标题（用于会话列表展示） */
   currentTaskTitle?: string;
+  /** 用户为此会话选定的 Claude 模型（别名或完整 ID）。结构化会话下次 spawn 时使用；PTY 会话仅用于展示。 */
+  selectedModel?: string | null;
 }
 
 // ── Session Lifecycle ──

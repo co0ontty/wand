@@ -180,8 +180,8 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", express.json(), async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean };
-    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, provider: body.provider, worktreeEnabled: body.worktreeEnabled === true, hasPrompt: !!body.prompt }));
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string };
+    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, provider: body.provider, worktreeEnabled: body.worktreeEnabled === true, hasPrompt: !!body.prompt, model: body.model }));
     try {
       if (body.provider && body.provider !== "claude") {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude provider。" });
@@ -193,11 +193,35 @@ export function registerSessionRoutes(
         prompt: body.prompt,
         runner: body.runner ?? "claude-cli-print",
         worktreeEnabled: body.worktreeEnabled === true,
+        model: typeof body.model === "string" ? body.model.trim() : undefined,
       });
       console.log("[WAND] structured session created:", JSON.stringify({ id: snapshot.id, sessionKind: snapshot.sessionKind, runner: snapshot.runner, status: snapshot.status }));
       res.status(201).json(snapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法启动结构化会话。") });
+    }
+  });
+
+  app.post("/api/sessions/:id/model", express.json(), (req, res) => {
+    const body = req.body as { model?: string | null };
+    const rawModel = typeof body?.model === "string" ? body.model.trim() : null;
+    const id = req.params.id;
+    try {
+      const structuredSnapshot = structured.get(id);
+      if (structuredSnapshot) {
+        const updated = structured.setSessionModel(id, rawModel);
+        res.json(updated);
+        return;
+      }
+      const ptySnapshot = processes.get(id);
+      if (!ptySnapshot) {
+        res.status(404).json({ error: "未找到该会话。" });
+        return;
+      }
+      const updated = processes.setSessionModel(id, rawModel);
+      res.json(updated);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "切换模型失败。") });
     }
   });
 

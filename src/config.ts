@@ -22,6 +22,7 @@ export const defaultConfig = (): WandConfig => ({
   language: "",
   android: defaultAndroidApkConfig(),
   cardDefaults: defaultCardExpandDefaults(),
+  defaultModel: "",
   commandPresets: [
     {
       label: "Claude",
@@ -200,6 +201,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
       : crypto.randomBytes(32).toString("hex"),
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
+    defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
   };
 }
 
