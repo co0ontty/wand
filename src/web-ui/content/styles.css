@@ -422,7 +422,7 @@
       backdrop-filter: blur(20px) saturate(180%);
       box-shadow: 4px 0 32px rgba(89, 58, 32, 0.08);
       transform: translateX(-100%);
-      transition: transform 0.4s var(--ease-out-expo), box-shadow 0.4s ease, opacity 0.4s ease;
+      transition: transform 0.35s var(--ease-out-expo), box-shadow 0.35s ease, opacity 0.25s ease;
       pointer-events: none;
       opacity: 0;
     }
@@ -448,7 +448,7 @@
     /* ===== 图钉按钮 ===== */
     .sidebar-pin-toggle {
       flex-shrink: 0;
-      transition: transform var(--transition-fast), color var(--transition-fast);
+      transition: transform 0.3s var(--ease-out-expo), color var(--transition-fast);
     }
     .sidebar-pin-toggle.pinned {
       color: var(--primary);
@@ -479,8 +479,62 @@
     .sidebar-header-actions {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
       flex-shrink: 0;
+    }
+
+    .sidebar-header-more {
+      position: relative;
+    }
+
+    .sidebar-header-overflow {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 150px;
+      background: rgba(255, 251, 245, 0.98);
+      backdrop-filter: blur(16px) saturate(180%);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      box-shadow: 0 4px 20px rgba(89, 58, 32, 0.12);
+      padding: 4px;
+      z-index: 60;
+    }
+
+    .sidebar-header-overflow.open {
+      display: block;
+      animation: fadeSlideDown 0.15s var(--ease-out-expo);
+    }
+
+    .sidebar-header-overflow .overflow-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 9px 12px;
+      border: none;
+      background: none;
+      font-family: var(--font-sans);
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-radius: 6px;
+      transition: background var(--transition-fast), color var(--transition-fast);
+    }
+
+    .sidebar-header-overflow .overflow-item:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+    }
+
+    .sidebar-header-overflow .overflow-item:active {
+      transform: scale(0.97);
+    }
+
+    @keyframes fadeSlideDown {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
     }
 
     .sidebar-logout {
@@ -830,6 +884,14 @@
       align-items: center;
       justify-content: space-between;
       margin-bottom: 12px;
+      padding: 6px 8px;
+      border-radius: var(--radius-sm);
+      background: rgba(150, 118, 85, 0.04);
+      transition: all var(--transition-fast);
+    }
+
+    .session-manage-bar:hover {
+      background: rgba(150, 118, 85, 0.07);
     }
 
     .session-manage-bar.active {
@@ -854,7 +916,23 @@
       gap: 8px;
     }
 
-    .session-manage-toggle,
+    .session-manage-toggle {
+      border: 1px solid rgba(197, 101, 61, 0.15);
+      background: rgba(197, 101, 61, 0.05);
+      color: var(--accent);
+      border-radius: var(--radius-md);
+      padding: 6px 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+
+    .session-manage-toggle:hover {
+      background: rgba(197, 101, 61, 0.12);
+      border-color: rgba(197, 101, 61, 0.25);
+    }
+
     .session-manage-btn {
       border: 1px solid var(--border-subtle);
       background: var(--bg-surface);
@@ -885,12 +963,12 @@
     }
 
     .session-group-title {
-      padding: 6px 8px 12px;
+      padding: 8px 8px 12px;
       font-size: 0.6875rem;
       font-weight: 700;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: var(--text-tertiary);
+      color: var(--text-secondary);
       display: flex;
       align-items: center;
       gap: 8px;
@@ -899,8 +977,9 @@
     .session-group-title::before {
       content: '';
       width: 3px;
-      height: 12px;
-      background: var(--accent-soft);
+      height: 14px;
+      background: var(--accent);
+      opacity: 0.7;
       border-radius: var(--radius-full);
     }
 
@@ -915,24 +994,25 @@
     }
     .claude-history-toggle .chevron {
       display: inline-block;
-      transition: transform 0.2s ease;
-      font-size: 0.625rem;
-      margin-right: 2px;
+      transition: transform 0.25s var(--ease-out-expo);
+      font-size: 0.6875rem;
+      margin-right: 4px;
     }
     .claude-history-toggle .history-count {
-      font-size: 0.625rem;
-      font-weight: 500;
-      color: var(--text-muted);
-      background: var(--bg-inset);
-      padding: 1px 6px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: var(--bg-tertiary);
+      padding: 2px 7px;
       border-radius: var(--radius-full);
-      margin-left: 4px;
+      margin-left: 6px;
     }
     .claude-history-loading {
-      padding: 12px 8px;
+      padding: 16px 8px;
       color: var(--text-muted);
       font-size: 0.8125rem;
       text-align: center;
+      font-style: italic;
     }
     .claude-history-directory-header {
       margin-top: 6px;
@@ -940,13 +1020,13 @@
       user-select: none;
     }
     .claude-history-directory-header .chevron {
-      font-size: 0.6rem;
-      margin-right: 2px;
+      font-size: 0.6875rem;
+      margin-right: 4px;
     }
     .claude-history-directory-title {
-      font-size: 0.6rem;
-      padding: 4px 8px 4px;
-      opacity: 0.7;
+      font-size: 0.6875rem;
+      padding: 6px 8px;
+      opacity: 0.8;
       justify-content: space-between;
     }
     .claude-history-directory-label {
@@ -965,10 +1045,12 @@
       white-space: nowrap;
     }
     .claude-history-item {
-      opacity: 0.8;
+      opacity: 0.85;
+      transition: opacity 0.15s ease, background 0.15s ease;
     }
     .claude-history-item:hover {
       opacity: 1;
+      background: rgba(150, 118, 85, 0.06);
     }
 
     /* ===== 会话卡片项 ===== */
@@ -981,9 +1063,9 @@
       color: var(--text-primary);
       padding: 10px 12px;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: all 0.2s ease, transform 0.1s ease;
       font-family: var(--font-sans);
-      margin-bottom: 4px;
+      margin-bottom: 6px;
       position: relative;
       overflow: hidden;
     }
@@ -992,14 +1074,14 @@
       content: '';
       position: absolute;
       left: 0;
-      top: 4px;
-      bottom: 4px;
+      top: 6px;
+      bottom: 6px;
       width: 3px;
       background: var(--accent);
       opacity: 0;
       transform: scaleY(0);
       transition: all 0.2s ease;
-      border-radius: var(--radius-full);
+      border-radius: 2px;
     }
 
     .session-item-row {
@@ -1152,8 +1234,9 @@
     /* ===== 会话操作按钮 ===== */
     .session-actions {
       position: absolute;
-      right: 0;
-      top: 0;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
       display: inline-flex;
       align-items: center;
       gap: 2px;
@@ -1695,7 +1778,7 @@
     @media (hover: hover) {
       .session-item .session-actions {
         opacity: 0;
-        transition: opacity 0.15s ease;
+        transition: opacity 0.2s ease;
       }
       .session-item:hover .session-actions,
       .session-item.active .session-actions,
@@ -1718,6 +1801,7 @@
     .session-item:hover {
       background: rgba(150, 118, 85, 0.06);
       border-color: var(--border-subtle);
+      box-shadow: 0 1px 4px rgba(89, 58, 32, 0.04);
     }
 
     .session-item:hover::before {
@@ -1728,6 +1812,7 @@
     .session-item.active {
       background: rgba(197, 101, 61, 0.08);
       border-color: rgba(197, 101, 61, 0.2);
+      box-shadow: 0 1px 6px rgba(197, 101, 61, 0.08);
     }
 
     .session-item.active::before {
@@ -1835,24 +1920,44 @@
     }
 
     .sidebar-footer-actions {
-      display: flex;
-      justify-content: center;
-      gap: 4px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
     }
 
     .sidebar-footer-actions .btn {
-      flex: 1;
-      display: inline-flex;
+      display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 4px;
-      font-size: 0.75rem;
-      color: var(--text-secondary);
+      gap: 3px;
+      font-size: 0.625rem;
+      color: var(--text-muted);
+      padding: 8px 4px;
+      min-height: 48px;
+      border-radius: var(--radius-sm);
+      transition: all var(--transition-fast);
+    }
+
+    .sidebar-footer-actions .btn svg {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
     }
 
     .sidebar-footer-actions .btn:hover {
       color: var(--text-primary);
-      background: var(--bg-tertiary);
+      background: rgba(150, 118, 85, 0.08);
+      transform: translateY(-1px);
+    }
+
+    .sidebar-footer-actions .btn:active {
+      transform: scale(0.95);
+      transition-duration: 0.1s;
+    }
+
+    .sidebar-footer-actions .btn.hidden {
+      display: none;
     }
 
     .sidebar-meta {
@@ -2227,12 +2332,6 @@
 
     .terminal-scroll-wrap ::selection {
       background: rgba(214, 123, 82, 0.28);
-    }
-
-    .terminal-scroll-wrap span {
-      text-decoration-thickness: 0.5px !important;
-      text-decoration-color: rgba(245, 234, 220, 0.15) !important;
-      text-underline-offset: 3px !important;
     }
 
     .terminal-scroll-wrap .term-grid {
@@ -6175,8 +6274,12 @@
       .thinking-content { font-size: 0.8125rem; }
       .tool-picker { grid-template-columns: 1fr; }
       /* 平板触摸优化 - 44px触摸区域 */
-      .session-item { min-height: 48px; padding: 10px 12px; }
-      .session-action-btn { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
+      .session-item { min-height: 52px; padding: 12px 12px; }
+      .session-action-btn { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+      .session-manage-toggle,
+      .session-manage-btn { min-height: 36px; padding: 8px 12px; }
+      .claude-history-toggle { min-height: 40px; display: flex; align-items: center; }
+      .sidebar-footer-actions .btn { min-height: 44px; }
       .tree-item { min-height: 44px; padding: 8px 12px; }
       .folder-picker-item { min-height: 44px; }
     }
@@ -6223,6 +6326,9 @@
       .floating-sidebar-toggle .hamburger-icon { width: 13px; height: 9px; }
 
       .sidebar { top: 0; }
+      .sidebar-header { padding: 10px 12px; min-height: 48px; }
+      .sidebar-footer-actions { grid-template-columns: repeat(2, 1fr); }
+      .sidebar-footer-actions .btn { min-height: 40px; }
 
       /* 移动端终端顶栏 - 紧凑 */
       .terminal-header { padding: 5px 8px; min-height: 32px; }
@@ -6759,6 +6865,9 @@
       .session-action-btn { width: 30px; height: 30px; min-width: 30px; min-height: 30px; }
 
       .sidebar { top: 0; width: min(240px, calc(100vw - 10px)); }
+      .sidebar-footer-actions { grid-template-columns: repeat(4, 1fr); }
+      .sidebar-footer-actions .btn span { display: none; }
+      .sidebar-footer-actions .btn { min-height: 36px; padding: 6px; }
 
       .modal { max-height: 80vh; }
       .modal-header { padding: 8px 10px; min-height: 36px; }
