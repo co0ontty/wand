@@ -576,9 +576,10 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   app.use(compression({ threshold: 1024 }));
 
   const vendorCacheOpts = { maxAge: "7d", immutable: true };
-  app.use("/vendor/xterm", express.static(path.join(nodeModulesDir, "@xterm", "xterm"), vendorCacheOpts));
-  app.use("/vendor/xterm-addon-fit", express.static(path.join(nodeModulesDir, "@xterm", "addon-fit"), vendorCacheOpts));
-  app.use("/vendor/xterm-addon-serialize", express.static(path.join(nodeModulesDir, "@xterm", "addon-serialize"), vendorCacheOpts));
+  const contentDir = existsSync(path.join(SERVER_MODULE_DIR, "web-ui", "content"))
+    ? path.join(SERVER_MODULE_DIR, "web-ui", "content")
+    : path.join(RUNTIME_ROOT_DIR, "src", "web-ui", "content");
+  app.use("/vendor/wterm", express.static(path.join(contentDir, "vendor", "wterm"), vendorCacheOpts));
 
   // ── Web UI and PWA endpoints ──
 

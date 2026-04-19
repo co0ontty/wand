@@ -32,16 +32,14 @@ export function renderApp(configPath: string): string {
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icon.svg" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="/vendor/wterm/terminal.css" />
   <style>
 ${cssStyles}
   </style>
 </head>
 <body>
   <div id="app"></div>
-${scriptOpen} src="/vendor/xterm/lib/xterm.js">${scriptClose}
-${scriptOpen} src="/vendor/xterm-addon-fit/lib/addon-fit.js">${scriptClose}
-${scriptOpen} src="/vendor/xterm-addon-serialize/lib/addon-serialize.js">${scriptClose}
+${scriptOpen} src="/vendor/wterm/wterm.bundle.js">${scriptClose}
 ${scriptOpen}>
 ${scriptContent}
 ${scriptClose}

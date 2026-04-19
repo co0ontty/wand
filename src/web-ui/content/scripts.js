@@ -70,16 +70,10 @@
         sessions: [],
         suggestionTimer: null,
         terminal: null,
-        fitAddon: null,
         terminalFitInProgress: false,
-        serializeAddon: null,
-        terminalDomView: null,
-        terminalDomUpdateTimer: null,
-        _lastDomHtml: "",
         terminalSessionId: null,
         terminalOutput: "",
         terminalLiveStreamSessions: {},
-        terminalViewportSize: { width: 0, height: 0 },
         terminalAutoFollow: true,
         terminalScrollIdleTimer: null,
         terminalScrollIdleMs: 1800,
@@ -894,7 +888,7 @@
               try {
                 render({ skipShellChrome: true });
               } catch (_e) {
-                // render() may fail if external scripts (xterm.js) failed to load;
+                // render() may fail if external scripts (wterm) failed to load;
                 // continue with polling and session loading so the app remains functional
               }
               bindForegroundSyncListeners();
@@ -2118,19 +2112,18 @@
         } catch (e) {}
         applyTerminalScale();
         updateScaleLabel();
-        // Force refit: font size changed but container dimensions didn't,
-        // so ensureTerminalFit (which resets viewport tracking) is needed
-        // instead of scheduleTerminalResize (which skips when size unchanged).
-        ensureTerminalFit();
       }
 
       function applyTerminalScale() {
-        if (!state.terminal) return;
-        state.terminal.options.fontSize = state.terminalBaseFontSize * state.terminalScale;
-        state.terminal.refresh(0, state.terminal.rows - 1);
-        // Apply to DOM terminal view as well
-        if (state.terminalDomView) {
-          state.terminalDomView.style.fontSize = (state.terminalBaseFontSize * state.terminalScale) + "px";
+        if (!state.terminal || !state.terminal.element) return;
+        var newSize = (state.terminalBaseFontSize * state.terminalScale) + "px";
+        var newRowHeight = (state.terminalBaseFontSize * state.terminalScale * 1.5) + "px";
+        state.terminal.element.style.setProperty("--term-font-size", newSize);
+        state.terminal.element.style.setProperty("--term-row-height", newRowHeight);
+        if (typeof state.terminal.remeasure === "function") {
+          requestAnimationFrame(function() {
+            if (state.terminal) state.terminal.remeasure();
+          });
         }
       }
 
@@ -4163,10 +4156,7 @@
 
       function getTerminalViewport() {
         if (!state.terminal || !state.terminal.element) return null;
-        if (state.terminalViewportEl && state.terminal.element.contains(state.terminalViewportEl)) {
-          return state.terminalViewportEl;
-        }
-        state.terminalViewportEl = state.terminal.element.querySelector(".xterm-viewport");
+        state.terminalViewportEl = state.terminal.element;
         return state.terminalViewportEl;
       }
 
@@ -4192,11 +4182,6 @@
       }
 
       function isTerminalNearBottom() {
-        // On mobile, check DOM view scroll position
-        if (state.terminalDomView) {
-          var d = state.terminalDomView.scrollHeight - state.terminalDomView.clientHeight - state.terminalDomView.scrollTop;
-          return d <= state.terminalScrollThreshold;
-        }
         var viewport = getTerminalViewport();
         if (!viewport) return true;
         var distance = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
@@ -4205,25 +4190,13 @@
 
       function scrollTerminalToBottom(smooth) {
         if (!state.terminal) return;
-        // Also scroll mobile DOM view
-        if (state.terminalDomView) {
-          if (smooth) {
-            state.terminalDomView.scrollTo({ top: state.terminalDomView.scrollHeight, behavior: "smooth" });
-          } else {
-            state.terminalDomView.scrollTop = state.terminalDomView.scrollHeight;
-          }
-        }
+        var viewport = getTerminalViewport();
+        if (!viewport) return;
         if (smooth) {
-          var viewport = getTerminalViewport();
-          if (viewport) {
-            viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
-            setTimeout(function() {
-              if (state.terminal) state.terminal.scrollToBottom();
-            }, 160);
-            return;
-          }
+          viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+        } else {
+          viewport.scrollTop = viewport.scrollHeight;
         }
-        state.terminal.scrollToBottom();
       }
 
       function scheduleTerminalResumeFollow() {
@@ -4444,6 +4417,11 @@
         requestSyncScrollbar();
       }
 
+      function resetTerminal() {
+        if (!state.terminal || typeof state.terminal.reset !== "function") return;
+        state.terminal.reset();
+      }
+
       function syncTerminalBuffer(sessionId, output, options) {
         if (!state.terminal) return false;
         var normalizedOutput = normalizeTerminalOutput(output || "");
@@ -4463,7 +4441,7 @@
         }
 
         if (sessionChanged) {
-          state.terminal.reset();
+          resetTerminal();
           currentOutput = "";
           state.terminalOutput = "";
           state.terminalAutoFollow = true;
@@ -4473,18 +4451,15 @@
 
         if (mode === "replace") {
           if (normalizedOutput !== currentOutput) {
-            state.terminal.reset();
+            resetTerminal();
             if (normalizedOutput) {
               state.terminal.write(normalizedOutput);
             }
             wrote = true;
           }
         } else if (normalizedOutput.length < currentOutput.length && !sessionChanged) {
-          // Ignore regressive snapshots for the active session; wait for an explicit replace.
           return false;
         } else if (liveChunkStream && !sessionChanged && mode !== "replace" && currentOutput && !normalizedOutput.startsWith(currentOutput)) {
-          // When a session is already streaming live chunks, do not let polled snapshots
-          // rewrite the terminal unless they are strict appends of what we've rendered.
           return false;
         } else if (normalizedOutput.startsWith(currentOutput)) {
           var delta = normalizedOutput.slice(currentOutput.length);
@@ -4493,10 +4468,9 @@
             wrote = true;
           }
         } else if (currentOutput && currentOutput.startsWith(normalizedOutput)) {
-          // Ignore shorter/stale snapshots from polling or reconnect races.
           return false;
         } else {
-          state.terminal.reset();
+          resetTerminal();
           if (normalizedOutput) {
             state.terminal.write(normalizedOutput);
           }
@@ -4505,40 +4479,21 @@
 
         state.terminalSessionId = nextSessionId;
         state.terminalOutput = normalizedOutput;
-        scheduleMobileDomUpdate();
         if (shouldScroll && (wrote || sessionChanged || mode === "replace")) {
           maybeScrollTerminalToBottom(sessionChanged || mode === "replace" ? "force" : "output");
         } else {
           updateTerminalJumpToBottomButton();
         }
-        // When switching sessions, re-fit the terminal so the PTY receives
-        // the correct dimensions for this client's viewport.
-        if (sessionChanged && state.fitAddon) {
-          state.terminalViewportSize = { width: 0, height: 0 };
-          scheduleTerminalResize(true);
+        if (sessionChanged) {
+          sendTerminalResize(state.terminal.cols, state.terminal.rows);
         }
         return wrote || sessionChanged;
       }
 
-      function shouldResizeTerminalViewport() {
-        var output = document.getElementById("output");
-        if (!output) return false;
-        var rect = output.getBoundingClientRect();
-        var width = Math.round(rect.width);
-        var height = Math.round(rect.height);
-        if (!width || !height) return false;
-        if (state.terminalViewportSize.width === width && state.terminalViewportSize.height === height) {
-          return false;
-        }
-        state.terminalViewportSize = { width: width, height: height };
-        return true;
-      }
-
       function initTerminal() {
         var container = document.getElementById("output");
-        if (!container || state.terminal) return;
-        if (typeof Terminal === "undefined") {
-          // xterm.js not yet loaded — retry after a short delay
+        if (!container || state.terminal || state.terminalInitializing) return;
+        if (typeof WTermLib === "undefined" || !WTermLib.WTerm) {
           if (!state.terminalInitRetries) state.terminalInitRetries = 0;
           if (state.terminalInitRetries < 10) {
             state.terminalInitRetries++;
@@ -4547,160 +4502,79 @@
           return;
         }
         state.terminalInitRetries = 0;
+        state.terminalInitializing = true;
 
-        state.terminal = new Terminal({
+        var termWrap = document.createElement("div");
+        termWrap.className = "terminal-scroll-wrap";
+        container.appendChild(termWrap);
+
+        var term = new WTermLib.WTerm(termWrap, {
           cols: 120,
           rows: 36,
-          convertEol: true,
-          disableStdin: false,
+          autoResize: true,
           cursorBlink: false,
-          fontFamily: '"Geist Mono", "SF Mono", monospace',
-          fontSize: 13,
-          lineHeight: 1.5,
-          allowProposedApi: true,
-          scrollback: 10000,
-          wheelScrollMargin: 0,
-          theme: {
-            background: "#1f1b17",
-            foreground: "#f5eadc",
-            cursor: "#d67b52",
-            selectionBackground: "rgba(214, 123, 82, 0.28)",
-            black: "#1f1b17",
-            red: "#d27766",
-            green: "#7fa36f",
-            yellow: "#d5a35b",
-            blue: "#87a9d9",
-            magenta: "#c595c7",
-            cyan: "#7fb3b1",
-            white: "#f5eadc",
-            brightBlack: "#625347",
-            brightRed: "#e39a89",
-            brightGreen: "#9cc08a",
-            brightYellow: "#ebbb6e",
-            brightBlue: "#a8c1ea",
-            brightMagenta: "#dbb1dc",
-            brightCyan: "#9acbca",
-            brightWhite: "#fff7ef"
+          onData: function(data) {
+            if (state.terminalInteractive) return;
+            queueDirectInput(data);
+          },
+          onResize: function(cols, rows) {
+            sendTerminalResize(cols, rows);
           }
         });
 
-        var fitAddonConstructor =
-          typeof FitAddon !== "undefined" && FitAddon && typeof FitAddon.FitAddon === "function"
-            ? FitAddon.FitAddon
-            : null;
-        state.fitAddon = fitAddonConstructor ? new fitAddonConstructor() : null;
-        if (state.fitAddon) {
-          state.terminal.loadAddon(state.fitAddon);
-          // Patch: FitAddon subtracts 14px for a scrollbar that CSS hides;
-          // recalculate cols without the scrollbar deduction.
-          var _origPropose = state.fitAddon.proposeDimensions;
-          state.fitAddon.proposeDimensions = function() {
-            var result = _origPropose.call(state.fitAddon);
-            if (result && state.terminal) {
-              try {
-                var core = state.terminal._core;
-                var cellW = core._renderService.dimensions.css.cell.width;
-                var el = state.terminal.element;
-                if (cellW > 0 && el && el.parentElement) {
-                  var pw = Math.max(0, parseInt(window.getComputedStyle(el.parentElement).getPropertyValue("width")));
-                  var es = window.getComputedStyle(el);
-                  var ePad = parseInt(es.getPropertyValue("padding-left")) + parseInt(es.getPropertyValue("padding-right"));
-                  result.cols = Math.max(2, Math.floor((pw - ePad) / cellW));
-                }
-              } catch(e) {}
-            }
-            return result;
-          };
-        } else {
-          console.error("[wand] xterm fit addon failed to load; continuing without fit support.");
-        }
+        term.init().then(function() {
+          state.terminal = term;
+          state.terminalInitializing = false;
+          applyTerminalScale();
+          state.terminalAutoFollow = true;
+          clearTerminalScrollIdleTimer();
 
-        // Load serialize addon for mobile DOM rendering
-        if (typeof SerializeAddon !== "undefined" && SerializeAddon && typeof SerializeAddon.SerializeAddon === "function") {
-          state.serializeAddon = new SerializeAddon.SerializeAddon();
-          state.terminal.loadAddon(state.serializeAddon);
-        }
-
-        state.terminal.open(container);
-        applyTerminalScale();
-        state.terminalViewportSize = { width: 0, height: 0 };
-        state.terminalAutoFollow = true;
-        clearTerminalScrollIdleTimer();
-        // Retry-based fit: wait for browser to complete layout before measuring and fitting
-        if (state.fitAddon) {
-          ensureTerminalFit();
-          // Secondary fit after fonts are loaded — FitAddon measures character
-          // dimensions from the rendered font; if a custom web font (e.g. Geist
-          // Mono) hasn't loaded yet the initial fit() uses fallback metrics and
-          // computes too few columns.
-          if (document.fonts && document.fonts.ready) {
-            document.fonts.ready.then(function() {
-              state.terminalViewportSize = { width: 0, height: 0 };
-              ensureTerminalFit();
-            });
+          var viewport = getTerminalViewport();
+          if (viewport) {
+            state.terminalViewportScrollHandler = function() {
+              if (isTerminalNearBottom()) {
+                state.terminalAutoFollow = true;
+                clearTerminalScrollIdleTimer();
+                updateTerminalJumpToBottomButton();
+                return;
+              }
+              setTerminalManualScrollActive();
+            };
+            state.terminalViewportTouchHandler = function() {
+              setTerminalManualScrollActive();
+            };
+            viewport.addEventListener("scroll", state.terminalViewportScrollHandler, { passive: true });
+            viewport.addEventListener("touchmove", state.terminalViewportTouchHandler, { passive: true });
           }
-          // Safety-net fit after layout has fully stabilised (CSS transitions,
-          // deferred reflows, late font loads, etc.)
-          setTimeout(function() {
-            if (state.terminal && state.fitAddon) {
-              state.terminalViewportSize = { width: 0, height: 0 };
-              ensureTerminalFit();
+
+          state.terminalWheelHandler = function(e) {
+            if (!isTerminalNearBottom() || e.deltaY < 0) {
+              setTerminalManualScrollActive();
             }
-          }, 500);
-        }
+            e.stopPropagation();
+          };
+          container.addEventListener("wheel", state.terminalWheelHandler, { passive: true });
 
-        var viewport = getTerminalViewport();
-        if (viewport) {
-          state.terminalViewportScrollHandler = function() {
-            if (isTerminalNearBottom()) {
-              state.terminalAutoFollow = true;
-              clearTerminalScrollIdleTimer();
-              updateTerminalJumpToBottomButton();
-              return;
+          initTerminalScrollbar(container);
+
+          if (state.selectedId) {
+            var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+            if (session) {
+              syncTerminalBuffer(session.id, session.output || "", { mode: "append", scroll: false });
             }
-            setTerminalManualScrollActive();
-          };
-          state.terminalViewportTouchHandler = function() {
-            setTerminalManualScrollActive();
-          };
-          viewport.addEventListener("scroll", state.terminalViewportScrollHandler, { passive: true });
-          viewport.addEventListener("touchmove", state.terminalViewportTouchHandler, { passive: true });
-        }
-
-        container.addEventListener('wheel', function(e) {
-          if (!isTerminalNearBottom() || e.deltaY < 0) {
-            setTerminalManualScrollActive();
+          } else {
+            term.write("点击上方「新对话」开始你的第一次对话。\r\n");
           }
-          e.stopPropagation();
-        }, { passive: true });
 
-        // Create custom scrollbar overlay
-        initTerminalScrollbar(container);
-
-        // Terminal copy button for mobile
-        initMobileDomTerminal(container);
-
-        if (state.selectedId) {
-          var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-          if (session) {
-            syncTerminalBuffer(session.id, session.output || "", { mode: "append", scroll: false });
-          }
-        } else {
-          state.terminal.writeln("点击上方「新对话」开始你的第一次对话。");
-        }
-
-        state.terminal.onData(function(data) {
-          if (state.terminalInteractive) return;
-          queueDirectInput(data);
+          state.terminalClickHandler = focusInputBox;
+          container.addEventListener("click", state.terminalClickHandler);
+          updateTerminalJumpToBottomButton();
+          initTerminalResizeHandle();
+          observeTerminalResize();
+        }).catch(function(err) {
+          state.terminalInitializing = false;
+          console.error("[wand] wterm init failed:", err);
         });
-
-        container.addEventListener("click", focusInputBox);
-        updateTerminalJumpToBottomButton();
-
-        // 初始化拖动调整大小
-        initTerminalResizeHandle();
-
-        observeTerminalResize();
       }
 
       function login() {
@@ -5435,10 +5309,8 @@
           initTerminal();
         }
         if (state.terminal && terminalContainer && !terminalContainer.contains(state.terminal.element)) {
-          state.terminal.open(terminalContainer);
-          applyTerminalScale();
-          state.terminalViewportSize = { width: 0, height: 0 };
-          scheduleTerminalResize();
+          teardownTerminal();
+          initTerminal();
         }
 
         if (selectedSession && state.terminal) {
@@ -7728,9 +7600,6 @@
 
         if (!structured) {
           if (!state.terminal) initTerminal();
-          if (state.terminal && state.fitAddon) {
-            ensureTerminalFit();
-          }
         }
         applyCurrentView();
         focusInputBox();
@@ -8092,7 +7961,6 @@
           return postInput(input, shortcutKey, viewOverride).finally(function() {
             var idx = state.messageQueue.indexOf(input);
             if (idx > -1) state.messageQueue.splice(idx, 1);
-            scheduleMobileDomUpdate();
           });
         });
         return state.inputQueue;
@@ -9068,7 +8936,7 @@
         setTimeout(function() {
           window.scrollTo(0, 0);
           // On mobile, force terminal refit + scroll after keyboard dismissal.
-          // The container height restores but xterm needs an explicit refit to
+          // The container height restores but terminal needs time to
           // fill the expanded space, and the scroll position needs resetting.
           if (isTouchDevice()) {
             ensureTerminalFit();
@@ -9737,9 +9605,8 @@
         if (!output) return;
         output.setAttribute("tabindex", "0");
         output.focus();
-        var terminalTextarea = output.querySelector(".xterm-helper-textarea");
-        if (terminalTextarea && typeof terminalTextarea.focus === "function") {
-          terminalTextarea.focus();
+        if (state.terminal && state.terminal.focus) {
+          state.terminal.focus();
         }
       }
 
@@ -9905,11 +9772,6 @@
       function observeTerminalResize() {
         var output = document.getElementById("output");
         if (!output) return;
-
-        if (typeof ResizeObserver === "function") {
-          state.resizeObserver = new ResizeObserver(function() { scheduleTerminalResize(true); });
-          state.resizeObserver.observe(output);
-        }
         var lastKnownDesktop = !isMobileLayout();
         state.resizeHandler = function() {
           scheduleTerminalResize(true);
@@ -9961,6 +9823,7 @@
           }
         });
         clearTerminalScrollIdleTimer();
+        var output = document.getElementById("output");
         if (state.terminalViewportEl) {
           if (state.terminalViewportScrollHandler) {
             state.terminalViewportEl.removeEventListener("scroll", state.terminalViewportScrollHandler);
@@ -9969,27 +9832,30 @@
             state.terminalViewportEl.removeEventListener("touchmove", state.terminalViewportTouchHandler);
           }
         }
+        if (output) {
+          if (state.terminalWheelHandler) {
+            output.removeEventListener("wheel", state.terminalWheelHandler);
+          }
+          if (state.terminalClickHandler) {
+            output.removeEventListener("click", state.terminalClickHandler);
+          }
+        }
         state.terminalViewportEl = null;
         state.terminalViewportScrollHandler = null;
         state.terminalViewportTouchHandler = null;
+        state.terminalWheelHandler = null;
+        state.terminalClickHandler = null;
+        if (state.terminalScrollbarEl && state.terminalScrollbarEl.parentNode) {
+          state.terminalScrollbarEl.parentNode.removeChild(state.terminalScrollbarEl);
+        }
+        state.terminalScrollbarEl = null;
+        state.terminalScrollbarThumbEl = null;
         if (state.terminal) {
-          state.terminal.dispose();
+          state.terminal.destroy();
           state.terminal = null;
-        }
-        state.fitAddon = null;
-        state.serializeAddon = null;
-        if (state.terminalDomView && state.terminalDomView.parentNode) {
-          state.terminalDomView.parentNode.removeChild(state.terminalDomView);
-        }
-        state.terminalDomView = null;
-        state._lastDomHtml = "";
-        if (state.terminalDomUpdateTimer) {
-          clearTimeout(state.terminalDomUpdateTimer);
-          state.terminalDomUpdateTimer = null;
         }
         state.terminalSessionId = null;
         state.terminalOutput = "";
-        state.terminalViewportSize = { width: 0, height: 0 };
         state.terminalAutoFollow = true;
         state.showTerminalJumpToBottom = false;
         updateTerminalJumpToBottomButton();
@@ -10012,39 +9878,9 @@
       }
 
       function ensureTerminalFit() {
-        if (state.terminalFitInProgress) return;
-        state.terminalFitInProgress = true;
-        var maxAttempts = 20;
-        var attempt = 0;
-        function finishFit() {
-          state.terminalFitInProgress = false;
-        }
-        function tryFit() {
-          attempt++;
-          state.terminalViewportSize = { width: 0, height: 0 };
-          if (shouldResizeTerminalViewport() && state.fitAddon) {
-            state.fitAddon.fit();
-            maybeScrollTerminalToBottom("resize");
-            if (state.terminal) {
-              sendTerminalResize(state.terminal.cols, state.terminal.rows);
-            }
-            var output = document.getElementById("output");
-            if (output && state.terminal) {
-              var containerW = output.getBoundingClientRect().width;
-              var expectedMinCols = Math.floor(containerW / 20);
-              if (state.terminal.cols < expectedMinCols && attempt < maxAttempts) {
-                requestAnimationFrame(tryFit);
-                return;
-              }
-            }
-            finishFit();
-          } else if (attempt < maxAttempts) {
-            requestAnimationFrame(tryFit);
-          } else {
-            finishFit();
-          }
-        }
-        requestAnimationFrame(tryFit);
+        if (!state.terminal) return;
+        maybeScrollTerminalToBottom("resize");
+        sendTerminalResize(state.terminal.cols, state.terminal.rows);
       }
 
       function scheduleTerminalResize(immediate) {
@@ -10060,16 +9896,11 @@
       }
 
       function syncTerminalSize() {
-        var output = document.getElementById("output");
-        if (!state.terminal || !state.fitAddon || !output) return;
-        if (!shouldResizeTerminalViewport()) return;
-
+        if (!state.terminal) return;
         var shouldFollow = state.terminalAutoFollow || isTerminalNearBottom();
-        state.fitAddon.fit();
         if (shouldFollow) {
           maybeScrollTerminalToBottom("resize");
         }
-
         sendTerminalResize(state.terminal.cols, state.terminal.rows);
       }
 
@@ -10115,9 +9946,8 @@
             flushPendingMessages();
             // Re-fit terminal on reconnect — the viewport may have changed
             // while disconnected, and the PTY needs up-to-date dimensions.
-            if (state.terminal && state.fitAddon) {
-              state.terminalViewportSize = { width: 0, height: 0 };
-              ensureTerminalFit();
+            if (state.terminal) {
+              sendTerminalResize(state.terminal.cols, state.terminal.rows);
             }
           };
 
@@ -10216,8 +10046,7 @@
             // Real-time terminal output
             if (msg.sessionId === state.selectedId && state.terminal && msg.data) {
               if (msg.data.chunk && (!state.terminalSessionId || state.terminalSessionId === msg.sessionId)) {
-                // Fast path: write chunk directly to avoid full-output comparison
-                // which can trigger terminal.reset() and cause screen flicker.
+                // Fast path: write chunk directly to avoid full-output comparison.
                 state.terminalLiveStreamSessions[msg.sessionId] = true;
                 state.terminal.write(msg.data.chunk);
                 state.terminalSessionId = msg.sessionId;
@@ -10228,9 +10057,8 @@
                 }
                 maybeScrollTerminalToBottom("output");
                 updateTerminalJumpToBottomButton();
-                scheduleMobileDomUpdate();
               } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
-                // Fallback: no chunk available, use full-output comparison (only in full mode)
+                // Fallback: no chunk available, use full-output comparison.
                 syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
               }
             }
@@ -10697,7 +10525,6 @@
         }
         updateTerminalJumpToBottomButton();
         if (state.currentView === "terminal") {
-          state.terminalViewportSize = { width: 0, height: 0 };
           scheduleTerminalResize(true);
         }
       }
@@ -11404,161 +11231,6 @@
       })();
 
       // ===== Terminal copy button for mobile =====
-      // ===== Mobile DOM terminal view =====
-      function initMobileDomTerminal(container) {
-        // DOM terminal feature removed — always return
-        return;
-
-        // Create DOM view container
-        var domView = document.createElement("div");
-        domView.className = "terminal-dom-view active";
-        container.appendChild(domView);
-
-        // Always set font-size explicitly to match xterm
-        domView.style.fontSize = (state.terminalBaseFontSize * state.terminalScale) + "px";
-
-        // Hide xterm canvas but keep it in layout for FitAddon sizing.
-        // Use opacity:0 + pointer-events:none so the element still occupies
-        // space in the flex container and fit() can compute cols/rows correctly.
-        setTimeout(function() {
-          var xtermEl = container.querySelector(".xterm");
-          if (xtermEl) {
-            xtermEl.style.opacity = "0";
-            xtermEl.style.pointerEvents = "none";
-          }
-        }, 100);
-
-        // Save reference
-        state.terminalDomView = domView;
-        state.terminalDomUpdateTimer = null;
-
-        // Scroll events for auto-follow
-        domView.addEventListener("scroll", function() {
-          var distance = domView.scrollHeight - domView.clientHeight - domView.scrollTop;
-          if (distance <= state.terminalScrollThreshold) {
-            state.terminalAutoFollow = true;
-            clearTerminalScrollIdleTimer();
-            updateTerminalJumpToBottomButton();
-          } else {
-            setTerminalManualScrollActive();
-          }
-        }, { passive: true });
-
-        domView.addEventListener("touchmove", function() {
-          setTerminalManualScrollActive();
-        }, { passive: true });
-
-        // Trigger initial render
-        scheduleMobileDomUpdate();
-      }
-
-      function updateMobileDomView() {
-        if (!state.terminalDomView || !state.serializeAddon) return;
-
-        try {
-          // Serialize the entire buffer including scrollback history
-          var buf = state.terminal.buffer.active;
-          var totalRows = buf.length;
-          var html = state.serializeAddon.serializeAsHTML({
-            includeGlobalBackground: true,
-            range: { start: 0, end: totalRows }
-          });
-
-          // Extract the <pre>...</pre> portion
-          var match = html.match(/<pre[\s\S]*<\/pre>/);
-          var preHtml = match ? match[0] : "";
-
-          // Strip inline font-size/font-family from the serialized HTML
-          // so our CSS controls sizing and font consistently
-          preHtml = preHtml.replace(/font-size:\s*[^;"']+;?/g, "");
-          preHtml = preHtml.replace(/font-family:\s*[^;"']+;?/g, "");
-
-          // Fix colors for dark background
-          preHtml = fixDarkTerminalColors(preHtml);
-
-          // Skip update if content unchanged
-          if (preHtml === state._lastDomHtml) return;
-          state._lastDomHtml = preHtml;
-
-          // Preserve scroll position for non-auto-follow mode
-          var wasAtBottom = state.terminalAutoFollow;
-          var scrollTop = state.terminalDomView.scrollTop;
-
-          state.terminalDomView.innerHTML = preHtml;
-
-          if (wasAtBottom) {
-            state.terminalDomView.scrollTop = state.terminalDomView.scrollHeight;
-          } else {
-            state.terminalDomView.scrollTop = scrollTop;
-          }
-        } catch (e) {
-          // Fallback: plain text if serialize fails
-          if (state.terminal && state.terminal.buffer) {
-            var buf = state.terminal.buffer.active;
-            var lines = [];
-            for (var i = 0; i < buf.length; i++) {
-              var line = buf.getLine(i);
-              if (line) lines.push(line.translateToString(true));
-            }
-            var text = lines.join("\n").replace(/\n+$/, "");
-            state.terminalDomView.innerHTML = '<pre><div style="padding:8px 12px">' + escapeHtml(text) + '</div></pre>';
-            if (state.terminalAutoFollow) {
-              state.terminalDomView.scrollTop = state.terminalDomView.scrollHeight;
-            }
-          }
-        }
-      }
-
-      // Fix serialize addon's color issues on dark terminal background
-      function fixDarkTerminalColors(html) {
-        // Theme reference: bg=#1f1b17, fg=#f5eadc, black=#1f1b17, brightBlack=#625347
-        // 1. Hardcoded inverse: black text on gray → theme fg on theme brightBlack bg
-        html = html.replace(
-          /color:\s*#000000;\s*background-color:\s*#BFBFBF/g,
-          "color: #f5eadc; background-color: #625347"
-        );
-        // 2. Fix foreground colors that are too dark to read on #1f1b17 background.
-        //    Process each style attribute: split into declarations, fix only "color:" (not "background-color:").
-        html = html.replace(/style='([^']*)'/g, function(_match, styles) {
-          var parts = styles.split(";");
-          for (var i = 0; i < parts.length; i++) {
-            var decl = parts[i].trim();
-            // Skip background-color declarations
-            if (/^background-color\s*:/.test(decl)) continue;
-            // Match standalone color declaration
-            if (/^color\s*:/.test(decl)) {
-              var hexMatch = decl.match(/#([0-9a-fA-F]{6})\b/);
-              if (hexMatch && isColorTooDark("#" + hexMatch[1])) {
-                parts[i] = parts[i].replace(/#[0-9a-fA-F]{6}/, "#625347");
-              }
-            }
-          }
-          return "style='" + parts.join(";") + "'";
-        });
-        return html;
-      }
-
-      function isColorTooDark(hex) {
-        // Parse hex color and check relative luminance
-        var r = parseInt(hex.substring(1, 3), 16);
-        var g = parseInt(hex.substring(3, 5), 16);
-        var b = parseInt(hex.substring(5, 7), 16);
-        // Simple perceived brightness: if below threshold, it's too dark for #1f1b17 bg
-        var brightness = (r * 299 + g * 587 + b * 114) / 1000;
-        return brightness < 45; // #1f1b17 has brightness ~22, threshold catches colors close to it
-      }
-
-      function scheduleMobileDomUpdate() {
-        if (!state.terminalDomView) return;
-        // Trailing-edge debounce: reset timer on each call to batch rapid updates
-        if (state.terminalDomUpdateTimer) {
-          clearTimeout(state.terminalDomUpdateTimer);
-        }
-        state.terminalDomUpdateTimer = setTimeout(function() {
-          state.terminalDomUpdateTimer = null;
-          updateMobileDomView();
-        }, 150);
-      }
 
       function isNoiseLine(line) {
         if (!line) return false;
