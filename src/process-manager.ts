@@ -435,12 +435,15 @@ function readClaudeSessionSummary(filePath: string, id: string, cwd: string): Cl
   }
 }
 
+const WORKTREE_DIR_PATTERN = /--?\.?(?:wand-worktrees|claude-worktrees)-/;
+
 /** Scan all ~/.claude/projects/ directories for session JSONL files. */
 function listAllClaudeHistorySessions(): ClaudeHistorySession[] {
   const projectsDir = path.join(os.homedir(), ".claude", "projects");
   try {
     const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory());
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => !WORKTREE_DIR_PATTERN.test(entry.name));
 
     const results: ClaudeHistorySession[] = [];
     for (const dir of projectDirs) {

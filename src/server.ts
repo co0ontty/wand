@@ -19,6 +19,7 @@ import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
 import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { registerUploadRoutes } from "./upload-routes.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
@@ -1007,6 +1008,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode);
   registerClaudeHistoryRoutes(app, processes, storage);
+  registerUploadRoutes(app, processes);
 
   // ── Path suggestion ──
 

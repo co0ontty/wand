@@ -203,6 +203,7 @@
         selectedClaudeHistoryIds: {},
         askUserSelections: {},  // { toolUseId: { 0: [optIdx...], submitted: false } }
         queueEpoch: 0,  // Monotonic counter for queue state freshness
+        pendingAttachments: [],  // [{ file, previewUrl, name, size }]
         // Load last used working directory from localStorage
         workingDir: (function() {
           try {
@@ -1111,12 +1112,21 @@
                   '<span class="session-count" id="session-count">' + String(state.sessions.length) + '</span>' +
                 '</div>' +
                 '<div class="sidebar-header-actions">' +
-                  '<button id="sidebar-home-btn" class="btn btn-ghost btn-sm" type="button" title="回到首页">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>' +
-                  '</button>' +
-                  '<button id="sidebar-refresh-btn" class="btn btn-ghost btn-sm" type="button" title="刷新页面">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>' +
-                  '</button>' +
+                  '<div class="sidebar-header-more">' +
+                    '<button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="更多操作">' +
+                      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>' +
+                    '</button>' +
+                    '<div class="sidebar-header-overflow" id="sidebar-overflow-menu">' +
+                      '<button class="overflow-item" id="sidebar-home-btn" type="button">' +
+                        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>' +
+                        '<span>回到首页</span>' +
+                      '</button>' +
+                      '<button class="overflow-item" id="sidebar-refresh-btn" type="button">' +
+                        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>' +
+                        '<span>刷新页面</span>' +
+                      '</button>' +
+                    '</div>' +
+                  '</div>' +
                   '<button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? ' pinned' : '') + '" type="button" title="' + (state.sidebarPinned ? '取消固定侧栏' : '固定侧栏') + '">' +
                     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg>' +
                   '</button>' +
@@ -1131,15 +1141,21 @@
               '<div class="sidebar-footer">' +
                 '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
                 '<div class="sidebar-footer-actions">' +
-                  '<button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="查看文件">📁 文件</button>' +
+                  '<button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="查看文件">' +
+                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>' +
+                    '<span>文件</span>' +
+                  '</button>' +
                   '<button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="设置">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> 设置' +
+                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' +
+                    '<span>设置</span>' +
                   '</button>' +
                   '<button id="pwa-install-button" class="btn btn-ghost btn-sm hidden" title="安装应用">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 安装' +
+                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
+                    '<span>安装</span>' +
                   '</button>' +
                   '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="退出登录">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> 退出' +
+                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
+                    '<span>退出</span>' +
                   '</button>' +
                 '</div>' +
               '</div>' +
@@ -1231,8 +1247,13 @@
                 '</div>' +
                 '<div class="input-composer">' +
                   '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                  '<div id="attachment-preview" class="attachment-preview hidden"></div>' +
                   '<div class="input-composer-bar">' +
                     '<div class="input-composer-left">' +
+                      '<button id="attach-btn" class="btn-circle btn-circle-attach" type="button" title="附加文件">' +
+                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>' +
+                      '</button>' +
+                      '<input type="file" id="file-upload-input" multiple style="display:none">' +
                       '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
                         renderModeOptions(preferredTool, composerMode) +
                       '</select>' +
@@ -3250,6 +3271,17 @@
         if (closeDrawerBtn) closeDrawerBtn.addEventListener("click", closeSessionsDrawer);
         var pinBtn = document.getElementById("sidebar-pin-btn");
         if (pinBtn) pinBtn.addEventListener("click", toggleSidebarPin);
+        var sidebarMoreBtn = document.getElementById("sidebar-more-btn");
+        var sidebarOverflow = document.getElementById("sidebar-overflow-menu");
+        if (sidebarMoreBtn && sidebarOverflow) {
+          sidebarMoreBtn.addEventListener("click", function(e) {
+            e.stopPropagation();
+            sidebarOverflow.classList.toggle("open");
+          });
+          document.addEventListener("click", function() {
+            sidebarOverflow.classList.remove("open");
+          });
+        }
         var homeBtn = document.getElementById("sidebar-home-btn");
         if (homeBtn) homeBtn.addEventListener("click", function() {
           state.selectedId = null;
@@ -3488,6 +3520,42 @@
             handleInputBoxFocus({ target: inputBox });
           });
           inputBox.addEventListener("blur", handleInputBoxBlur);
+        }
+
+        // Attach button & drag-drop
+        var attachBtn = document.getElementById("attach-btn");
+        var fileInput = document.getElementById("file-upload-input");
+        if (attachBtn && fileInput) {
+          attachBtn.addEventListener("click", function() { fileInput.click(); });
+          fileInput.addEventListener("change", function() {
+            var files = fileInput.files;
+            if (files) {
+              for (var i = 0; i < files.length; i++) addPendingAttachment(files[i]);
+            }
+            fileInput.value = "";
+          });
+        }
+        var composer = document.querySelector(".input-composer");
+        if (composer) {
+          composer.addEventListener("dragover", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            composer.classList.add("drag-over");
+          });
+          composer.addEventListener("dragleave", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            composer.classList.remove("drag-over");
+          });
+          composer.addEventListener("drop", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            composer.classList.remove("drag-over");
+            var files = e.dataTransfer && e.dataTransfer.files;
+            if (files) {
+              for (var i = 0; i < files.length; i++) addPendingAttachment(files[i]);
+            }
+          });
         }
 
         // Terminal interactive toggle (both topbar and terminal-header)
@@ -7106,6 +7174,107 @@
         }
       }
 
+      // ── Attachment helpers ──
+
+      var ATTACH_MAX_SIZE = 10 * 1024 * 1024;
+
+      function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+      }
+
+      function isImageType(type) {
+        return /^image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/.test(type);
+      }
+
+      function addPendingAttachment(file) {
+        if (!file) return;
+        if (file.size > ATTACH_MAX_SIZE) {
+          showToast("文件过大（上限 10 MB）: " + file.name, "error");
+          return;
+        }
+        var entry = { file: file, name: file.name, size: file.size, previewUrl: null };
+        if (isImageType(file.type)) {
+          entry.previewUrl = URL.createObjectURL(file);
+        }
+        state.pendingAttachments.push(entry);
+        renderAttachmentPreview();
+      }
+
+      function removePendingAttachment(index) {
+        var removed = state.pendingAttachments.splice(index, 1);
+        if (removed.length && removed[0].previewUrl) {
+          URL.revokeObjectURL(removed[0].previewUrl);
+        }
+        renderAttachmentPreview();
+      }
+
+      function clearAttachments() {
+        state.pendingAttachments.forEach(function(a) {
+          if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+        });
+        state.pendingAttachments = [];
+        renderAttachmentPreview();
+      }
+
+      function renderAttachmentPreview() {
+        var bar = document.getElementById("attachment-preview");
+        if (!bar) return;
+        var items = state.pendingAttachments;
+        if (items.length === 0) {
+          bar.classList.add("hidden");
+          bar.innerHTML = "";
+          return;
+        }
+        bar.classList.remove("hidden");
+        var html = "";
+        for (var i = 0; i < items.length; i++) {
+          var a = items[i];
+          var thumb = a.previewUrl
+            ? '<img src="' + escapeHtml(a.previewUrl) + '" alt="">'
+            : '<span class="att-icon">📄</span>';
+          html += '<span class="attachment-pill" data-index="' + i + '">' +
+            thumb +
+            '<span class="att-name" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span>' +
+            '<span class="att-size">' + formatFileSize(a.size) + '</span>' +
+            '<button class="att-remove" data-index="' + i + '" title="移除">×</button>' +
+            '</span>';
+        }
+        bar.innerHTML = html;
+        bar.querySelectorAll(".att-remove").forEach(function(btn) {
+          btn.addEventListener("click", function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            removePendingAttachment(parseInt(btn.getAttribute("data-index"), 10));
+          });
+        });
+      }
+
+      function uploadAttachments(sessionId) {
+        if (!state.pendingAttachments.length) return Promise.resolve([]);
+        var formData = new FormData();
+        state.pendingAttachments.forEach(function(a) {
+          formData.append("files", a.file, a.name);
+        });
+        return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/upload", {
+          method: "POST",
+          body: formData,
+          credentials: "same-origin"
+        }).then(function(resp) {
+          if (!resp.ok) return resp.json().then(function(e) { throw new Error(e.error || "上传失败"); });
+          return resp.json();
+        }).then(function(data) {
+          return data.files || [];
+        });
+      }
+
+      function buildAttachmentPrefix(uploadedFiles) {
+        if (!uploadedFiles || !uploadedFiles.length) return "";
+        var paths = uploadedFiles.map(function(f) { return f.savedPath; });
+        return "[附件已上传，请查看以下文件:\n" + paths.join("\n") + "]\n\n";
+      }
+
       function handleInteractiveTextInput(inputBox) {
         if (!state.terminalInteractive || !inputBox) return false;
         var value = inputBox.value || "";
@@ -7118,6 +7287,17 @@
       }
 
       function handleInputPaste(event) {
+        var items = event.clipboardData && event.clipboardData.items;
+        if (items && !state.terminalInteractive) {
+          for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf("image/") === 0) {
+              event.preventDefault();
+              var file = items[i].getAsFile();
+              if (file) addPendingAttachment(file);
+              return;
+            }
+          }
+        }
         var pasted = event.clipboardData && event.clipboardData.getData("text");
         if (!pasted) return;
         event.preventDefault();
@@ -7615,7 +7795,9 @@
         var inputBox = document.getElementById("input-box");
         var value = inputBox ? inputBox.value : "";
         var selectedSession = getSelectedSession();
-        if (value) {
+        var hasAttachments = state.pendingAttachments.length > 0;
+
+        if (value || hasAttachments) {
           console.log("[WAND] sendInputFromBox", {
             sessionId: state.selectedId,
             sessionStatus: selectedSession ? selectedSession.status : null,
@@ -7625,50 +7807,62 @@
             view: state.currentView,
             wsConnected: state.wsConnected,
             terminalInteractive: state.terminalInteractive,
-            inputLength: value.length
+            inputLength: value.length,
+            attachments: state.pendingAttachments.length
           });
-          // Clear todo progress bar at the start of a new user turn
-          var todoEl = document.getElementById("todo-progress");
-          if (todoEl) todoEl.classList.add("hidden");
 
-          if (isStructuredSession(selectedSession)) {
-            return postStructuredInput(value, inputBox, selectedSession);
-          }
+          var attachUpload = hasAttachments && state.selectedId
+            ? uploadAttachments(state.selectedId)
+            : Promise.resolve([]);
 
-          var submitChunks = getTerminalSubmitChunks(selectedSession, value);
-          var isOffline = !state.wsConnected;
+          return attachUpload.then(function(uploadedFiles) {
+            var prefix = buildAttachmentPrefix(uploadedFiles);
+            var finalValue = prefix + (value || (uploadedFiles.length ? "请查看附件。" : ""));
+            if (uploadedFiles.length) clearAttachments();
 
-          if (isOffline) {
-            // Offline: queue for flush on reconnect, clear input immediately
-            queueOfflineTerminalChunks(submitChunks);
-            if (inputBox) {
-              inputBox.value = "";
-              autoResizeInput(inputBox);
+            // Clear todo progress bar at the start of a new user turn
+            var todoEl = document.getElementById("todo-progress");
+            if (todoEl) todoEl.classList.add("hidden");
+
+            if (isStructuredSession(selectedSession)) {
+              return postStructuredInput(finalValue, inputBox, selectedSession);
             }
-            setDraftValue("");
-            return Promise.resolve();
-          }
 
-          // Online: send via queue, only clear on success
-          return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
-            if (!readySession) {
-              showToast("会话未就绪，将稍后重试。", "info");
-              return null;
-            }
-            var submitView = state.currentView;
-            if (readySession && readySession.provider === "codex" && state.selectedId !== readySession.id) {
-              throw new Error("Codex session changed before input send.");
-            }
-            return sendTerminalChunks(submitChunks, "enter_text", 30, submitView).then(function() {
-              // Clear input only after the send succeeds
-              if (inputBox && inputBox.value === value) {
+            var submitChunks = getTerminalSubmitChunks(selectedSession, finalValue);
+            var isOffline = !state.wsConnected;
+
+            if (isOffline) {
+              queueOfflineTerminalChunks(submitChunks);
+              if (inputBox) {
                 inputBox.value = "";
                 autoResizeInput(inputBox);
               }
               setDraftValue("");
+              return Promise.resolve();
+            }
+
+            return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
+              if (!readySession) {
+                showToast("会话未就绪，将稍后重试。", "info");
+                return null;
+              }
+              var submitView = state.currentView;
+              if (readySession && readySession.provider === "codex" && state.selectedId !== readySession.id) {
+                throw new Error("Codex session changed before input send.");
+              }
+              return sendTerminalChunks(submitChunks, "enter_text", 30, submitView).then(function() {
+                if (inputBox && inputBox.value === value) {
+                  inputBox.value = "";
+                  autoResizeInput(inputBox);
+                }
+                setDraftValue("");
+              });
+            }).catch(function(err) {
+              showToast(getInputErrorMessage(err), "error");
+              throw err;
             });
           }).catch(function(err) {
-            showToast(getInputErrorMessage(err), "error");
+            showToast("附件上传失败: " + (err.message || err), "error");
             throw err;
           });
         }

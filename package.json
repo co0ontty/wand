@@ -35,9 +35,11 @@
   "dependencies": {
     "@types/compression": "^1.8.1",
     "@types/cookie": "^0.6.0",
+    "@types/multer": "^2.1.0",
     "@wterm/dom": "^0.1.8",
     "compression": "^1.8.1",
     "express": "^4.21.2",
+    "multer": "^2.1.1",
     "node-pty": "^1.1.0",
     "puppeteer": "^24.40.0",
     "ws": "^8.19.0"
