@@ -74,6 +74,9 @@
         terminalSessionId: null,
         terminalOutput: "",
         terminalLiveStreamSessions: {},
+        lastChunkAt: 0,
+        terminalHealthTimer: null,
+        lastTerminalResyncAt: 0,
         terminalAutoFollow: true,
         terminalScrollIdleTimer: null,
         terminalScrollIdleMs: 1800,
@@ -4639,6 +4642,7 @@
           updateTerminalJumpToBottomButton();
           initTerminalResizeHandle();
           observeTerminalResize();
+          startTerminalHealthCheck();
         }).catch(function(err) {
           state.terminalInitializing = false;
           console.error("[wand] wterm init failed:", err);
@@ -5437,6 +5441,15 @@
             }
             updateSessionSnapshot(data);
             updateShellChrome();
+
+            if (state.terminal && id === state.selectedId && data.output !== undefined) {
+              syncTerminalBuffer(id, data.output, { mode: "append" });
+              if (state.terminal.remeasure) {
+                requestAnimationFrame(function() {
+                  if (state.terminal) state.terminal.remeasure();
+                });
+              }
+            }
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
               state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, data.output, false));
@@ -7782,7 +7795,7 @@
           if (!state.terminal) initTerminal();
         }
         applyCurrentView();
-        focusInputBox();
+        focusInputBox(true);
       }
 
 
@@ -9991,7 +10004,36 @@
         requestAnimationFrame(function() { scheduleTerminalResize(true); });
       }
 
+      function startTerminalHealthCheck() {
+        if (state.terminalHealthTimer) return;
+        state.terminalHealthTimer = setInterval(function() {
+          if (!state.terminal || state.currentView !== "terminal" || document.hidden) return;
+          var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+          if (!selectedSession || selectedSession.sessionKind === "structured") return;
+          // Lightweight remeasure every 5s
+          if (state.terminal.remeasure) state.terminal.remeasure();
+          // Full re-sync every 30s during output pauses
+          var now = Date.now();
+          var chunkPause = state.lastChunkAt > 0 && (now - state.lastChunkAt > 300);
+          var resyncDue = (now - state.lastTerminalResyncAt) > 30000;
+          if (resyncDue && (chunkPause || selectedSession.status !== "running") && state.terminalOutput) {
+            state.lastTerminalResyncAt = now;
+            state.terminal.reset();
+            state.terminal.write(state.terminalOutput);
+            maybeScrollTerminalToBottom("output");
+          }
+        }, 5000);
+      }
+
+      function stopTerminalHealthCheck() {
+        if (state.terminalHealthTimer) {
+          clearInterval(state.terminalHealthTimer);
+          state.terminalHealthTimer = null;
+        }
+      }
+
       function teardownTerminal() {
+        stopTerminalHealthCheck();
         if (state.resizeTimer) {
           clearTimeout(state.resizeTimer);
           state.resizeTimer = null;
@@ -10255,6 +10297,7 @@
             if (msg.sessionId === state.selectedId && state.terminal && msg.data) {
               if (msg.data.chunk && (!state.terminalSessionId || state.terminalSessionId === msg.sessionId)) {
                 // Fast path: write chunk directly to avoid full-output comparison.
+                state.lastChunkAt = Date.now();
                 state.terminalLiveStreamSessions[msg.sessionId] = true;
                 state.terminal.write(msg.data.chunk);
                 state.terminalSessionId = msg.sessionId;
@@ -10391,6 +10434,11 @@
               updateTerminalOutput(msg.data.output || "", msg.sessionId, "append");
               // Ensure terminal is properly fitted after receiving initial data
               scheduleTerminalResize(true);
+              if (state.terminal && state.terminal.remeasure) {
+                requestAnimationFrame(function() {
+                  if (state.terminal) state.terminal.remeasure();
+                });
+              }
             }
             break;
           case 'usage':
@@ -10734,6 +10782,11 @@
         updateTerminalJumpToBottomButton();
         if (state.currentView === "terminal") {
           scheduleTerminalResize(true);
+          if (state.terminal && state.terminal.remeasure) {
+            requestAnimationFrame(function() {
+              if (state.terminal) state.terminal.remeasure();
+            });
+          }
         }
       }
 
