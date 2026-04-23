@@ -10221,8 +10221,22 @@
                 snapshot.messages = msg.data.messages;
               }
 
-              // Only update if we have meaningful data
-              if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined) {
+              // Fast path: chunk-only incremental events skip expensive chat update
+              var isChunkOnly = isIncremental && msg.data.chunk
+                && !msg.data.lastMessage && !snapshot.messages
+                && snapshot.output === undefined
+                && !msg.data.structuredState && !msg.data.sessionKind;
+
+              if (isChunkOnly) {
+                // Only update permissionBlocked if it actually changed
+                if (msg.data.permissionBlocked !== undefined) {
+                  var existingPB = state.sessions.find(function(s) { return s.id === msg.sessionId; });
+                  if (existingPB && !!existingPB.permissionBlocked !== !!msg.data.permissionBlocked) {
+                    updateSessionSnapshot(snapshot);
+                    if (msg.sessionId === state.selectedId) updateTaskDisplay();
+                  }
+                }
+              } else if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined) {
                 updateSessionSnapshot(snapshot);
                 if (msg.sessionId === state.selectedId) {
                   var updatedSession = state.sessions.find(function(s) { return s.id === msg.sessionId; }) || snapshot;
@@ -10247,7 +10261,7 @@
                 if (msg.data.output) {
                   state.terminalOutput = normalizeTerminalOutput(msg.data.output);
                 } else {
-                  state.terminalOutput = normalizeTerminalOutput((state.terminalOutput || "") + msg.data.chunk);
+                  state.terminalOutput = (state.terminalOutput || "") + normalizeTerminalOutput(msg.data.chunk);
                 }
                 maybeScrollTerminalToBottom("output");
                 updateTerminalJumpToBottomButton();
@@ -10745,13 +10759,15 @@
         if (chatRenderTimer) clearTimeout(chatRenderTimer);
         if (immediate) {
           chatRenderTimer = null;
-          // Messages already updated in handleWebSocketMessage, just render
           renderChat();
           return;
         }
+        var selectedForDelay = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var isActiveStream = selectedForDelay && selectedForDelay.status === "running"
+          && selectedForDelay.sessionKind !== "structured";
+        var delay = isActiveStream ? 150 : 30;
         chatRenderTimer = setTimeout(function() {
           chatRenderTimer = null;
-          // Re-parse messages from the latest session output (fallback for edge cases)
           var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (selectedSession) {
               state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, selectedSession.output, true));

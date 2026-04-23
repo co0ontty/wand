@@ -176,12 +176,18 @@ export class WsBroadcastManager {
       return;
     }
     client.sendInProgress = true;
-    const message = client.sendQueue.shift()!;
-    client.ws.send(message, (err) => {
-      client.sendInProgress = false;
-      if (err) return;
-      this.processWsQueue(client);
-    });
+    const batch = client.sendQueue.splice(0, Math.min(8, client.sendQueue.length));
+    let pending = batch.length;
+    for (const msg of batch) {
+      client.ws.send(msg, (err) => {
+        if (--pending === 0) {
+          client.sendInProgress = false;
+          if (!err && client.sendQueue.length > 0) {
+            setImmediate(() => this.processWsQueue(client));
+          }
+        }
+      });
+    }
   }
 
   private readSessionCookie(req: { headers: { cookie?: string } }): string | undefined {

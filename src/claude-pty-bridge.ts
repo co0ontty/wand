@@ -158,6 +158,10 @@ export class ClaudePtyBridge extends EventEmitter {
   private rememberedScopes: Set<EscalationScope> = new Set();
   private rememberedTargets: Set<string> = new Set();
 
+  // Chat event throttle
+  private lastChatEmitAt: number = 0;
+  private chatEmitTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Idle probe state (last-resort robustness)
   private lastOutputAt: number;
   private lastUserInputAt: number;
@@ -311,6 +315,12 @@ export class ClaudePtyBridge extends EventEmitter {
     if (this.taskDebounceTimer) {
       clearTimeout(this.taskDebounceTimer);
       this.taskDebounceTimer = null;
+    }
+
+    // Flush pending chat emit
+    if (this.chatEmitTimer) {
+      clearTimeout(this.chatEmitTimer);
+      this.chatEmitTimer = null;
     }
 
     // Clear permission state — prevents stale blocked state after exit
@@ -901,6 +911,8 @@ export class ClaudePtyBridge extends EventEmitter {
     return false;
   }
 
+  private static readonly CHAT_THROTTLE_MS = 80;
+
   private updateAssistantContent(): void {
     const idx = this.chatState.assistantIndex;
     if (idx === null) return;
@@ -909,6 +921,28 @@ export class ClaudePtyBridge extends EventEmitter {
     if (text) {
       this.messages[idx].content = [{ type: "text", text }];
     }
+
+    const now = Date.now();
+    if (now - this.lastChatEmitAt < ClaudePtyBridge.CHAT_THROTTLE_MS) {
+      if (!this.chatEmitTimer) {
+        this.chatEmitTimer = setTimeout(() => {
+          this.chatEmitTimer = null;
+          this.lastChatEmitAt = Date.now();
+          this.emitEvent({
+            type: "output.chat",
+            sessionId: this.sessionId,
+            timestamp: Date.now(),
+            data: {
+              messages: this.messages,
+              streamingIndex: this.chatState.assistantIndex,
+              isResponding: true,
+            } as ChatOutputData,
+          });
+        }, ClaudePtyBridge.CHAT_THROTTLE_MS);
+      }
+      return;
+    }
+    this.lastChatEmitAt = now;
 
     this.emitEvent({
       type: "output.chat",

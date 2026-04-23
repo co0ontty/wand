@@ -1715,9 +1715,21 @@ export class ProcessManager extends EventEmitter {
    */
   private handleBridgeEvent(record: SessionRecord, event: SessionEvent): void {
     switch (event.type) {
-      case "output.raw":
+      case "output.raw": {
+        record.output = record.ptyBridge?.getRawOutput() ?? record.output;
+        this.emitEvent({
+          type: "output",
+          sessionId: event.sessionId,
+          data: {
+            incremental: true,
+            chunk: (event.data as { chunk: string }).chunk,
+            permissionBlocked: this.isPermissionBlocked(record),
+          },
+        });
+        break;
+      }
+
       case "output.chat": {
-        // Sync record.output from bridge before emitting so the event carries fresh data
         record.output = record.ptyBridge?.getRawOutput() ?? record.output;
         const rawMessages = record.ptyBridge?.getMessages() ?? [];
         const isStreaming = record.status === "running";
@@ -1727,20 +1739,14 @@ export class ProcessManager extends EventEmitter {
         };
 
         if (isStreaming && rawMessages.length > 0) {
-          // Incremental mode: send only chunk + last (streaming) turn
           data.incremental = true;
           const lastTurn = rawMessages[rawMessages.length - 1];
           const truncatedLast = truncateMessagesForTransport([lastTurn], this.config.cardDefaults ?? {}, 0);
           data.lastMessage = truncatedLast[0];
           data.messageCount = rawMessages.length;
         } else {
-          // Full mode: non-streaming or empty messages
           data.output = record.output;
           data.messages = truncateMessagesForTransport(rawMessages, this.config.cardDefaults ?? {}, rawMessages.length - 1);
-        }
-
-        if (event.type === "output.raw") {
-          data.chunk = (event.data as { chunk: string }).chunk;
         }
         this.emitEvent({
           type: "output",
