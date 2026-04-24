@@ -83,12 +83,25 @@ async function checkNpmLatestVersion(forceRefresh = false): Promise<{ current: s
 }
 
 function compareSemver(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
+  const parse = (v: string) => {
+    const [main, ...rest] = v.split("-");
+    const pre = rest.join("-");
+    const mainParts = main.split(".").map((n) => Number(n) || 0);
+    return { mainParts, pre };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
   for (let i = 0; i < 3; i++) {
-    const diff = (pa[i] || 0) - (pb[i] || 0);
+    const diff = (pa.mainParts[i] || 0) - (pb.mainParts[i] || 0);
     if (diff !== 0) return diff;
   }
+  // Main version equal — apply semver prerelease rule: no prerelease > with prerelease.
+  if (!pa.pre && pb.pre) return 1;
+  if (pa.pre && !pb.pre) return -1;
+  if (!pa.pre && !pb.pre) return 0;
+  // Both have prerelease: lexical compare handles debug.MMDDHHMM ordering.
+  if (pa.pre < pb.pre) return -1;
+  if (pa.pre > pb.pre) return 1;
   return 0;
 }
 

@@ -23,6 +23,7 @@ import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.SslErrorHandler;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -74,6 +75,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String CHANNEL_ID_PREFIX_LEGACY = "wand_notif_";
     private static final String CHANNEL_ID_LEGACY = "wand_notifications";
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
+    private static final int FILE_CHOOSER_REQUEST = 1002;
     private static final int NOTIFICATION_ID_BASE = 2000;
     private static final long PROGRESS_UPDATE_DEBOUNCE_MS = 500;
 
@@ -95,6 +97,7 @@ public class MainActivity extends AppCompatActivity {
     private final Map<String, Long> progressUpdateTimestamps = new HashMap<>();
     private final Map<String, Runnable> pendingProgressUpdates = new HashMap<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private ValueCallback<Uri[]> pendingFileChooserCallback;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -137,6 +140,8 @@ public class MainActivity extends AppCompatActivity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        settings.setAllowFileAccess(true);
+        settings.setAllowContentAccess(true);
 
         // Dynamic version in User-Agent
         String versionName = "1.0";
@@ -189,7 +194,50 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> filePathCallback,
+                                             FileChooserParams fileChooserParams) {
+                if (pendingFileChooserCallback != null) {
+                    pendingFileChooserCallback.onReceiveValue(null);
+                }
+                pendingFileChooserCallback = filePathCallback;
+
+                Intent contentIntent = new Intent(Intent.ACTION_GET_CONTENT);
+                contentIntent.addCategory(Intent.CATEGORY_OPENABLE);
+                contentIntent.setType("*/*");
+
+                String[] acceptTypes = fileChooserParams.getAcceptTypes();
+                List<String> mimeTypes = new ArrayList<>();
+                if (acceptTypes != null) {
+                    for (String t : acceptTypes) {
+                        if (t != null && !t.trim().isEmpty()) mimeTypes.add(t.trim());
+                    }
+                }
+                if (!mimeTypes.isEmpty()) {
+                    contentIntent.putExtra(Intent.EXTRA_MIME_TYPES,
+                            mimeTypes.toArray(new String[0]));
+                }
+                if (fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                    contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                }
+
+                Intent chooser = Intent.createChooser(contentIntent,
+                        fileChooserParams.getTitle() != null
+                                ? fileChooserParams.getTitle().toString()
+                                : "选择文件");
+                try {
+                    startActivityForResult(chooser, FILE_CHOOSER_REQUEST);
+                } catch (Exception e) {
+                    pendingFileChooserCallback = null;
+                    filePathCallback.onReceiveValue(null);
+                    Toast.makeText(MainActivity.this, "未找到可用的文件选择器",
+                            Toast.LENGTH_SHORT).show();
+                    return false;
+                }
+                return true;
+            }
+        });
 
         // Register JS bridge for native notifications
         webView.addJavascriptInterface(new NotificationBridge(), "WandNative");
@@ -366,7 +414,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void downloadUpdate(String url, String fileName, String source) {
-            runOnUiThread(() -> downloadAndInstall(url, fileName, source));
+            runOnUiThread(() -> downloadAndInstall(url, fileName, source, null));
         }
 
         @JavascriptInterface
@@ -640,6 +688,30 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != FILE_CHOOSER_REQUEST) return;
+
+        ValueCallback<Uri[]> cb = pendingFileChooserCallback;
+        pendingFileChooserCallback = null;
+        if (cb == null) return;
+
+        Uri[] results = null;
+        if (resultCode == RESULT_OK && data != null) {
+            if (data.getClipData() != null) {
+                int count = data.getClipData().getItemCount();
+                results = new Uri[count];
+                for (int i = 0; i < count; i++) {
+                    results[i] = data.getClipData().getItemAt(i).getUri();
+                }
+            } else if (data.getData() != null) {
+                results = new Uri[]{data.getData()};
+            }
+        }
+        cb.onReceiveValue(results);
+    }
+
+    @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
@@ -703,9 +775,9 @@ public class MainActivity extends AppCompatActivity {
 
                 if (latestVersion.isEmpty() || downloadUrl.isEmpty()) return;
 
-                // Check if user skipped this version
                 ServerStore store = new ServerStore(MainActivity.this);
                 if (latestVersion.equals(store.getSkippedVersion())) return;
+                if (latestVersion.equals(store.getDownloadedApkVersion())) return;
 
                 runOnUiThread(() -> {
                     new NotificationBridge().sendNotification(
@@ -731,7 +803,7 @@ public class MainActivity extends AppCompatActivity {
                 .setTitle(R.string.update_title)
                 .setMessage("当前版本: " + currentVer + "\n最新版本: " + latestVer + sizeText + sourceText)
                 .setPositiveButton(R.string.update_now, (dialog, which) ->
-                        downloadAndInstall(downloadUrl, fileName, source))
+                        downloadAndInstall(downloadUrl, fileName, source, latestVer))
                 .setNegativeButton(R.string.remind_later, null)
                 .setNeutralButton(R.string.skip_version, (dialog, which) ->
                         new ServerStore(this).setSkippedVersion(latestVer))
@@ -740,7 +812,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @SuppressWarnings("deprecation")
-    private void downloadAndInstall(String downloadUrl, String fileName, String source) {
+    private void downloadAndInstall(String downloadUrl, String fileName, String source, String latestVersion) {
         if (downloadUrl == null || downloadUrl.isEmpty()) {
             Toast.makeText(this, "下载地址为空", Toast.LENGTH_LONG).show();
             return;
@@ -820,6 +892,10 @@ public class MainActivity extends AppCompatActivity {
 
                 if (!outputFile.exists() || outputFile.length() == 0) {
                     throw new Exception("下载文件为空");
+                }
+
+                if (latestVersion != null) {
+                    new ServerStore(MainActivity.this).setDownloadedApkVersion(latestVersion);
                 }
 
                 runOnUiThread(() -> {

@@ -81,6 +81,14 @@ public class ServerStore {
         prefs.edit().putString("skipped_apk_version", version).apply();
     }
 
+    public String getDownloadedApkVersion() {
+        return prefs.getString("downloaded_apk_version", "");
+    }
+
+    public void setDownloadedApkVersion(String version) {
+        prefs.edit().putString("downloaded_apk_version", version).apply();
+    }
+
     public String getAppToken() {
         return prefs.getString(KEY_APP_TOKEN, "");
     }
