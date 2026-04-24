@@ -3656,7 +3656,16 @@
         if (scaleDownBtn) scaleDownBtn.addEventListener("click", function() { adjustTerminalScale(-0.25); });
         if (scaleUpBtn) scaleUpBtn.addEventListener("click", function() { adjustTerminalScale(0.25); });
         var pageRefreshBtn = document.getElementById("page-refresh-btn");
-        if (pageRefreshBtn) pageRefreshBtn.addEventListener("click", function() { location.reload(); });
+        if (pageRefreshBtn) pageRefreshBtn.addEventListener("click", function(ev) {
+          // Soft refresh: replay terminal buffer + rebuild chat view.
+          // Fixes residual DOM from CSI cursor-jump sequences without losing page state.
+          // Hold Shift to force a full page reload as an escape hatch.
+          if (ev && ev.shiftKey) {
+            location.reload();
+            return;
+          }
+          softRefreshCurrentView();
+        });
         var jumpBottomBtn = document.getElementById("terminal-jump-bottom");
         if (jumpBottomBtn) jumpBottomBtn.addEventListener("click", function() {
           maybeScrollTerminalToBottom("force");
@@ -4517,6 +4526,38 @@
         state.terminal.reset();
       }
 
+      // Soft resync terminal: reset WASM grid and replay full output buffer.
+      // Clears any stale DOM rows left over from CSI cursor-jump sequences
+      // (e.g. Claude permission menus redrawing in place while user holds arrow keys).
+      function softResyncTerminal() {
+        if (!state.terminal || !state.terminalOutput) return false;
+        resetTerminal();
+        state.terminal.write(state.terminalOutput);
+        state.lastTerminalResyncAt = Date.now();
+        maybeScrollTerminalToBottom("output");
+        return true;
+      }
+
+      // Soft refresh the whole current view without losing page state:
+      // - Replays terminal buffer to clear residue
+      // - Clears chat render cache and forces a full rebuild
+      // Used by the refresh button and by automatic triggers
+      // (e.g. permission escalation appearing/disappearing).
+      function softRefreshCurrentView() {
+        softResyncTerminal();
+        if (typeof resetChatRenderCache === "function") resetChatRenderCache();
+        if (typeof scheduleChatRender === "function") scheduleChatRender(true);
+        else if (typeof render === "function") render();
+      }
+
+      function scheduleSoftResyncTerminal(delayMs) {
+        if (state.softResyncTimer) clearTimeout(state.softResyncTimer);
+        state.softResyncTimer = setTimeout(function() {
+          state.softResyncTimer = null;
+          softResyncTerminal();
+        }, typeof delayMs === "number" ? delayMs : 150);
+      }
+
       function syncTerminalBuffer(sessionId, output, options) {
         if (!state.terminal) return false;
         var normalizedOutput = normalizeTerminalOutput(output || "");
@@ -5155,6 +5196,17 @@
         if (normalizedSnapshot.id === state.selectedId) {
           reconcileInteractiveState();
           updateTaskDisplay();
+          // Escalation/permission toggles are the common trigger for CSI cursor-jump
+          // redraw sequences from Claude CLI. When they appear or dismiss, schedule a
+          // debounced terminal resync so residual DOM rows get cleaned up automatically
+          // — same fix the user used to have to reach for via the refresh button.
+          var prevEsc = prevSession && prevSession.pendingEscalation ? 1 : 0;
+          var nextEsc = updatedSession && updatedSession.pendingEscalation ? 1 : 0;
+          var prevBlocked = prevSession && prevSession.permissionBlocked ? 1 : 0;
+          var nextBlocked = updatedSession && updatedSession.permissionBlocked ? 1 : 0;
+          if (prevEsc !== nextEsc || prevBlocked !== nextBlocked) {
+            scheduleSoftResyncTerminal(200);
+          }
         }
         // When a session transitions to a non-running state, try flushing cross-session queue
         if (normalizedSnapshot.status && normalizedSnapshot.status !== "running" && state.crossSessionQueue.length > 0) {
@@ -6298,6 +6350,9 @@
           defaultModel: (document.getElementById("cfg-default-model") || {}).value || "",
         };
 
+        var previousDefaultModel = (state.config && state.config.defaultModel) || "";
+        var nextDefaultModel = body.defaultModel || "";
+
         fetch("/api/settings/config", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -6315,6 +6370,15 @@
               msgEl.style.color = "var(--success)";
             }
             msgEl.classList.remove("hidden");
+          }
+          if (!data || !data.error) {
+            if (state.config) state.config.defaultModel = nextDefaultModel;
+            state.configDefaultModel = nextDefaultModel;
+            if (nextDefaultModel !== previousDefaultModel) {
+              state.chatModel = "";
+              try { localStorage.removeItem("wand-chat-model"); } catch (e) {}
+              syncComposerModelSelect(getSelectedSession());
+            }
           }
         })
         .catch(function() {
