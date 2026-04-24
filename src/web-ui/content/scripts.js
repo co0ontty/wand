@@ -201,6 +201,7 @@
         claudeHistoryLoaded: false,
         claudeHistoryExpanded: true,
         claudeHistoryExpandedDirs: {},
+        archivedExpanded: false,
         sessionsManageMode: false,
         selectedSessionIds: {},
         selectedClaudeHistoryIds: {},
@@ -1733,7 +1734,7 @@
           groups.push(renderRecentGroup(activeSessions, recentHistorySessions));
         }
         if (archivedSessions.length > 0) {
-          groups.push(renderSessionGroup("已归档", archivedSessions, "sessions"));
+          groups.push(renderArchivedGroup(archivedSessions));
         }
         groups.push(renderClaudeHistorySection());
         if (activeSessions.length === 0 && archivedSessions.length === 0 && recentHistorySessions.length === 0) {
@@ -1754,12 +1755,17 @@
         var historyCount = getSelectedClaudeHistoryIds().length;
         var totalCount = sessionCount + historyCount;
         var hasAny = totalCount > 0;
+        var selectable = countSelectableItems();
+        var allSelected = selectable > 0 && totalCount >= selectable;
+        var selectAllLabel = allSelected ? "取消全选" : "全选";
+        var selectAllAction = allSelected ? "clear-selection" : "select-all-visible";
+        var selectAllDisabled = selectable === 0 ? ' disabled' : '';
 
         return '<div class="session-manage-bar active">' +
           '<div class="session-manage-summary">已选择 ' + totalCount + ' 项</div>' +
           '<div class="session-manage-actions">' +
-            '<button class="session-manage-btn" data-action="select-all-visible" type="button">全选</button>' +
-            '<button class="session-manage-btn" data-action="clear-selection" type="button">清空</button>' +
+            '<button class="session-manage-btn" data-action="' + selectAllAction + '" type="button"' + selectAllDisabled + '>' + selectAllLabel + '</button>' +
+            '<button class="session-manage-btn" data-action="clear-selection" type="button"' + (hasAny ? '' : ' disabled') + '>清空</button>' +
             '<button class="session-manage-btn danger" data-action="delete-selected" type="button"' + (hasAny ? '' : ' disabled') + '>删除所选</button>' +
             '<button class="session-manage-btn" data-action="toggle-manage-mode" type="button">完成</button>' +
           '</div>' +
@@ -1771,6 +1777,20 @@
           '<div class="session-group-title">' + escapeHtml(title) + '</div>' +
           sessions.map(function(session) { return renderSessionItem(session, kind); }).join("") +
         '</section>';
+      }
+
+      function renderArchivedGroup(archivedSessions) {
+        var expanded = !!state.archivedExpanded;
+        var chevron = expanded ? "&#9662;" : "&#9656;";
+        var header = '<div class="session-group-title claude-history-toggle" data-action="toggle-archived-group">' +
+          '<span class="chevron">' + chevron + '</span> 已归档 ' +
+          '<span class="history-count">' + archivedSessions.length + '</span>' +
+          '</div>';
+        if (!expanded) {
+          return '<section class="session-group">' + header + '</section>';
+        }
+        var items = archivedSessions.map(function(session) { return renderSessionItem(session, "sessions"); }).join("");
+        return '<section class="session-group">' + header + items + '</section>';
       }
 
       function renderRecentGroup(activeSessions, recentHistorySessions) {
@@ -1864,11 +1884,19 @@
         updateSessionsList();
       }
 
+      function getSelectableSessions() {
+        return state.sessions.filter(function(session) {
+          return session.archived || !session.resumedToSessionId;
+        });
+      }
+
+      function countSelectableItems() {
+        return getSelectableSessions().length + getVisibleClaudeHistorySessions().length;
+      }
+
       function selectAllVisibleItems() {
         var nextSessionIds = {};
-        state.sessions.filter(function(session) {
-          return !session.resumedToSessionId;
-        }).forEach(function(session) {
+        getSelectableSessions().forEach(function(session) {
           nextSessionIds[session.id] = true;
         });
         var nextHistoryIds = {};
@@ -2507,15 +2535,8 @@
         // Ordered lists
         escaped = escaped.replace(/^\d+\.\s+(.*)$/gm, '<li>$1</li>');
 
-        // Tables
-        escaped = escaped.replace(/\|(.+)\|/g, function(match) {
-          var cells = match.split("|").slice(1, -1);
-          if (cells.every(function(c) { return /^[\-:]+$/.test(c.trim()); })) {
-            return "";
-          }
-          return '<tr>' + cells.map(function(c) { return '<td>' + c.trim() + '</td>'; }).join("") + '</tr>';
-        });
-        escaped = escaped.replace(/(<tr>.*<\/tr>\n?)+/g, '<table>$&</table>');
+        // Tables (GFM)
+        escaped = parseMarkdownTables(escaped);
 
         // Paragraphs
         var paragraphs = escaped.split(/\n{2,}/);
@@ -4125,6 +4146,9 @@
             }
           } else if (actionButton.dataset.action === "clear-all-history") {
             clearAllClaudeHistory();
+          } else if (actionButton.dataset.action === "toggle-archived-group") {
+            state.archivedExpanded = !state.archivedExpanded;
+            updateSessionsList();
           } else if (actionButton.dataset.action === "resume" && actionButton.dataset.sessionId) {
             handleResumeAction(actionButton);
           } else if (actionButton.dataset.action === "resume-history" && actionButton.dataset.claudeSessionId) {
@@ -13113,6 +13137,65 @@
         return deduped.join(newline);
       }
 
+      function parseMarkdownTables(source) {
+        var NL = "\n";
+        var lines = source.split(NL);
+        var out = [];
+        var i = 0;
+
+        function splitRow(line) {
+          var s = line.trim();
+          if (s.charAt(0) === "|") s = s.slice(1);
+          if (s.charAt(s.length - 1) === "|") s = s.slice(0, -1);
+          return s.split("|");
+        }
+        function styleAttr(a) { return a ? ' style="text-align:' + a + '"' : ""; }
+        function buildTable(headers, aligns, rows) {
+          var thead = "<thead><tr>" + headers.map(function(c, idx) {
+            return "<th" + styleAttr(aligns[idx]) + ">" + c.trim() + "</th>";
+          }).join("") + "</tr></thead>";
+          var tbody = rows.length ? ("<tbody>" + rows.map(function(r) {
+            return "<tr>" + r.map(function(c, idx) {
+              return "<td" + styleAttr(aligns[idx]) + ">" + c.trim() + "</td>";
+            }).join("") + "</tr>";
+          }).join("") + "</tbody>") : "";
+          return '<div class="md-table-wrap"><table class="md-table">' + thead + tbody + "</table></div>";
+        }
+
+        while (i < lines.length) {
+          var header = lines[i];
+          if (header.indexOf("|") !== -1 && i + 1 < lines.length) {
+            var sep = lines[i + 1].trim();
+            if (/^\|?\s*:?-+:?(\s*\|\s*:?-+:?)+\s*\|?$/.test(sep)) {
+              var headers = splitRow(header);
+              var aligns = splitRow(sep).map(function(c) {
+                var t = c.trim();
+                var L = t.charAt(0) === ":";
+                var R = t.charAt(t.length - 1) === ":";
+                if (L && R) return "center";
+                if (R) return "right";
+                if (L) return "left";
+                return "";
+              });
+              var rows = [];
+              var j = i + 2;
+              while (j < lines.length) {
+                var trimmed = lines[j].trim();
+                if (!trimmed || trimmed.indexOf("|") === -1) break;
+                rows.push(splitRow(lines[j]));
+                j += 1;
+              }
+              out.push("", buildTable(headers, aligns, rows), "");
+              i = j;
+              continue;
+            }
+          }
+          out.push(header);
+          i += 1;
+        }
+        return out.join(NL);
+      }
+
       function renderMarkdown(text) {
         if (!text) return "";
 
@@ -13237,6 +13320,7 @@
         result = replaceLinePrefix(result, "- ", '<li>', '</li>');
         result = replaceLinePrefix(result, "* ", '<li>', '</li>');
         result = replaceOrderedList(result);
+        result = parseMarkdownTables(result);
 
         var lines = result.split(newline);
         var grouped = [];
