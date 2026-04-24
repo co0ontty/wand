@@ -1257,7 +1257,7 @@
                       '<button id="attach-btn" class="btn-circle btn-circle-attach" type="button" title="附加文件">' +
                         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>' +
                       '</button>' +
-                      '<input type="file" id="file-upload-input" multiple style="display:none">' +
+                      '<input type="file" id="file-upload-input" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
                       '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
                         renderModeOptions(preferredTool, composerMode) +
                       '</select>' +
@@ -4535,6 +4535,10 @@
         state.terminal.write(state.terminalOutput);
         state.lastTerminalResyncAt = Date.now();
         maybeScrollTerminalToBottom("output");
+        // Remeasure against real container: the refresh button used to only
+        // reset+write, so a stale cols/rows (set at mount time with hidden
+        // container) would survive the refresh and keep wrapping output wrong.
+        ensureTerminalFit("refresh");
         return true;
       }
 
@@ -4708,6 +4712,10 @@
           initTerminalResizeHandle();
           observeTerminalResize();
           startTerminalHealthCheck();
+          // Container may have been hidden / zero-width at construction
+          // time (hard-coded 120x36). Remeasure against the real container
+          // so wterm reflows the just-written history to the correct cols.
+          ensureTerminalFit("mount");
         }).catch(function(err) {
           state.terminalInitializing = false;
           console.error("[wand] wterm init failed:", err);
@@ -5520,11 +5528,9 @@
 
             if (state.terminal && id === state.selectedId && data.output !== undefined) {
               syncTerminalBuffer(id, data.output, { mode: "append" });
-              if (state.terminal.remeasure) {
-                requestAnimationFrame(function() {
-                  if (state.terminal) state.terminal.remeasure();
-                });
-              }
+              // Session-switch / history replay: force a real fit so wterm
+              // reflows the just-written output against the real container.
+              ensureTerminalFit("session-switch");
             }
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
@@ -7884,6 +7890,10 @@
         }
         applyCurrentView();
         focusInputBox(true);
+        // Container just flipped from hidden -> visible (or geometry changed
+        // because chat/terminal panels swapped). Refit now so the terminal
+        // picks up the real cols/rows instead of keeping the stale ones.
+        if (!structured) ensureTerminalFit("view-switch");
       }
 
 
@@ -10089,6 +10099,15 @@
           state.visualViewportHandler = function() { scheduleTerminalResize(true); };
           window.visualViewport.addEventListener("resize", state.visualViewportHandler);
         }
+        // Page returning from background: container dimensions may have
+        // drifted (PWA standalone, tab switch, iOS address-bar toggle).
+        state.visibilityHandler = function() {
+          if (!document.hidden) ensureTerminalFit("visibility");
+        };
+        document.addEventListener("visibilitychange", state.visibilityHandler);
+        // Mobile device rotation — large geometry change.
+        state.orientationHandler = function() { ensureTerminalFit("orientation"); };
+        window.addEventListener("orientationchange", state.orientationHandler);
         requestAnimationFrame(function() { scheduleTerminalResize(true); });
       }
 
@@ -10098,17 +10117,14 @@
           if (!state.terminal || state.currentView !== "terminal" || document.hidden) return;
           var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
           if (!selectedSession || selectedSession.sessionKind === "structured") return;
-          // Lightweight remeasure every 5s
-          if (state.terminal.remeasure) state.terminal.remeasure();
-          // Full re-sync every 30s during output pauses
+          // Lightweight fit every 5s: gated + double-rAF + remeasure.
+          ensureTerminalFit("health");
+          // Full re-sync every 30s during output pauses — also refits.
           var now = Date.now();
           var chunkPause = state.lastChunkAt > 0 && (now - state.lastChunkAt > 300);
           var resyncDue = (now - state.lastTerminalResyncAt) > 30000;
           if (resyncDue && (chunkPause || selectedSession.status !== "running") && state.terminalOutput) {
-            state.lastTerminalResyncAt = now;
-            state.terminal.reset();
-            state.terminal.write(state.terminalOutput);
-            maybeScrollTerminalToBottom("output");
+            softResyncTerminal();
           }
         }, 5000);
       }
@@ -10137,6 +10153,14 @@
         if (state.visualViewportHandler && window.visualViewport) {
           window.visualViewport.removeEventListener("resize", state.visualViewportHandler);
           state.visualViewportHandler = null;
+        }
+        if (state.visibilityHandler) {
+          document.removeEventListener("visibilitychange", state.visibilityHandler);
+          state.visibilityHandler = null;
+        }
+        if (state.orientationHandler) {
+          window.removeEventListener("orientationchange", state.orientationHandler);
+          state.orientationHandler = null;
         }
         [["mousemove", "resizeMouseMove"], ["mouseup", "resizeMouseUp"],
          ["touchmove", "resizeTouchMove"], ["touchend", "resizeTouchEnd"]
@@ -10201,10 +10225,30 @@
         }
       }
 
-      function ensureTerminalFit() {
-        if (!state.terminal) return;
-        maybeScrollTerminalToBottom("resize");
-        sendTerminalResize(state.terminal.cols, state.terminal.rows);
+      // Unified entry point for re-fitting the xterm grid to its container.
+      // Why: wterm's `autoResize` ResizeObserver only fires on subsequent
+      // container size changes. If the terminal is mounted or written to
+      // while the container is hidden/zero-width, cols/rows stay wrong and
+      // new output renders with broken wrapping (content visually piles at
+      // the top). Call this after any layout change that might have altered
+      // container geometry (mount, session switch, view switch, refresh).
+      function ensureTerminalFit(reason) {
+        if (!state.terminal) return false;
+        var el = document.getElementById("output");
+        if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return false;
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            if (!state.terminal) return;
+            if (typeof state.terminal.remeasure === "function") {
+              state.terminal.remeasure();
+            }
+            sendTerminalResize(state.terminal.cols, state.terminal.rows);
+            if (state.terminalAutoFollow || isTerminalNearBottom()) {
+              maybeScrollTerminalToBottom("resize");
+            }
+          });
+        });
+        return true;
       }
 
       function scheduleTerminalResize(immediate) {
@@ -10269,10 +10313,9 @@
             // Flush pending messages after reconnection
             flushPendingMessages();
             // Re-fit terminal on reconnect — the viewport may have changed
-            // while disconnected, and the PTY needs up-to-date dimensions.
-            if (state.terminal) {
-              sendTerminalResize(state.terminal.cols, state.terminal.rows);
-            }
+            // while disconnected, so remeasure against real container size
+            // rather than sending stale cols/rows from before the disconnect.
+            ensureTerminalFit("ws-reconnect");
           };
 
           ws.onmessage = function(event) {
