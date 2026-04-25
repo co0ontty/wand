@@ -4659,9 +4659,142 @@
         requestSyncScrollbar();
       }
 
+      // ──────── East-Asian-Wide padding for wterm WASM ────────
+      //
+      // wterm's WASM grid (as of @wterm/core 0.1.8/0.1.9) treats every
+      // codepoint as occupying exactly 1 cell, while node-pty's backend
+      // and Claude Code's TUI emit cursor-positioning sequences that
+      // assume CJK / fullwidth / emoji codepoints occupy 2 columns
+      // (Unicode TR11 East-Asian-Width = W or F). The mismatch makes
+      // every CSI cursor move after CJK output drift by N/2 columns,
+      // causing in-place rewrites (thinking spinner, todo list,
+      // permission menus) to leave torn residue like "替替换换".
+      //
+      // Fix: insert U+2060 (Word Joiner — zero-width, unbreakable) after
+      // each wide codepoint before handing the byte stream to the WASM
+      // grid. The WJ takes one cell, so wide chars now occupy 2 cells —
+      // matching the backend's column accounting exactly. The browser
+      // renders WJ at zero width, so the visual layout stays correct.
+      //
+      // The scanner is ANSI-aware: it tracks ESC / CSI / OSC / DCS
+      // / PM / APC state across chunk boundaries so wide codepoints
+      // inside escape sequences (e.g. OSC window-title payloads) are
+      // not padded — that would break sequence parsing.
+      function isEastAsianWide(cp) {
+        if (cp < 0x1100) return false;
+        return (
+          (cp >= 0x1100 && cp <= 0x115f) ||
+          (cp >= 0x2329 && cp <= 0x232a) ||
+          (cp >= 0x2e80 && cp <= 0x303e) ||
+          (cp >= 0x3041 && cp <= 0x33ff) ||
+          (cp >= 0x3400 && cp <= 0x4dbf) ||
+          (cp >= 0x4e00 && cp <= 0x9fff) ||
+          (cp >= 0xa000 && cp <= 0xa4cf) ||
+          (cp >= 0xac00 && cp <= 0xd7a3) ||
+          (cp >= 0xf900 && cp <= 0xfaff) ||
+          (cp >= 0xfe30 && cp <= 0xfe4f) ||
+          (cp >= 0xff00 && cp <= 0xff60) ||
+          (cp >= 0xffe0 && cp <= 0xffe6) ||
+          (cp >= 0x1f000 && cp <= 0x1f9ff) ||
+          (cp >= 0x20000 && cp <= 0x2fffd) ||
+          (cp >= 0x30000 && cp <= 0x3fffd)
+        );
+      }
+
+      var WAND_WIDE_FILLER = "\u2060";
+
+      function createWideParserState() { return { mode: "normal" }; }
+
+      function widePadAnsi(data, st) {
+        if (!data) return "";
+        var s = String(data);
+        var out = "";
+        for (var i = 0; i < s.length; i++) {
+          var code = s.charCodeAt(i);
+          var cp = code;
+          var consumed = 1;
+          if (code >= 0xd800 && code <= 0xdbff && i + 1 < s.length) {
+            var lo = s.charCodeAt(i + 1);
+            if (lo >= 0xdc00 && lo <= 0xdfff) {
+              cp = (code - 0xd800) * 0x400 + (lo - 0xdc00) + 0x10000;
+              consumed = 2;
+            }
+          }
+          var ch = consumed === 2 ? s.substr(i, 2) : s.charAt(i);
+          switch (st.mode) {
+            case "normal":
+              if (cp === 0x1b) { st.mode = "esc"; out += ch; }
+              else if (cp === 0x9b) { st.mode = "csi"; out += ch; }
+              else if (cp === 0x9d || cp === 0x90 || cp === 0x9e || cp === 0x9f) {
+                st.mode = "string"; out += ch;
+              } else {
+                out += ch;
+                if (isEastAsianWide(cp)) out += WAND_WIDE_FILLER;
+              }
+              break;
+            case "esc":
+              out += ch;
+              if (cp === 0x5b) st.mode = "csi";
+              else if (cp === 0x5d || cp === 0x50 || cp === 0x58 ||
+                       cp === 0x5e || cp === 0x5f) st.mode = "string";
+              else st.mode = "normal";
+              break;
+            case "csi":
+              out += ch;
+              if (cp >= 0x40 && cp <= 0x7e) st.mode = "normal";
+              break;
+            case "string":
+              out += ch;
+              if (cp === 0x07 || cp === 0x9c) st.mode = "normal";
+              else if (cp === 0x1b) st.mode = "string-esc";
+              break;
+            case "string-esc":
+              out += ch;
+              if (cp === 0x5c) st.mode = "normal";
+              else st.mode = "string";
+              break;
+          }
+          i += consumed - 1;
+        }
+        return out;
+      }
+
+      function wandTerminalWrite(terminal, data) {
+        if (!terminal || data == null) return;
+        if (!state.wideParserState) state.wideParserState = createWideParserState();
+        terminal.write(widePadAnsi(data, state.wideParserState));
+      }
+
+      function resetWideParserState() {
+        state.wideParserState = createWideParserState();
+      }
+
+      // Strip the wide-pad filler from copied text so users pasting
+      // selected terminal output don't get hidden U+2060 sprinkled
+      // through every CJK string.
+      function stripWideFillerForCopy() {
+        if (typeof document === "undefined") return;
+        document.addEventListener("copy", function(e) {
+          var sel = window.getSelection && window.getSelection();
+          if (!sel || sel.isCollapsed) return;
+          var anchor = sel.anchorNode;
+          var node = anchor && anchor.nodeType === 3 ? anchor.parentNode : anchor;
+          var output = document.getElementById("output");
+          if (!output || !node || !output.contains(node)) return;
+          var text = sel.toString();
+          if (text.indexOf(WAND_WIDE_FILLER) === -1) return;
+          if (e.clipboardData) {
+            e.clipboardData.setData("text/plain", text.split(WAND_WIDE_FILLER).join(""));
+            e.preventDefault();
+          }
+        });
+      }
+      stripWideFillerForCopy();
+
       function resetTerminal() {
         if (!state.terminal || typeof state.terminal.reset !== "function") return;
         state.terminal.reset();
+        resetWideParserState();
       }
 
       // Soft resync terminal: reset WASM grid and replay full output buffer.
@@ -4670,7 +4803,7 @@
       function softResyncTerminal() {
         if (!state.terminal || !state.terminalOutput) return false;
         resetTerminal();
-        state.terminal.write(state.terminalOutput);
+        wandTerminalWrite(state.terminal, state.terminalOutput);
         state.lastTerminalResyncAt = Date.now();
         maybeScrollTerminalToBottom("output");
         // Remeasure against real container: the refresh button used to only
@@ -4734,7 +4867,7 @@
           if (normalizedOutput !== currentOutput) {
             resetTerminal();
             if (normalizedOutput) {
-              state.terminal.write(normalizedOutput);
+              wandTerminalWrite(state.terminal, normalizedOutput);
             }
             wrote = true;
           }
@@ -4745,7 +4878,7 @@
         } else if (normalizedOutput.startsWith(currentOutput)) {
           var delta = normalizedOutput.slice(currentOutput.length);
           if (delta) {
-            state.terminal.write(delta);
+            wandTerminalWrite(state.terminal, delta);
             wrote = true;
           }
         } else if (currentOutput && currentOutput.startsWith(normalizedOutput)) {
@@ -4753,7 +4886,7 @@
         } else {
           resetTerminal();
           if (normalizedOutput) {
-            state.terminal.write(normalizedOutput);
+            wandTerminalWrite(state.terminal, normalizedOutput);
           }
           wrote = true;
         }
@@ -4853,7 +4986,7 @@
               syncTerminalBuffer(session.id, session.output || "", { mode: "append", scroll: false });
             }
           } else {
-            term.write("点击上方「新对话」开始你的第一次对话。\r\n");
+            wandTerminalWrite(term, "点击上方「新对话」开始你的第一次对话。\r\n");
           }
 
           state.terminalClickHandler = focusInputBox;
@@ -10679,7 +10812,7 @@
                 // so absolute-cursor CSI sequences in the chunk land on the
                 // right grid (otherwise content tears or stacks at the top).
                 maybeRefitTerminal();
-                state.terminal.write(msg.data.chunk);
+                wandTerminalWrite(state.terminal, msg.data.chunk);
                 state.terminalSessionId = msg.sessionId;
                 if (msg.data.output) {
                   state.terminalOutput = normalizeTerminalOutput(msg.data.output);
