@@ -337,8 +337,11 @@
         var enabled = !!state.chatAutoFollow;
         button.classList.toggle("active", enabled);
         button.setAttribute("aria-pressed", enabled ? "true" : "false");
-        button.setAttribute("title", enabled ? "追踪底部：开启" : "追踪底部：已暂停");
-        button.textContent = enabled ? "追底" : "暂停";
+        button.setAttribute("title", enabled ? "追踪底部：开启（点击暂停）" : "追踪底部：已暂停（点击开启）");
+        button.setAttribute("aria-label", enabled ? "追踪底部：开启" : "追踪底部：已暂停");
+        button.innerHTML = enabled
+          ? '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 2.5l4.5 4.5 4.5-4.5"/><path d="M3.5 8.5l4.5 4.5 4.5-4.5"/></svg>'
+          : '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 3v10"/><path d="M10.5 3v10"/></svg>';
       }
 
       function updateChatJumpToBottomButton() {
@@ -1208,7 +1211,7 @@
               '</div>' +
               '<div id="chat-output" class="chat-container hidden">' +
                 '<div class="chat-overlay-controls">' +
-                  '<button id="chat-follow-toggle" class="chat-follow-toggle topbar-btn' + (state.chatAutoFollow ? ' active' : '') + '" type="button" aria-pressed="' + (state.chatAutoFollow ? 'true' : 'false') + '" title="' + (state.chatAutoFollow ? '追踪底部：开启' : '追踪底部：已暂停') + '">' + (state.chatAutoFollow ? '追底' : '暂停') + '</button>' +
+                  '<button id="chat-follow-toggle" class="chat-follow-toggle topbar-btn' + (state.chatAutoFollow ? ' active' : '') + '" type="button" aria-pressed="' + (state.chatAutoFollow ? 'true' : 'false') + '" aria-label="' + (state.chatAutoFollow ? '追踪底部：开启' : '追踪底部：已暂停') + '" title="' + (state.chatAutoFollow ? '追踪底部：开启（点击暂停）' : '追踪底部：已暂停（点击开启）') + '">' + (state.chatAutoFollow ? '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 2.5l4.5 4.5 4.5-4.5"/><path d="M3.5 8.5l4.5 4.5 4.5-4.5"/></svg>' : '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 3v10"/><path d="M10.5 3v10"/></svg>') + '</button>' +
                 '</div>' +
                 '<button id="chat-jump-bottom" class="chat-jump-bottom' + (state.showChatJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部并继续追底" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
               '</div>' +
@@ -1412,58 +1415,81 @@
                   '<div class="settings-about-row"><span class="settings-label">Node.js 要求</span><span class="settings-value" id="settings-node-req">-</span></div>' +
                   '<div class="settings-about-row"><span class="settings-label">仓库地址</span><span class="settings-value" id="settings-repo-url"><a href="#" target="_blank" rel="noopener">-</a></span></div>' +
                 '</div>' +
-                '<div class="settings-update-section">' +
+                '<div class="settings-update-section" id="web-update-section">' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">🌐</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">Web 端</h4>' +
+                      '<p class="settings-section-sub">浏览器访问的服务版本</p>' +
+                    '</div>' +
+                  '</div>' +
                   '<div class="settings-about-row">' +
                     '<span class="settings-label">最新版本</span>' +
                     '<span class="settings-value" id="settings-latest-version">-</span>' +
                   '</div>' +
                   '<div class="settings-update-actions">' +
-                    '<button id="check-update-button" class="btn btn-ghost btn-sm">\u68c0\u67e5\u66f4\u65b0</button>' +
+                    '<button id="check-update-button" class="btn btn-secondary btn-sm">\u68c0\u67e5\u66f4\u65b0</button>' +
                     '<button id="do-update-button" class="btn btn-primary btn-sm hidden">\u66f4\u65b0\u5230\u6700\u65b0\u7248</button>' +
                     '<button id="do-restart-button" class="btn btn-success btn-sm hidden">\u91cd\u542f\u751f\u6548</button>' +
                   '</div>' +
                   '<p id="update-message" class="hint hidden"></p>' +
-                  '<div class="settings-auto-update-row" style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">' +
-                    '<span class="settings-label">自动更新</span>' +
-                    '<label style="position:relative;cursor:pointer">' +
+                  '<div class="settings-toggle-row">' +
+                    '<div class="settings-toggle-text">' +
+                      '<span class="settings-toggle-title">自动更新</span>' +
+                      '<span class="settings-toggle-desc">检测到新版本将自动下载安装并重启服务。</span>' +
+                    '</div>' +
+                    '<label class="settings-switch">' +
                       '<input type="checkbox" id="auto-update-web-toggle" class="switch-toggle">' +
                       '<span class="switch-slider"></span>' +
                     '</label>' +
                   '</div>' +
-                  '<p class="hint" style="margin-top:2px">开启后，检测到新版本将自动下载安装并重启服务。</p>' +
                 '</div>' +
-                '<div class="settings-update-section" id="android-apk-section">' +
+                '<div class="settings-update-section hidden" id="android-apk-section">' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">📱</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">Android App</h4>' +
+                      '<p class="settings-section-sub">原生客户端版本与 APK 下载</p>' +
+                    '</div>' +
+                  '</div>' +
                   '<div id="android-apk-current-row" class="settings-about-row hidden">' +
                     '<span class="settings-label">当前版本</span>' +
                     '<span class="settings-value" id="settings-android-apk-current">-</span>' +
                   '</div>' +
-                  '<div id="android-apk-github-row" class="settings-about-row hidden">' +
+                  '<div id="android-apk-github-row" class="settings-about-row settings-about-row-action hidden">' +
                     '<span class="settings-label">线上版本</span>' +
-                    '<span class="settings-value" id="settings-android-apk-github" style="flex:1">-</span>' +
-                    '<button id="download-github-apk-btn" class="btn btn-ghost btn-sm hidden" type="button" style="margin-left:8px;flex-shrink:0">下载</button>' +
+                    '<span class="settings-value settings-value-flex" id="settings-android-apk-github">-</span>' +
+                    '<button id="download-github-apk-btn" class="btn btn-secondary btn-sm hidden" type="button">下载</button>' +
                   '</div>' +
-                  '<div id="android-apk-local-row" class="settings-about-row hidden">' +
+                  '<div id="android-apk-local-row" class="settings-about-row settings-about-row-action hidden">' +
                     '<span class="settings-label">本地版本</span>' +
-                    '<span class="settings-value" id="settings-android-apk-local" style="flex:1">-</span>' +
-                    '<button id="download-local-apk-btn" class="btn btn-ghost btn-sm hidden" type="button" style="margin-left:8px;flex-shrink:0">下载</button>' +
+                    '<span class="settings-value settings-value-flex" id="settings-android-apk-local">-</span>' +
+                    '<button id="download-local-apk-btn" class="btn btn-secondary btn-sm hidden" type="button">下载</button>' +
                   '</div>' +
-                  '<div id="android-auto-update-row" class="hidden" style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">' +
-                    '<span class="settings-label">自动更新</span>' +
-                    '<label style="position:relative;cursor:pointer">' +
+                  '<div id="android-auto-update-row" class="settings-toggle-row hidden">' +
+                    '<div class="settings-toggle-text">' +
+                      '<span class="settings-toggle-title">自动更新</span>' +
+                      '<span class="settings-toggle-desc" id="android-auto-update-hint">检测到新版 APK 将自动下载安装。</span>' +
+                    '</div>' +
+                    '<label class="settings-switch">' +
                       '<input type="checkbox" id="auto-update-apk-toggle" class="switch-toggle">' +
                       '<span class="switch-slider"></span>' +
                     '</label>' +
                   '</div>' +
-                  '<p id="android-auto-update-hint" class="hint hidden" style="margin-top:2px">开启后，检测到新版 APK 将自动下载安装。</p>' +
                   '<p id="android-apk-message" class="hint hidden"></p>' +
                 '</div>' +
                 '<div class="settings-update-section" id="android-connect-section">' +
-                  '<div class="settings-section-title" style="margin-bottom:8px">App 连接码</div>' +
-                  '<div class="settings-connect-url-box">' +
-                    '<code id="android-connect-code" class="settings-connect-url-text" style="font-size:12px;word-break:break-all">-</code>' +
-                    '<button id="copy-connect-code-button" class="btn btn-ghost btn-sm" type="button" title="复制连接码">复制</button>' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">🔗</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">App 连接码</h4>' +
+                      '<p class="settings-section-sub">粘贴到 Android App 即可自动连接，无需密码；改密码后失效。</p>' +
+                    '</div>' +
                   '</div>' +
-                  '<p class="hint">复制此连接码粘贴到 Android App 即可自动连接，无需输入密码。修改密码后连接码自动失效。</p>' +
+                  '<div class="settings-connect-url-box">' +
+                    '<code id="android-connect-code" class="settings-connect-url-text">-</code>' +
+                    '<button id="copy-connect-code-button" class="btn btn-secondary btn-sm" type="button" title="复制连接码">复制</button>' +
+                  '</div>' +
                 '</div>' +
               '</div>' +
 
@@ -1473,54 +1499,88 @@
                   '<h3 class="settings-panel-title">通知</h3>' +
                   '<p class="settings-panel-desc">设置提示音、系统通知和浏览器通知的行为。</p>' +
                 '</div>' +
-                '<div class="settings-section-title">\u901a\u77e5\u504f\u597d</div>' +
-                '<div class="field field-inline">' +
-                  '<input id="cfg-notif-sound" type="checkbox" class="field-checkbox" />' +
-                  '<label class="field-label" for="cfg-notif-sound">\u64ad\u653e\u63d0\u793a\u97f3</label>' +
-                '</div>' +
-                '<p class="hint" style="margin-top:0;margin-bottom:10px">\u91cd\u8981\u901a\u77e5\uff08\u7248\u672c\u66f4\u65b0\u3001\u6743\u9650\u7b49\u5f85\u7b49\uff09\u65f6\u64ad\u653e\u67d4\u548c\u7684\u63d0\u793a\u97f3</p>' +
-                '<div class="field" id="notif-volume-field" style="margin-bottom:10px">' +
-                  '<label class="field-label" style="margin-bottom:4px">\u97f3\u91cf</label>' +
-                  '<div style="display:flex;align-items:center;gap:8px">' +
-                    '<input id="cfg-notif-volume" type="range" min="0" max="100" step="5" style="flex:1;accent-color:var(--accent)" />' +
-                    '<span id="cfg-notif-volume-val" style="min-width:32px;text-align:right;font-size:12px;color:var(--text-secondary)">80%</span>' +
-                  '</div>' +
-                '</div>' +
-                '<div class="field field-inline">' +
-                  '<input id="cfg-notif-bubble" type="checkbox" class="field-checkbox" />' +
-                  '<label class="field-label" for="cfg-notif-bubble">\u5e94\u7528\u5185\u901a\u77e5\u6c14\u6ce1</label>' +
-                '</div>' +
-                '<p class="hint" style="margin-top:0;margin-bottom:10px">\u5728\u9875\u9762\u9876\u90e8\u5f39\u51fa\u6d6e\u52a8\u901a\u77e5\u6c14\u6ce1</p>' +
-                '<div id="native-sound-section" class="settings-notification-section hidden" style="margin-top:6px">' +
-                  '<div class="settings-section-title">\u7cfb\u7edf\u901a\u77e5\u94c3\u58f0</div>' +
-                  '<div class="settings-about-row">' +
-                    '<span class="settings-label">\u94c3\u58f0</span>' +
-                    '<div style="display:flex;align-items:center;gap:6px">' +
-                      '<select id="native-sound-select" class="field-select" style="min-width:100px"></select>' +
-                      '<button id="native-sound-preview" class="btn btn-ghost btn-sm">\u25b6 \u8bd5\u542c</button>' +
+                '<div class="settings-notification-section">' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">🔔</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">通知偏好</h4>' +
+                      '<p class="settings-section-sub">提示音与应用内通知气泡</p>' +
                     '</div>' +
                   '</div>' +
-                  '<p class="hint" style="margin-top:0">\u9009\u62e9 Android \u7cfb\u7edf\u901a\u77e5\u4f7f\u7528\u7684\u94c3\u58f0</p>' +
-                '</div>' +
-                '<div id="native-haptic-section" class="settings-notification-section hidden" style="margin-top:6px">' +
-                  '<div class="settings-section-title">\u89e6\u611f\u53cd\u9988</div>' +
-                  '<div class="field field-inline" style="margin:4px 0">' +
-                    '<input id="cfg-haptic-enabled" type="checkbox" class="field-checkbox" />' +
-                    '<label class="field-label" for="cfg-haptic-enabled">\u542f\u7528\u89e6\u611f\u53cd\u9988</label>' +
+                  '<div class="settings-toggle-row">' +
+                    '<div class="settings-toggle-text">' +
+                      '<label class="settings-toggle-title" for="cfg-notif-sound">播放提示音</label>' +
+                      '<span class="settings-toggle-desc">重要通知（版本更新、权限等待等）时播放柔和提示音。</span>' +
+                    '</div>' +
+                    '<label class="settings-switch">' +
+                      '<input id="cfg-notif-sound" type="checkbox" class="switch-toggle" />' +
+                      '<span class="switch-slider"></span>' +
+                    '</label>' +
                   '</div>' +
-                  '<p class="hint" style="margin-top:0">\u6309\u94ae\u64cd\u4f5c\u548c\u4efb\u52a1\u5b8c\u6210\u65f6\u63d0\u4f9b\u632f\u52a8\u53cd\u9988</p>' +
+                  '<div class="settings-range-row" id="notif-volume-field">' +
+                    '<label class="settings-range-label" for="cfg-notif-volume">音量</label>' +
+                    '<input id="cfg-notif-volume" type="range" min="0" max="100" step="5" class="settings-range" />' +
+                    '<span id="cfg-notif-volume-val" class="settings-range-value">80%</span>' +
+                  '</div>' +
+                  '<div class="settings-toggle-row">' +
+                    '<div class="settings-toggle-text">' +
+                      '<label class="settings-toggle-title" for="cfg-notif-bubble">应用内通知气泡</label>' +
+                      '<span class="settings-toggle-desc">在页面顶部弹出浮动通知气泡。</span>' +
+                    '</div>' +
+                    '<label class="settings-switch">' +
+                      '<input id="cfg-notif-bubble" type="checkbox" class="switch-toggle" />' +
+                      '<span class="switch-slider"></span>' +
+                    '</label>' +
+                  '</div>' +
                 '</div>' +
-                '<div class="settings-notification-section" style="margin-top:6px">' +
-                  '<div class="settings-section-title">\u6d4f\u89c8\u5668\u901a\u77e5</div>' +
+                '<div id="native-sound-section" class="settings-notification-section hidden">' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">🎵</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">系统通知铃声</h4>' +
+                      '<p class="settings-section-sub">选择 Android 系统通知使用的铃声</p>' +
+                    '</div>' +
+                  '</div>' +
+                  '<div class="settings-row-with-action">' +
+                    '<select id="native-sound-select" class="field-input field-select"></select>' +
+                    '<button id="native-sound-preview" class="btn btn-secondary btn-sm" type="button">▶ 试听</button>' +
+                  '</div>' +
+                '</div>' +
+                '<div id="native-haptic-section" class="settings-notification-section hidden">' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">📳</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">触感反馈</h4>' +
+                      '<p class="settings-section-sub">按钮操作和任务完成时提供振动反馈</p>' +
+                    '</div>' +
+                  '</div>' +
+                  '<div class="settings-toggle-row">' +
+                    '<div class="settings-toggle-text">' +
+                      '<label class="settings-toggle-title" for="cfg-haptic-enabled">启用触感反馈</label>' +
+                    '</div>' +
+                    '<label class="settings-switch">' +
+                      '<input id="cfg-haptic-enabled" type="checkbox" class="switch-toggle" />' +
+                      '<span class="switch-slider"></span>' +
+                    '</label>' +
+                  '</div>' +
+                '</div>' +
+                '<div class="settings-notification-section">' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">🌐</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">浏览器通知</h4>' +
+                      '<p class="settings-section-sub">来自系统通知中心的弹窗</p>' +
+                    '</div>' +
+                  '</div>' +
                   '<div class="settings-about-row">' +
-                    '<span class="settings-label">\u6388\u6743\u72b6\u6001</span>' +
+                    '<span class="settings-label">授权状态</span>' +
                     '<span class="settings-value" id="notification-permission-status">-</span>' +
                   '</div>' +
                   '<div class="settings-update-actions">' +
-                    '<button id="notification-request-btn" class="btn btn-ghost btn-sm hidden">\u6388\u6743\u901a\u77e5</button>' +
-                    '<button id="notification-reset-btn" class="btn btn-ghost btn-sm hidden">\u91cd\u65b0\u6388\u6743</button>' +
-                    '<button id="notification-test-btn" class="btn btn-ghost btn-sm">\u53d1\u9001\u6d4b\u8bd5\u901a\u77e5</button>' +
-                    '<button id="notification-test-delay-btn" class="btn btn-ghost btn-sm">10 \u79d2\u540e\u53d1\u9001</button>' +
+                    '<button id="notification-request-btn" class="btn btn-secondary btn-sm hidden" type="button">授权通知</button>' +
+                    '<button id="notification-reset-btn" class="btn btn-secondary btn-sm hidden" type="button">重新授权</button>' +
+                    '<button id="notification-test-btn" class="btn btn-secondary btn-sm" type="button">发送测试通知</button>' +
+                    '<button id="notification-test-delay-btn" class="btn btn-secondary btn-sm" type="button">10 秒后发送</button>' +
                   '</div>' +
                   '<p id="notification-test-message" class="hint hidden"></p>' +
                 '</div>' +
@@ -1578,13 +1638,13 @@
                 '<p class="field-hint" style="margin-top:-4px;">设置回复语言后，Claude 将尽量使用指定语言回复。</p>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-default-model">默认模型</label>' +
-                  '<div style="display:flex;gap:8px;align-items:center;">' +
-                    '<select id="cfg-default-model" class="field-input" style="flex:1;">' +
+                  '<div class="settings-row-with-action">' +
+                    '<select id="cfg-default-model" class="field-input field-select">' +
                       '<option value="">跟随 Claude Code 默认</option>' +
                     '</select>' +
-                    '<button type="button" id="cfg-default-model-refresh" class="btn btn-ghost btn-sm" title="刷新模型列表">刷新</button>' +
+                    '<button type="button" id="cfg-default-model-refresh" class="btn btn-secondary btn-sm" title="刷新模型列表">刷新</button>' +
                   '</div>' +
-                  '<p class="field-hint" id="cfg-default-model-version" style="margin-top:4px;">新建会话时默认使用该模型；运行中的会话可在输入框切换。</p>' +
+                  '<p class="field-hint" id="cfg-default-model-version">新建会话时默认使用该模型；运行中的会话可在输入框切换。</p>' +
                 '</div>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-cwd">默认工作目录</label>' +
@@ -1595,24 +1655,29 @@
                   '<input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" />' +
                 '</div>' +
                 (typeof WandNative !== "undefined" && typeof WandNative.getAppIcon === "function" ?
-                '<div style="margin-bottom:16px">' +
-                  '<div class="settings-section-title">应用图标</div>' +
-                  '<p class="hint" style="margin-top:-4px;margin-bottom:10px">选择 App 启动器图标，返回桌面后生效</p>' +
-                  '<div id="app-icon-picker" style="display:flex;gap:16px">' +
-                    '<div class="app-icon-option" data-icon="shorthair" style="cursor:pointer;text-align:center">' +
-                      '<div class="app-icon-preview" style="width:56px;height:56px;border-radius:12px;overflow:hidden;border:3px solid transparent;background:var(--bg-tertiary);display:flex;align-items:center;justify-content:center;margin-bottom:4px">' +
-                        PIXEL_AVATAR.user +
-                      '</div>' +
-                      '<span style="font-size:0.72rem;color:var(--text-secondary)">赛博虎妞</span>' +
-                    '</div>' +
-                    '<div class="app-icon-option" data-icon="garfield" style="cursor:pointer;text-align:center">' +
-                      '<div class="app-icon-preview" style="width:56px;height:56px;border-radius:12px;overflow:hidden;border:3px solid transparent;background:var(--bg-tertiary);display:flex;align-items:center;justify-content:center;margin-bottom:4px">' +
-                        PIXEL_AVATAR.assistant +
-                      '</div>' +
-                      '<span style="font-size:0.72rem;color:var(--text-secondary)">勤劳初二</span>' +
+                '<div class="settings-app-icon-block">' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">🎨</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">应用图标</h4>' +
+                      '<p class="settings-section-sub">选择 App 启动器图标，返回桌面后生效</p>' +
                     '</div>' +
                   '</div>' +
-                  '<p id="app-icon-message" class="hint hidden" style="margin-top:8px"></p>' +
+                  '<div id="app-icon-picker" class="settings-app-icon-picker">' +
+                    '<button type="button" class="settings-app-icon-option" data-icon="shorthair">' +
+                      '<span class="settings-app-icon-preview">' +
+                        PIXEL_AVATAR.user +
+                      '</span>' +
+                      '<span class="settings-app-icon-label">赛博虎妞</span>' +
+                    '</button>' +
+                    '<button type="button" class="settings-app-icon-option" data-icon="garfield">' +
+                      '<span class="settings-app-icon-preview">' +
+                        PIXEL_AVATAR.assistant +
+                      '</span>' +
+                      '<span class="settings-app-icon-label">勤劳初二</span>' +
+                    '</button>' +
+                  '</div>' +
+                  '<p id="app-icon-message" class="hint hidden"></p>' +
                 '</div>'
                 : '') +
                 '<div class="settings-actions settings-actions-sticky">' +
@@ -1628,7 +1693,13 @@
                   '<p class="settings-panel-desc">管理登录密码与 SSL 证书，敏感变更请确认后再保存。</p>' +
                 '</div>' +
                 '<div class="settings-card">' +
-                  '<h3 class="settings-section-title">\ud83d\udd12 修改密码</h3>' +
+                  '<div class="settings-card-head">' +
+                    '<span class="settings-card-icon">\ud83d\udd12</span>' +
+                    '<div class="settings-card-head-text">' +
+                      '<h3 class="settings-card-title">修改密码</h3>' +
+                      '<p class="settings-card-desc">至少 6 个字符；保存后下次登录生效。</p>' +
+                    '</div>' +
+                  '</div>' +
                   '<div class="field">' +
                     '<label class="field-label" for="new-password">新密码</label>' +
                     '<input id="new-password" type="password" class="field-input" placeholder="输入新密码（至少 6 个字符）" autocomplete="new-password" />' +
@@ -1637,22 +1708,45 @@
                     '<label class="field-label" for="confirm-password">确认密码</label>' +
                     '<input id="confirm-password" type="password" class="field-input" placeholder="再次输入新密码" autocomplete="new-password" />' +
                   '</div>' +
-                  '<button id="save-password-button" class="btn btn-primary btn-block">保存密码</button>' +
+                  '<div class="settings-card-actions">' +
+                    '<button id="save-password-button" class="btn btn-primary">保存密码</button>' +
+                  '</div>' +
                   '<p id="settings-error" class="error-message hidden"></p>' +
-                  '<p id="settings-success" class="hint hidden" style="color: var(--success);"></p>' +
+                  '<p id="settings-success" class="hint settings-success-message hidden"></p>' +
                 '</div>' +
                 '<div class="settings-card">' +
-                  '<h3 class="settings-section-title">\ud83d\udd10 SSL 证书</h3>' +
-                  '<p class="settings-hint" id="cert-status">加载中...</p>' +
+                  '<div class="settings-card-head">' +
+                    '<span class="settings-card-icon">\ud83d\udd10</span>' +
+                    '<div class="settings-card-head-text">' +
+                      '<h3 class="settings-card-title">SSL 证书</h3>' +
+                      '<p class="settings-card-desc" id="cert-status">加载中...</p>' +
+                    '</div>' +
+                  '</div>' +
                   '<div class="field">' +
                     '<label class="field-label" for="cert-key-file">私钥文件 (.key)</label>' +
-                    '<input id="cert-key-file" type="file" class="field-input field-file" accept=".key,.pem" />' +
+                    '<div class="file-picker">' +
+                      '<input id="cert-key-file" type="file" class="file-picker-input" accept=".key,.pem" />' +
+                      '<label for="cert-key-file" class="file-picker-trigger">' +
+                        '<svg class="file-picker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>' +
+                        '<span class="file-picker-label">选择私钥</span>' +
+                      '</label>' +
+                      '<span class="file-picker-name" data-default="未选择文件">未选择文件</span>' +
+                    '</div>' +
                   '</div>' +
                   '<div class="field">' +
                     '<label class="field-label" for="cert-cert-file">证书文件 (.crt/.pem)</label>' +
-                    '<input id="cert-cert-file" type="file" class="field-input field-file" accept=".crt,.pem,.cert" />' +
+                    '<div class="file-picker">' +
+                      '<input id="cert-cert-file" type="file" class="file-picker-input" accept=".crt,.pem,.cert" />' +
+                      '<label for="cert-cert-file" class="file-picker-trigger">' +
+                        '<svg class="file-picker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>' +
+                        '<span class="file-picker-label">选择证书</span>' +
+                      '</label>' +
+                      '<span class="file-picker-name" data-default="未选择文件">未选择文件</span>' +
+                    '</div>' +
                   '</div>' +
-                  '<button id="upload-cert-button" class="btn btn-primary btn-block">上传证书</button>' +
+                  '<div class="settings-card-actions">' +
+                    '<button id="upload-cert-button" class="btn btn-primary">上传证书</button>' +
+                  '</div>' +
                   '<p id="cert-message" class="hint hidden"></p>' +
                 '</div>' +
               '</div>' +
@@ -3363,7 +3457,7 @@
         // App icon picker (APK only)
         var appIconPicker = document.getElementById("app-icon-picker");
         if (appIconPicker) {
-          var appIconOpts = appIconPicker.querySelectorAll(".app-icon-option");
+          var appIconOpts = appIconPicker.querySelectorAll(".settings-app-icon-option");
           for (var ai = 0; ai < appIconOpts.length; ai++) {
             appIconOpts[ai].addEventListener("click", function() {
               var iconName = this.getAttribute("data-icon");
@@ -3384,6 +3478,24 @@
         }
         var uploadCertBtn = document.getElementById("upload-cert-button");
         if (uploadCertBtn) uploadCertBtn.addEventListener("click", uploadCertificates);
+        var filePickerInputs = document.querySelectorAll(".file-picker-input");
+        for (var fpi = 0; fpi < filePickerInputs.length; fpi++) {
+          (function(input) {
+            input.addEventListener("change", function() {
+              var picker = input.closest(".file-picker");
+              if (!picker) return;
+              var nameEl = picker.querySelector(".file-picker-name");
+              if (!nameEl) return;
+              if (input.files && input.files[0]) {
+                nameEl.textContent = input.files[0].name;
+                picker.classList.add("file-picker-has-file");
+              } else {
+                nameEl.textContent = nameEl.getAttribute("data-default") || "未选择文件";
+                picker.classList.remove("file-picker-has-file");
+              }
+            });
+          })(filePickerInputs[fpi]);
+        }
         var checkUpdateBtn = document.getElementById("check-update-button");
         if (checkUpdateBtn) checkUpdateBtn.addEventListener("click", checkForUpdate);
         var doUpdateBtn = document.getElementById("do-update-button");
@@ -4564,6 +4676,9 @@
         // Remeasure against real container: the refresh button used to only
         // reset+write, so a stale cols/rows (set at mount time with hidden
         // container) would survive the refresh and keep wrapping output wrong.
+        // Suppress the auto-replay branch in ensureTerminalFit — we just
+        // replayed, no point doing it again on the next rAF tick.
+        state.suppressFitReplay = true;
         ensureTerminalFit("refresh");
         return true;
       }
@@ -4688,7 +4803,16 @@
           }
         });
 
-        term.init().then(function() {
+        // Wait for the monospace webfont (if any) before init so the very first
+        // _measureCharSize() inside wterm uses the final glyph metrics. Otherwise
+        // the fallback font's narrower glyphs make wterm calculate too many cols,
+        // and subsequent chunks render with broken wrapping until the user
+        // triggers a resize. Cap the wait so a missing font never blocks startup.
+        var fontsReady = (document.fonts && typeof document.fonts.ready === "object")
+          ? Promise.race([document.fonts.ready, new Promise(function(r) { setTimeout(r, 800); })])
+          : Promise.resolve();
+
+        fontsReady.then(function() { return term.init(); }).then(function() {
           state.terminal = term;
           state.terminalInitializing = false;
           applyTerminalScale();
@@ -6220,6 +6344,11 @@
             var apkMessageEl = document.getElementById("android-apk-message");
             var androidApk = data.androidApk || {};
             var isInApk = !!_apkVersion;
+            var hasApkInfo = isInApk || !!androidApk.github || !!androidApk.local;
+            if (apkSection) {
+              if (hasApkInfo) apkSection.classList.remove("hidden");
+              else apkSection.classList.add("hidden");
+            }
 
             if (isInApk) {
               // ── APK 内模式：显示当前版本 + 线上版本 + 本地版本 ──
@@ -6663,12 +6792,11 @@
       // ── Notification Settings Helpers ──
 
       function _updateAppIconSelection(activeIcon) {
-        var opts = document.querySelectorAll(".app-icon-option");
+        var opts = document.querySelectorAll(".settings-app-icon-option");
         for (var i = 0; i < opts.length; i++) {
-          var preview = opts[i].querySelector(".app-icon-preview");
-          if (preview) {
-            preview.style.borderColor = opts[i].getAttribute("data-icon") === activeIcon ? "var(--accent)" : "transparent";
-          }
+          var isActive = opts[i].getAttribute("data-icon") === activeIcon;
+          opts[i].classList.toggle("selected", isActive);
+          opts[i].setAttribute("aria-pressed", isActive ? "true" : "false");
         }
       }
 
@@ -10019,13 +10147,28 @@
             syncInputBoxScroll(inputBox);
           }
 
+          // Keyboard just opened — terminal viewport now shares space with
+          // the keyboard; visible rows shrink even if cols stayed the same.
+          // Without an immediate refit, any chunk arriving while the keyboard
+          // animates in renders against the old grid and tears the screen.
+          if (!keyboardOpen && isKeyboardOpen) {
+            ensureTerminalFit("keyboard-open");
+          }
+
           // Keyboard just closed — force terminal refit and scroll to bottom
           // after a delay so the keyboard dismiss animation and layout settle.
           if (keyboardOpen && !isKeyboardOpen) {
             setTimeout(function() {
-              ensureTerminalFit();
+              ensureTerminalFit("keyboard-close");
               maybeScrollTerminalToBottom("force");
             }, 200);
+          }
+
+          // visualViewport height changed without a keyboard transition —
+          // covers iOS address-bar collapse/expand and split-screen drag.
+          // Cheap to call: ensureTerminalFit early-exits if cols/rows stable.
+          if (heightChanged && keyboardOpen === isKeyboardOpen) {
+            ensureTerminalFit("viewport");
           }
 
           keyboardOpen = isKeyboardOpen;
@@ -10284,6 +10427,8 @@
         if (!state.terminal) return false;
         var el = document.getElementById("output");
         if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return false;
+        var prevCols = state.terminal.cols;
+        var prevRows = state.terminal.rows;
         requestAnimationFrame(function() {
           requestAnimationFrame(function() {
             if (!state.terminal) return;
@@ -10291,12 +10436,64 @@
               state.terminal.remeasure();
             }
             sendTerminalResize(state.terminal.cols, state.terminal.rows);
+            // Cache the container width that produced this cols/rows so the
+            // hot-path chunk writer can detect drift cheaply (avoids running
+            // a full remeasure on every WebSocket message).
+            state.lastFitContainerWidth = el.offsetWidth;
+            state.lastFitContainerHeight = el.offsetHeight;
+            // If cols actually changed, the previously written buffer was
+            // wrapped to the old width. Replay the full buffer so historical
+            // lines and any in-flight CSI cursor sequences re-render against
+            // the new grid — this is what fixes the "torn" screens users see
+            // after rotating, opening the keyboard, or resizing the panel.
+            var skipReplay = state.suppressFitReplay === true;
+            state.suppressFitReplay = false;
+            if (!skipReplay && (state.terminal.cols !== prevCols || state.terminal.rows !== prevRows)) {
+              if (state.terminalOutput) softResyncTerminal();
+            }
             if (state.terminalAutoFollow || isTerminalNearBottom()) {
               maybeScrollTerminalToBottom("resize");
             }
           });
         });
         return true;
+      }
+
+      // Cheap cols/rows drift check — call before writing a new PTY chunk so
+      // the chunk renders against the correct grid even if ResizeObserver
+      // hasn't fired yet (e.g. mobile keyboard mid-animation, iOS PWA address
+      // bar collapse, panel drag in progress). Only runs a real remeasure
+      // when the container width changed since the last fit; otherwise it is
+      // effectively a single offsetWidth read.
+      function maybeRefitTerminal() {
+        if (!state.terminal) return;
+        var el = document.getElementById("output");
+        if (!el) return;
+        var w = el.offsetWidth;
+        var h = el.offsetHeight;
+        if (w === 0 || h === 0) return;
+        // First call: just record the baseline and let ensureTerminalFit
+        // (called from initTerminal/mount) own the initial sync.
+        if (state.lastFitContainerWidth === undefined) {
+          state.lastFitContainerWidth = w;
+          state.lastFitContainerHeight = h;
+          return;
+        }
+        if (w === state.lastFitContainerWidth && h === state.lastFitContainerHeight) return;
+        state.lastFitContainerWidth = w;
+        state.lastFitContainerHeight = h;
+        var prevCols = state.terminal.cols;
+        var prevRows = state.terminal.rows;
+        if (typeof state.terminal.remeasure === "function") {
+          state.terminal.remeasure();
+        }
+        if (state.terminal.cols !== prevCols || state.terminal.rows !== prevRows) {
+          sendTerminalResize(state.terminal.cols, state.terminal.rows);
+          // Don't replay here: the caller is about to write a fresh chunk and
+          // a softResync would race with it. The chunk itself will reach the
+          // correct grid; older buffer drift is repaired by the next
+          // ensureTerminalFit / health check / manual refresh.
+        }
       }
 
       function scheduleTerminalResize(immediate) {
@@ -10478,6 +10675,10 @@
                 // Fast path: write chunk directly to avoid full-output comparison.
                 state.lastChunkAt = Date.now();
                 state.terminalLiveStreamSessions[msg.sessionId] = true;
+                // Detect cheap container-width drift before applying the chunk
+                // so absolute-cursor CSI sequences in the chunk land on the
+                // right grid (otherwise content tears or stacks at the top).
+                maybeRefitTerminal();
                 state.terminal.write(msg.data.chunk);
                 state.terminalSessionId = msg.sessionId;
                 if (msg.data.output) {

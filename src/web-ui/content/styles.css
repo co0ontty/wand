@@ -2961,51 +2961,86 @@
 
     .chat-overlay-controls {
       position: absolute;
-      top: 8px;
-      right: 8px;
+      top: 10px;
+      right: 10px;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 2px;
-      border-radius: 7px;
-      border: 1px solid rgba(125, 91, 57, 0.12);
-      background: rgba(255, 250, 242, 0.72);
-      backdrop-filter: blur(8px);
-      box-shadow: 0 6px 18px rgba(89, 58, 32, 0.12);
-      opacity: 0.84;
-      transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease;
       z-index: 12;
       pointer-events: auto;
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity 0.22s ease, transform 0.26s var(--ease-out-expo);
     }
 
     .chat-container:hover .chat-overlay-controls,
     .chat-overlay-controls:focus-within {
       opacity: 1;
-      background: rgba(255, 250, 242, 0.88);
-      border-color: rgba(197, 101, 61, 0.16);
+      transform: translateY(0);
     }
 
     .chat-follow-toggle {
-      min-width: 52px;
-      padding: 0 10px;
-      font-size: 0.6875rem;
-      color: var(--text-secondary);
-      background: transparent;
-      border-color: transparent;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: unset;
+      padding: 6px 11px;
+      color: var(--text-tertiary);
+      background: rgba(255, 250, 242, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(125, 91, 57, 0.1);
+      border-radius: 999px;
+      box-shadow: 0 1px 4px rgba(89, 58, 32, 0.06);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .chat-follow-toggle svg {
+      flex-shrink: 0;
+      opacity: 0.7;
+      transition: opacity 0.18s ease, transform 0.2s var(--ease-out-expo);
     }
 
     .chat-follow-toggle.active {
-      background: var(--accent-muted);
       color: var(--accent);
-      border-color: rgba(197, 101, 61, 0.2);
+      background: rgba(255, 250, 242, 0.88);
+      border-color: rgba(197, 101, 61, 0.18);
+      box-shadow:
+        0 1px 4px rgba(89, 58, 32, 0.08),
+        0 0 0 1px rgba(197, 101, 61, 0.06);
+    }
+
+    .chat-follow-toggle.active svg {
+      opacity: 0.85;
+      stroke: var(--accent);
     }
 
     .chat-follow-toggle:hover {
-      background: rgba(255, 255, 255, 0.7);
+      color: var(--text-primary);
+      background: rgba(255, 252, 248, 0.92);
+      border-color: rgba(125, 91, 57, 0.16);
+      box-shadow: 0 2px 8px rgba(89, 58, 32, 0.1);
+    }
+
+    .chat-follow-toggle:hover svg {
+      opacity: 0.8;
     }
 
     .chat-follow-toggle.active:hover {
-      background: rgba(197, 101, 61, 0.18);
+      color: var(--accent-hover);
+      background: rgba(255, 248, 240, 0.94);
+      border-color: rgba(197, 101, 61, 0.24);
+      box-shadow: 0 2px 8px rgba(184, 92, 55, 0.12);
+    }
+
+    .chat-follow-toggle.active:hover svg {
+      stroke: var(--accent-hover);
+      transform: translateY(1px);
+    }
+
+    .chat-follow-toggle:active {
+      transform: scale(0.94);
+      transition-duration: 0.06s;
     }
 
     .chat-jump-bottom {
@@ -8127,6 +8162,7 @@
       padding-top: 16px;
       background: linear-gradient(180deg, rgba(255, 251, 245, 0), rgba(255, 251, 245, 0.98) 28px);
       z-index: 1;
+      justify-content: flex-end;
     }
 
     .settings-status-message {
@@ -9828,6 +9864,379 @@
       color: var(--error, #e55);
       background: rgba(229, 85, 85, 0.12);
       opacity: 1;
+    }
+
+    /* ============================================================ */
+    /* Settings v2 — refined sections, file picker, toggle rows       */
+    /* ============================================================ */
+
+    /* 卡片头部（修改密码 / SSL 证书等） */
+    .settings-card-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .settings-card-icon {
+      flex: 0 0 auto;
+      width: 36px;
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(197, 101, 61, 0.18), rgba(197, 101, 61, 0.06));
+      color: var(--accent);
+      font-size: 18px;
+      box-shadow: inset 0 0 0 1px rgba(197, 101, 61, 0.18);
+    }
+    .settings-card-head-text {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .settings-card-title {
+      font-size: 0.9375rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: 0.005em;
+      line-height: 1.3;
+      margin: 0;
+    }
+    .settings-card-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin: 0;
+    }
+    .settings-card-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+      margin-top: 6px;
+    }
+    .settings-card-actions .btn {
+      min-width: 120px;
+    }
+    .settings-success-message {
+      color: var(--success);
+    }
+
+    /* 区块头（关于 / 通知 tab 内的小段标题） */
+    .settings-section-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .settings-section-icon {
+      flex: 0 0 auto;
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      background: rgba(197, 101, 61, 0.10);
+      font-size: 14px;
+    }
+    .settings-section-head-text {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .settings-section-heading {
+      font-size: 0.875rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: 0.005em;
+      line-height: 1.3;
+      margin: 0;
+    }
+    .settings-section-sub {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    /* Toggle 行（描述在左、开关在右） */
+    .settings-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid rgba(125, 91, 57, 0.10);
+      margin-top: 10px;
+    }
+    .settings-toggle-row + .settings-toggle-row,
+    .settings-toggle-row + .settings-range-row,
+    .settings-range-row + .settings-toggle-row {
+      margin-top: 8px;
+    }
+    .settings-toggle-text {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .settings-toggle-title {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      cursor: pointer;
+    }
+    .settings-toggle-desc {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .settings-switch {
+      position: relative;
+      flex: 0 0 auto;
+      cursor: pointer;
+      display: inline-block;
+    }
+
+    /* Range 行（音量等） */
+    .settings-range-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid rgba(125, 91, 57, 0.10);
+      margin-top: 8px;
+    }
+    .settings-range-label {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      flex: 0 0 auto;
+      margin-bottom: 0;
+    }
+    .settings-range {
+      flex: 1;
+      min-width: 0;
+      accent-color: var(--accent);
+    }
+    .settings-range-value {
+      flex: 0 0 36px;
+      text-align: right;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 行内带操作的字段（select + 刷新等） */
+    .settings-row-with-action {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .settings-row-with-action > .field-input,
+    .settings-row-with-action > .field-select,
+    .settings-row-with-action > select {
+      flex: 1;
+      min-width: 0;
+    }
+    .settings-row-with-action > .btn {
+      flex-shrink: 0;
+    }
+
+    /* settings-about-row 加按钮的变体 */
+    .settings-about-row-action {
+      flex-wrap: nowrap;
+    }
+    .settings-value-flex {
+      flex: 1;
+      text-align: right;
+    }
+
+    /* ===== File picker ===== */
+    .file-picker {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 12px 6px 6px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px dashed rgba(125, 91, 57, 0.25);
+      border-radius: 12px;
+      transition: border-color 0.18s, background 0.18s;
+    }
+    .file-picker:hover {
+      border-color: var(--accent-soft, rgba(197, 101, 61, 0.45));
+      background: rgba(255, 255, 255, 0.9);
+    }
+    .file-picker.file-picker-has-file {
+      border-style: solid;
+      border-color: rgba(197, 101, 61, 0.35);
+      background: linear-gradient(135deg, rgba(197, 101, 61, 0.08), rgba(255, 255, 255, 0.85));
+    }
+    .file-picker-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .file-picker-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 80%, #000 0%));
+      color: #fff;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      border-radius: 9px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: filter 0.15s, transform 0.15s, box-shadow 0.15s;
+      box-shadow: var(--shadow-xs);
+      user-select: none;
+    }
+    .file-picker-trigger:hover {
+      filter: brightness(1.05);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-sm);
+    }
+    .file-picker-trigger:active {
+      transform: translateY(0);
+    }
+    .file-picker-input:focus-visible + .file-picker-trigger {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .file-picker-icon {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+    .file-picker-label {
+      white-space: nowrap;
+    }
+    .file-picker-name {
+      flex: 1;
+      min-width: 0;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--font-mono);
+    }
+    .file-picker.file-picker-has-file .file-picker-name {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    /* ===== App icon picker (general tab) ===== */
+    .settings-app-icon-block {
+      margin-bottom: 18px;
+    }
+    .settings-app-icon-picker {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .settings-app-icon-option {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 10px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      cursor: pointer;
+      transition: border-color 0.18s, background 0.18s, transform 0.18s, box-shadow 0.18s;
+      min-width: 84px;
+    }
+    .settings-app-icon-option:hover {
+      transform: translateY(-1px);
+      border-color: rgba(197, 101, 61, 0.30);
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: var(--shadow-xs);
+    }
+    .settings-app-icon-option.selected,
+    .settings-app-icon-option[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: linear-gradient(135deg, rgba(197, 101, 61, 0.14), rgba(197, 101, 61, 0.04));
+      box-shadow: inset 0 0 0 1px rgba(197, 101, 61, 0.20);
+    }
+    .settings-app-icon-preview {
+      width: 56px;
+      height: 56px;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--bg-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .settings-app-icon-label {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    /* ===== Connect URL box refinements ===== */
+    .settings-connect-url-text {
+      font-family: var(--font-mono, monospace);
+      font-size: 12px;
+      color: var(--text-primary);
+      word-break: break-all;
+      user-select: all;
+      -webkit-user-select: all;
+    }
+
+    /* ===== Mobile tweaks ===== */
+    @media (max-width: 640px) {
+      .settings-toggle-row,
+      .settings-range-row {
+        padding: 10px 12px;
+      }
+      .settings-toggle-row {
+        flex-wrap: wrap;
+      }
+      .settings-card-actions {
+        justify-content: stretch;
+      }
+      .settings-card-actions .btn {
+        flex: 1;
+        min-width: 0;
+      }
+      .file-picker {
+        flex-wrap: wrap;
+        padding: 8px;
+      }
+      .file-picker-trigger {
+        flex: 1 1 auto;
+        justify-content: center;
+      }
+      .file-picker-name {
+        flex: 1 1 100%;
+        text-align: center;
+        padding: 0 4px;
+      }
+      .settings-row-with-action {
+        flex-wrap: wrap;
+      }
+      .settings-row-with-action > .btn {
+        flex: 1;
+      }
     }
 
     /* 结束标记 */
