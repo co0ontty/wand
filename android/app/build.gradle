@@ -3,7 +3,19 @@ plugins {
 }
 
 def appVersionName = project.hasProperty('APP_VERSION_NAME') ? project.property('APP_VERSION_NAME') : "1.0.0"
-def appVersionCode = project.hasProperty('APP_VERSION_CODE') ? project.property('APP_VERSION_CODE').toString().toInteger() : 1
+
+// major * 1_000_000 + minor * 10_000 + patch * 100 + (debug ? 1 : 0)
+// e.g. 1.17.6 → 1_170_600 (release), 1.17.6-debug.xxx → 1_170_601
+def computeVersionCode = { String name ->
+    def m = (name =~ /(\d+)\.(\d+)\.(\d+)/)
+    if (m.find()) {
+        def base = m.group(1).toInteger() * 1000000 + m.group(2).toInteger() * 10000 + m.group(3).toInteger() * 100
+        return base + (name.contains("-debug") ? 1 : 0)
+    }
+    return 1
+}
+
+def appVersionCode = project.hasProperty('APP_VERSION_CODE') ? project.property('APP_VERSION_CODE').toString().toInteger() : computeVersionCode(appVersionName)
 
 android {
     namespace 'com.wand.app'

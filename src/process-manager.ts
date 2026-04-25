@@ -752,16 +752,26 @@ export class ProcessManager extends EventEmitter {
       this.lastPersistedMessageState.delete(id);
       this.storage.deleteSession(id);
     }
+    if (toRemove.length > 0) {
+      this.claudeHistoryCache = null;
+    }
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string }): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string }): SessionSnapshot {
     this.assertCommandAllowed(command);
 
     const baseCwd = cwd
       ? path.resolve(process.cwd(), cwd)
       : path.resolve(process.cwd(), this.config.defaultCwd);
 
-    const id = randomUUID();
+    const id = opts?.reuseId || randomUUID();
+    if (opts?.reuseId) {
+      const oldRecord = this.sessions.get(id);
+      if (oldRecord) {
+        this.cleanupRecord(oldRecord);
+        this.sessions.delete(id);
+      }
+    }
     const worktreeSetup = opts?.worktreeEnabled
       ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id })
       : null;
@@ -840,6 +850,9 @@ export class ProcessManager extends EventEmitter {
 
     this.sessions.set(id, record);
     this.persist(record);
+    if (initialClaudeSessionId) {
+      this.claudeHistoryCache = null;
+    }
     this.cleanupOldSessions();
 
     this.lifecycleManager.register(id, "initializing");
@@ -959,6 +972,7 @@ export class ProcessManager extends EventEmitter {
       const bridgeSessionId = rec.ptyBridge?.getClaudeSessionId();
       if (bridgeSessionId && bridgeSessionId !== rec.claudeSessionId) {
         rec.claudeSessionId = bridgeSessionId;
+        this.claudeHistoryCache = null;
         process.stderr.write(`[wand] Captured Claude session ID: ${bridgeSessionId}\n`);
       }
 
@@ -1279,6 +1293,42 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
+  private cleanupRecord(record: SessionRecord): void {
+    if (record.taskDebounceTimer) {
+      clearTimeout(record.taskDebounceTimer);
+      record.taskDebounceTimer = null;
+    }
+    if (record.claudeTaskDiscoveryTimer) {
+      clearTimeout(record.claudeTaskDiscoveryTimer);
+      record.claudeTaskDiscoveryTimer = null;
+    }
+    if (record.initialInputTimer) {
+      clearTimeout(record.initialInputTimer);
+      record.initialInputTimer = null;
+    }
+    const pendingPersist = this.persistDebounceTimers.get(record.id);
+    if (pendingPersist) {
+      clearTimeout(pendingPersist);
+      this.persistDebounceTimers.delete(record.id);
+    }
+    if (record.status === "running") {
+      record.stopRequested = true;
+      if (record.childProcess) {
+        record.childProcess.kill();
+        record.childProcess = null;
+      }
+      if (record.ptyProcess) {
+        record.ptyProcess.kill();
+        record.ptyProcess = null;
+      }
+    }
+    if (record.ptyBridge) {
+      record.ptyBridge.removeAllListeners();
+      record.ptyBridge = null;
+    }
+    this.lifecycleManager.unregister(record.id);
+  }
+
   delete(id: string): void {
     const record = this.mustGet(id);
 
@@ -1332,8 +1382,11 @@ export class ProcessManager extends EventEmitter {
     this.logger.deleteSession(id);
     this.deleteClaudeCache(record);
     this.sessions.delete(id);
-      this.lastPersistedMessageState.delete(id);
+    this.lastPersistedMessageState.delete(id);
     this.lifecycleManager.unregister(id);
+    if (record.claudeSessionId) {
+      this.claudeHistoryCache = null;
+    }
   }
 
   private deleteClaudeCache(record: Pick<SessionRecord, "claudeSessionId" | "cwd">): void {
@@ -1574,8 +1627,8 @@ export class ProcessManager extends EventEmitter {
   /**
    * Auto-recover the most recent exited session that has a Claude session ID.
    * Only resumes one session per server start, using the most recent eligible
-   * session. Sets `resumedToSessionId` on the original session and
-   * `autoRecovered: true` on the new session.
+   * session. Reuses the original session ID (in-place resume) and sets
+   * `autoRecovered: true`.
    */
   private autoRecoverExitedSessions(): void {
     // Find eligible exited sessions
@@ -1617,23 +1670,15 @@ export class ProcessManager extends EventEmitter {
     );
 
     const resumeCommand = `${original.command.trim()} --resume ${original.claudeSessionId}`;
-    let newRecord: SessionRecord | null = null;
 
     try {
       const snapshot = this.start(resumeCommand, original.cwd, original.mode, undefined, {
-        resumedFromSessionId: original.id,
+        reuseId: original.id,
         autoRecovered: true
       });
 
-      newRecord = this.sessions.get(snapshot.id) ?? null;
-      if (!newRecord) return;
-
-      // Set resumedToSessionId on the original session
-      original.resumedToSessionId = snapshot.id;
-      this.storage.saveSession(this.snapshot(original));
-
       console.error(
-        `[ProcessManager] Auto-recovered session ${snapshot.id} from ${original.id}`
+        `[ProcessManager] Auto-recovered session ${snapshot.id} (in-place)`
       );
     } catch (err) {
       console.error(`[ProcessManager] Auto-recovery failed: ${String(err)}`);

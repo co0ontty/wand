@@ -30,8 +30,7 @@ APK_DIR="$HOME/.wand/android"
 mkdir -p "$APK_DIR"
 echo "==> 编译 Android APK (v$VERSION)..."
 (cd android && ./gradlew assembleDebug \
-  -PAPP_VERSION_NAME="$VERSION" \
-  -PAPP_VERSION_CODE=$(echo "$VERSION" | awk -F. '{printf "%d%02d%02d", $1, $2, $3}'))
+  -PAPP_VERSION_NAME="$VERSION")
 cp android/app/build/outputs/apk/debug/app-debug.apk "$APK_DIR/wand-v${VERSION}.apk"
 echo "==> APK 已部署到 $APK_DIR/wand-v${VERSION}.apk"
 

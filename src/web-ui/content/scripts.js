@@ -842,6 +842,9 @@
         if (!state.ws || (state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING)) {
           initWebSocket();
         }
+        if (state.claudeHistoryLoaded) {
+          loadClaudeHistory();
+        }
         return loadSessions({ skipSelectedOutputReload: true }).then(function() {
           if (state.selectedId) {
             return loadOutput(state.selectedId);
@@ -1201,13 +1204,13 @@
                   '<span class="terminal-scale-overlay-divider"></span>' +
                   '<button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面">↻</button>' +
                 '</div>' +
-                '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部">↓ 最新</button>' +
+                '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
               '</div>' +
               '<div id="chat-output" class="chat-container hidden">' +
                 '<div class="chat-overlay-controls">' +
                   '<button id="chat-follow-toggle" class="chat-follow-toggle topbar-btn' + (state.chatAutoFollow ? ' active' : '') + '" type="button" aria-pressed="' + (state.chatAutoFollow ? 'true' : 'false') + '" title="' + (state.chatAutoFollow ? '追踪底部：开启' : '追踪底部：已暂停') + '">' + (state.chatAutoFollow ? '追底' : '暂停') + '</button>' +
                 '</div>' +
-                '<button id="chat-jump-bottom" class="chat-jump-bottom' + (state.showChatJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部并继续追底">↓ 最新</button>' +
+                '<button id="chat-jump-bottom" class="chat-jump-bottom' + (state.showChatJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部并继续追底" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
               '</div>' +
               '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
                 '<div class="blank-chat-inner">' +
@@ -1865,8 +1868,12 @@
       }
 
       function getVisibleClaudeHistorySessions() {
+        var managedIds = new Set();
+        state.sessions.forEach(function(s) {
+          if (s.claudeSessionId) managedIds.add(s.claudeSessionId);
+        });
         return state.claudeHistory.filter(function(s) {
-          return s.hasConversation && !s.managedByWand;
+          return s.hasConversation && !s.managedByWand && !managedIds.has(s.claudeSessionId);
         });
       }
 
@@ -4857,6 +4864,9 @@
             : "向 Codex 发送输入；chat 为解析后的阅读视图";
         }
         if (session && !isStructuredSession(session) && session.status !== "running") {
+          if (canAutoResumeSession(session)) {
+            return "输入消息...";
+          }
           return "会话已结束，无法继续发送";
         }
         return session && isStructuredSession(session) && session.structuredState && session.structuredState.inFlight
@@ -8243,7 +8253,6 @@
           if (!data) return null;
           updateSessionSnapshot(data);
           updateSessionsList();
-          switchToSessionView(data.id);
           subscribeToSession(data.id);
           return loadOutput(data.id).then(function() {
             focusInputBox(true);
@@ -9014,6 +9023,9 @@
             else showToast(data.error, "error");
             return null;
           }
+          state.claudeHistory = state.claudeHistory.filter(function(s) {
+            return s.claudeSessionId !== claudeSessionId;
+          });
           state.selectedId = data.id;
           persistSelectedId();
           state.drafts[data.id] = "";
@@ -9043,6 +9055,11 @@
         console.log("[WAND] resumeSessionFromList sessionId:", sessionId);
         return resumeSession(sessionId).then(function(data) {
           if (!data) return null;
+          if (data.claudeSessionId) {
+            state.claudeHistory = state.claudeHistory.filter(function(s) {
+              return s.claudeSessionId !== data.claudeSessionId;
+            });
+          }
           return activateSession(data).then(function() {
             return data;
           });
@@ -9150,11 +9167,13 @@
         resumeClaudeHistorySession(claudeSessionId, cwd)
           .then(function(data) {
             if (data && data.id) {
+              state.claudeHistory = state.claudeHistory.filter(function(s) {
+                return s.claudeSessionId !== claudeSessionId;
+              });
               state.selectedId = data.id;
               persistSelectedId();
               state.drafts[data.id] = "";
-              loadSessions().then(function() {
-                selectSession(data.id);
+              activateSession(data).then(function() {
                 closeSessionsDrawer();
               });
             }
