@@ -39,7 +39,10 @@ public class ConnectActivity extends AppCompatActivity {
     private TextView statusText;
     private LinearLayout recentList;
     private TextView recentLabel;
+    private LinearLayout autoConnectGroup;
+    private LinearLayout formGroup;
     private ServerStore serverStore;
+    private boolean autoConnecting = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,12 +55,24 @@ public class ConnectActivity extends AppCompatActivity {
         statusText = findViewById(R.id.statusText);
         recentList = findViewById(R.id.recentList);
         recentLabel = findViewById(R.id.recentLabel);
+        autoConnectGroup = findViewById(R.id.autoConnectGroup);
+        formGroup = findViewById(R.id.formGroup);
 
-        handleDeepLink(getIntent());
+        if (handleDeepLink(getIntent())) {
+            return;
+        }
 
+        boolean skipAutoConnect = getIntent().getBooleanExtra("skip_auto_connect", false);
         String lastUrl = serverStore.getLastUrl();
         if (!TextUtils.isEmpty(lastUrl)) {
             urlInput.setText(lastUrl);
+            if (!skipAutoConnect) {
+                tryAutoConnect(lastUrl);
+            } else {
+                showForm();
+            }
+        } else {
+            showForm();
         }
 
         connectButton.setOnClickListener(v -> attemptConnect());
@@ -69,8 +84,6 @@ public class ConnectActivity extends AppCompatActivity {
             }
             return false;
         });
-
-        refreshRecentList();
     }
 
     @Override
@@ -79,16 +92,89 @@ public class ConnectActivity extends AppCompatActivity {
         handleDeepLink(intent);
     }
 
-    private void handleDeepLink(Intent intent) {
-        if (intent == null || intent.getData() == null) return;
+    private boolean handleDeepLink(Intent intent) {
+        if (intent == null || intent.getData() == null) return false;
         Uri uri = intent.getData();
         if ("wand".equals(uri.getScheme()) && "connect".equals(uri.getHost())) {
             String serverUrl = uri.getQueryParameter("url");
             if (!TextUtils.isEmpty(serverUrl)) {
                 urlInput.setText(serverUrl);
                 attemptConnect();
+                return true;
             }
         }
+        return false;
+    }
+
+    private void tryAutoConnect(String savedInput) {
+        autoConnecting = true;
+        autoConnectGroup.setVisibility(View.VISIBLE);
+        formGroup.setVisibility(View.GONE);
+
+        new Thread(() -> {
+            String[] decoded = tryDecodeConnectCode(savedInput);
+
+            if (decoded != null) {
+                String serverUrl = decoded[0];
+                String appToken = decoded[1];
+                String error = testConnectionWithToken(serverUrl, appToken, 5000);
+                runOnUiThread(() -> {
+                    autoConnecting = false;
+                    if (error == null) {
+                        serverStore.setAppToken(appToken);
+                        launchWebView(serverUrl, appToken);
+                    } else {
+                        showFormWithMessage(error);
+                    }
+                });
+            } else {
+                String url = savedInput;
+                if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                    url = "http://" + url;
+                }
+                if (url.endsWith("/")) {
+                    url = url.substring(0, url.length() - 1);
+                }
+                final String normalizedUrl = url;
+
+                String savedToken = serverStore.getAppToken();
+                if (!TextUtils.isEmpty(savedToken)) {
+                    String error = testConnectionWithToken(normalizedUrl, savedToken, 5000);
+                    if (error == null) {
+                        runOnUiThread(() -> {
+                            autoConnecting = false;
+                            launchWebView(normalizedUrl, savedToken);
+                        });
+                        return;
+                    }
+                }
+
+                String error = testConnection(normalizedUrl, 5000);
+                runOnUiThread(() -> {
+                    autoConnecting = false;
+                    if (error == null) {
+                        launchWebView(normalizedUrl, null);
+                    } else {
+                        showFormWithMessage(null);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void showForm() {
+        autoConnectGroup.setVisibility(View.GONE);
+        formGroup.setVisibility(View.VISIBLE);
+        refreshRecentList();
+    }
+
+    private void showFormWithMessage(String errorMessage) {
+        autoConnectGroup.setVisibility(View.GONE);
+        formGroup.setVisibility(View.VISIBLE);
+        if (errorMessage != null) {
+            showStatus(errorMessage);
+        }
+        refreshRecentList();
     }
 
     /**
@@ -97,7 +183,6 @@ public class ConnectActivity extends AppCompatActivity {
      */
     private String[] tryDecodeConnectCode(String input) {
         try {
-            // Strip ALL whitespace (copy-paste may introduce spaces/newlines)
             String cleaned = input.replaceAll("\\s+", "");
             if (cleaned.isEmpty()) return null;
             byte[] buf = Base64.decode(cleaned, Base64.DEFAULT | Base64.NO_WRAP | Base64.URL_SAFE);
@@ -125,14 +210,13 @@ public class ConnectActivity extends AppCompatActivity {
         statusText.setVisibility(View.GONE);
 
         new Thread(() -> {
-            // First try decoding as connect code
             String[] decoded = tryDecodeConnectCode(rawInput);
 
             if (decoded != null) {
                 String serverUrl = decoded[0];
                 String appToken = decoded[1];
 
-                String error = testConnectionWithToken(serverUrl, appToken);
+                String error = testConnectionWithToken(serverUrl, appToken, 8000);
                 runOnUiThread(() -> {
                     connectButton.setEnabled(true);
                     connectButton.setText(R.string.connect_button);
@@ -147,7 +231,6 @@ public class ConnectActivity extends AppCompatActivity {
                     }
                 });
             } else {
-                // Plain URL fallback
                 String url = rawInput;
                 if (!url.startsWith("http://") && !url.startsWith("https://")) {
                     url = "http://" + url;
@@ -157,7 +240,7 @@ public class ConnectActivity extends AppCompatActivity {
                 }
 
                 final String normalizedUrl = url;
-                String error = testConnection(normalizedUrl);
+                String error = testConnection(normalizedUrl, 8000);
                 runOnUiThread(() -> {
                     connectButton.setEnabled(true);
                     connectButton.setText(R.string.connect_button);
@@ -175,15 +258,15 @@ public class ConnectActivity extends AppCompatActivity {
         }).start();
     }
 
-    private String testConnectionWithToken(String baseUrl, String appToken) {
+    private String testConnectionWithToken(String baseUrl, String appToken, int timeout) {
         HttpURLConnection conn = null;
         try {
             URL url = new URL(baseUrl + "/api/login");
             conn = (HttpURLConnection) url.openConnection();
             trustSelfSigned(conn);
 
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(8000);
+            conn.setConnectTimeout(timeout);
+            conn.setReadTimeout(timeout);
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
@@ -230,14 +313,14 @@ public class ConnectActivity extends AppCompatActivity {
         }
     }
 
-    private String testConnection(String baseUrl) {
+    private String testConnection(String baseUrl, int timeout) {
         try {
             URL url = new URL(baseUrl + "/api/config");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             trustSelfSigned(conn);
 
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(8000);
+            conn.setConnectTimeout(timeout);
+            conn.setReadTimeout(timeout);
             conn.setRequestMethod("GET");
             int code = conn.getResponseCode();
             conn.disconnect();
@@ -285,6 +368,7 @@ public class ConnectActivity extends AppCompatActivity {
             intent.putExtra("app_token", appToken);
         }
         startActivity(intent);
+        finish();
     }
 
     private void showStatus(String message) {
@@ -295,7 +379,9 @@ public class ConnectActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        refreshRecentList();
+        if (!autoConnecting) {
+            refreshRecentList();
+        }
     }
 
     private void refreshRecentList() {

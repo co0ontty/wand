@@ -7,6 +7,8 @@
     <string name="recent_servers">最近连接</string>
     <string name="no_recent_servers">暂无最近连接记录</string>
     <string name="connecting">正在连接…</string>
+    <string name="auto_connecting">正在自动连接上次的服务器…</string>
+    <string name="auto_connect_failed">自动连接失败，请重新连接</string>
     <string name="connection_failed">连接失败，请检查地址是否正确</string>
     <string name="disconnected">服务器连接断开</string>
     <string name="retry">重新连接</string>

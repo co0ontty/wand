@@ -1499,6 +1499,14 @@
                   '</div>' +
                   '<p class="hint" style="margin-top:0">\u9009\u62e9 Android \u7cfb\u7edf\u901a\u77e5\u4f7f\u7528\u7684\u94c3\u58f0</p>' +
                 '</div>' +
+                '<div id="native-haptic-section" class="settings-notification-section hidden" style="margin-top:6px">' +
+                  '<div class="settings-section-title">\u89e6\u611f\u53cd\u9988</div>' +
+                  '<div class="field field-inline" style="margin:4px 0">' +
+                    '<input id="cfg-haptic-enabled" type="checkbox" class="field-checkbox" />' +
+                    '<label class="field-label" for="cfg-haptic-enabled">\u542f\u7528\u89e6\u611f\u53cd\u9988</label>' +
+                  '</div>' +
+                  '<p class="hint" style="margin-top:0">\u6309\u94ae\u64cd\u4f5c\u548c\u4efb\u52a1\u5b8c\u6210\u65f6\u63d0\u4f9b\u632f\u52a8\u53cd\u9988</p>' +
+                '</div>' +
                 '<div class="settings-notification-section" style="margin-top:6px">' +
                   '<div class="settings-section-title">\u6d4f\u89c8\u5668\u901a\u77e5</div>' +
                   '<div class="settings-about-row">' +
@@ -3483,6 +3491,19 @@
             } catch (_e) {}
           }
         }
+        // Native haptic toggle (APK only)
+        if (_hasNativeBridge && typeof WandNative.isHapticEnabled === "function") {
+          var hapticSection = document.getElementById("native-haptic-section");
+          var hapticToggle = document.getElementById("cfg-haptic-enabled");
+          if (hapticSection && hapticToggle) {
+            hapticSection.classList.remove("hidden");
+            try { hapticToggle.checked = WandNative.isHapticEnabled(); } catch (_e) {}
+            hapticToggle.addEventListener("change", function() {
+              try { WandNative.setHapticEnabled(hapticToggle.checked); } catch (_e) {}
+              if (hapticToggle.checked) _vibrate("medium");
+            });
+          }
+        }
         var newSessBtn = document.getElementById("topbar-new-session-button");
         if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
         var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
@@ -4245,16 +4266,14 @@
         if (!badge) return;
         var fullId = badge.dataset.claudeId;
         if (!fullId) return;
-        navigator.clipboard.writeText(fullId).then(function() {
-          var original = badge.textContent;
+        var original = badge.textContent;
+        copyToClipboard(fullId, null, function() {
           badge.textContent = "\u2713 已复制";
           badge.classList.add("copied");
           setTimeout(function() {
             badge.textContent = original;
             badge.classList.remove("copied");
           }, 1200);
-        }).catch(function() {
-          showToast("复制失败", "error");
         });
       }
 
@@ -5389,6 +5408,7 @@
                 flushCrossSessionQueue();
               }
               renderCrossSessionQueue();
+              _syncWakeLock();
             });
           })
           .catch(function(e) {
@@ -5948,6 +5968,12 @@
               try { localStorage.setItem("wand-notif-volume", String(nativeVol)); } catch (_e) {}
             } catch (_e) {}
           }
+          if (_hasNativeBridge && typeof WandNative.isHapticEnabled === "function") {
+            try {
+              var hapticEl = document.getElementById("cfg-haptic-enabled");
+              if (hapticEl) hapticEl.checked = WandNative.isHapticEnabled();
+            } catch (_e) {}
+          }
         }
       }
 
@@ -6094,16 +6120,23 @@
       }
 
 
-      function copyToClipboard(text, triggerBtn) {
+      function copyToClipboard(text, triggerBtn, successCallback) {
         if (!text) return;
-        navigator.clipboard.writeText(text).then(function() {
+        function onSuccess() {
+          _vibrate("light");
+          if (successCallback) { successCallback(); return; }
           if (triggerBtn) {
             var orig = triggerBtn.textContent;
             triggerBtn.textContent = "已复制";
             setTimeout(function() { triggerBtn.textContent = orig; }, 1500);
           }
-        }).catch(function() {
-          // Fallback for non-secure contexts
+        }
+        if (_hasNativeBridge && typeof WandNative.copyToClipboard === "function") {
+          try {
+            if (WandNative.copyToClipboard(text) === "ok") { onSuccess(); return; }
+          } catch (_e) {}
+        }
+        navigator.clipboard.writeText(text).then(onSuccess).catch(function() {
           var ta = document.createElement("textarea");
           ta.value = text;
           ta.style.position = "fixed";
@@ -6112,11 +6145,7 @@
           ta.select();
           document.execCommand("copy");
           document.body.removeChild(ta);
-          if (triggerBtn) {
-            var orig = triggerBtn.textContent;
-            triggerBtn.textContent = "已复制";
-            setTimeout(function() { triggerBtn.textContent = orig; }, 1500);
-          }
+          onSuccess();
         });
       }
 
@@ -10489,8 +10518,10 @@
             } else {
               endedNotifBody = endedSession ? (endedSession.command || msg.sessionId) : msg.sessionId;
             }
+            _vibrate(endedIsError ? "error" : "success");
             notifyTaskEnded(msg.sessionId, endedNotifTitle, endedNotifBody);
             clearSessionProgressNative(msg.sessionId);
+            _syncWakeLock();
             if (msg.sessionId !== state.selectedId || document.hidden) {
               showNotificationBubble({
                 title: endedNotifTitle,
@@ -10629,6 +10660,7 @@
                 } else {
                   permBody += "\n" + permDetail;
                 }
+                _vibrate("medium");
                 notifyPermissionRequest(msg.sessionId, permBody);
                 // In-app bubble if not currently viewing this session
                 if (msg.sessionId !== state.selectedId) {
@@ -10653,6 +10685,7 @@
               }
               updateSessionSnapshot(statusUpdate);
               syncSessionProgressToNative(msg.sessionId);
+              _syncWakeLock();
               if (msg.sessionId === state.selectedId) {
                 updateTaskDisplay();
                 if (msg.data.approvalStats) {
@@ -10777,6 +10810,7 @@
       }
 
       function approvePermission() {
+        _vibrate("light");
         if (!state.selectedId) return;
         var approveBtn = document.getElementById("approve-permission-btn");
         var denyBtn = document.getElementById("deny-permission-btn");
@@ -10805,6 +10839,7 @@
       }
 
       function denyPermission() {
+        _vibrate("light");
         if (!state.selectedId) return;
         var approveBtn = document.getElementById("approve-permission-btn");
         var denyBtn = document.getElementById("deny-permission-btn");
@@ -11507,13 +11542,10 @@
             var codeBlock = btn.closest(".code-block");
             var code = codeBlock ? codeBlock.querySelector("code") : null;
             if (code) {
-              navigator.clipboard.writeText(code.textContent || "").then(function() {
+              copyToClipboard(code.textContent || "", null, function() {
                 btn.textContent = "Copied!";
                 btn.classList.add("copied");
-                setTimeout(function() {
-                  btn.textContent = "Copy";
-                  btn.classList.remove("copied");
-                }, 2000);
+                setTimeout(function() { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 2000);
               });
             }
           });
@@ -11522,25 +11554,20 @@
 
       function attachAllCopyHandlers(container) {
         container.querySelectorAll(".code-copy").forEach(function(btn) {
-          // Remove existing listeners by cloning
           var clone = btn.cloneNode(true);
           btn.parentNode.replaceChild(clone, btn);
           clone.addEventListener("click", function() {
             var codeBlock = clone.closest(".code-block");
             var code = codeBlock ? codeBlock.querySelector("code") : null;
             if (code) {
-              navigator.clipboard.writeText(code.textContent || "").then(function() {
+              copyToClipboard(code.textContent || "", null, function() {
                 clone.textContent = "Copied!";
                 clone.classList.add("copied");
-                setTimeout(function() {
-                  clone.textContent = "Copy";
-                  clone.classList.remove("copied");
-                }, 2000);
+                setTimeout(function() { clone.textContent = "Copy"; clone.classList.remove("copied"); }, 2000);
               });
             }
           });
         });
-        // Attach message-level copy buttons for touch devices
         attachMessageCopyButtons(container);
       }
 
@@ -11560,7 +11587,7 @@
           btn.addEventListener("click", function(e) {
             e.stopPropagation();
             var text = bubble.innerText || bubble.textContent || "";
-            navigator.clipboard.writeText(text.trim()).then(function() {
+            copyToClipboard(text.trim(), null, function() {
               btn.textContent = "已复制";
               btn.classList.add("copied");
               setTimeout(function() {
@@ -13629,6 +13656,30 @@
       var _apkVersionMatch = navigator.userAgent.match(/WandApp\/([^\s]+)/);
       var _apkVersion = _apkVersionMatch ? _apkVersionMatch[1] : null;
 
+      function _vibrate(pattern) {
+        if (!_hasNativeBridge || typeof WandNative.vibrate !== "function") return;
+        try { WandNative.vibrate(pattern || "light"); } catch (_e) {}
+      }
+
+      function _syncWakeLock() {
+        if (!_hasNativeBridge) return;
+        var anyActive = state.sessions.some(function(s) {
+          return !s.archived && (s.status === "running" || s.status === "thinking" || s.status === "initializing");
+        });
+        if (typeof WandNative.setKeepScreenOn === "function") {
+          try { WandNative.setKeepScreenOn(anyActive); } catch (_e) {}
+        }
+        if (anyActive) {
+          if (typeof WandNative.startKeepAlive === "function") {
+            try { WandNative.startKeepAlive(); } catch (_e) {}
+          }
+        } else {
+          if (typeof WandNative.stopKeepAlive === "function") {
+            try { WandNative.stopKeepAlive(); } catch (_e) {}
+          }
+        }
+      }
+
       function _getNativePermission() {
         if (_hasNativeBridge && typeof WandNative.getPermission === "function") {
           try { return WandNative.getPermission(); } catch (_e) {}
@@ -13847,6 +13898,41 @@
         }
         try { WandNative.clearSessionProgress(sessionId); } catch (_e) {}
       }
+
+      // ── Android back button handler ──
+      window.handleNativeBack = function() {
+        var settingsModal = document.getElementById("settings-modal");
+        if (settingsModal && !settingsModal.classList.contains("hidden")) {
+          closeSettingsModal();
+          return true;
+        }
+        var sessionModal = document.getElementById("session-modal");
+        if (sessionModal && !sessionModal.classList.contains("hidden")) {
+          closeSessionModal();
+          return true;
+        }
+        var worktreeModal = document.getElementById("worktree-merge-modal");
+        if (worktreeModal && !worktreeModal.classList.contains("hidden")) {
+          closeWorktreeMergeModal();
+          return true;
+        }
+        if (state.filePanelOpen && isMobileLayout()) {
+          setFilePanelOpen(false);
+          return true;
+        }
+        if (state.sessionsDrawerOpen && isMobileLayout()) {
+          closeSessionsDrawer();
+          return true;
+        }
+        if (isMobileLayout() && state.selectedId) {
+          state.selectedId = null;
+          persistSelectedId();
+          state.sessionsDrawerOpen = true;
+          render();
+          return true;
+        }
+        return false;
+      };
 
       /**
        * Play a soft, rounded notification chime using Web Audio API.

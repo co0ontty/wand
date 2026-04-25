@@ -18,8 +18,8 @@ import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.KeyEvent;
 import android.view.View;
+import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.SslErrorHandler;
@@ -34,6 +34,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
@@ -98,6 +99,8 @@ public class MainActivity extends AppCompatActivity {
     private final Map<String, Runnable> pendingProgressUpdates = new HashMap<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private ValueCallback<Uri[]> pendingFileChooserCallback;
+    private boolean keepAliveRunning = false;
+    private long lastBackPressedTime = 0;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -124,11 +127,36 @@ public class MainActivity extends AppCompatActivity {
             webView.loadUrl(serverUrl);
         });
 
-        backButton.setOnClickListener(v -> finish());
+        backButton.setOnClickListener(v -> {
+            Intent connectIntent = new Intent(this, ConnectActivity.class);
+            connectIntent.putExtra("skip_auto_connect", true);
+            connectIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(connectIntent);
+            finish();
+        });
 
         createNotificationChannels();
         setupWebView();
         webView.loadUrl(serverUrl);
+
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                webView.evaluateJavascript(
+                    "(function(){try{return window.handleNativeBack?window.handleNativeBack():false;}catch(e){return false;}})()",
+                    result -> {
+                        if ("true".equals(result)) return;
+                        long now = System.currentTimeMillis();
+                        if (now - lastBackPressedTime < 2000) {
+                            finish();
+                        } else {
+                            lastBackPressedTime = now;
+                            Toast.makeText(MainActivity.this, "再按一次退出", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                );
+            }
+        });
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -562,6 +590,128 @@ public class MainActivity extends AppCompatActivity {
             if (pending != null) mainHandler.removeCallbacks(pending);
             NotificationManagerCompat.from(MainActivity.this).cancel("progress:" + sessionId, 0);
         }
+
+        // ── Clipboard ──
+
+        @JavascriptInterface
+        public String copyToClipboard(String text) {
+            try {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                        getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                if (cm != null) {
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("wand", text));
+                    return "ok";
+                }
+                return "error";
+            } catch (Exception e) {
+                return "error";
+            }
+        }
+
+        // ── Wake lock ──
+
+        @JavascriptInterface
+        public void setKeepScreenOn(boolean enabled) {
+            runOnUiThread(() -> {
+                if (enabled) {
+                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                } else {
+                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                }
+            });
+        }
+
+        // ── Foreground service ──
+
+        @JavascriptInterface
+        public void startKeepAlive() {
+            if (keepAliveRunning) return;
+            keepAliveRunning = true;
+            runOnUiThread(() -> {
+                try {
+                    Intent serviceIntent = new Intent(MainActivity.this, WandForegroundService.class);
+                    serviceIntent.putExtra("server_url", serverUrl);
+                    serviceIntent.putExtra("app_token", appToken);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent);
+                    } else {
+                        startService(serviceIntent);
+                    }
+                } catch (Exception ignored) {}
+            });
+        }
+
+        @JavascriptInterface
+        public void stopKeepAlive() {
+            if (!keepAliveRunning) return;
+            keepAliveRunning = false;
+            runOnUiThread(() -> {
+                try {
+                    stopService(new Intent(MainActivity.this, WandForegroundService.class));
+                } catch (Exception ignored) {}
+            });
+        }
+
+        // ── Haptic feedback ──
+
+        @JavascriptInterface
+        public void vibrate(String pattern) {
+            if (!new ServerStore(MainActivity.this).isHapticEnabled()) return;
+            android.os.Vibrator vibrator = (android.os.Vibrator)
+                    getSystemService(android.content.Context.VIBRATOR_SERVICE);
+            if (vibrator == null || !vibrator.hasVibrator()) return;
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    android.os.VibrationEffect effect;
+                    switch (pattern != null ? pattern : "light") {
+                        case "medium":
+                            effect = android.os.VibrationEffect.createOneShot(30,
+                                    android.os.VibrationEffect.DEFAULT_AMPLITUDE);
+                            break;
+                        case "success":
+                            effect = android.os.VibrationEffect.createWaveform(
+                                    new long[]{0, 10, 80, 10}, -1);
+                            break;
+                        case "error":
+                            effect = android.os.VibrationEffect.createWaveform(
+                                    new long[]{0, 30, 60, 30, 60, 30}, -1);
+                            break;
+                        case "light":
+                        default:
+                            effect = android.os.VibrationEffect.createOneShot(10,
+                                    android.os.VibrationEffect.DEFAULT_AMPLITUDE);
+                            break;
+                    }
+                    vibrator.vibrate(effect);
+                } else {
+                    switch (pattern != null ? pattern : "light") {
+                        case "medium":
+                            vibrator.vibrate(30);
+                            break;
+                        case "success":
+                            vibrator.vibrate(new long[]{0, 10, 80, 10}, -1);
+                            break;
+                        case "error":
+                            vibrator.vibrate(new long[]{0, 30, 60, 30, 60, 30}, -1);
+                            break;
+                        case "light":
+                        default:
+                            vibrator.vibrate(10);
+                            break;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        @JavascriptInterface
+        public boolean isHapticEnabled() {
+            return new ServerStore(MainActivity.this).isHapticEnabled();
+        }
+
+        @JavascriptInterface
+        public void setHapticEnabled(boolean enabled) {
+            new ServerStore(MainActivity.this).setHapticEnabled(enabled);
+        }
     }
 
     private void doUpdateSessionProgress(String sessionId, String jsonData) {
@@ -964,16 +1114,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ── Navigation and lifecycle ──
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
-            webView.goBack();
-            return true;
-        }
-        return super.onKeyDown(keyCode, event);
-    }
+    // ── Lifecycle ──
 
     @Override
     protected void onResume() {
@@ -993,6 +1134,10 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (keepAliveRunning) {
+            try { stopService(new Intent(this, WandForegroundService.class)); } catch (Exception ignored) {}
+            keepAliveRunning = false;
+        }
         NotificationManagerCompat nm = NotificationManagerCompat.from(this);
         for (String sessionId : progressUpdateTimestamps.keySet()) {
             nm.cancel("progress:" + sessionId, 0);

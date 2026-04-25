@@ -32,62 +32,96 @@
             android:textSize="14sp"
             android:textColor="@color/text_secondary" />
 
-        <!-- URL input -->
-        <com.google.android.material.textfield.TextInputLayout
+        <!-- Auto-connect loading state -->
+        <LinearLayout
+            android:id="@+id/autoConnectGroup"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="@string/server_url_hint"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:visibility="gone">
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/urlInput"
+            <ProgressBar
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:indeterminateTint="@color/primary" />
+
+            <TextView
+                android:id="@+id/autoConnectStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/auto_connecting"
+                android:textSize="14sp"
+                android:textColor="@color/text_secondary" />
+
+        </LinearLayout>
+
+        <!-- Form group (hidden during auto-connect) -->
+        <LinearLayout
+            android:id="@+id/formGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- URL input -->
+            <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="textNoSuggestions"
-                android:imeOptions="actionDone"
-                android:singleLine="true"
-                android:textSize="15sp" />
+                android:hint="@string/server_url_hint"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
 
-        </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/urlInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textNoSuggestions"
+                    android:imeOptions="actionDone"
+                    android:singleLine="true"
+                    android:textSize="15sp" />
 
-        <!-- Status message -->
-        <TextView
-            android:id="@+id/statusText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:textSize="13sp"
-            android:textColor="@color/error"
-            android:visibility="gone" />
+            </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- Connect button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/connectButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/connect_button"
-            android:textSize="16sp"
-            android:backgroundTint="@color/primary" />
+            <!-- Status message -->
+            <TextView
+                android:id="@+id/statusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textSize="13sp"
+                android:textColor="@color/error"
+                android:visibility="gone" />
 
-        <!-- Recent servers section -->
-        <TextView
-            android:id="@+id/recentLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="36dp"
-            android:text="@string/recent_servers"
-            android:textSize="13sp"
-            android:textColor="@color/text_secondary"
-            android:textStyle="bold"
-            android:visibility="gone" />
+            <!-- Connect button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/connectButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/connect_button"
+                android:textSize="16sp"
+                android:backgroundTint="@color/primary" />
 
-        <LinearLayout
-            android:id="@+id/recentList"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="vertical" />
+            <!-- Recent servers section -->
+            <TextView
+                android:id="@+id/recentLabel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="36dp"
+                android:text="@string/recent_servers"
+                android:textSize="13sp"
+                android:textColor="@color/text_secondary"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/recentList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical" />
+
+        </LinearLayout>
 
     </LinearLayout>
 </ScrollView>

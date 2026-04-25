@@ -21,6 +21,7 @@ public class ServerStore {
     private static final String KEY_APP_ICON = "app_icon";
     private static final String KEY_NOTIFICATION_SOUND = "notification_sound";
     private static final String KEY_NOTIFICATION_VOLUME = "notification_volume";
+    private static final String KEY_HAPTIC_ENABLED = "haptic_enabled";
     private static final int MAX_RECENT = 5;
 
     private final SharedPreferences prefs;
@@ -123,5 +124,13 @@ public class ServerStore {
 
     public void setNotificationVolume(int volume) {
         prefs.edit().putInt(KEY_NOTIFICATION_VOLUME, Math.max(0, Math.min(100, volume))).apply();
+    }
+
+    public boolean isHapticEnabled() {
+        return prefs.getBoolean(KEY_HAPTIC_ENABLED, true);
+    }
+
+    public void setHapticEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_HAPTIC_ENABLED, enabled).apply();
     }
 }

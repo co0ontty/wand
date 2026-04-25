@@ -122,16 +122,19 @@
     }
 
     /* ===== PWA 独立窗口模式 ===== */
+    /* 顶部安全区:用 max() 保底,避免 iPad 横屏/Stage Manager 等 inset 为 0 的场景下贴顶,
+       同时为 iPadOS Stage Manager 浮动控件预留视觉缓冲 */
     @media (display-mode: standalone) {
       :root {
         --safe-bottom: env(safe-area-inset-bottom, 0px);
+        --pwa-safe-top: max(env(safe-area-inset-top, 0px), 14px);
       }
       .app-container {
-        --pwa-top-inset: env(safe-area-inset-top, 0px);
-        padding-top: env(safe-area-inset-top, 0px);
+        --pwa-top-inset: var(--pwa-safe-top);
+        padding-top: var(--pwa-safe-top);
       }
       .sidebar-header {
-        padding-top: calc(14px + env(safe-area-inset-top, 0px));
+        padding-top: calc(14px + var(--pwa-safe-top));
       }
       .main-content {
         padding-top: 0;
@@ -141,13 +144,14 @@
     /* iOS Safari PWA fallback (navigator.standalone adds .is-pwa via JS) */
     .is-pwa {
       --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --pwa-safe-top: max(env(safe-area-inset-top, 0px), 14px);
     }
     .is-pwa .app-container {
-      --pwa-top-inset: env(safe-area-inset-top, 0px);
-      padding-top: env(safe-area-inset-top, 0px);
+      --pwa-top-inset: var(--pwa-safe-top);
+      padding-top: var(--pwa-safe-top);
     }
     .is-pwa .sidebar-header {
-      padding-top: calc(14px + env(safe-area-inset-top, 0px));
+      padding-top: calc(14px + var(--pwa-safe-top));
     }
 
     /* ===== PWA 窗口控件覆盖模式 (Window Controls Overlay) ===== */
@@ -2220,10 +2224,20 @@
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      padding: 4px 10px;
+      padding: 6px 10px;
       flex-shrink: 0;
-      min-height: 0;
+      min-height: 44px;
       gap: 8px;
+    }
+
+    /* PWA 模式额外留出顶部缓冲,避免与 iPadOS Stage Manager 等系统浮动控件视觉粘连 */
+    @media (display-mode: standalone) {
+      .main-header-row {
+        padding-top: 10px;
+      }
+    }
+    .is-pwa .main-header-row {
+      padding-top: 10px;
     }
 
     /* Current task indicator */
