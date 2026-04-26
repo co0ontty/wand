@@ -36,6 +36,40 @@ function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0 || process.geteuid?.() === 0;
 }
 
+/**
+ * 找出最后一条 assistant turn 中尚未配对 tool_result 的 AskUserQuestion tool_use。
+ * 用来识别"刚被 SIGTERM 中断、正在等用户提交答案"的状态。
+ */
+function findUnpairedAskUserQuestion(
+  messages: ConversationTurn[],
+): { id: string } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const turn = messages[i];
+    if (turn.role !== "assistant") continue;
+    for (const block of turn.content) {
+      if (block.type === "tool_use" && block.name === "AskUserQuestion") {
+        const toolUseId = block.id;
+        // 检查后续 turn 中是否已有对应 tool_result
+        let answered = false;
+        for (let j = i + 1; j < messages.length; j++) {
+          const nextTurn = messages[j];
+          for (const nb of nextTurn.content) {
+            if (nb.type === "tool_result" && nb.tool_use_id === toolUseId) {
+              answered = true;
+              break;
+            }
+          }
+          if (answered) break;
+        }
+        if (!answered) return { id: toolUseId };
+      }
+    }
+    // 只检查最后一条 assistant turn
+    return null;
+  }
+  return null;
+}
+
 /** Enrich a snapshot with a derived summary from the first user message. */
 function withSummary(snapshot: SessionSnapshot): SessionSnapshot {
   if (snapshot.summary) return snapshot;
@@ -253,10 +287,26 @@ export class StructuredSessionManager {
       }
     }
 
-    const userTurn: ConversationTurn = {
-      role: "user",
-      content: [{ type: "text", text: prompt }],
-    };
+    // 检测上一轮 assistant 是否有未配对的 AskUserQuestion tool_use（说明前一次
+    // child 是被 SIGTERM 主动 kill 的，正在等用户回答）。如果有，把这次的输入打包
+    // 成 tool_result 注入到 messages，让 UI 把卡片渲染为 answered。
+    const pendingAsk = findUnpairedAskUserQuestion(session.messages ?? []);
+    const userTurn: ConversationTurn = pendingAsk
+      ? {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: pendingAsk.id,
+              content: prompt,
+              is_error: false,
+            },
+          ],
+        }
+      : {
+          role: "user",
+          content: [{ type: "text", text: prompt }],
+        };
     const requestId = randomUUID();
     const updated: SessionSnapshot = {
       ...session,
@@ -280,8 +330,14 @@ export class StructuredSessionManager {
       data: { status: "running", sessionKind: "structured", queuedMessages: updated.queuedMessages, structuredState: updated.structuredState },
     });
 
+    // 续接 AskUserQuestion 时给 Claude 加上下文，避免它把刚才悬挂的 tool_use 当作
+    // 异常重试。结构化模式 (claude -p) 没有 tool_result 回传通道，所以用文本告知。
+    const claudePrompt = pendingAsk
+      ? `[对刚才 AskUserQuestion 工具的回答 — 结构化模式不支持工具结果回传，下面是用户从选项中的选择]\n${prompt}`
+      : prompt;
+
     try {
-      await this.runClaudeStreaming(id, updated, prompt);
+      await this.runClaudeStreaming(id, updated, claudePrompt);
       const finished = this.requireSession(id);
       return finished;
     } catch (error) {
@@ -616,6 +672,13 @@ export class StructuredSessionManager {
         args.push("--model", modelChoice);
       }
 
+      // 托管模式：禁用 AskUserQuestion，让 agent 自己拍板，不要等用户决策。
+      // 非托管模式：保留工具，靠 processLine 检测后主动 kill child 触发"中断+续接"流程。
+      const isManaged = session.mode === "managed";
+      if (isManaged) {
+        args.push("--disallowedTools", "AskUserQuestion");
+      }
+
       if (session.claudeSessionId) {
         args.push("--resume", session.claudeSessionId);
       }
@@ -642,6 +705,11 @@ export class StructuredSessionManager {
 
       // Debounce output events to avoid flooding the WebSocket.
       let emitTimer: ReturnType<typeof setTimeout> | null = null;
+
+      // 当 Claude 在非托管模式调用 AskUserQuestion 时，stdin 关闭导致它会 hang 等
+      // tool_result。我们检测到后主动 kill child，让它顺利退出，UI 把 tool_use 卡片
+      // 渲染成可交互选项；用户提交后由 sendMessage() 通过 --resume 续接。
+      let killedForAskUserQuestion = false;
 
       const flushEmit = (): void => {
         if (emitTimer) {
@@ -717,6 +785,21 @@ export class StructuredSessionManager {
           // We only use the authoritative usage from the final "result" event.
           syncSnapshot();
           scheduleEmit();
+
+          // 非托管模式下检测 AskUserQuestion：claude -p 的 stdin 被 ignore，无法回传
+          // tool_result，进程会 hang 住。主动 SIGTERM 让它退出；后续用户提交答案时由
+          // sendMessage() 注入伪造的 tool_result 并通过 --resume 续接。
+          if (!isManaged && !killedForAskUserQuestion) {
+            const askBlock = extracted.content.find(
+              (b): b is ContentBlock & { type: "tool_use" } =>
+                b.type === "tool_use" && b.name === "AskUserQuestion",
+            );
+            if (askBlock) {
+              killedForAskUserQuestion = true;
+              flushEmit();
+              try { child.kill("SIGTERM"); } catch (_err) { /* ignore */ }
+            }
+          }
           return;
         }
 
@@ -849,11 +932,13 @@ export class StructuredSessionManager {
           msgs.push(assistantTurn);
         }
 
+        // 被 AskUserQuestion 检测主动 kill 时，保持 status="running" 让 UI 不跳到
+        // "已停止"。inFlight=false 才能让用户提交答案触发新的 sendMessage 而不是排队。
         const finished: SessionSnapshot = {
           ...current,
-          status: "stopped",
-          exitCode: 0,
-          endedAt: new Date().toISOString(),
+          status: killedForAskUserQuestion ? "running" : "stopped",
+          exitCode: killedForAskUserQuestion ? null : 0,
+          endedAt: killedForAskUserQuestion ? null : new Date().toISOString(),
           output: turnState.result,
           claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
           messages: msgs,
@@ -871,7 +956,15 @@ export class StructuredSessionManager {
         this.storage.saveSession(finished);
 
         this.emitStructuredSnapshot(finished);
-        this.emitStructuredSnapshot(finished, "ended");
+        if (!killedForAskUserQuestion) {
+          this.emitStructuredSnapshot(finished, "ended");
+        }
+
+        // 等待用户回答 AskUserQuestion 时，跳过 ExitPlanMode 自续接和队列推进。
+        if (killedForAskUserQuestion) {
+          resolve();
+          return;
+        }
 
         // Auto-continue after plan mode exit: when Claude calls ExitPlanMode,
         // the `-p` process exits because stdin is "ignore" and it cannot get
