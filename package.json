@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "1.18.2",
+  "version": "1.18.4",
   "description": "A web terminal for local CLI tools like Claude.",
   "type": "module",
   "bin": {
