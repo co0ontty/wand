@@ -1123,7 +1123,24 @@ public class MainActivity extends AppCompatActivity {
         if (errorOverlay.getVisibility() == View.VISIBLE) {
             hideError();
             webView.reload();
+            return;
         }
+        // Notify the page that the host activity just resumed. The page's
+        // visibilitychange / focus / pageshow listeners are unreliable on
+        // Android after Doze or long backgrounding (Chromium may suspend
+        // the renderer entirely), so we drive a deterministic foreground
+        // sync from native. The handler in scripts.js force-reconnects the
+        // WebSocket and force-refits the terminal grid.
+        // Posted to the WebView's own thread to avoid running JS while the
+        // view is still mid-resume.
+        webView.post(() -> {
+            try {
+                webView.evaluateJavascript(
+                    "window.dispatchEvent(new Event('wand-android-resume'));",
+                    null
+                );
+            } catch (Exception ignored) {}
+        });
     }
 
     @Override

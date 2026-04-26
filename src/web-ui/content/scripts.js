@@ -182,6 +182,8 @@
         chatScrollHandler: null,
         lastForegroundSyncAt: 0,
         foregroundSyncTimer: null,
+        wsReconnectAttempts: 0,
+        wsReconnectTimer: null,
         currentMessages: [],
         lastRenderedHash: 0,
         lastRenderedMsgCount: 0,
@@ -824,25 +826,38 @@
           '</div>';
       }
 
-      function scheduleForegroundSync(reason) {
+      function scheduleForegroundSync(reason, opts) {
         if (!state.config) return;
         if (document.hidden) return;
+        var immediate = opts && opts.immediate === true;
         var now = Date.now();
-        if (now - state.lastForegroundSyncAt < 1500) return;
+        // Immediate path bypasses the throttle. Used by the Android resume
+        // bridge: WebView.onResume → wand-android-resume custom event needs
+        // to refresh state right away, not 1.5s later. The throttle still
+        // protects rapid visibilitychange / focus / pageshow bursts during
+        // normal browser interaction.
+        if (!immediate && now - state.lastForegroundSyncAt < 1500) return;
         state.lastForegroundSyncAt = now;
         if (state.foregroundSyncTimer) {
           clearTimeout(state.foregroundSyncTimer);
         }
+        var delay = immediate ? 0 : 80;
         state.foregroundSyncTimer = setTimeout(function() {
           state.foregroundSyncTimer = null;
-          syncOnForeground(reason);
-        }, 80);
+          syncOnForeground(reason, immediate);
+        }, delay);
       }
 
-      function syncOnForeground(reason) {
+      function syncOnForeground(reason, force) {
         if (!state.config) return Promise.resolve();
         if (document.hidden) return Promise.resolve();
-        if (!state.ws || (state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING)) {
+        // On Android resume the previous WS may still report OPEN/CONNECTING
+        // for a few seconds because the close frame hasn't been delivered
+        // yet (TCP keepalive / Doze suspended the network stack). Force a
+        // fresh socket so we don't sit on a zombie connection.
+        if (force) {
+          forceReconnectWebSocket("resume-force");
+        } else if (!state.ws || (state.ws.readyState !== WebSocket.OPEN && state.ws.readyState !== WebSocket.CONNECTING)) {
           initWebSocket();
         }
         if (state.claudeHistoryLoaded) {
@@ -863,8 +878,15 @@
         window.__wandForegroundSyncBound = true;
 
         document.addEventListener("visibilitychange", function() {
-          if (!document.hidden) {
+          if (document.hidden) {
+            // Stop the reconnect backoff while hidden — the OS may freeze
+            // timers and then deliver them in a burst when we resume,
+            // creating a thundering-herd of connect attempts. The resume
+            // event will trigger one decisive reconnect instead.
+            cancelWsReconnect();
+          } else {
             scheduleForegroundSync("visibility");
+            ensureTerminalFitWithRetry("visibility");
           }
         });
 
@@ -878,6 +900,18 @@
 
         window.addEventListener("resume", function() {
           scheduleForegroundSync("resume");
+        });
+
+        // Bridge from Android WebView host: MainActivity.onResume() calls
+        // evaluateJavascript to dispatch this event, which is the only
+        // reliable foreground signal once Doze/process-suspension has
+        // frozen page-level events (visibilitychange/focus/pageshow may
+        // fire late or not at all after a long suspend). Force-reconnect
+        // and force-refit immediately rather than waiting for the
+        // throttled scheduleForegroundSync path.
+        window.addEventListener("wand-android-resume", function() {
+          scheduleForegroundSync("android-resume", { immediate: true });
+          ensureTerminalFitWithRetry("android-resume");
         });
       }
 
@@ -10556,6 +10590,53 @@
       // new output renders with broken wrapping (content visually piles at
       // the top). Call this after any layout change that might have altered
       // container geometry (mount, session switch, view switch, refresh).
+      // Same as ensureTerminalFit, but if the container is currently 0×0
+      // (typical right after Android WebView.onResume — the page hasn't
+      // re-laid-out yet), keep retrying through requestAnimationFrame /
+      // setTimeout up to ~5 frames. Each attempt forces a layout read
+      // (offsetHeight) so the browser has to flush styles.
+      // Without this, the very first ensureTerminalFit silently fails,
+      // cols/rows stay at the pre-suspend values, and freshly arriving
+      // PTY chunks wrap against the wrong width — that's exactly the
+      // "content piles at the top after resuming the app" bug.
+      function ensureTerminalFitWithRetry(reason) {
+        if (!state.terminal) return;
+        var attempts = 0;
+        var maxAttempts = 8;
+        function tryFit() {
+          if (!state.terminal) return;
+          var el = document.getElementById("output");
+          if (el) {
+            // Force a layout flush so offsetWidth reflects the post-resume
+            // container size, not a stale 0 from the suspended frame.
+            void el.offsetHeight;
+          }
+          if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
+            ensureTerminalFit(reason);
+            // After fit, force a buffer replay: even when cols didn't
+            // change, the WASM grid state may be inconsistent after a
+            // long suspend (DOM rows clipped, scroll position lost).
+            // softResyncTerminal is cheap because terminalOutput is
+            // already in memory.
+            if (state.terminalOutput) {
+              state.suppressFitReplay = true;
+              softResyncTerminal();
+            }
+            return;
+          }
+          if (++attempts >= maxAttempts) return;
+          // Mix rAF and timeout: some Android WebView versions skip rAF
+          // during the first frame after resume, so falling back to a
+          // 16ms timer guarantees forward progress.
+          if (attempts <= 4) {
+            requestAnimationFrame(tryFit);
+          } else {
+            setTimeout(tryFit, 32);
+          }
+        }
+        tryFit();
+      }
+
       function ensureTerminalFit(reason) {
         if (!state.terminal) return false;
         var el = document.getElementById("output");
@@ -10668,7 +10749,54 @@
         if (timeEls.length > 0) scheduleSessionListUpdate();
       }, 30000);
 
-      function initWebSocket() {
+      function cancelWsReconnect() {
+        if (state.wsReconnectTimer) {
+          clearTimeout(state.wsReconnectTimer);
+          state.wsReconnectTimer = null;
+        }
+      }
+
+      // Drop any in-flight socket and start a new one *now* — used by the
+      // Android resume bridge to recover from zombie connections (socket
+      // still says OPEN, but the TCP path was torn down by Doze). Skips
+      // the backoff timer; the caller has already decided this is urgent.
+      function forceReconnectWebSocket(reason) {
+        cancelWsReconnect();
+        if (state.ws) {
+          var stale = state.ws;
+          // Detach handlers so the imminent close doesn't trigger another
+          // reconnect path while we're already starting a fresh one.
+          try { stale.onclose = null; } catch (e) { /* ignore */ }
+          try { stale.onerror = null; } catch (e) { /* ignore */ }
+          try { stale.close(); } catch (e) { /* ignore */ }
+          state.ws = null;
+        }
+        state.wsConnected = false;
+        state.wsReconnectAttempts = 0;
+        initWebSocket(reason);
+      }
+
+      function scheduleWsReconnect() {
+        if (state.wsReconnectTimer) return;
+        // Don't burn battery reconnecting while hidden — the resume
+        // listener will kick a fresh connect when we're foreground.
+        if (document.hidden) return;
+        var attempt = state.wsReconnectAttempts || 0;
+        // 0.5s, 1s, 2s, 4s, then capped at 8s. Faster than the old
+        // fixed 2s on the first retry (matters for transient blips)
+        // and bounded so a flapping server doesn't get hammered.
+        var delays = [500, 1000, 2000, 4000, 8000];
+        var delay = delays[attempt < delays.length ? attempt : delays.length - 1];
+        state.wsReconnectAttempts = attempt + 1;
+        state.wsReconnectTimer = setTimeout(function() {
+          state.wsReconnectTimer = null;
+          if (state.config && !state.ws && !document.hidden) {
+            initWebSocket("backoff");
+          }
+        }, delay);
+      }
+
+      function initWebSocket(reason) {
         if (!window.WebSocket) return false;
 
         // Prevent duplicate connections
@@ -10686,6 +10814,10 @@
           ws.onopen = function() {
             state.ws = ws;
             state.wsConnected = true;
+            // Reset backoff on a successful connect so the next disconnect
+            // starts the ladder from 500ms again.
+            state.wsReconnectAttempts = 0;
+            cancelWsReconnect();
             // Subscribe to current session if any
             subscribeToSession(state.selectedId);
             // Flush pending messages after reconnection
@@ -10693,7 +10825,10 @@
             // Re-fit terminal on reconnect — the viewport may have changed
             // while disconnected, so remeasure against real container size
             // rather than sending stale cols/rows from before the disconnect.
-            ensureTerminalFit("ws-reconnect");
+            // Use the retry variant: when the reconnect is triggered by
+            // Android resume, the WebView container may still be 0×0 for
+            // the first 1–2 frames while layout settles.
+            ensureTerminalFitWithRetry("ws-reconnect");
           };
 
           ws.onmessage = function(event) {
@@ -10708,12 +10843,7 @@
           ws.onclose = function() {
             state.ws = null;
             state.wsConnected = false;
-            // Reconnect after 2 seconds
-            setTimeout(function() {
-              if (state.config && !state.ws) {
-                initWebSocket();
-              }
-            }, 2000);
+            scheduleWsReconnect();
           };
 
           ws.onerror = function() {
@@ -10722,6 +10852,9 @@
 
           return true;
         } catch (e) {
+          // Constructor threw (rare — bad URL, blocked scheme). Try again
+          // through the backoff path so we don't get stuck.
+          scheduleWsReconnect();
           return false;
         }
       }
