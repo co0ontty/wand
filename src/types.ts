@@ -296,14 +296,8 @@ export interface SessionSnapshot {
   /** Pending structured user inputs queued while an assistant response is in flight. */
   queuedMessages?: string[];
   structuredState?: StructuredSessionState;
-  /** Session lifecycle state */
-  lifecycleState?: "running" | "idle" | "archived";
-  /** Last activity timestamp */
-  lastActivityAt?: string | null;
   /** 此会话是从哪个 Wand 会话恢复而来 */
   resumedFromSessionId?: string | null;
-  /** 此会话被哪个恢复后的会话替代 */
-  resumedToSessionId?: string | null;
   /** 服务器重启时是否自动恢复 */
   autoRecovered?: boolean;
   /** 是否启用自动批准权限 */
@@ -316,18 +310,6 @@ export interface SessionSnapshot {
   currentTaskTitle?: string;
   /** 用户为此会话选定的 Claude 模型（别名或完整 ID）。结构化会话下次 spawn 时使用；PTY 会话仅用于展示。 */
   selectedModel?: string | null;
-}
-
-// ── Session Lifecycle ──
-
-export type SessionLifecycleState = "initializing" | "running" | "idle" | "thinking" | "waiting-input" | "archived";
-
-export interface SessionLifecycle {
-  state: SessionLifecycleState;
-  stateSince: number;
-  lastActivityAt: number;
-  archivedBy?: "user" | "timeout" | "error";
-  archiveReason?: string;
 }
 
 // ── Session Event (PTY Bridge Output) ──

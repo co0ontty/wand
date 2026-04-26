@@ -1855,7 +1855,7 @@
       }
 
       function renderSessions() {
-        var activeSessions = state.sessions.filter(function(session) { return !session.archived && !session.resumedToSessionId; });
+        var activeSessions = state.sessions.filter(function(session) { return !session.archived; });
         var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
         var groups = [];
         groups.push(renderSessionManageBar());
@@ -2028,9 +2028,7 @@
       }
 
       function getSelectableSessions() {
-        return state.sessions.filter(function(session) {
-          return session.archived || !session.resumedToSessionId;
-        });
+        return state.sessions.slice();
       }
 
       function countSelectableItems() {
@@ -2777,10 +2775,8 @@
         var statusMap = {
           "stopped": "已停止",
           "running": "运行中",
-          "idle": "空闲",
-          "thinking": "思考中",
-          "waiting-input": "等待输入",
-          "initializing": "启动中"
+          "exited": "已退出",
+          "failed": "已失败"
         };
         return statusMap[session.status] || session.status;
       }

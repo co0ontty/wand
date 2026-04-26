@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm install                # Install dependencies (requires Node.js >= 22.5.0)
 npm run check              # Type-check only (tsc --noEmit)
-npm run build              # Compile TypeScript and copy src/web-ui/content into dist/web-ui/
+npm run build              # Three steps: bundle wterm → tsc → copy src/web-ui/content into dist/web-ui/
 npm run dev                # Run the CLI entrypoint directly from src/ via tsx
 node dist/cli.js init      # Create or refresh config + SQLite files
 node dist/cli.js web       # Start the packaged web server from dist/
@@ -57,6 +57,7 @@ The runtime config file is `~/.wand/config.json` by default.
 - `npm run dev` already runs `src/cli.ts web`; append CLI flags after `--`.
 - `ensureConfig()` rewrites the config file with defaults merged in, so config-schema changes must also update `src/config.ts`.
 - `npm run build` must keep copying `src/web-ui/content/` into `dist/web-ui/`; the packaged app depends on those static assets.
+- `scripts/bundle-wterm.js` uses esbuild to bundle `@wterm/dom` into `src/web-ui/content/vendor/wterm/wterm.bundle.js` and copies `terminal.css` next to it. It also patches the renderer to strip an underline branch (`stripUnderlinePlugin`). After changing wterm-related code or upgrading `@wterm/dom`, you must re-run this script — `npm run dev` does not rebundle automatically. The committed bundle is what the browser loads.
 
 ## Android APK Build & Deployment
 
@@ -66,9 +67,10 @@ The runtime config file is `~/.wand/config.json` by default.
 ```bash
 cd android
 # 使用最新 git tag 作为版本号，加 debug 时间戳后缀
+# versionCode 由 publish.sh 自动派生（major*10000+minor*100+patch）；手动构建时随便给一个递增整数即可
 ./gradlew assembleDebug \
   -PAPP_VERSION_NAME="$(git describe --tags --abbrev=0 | sed 's/^v//')-debug.$(date +%m%d%H%M)" \
-  -PAPP_VERSION_CODE=11302
+  -PAPP_VERSION_CODE="$(git describe --tags --abbrev=0 | sed 's/^v//' | awk -F. '{printf \"%d%02d%02d\", $1,$2,$3}')"
 ```
 产物：`android/app/build/outputs/apk/debug/app-debug.apk`
 
@@ -130,7 +132,7 @@ git tag v1.15.0
 
 ## Architecture
 
-`wand` is a Node.js web console for local CLI tools such as Claude Code. The app starts from a CLI command, serves a browser UI over Express + WebSocket, launches commands inside PTYs with `node-pty`, and persists session/auth state in SQLite under `~/.wand/`.
+`wand` is a Node.js web console for local CLI tools such as Claude Code and Codex. The app starts from a CLI command, serves a browser UI over Express + WebSocket, launches commands inside PTYs with `node-pty` (or as one-shot streamed processes for the structured runner), and persists session/auth state in SQLite under `~/.wand/`. A single session is tagged with a `SessionRunner` (`claude` / `codex` / etc.) and an `ExecutionMode` that picks between the PTY runner and the structured runner — see "Two session runners" below.
 
 ### Runtime flow
 
@@ -141,6 +143,15 @@ git tag v1.15.0
 5. The browser UI subscribes over `/ws` and renders the same session in two synchronized representations: terminal output and structured chat history.
 
 When debugging a user-visible session bug, trace the full chain: `cli.ts` -> `server.ts` -> `process-manager.ts` -> `claude-pty-bridge.ts` -> web UI.
+
+### Two session runners
+
+A session can run in one of two modes, owned by different managers:
+
+- **PTY runner** (`src/process-manager.ts`) — interactive PTY-backed sessions for `claude` / `codex` / shells. This is the default and drives both the terminal view and (via `ClaudePtyBridge`) the structured chat view. Permission prompts, resume, archive/idle transitions and most lifecycle logic live here.
+- **Structured runner** (`src/structured-session-manager.ts`) — non-PTY sessions that spawn `claude -p` and consume its streamed JSON output, for prompts that don't need an interactive terminal. Output debounce is 16 ms (`STREAM_EMIT_DEBOUNCE_MS`). It shares `WandStorage`, `SessionSnapshot`, and `ProcessEvent` types with the PTY runner, and can also use git worktrees via `prepareSessionWorktree()`.
+
+When debugging session behavior, first check which runner owns the session — they share types but execute on independent code paths.
 
 ### API and UI boundary
 
@@ -159,6 +170,9 @@ Before adding a new abstraction, check whether the needed data can fit into an e
 - SQLite lives beside the config (`resolveDatabasePath(configPath)`), usually `~/.wand/wand.db`; `src/storage.ts` stores auth sessions, command sessions, app config overrides, Claude resume metadata, and serialized `ConversationTurn[]`.
 - Schema migration policy is additive only: `ensureCommandSessionSchema()` adds missing columns and never drops old ones.
 - `src/session-logger.ts` writes per-session artifacts under `~/.wand/sessions/<sessionId>/`, including rotating PTY logs, structured messages, metadata, native stream events, and shortcut interaction logs.
+- Two more directories live **inside the session's working directory**, not under `~/.wand/`:
+  - `<session.cwd>/.wand-uploads/` — uploaded files written by `src/upload-routes.ts` (10 MB per file, max 5 files per request, filenames sanitized to `[a-zA-Z0-9._-]`).
+  - `.wand-worktrees/` (at the repo root when worktree mode is enabled) — per-session git worktrees created and cleaned up by `src/git-worktree.ts`. Snapshots store the worktree handle on `SessionSnapshot.worktree`.
 
 If persistence looks inconsistent, inspect both SQLite (`src/storage.ts`) and file-based session artifacts (`src/session-logger.ts`); they are complementary, not redundant.
 
@@ -190,6 +204,7 @@ The frontend is server-rendered, not a separate SPA build. `src/server.ts` serve
 When changing frontend behavior, check both layers:
 - `src/web-ui/index.ts`, `styles.ts`, `scripts.ts` for server-assembled inline assets
 - `src/web-ui/content/styles.css` and `src/web-ui/content/scripts.js` for copied browser assets used from `dist/`
+- `src/web-ui/content/vendor/wterm/wterm.bundle.js` + `terminal.css` — the wterm terminal renderer, regenerated by `scripts/bundle-wterm.js`. Don't hand-edit the bundle; change source or upgrade `@wterm/dom`, then re-run the script.
 
 Any build or packaging change that forgets to copy `src/web-ui/content/` into `dist/web-ui/` will break the packaged app even if dev mode still works.
 
@@ -211,6 +226,7 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/server.ts` | Express server, REST API, WebSocket, PWA/service worker endpoints |
 | `src/server-session-routes.ts` | Session/resume/history HTTP routes and shared API error helpers |
 | `src/process-manager.ts` | PTY session orchestration, input/output routing, permission handling, resume/archive logic |
+| `src/structured-session-manager.ts` | Non-PTY runner that spawns `claude -p` and streams JSON output |
 | `src/claude-pty-bridge.ts` | PTY output parser for structured chat, permissions, task tracking, and Claude session IDs |
 | `src/resume-policy.ts` | Heuristics for mapping Claude history/resume data back onto wand sessions |
 | `src/storage.ts` | SQLite persistence and additive schema migration helpers |
@@ -221,7 +237,15 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/cert.ts` | Self-signed HTTPS certificate generation and loading |
 | `src/ws-broadcast.ts` | WebSocket broadcast manager for `/ws` fanout |
 | `src/pwa.ts` | PWA manifest and service worker script generation |
-| `src/web-ui/` | Server-rendered HTML plus browser assets |
+| `src/git-worktree.ts` | Per-session git worktree create/merge/cleanup, backs `.wand-worktrees/` |
+| `src/upload-routes.ts` | `POST /api/sessions/:id/upload` — multer-backed uploads to `<cwd>/.wand-uploads/` |
+| `src/models.ts` | Built-in Claude model list, `claude --version` probing, model cache |
+| `src/middleware/path-safety.ts` | Path-traversal guard for the file browser API |
+| `src/middleware/rate-limit.ts` | Login / sensitive endpoint rate limiting |
+| `src/pty-text-utils.ts` | ANSI / control-sequence helpers for terminal output processing |
+| `src/message-truncator.ts` | Long-message truncation for chat persistence and broadcast |
+| `src/avatar.ts` | Pixel-cat avatar generation (赛博虎妞 / 勤劳初二) |
+| `src/web-ui/` | Server-rendered HTML + browser assets. Terminal rendering loads `content/vendor/wterm/wterm.bundle.js`, generated by `scripts/bundle-wterm.js` — do not hand-edit |
 | `src/types.ts` | Shared contracts across CLI, server, storage, PTY bridge, and UI |
 
 ### REST surface

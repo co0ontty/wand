@@ -23,7 +23,6 @@ interface SessionRow {
   queued_messages: string | null;
   structured_state: string | null;
   resumed_from_session_id: string | null;
-  resumed_to_session_id: string | null;
   auto_recovered: number;
   worktree_enabled: number;
   worktree_info: string | null;
@@ -93,13 +92,13 @@ function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktre
 
 function sessionSelectFields(): string {
   return `id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info`;
+             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info`;
 }
 
 function sessionPersistFields(): string {
   return `id, command, cwd, mode, status, exit_code, started_at, ended_at, output
              , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, structured_state
-             , resumed_from_session_id, resumed_to_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info`;
+             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info`;
 }
 
 function sessionPersistAssignments(): string {
@@ -121,7 +120,6 @@ function sessionPersistAssignments(): string {
              queued_messages = excluded.queued_messages,
              structured_state = excluded.structured_state,
              resumed_from_session_id = excluded.resumed_from_session_id,
-             resumed_to_session_id = excluded.resumed_to_session_id,
              auto_recovered = excluded.auto_recovered,
              worktree_enabled = excluded.worktree_enabled,
              worktree_info = excluded.worktree_info,
@@ -134,7 +132,7 @@ function sessionMetadataAssignments(): string {
            started_at = ?, ended_at = ?, output = ?,
            archived = ?, archived_at = ?, claude_session_id = ?,
            provider = ?, session_kind = ?, runner = ?, structured_state = ?,
-           resumed_from_session_id = ?, resumed_to_session_id = ?, auto_recovered = ?,
+           resumed_from_session_id = ?, auto_recovered = ?,
            worktree_enabled = ?, worktree_info = ?, worktree_merge_status = ?, worktree_merge_info = ?`;
 }
 
@@ -159,7 +157,6 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     snapshot.queuedMessages ? JSON.stringify(snapshot.queuedMessages) : null,
     snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
     snapshot.resumedFromSessionId ?? null,
-    snapshot.resumedToSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
     snapshot.worktreeEnabled ? 1 : 0,
     serializeWorktreeInfo(snapshot.worktree),
@@ -186,7 +183,6 @@ function sessionMetadataValues(snapshot: SessionSnapshot): Array<string | number
     snapshot.runner ?? null,
     snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
     snapshot.resumedFromSessionId ?? null,
-    snapshot.resumedToSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
     snapshot.worktreeEnabled ? 1 : 0,
     serializeWorktreeInfo(snapshot.worktree),
@@ -218,7 +214,6 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     queuedMessages: parseQueuedMessages(row.queued_messages),
     structuredState: safeJsonParse<StructuredSessionState>(row.structured_state),
     resumedFromSessionId: row.resumed_from_session_id ?? undefined,
-    resumedToSessionId: row.resumed_to_session_id ?? undefined,
     autoRecovered: Boolean(row.auto_recovered),
     worktreeEnabled: Boolean(row.worktree_enabled),
     worktree: parseWorktreeInfo(row.worktree_info) ?? null,

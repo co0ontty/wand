@@ -10,7 +10,6 @@ import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
 import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
-import { SessionLifecycleManager } from "./session-lifecycle.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
@@ -473,10 +472,9 @@ function listAllClaudeHistorySessions(): ClaudeHistorySession[] {
   }
 }
 
-function shouldAutoResumeSession(record: Pick<SessionRecord, "status" | "claudeSessionId" | "messages" | "archived" | "resumedToSessionId" | "ptyProcess">): boolean {
+function shouldAutoResumeSession(record: Pick<SessionRecord, "status" | "claudeSessionId" | "messages" | "archived" | "ptyProcess">): boolean {
   return record.status === "exited"
     && !record.archived
-    && !record.resumedToSessionId
     && record.ptyProcess === null
     && hasResumeEligibleConversation(record);
 }
@@ -588,7 +586,8 @@ function deriveSessionSummary(messages: ConversationTurn[], currentTaskTitle: st
 export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly logger: SessionLogger;
-  private readonly lifecycleManager: SessionLifecycleManager;
+  /** 24h archive scan timer */
+  private archiveTimer: NodeJS.Timeout | null = null;
   /** Per-session debounce timers for throttled persist calls */
   private readonly persistDebounceTimers = new Map<string, NodeJS.Timeout>();
   /** Last persisted message state per session — used to skip redundant message writes */
@@ -601,17 +600,7 @@ export class ProcessManager extends EventEmitter {
   ) {
     super();
     this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"), config.shortcutLogMaxBytes);
-    
-    // Initialize lifecycle manager
-    this.lifecycleManager = new SessionLifecycleManager({
-      onStateChange: (sessionId, oldState, newState) => {
-        this.emitEvent({ type: "status", sessionId, data: { oldState, newState } });
-      },
-      onIdle: (_sessionId) => {},
-      onArchived: (sessionId, reason) => {
-        console.error(`[ProcessManager] Session ${sessionId} archived: ${reason}`);
-      },
-    });
+
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "pty") {
         continue;
@@ -661,7 +650,6 @@ export class ProcessManager extends EventEmitter {
           claudeSessionId: resumeCommandSessionId ?? updated.claudeSessionId,
           approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
         });
-        this.lifecycleManager.register(snapshot.id, "idle");
         console.error(`[ProcessManager] Restored session ${snapshot.id} marked as exited (PTY orphaned)`);
       } else {
         this.sessions.set(snapshot.id, {
@@ -694,7 +682,6 @@ export class ProcessManager extends EventEmitter {
           claudeSessionId: resumeCommandSessionId ?? snapshot.claudeSessionId,
           approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
         });
-        this.lifecycleManager.register(snapshot.id, "archived");
       }
     }
     // Defer expensive file-system scanning and auto-recovery so the server
@@ -704,6 +691,12 @@ export class ProcessManager extends EventEmitter {
       this.autoRecoverExitedSessions();
     });
     this.archiveExpiredSessions();
+    this.archiveTimer = setInterval(() => {
+      try { this.archiveExpiredSessions(); } catch (err) {
+        console.error(`[ProcessManager] archive scan failed: ${String(err)}`);
+      }
+    }, 60 * 1000);
+    this.archiveTimer.unref?.();
   }
 
   on(event: "process", listener: ProcessEventHandler): this {
@@ -818,7 +811,7 @@ export class ProcessManager extends EventEmitter {
       ptyPermissionBlocked: false,
       lastAutoConfirmAt: 0,
       autoApprovePermissions: this.shouldAutoApprovePermissions(command, effectiveMode, provider),
-      resumedFromSessionId: opts?.resumedFromSessionId ?? null,
+      resumedFromSessionId: opts?.resumedFromSessionId ?? (opts?.reuseId ? opts.reuseId : null),
       autoRecovered: opts?.autoRecovered ?? false,
       rememberedEscalationScopes: new Set(),
       rememberedEscalationTargets: new Set(),
@@ -855,7 +848,6 @@ export class ProcessManager extends EventEmitter {
     }
     this.cleanupOldSessions();
 
-    this.lifecycleManager.register(id, "initializing");
 
     const shellArgs = this.buildShellArgs(processedCommand);
     let child: import("node-pty").IPty;
@@ -878,7 +870,6 @@ export class ProcessManager extends EventEmitter {
       record.exitCode = -1;
       record.endedAt = new Date().toISOString();
       record.ptyProcess = null;
-      this.lifecycleManager.archive(id, "Session spawn failed", "error");
       this.persist(record);
       return this.snapshot(record);
     }
@@ -886,7 +877,6 @@ export class ProcessManager extends EventEmitter {
     record.processId = child.pid;
     record.ptyProcess = child;
     record.status = "running";
-    this.lifecycleManager.setState(id, "running");
 
     child.onExit(({ exitCode }) => {
       const current = this.sessions.get(id);
@@ -909,7 +899,6 @@ export class ProcessManager extends EventEmitter {
       current.exitCode = current.stopRequested ? null : exitCode;
       current.endedAt = new Date().toISOString();
       current.ptyProcess = null;
-      this.lifecycleManager.archive(id, `Session ${current.status}`, current.stopRequested ? "user" : "error");
       this.flushPersist(current);
       this.storage.saveSession(this.snapshot(current));
       this.emitEvent({ type: "ended", sessionId: id, data: this.snapshot(current) });
@@ -1044,7 +1033,6 @@ export class ProcessManager extends EventEmitter {
 
 
   list(): SessionSnapshot[] {
-    this.archiveExpiredSessions();
     return Array.from(this.sessions.values())
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
       .map((session) => this.snapshot(session));
@@ -1052,7 +1040,6 @@ export class ProcessManager extends EventEmitter {
 
   /** Return lightweight snapshots for the session list (no output/messages). */
   listSlim(): SessionSnapshot[] {
-    this.archiveExpiredSessions();
     return Array.from(this.sessions.values())
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
       .map((session) => this.snapshotSlim(session));
@@ -1123,7 +1110,6 @@ export class ProcessManager extends EventEmitter {
   }
 
   get(id: string): SessionSnapshot | null {
-    this.archiveExpiredSessions();
     const record = this.sessions.get(id);
     if (!record) {
       // Fallback: check SQLite for sessions that were evicted from memory
@@ -1171,8 +1157,6 @@ export class ProcessManager extends EventEmitter {
     }
 
     // Update lifecycle
-    this.lifecycleManager.touch(id);
-    this.lifecycleManager.startThinking(id);
 
     if (!record.ptyProcess) {
       console.error(`[ProcessManager] Rejecting input: session ${id} has no PTY`);
@@ -1186,7 +1170,7 @@ export class ProcessManager extends EventEmitter {
       const ctx: ShortcutLogContext = {
         mode: record.mode,
         autoApprove: record.autoApprovePermissions,
-        permissionBlocked: record.ptyPermissionBlocked || !!record.pendingEscalation,
+        permissionBlocked: this.isPermissionBlocked(record),
         input,
       };
       this.logger.appendShortcutLog(id, shortcutKey, tailLines, ctx);
@@ -1288,7 +1272,6 @@ export class ProcessManager extends EventEmitter {
     }
 
     // Update lifecycle
-    this.lifecycleManager.archive(id, "Session stopped by user", "user");
     this.persist(record);
     return this.snapshot(record);
   }
@@ -1326,7 +1309,6 @@ export class ProcessManager extends EventEmitter {
       record.ptyBridge.removeAllListeners();
       record.ptyBridge = null;
     }
-    this.lifecycleManager.unregister(record.id);
   }
 
   delete(id: string): void {
@@ -1383,7 +1365,6 @@ export class ProcessManager extends EventEmitter {
     this.deleteClaudeCache(record);
     this.sessions.delete(id);
     this.lastPersistedMessageState.delete(id);
-    this.lifecycleManager.unregister(id);
     if (record.claudeSessionId) {
       this.claudeHistoryCache = null;
     }
@@ -1448,7 +1429,6 @@ export class ProcessManager extends EventEmitter {
       claudeSessionId: record.claudeSessionId || null,
       messages: messages.length > 0 ? messages : undefined,
       resumedFromSessionId: record.resumedFromSessionId ?? undefined,
-      resumedToSessionId: record.resumedToSessionId ?? undefined,
       autoRecovered: record.autoRecovered ?? false,
       autoApprovePermissions: record.autoApprovePermissions || undefined,
       approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined,
@@ -1469,7 +1449,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   private isPermissionBlocked(record: SessionRecord): boolean {
-    return record.ptyBridge?.isPermissionBlocked() ?? record.pendingEscalation !== null;
+    return record.ptyPermissionBlocked || record.pendingEscalation !== null;
   }
 
   private defaultAutonomyPolicy(mode: ExecutionMode): AutonomyPolicy {
@@ -1571,7 +1551,6 @@ export class ProcessManager extends EventEmitter {
       endedAt: record.endedAt,
       claudeSessionId: record.claudeSessionId,
       resumedFromSessionId: record.resumedFromSessionId ?? null,
-      resumedToSessionId: record.resumedToSessionId ?? null,
       autoRecovered: record.autoRecovered ?? false,
     });
     if (shouldSaveMessages) {
@@ -1882,8 +1861,6 @@ export class ProcessManager extends EventEmitter {
         record.ptyBridge?.clearRememberedPermissions();
         record.rememberedEscalationScopes.clear();
         record.rememberedEscalationTargets.clear();
-        this.lifecycleManager.stopThinking(record.id);
-        this.lifecycleManager.waitingInput(record.id);
         this.persist(record);
         this.storage.saveSession(this.snapshot(record));
         break;

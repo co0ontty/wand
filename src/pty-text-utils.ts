@@ -1,7 +1,5 @@
 /**
- * Shared PTY text processing utilities.
- * Used by both claude-pty-bridge.ts and message-parser.ts to ensure
- * consistent ANSI stripping and noise filtering.
+ * Shared PTY text processing utilities for consistent ANSI stripping and noise filtering.
  */
 
 /** Strip ANSI escape sequences and control characters from raw PTY output. */

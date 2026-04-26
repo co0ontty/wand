@@ -1,6 +1,5 @@
 import express, { Express } from "express";
 
-import { parseMessages } from "./message-parser.js";
 import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
@@ -406,13 +405,7 @@ export function registerSessionRoutes(
       ? processes.getPtyTranscript(snapshot.id) ?? snapshot.output
       : snapshot.output;
     if (req.query.format === "chat") {
-      const allowFallback = (snapshot.sessionKind ?? "pty") === "pty";
-      const fallbackOutput = allowFallback ? transcriptOutput : "";
-      const messages = snapshot.messages && snapshot.messages.length > 0
-        ? snapshot.messages
-        : allowFallback
-          ? parseMessages(fallbackOutput, snapshot.command)
-          : [];
+      const messages = snapshot.messages ?? [];
       res.json({ ...snapshot, output: transcriptOutput, messages });
     } else {
       res.json({ ...snapshot, output: transcriptOutput });
@@ -451,7 +444,7 @@ export function registerSessionRoutes(
       const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
       const resumeCommand = `${command} --resume ${claudeSessionId}`;
       const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: sessionId });
-      res.status(201).json({ resumedFromSessionId: sessionId, ...newSnapshot });
+      res.status(201).json(newSnapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
     }
@@ -488,7 +481,7 @@ export function registerSessionRoutes(
         const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
         const resumeCommand = `${command} --resume ${claudeSessionId}`;
         const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: existingSession.id });
-        res.status(201).json({ resumedFromSessionId: existingSession.id, resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
+        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
       } else {
         const cwd = body.cwd?.trim();
         if (!cwd) {

@@ -30,6 +30,7 @@ interface StreamingTurnState {
 }
 
 const STREAM_EMIT_DEBOUNCE_MS = 16;
+const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
 
 function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0 || process.geteuid?.() === 0;
@@ -82,6 +83,7 @@ export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   private readonly pendingChildren = new Map<string, ChildProcess>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
+  private archiveTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly storage: WandStorage, private readonly config: WandConfig) {
     for (const snapshot of this.storage.loadSessions()) {
@@ -110,6 +112,26 @@ export class StructuredSessionManager {
       };
       this.sessions.set(restored.id, restored);
       this.storage.saveSession(restored);
+    }
+    this.archiveExpiredSessions();
+    this.archiveTimer = setInterval(() => {
+      try { this.archiveExpiredSessions(); } catch (err) {
+        console.error(`[StructuredSessionManager] archive scan failed: ${String(err)}`);
+      }
+    }, 60 * 1000);
+    this.archiveTimer.unref?.();
+  }
+
+  private archiveExpiredSessions(): void {
+    const now = Date.now();
+    for (const session of this.sessions.values()) {
+      if (session.archived || session.status === "running") continue;
+      const referenceTime = session.endedAt ?? session.startedAt;
+      const endedAtMs = Date.parse(referenceTime);
+      if (!Number.isFinite(endedAtMs) || now - endedAtMs < ARCHIVE_AFTER_MS) continue;
+      session.archived = true;
+      session.archivedAt = new Date(now).toISOString();
+      this.storage.saveSession(session);
     }
   }
 
