@@ -682,15 +682,19 @@ export class StructuredSessionManager {
       if (session.claudeSessionId) {
         args.push("--resume", session.claudeSessionId);
       }
-      args.push(prompt);
 
+      // 通过 stdin 传 prompt，避免被 --allowedTools / --disallowedTools 这类
+      // variadic 参数贪婪吞掉（commander 的 <tools...> 会一直吃 positional 直到
+      // 下一个 flag）。表现为 claude 报 "Input must be provided either through
+      // stdin or as a prompt argument when using --print"。
       const child = spawn("claude", args, {
         cwd: session.cwd,
         env: process.env,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
-      console.log("[WAND] spawned claude -p pid:", child.pid, "args:", args.filter(a => a !== prompt).join(" "));
+      console.log("[WAND] spawned claude -p pid:", child.pid, "args:", args.join(" "));
       this.pendingChildren.set(sessionId, child);
+      child.stdin?.end(prompt);
 
       const turnState: StreamingTurnState = {
         blocks: [],
