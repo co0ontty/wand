@@ -5175,7 +5175,7 @@
           return "会话已结束，无法继续发送";
         }
         return session && isStructuredSession(session) && session.structuredState && session.structuredState.inFlight
-          ? "思考中，可继续发送，消息会自动排队"
+          ? "思考中 · 发送新消息将中断当前回复"
           : "输入消息...";
       }
 
@@ -8341,29 +8341,25 @@
           return Promise.resolve();
         }
 
-        var isQueueing = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
-        if (!isQueueing) {
-          // Immediately render user message with thinking indicator
-          var userTurn = { role: "user", content: [{ type: "text", text: input }] };
-          var userMsgs = stripRenderOnlyStructuredMessages(Array.isArray(session.messages) ? session.messages.slice() : []);
-          userMsgs.push(userTurn);
-          var optimisticStructuredState = Object.assign({}, session.structuredState || {}, { inFlight: true });
-          // Write optimistic user turn into session.messages so WS updates
-          // that arrive before the HTTP response don't erase it.
-          updateSessionSnapshot({
-            id: session.id,
-            status: "running",
-            messages: userMsgs,
-            structuredState: optimisticStructuredState,
-          });
-          state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
-            status: "running",
-            messages: userMsgs,
-            structuredState: optimisticStructuredState,
-          }), userMsgs);
-          updateInputHint("思考中…");
-          renderChat(true);
-        }
+        var isInterrupting = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
+        // Immediately render user message with thinking indicator
+        var userTurn = { role: "user", content: [{ type: "text", text: input }] };
+        var userMsgs = stripRenderOnlyStructuredMessages(Array.isArray(session.messages) ? session.messages.slice() : []);
+        userMsgs.push(userTurn);
+        var optimisticStructuredState = Object.assign({}, session.structuredState || {}, { inFlight: true });
+        updateSessionSnapshot({
+          id: session.id,
+          status: "running",
+          messages: userMsgs,
+          structuredState: optimisticStructuredState,
+        });
+        state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
+          status: "running",
+          messages: userMsgs,
+          structuredState: optimisticStructuredState,
+        }), userMsgs);
+        updateInputHint("思考中…");
+        renderChat(true);
 
         if (inputBox) {
           inputBox.value = "";
@@ -8380,7 +8376,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ input: input })
+          body: JSON.stringify({ input: input, interrupt: isInterrupting || undefined })
         })
         .then(function(res) { return res.json(); })
         .then(function(snapshot) {
@@ -8388,9 +8384,6 @@
             throw new Error(snapshot.error);
           }
           if (snapshot && snapshot.id) {
-            // If a WS update has already bumped the queue epoch, the HTTP
-            // response's queuedMessages is stale — drop it to avoid
-            // re-introducing already-dequeued items.
             if (state.queueEpoch > epochBeforePost && snapshot.queuedMessages) {
               delete snapshot.queuedMessages;
             }
@@ -8398,13 +8391,8 @@
             var refreshedSession = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
             state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot.output, false));
             renderChat(true);
-            if (isQueueing) {
-              var queuedCount = getStructuredQueuedInputs(refreshedSession).length;
-              if (queuedCount > 0) {
-                showToast("已排队（第 " + queuedCount + " 条），将在当前消息处理完成后自动发送。", "info");
-              }
-            } else {
-              updateInputHint("Enter 发送 · Shift+Enter 换行");
+            if (isInterrupting) {
+              showToast("已中断上一条回复，正在处理新消息…", "info");
             }
           }
         })

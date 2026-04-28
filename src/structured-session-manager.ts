@@ -116,6 +116,7 @@ function buildIncrementalStructuredPayload(snapshot: SessionSnapshot): ProcessEv
 export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   private readonly pendingChildren = new Map<string, ChildProcess>();
+  private readonly interruptedWith = new Map<string, string>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   private archiveTimer: NodeJS.Timeout | null = null;
 
@@ -248,7 +249,7 @@ export class StructuredSessionManager {
     return snapshot;
   }
 
-  async sendMessage(id: string, input: string): Promise<SessionSnapshot> {
+  async sendMessage(id: string, input: string, opts?: { interrupt?: boolean }): Promise<SessionSnapshot> {
     let session = this.requireSession(id);
     const prompt = input.trim();
     if (!prompt) return session;
@@ -271,6 +272,10 @@ export class StructuredSessionManager {
         this.sessions.set(id, recovered);
         this.storage.saveSession(recovered);
         session = recovered;
+      } else if (opts?.interrupt) {
+        this.interruptedWith.set(id, prompt);
+        try { child.kill("SIGTERM"); } catch (_err) { /* ignore */ }
+        return session;
       } else {
         const queue = [...(session.queuedMessages ?? [])];
         if (queue.length >= 10) {
@@ -444,6 +449,7 @@ export class StructuredSessionManager {
 
   stop(id: string): SessionSnapshot {
     const session = this.requireSession(id);
+    this.interruptedWith.delete(id);
     const child = this.pendingChildren.get(id);
     if (child) {
       child.kill();
@@ -936,16 +942,19 @@ export class StructuredSessionManager {
           msgs.push(assistantTurn);
         }
 
-        // 被 AskUserQuestion 检测主动 kill 时，保持 status="running" 让 UI 不跳到
-        // "已停止"。inFlight=false 才能让用户提交答案触发新的 sendMessage 而不是排队。
+        // 被 AskUserQuestion 检测或用户中断主动 kill 时，保持 status="running"
+        // 让 UI 不跳到"已停止"。inFlight=false 才能触发后续 sendMessage。
+        const interruptPrompt = this.interruptedWith.get(sessionId);
+        const keepRunning = killedForAskUserQuestion || !!interruptPrompt;
         const finished: SessionSnapshot = {
           ...current,
-          status: killedForAskUserQuestion ? "running" : "stopped",
-          exitCode: killedForAskUserQuestion ? null : 0,
-          endedAt: killedForAskUserQuestion ? null : new Date().toISOString(),
+          status: keepRunning ? "running" : "stopped",
+          exitCode: keepRunning ? null : 0,
+          endedAt: keepRunning ? null : new Date().toISOString(),
           output: turnState.result,
           claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
           messages: msgs,
+          queuedMessages: interruptPrompt ? [] : current.queuedMessages,
           pendingEscalation: null,
           permissionBlocked: false,
           structuredState: {
@@ -960,13 +969,26 @@ export class StructuredSessionManager {
         this.storage.saveSession(finished);
 
         this.emitStructuredSnapshot(finished);
-        if (!killedForAskUserQuestion) {
+        if (!keepRunning) {
           this.emitStructuredSnapshot(finished, "ended");
         }
 
-        // 等待用户回答 AskUserQuestion 时，跳过 ExitPlanMode 自续接和队列推进。
+        // 等待用户回答 AskUserQuestion 时，跳过后续自续接和队列推进。
         if (killedForAskUserQuestion) {
           resolve();
+          return;
+        }
+
+        // 用户中断当前回复：保存部分回复后立即发送新消息。
+        if (interruptPrompt) {
+          this.interruptedWith.delete(sessionId);
+          console.log("[WAND] interrupt-and-send for session:", sessionId, "prompt:", interruptPrompt.substring(0, 50));
+          resolve();
+          setImmediate(() => {
+            this.sendMessage(sessionId, interruptPrompt).catch((err) => {
+              console.error("[WAND] interrupt-and-send failed:", err);
+            });
+          });
           return;
         }
 
