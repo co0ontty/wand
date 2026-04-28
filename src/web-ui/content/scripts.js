@@ -831,21 +831,19 @@
         if (document.hidden) return;
         var immediate = opts && opts.immediate === true;
         var now = Date.now();
-        // Immediate path bypasses the throttle. Used by the Android resume
-        // bridge: WebView.onResume → wand-android-resume custom event needs
-        // to refresh state right away, not 1.5s later. The throttle still
-        // protects rapid visibilitychange / focus / pageshow bursts during
-        // normal browser interaction.
+        // 节流只是为了防止 visibilitychange/focus/pageshow 在前台切换时
+        // 连珠炮式触发同一份重连工作，不再借此延迟实际同步——之前用
+        // 80ms 兜延迟的版本会在前台事件后再去 loadOutput 全量重写
+        // terminal，但 wterm cols 那时还没被 ResizeObserver 自适应到，
+        // 写进去的全是按错列宽排版的内容，结果"切回前台/刷新页面 →
+        // 中间一大段都看不到"反而成了常态。
         if (!immediate && now - state.lastForegroundSyncAt < 1500) return;
         state.lastForegroundSyncAt = now;
         if (state.foregroundSyncTimer) {
           clearTimeout(state.foregroundSyncTimer);
-        }
-        var delay = immediate ? 0 : 80;
-        state.foregroundSyncTimer = setTimeout(function() {
           state.foregroundSyncTimer = null;
-          syncOnForeground(reason, immediate);
-        }, delay);
+        }
+        syncOnForeground(reason, immediate);
       }
 
       function syncOnForeground(reason, force) {
@@ -863,12 +861,13 @@
         if (state.claudeHistoryLoaded) {
           loadClaudeHistory();
         }
-        return loadSessions({ skipSelectedOutputReload: true }).then(function() {
-          if (state.selectedId) {
-            return loadOutput(state.selectedId);
-          }
-          scheduleChatRender(true);
-        }).catch(function(e) {
+        // 不再 loadOutput 当前会话——WS 重连后服务端会主动推一条 init
+        // 消息，那条路径已经走 ensureTerminalFitWithRetry 强制按真实
+        // cols 重排 history，足够覆盖前台恢复时的同步需求。这里多加
+        // 一次 fetch + syncTerminalBuffer 反而会在 ws/http 两路的 output
+        // 之间来回 reset，导致 alt-screen 中正在绘制的 Claude TUI 被
+        // 中途清掉。只把会话列表刷一下，保证状态条/会话名等元数据是新的。
+        return loadSessions({ skipSelectedOutputReload: true }).catch(function(e) {
           console.error("[wand] foreground sync failed:", reason, e);
         });
       }
@@ -4969,6 +4968,19 @@
           },
           onResize: function(cols, rows) {
             sendTerminalResize(cols, rows);
+            // wterm 自身 ResizeObserver 在容器尺寸变化时主动调 resize()，
+            // bridge.resize() 把 grid 按新 cols 重排，但 scrollback 仍是
+            // 按旧 cols 写入 WASM 的、新 grid 又被清空到干净状态。wand
+            // 这层缓存的 terminalOutput 才是完整原始字节流，必须按新
+            // cols 重放一次，grid + scrollback 才会和实际历史对齐。
+            // 同步立即重放——不要走 setTimeout(0)：移动端 WebView 在
+            // 前后台切换或键盘动画期间，macrotask 经常被推迟到 wterm
+            // 的下一帧 render 之后，结果用户先看到一帧空 grid 才看到
+            // replay 完的内容，体感上就是"刷新都没用、动一下窗口才好"。
+            if (state.terminal && state.terminalOutput) {
+              state.suppressFitReplay = true;
+              softResyncTerminal();
+            }
           }
         });
 
@@ -5792,12 +5804,17 @@
           initTerminal();
         }
 
-        if (selectedSession && state.terminal) {
-          syncTerminalBuffer(selectedSession.id, selectedSession.output || "", { mode: "append", scroll: false });
-        } else if (!selectedSession) {
+        if (!selectedSession) {
           state.terminalSessionId = null;
           state.terminalOutput = "";
         }
+        // 之前这里会用 selectedSession.output 再 syncTerminalBuffer 一次。
+        // 但 updateShellChrome 在 updateSessionsList、status 推送、init
+        // 等多个高频路径都会被调，每次都拿"可能不带 output 的 slim 快照"
+        // 兜回来 sync 一遍：要么早返回浪费判断，要么 prefix 不匹配触发
+        // reset+全量重写、把 alt-screen 中正在绘制的 Claude TUI 切走。
+        // terminal 写入应当只走 chunk hot-path 与 ws init 这两条权威路径，
+        // 这里不再插手，避免引入二次覆盖。
 
         if (state.terminal && selectedSession && state.currentView === "terminal") {
           maybeScrollTerminalToBottom("view");
@@ -10642,7 +10659,16 @@
       function ensureTerminalFit(reason) {
         if (!state.terminal) return false;
         var el = document.getElementById("output");
-        if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return false;
+        if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) {
+          // 容器暂时没有可见尺寸（hidden、动画过渡、键盘弹起前的 layout
+          // 中间帧、Android WebView resume 头几帧），不要静默放弃——
+          // 改成丢给 ensureTerminalFitWithRetry 兜底，等容器有了真实
+          // 尺寸再 fit + replay。否则一旦错过这一次，只能等下一次外部
+          // 触发（旋转屏幕、开关键盘等），中间的输出就会一直按错误
+          // 宽度堆在视图上方，看起来像"中间一大段都没有显示"。
+          ensureTerminalFitWithRetry(reason || "fit-retry");
+          return false;
+        }
         var prevCols = state.terminal.cols;
         var prevRows = state.terminal.rows;
         requestAnimationFrame(function() {
@@ -11046,14 +11072,19 @@
               renderChat(true);
               updateTaskDisplay();
               updateApprovalStats();
-              updateTerminalOutput(msg.data.output || "", msg.sessionId, "append");
-              // Ensure terminal is properly fitted after receiving initial data
-              scheduleTerminalResize(true);
-              if (state.terminal && state.terminal.remeasure) {
-                requestAnimationFrame(function() {
-                  if (state.terminal) state.terminal.remeasure();
-                });
-              }
+              // ws 重新订阅时拿到的是服务端 ring buffer 的最新窗口（最多
+              // 120KB）；客户端缓存的 terminalOutput 可能早于服务端窗口
+              // 的起点。append 模式有 prefix 检查，prefix 不匹配就 reset+
+              // 全量重写、全等就直接 return false——前者会把 alt-screen
+              // 中的 Claude TUI 切走，后者会把"应该按真实 cols 重写"的
+              // 机会跳过。改用 replace 强制 reset+按当前 cols 重写一次，
+              // 这是订阅时唯一可信的全量基线。
+              updateTerminalOutput(msg.data.output || "", msg.sessionId, "replace");
+              // 紧接着等容器有真实尺寸再 fit + softResync：wterm 启动
+              // 硬编码 cols=120，replace 写入也可能落在错的列宽上，
+              // ResizeObserver 的回调是异步的，得用 fit-with-retry 兜
+              // 一次，确保最终一定按真实宽度重排。
+              ensureTerminalFitWithRetry("init");
             }
             break;
           case 'usage':
