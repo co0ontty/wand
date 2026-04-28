@@ -8484,7 +8484,14 @@
           credentials: "same-origin",
           body: JSON.stringify({ input: input, interrupt: isInterrupting || undefined })
         })
-        .then(function(res) { return res.json(); })
+        .then(function(res) {
+          if (!res.ok) {
+            return res.json().catch(function() { return { error: "请求失败" }; }).then(function(payload) {
+              throw new Error((payload && payload.error) || "无法发送结构化消息。");
+            });
+          }
+          return res.json();
+        })
         .then(function(snapshot) {
           if (snapshot && snapshot.error) {
             throw new Error(snapshot.error);
@@ -9181,6 +9188,12 @@
 
       function flushPendingMessages() {
         if (state.pendingMessages.length === 0) return;
+
+        var selectedSession = getSelectedSession();
+        if (isStructuredSession(selectedSession)) {
+          state.pendingMessages = [];
+          return;
+        }
 
         // Send queued messages in order, bypassing the session-running check
         // since our local state may be stale right after reconnect
