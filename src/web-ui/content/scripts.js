@@ -4822,8 +4822,14 @@
       stripWideFillerForCopy();
 
       function resetTerminal() {
-        if (!state.terminal || typeof state.terminal.reset !== "function") return;
-        state.terminal.reset();
+        if (!state.terminal || typeof state.terminal.write !== "function") return;
+        // @wterm/dom 的 WTerm 类没有暴露 reset() 方法（grep 全包零匹配），
+        // 所以早期的 state.terminal.reset() 调用是 no-op——softResyncTerminal
+        // 实际只做了"再写一份 terminalOutput 追加"，旧 grid 不会被清空，
+        // 这就是"点刷新按钮没用、只有窗口尺寸变化才修"的根因。
+        // 改用 ANSI RIS (Reset to Initial State, ESC c) 让 WASM 状态机自己
+        // 重置 grid / 光标 / 属性 / scrollback，所有 VT 实现都支持这个序列。
+        state.terminal.write("\x1bc");
         resetWideParserState();
       }
 
@@ -10669,43 +10675,6 @@
         return true;
       }
 
-      // Cheap cols/rows drift check — call before writing a new PTY chunk so
-      // the chunk renders against the correct grid even if ResizeObserver
-      // hasn't fired yet (e.g. mobile keyboard mid-animation, iOS PWA address
-      // bar collapse, panel drag in progress). Only runs a real remeasure
-      // when the container width changed since the last fit; otherwise it is
-      // effectively a single offsetWidth read.
-      function maybeRefitTerminal() {
-        if (!state.terminal) return;
-        var el = document.getElementById("output");
-        if (!el) return;
-        var w = el.offsetWidth;
-        var h = el.offsetHeight;
-        if (w === 0 || h === 0) return;
-        // First call: just record the baseline and let ensureTerminalFit
-        // (called from initTerminal/mount) own the initial sync.
-        if (state.lastFitContainerWidth === undefined) {
-          state.lastFitContainerWidth = w;
-          state.lastFitContainerHeight = h;
-          return;
-        }
-        if (w === state.lastFitContainerWidth && h === state.lastFitContainerHeight) return;
-        state.lastFitContainerWidth = w;
-        state.lastFitContainerHeight = h;
-        var prevCols = state.terminal.cols;
-        var prevRows = state.terminal.rows;
-        if (typeof state.terminal.remeasure === "function") {
-          state.terminal.remeasure();
-        }
-        if (state.terminal.cols !== prevCols || state.terminal.rows !== prevRows) {
-          sendTerminalResize(state.terminal.cols, state.terminal.rows);
-          // Don't replay here: the caller is about to write a fresh chunk and
-          // a softResync would race with it. The chunk itself will reach the
-          // correct grid; older buffer drift is repaired by the next
-          // ensureTerminalFit / health check / manual refresh.
-        }
-      }
-
       function scheduleTerminalResize(immediate) {
         if (state.resizeTimer) {
           clearTimeout(state.resizeTimer);
@@ -10937,10 +10906,12 @@
                 // Fast path: write chunk directly to avoid full-output comparison.
                 state.lastChunkAt = Date.now();
                 state.terminalLiveStreamSessions[msg.sessionId] = true;
-                // Detect cheap container-width drift before applying the chunk
-                // so absolute-cursor CSI sequences in the chunk land on the
-                // right grid (otherwise content tears or stacks at the top).
-                maybeRefitTerminal();
+                // 不再在 hot-path 调 maybeRefitTerminal/remeasure。它会偷偷把
+                // wterm 的 this.cols 改成新值，让 wterm 自己的 ResizeObserver
+                // 误判 newCols === this.cols 而跳过 wterm.resize() —— 那条路径
+                // 才会真正调 Renderer.setup() 重建 DOM 行。绕过它就让容器尺寸
+                // 变化的视觉错位无法被自愈，直到用户手动改窗口才修。现在让
+                // wterm 内部 ResizeObserver 独占 cols 跟踪职责。
                 wandTerminalWrite(state.terminal, msg.data.chunk);
                 state.terminalSessionId = msg.sessionId;
                 if (msg.data.output) {
