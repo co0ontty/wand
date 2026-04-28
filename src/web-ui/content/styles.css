@@ -1061,9 +1061,9 @@
     .session-item {
       width: 100%;
       text-align: left;
-      background: var(--bg-surface);
-      border: 1px solid transparent;
-      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
       color: var(--text-primary);
       padding: 10px 12px;
       cursor: pointer;
@@ -1097,6 +1097,7 @@
       position: relative;
       z-index: 2;
       background: inherit;
+      border-radius: inherit;
       transition: transform 0.3s var(--ease-out-expo);
       will-change: transform;
     }
@@ -1803,9 +1804,9 @@
 
     /* ===== 会话卡片交互效果 ===== */
     .session-item:hover {
-      background: rgba(150, 118, 85, 0.06);
-      border-color: var(--border-subtle);
-      box-shadow: 0 1px 4px rgba(89, 58, 32, 0.04);
+      background: rgba(255, 255, 255, 0.7);
+      border-color: var(--border-default);
+      box-shadow: 0 2px 8px rgba(89, 58, 32, 0.06);
     }
 
     .session-item:hover::before {
@@ -1814,9 +1815,9 @@
     }
 
     .session-item.active {
-      background: rgba(197, 101, 61, 0.08);
-      border-color: rgba(197, 101, 61, 0.2);
-      box-shadow: 0 1px 6px rgba(197, 101, 61, 0.08);
+      background: rgba(197, 101, 61, 0.06);
+      border-color: rgba(197, 101, 61, 0.25);
+      box-shadow: 0 2px 8px rgba(197, 101, 61, 0.1);
     }
 
     .session-item.active::before {
@@ -1884,7 +1885,7 @@
 
     .session-status.running .session-status-dot {
       background: var(--success);
-      box-shadow: 0 0 8px var(--success-glow);
+      box-shadow: 0 0 5px var(--success-glow);
       animation: status-pulse 2s ease-in-out infinite;
     }
 
