@@ -1054,14 +1054,14 @@
     }
     .claude-history-item:hover {
       opacity: 1;
-      background: rgba(150, 118, 85, 0.06);
+      background: rgba(255, 253, 250, 0.96);
     }
 
     /* ===== 会话卡片项 ===== */
     .session-item {
       width: 100%;
       text-align: left;
-      background: rgba(255, 255, 255, 0.55);
+      background: rgba(255, 252, 247, 0.92);
       border: 1px solid var(--border-subtle);
       border-radius: 10px;
       color: var(--text-primary);
@@ -1149,7 +1149,7 @@
 
     .session-item.selected {
       border-color: rgba(197, 101, 61, 0.35);
-      background: rgba(197, 101, 61, 0.08);
+      background: rgba(255, 245, 238, 0.96);
     }
 
     .session-item.selected::before {
@@ -1804,9 +1804,9 @@
 
     /* ===== 会话卡片交互效果 ===== */
     .session-item:hover {
-      background: rgba(255, 255, 255, 0.7);
+      background: rgba(255, 253, 250, 0.96);
       border-color: var(--border-default);
-      box-shadow: 0 2px 8px rgba(89, 58, 32, 0.06);
+      box-shadow: 0 2px 8px rgba(89, 58, 32, 0.07);
     }
 
     .session-item:hover::before {
@@ -1815,8 +1815,8 @@
     }
 
     .session-item.active {
-      background: rgba(197, 101, 61, 0.06);
-      border-color: rgba(197, 101, 61, 0.25);
+      background: rgba(255, 247, 240, 0.96);
+      border-color: rgba(197, 101, 61, 0.3);
       box-shadow: 0 2px 8px rgba(197, 101, 61, 0.1);
     }
 
