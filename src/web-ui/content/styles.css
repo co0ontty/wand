@@ -2219,15 +2219,92 @@
 
     .terminal-info { font-size: 0.625rem; color: var(--text-muted); font-weight: 500; }
 
-    /* ===== 主内容区顶部行 ===== */
+    /* ===== 主内容区顶部行（三段式） ===== */
     .main-header-row {
       display: flex;
       align-items: center;
-      justify-content: flex-start;
       padding: 6px 10px;
       flex-shrink: 0;
       min-height: 44px;
       gap: 8px;
+      position: relative;
+    }
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .topbar-center {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+    }
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    /* 左段品牌徽标 */
+    .topbar-brand {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-active));
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.85rem;
+      letter-spacing: 0.02em;
+      box-shadow: 0 1px 3px rgba(89, 58, 32, 0.18);
+      user-select: none;
+      flex-shrink: 0;
+    }
+
+    /* 中段：会话标题 / cwd / 标语 */
+    .topbar-session-title {
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 0;
+      max-width: 240px;
+    }
+    .topbar-cwd {
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      font-family: var(--font-mono, monospace);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+      flex: 1 1 0;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 6px;
+      direction: rtl;
+      text-align: left;
+      transition: background var(--transition-fast), color var(--transition-fast);
+    }
+    .topbar-cwd:hover {
+      background: rgba(255, 255, 255, 0.55);
+      color: var(--text-secondary);
+    }
+    .topbar-tagline {
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     /* PWA 模式额外留出顶部缓冲,避免与 iPadOS Stage Manager 等系统浮动控件视觉粘连 */
@@ -2240,7 +2317,65 @@
       padding-top: 10px;
     }
 
-    /* Current task indicator */
+    /* 会话状态徽标（静态） */
+    .session-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 2px 9px 2px 7px;
+      flex-shrink: 0;
+      max-width: 140px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .session-status-pill .session-status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      flex-shrink: 0;
+    }
+    .session-status-pill .session-status-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .session-status-pill.running {
+      background: var(--success-muted);
+      border-color: rgba(79, 122, 88, 0.3);
+      color: var(--success);
+    }
+    .session-status-pill.running .session-status-dot {
+      background: var(--success);
+      animation: task-pulse 1.2s ease-in-out infinite;
+    }
+    .session-status-pill.permission-blocked {
+      background: var(--warning-muted);
+      border-color: rgba(169, 106, 47, 0.35);
+      color: var(--warning);
+    }
+    .session-status-pill.permission-blocked .session-status-dot {
+      background: var(--warning);
+      animation: task-pulse 1.2s ease-in-out infinite;
+    }
+    .session-status-pill.exited,
+    .session-status-pill.stopped {
+      color: var(--text-muted);
+    }
+    .session-status-pill.failed {
+      background: var(--danger-muted);
+      border-color: rgba(178, 79, 69, 0.3);
+      color: var(--danger);
+    }
+    .session-status-pill.failed .session-status-dot { background: var(--danger); }
+    .session-status-pill.archived { opacity: 0.7; }
+
+    /* Current task indicator（动态活动徽标，由 updateTaskDisplay 管理） */
     .current-task {
       display: flex;
       align-items: center;
@@ -2252,7 +2387,7 @@
       border-radius: 20px;
       padding: 2px 8px 2px 5px;
       font-weight: 500;
-      max-width: 280px;
+      max-width: 240px;
       min-width: 0;
       overflow: hidden;
       flex-shrink: 1;
@@ -2273,6 +2408,50 @@
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.5; transform: scale(0.8); }
     }
+
+    /* 右段更多菜单 */
+    .topbar-more-wrap {
+      position: relative;
+      display: inline-flex;
+    }
+    .topbar-more-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 168px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      padding: 4px;
+      box-shadow: var(--shadow-lg);
+      z-index: 60;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .topbar-more-menu.hidden { display: none; }
+    .topbar-more-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      padding: 8px 12px;
+      border: 0;
+      background: transparent;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 8px;
+      text-align: left;
+      transition: background var(--transition-fast), color var(--transition-fast);
+    }
+    .topbar-more-item:hover { background: var(--accent-muted); color: var(--accent); }
+    .topbar-more-item svg { flex-shrink: 0; opacity: 0.85; }
+    .topbar-more-item.topbar-more-item-danger { color: var(--danger); }
+    .topbar-more-item.topbar-more-item-danger:hover { background: var(--danger-muted); color: var(--danger-hover); }
+    .topbar-more-item.hidden { display: none; }
 
     /* 桌面端显示所有按钮 */
     .terminal-scale-toggle { display: flex; }
@@ -6565,6 +6744,12 @@
       .current-task { font-size: 0.5625rem; padding: 1px 6px 1px 4px; gap: 3px; }
 
       .main-header-row { padding: 2px 6px; gap: 4px; }
+      .topbar-brand,
+      .topbar-cwd { display: none; }
+      .topbar-session-title { max-width: 140px; font-size: 0.78rem; }
+      .session-status-pill { font-size: 0.625rem; padding: 1px 7px 1px 5px; max-width: 110px; }
+      .session-status-pill .session-status-dot { width: 5px; height: 5px; }
+      .topbar-more-menu { min-width: 156px; }
 
       /* 视图切换按钮 - 紧凑 */
       .view-toggle { height: 28px; padding: 2px; gap: 1px; }

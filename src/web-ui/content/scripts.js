@@ -167,6 +167,7 @@
             return false;
           }
         })(),
+        topbarMoreOpen: false,
         chatAutoFollow: (function() {
           try {
             var saved = localStorage.getItem(CHAT_AUTO_FOLLOW_STORAGE_KEY);
@@ -804,14 +805,11 @@
 
       function updateInstallPrompt() {
         // 显示或隐藏菜单栏中的安装按钮
+        var visible = !!(state.showInstallPrompt && state.deferredPrompt);
         var installBtn = document.getElementById('pwa-install-button');
-        if (installBtn) {
-          if (state.showInstallPrompt && state.deferredPrompt) {
-            installBtn.classList.remove('hidden');
-          } else {
-            installBtn.classList.add('hidden');
-          }
-        }
+        if (installBtn) installBtn.classList.toggle('hidden', !visible);
+        var topbarInstallItem = document.getElementById('topbar-install-item');
+        if (topbarInstallItem) topbarInstallItem.classList.toggle('hidden', !visible);
       }
 
       function renderBootLoading() {
@@ -1205,12 +1203,38 @@
             '</aside>' +
             '<main class="main-content">' +
               '<div class="main-header-row">' +
-                '<button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? ' active' : '') + '" aria-label="切换会话侧栏" type="button">' +
-                  '<span class="hamburger-icon">' +
-                    '<span></span><span></span><span></span>' +
-                  '</span>' +
-                '</button>' +
-                '<span class="current-task hidden" id="current-task"></span>' +
+                '<div class="topbar-left">' +
+                  '<button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? ' active' : '') + '" aria-label="切换会话侧栏" type="button">' +
+                    '<span class="hamburger-icon">' +
+                      '<span></span><span></span><span></span>' +
+                    '</span>' +
+                  '</button>' +
+                  '<span class="topbar-brand" aria-hidden="true">W</span>' +
+                '</div>' +
+                '<div class="topbar-center">' +
+                  (selectedSession
+                    ? (
+                        '<span class="topbar-session-title" title="' + escapeHtml(selectedSession.command || "") + '">' + escapeHtml(shortCommand(selectedSession.command)) + '</span>' +
+                        '<span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span>' +
+                        '<span class="current-task hidden" id="current-task"></span>' +
+                        (selectedSession.cwd ? '<span class="topbar-cwd" id="topbar-cwd" title="' + escapeHtml(selectedSession.cwd) + '" role="button" tabindex="0">' + escapeHtml(selectedSession.cwd) + '</span>' : '')
+                      )
+                    : '<span class="topbar-tagline">Wand 控制台</span>' +
+                      '<span class="current-task hidden" id="current-task"></span>'
+                  ) +
+                '</div>' +
+                '<div class="topbar-right">' +
+                  (selectedSession && selectedSession.cwd ? '<button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? ' active' : '') + '" type="button" aria-label="文件" title="文件"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>' : '') +
+                  '<div class="topbar-more-wrap">' +
+                    '<button id="topbar-more-button" class="topbar-btn square' + (state.topbarMoreOpen ? ' active' : '') + '" type="button" aria-label="更多" aria-haspopup="menu" aria-expanded="' + (state.topbarMoreOpen ? 'true' : 'false') + '" title="更多"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>' +
+                    '<div id="topbar-more-menu" class="topbar-more-menu' + (state.topbarMoreOpen ? '' : ' hidden') + '" role="menu">' +
+                      '<button class="topbar-more-item" data-action="settings" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>' +
+                      '<button class="topbar-more-item" data-action="refresh" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>刷新</span></button>' +
+                      '<button class="topbar-more-item' + (state.showInstallPrompt && state.deferredPrompt ? '' : ' hidden') + '" id="topbar-install-item" data-action="install" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>安装应用</span></button>' +
+                      '<button class="topbar-more-item topbar-more-item-danger" data-action="logout" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>退出</span></button>' +
+                    '</div>' +
+                  '</div>' +
+                '</div>' +
               '</div>' +
               // File panel backdrop (mobile)
               '<div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div>' +
@@ -3818,6 +3842,88 @@
         // File panel backdrop click to close (mobile)
         var filePanelBackdrop = document.getElementById("file-panel-backdrop");
         if (filePanelBackdrop) filePanelBackdrop.addEventListener("click", closeFilePanel);
+
+        // Topbar: file button (mirrors toggleFilePanel)
+        var topbarFileBtn = document.getElementById("topbar-file-button");
+        if (topbarFileBtn) topbarFileBtn.addEventListener("click", toggleFilePanel);
+
+        // Topbar: cwd click → open file panel
+        var topbarCwdEl = document.getElementById("topbar-cwd");
+        if (topbarCwdEl) {
+          topbarCwdEl.addEventListener("click", function() {
+            if (!state.filePanelOpen) toggleFilePanel();
+          });
+          topbarCwdEl.addEventListener("keydown", function(e) {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              if (!state.filePanelOpen) toggleFilePanel();
+            }
+          });
+        }
+
+        // Topbar: more menu
+        var topbarMoreBtn = document.getElementById("topbar-more-button");
+        var topbarMoreMenu = document.getElementById("topbar-more-menu");
+        if (topbarMoreBtn && topbarMoreMenu) {
+          topbarMoreBtn.addEventListener("click", function(e) {
+            e.stopPropagation();
+            state.topbarMoreOpen = !state.topbarMoreOpen;
+            topbarMoreMenu.classList.toggle("hidden", !state.topbarMoreOpen);
+            topbarMoreBtn.classList.toggle("active", state.topbarMoreOpen);
+            topbarMoreBtn.setAttribute("aria-expanded", state.topbarMoreOpen ? "true" : "false");
+          });
+          topbarMoreMenu.addEventListener("click", function(e) {
+            var btn = e.target && e.target.closest ? e.target.closest(".topbar-more-item") : null;
+            if (!btn) return;
+            var action = btn.getAttribute("data-action");
+            // Close menu first regardless of action
+            state.topbarMoreOpen = false;
+            topbarMoreMenu.classList.add("hidden");
+            topbarMoreBtn.classList.remove("active");
+            topbarMoreBtn.setAttribute("aria-expanded", "false");
+            switch (action) {
+              case "settings":
+                openSettingsModal();
+                break;
+              case "refresh":
+                window.location.reload();
+                break;
+              case "install":
+                if (state.deferredPrompt) {
+                  state.deferredPrompt.prompt();
+                  state.deferredPrompt.userChoice.then(function() {
+                    state.deferredPrompt = null;
+                    state.showInstallPrompt = false;
+                    updateInstallPrompt();
+                  });
+                }
+                break;
+              case "logout":
+                logout();
+                break;
+            }
+          });
+          // Close on outside click
+          document.addEventListener("click", function(e) {
+            if (!state.topbarMoreOpen) return;
+            var wrap = topbarMoreMenu.parentElement;
+            if (wrap && !wrap.contains(e.target)) {
+              state.topbarMoreOpen = false;
+              topbarMoreMenu.classList.add("hidden");
+              topbarMoreBtn.classList.remove("active");
+              topbarMoreBtn.setAttribute("aria-expanded", "false");
+            }
+          });
+          // Close on ESC
+          document.addEventListener("keydown", function(e) {
+            if (e.key === "Escape" && state.topbarMoreOpen) {
+              state.topbarMoreOpen = false;
+              topbarMoreMenu.classList.add("hidden");
+              topbarMoreBtn.classList.remove("active");
+              topbarMoreBtn.setAttribute("aria-expanded", "false");
+            }
+          });
+        }
 
         // Terminal scale controls (topbar)
         var scaleDownBtn = document.getElementById("terminal-scale-down-top");
