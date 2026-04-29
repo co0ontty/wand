@@ -119,6 +119,17 @@ export function getGitStatus(cwd: string): GitStatusResult {
   const allEntries = parsePorcelain(porcelain);
   const files = allEntries.slice(0, MAX_FILE_ENTRIES);
 
+  let latestTag: string | undefined;
+  let suggestedNextTag: string | undefined;
+  try {
+    latestTag = runGit(["describe", "--tags", "--abbrev=0"], cwd);
+  } catch {
+    latestTag = undefined;
+  }
+  if (latestTag) {
+    suggestedNextTag = bumpPatchTag(latestTag);
+  }
+
   return {
     isGit: true,
     branch,
@@ -127,7 +138,19 @@ export function getGitStatus(cwd: string): GitStatusResult {
     head,
     repoRoot,
     initialCommit,
+    latestTag,
+    suggestedNextTag,
   };
+}
+
+function bumpPatchTag(tag: string): string {
+  const m = tag.match(/^(v?)(\d+)\.(\d+)\.(\d+)(.*)/);
+  if (!m) return "";
+  const prefix = m[1];
+  const major = m[2];
+  const minor = m[3];
+  const patch = parseInt(m[4], 10) + 1;
+  return `${prefix}${major}.${minor}.${patch}`;
 }
 
 interface QuickCommitOptions {
@@ -136,6 +159,8 @@ interface QuickCommitOptions {
   autoMessage: boolean;
   customMessage?: string;
   tag?: string;
+  autoTag?: boolean;
+  push?: boolean;
 }
 
 export class QuickCommitError extends Error {
@@ -174,13 +199,26 @@ function execClaudePrint(prompt: string): Promise<string> {
   });
 }
 
-function buildPrompt(diffStat: string, diff: string, language: string): string {
+function buildPrompt(diffStat: string, diff: string, language: string, opts?: { needTag?: boolean; latestTag?: string }): string {
   const lang = language && language.trim() ? language.trim() : "中文";
   const sections: string[] = [];
-  sections.push(`请根据下面的 git diff，用 ${lang} 写一条简洁的 commit message：`);
-  sections.push("- 只输出一行内容，不要解释、不要 Markdown、不要代码块");
-  sections.push("- 不超过 50 字 / 12 单词，使用祈使句，描述「做了什么」");
-  sections.push("- 不要包含 issue 编号或作者信息");
+  if (opts?.needTag) {
+    sections.push(`请根据下面的 git diff，用 ${lang} 完成两件事：`);
+    sections.push("1. 写一条简洁的 commit message");
+    sections.push("2. 建议一个合适的 git tag（语义化版本号）");
+    sections.push("");
+    sections.push("输出格式（严格两行，不要其他内容）：");
+    sections.push("第一行：commit message");
+    sections.push("第二行：tag 名（如 v1.2.3）");
+    sections.push("");
+    sections.push("commit message 要求：不超过 50 字 / 12 单词，使用祈使句");
+    sections.push("tag 要求：基于" + (opts.latestTag ? "当前最新 tag " + opts.latestTag + " 递增" : "语义化版本号") + "，根据改动大小决定 bump major/minor/patch");
+  } else {
+    sections.push(`请根据下面的 git diff，用 ${lang} 写一条简洁的 commit message：`);
+    sections.push("- 只输出一行内容，不要解释、不要 Markdown、不要代码块");
+    sections.push("- 不超过 50 字 / 12 单词，使用祈使句，描述「做了什么」");
+    sections.push("- 不要包含 issue 编号或作者信息");
+  }
   sections.push("");
   sections.push("=== git diff --stat ===");
   sections.push(diffStat || "(empty)");
@@ -192,7 +230,12 @@ function buildPrompt(diffStat: string, diff: string, language: string): string {
   return sections.join("\n");
 }
 
-async function generateCommitMessage(cwd: string, language: string): Promise<string> {
+interface CommitInfo {
+  message: string;
+  tag?: string;
+}
+
+async function generateCommitInfo(cwd: string, language: string, opts?: { needTag?: boolean }): Promise<CommitInfo> {
   let diffStat = "";
   try {
     diffStat = runGit(["diff", "--cached", "--stat"], cwd, COMMIT_GIT_TIMEOUT_MS);
@@ -213,22 +256,43 @@ async function generateCommitMessage(cwd: string, language: string): Promise<str
     diff = "";
   }
 
-  const prompt = buildPrompt(diffStat, diff, language);
+  let latestTag: string | undefined;
+  if (opts?.needTag) {
+    try {
+      latestTag = runGit(["describe", "--tags", "--abbrev=0"], cwd);
+    } catch {
+      latestTag = undefined;
+    }
+  }
+
+  const prompt = buildPrompt(diffStat, diff, language, { needTag: opts?.needTag, latestTag });
   const raw = await execClaudePrint(prompt);
 
-  const firstLine = raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0) || "";
-  const message = firstLine
-    .replace(/^["'`]+/, "")
-    .replace(/["'`]+$/, "")
-    .replace(/^[*#>\-]+\s*/, "")
-    .trim();
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+
+  function cleanLine(line: string): string {
+    return line
+      .replace(/^["'`]+/, "")
+      .replace(/["'`]+$/, "")
+      .replace(/^[*#>\-]+\s*/, "")
+      .replace(/^\d+\.\s*/, "")
+      .trim();
+  }
+
+  const message = cleanLine(lines[0] || "");
   if (!message) {
     throw new QuickCommitError("Claude 返回的 commit message 为空。", "CLAUDE_EMPTY_OUTPUT");
   }
-  return message;
+
+  let tag: string | undefined;
+  if (opts?.needTag && lines.length >= 2) {
+    const rawTag = cleanLine(lines[1]);
+    if (rawTag && /^[A-Za-z0-9._\-/+]+$/.test(rawTag)) {
+      tag = rawTag;
+    }
+  }
+
+  return { message, tag };
 }
 
 function ensureCleanTagName(tag: string): string {
@@ -243,7 +307,7 @@ function ensureCleanTagName(tag: string): string {
 }
 
 export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCommitResult> {
-  const { cwd, language, autoMessage, customMessage, tag } = opts;
+  const { cwd, language, autoMessage, customMessage, tag, autoTag } = opts;
 
   if (!cwd || !existsSync(cwd)) {
     throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
@@ -259,17 +323,17 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     throw new QuickCommitError("当前目录不在 git 仓库内。", "NOT_A_GIT_REPO");
   }
 
-  const cleanTag = tag && tag.trim() ? ensureCleanTagName(tag) : undefined;
-  if (cleanTag) {
+  const userTag = tag && tag.trim() ? ensureCleanTagName(tag) : undefined;
+  if (userTag) {
     let tagAlreadyExists = false;
     try {
-      runGit(["rev-parse", "--verify", `refs/tags/${cleanTag}`], cwd);
+      runGit(["rev-parse", "--verify", `refs/tags/${userTag}`], cwd);
       tagAlreadyExists = true;
     } catch {
       tagAlreadyExists = false;
     }
     if (tagAlreadyExists) {
-      throw new QuickCommitError(`tag 已存在：${cleanTag}`, "TAG_EXISTS");
+      throw new QuickCommitError(`tag 已存在：${userTag}`, "TAG_EXISTS");
     }
   }
 
@@ -289,13 +353,40 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     throw new QuickCommitError("没有任何改动可以提交。", "NOTHING_TO_COMMIT");
   }
 
+  const needClaudeTag = autoTag && !userTag;
   let message: string;
+  let claudeTag: string | undefined;
+
   if (autoMessage) {
-    message = await generateCommitMessage(cwd, language);
+    const info = await generateCommitInfo(cwd, language, { needTag: needClaudeTag });
+    message = info.message;
+    claudeTag = info.tag;
   } else {
     message = (customMessage || "").trim();
     if (!message) {
       throw new QuickCommitError("commit message 不能为空。", "EMPTY_MESSAGE");
+    }
+    if (needClaudeTag) {
+      try {
+        const latestTag = runGit(["describe", "--tags", "--abbrev=0"], cwd);
+        claudeTag = bumpPatchTag(latestTag) || undefined;
+      } catch {
+        claudeTag = undefined;
+      }
+    }
+  }
+
+  const finalTag = userTag || claudeTag;
+  if (finalTag) {
+    let tagAlreadyExists = false;
+    try {
+      runGit(["rev-parse", "--verify", `refs/tags/${finalTag}`], cwd);
+      tagAlreadyExists = true;
+    } catch {
+      tagAlreadyExists = false;
+    }
+    if (tagAlreadyExists) {
+      throw new QuickCommitError(`tag 已存在：${finalTag}`, "TAG_EXISTS");
     }
   }
 
@@ -313,12 +404,24 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   }
 
   let tagResult: QuickCommitResult["tag"];
-  if (cleanTag) {
+  if (finalTag) {
     try {
-      runGitAllowEmpty(["tag", cleanTag], cwd, COMMIT_GIT_TIMEOUT_MS);
-      tagResult = { name: cleanTag };
+      runGitAllowEmpty(["tag", finalTag], cwd, COMMIT_GIT_TIMEOUT_MS);
+      tagResult = { name: finalTag };
     } catch (error) {
       throw new QuickCommitError(`git tag 失败：${getGitErrorMessage(error)}`, "GIT_TAG_FAILED");
+    }
+  }
+
+  let pushed = false;
+  if (opts.push) {
+    try {
+      const pushArgs = ["push"];
+      if (tagResult) pushArgs.push("--tags");
+      runGitAllowEmpty(pushArgs, cwd, COMMIT_GIT_TIMEOUT_MS);
+      pushed = true;
+    } catch (error) {
+      throw new QuickCommitError(`git push 失败：${getGitErrorMessage(error)}`, "GIT_PUSH_FAILED");
     }
   }
 
@@ -326,5 +429,6 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     ok: true,
     commit: { hash, message },
     tag: tagResult,
+    pushed,
   };
 }

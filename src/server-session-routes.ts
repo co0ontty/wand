@@ -371,7 +371,7 @@ export function registerSessionRoutes(
       res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
       return;
     }
-    const body = (req.body ?? {}) as { autoMessage?: boolean; customMessage?: string; tag?: string };
+    const body = (req.body ?? {}) as { autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean };
     try {
       const result = await runQuickCommit({
         cwd: snapshot.cwd,
@@ -379,6 +379,8 @@ export function registerSessionRoutes(
         autoMessage: body.autoMessage !== false,
         customMessage: typeof body.customMessage === "string" ? body.customMessage : undefined,
         tag: typeof body.tag === "string" ? body.tag : undefined,
+        autoTag: !!body.autoTag,
+        push: !!body.push,
       });
       res.json(result);
     } catch (error) {

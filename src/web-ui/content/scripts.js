@@ -176,7 +176,7 @@
         quickCommitOpen: false,
         quickCommitSubmitting: false,
         quickCommitError: "",
-        quickCommitForm: { autoMessage: true, customMessage: "", makeTag: false, tag: "" },
+        quickCommitForm: { autoMessage: true, customMessage: "", makeTag: false, tag: "", push: false },
         chatAutoFollow: (function() {
           try {
             var saved = localStorage.getItem(CHAT_AUTO_FOLLOW_STORAGE_KEY);
@@ -1564,23 +1564,25 @@
         if (tagInput) tagInput.addEventListener("input", function() {
           state.quickCommitForm.tag = tagInput.value;
         });
+        var pushCb = document.getElementById("quick-commit-push");
+        if (pushCb) pushCb.addEventListener("change", function() {
+          state.quickCommitForm.push = pushCb.checked;
+        });
       }
 
       function submitQuickCommit() {
         if (!state.selectedId || state.quickCommitSubmitting) return;
         var form = state.quickCommitForm || {};
+        var userTag = form.makeTag ? (form.tag || "").trim() : "";
         var payload = {
           autoMessage: form.autoMessage !== false,
           customMessage: form.autoMessage === false ? (form.customMessage || "") : "",
-          tag: form.makeTag ? (form.tag || "") : ""
+          tag: userTag,
+          autoTag: form.makeTag && !userTag,
+          push: !!form.push
         };
         if (!payload.autoMessage && !payload.customMessage.trim()) {
           state.quickCommitError = "请填写 commit message。";
-          rerenderQuickCommitModal();
-          return;
-        }
-        if (form.makeTag && !payload.tag.trim()) {
-          state.quickCommitError = "请填写 tag 名。";
           rerenderQuickCommitModal();
           return;
         }
@@ -1601,7 +1603,7 @@
             var data = result.data || {};
             var hash = data.commit && data.commit.hash ? data.commit.hash.substring(0, 7) : "";
             var tagName = data.tag && data.tag.name ? data.tag.name : "";
-            var msg = "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 tag " + tagName : "");
+            var msg = "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 tag " + tagName : "") + (data.pushed ? "，已 push" : "");
             if (typeof showToast === "function") showToast(msg, "success");
             closeQuickCommitModal();
             if (state.selectedId) loadGitStatus(state.selectedId, { force: true });
@@ -1656,11 +1658,15 @@
               '</div>' +
               '<label class="qc-checkbox-row">' +
                 '<input type="checkbox" id="quick-commit-make-tag"' + (f.makeTag ? ' checked' : '') + '>' +
-                '<span>提交后打 tag</span>' +
+                '<span>提交后打 tag' + (s.latestTag ? '（当前：' + escapeHtml(s.latestTag) + '）' : '') + '</span>' +
               '</label>' +
               '<div class="qc-tag-row' + (f.makeTag ? '' : ' hidden') + '" id="quick-commit-tag-row">' +
-                '<input type="text" id="quick-commit-tag" class="field-input" placeholder="例如 v1.0.0" value="' + escapeHtml(f.tag || "") + '">' +
+                '<input type="text" id="quick-commit-tag" class="field-input" placeholder="留空由 Claude 自动建议' + (s.suggestedNextTag ? '（如 ' + escapeHtml(s.suggestedNextTag) + '）' : '') + '" value="' + escapeHtml(f.tag || "") + '">' +
               '</div>' +
+              '<label class="qc-checkbox-row">' +
+                '<input type="checkbox" id="quick-commit-push"' + (f.push ? ' checked' : '') + '>' +
+                '<span>提交后 push 到远端</span>' +
+              '</label>' +
               '<p id="quick-commit-error" class="error-message' + (state.quickCommitError ? '' : ' hidden') + '">' + escapeHtml(state.quickCommitError || "") + '</p>' +
               '<div class="worktree-merge-actions">' +
                 '<button id="quick-commit-cancel-btn" class="btn btn-secondary" type="button">取消</button>' +
