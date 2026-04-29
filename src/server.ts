@@ -1019,7 +1019,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
-  registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode);
+  registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config);
   registerClaudeHistoryRoutes(app, processes, storage);
   registerUploadRoutes(app, processes);
 

@@ -168,6 +168,15 @@
           }
         })(),
         topbarMoreOpen: false,
+        gitStatus: null,
+        gitStatusSessionId: null,
+        gitStatusLoading: false,
+        gitStatusInflight: null,
+        gitStatusLastFetchAt: 0,
+        quickCommitOpen: false,
+        quickCommitSubmitting: false,
+        quickCommitError: "",
+        quickCommitForm: { autoMessage: true, customMessage: "", makeTag: false, tag: "" },
         chatAutoFollow: (function() {
           try {
             var saved = localStorage.getItem(CHAT_AUTO_FOLLOW_STORAGE_KEY);
@@ -1023,6 +1032,11 @@
             syncSessionModalUI();
           }
         }
+
+        // 初始加载或会话切换后惰性触发 git 状态拉取（loadGitStatus 自带节流）。
+        if (isLoggedIn && state.selectedId && state.gitStatusSessionId !== state.selectedId) {
+          loadGitStatus(state.selectedId);
+        }
       }
 
       function renderShortcutKeys() {
@@ -1225,6 +1239,7 @@
                 '</div>' +
                 '<div class="topbar-right">' +
                   (selectedSession && selectedSession.cwd ? '<button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? ' active' : '') + '" type="button" aria-label="文件" title="文件"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>' : '') +
+                  '<span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + '</span>' +
                   '<div class="topbar-more-wrap">' +
                     '<button id="topbar-more-button" class="topbar-btn square' + (state.topbarMoreOpen ? ' active' : '') + '" type="button" aria-label="更多" aria-haspopup="menu" aria-expanded="' + (state.topbarMoreOpen ? 'true' : 'false') + '" title="更多"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>' +
                     '<div id="topbar-more-menu" class="topbar-more-menu' + (state.topbarMoreOpen ? '' : ' hidden') + '" role="menu">' +
@@ -1389,7 +1404,271 @@
               '</section>' +
             '</main>' +
           '</div>' +
-        '</div>' + renderSessionModal() + renderWorktreeMergeModal() + renderSettingsModal();
+        '</div>' + renderSessionModal() + renderWorktreeMergeModal() + renderSettingsModal() + renderQuickCommitModal();
+      }
+
+      function renderTopbarGitBadgeHtml() {
+        if (!state.selectedId || !state.gitStatus || !state.gitStatus.isGit) return "";
+        if (state.gitStatusSessionId !== state.selectedId) return "";
+        var branch = state.gitStatus.branch || "?";
+        var count = state.gitStatus.modifiedCount || 0;
+        var titleText = branch + (count ? "  ·  " + count + " 个文件待提交" : "  ·  工作区干净");
+        return '<button id="topbar-git-badge" class="topbar-git-badge" type="button" title="' + escapeHtml(titleText) + '" aria-label="快捷提交">'
+          + '<svg class="topbar-git-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 8v8"/><path d="M18 11v1a3 3 0 0 1-3 3H9"/></svg>'
+          + '<span class="topbar-git-branch">' + escapeHtml(branch) + '</span>'
+          + (count > 0
+              ? '<span class="topbar-git-count">·' + count + '</span>'
+              : '<span class="topbar-git-clean" aria-hidden="true">✓</span>')
+          + '</button>';
+      }
+
+      function updateTopbarGitBadge() {
+        var slot = document.getElementById("topbar-git-slot");
+        if (!slot) return;
+        slot.innerHTML = renderTopbarGitBadgeHtml();
+        var btn = document.getElementById("topbar-git-badge");
+        if (btn) {
+          btn.addEventListener("click", function(e) {
+            e.preventDefault();
+            openQuickCommitModal();
+          });
+        }
+      }
+
+      function loadGitStatus(sessionId, options) {
+        if (!sessionId) return Promise.resolve(null);
+        var force = options && options.force;
+        // Same session, fetched within 1s, and no force → skip.
+        var now = Date.now();
+        if (!force && state.gitStatusSessionId === sessionId && state.gitStatus && (now - state.gitStatusLastFetchAt) < 1000) {
+          return Promise.resolve(state.gitStatus);
+        }
+        if (state.gitStatusInflight && state.gitStatusInflight.sessionId === sessionId) {
+          return state.gitStatusInflight.promise;
+        }
+        state.gitStatusLoading = true;
+        var promise = fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/git-status", {
+          credentials: "same-origin"
+        })
+          .then(function(res) { return res.ok ? res.json() : { isGit: false }; })
+          .then(function(data) {
+            state.gitStatus = data || { isGit: false };
+            state.gitStatusSessionId = sessionId;
+            state.gitStatusLastFetchAt = Date.now();
+            updateTopbarGitBadge();
+            return data;
+          })
+          .catch(function() {
+            state.gitStatus = { isGit: false };
+            state.gitStatusSessionId = sessionId;
+            state.gitStatusLastFetchAt = Date.now();
+            updateTopbarGitBadge();
+            return null;
+          })
+          .finally(function() {
+            state.gitStatusLoading = false;
+            if (state.gitStatusInflight && state.gitStatusInflight.sessionId === sessionId) {
+              state.gitStatusInflight = null;
+            }
+          });
+        state.gitStatusInflight = { sessionId: sessionId, promise: promise };
+        return promise;
+      }
+
+      var quickCommitEscHandler = null;
+
+      function openQuickCommitModal() {
+        if (!state.selectedId) return;
+        state.quickCommitOpen = true;
+        state.quickCommitSubmitting = false;
+        state.quickCommitError = "";
+        state.quickCommitForm = { autoMessage: true, customMessage: "", makeTag: false, tag: "" };
+        closeWorktreeMergeModal();
+        closeSessionModal();
+        closeSettingsModal();
+        rerenderQuickCommitModal();
+        var modal = document.getElementById("quick-commit-modal");
+        if (modal) {
+          modal.classList.remove("hidden");
+          lastFocusedElement = document.activeElement;
+          setupFocusTrap(modal);
+        }
+        if (quickCommitEscHandler) document.removeEventListener("keydown", quickCommitEscHandler);
+        quickCommitEscHandler = function(e) {
+          if (e.key === "Escape" && state.quickCommitOpen && !state.quickCommitSubmitting) {
+            closeQuickCommitModal();
+          }
+        };
+        document.addEventListener("keydown", quickCommitEscHandler);
+        loadGitStatus(state.selectedId, { force: true }).then(function() {
+          if (!state.quickCommitOpen) return;
+          rerenderQuickCommitModal();
+        });
+      }
+
+      function closeQuickCommitModal() {
+        state.quickCommitOpen = false;
+        state.quickCommitSubmitting = false;
+        state.quickCommitError = "";
+        var modal = document.getElementById("quick-commit-modal");
+        if (modal) modal.classList.add("hidden");
+        if (focusTrapHandler) {
+          document.removeEventListener("keydown", focusTrapHandler);
+          focusTrapHandler = null;
+        }
+        if (quickCommitEscHandler) {
+          document.removeEventListener("keydown", quickCommitEscHandler);
+          quickCommitEscHandler = null;
+        }
+        if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+          lastFocusedElement.focus();
+        }
+      }
+
+      function rerenderQuickCommitModal() {
+        var modal = document.getElementById("quick-commit-modal");
+        if (!modal) return;
+        var html = renderQuickCommitModal();
+        var temp = document.createElement("div");
+        temp.innerHTML = html;
+        var fresh = temp.querySelector("#quick-commit-modal");
+        if (!fresh) return;
+        modal.innerHTML = fresh.innerHTML;
+        attachQuickCommitModalListeners();
+      }
+
+      function attachQuickCommitModalListeners() {
+        var closeBtn = document.getElementById("quick-commit-close-btn");
+        if (closeBtn) closeBtn.addEventListener("click", closeQuickCommitModal);
+        var cancelBtn = document.getElementById("quick-commit-cancel-btn");
+        if (cancelBtn) cancelBtn.addEventListener("click", closeQuickCommitModal);
+        var submitBtn = document.getElementById("quick-commit-submit-btn");
+        if (submitBtn) submitBtn.addEventListener("click", submitQuickCommit);
+        var autoCb = document.getElementById("quick-commit-auto");
+        if (autoCb) autoCb.addEventListener("change", function() {
+          state.quickCommitForm.autoMessage = autoCb.checked;
+          var row = document.getElementById("quick-commit-message-row");
+          if (row) row.classList.toggle("hidden", autoCb.checked);
+        });
+        var msgEl = document.getElementById("quick-commit-message");
+        if (msgEl) msgEl.addEventListener("input", function() {
+          state.quickCommitForm.customMessage = msgEl.value;
+        });
+        var tagCb = document.getElementById("quick-commit-make-tag");
+        if (tagCb) tagCb.addEventListener("change", function() {
+          state.quickCommitForm.makeTag = tagCb.checked;
+          var row = document.getElementById("quick-commit-tag-row");
+          if (row) row.classList.toggle("hidden", !tagCb.checked);
+        });
+        var tagInput = document.getElementById("quick-commit-tag");
+        if (tagInput) tagInput.addEventListener("input", function() {
+          state.quickCommitForm.tag = tagInput.value;
+        });
+      }
+
+      function submitQuickCommit() {
+        if (!state.selectedId || state.quickCommitSubmitting) return;
+        var form = state.quickCommitForm || {};
+        var payload = {
+          autoMessage: form.autoMessage !== false,
+          customMessage: form.autoMessage === false ? (form.customMessage || "") : "",
+          tag: form.makeTag ? (form.tag || "") : ""
+        };
+        if (!payload.autoMessage && !payload.customMessage.trim()) {
+          state.quickCommitError = "请填写 commit message。";
+          rerenderQuickCommitModal();
+          return;
+        }
+        if (form.makeTag && !payload.tag.trim()) {
+          state.quickCommitError = "请填写 tag 名。";
+          rerenderQuickCommitModal();
+          return;
+        }
+        state.quickCommitSubmitting = true;
+        state.quickCommitError = "";
+        rerenderQuickCommitModal();
+        fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/quick-commit", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+          .then(function(res) {
+            return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+          })
+          .then(function(result) {
+            if (!result.ok) throw new Error((result.data && result.data.error) || "快捷提交失败。");
+            var data = result.data || {};
+            var hash = data.commit && data.commit.hash ? data.commit.hash.substring(0, 7) : "";
+            var tagName = data.tag && data.tag.name ? data.tag.name : "";
+            var msg = "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 tag " + tagName : "");
+            if (typeof showToast === "function") showToast(msg, "success");
+            closeQuickCommitModal();
+            if (state.selectedId) loadGitStatus(state.selectedId, { force: true });
+          })
+          .catch(function(error) {
+            state.quickCommitError = (error && error.message) || "快捷提交失败。";
+          })
+          .finally(function() {
+            state.quickCommitSubmitting = false;
+            if (state.quickCommitOpen) rerenderQuickCommitModal();
+          });
+      }
+
+      function renderQuickCommitModal() {
+        var s = state.gitStatus || {};
+        var f = state.quickCommitForm || { autoMessage: true, customMessage: "", makeTag: false, tag: "" };
+        var langValue = (state.config && (state.config.language || "")) || "";
+        var langLabel = langValue ? langValue : "中文";
+        var files = Array.isArray(s.files) ? s.files : [];
+        var fileRows = files.map(function(item) {
+          var status = (item.status || "  ").substring(0, 2);
+          var flag = status.trim() || "?";
+          var cls = "qc-flag";
+          if (flag === "A" || status[0] === "A") cls += " qc-flag-add";
+          else if (flag === "D" || status[0] === "D") cls += " qc-flag-del";
+          else if (flag === "M" || status[0] === "M") cls += " qc-flag-mod";
+          else if (flag === "??" || status === "??") cls += " qc-flag-untracked";
+          else if (flag === "R") cls += " qc-flag-ren";
+          return '<div class="qc-file-row"><span class="' + cls + '">' + escapeHtml(status) + '</span><span class="qc-file-path">' + escapeHtml(item.path || "") + '</span></div>';
+        }).join("");
+        if (!fileRows) fileRows = '<div class="qc-empty">工作区干净，没有可提交的改动。</div>';
+        var hasChanges = (s.modifiedCount || 0) > 0;
+
+        return '<section id="quick-commit-modal" class="modal-backdrop' + (state.quickCommitOpen ? '' : ' hidden') + '">' +
+          '<div class="modal quick-commit-modal" role="dialog" aria-labelledby="quick-commit-title">' +
+            '<div class="modal-header">' +
+              '<div>' +
+                '<h2 id="quick-commit-title" class="modal-title">快捷提交</h2>' +
+                '<p class="modal-subtitle">' + escapeHtml((s.branch || "(no branch)") + ' · ' + (s.modifiedCount || 0) + ' 个改动') + '</p>' +
+              '</div>' +
+              '<button id="quick-commit-close-btn" class="btn btn-ghost btn-icon" type="button" aria-label="关闭">&times;</button>' +
+            '</div>' +
+            '<div class="modal-body">' +
+              '<div class="qc-files-wrap">' + fileRows + '</div>' +
+              '<label class="qc-checkbox-row">' +
+                '<input type="checkbox" id="quick-commit-auto"' + (f.autoMessage ? ' checked' : '') + '>' +
+                '<span>由 Claude 自动编写 commit message（语言：' + escapeHtml(langLabel) + '）</span>' +
+              '</label>' +
+              '<div class="qc-message-row' + (f.autoMessage ? ' hidden' : '') + '" id="quick-commit-message-row">' +
+                '<label class="field-label" for="quick-commit-message">commit message</label>' +
+                '<textarea id="quick-commit-message" class="field-input" rows="2" placeholder="请输入 commit message">' + escapeHtml(f.customMessage || "") + '</textarea>' +
+              '</div>' +
+              '<label class="qc-checkbox-row">' +
+                '<input type="checkbox" id="quick-commit-make-tag"' + (f.makeTag ? ' checked' : '') + '>' +
+                '<span>提交后打 tag</span>' +
+              '</label>' +
+              '<div class="qc-tag-row' + (f.makeTag ? '' : ' hidden') + '" id="quick-commit-tag-row">' +
+                '<input type="text" id="quick-commit-tag" class="field-input" placeholder="例如 v1.0.0" value="' + escapeHtml(f.tag || "") + '">' +
+              '</div>' +
+              '<p id="quick-commit-error" class="error-message' + (state.quickCommitError ? '' : ' hidden') + '">' + escapeHtml(state.quickCommitError || "") + '</p>' +
+              '<div class="worktree-merge-actions">' +
+                '<button id="quick-commit-cancel-btn" class="btn btn-secondary" type="button">取消</button>' +
+                '<button id="quick-commit-submit-btn" class="btn btn-primary" type="button"' + (hasChanges && !state.quickCommitSubmitting ? '' : ' disabled') + '>' + (state.quickCommitSubmitting ? '提交中…' : '执行') + '</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</section>';
       }
 
       function renderWorktreeMergeModal() {
@@ -4335,6 +4614,23 @@
           });
         }
 
+        var topbarGitBadge = document.getElementById("topbar-git-badge");
+        if (topbarGitBadge) {
+          topbarGitBadge.addEventListener("click", function(e) {
+            e.preventDefault();
+            openQuickCommitModal();
+          });
+        }
+        var quickCommitModal = document.getElementById("quick-commit-modal");
+        if (quickCommitModal) {
+          quickCommitModal.addEventListener("click", function(e) {
+            if (e.target.id === "quick-commit-modal" && !state.quickCommitSubmitting) {
+              closeQuickCommitModal();
+            }
+          });
+        }
+        attachQuickCommitModalListeners();
+
         initTerminal();
         setupMobileKeyboardHandlers();
         setupVisualViewportHandlers();
@@ -5812,6 +6108,9 @@
               }
             }
             updateShellChrome();
+            if (state.selectedId && state.gitStatusSessionId !== state.selectedId) {
+              loadGitStatus(state.selectedId);
+            }
 
             var reloadPromise = Promise.resolve();
             if (!opts.skipSelectedOutputReload && state.selectedId) {
@@ -6021,6 +6320,11 @@
         }
         loadOutput(id).then(function() { focusInputBox(true); });
         subscribeToSession(id);
+        // 切换会话时清掉旧 git 状态，再异步刷新
+        state.gitStatus = null;
+        state.gitStatusSessionId = null;
+        updateTopbarGitBadge();
+        loadGitStatus(id, { force: true });
       }
 
       function updatePinState() {

@@ -3,8 +3,9 @@ import express, { Express } from "express";
 import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
-import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnapshot } from "./types.js";
+import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
+import { getGitStatus, QuickCommitError, runQuickCommit } from "./git-quick-commit.js";
 
 export function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -170,7 +171,8 @@ export function registerSessionRoutes(
   processes: ProcessManager,
   structured: StructuredSessionManager,
   storage: WandStorage,
-  defaultMode: ExecutionMode
+  defaultMode: ExecutionMode,
+  config: WandConfig
 ): void {
   app.get("/api/sessions", (_req, res) => {
     const all = listAllSessionsSlim(processes, structured);
@@ -339,6 +341,53 @@ export function registerSessionRoutes(
         });
       }
       res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法合并 worktree。"));
+    }
+  });
+
+  app.get("/api/sessions/:id/git-status", (req, res) => {
+    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    if (!snapshot.cwd) {
+      res.json({ isGit: false });
+      return;
+    }
+    try {
+      res.json(getGitStatus(snapshot.cwd));
+    } catch (error) {
+      res.json({ isGit: false, error: getErrorMessage(error, "无法读取 git 状态。") });
+    }
+  });
+
+  app.post("/api/sessions/:id/quick-commit", express.json(), async (req, res) => {
+    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    if (!snapshot.cwd) {
+      res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
+      return;
+    }
+    const body = (req.body ?? {}) as { autoMessage?: boolean; customMessage?: string; tag?: string };
+    try {
+      const result = await runQuickCommit({
+        cwd: snapshot.cwd,
+        language: config.language ?? "",
+        autoMessage: body.autoMessage !== false,
+        customMessage: typeof body.customMessage === "string" ? body.customMessage : undefined,
+        tag: typeof body.tag === "string" ? body.tag : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof QuickCommitError) {
+        const status = error.code === "NOTHING_TO_COMMIT" || error.code === "TAG_EXISTS" ? 409 : 400;
+        res.status(status).json({ error: error.message, errorCode: error.code });
+        return;
+      }
+      res.status(400).json({ error: getErrorMessage(error, "快捷提交失败。") });
     }
   });
 

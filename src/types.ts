@@ -154,6 +154,31 @@ export interface WorktreeMergeResult {
   reason?: string;
 }
 
+export interface GitStatusFileEntry {
+  path: string;
+  /** Two-char porcelain status (e.g. " M", "MM", "??", "A ") */
+  status: string;
+}
+
+export interface GitStatusResult {
+  isGit: boolean;
+  branch?: string;
+  /** Number of files with any change (modified / added / deleted / untracked). */
+  modifiedCount?: number;
+  files?: GitStatusFileEntry[];
+  head?: string;
+  repoRoot?: string;
+  /** Truthy when the repo has no commits yet (initial state). */
+  initialCommit?: boolean;
+  error?: string;
+}
+
+export interface QuickCommitResult {
+  ok: boolean;
+  commit?: { hash: string; message: string };
+  tag?: { name: string };
+}
+
 export interface CommandRequest {
   command: string;
   provider?: SessionProvider;

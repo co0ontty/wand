@@ -10425,4 +10425,157 @@
       }
     }
 
+    /* ── 顶栏 git 徽章 ── */
+    .topbar-git-slot {
+      display: inline-flex;
+      align-items: center;
+    }
+    .topbar-git-slot:empty {
+      display: none;
+    }
+    .topbar-git-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 32px;
+      padding: 0 10px;
+      font-family: var(--font-sans);
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all var(--transition-fast);
+      box-sizing: border-box;
+      line-height: 1;
+    }
+    .topbar-git-badge:hover {
+      background: rgba(255, 255, 255, 0.5);
+      color: var(--text-primary);
+    }
+    .topbar-git-badge:active {
+      transform: scale(0.96);
+    }
+    .topbar-git-icon {
+      flex-shrink: 0;
+      opacity: 0.85;
+    }
+    .topbar-git-branch {
+      font-family: var(--font-mono, monospace);
+      font-weight: 600;
+      max-width: 12em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .topbar-git-count {
+      color: var(--accent);
+      font-weight: 700;
+      font-family: var(--font-mono, monospace);
+    }
+    .topbar-git-clean {
+      color: rgba(60, 160, 90, 0.85);
+      font-weight: 700;
+      font-size: 0.78rem;
+    }
+
+    /* ── 快捷提交模态框 ── */
+    .quick-commit-modal {
+      max-width: 560px;
+    }
+    .quick-commit-modal .modal-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .qc-files-wrap {
+      max-height: 200px;
+      overflow-y: auto;
+      padding: 8px 10px;
+      border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.45);
+      font-family: var(--font-mono, monospace);
+      font-size: 0.78rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .qc-empty {
+      color: var(--text-muted);
+      padding: 6px 0;
+      text-align: center;
+      font-style: italic;
+    }
+    .qc-file-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      line-height: 1.5;
+    }
+    .qc-flag {
+      flex-shrink: 0;
+      width: 24px;
+      text-align: center;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 0;
+    }
+    .qc-flag-add { color: rgba(60, 160, 90, 0.95); }
+    .qc-flag-mod { color: rgba(220, 150, 30, 0.95); }
+    .qc-flag-del { color: rgba(200, 70, 70, 0.95); }
+    .qc-flag-ren { color: rgba(110, 130, 200, 0.95); }
+    .qc-flag-untracked { color: rgba(140, 140, 140, 0.95); }
+    .qc-file-path {
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .qc-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: var(--text-primary);
+      cursor: pointer;
+      user-select: none;
+    }
+    .qc-checkbox-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+    .qc-message-row,
+    .qc-tag-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .qc-message-row.hidden,
+    .qc-tag-row.hidden {
+      display: none;
+    }
+    .qc-message-row textarea {
+      resize: vertical;
+      min-height: 56px;
+      font-family: var(--font-mono, monospace);
+      font-size: 0.85rem;
+    }
+    .quick-commit-modal .worktree-merge-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    @media (max-width: 720px) {
+      .topbar-git-branch { max-width: 8em; }
+      .topbar-git-badge { padding: 0 8px; font-size: 0.7rem; }
+      .quick-commit-modal { max-width: 95vw; }
+      .qc-files-wrap { max-height: 160px; }
+    }
+
     /* 结束标记 */
