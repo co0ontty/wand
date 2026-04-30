@@ -158,6 +158,14 @@ export interface GitStatusFileEntry {
   path: string;
   /** Two-char porcelain status (e.g. " M", "MM", "??", "A ") */
   status: string;
+  /** True 当条目是 submodule（来源于 porcelain v2 的 sub 字段第一位为 S）。 */
+  isSubmodule?: boolean;
+  /** submodule 子状态：指针是否变化 / 内部是否 dirty / 是否有未跟踪文件。 */
+  submoduleState?: {
+    commitChanged: boolean;
+    hasTrackedChanges: boolean;
+    hasUntracked: boolean;
+  };
 }
 
 export interface GitStatusResult {
@@ -182,6 +190,8 @@ export interface QuickCommitResult {
   commit?: { hash: string; message: string };
   tag?: { name: string };
   pushed?: boolean;
+  /** commit 已成功但 push 失败时填入；前端用它显示"已提交但 push 失败"。 */
+  pushError?: string;
 }
 
 export interface CommandRequest {

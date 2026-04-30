@@ -10533,6 +10533,19 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .qc-submodule-badge {
+      flex-shrink: 0;
+      padding: 1px 6px;
+      border-radius: 8px;
+      background: rgba(140, 100, 200, 0.16);
+      color: rgba(110, 70, 180, 0.95);
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
     }
     .qc-checkbox-row {
       display: flex;

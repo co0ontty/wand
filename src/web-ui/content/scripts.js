@@ -1482,7 +1482,7 @@
         state.quickCommitOpen = true;
         state.quickCommitSubmitting = false;
         state.quickCommitError = "";
-        state.quickCommitForm = { autoMessage: true, customMessage: "", makeTag: false, tag: "" };
+        state.quickCommitForm = { autoMessage: true, customMessage: "", makeTag: false, tag: "", push: false };
         closeWorktreeMergeModal();
         closeSessionModal();
         closeSettingsModal();
@@ -1603,8 +1603,15 @@
             var data = result.data || {};
             var hash = data.commit && data.commit.hash ? data.commit.hash.substring(0, 7) : "";
             var tagName = data.tag && data.tag.name ? data.tag.name : "";
-            var msg = "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 tag " + tagName : "") + (data.pushed ? "，已 push" : "");
-            if (typeof showToast === "function") showToast(msg, "success");
+            var base = "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 tag " + tagName : "");
+            var pushRequested = !!payload.push;
+            if (pushRequested && data.pushError) {
+              var msg = base + "；push 失败：" + data.pushError;
+              if (typeof showToast === "function") showToast(msg, "error");
+            } else {
+              var okMsg = base + (data.pushed ? "，已 push" : "");
+              if (typeof showToast === "function") showToast(okMsg, "success");
+            }
             closeQuickCommitModal();
             if (state.selectedId) loadGitStatus(state.selectedId, { force: true });
           })
@@ -1619,7 +1626,7 @@
 
       function renderQuickCommitModal() {
         var s = state.gitStatus || {};
-        var f = state.quickCommitForm || { autoMessage: true, customMessage: "", makeTag: false, tag: "" };
+        var f = state.quickCommitForm || { autoMessage: true, customMessage: "", makeTag: false, tag: "", push: false };
         var langValue = (state.config && (state.config.language || "")) || "";
         var langLabel = langValue ? langValue : "中文";
         var files = Array.isArray(s.files) ? s.files : [];
@@ -1632,7 +1639,17 @@
           else if (flag === "M" || status[0] === "M") cls += " qc-flag-mod";
           else if (flag === "??" || status === "??") cls += " qc-flag-untracked";
           else if (flag === "R") cls += " qc-flag-ren";
-          return '<div class="qc-file-row"><span class="' + cls + '">' + escapeHtml(status) + '</span><span class="qc-file-path">' + escapeHtml(item.path || "") + '</span></div>';
+          var subBadge = "";
+          if (item.isSubmodule) {
+            var st = item.submoduleState || {};
+            var parts = [];
+            if (st.commitChanged) parts.push("新指针");
+            if (st.hasTrackedChanges) parts.push("dirty");
+            if (st.hasUntracked) parts.push("未跟踪");
+            var label = parts.length ? "submodule · " + parts.join(" / ") : "submodule";
+            subBadge = '<span class="qc-submodule-badge">' + escapeHtml(label) + '</span>';
+          }
+          return '<div class="qc-file-row"><span class="' + cls + '">' + escapeHtml(status) + '</span><span class="qc-file-path">' + escapeHtml(item.path || "") + '</span>' + subBadge + '</div>';
         }).join("");
         if (!fileRows) fileRows = '<div class="qc-empty">工作区干净，没有可提交的改动。</div>';
         var hasChanges = (s.modifiedCount || 0) > 0;
@@ -5279,6 +5296,28 @@
         }, typeof delayMs === "number" ? delayMs : 150);
       }
 
+      // Claude CLI 的 permission 菜单 / 选择列表，在用户按方向键时会
+      // 发送光标定位 (CSI H/f)、光标移动 (CSI A-D)、擦除显示/行 (CSI
+      // J/K) 等序列在原地重绘整块区域。wterm 在这种高频原地重绘下，
+      // DOM 行经常残留或错位，导致新写入的内容被堆到 grid 顶部 ——
+      // 用户体感就是"明明在改菜单，结果跑到最上面去了"。
+      //
+      // 已有的 pendingEscalation/permissionBlocked 状态变化触发的
+      // scheduleSoftResyncTerminal 在这种场景下不会触发（这两个布尔
+      // 在菜单交互过程中不变），health check 的 30s 兜底也太慢，且
+      // 连续按键时 chunkPause 永远不成立（lastChunkAt 一直在刷新）。
+      //
+      // 这里在写 chunk 时被动检测：含上述序列就 schedule 一次 350ms
+      // debounce 的 softResync。连续按键时 timer 反复被重置，仅在
+      // 停顿后真正重放一次 buffer，开销可控。
+      var IN_PLACE_REDRAW_RE = /\x1b\[\d*(?:;\d*)?[ABCDfHJK]/;
+      function maybeScheduleResyncForChunk(chunk) {
+        if (!chunk || typeof chunk !== "string") return;
+        if (chunk.indexOf("\x1b[") === -1) return;
+        if (!IN_PLACE_REDRAW_RE.test(chunk)) return;
+        scheduleSoftResyncTerminal(350);
+      }
+
       function syncTerminalBuffer(sessionId, output, options) {
         if (!state.terminal) return false;
         var normalizedOutput = normalizeTerminalOutput(output || "");
@@ -5322,6 +5361,7 @@
           var delta = normalizedOutput.slice(currentOutput.length);
           if (delta) {
             wandTerminalWrite(state.terminal, delta);
+            maybeScheduleResyncForChunk(delta);
             wrote = true;
           }
         } else if (currentOutput && currentOutput.startsWith(normalizedOutput)) {
@@ -11356,6 +11396,7 @@
                 // 变化的视觉错位无法被自愈，直到用户手动改窗口才修。现在让
                 // wterm 内部 ResizeObserver 独占 cols 跟踪职责。
                 wandTerminalWrite(state.terminal, msg.data.chunk);
+                maybeScheduleResyncForChunk(msg.data.chunk);
                 state.terminalSessionId = msg.sessionId;
                 if (msg.data.output) {
                   state.terminalOutput = normalizeTerminalOutput(msg.data.output);
