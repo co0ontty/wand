@@ -1,0 +1,13 @@
+[    3761ms] [INFO] Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner. @ http://127.0.0.1:9443/:0
+[    3850ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[    3850ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[    7676ms] [INFO] Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner. @ http://127.0.0.1:9443/:0
+[    7778ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[    7778ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[   45855ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ https://127.0.0.1:8443/api/config:0
+[   45858ms] [ERROR] An SSL certificate error occurred when fetching the script. @ :0
+[   45936ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ https://127.0.0.1:8443/:0
+[   45936ms] [LOG] SW registration skipped: likely self-signed certificate issue @ https://127.0.0.1:8443/:10639
+[   45942ms] [INFO] Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner. @ https://127.0.0.1:8443/:0
+[   49933ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ https://127.0.0.1:8443/:0
+[   49933ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ https://127.0.0.1:8443/:0

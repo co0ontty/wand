@@ -1,0 +1,206 @@
+- generic [ref=e2]:
+  - generic [ref=e8]:
+    - complementary:
+      - generic:
+        - generic:
+          - generic: W
+          - generic: 会话
+          - generic: "3"
+        - generic:
+          - generic:
+            - button "更多操作":
+              - img
+          - button "固定侧栏":
+            - img
+          - button "关闭菜单": ×
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - generic: 最近的会话记录
+              - button "管理"
+            - generic:
+              - generic: 最近
+              - button "claude 27s 运行中 删除会话":
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: claude
+                        - generic "已运行 27s": 27s
+                      - generic:
+                        - generic: 运行中
+                    - generic:
+                      - button "删除会话":
+                        - img
+              - button "use bash to run \"ls -la /tmp/wand-dev\" 4分钟前 已停止 删除会话":
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: use bash to run "ls -la /tmp/wand-dev"
+                        - generic "2026/4/30 22:14:14": 4分钟前
+                      - generic:
+                        - generic: 已停止
+                    - generic:
+                      - button "删除会话":
+                        - img
+              - button "echo HELLO_FROM_PTY; sleep 60 9分钟前 已退出 删除会话":
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic: echo HELLO_FROM_PTY; sleep 60
+                        - generic "2026/4/30 22:08:49": 9分钟前
+                      - generic:
+                        - generic: 已退出
+                    - generic:
+                      - button "删除会话":
+                        - img
+              - button "use bash to run \"ls -la /tmp/wand-dev\" 406baae2 9 分钟前 恢复会话 删除会话":
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic: use bash to run "ls -la /tmp/wand-dev"
+                      - generic:
+                        - generic "406baae2-410e-4cf4-acc2-56d4b1df347f": 406baae2
+                        - generic: 9 分钟前
+                    - generic:
+                      - button "恢复会话":
+                        - img
+                      - button "删除会话":
+                        - img
+            - generic:
+              - generic:
+                - generic: ▾
+                - text: Claude 历史
+                - generic: "6"
+              - button "清空历史"
+              - button "▸ vibe/coding/wand (5) 清空此目录的历史会话":
+                - generic:
+                  - generic: ▸
+                  - generic: vibe/coding/wand (5)
+                  - button "清空此目录的历史会话": 清空此目录
+              - button "▸ vibe/coding/xnip (1) 清空此目录的历史会话":
+                - generic:
+                  - generic: ▸
+                  - generic: vibe/coding/xnip (1)
+                  - button "清空此目录的历史会话": 清空此目录
+      - generic:
+        - button "+ 新会话":
+          - generic: +
+          - text: 新会话
+        - generic:
+          - button "文件":
+            - img
+            - generic: 文件
+          - button "设置":
+            - img
+            - generic: 设置
+          - button "退出":
+            - img
+            - generic: 退出
+    - main [ref=e126]:
+      - generic [ref=e127]:
+        - generic [ref=e128]:
+          - button "切换会话侧栏" [ref=e129] [cursor=pointer]
+          - generic [ref=e133]: W
+        - generic [ref=e135]: Wand 控制台
+        - button "更多" [ref=e138] [cursor=pointer]:
+          - img [ref=e139]
+      - generic [ref=e143]:
+        - generic [ref=e144]:
+          - generic [ref=e145]: 文件
+          - button "关闭" [ref=e146] [cursor=pointer]: ×
+        - generic [ref=e147]:
+          - generic [ref=e148]:
+            - generic [ref=e149]: /Users/co0ontty/Self/vibe_coding/wand
+            - button "刷新文件列表" [ref=e150] [cursor=pointer]: ↻
+          - textbox "搜索文件..." [ref=e152]
+          - generic [ref=e155]: Loading...
+      - generic [ref=e156]:
+        - generic "终端缩放控件" [ref=e157]:
+          - button "−" [ref=e158]
+          - generic [ref=e159]: 100%
+          - button "+" [ref=e160]
+          - button "↻" [ref=e162]
+        - button "回到底部":
+          - img
+        - generic [ref=e163]:
+          - generic [ref=e164]:
+            - generic [ref=e165]: ╭─── Claude Code v2.1.81 ───────────────────────────────────────────────────────────────────────────────────╮
+            - generic [ref=e166]: │ │ Tips for getting started │
+            - generic [ref=e167]: │ Welcome back! │ Ask Claude to create a new app or clone a repository │
+            - generic [ref=e168]: │ │ ──────────────────────────────────────────────────── │
+            - generic [ref=e169]:
+              - text: │
+              - text: │ Recent activity │
+            - generic [ref=e177]:
+              - text: │
+              - text: │ No recent activity │
+            - generic [ref=e187]:
+              - text: │
+              - text: │ │
+            - generic [ref=e192]: │ │ │
+            - generic [ref=e193]: │ Opus 4.6 (1M context) with hi… · API Usage Billing │ │
+            - generic [ref=e194]: │ /private/tmp/wand-dev/workspace │ │
+            - generic [ref=e195]: ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+            - generic [ref=e197]: ↑ Opus now defaults to 1M context · 5x more room, same pricing
+            - generic [ref=e199]: ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+            - generic [ref=e200]: ❯ Try "edit <filepath> to..."
+            - generic [ref=e201]: ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+            - generic [ref=e202]: "? for shortcuts"
+          - textbox
+        - generic [ref=e221]: ⋮⋮ ⋮
+      - generic [ref=e244]:
+        - textbox "输入消息..." [active] [ref=e245]
+        - generic [ref=e246]:
+          - generic [ref=e247]:
+            - button "附加文件" [ref=e248] [cursor=pointer]:
+              - img [ref=e249]
+            - button "Choose File"
+            - combobox "仅对新建会话生效" [ref=e251] [cursor=pointer]:
+              - option "默认" [selected]
+              - option "全权限"
+              - option "自动编辑"
+              - option "原生"
+              - option "托管"
+            - combobox "切换模型（对运行中会话发送 /model，对新会话作为 --model 启动）" [ref=e252] [cursor=pointer]:
+              - option "默认（跟随设置）" [selected]
+              - option "default（跟随 Claude Code 默认）"
+              - option "opus（最新 Opus）"
+              - option "sonnet（最新 Sonnet）"
+              - option "haiku（最新 Haiku）"
+              - option "Opus 4.7 · claude-opus-4-7"
+              - option "Opus 4.6 · claude-opus-4-6"
+              - option "Sonnet 4.6 · claude-sonnet-4-6"
+              - option "Haiku 4.5 · claude-haiku-4-5-20251001"
+            - button "⌨" [ref=e253] [cursor=pointer]
+          - generic [ref=e254]:
+            - generic [ref=e256]:
+              - button "Ctrl" [ref=e257] [cursor=pointer]
+              - button "Alt" [ref=e258] [cursor=pointer]
+              - generic [ref=e259]: ·
+              - button "↑" [ref=e260] [cursor=pointer]
+              - button "↓" [ref=e261] [cursor=pointer]
+              - button "←" [ref=e262] [cursor=pointer]
+              - button "→" [ref=e263] [cursor=pointer]
+              - generic [ref=e264]: ·
+              - button "↵" [ref=e265] [cursor=pointer]
+              - button "C-↵" [ref=e266] [cursor=pointer]
+              - button "Esc" [ref=e267] [cursor=pointer]
+            - button "停止" [ref=e268] [cursor=pointer]:
+              - img [ref=e269]
+            - button "发送" [ref=e271] [cursor=pointer]:
+              - img [ref=e272]
+        - generic [ref=e275]:
+          - generic [ref=e276]: /tmp/wand-dev/workspace
+          - generic [ref=e277]: "|"
+          - generic [ref=e278]: 默认
+          - generic [ref=e279]: "|"
+          - generic "自动批准已关闭 — 点击开启" [ref=e280] [cursor=pointer]: 🛡 手动
+          - generic [ref=e281]: "|"
+          - generic [ref=e282]: 终端 · claude
+          - generic [ref=e283]: "|"
+          - generic [ref=e284]: 运行中
+  - text: 加载中...

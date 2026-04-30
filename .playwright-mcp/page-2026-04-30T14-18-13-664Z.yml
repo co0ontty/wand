@@ -1,0 +1,115 @@
+- generic [ref=e2]:
+  - generic [ref=e4]:
+    - complementary:
+      - generic:
+        - generic:
+          - generic: W
+          - generic: 会话
+          - generic: "0"
+        - generic:
+          - generic:
+            - button "更多操作":
+              - img
+          - button "固定侧栏":
+            - img
+          - button "关闭菜单": ×
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - generic: 最近的会话记录
+              - button "管理"
+            - generic:
+              - strong: 还没有会话记录
+              - text: 点击上方「新对话」开始你的第一次对话。
+            - generic:
+              - generic:
+                - generic: ▾
+                - text: Claude 历史
+              - generic: 扫描历史会话中…
+      - generic:
+        - button "+ 新会话":
+          - generic: +
+          - text: 新会话
+        - generic:
+          - button "文件":
+            - img
+            - generic: 文件
+          - button "设置":
+            - img
+            - generic: 设置
+          - button "退出":
+            - img
+            - generic: 退出
+    - main [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - button "切换会话侧栏" [ref=e8] [cursor=pointer]
+          - generic [ref=e13]: W
+        - generic [ref=e15]: Wand 控制台
+        - button "更多" [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - generic [ref=e25]: 文件
+          - button "关闭" [ref=e26] [cursor=pointer]: ×
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - generic [ref=e29]: /Users/co0ontty/Self/vibe_coding/wand
+            - button "刷新文件列表" [ref=e30] [cursor=pointer]: ↻
+          - textbox "搜索文件..." [ref=e32]
+          - generic [ref=e35]: Loading...
+      - generic [ref=e36]:
+        - generic "终端缩放控件" [ref=e37]:
+          - button "−" [ref=e38]
+          - generic [ref=e39]: 100%
+          - button "+" [ref=e40]
+          - button "↻" [ref=e42]
+        - button "回到底部":
+          - img
+        - generic [ref=e43]:
+          - textbox [active]
+        - generic [ref=e81]: ⋮⋮ ⋮
+      - generic [ref=e83]:
+        - textbox "输入消息..." [ref=e84]
+        - generic [ref=e85]:
+          - generic [ref=e86]:
+            - button "附加文件" [ref=e87] [cursor=pointer]:
+              - img [ref=e88]
+            - button "Choose File"
+            - combobox "仅对新建会话生效" [ref=e90] [cursor=pointer]:
+              - option "默认"
+              - option "全权限"
+              - option "自动编辑"
+              - option "原生"
+              - option "托管" [selected]
+            - combobox "切换模型（对运行中会话发送 /model，对新会话作为 --model 启动）" [ref=e91] [cursor=pointer]:
+              - option "默认（跟随设置）" [selected]
+          - generic [ref=e92]:
+            - generic [ref=e94]:
+              - button "Ctrl" [ref=e95] [cursor=pointer]
+              - button "Alt" [ref=e96] [cursor=pointer]
+              - generic [ref=e97]: ·
+              - button "↑" [ref=e98] [cursor=pointer]
+              - button "↓" [ref=e99] [cursor=pointer]
+              - button "←" [ref=e100] [cursor=pointer]
+              - button "→" [ref=e101] [cursor=pointer]
+              - generic [ref=e102]: ·
+              - button "↵" [ref=e103] [cursor=pointer]
+              - button "C-↵" [ref=e104] [cursor=pointer]
+              - button "Esc" [ref=e105] [cursor=pointer]
+            - button "停止" [ref=e106] [cursor=pointer]:
+              - img [ref=e107]
+            - button "发送" [ref=e109] [cursor=pointer]:
+              - img [ref=e110]
+        - generic [ref=e113]:
+          - generic [ref=e114]: 未设置目录
+          - generic [ref=e115]: "|"
+          - generic [ref=e116]: 默认
+          - generic [ref=e117]: "|"
+          - generic "自动批准已关闭 — 点击开启" [ref=e118] [cursor=pointer]: 🛡 手动
+          - generic [ref=e119]: "|"
+          - generic [ref=e120]: 终端
+          - generic [ref=e121]: "|"
+          - generic [ref=e122]: "-"
+  - text: 加载中...

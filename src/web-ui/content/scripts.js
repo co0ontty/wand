@@ -4241,7 +4241,9 @@
             location.reload();
             return;
           }
-          softRefreshCurrentView();
+          softResyncTerminal();
+          resetChatRenderCache();
+          scheduleChatRender(true);
         });
         var jumpBottomBtn = document.getElementById("terminal-jump-bottom");
         if (jumpBottomBtn) jumpBottomBtn.addEventListener("click", function() {
@@ -5260,32 +5262,19 @@
       // Soft resync terminal: reset WASM grid and replay full output buffer.
       // Clears any stale DOM rows left over from CSI cursor-jump sequences
       // (e.g. Claude permission menus redrawing in place while user holds arrow keys).
-      function softResyncTerminal() {
+      // Pass { skipFit: true } when the caller knows the grid was just sized
+      // correctly (e.g. wterm.onResize fired this resync — bouncing back into
+      // ensureTerminalFit would just trigger another remeasure → resize → onResize
+      // → softResyncTerminal recursion).
+      function softResyncTerminal(options) {
         if (!state.terminal || !state.terminalOutput) return false;
+        var opts = options || {};
         resetTerminal();
         wandTerminalWrite(state.terminal, state.terminalOutput);
         state.lastTerminalResyncAt = Date.now();
         maybeScrollTerminalToBottom("output");
-        // Remeasure against real container: the refresh button used to only
-        // reset+write, so a stale cols/rows (set at mount time with hidden
-        // container) would survive the refresh and keep wrapping output wrong.
-        // Suppress the auto-replay branch in ensureTerminalFit — we just
-        // replayed, no point doing it again on the next rAF tick.
-        state.suppressFitReplay = true;
-        ensureTerminalFit("refresh");
+        if (!opts.skipFit) ensureTerminalFit("refresh");
         return true;
-      }
-
-      // Soft refresh the whole current view without losing page state:
-      // - Replays terminal buffer to clear residue
-      // - Clears chat render cache and forces a full rebuild
-      // Used by the refresh button and by automatic triggers
-      // (e.g. permission escalation appearing/disappearing).
-      function softRefreshCurrentView() {
-        softResyncTerminal();
-        if (typeof resetChatRenderCache === "function") resetChatRenderCache();
-        if (typeof scheduleChatRender === "function") scheduleChatRender(true);
-        else if (typeof render === "function") render();
       }
 
       function scheduleSoftResyncTerminal(delayMs) {
@@ -5416,18 +5405,15 @@
           },
           onResize: function(cols, rows) {
             sendTerminalResize(cols, rows);
-            // wterm 自身 ResizeObserver 在容器尺寸变化时主动调 resize()，
-            // bridge.resize() 把 grid 按新 cols 重排，但 scrollback 仍是
-            // 按旧 cols 写入 WASM 的、新 grid 又被清空到干净状态。wand
-            // 这层缓存的 terminalOutput 才是完整原始字节流，必须按新
-            // cols 重放一次，grid + scrollback 才会和实际历史对齐。
-            // 同步立即重放——不要走 setTimeout(0)：移动端 WebView 在
-            // 前后台切换或键盘动画期间，macrotask 经常被推迟到 wterm
-            // 的下一帧 render 之后，结果用户先看到一帧空 grid 才看到
-            // replay 完的内容，体感上就是"刷新都没用、动一下窗口才好"。
+            // wterm.resize() just ran renderer.setup() (DOM rows wiped) and
+            // bridge.resize() (WASM grid reflowed). terminalOutput is the
+            // canonical raw byte stream — replay it now so historical lines
+            // and any in-flight CSI sequences re-render at the new width.
+            // skipFit: wterm already did the sizing work; calling
+            // ensureTerminalFit again here would just cycle back through
+            // remeasure → resize → onResize → softResyncTerminal.
             if (state.terminal && state.terminalOutput) {
-              state.suppressFitReplay = true;
-              softResyncTerminal();
+              softResyncTerminal({ skipFit: true });
             }
           }
         });
@@ -5494,7 +5480,7 @@
           // Container may have been hidden / zero-width at construction
           // time (hard-coded 120x36). Remeasure against the real container
           // so wterm reflows the just-written history to the correct cols.
-          ensureTerminalFit("mount");
+          ensureTerminalFit("mount", { forceReplay: true });
         }).catch(function(err) {
           state.terminalInitializing = false;
           console.error("[wand] wterm init failed:", err);
@@ -6321,7 +6307,7 @@
               syncTerminalBuffer(id, data.output, { mode: "append" });
               // Session-switch / history replay: force a real fit so wterm
               // reflows the just-written output against the real container.
-              ensureTerminalFit("session-switch");
+              ensureTerminalFit("session-switch", { forceReplay: true });
             }
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
@@ -8702,7 +8688,7 @@
         // Container just flipped from hidden -> visible (or geometry changed
         // because chat/terminal panels swapped). Refit now so the terminal
         // picks up the real cols/rows instead of keeping the stale ones.
-        if (!structured) ensureTerminalFit("view-switch");
+        if (!structured) ensureTerminalFit("view-switch", { forceReplay: true });
       }
 
 
@@ -10063,7 +10049,7 @@
           // The container height restores but terminal needs time to
           // fill the expanded space, and the scroll position needs resetting.
           if (isTouchDevice()) {
-            ensureTerminalFit();
+            ensureTerminalFit("keyboard-blur", { forceReplay: true });
             maybeScrollTerminalToBottom("force");
           }
         }, 100);
@@ -10795,14 +10781,14 @@
           // Without an immediate refit, any chunk arriving while the keyboard
           // animates in renders against the old grid and tears the screen.
           if (!keyboardOpen && isKeyboardOpen) {
-            ensureTerminalFit("keyboard-open");
+            ensureTerminalFit("keyboard-open", { forceReplay: true });
           }
 
           // Keyboard just closed — force terminal refit and scroll to bottom
           // after a delay so the keyboard dismiss animation and layout settle.
           if (keyboardOpen && !isKeyboardOpen) {
             setTimeout(function() {
-              ensureTerminalFit("keyboard-close");
+              ensureTerminalFit("keyboard-close", { forceReplay: true });
               maybeScrollTerminalToBottom("force");
             }, 200);
           }
@@ -10936,11 +10922,11 @@
         // Page returning from background: container dimensions may have
         // drifted (PWA standalone, tab switch, iOS address-bar toggle).
         state.visibilityHandler = function() {
-          if (!document.hidden) ensureTerminalFit("visibility");
+          if (!document.hidden) ensureTerminalFit("visibility", { forceReplay: true });
         };
         document.addEventListener("visibilitychange", state.visibilityHandler);
         // Mobile device rotation — large geometry change.
-        state.orientationHandler = function() { ensureTerminalFit("orientation"); };
+        state.orientationHandler = function() { ensureTerminalFit("orientation", { forceReplay: true }); };
         window.addEventListener("orientationchange", state.orientationHandler);
         requestAnimationFrame(function() { scheduleTerminalResize(true); });
       }
@@ -11059,24 +11045,71 @@
         }
       }
 
-      // Unified entry point for re-fitting the xterm grid to its container.
-      // Why: wterm's `autoResize` ResizeObserver only fires on subsequent
-      // container size changes. If the terminal is mounted or written to
-      // while the container is hidden/zero-width, cols/rows stay wrong and
-      // new output renders with broken wrapping (content visually piles at
-      // the top). Call this after any layout change that might have altered
-      // container geometry (mount, session switch, view switch, refresh).
-      // Same as ensureTerminalFit, but if the container is currently 0×0
-      // (typical right after Android WebView.onResume — the page hasn't
-      // re-laid-out yet), keep retrying through requestAnimationFrame /
-      // setTimeout up to ~5 frames. Each attempt forces a layout read
-      // (offsetHeight) so the browser has to flush styles.
-      // Without this, the very first ensureTerminalFit silently fails,
-      // cols/rows stay at the pre-suspend values, and freshly arriving
-      // PTY chunks wrap against the wrong width — that's exactly the
-      // "content piles at the top after resuming the app" bug.
-      function ensureTerminalFitWithRetry(reason) {
+      // Unified entry point for re-fitting the wterm grid to its container.
+      //
+      // wterm's internal ResizeObserver only fires when newCols/newRows
+      // actually differ from the current values. So a "soft refresh" path
+      // (refresh button, ws-reconnect, view-switch — container size unchanged)
+      // never reaches wterm.resize() on its own; we have to drive replay
+      // explicitly via { forceReplay: true }.
+      //
+      // When cols *do* change in the rAF body, our remeasure() calls
+      // wterm.resize() which synchronously fires the onResize callback —
+      // and that callback already runs softResyncTerminal({ skipFit: true }).
+      // So the rAF body must NOT replay again in that case (would flicker /
+      // double-scroll). The two outcomes are mutually exclusive: either
+      // remeasure resized and onResize replayed, or cols stayed put and we
+      // honor forceReplay.
+      function ensureTerminalFit(reason, options) {
+        if (!state.terminal) return false;
+        var opts = options || {};
+        var forceReplay = opts.forceReplay === true;
+        var el = document.getElementById("output");
+        if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) {
+          // Container has no visible size yet (hidden, mid-transition,
+          // pre-keyboard layout frame, Android WebView resume). Defer to
+          // the retry loop; without it, a missed fit means PTY chunks keep
+          // wrapping at the wrong width until the next external trigger
+          // (rotation, keyboard toggle), and content piles at the top.
+          ensureTerminalFitWithRetry(reason || "fit-retry", { forceReplay: forceReplay });
+          return false;
+        }
+        var prevCols = state.terminal.cols;
+        var prevRows = state.terminal.rows;
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            if (!state.terminal) return;
+            if (typeof state.terminal.remeasure === "function") {
+              // remeasure → wterm.resize (if cols changed) → onResize →
+              // softResyncTerminal({ skipFit: true }). Replay happens there.
+              state.terminal.remeasure();
+            }
+            sendTerminalResize(state.terminal.cols, state.terminal.rows);
+            var didResize = state.terminal.cols !== prevCols
+                         || state.terminal.rows !== prevRows;
+            // Mutex: didResize already replayed via onResize; otherwise the
+            // caller may still demand a replay (e.g. ws-reconnect, refresh
+            // button — DOM may be stale even at the same cols).
+            if (!didResize && forceReplay && state.terminalOutput) {
+              softResyncTerminal({ skipFit: true });
+            }
+            if (state.terminalAutoFollow || isTerminalNearBottom()) {
+              maybeScrollTerminalToBottom("resize");
+            }
+          });
+        });
+        return true;
+      }
+
+      // Same as ensureTerminalFit but spins through requestAnimationFrame /
+      // setTimeout up to ~8 frames waiting for a non-zero container size
+      // (Android WebView.onResume, keyboard transitions, hidden→visible
+      // panel flips). Forwards forceReplay so the caller's intent is
+      // preserved when the container finally settles.
+      function ensureTerminalFitWithRetry(reason, options) {
         if (!state.terminal) return;
+        var opts = options || {};
+        var forceReplay = opts.forceReplay !== false; // default true: retry path implies "may be stale"
         var attempts = 0;
         var maxAttempts = 8;
         function tryFit() {
@@ -11088,16 +11121,7 @@
             void el.offsetHeight;
           }
           if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
-            ensureTerminalFit(reason);
-            // After fit, force a buffer replay: even when cols didn't
-            // change, the WASM grid state may be inconsistent after a
-            // long suspend (DOM rows clipped, scroll position lost).
-            // softResyncTerminal is cheap because terminalOutput is
-            // already in memory.
-            if (state.terminalOutput) {
-              state.suppressFitReplay = true;
-              softResyncTerminal();
-            }
+            ensureTerminalFit(reason, { forceReplay: forceReplay });
             return;
           }
           if (++attempts >= maxAttempts) return;
@@ -11111,51 +11135,6 @@
           }
         }
         tryFit();
-      }
-
-      function ensureTerminalFit(reason) {
-        if (!state.terminal) return false;
-        var el = document.getElementById("output");
-        if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) {
-          // 容器暂时没有可见尺寸（hidden、动画过渡、键盘弹起前的 layout
-          // 中间帧、Android WebView resume 头几帧），不要静默放弃——
-          // 改成丢给 ensureTerminalFitWithRetry 兜底，等容器有了真实
-          // 尺寸再 fit + replay。否则一旦错过这一次，只能等下一次外部
-          // 触发（旋转屏幕、开关键盘等），中间的输出就会一直按错误
-          // 宽度堆在视图上方，看起来像"中间一大段都没有显示"。
-          ensureTerminalFitWithRetry(reason || "fit-retry");
-          return false;
-        }
-        var prevCols = state.terminal.cols;
-        var prevRows = state.terminal.rows;
-        requestAnimationFrame(function() {
-          requestAnimationFrame(function() {
-            if (!state.terminal) return;
-            if (typeof state.terminal.remeasure === "function") {
-              state.terminal.remeasure();
-            }
-            sendTerminalResize(state.terminal.cols, state.terminal.rows);
-            // Cache the container width that produced this cols/rows so the
-            // hot-path chunk writer can detect drift cheaply (avoids running
-            // a full remeasure on every WebSocket message).
-            state.lastFitContainerWidth = el.offsetWidth;
-            state.lastFitContainerHeight = el.offsetHeight;
-            // If cols actually changed, the previously written buffer was
-            // wrapped to the old width. Replay the full buffer so historical
-            // lines and any in-flight CSI cursor sequences re-render against
-            // the new grid — this is what fixes the "torn" screens users see
-            // after rotating, opening the keyboard, or resizing the panel.
-            var skipReplay = state.suppressFitReplay === true;
-            state.suppressFitReplay = false;
-            if (!skipReplay && (state.terminal.cols !== prevCols || state.terminal.rows !== prevRows)) {
-              if (state.terminalOutput) softResyncTerminal();
-            }
-            if (state.terminalAutoFollow || isTerminalNearBottom()) {
-              maybeScrollTerminalToBottom("resize");
-            }
-          });
-        });
-        return true;
       }
 
       function scheduleTerminalResize(immediate) {

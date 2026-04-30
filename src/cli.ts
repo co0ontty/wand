@@ -16,6 +16,8 @@ async function main(): Promise<void> {
     }
     case "web": {
       const config = await ensureRequiredFiles(configPath);
+      const { ensureNodePtyHelperExecutable } = await import("./ensure-node-pty-helper.js");
+      ensureNodePtyHelperExecutable();
       const { startServer } = await import("./server.js");
       await startServer(config, configPath);
       break;

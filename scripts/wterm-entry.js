@@ -40,8 +40,4 @@ export class WTerm extends BaseWTerm {
       this._scheduleRender();
     }
   }
-
-  get viewport() {
-    return this.element;
-  }
 }

@@ -1,0 +1,20 @@
+[     127ms] [INFO] Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner. @ http://127.0.0.1:9443/:0
+[     234ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[     234ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[    3174ms] [LOG] [WAND] switchToSessionView id: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171 found: true sessionKind: pty runner: pty isStructured: false currentView: terminal @ http://127.0.0.1:9443/:19274
+[   16186ms] [LOG] [WAND] sendInputFromBox {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, sessionStatus: running, sessionKind: pty, runner: pty, isStructured: false} @ http://127.0.0.1:9443/:19329
+[   16187ms] [LOG] [WAND] ensureSessionReadyForInput session: {id: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, status: running, claudeSessionId: null, sessionKind: pty, runner: pty} @ http://127.0.0.1:9443/:19611
+[   16187ms] [LOG] [wand] postInput: sending {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, inputLength: 2, view: terminal, wsConnected: true} @ http://127.0.0.1:9443/:19723
+[   16225ms] [LOG] [wand] postInput: sending {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, inputLength: 1, view: terminal, wsConnected: true} @ http://127.0.0.1:9443/:19723
+[   19044ms] [LOG] [WAND] sendInputFromBox {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, sessionStatus: running, sessionKind: pty, runner: pty, isStructured: false} @ http://127.0.0.1:9443/:19329
+[   19044ms] [LOG] [WAND] ensureSessionReadyForInput session: {id: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, status: running, claudeSessionId: null, sessionKind: pty, runner: pty} @ http://127.0.0.1:9443/:19611
+[   19044ms] [LOG] [wand] postInput: sending {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, inputLength: 2, view: terminal, wsConnected: true} @ http://127.0.0.1:9443/:19723
+[   19082ms] [LOG] [wand] postInput: sending {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, inputLength: 1, view: terminal, wsConnected: true} @ http://127.0.0.1:9443/:19723
+[   31905ms] [LOG] [WAND] sendInputFromBox {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, sessionStatus: running, sessionKind: pty, runner: pty, isStructured: false} @ http://127.0.0.1:9443/:19329
+[   31906ms] [LOG] [WAND] ensureSessionReadyForInput session: {id: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, status: running, claudeSessionId: null, sessionKind: pty, runner: pty} @ http://127.0.0.1:9443/:19611
+[   31906ms] [LOG] [wand] postInput: sending {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, inputLength: 18, view: terminal, wsConnected: true} @ http://127.0.0.1:9443/:19723
+[   31945ms] [LOG] [wand] postInput: sending {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, inputLength: 1, view: terminal, wsConnected: true} @ http://127.0.0.1:9443/:19723
+[   58802ms] [LOG] [WAND] sendInputFromBox {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, sessionStatus: running, sessionKind: pty, runner: pty, isStructured: false} @ http://127.0.0.1:9443/:19329
+[   58802ms] [LOG] [WAND] ensureSessionReadyForInput session: {id: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, status: running, claudeSessionId: null, sessionKind: pty, runner: pty} @ http://127.0.0.1:9443/:19611
+[   58803ms] [LOG] [wand] postInput: sending {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, inputLength: 6, view: terminal, wsConnected: true} @ http://127.0.0.1:9443/:19723
+[   58845ms] [LOG] [wand] postInput: sending {sessionId: ae7e0142-ccf9-469d-9ee7-c8fd5a04f171, inputLength: 1, view: terminal, wsConnected: true} @ http://127.0.0.1:9443/:19723

@@ -1,0 +1,7 @@
+[     182ms] [INFO] Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner. @ http://127.0.0.1:9443/:0
+[     300ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[     300ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[    5202ms] [INFO] Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner. @ http://127.0.0.1:9443/:0
+[    5310ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[    5310ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9443/:0
+[   11688ms] [WARNING] [wand] postInput: session not running, skipping send {sessionId: 58539728-c56f-4b8f-87dc-090c1e356c8c} @ http://127.0.0.1:9443/:19703
