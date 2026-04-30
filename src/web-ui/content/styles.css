@@ -10571,6 +10571,12 @@
     .qc-tag-row.hidden {
       display: none;
     }
+    .qc-message-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
     .qc-message-row textarea {
       resize: vertical;
       min-height: 56px;

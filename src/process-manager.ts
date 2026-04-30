@@ -14,10 +14,7 @@ import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
-import {
-  getResumeCommandSessionId,
-  hasRealConversationMessages,
-} from "./resume-policy.js";
+import { getResumeCommandSessionId } from "./resume-policy.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {
   return /^codex\b/.test(command.trim()) ? "codex" : "claude";
@@ -110,12 +107,6 @@ interface ClaudeProjectSessionCandidate {
 
 interface ClaudeProjectSessionDetails extends ClaudeProjectSessionCandidate {
   hasConversation: boolean;
-}
-
-interface ResumeEligibility {
-  hasClaudeSessionId: boolean;
-  hasRealConversation: boolean;
-  eligible: boolean;
 }
 
 interface PersistedMessageState {
@@ -236,57 +227,8 @@ function selectClaudeProjectSessionForRecord(record: Pick<SessionRecord, "cwd" |
   return candidates[0] ?? null;
 }
 
-/**
- * Broader fallback: find a JSONL file by mtime proximity when strict
- * mtime-correlation fails (e.g., file existed before session but Claude
- * wrote conversation content during this session).
- * Looks for the most recently modified file that was active near the
- * session's start time and has real conversation content.
- */
-function selectClaudeProjectSessionByProximity(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): ClaudeProjectSessionDetails | null {
-  const hasUserTurn = record.messages.some((turn) => turn.role === "user"
-    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
-  if (!hasUserTurn) {
-    return null;
-  }
-
-  const startedAtMs = Date.parse(record.startedAt);
-  const now = Date.now();
-  // Look for files modified from ~60s before session start up to now
-  const proximityWindowMs = 60 * 1000;
-
-  const candidates = listClaudeProjectSessionCandidates(record.cwd)
-    .filter((candidate) => {
-      if (!Number.isFinite(startedAtMs)) return true;
-      return candidate.mtimeMs >= startedAtMs - proximityWindowMs
-        && candidate.mtimeMs <= now + DISCOVERY_RECENT_WINDOW_MS;
-    })
-    .map((candidate) => readClaudeProjectSessionDetails(candidate.filePath, candidate.id))
-    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
-
-  return candidates[0] ?? null;
-}
-
-function getResumeEligibility(record: Pick<SessionRecord, "claudeSessionId" | "messages">): ResumeEligibility {
-  const hasClaudeSessionId = Boolean(record.claudeSessionId);
-  const hasRealConversation = hasRealConversationMessages(record.messages);
-  return {
-    hasClaudeSessionId,
-    hasRealConversation,
-    eligible: hasClaudeSessionId && hasRealConversation
-  };
-}
-
-function hasResumeEligibleConversation(record: Pick<SessionRecord, "claudeSessionId" | "messages">): boolean {
-  return getResumeEligibility(record).eligible;
-}
-
 function getLatestClaudeProjectSessionId(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): string | null {
-  // Try strict mtime-correlation first, then fall back to mtime proximity
-  return selectClaudeProjectSessionForRecord(record)?.id
-    ?? selectClaudeProjectSessionByProximity(record)?.id
-    ?? null;
+  return selectClaudeProjectSessionForRecord(record)?.id ?? null;
 }
 
 function listRecentClaudeProjectSessionIds(cwd: string, startedAt: string): string[] {
@@ -294,33 +236,6 @@ function listRecentClaudeProjectSessionIds(cwd: string, startedAt: string): stri
     .filter((candidate) => hasRecentProjectActivity(candidate, startedAt))
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
     .map((candidate) => candidate.id);
-}
-
-function findRealClaudeProjectSessionId(cwd: string, startedAt: string): string | null {
-  // Strict mtime-based discovery first
-  const candidates = listRecentClaudeProjectSessionIds(cwd, startedAt)
-    .map((id) => {
-      const filePath = path.join(getClaudeProjectDir(cwd), `${id}.jsonl`);
-      return readClaudeProjectSessionDetails(filePath, id);
-    })
-    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
-  if (candidates.length > 0) return candidates[0].id;
-
-  // Fallback: broader proximity search for files with conversation content
-  const startedAtMs = Date.parse(startedAt);
-  const now = Date.now();
-  const proximityWindowMs = 60 * 1000;
-  const proximityCandidates = listClaudeProjectSessionCandidates(cwd)
-    .filter((candidate) => {
-      if (!Number.isFinite(startedAtMs)) return true;
-      return candidate.mtimeMs >= startedAtMs - proximityWindowMs
-        && candidate.mtimeMs <= now + DISCOVERY_RECENT_WINDOW_MS;
-    })
-    .map((candidate) => readClaudeProjectSessionDetails(candidate.filePath, candidate.id))
-    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return proximityCandidates[0]?.id ?? null;
 }
 
 function isClaudeSessionFileAvailable(cwd: string, claudeSessionId: string): boolean {
@@ -470,20 +385,6 @@ function listAllClaudeHistorySessions(): ClaudeHistorySession[] {
   } catch {
     return [];
   }
-}
-
-function shouldAutoResumeSession(record: Pick<SessionRecord, "status" | "claudeSessionId" | "messages" | "archived" | "ptyProcess">): boolean {
-  return record.status === "exited"
-    && !record.archived
-    && record.ptyProcess === null
-    && hasResumeEligibleConversation(record);
-}
-
-function shouldBackfillClaudeSessionId(record: Pick<SessionRecord, "status" | "claudeSessionId" | "command" | "messages">): boolean {
-  return record.status === "exited"
-    && !record.claudeSessionId
-    && /^claude\b/.test(record.command.trim())
-    && hasRealConversationMessages(record.messages);
 }
 
 function snapshotMessages(record: Pick<SessionRecord, "ptyBridge" | "messages">): ConversationTurn[] {
@@ -684,12 +585,6 @@ export class ProcessManager extends EventEmitter {
         });
       }
     }
-    // Defer expensive file-system scanning and auto-recovery so the server
-    // can start responding to requests immediately.
-    setImmediate(() => {
-      this.backfillExitedClaudeSessionIds();
-      this.autoRecoverExitedSessions();
-    });
     this.archiveExpiredSessions();
     this.archiveTimer = setInterval(() => {
       try { this.archiveExpiredSessions(); } catch (err) {
@@ -1112,15 +1007,13 @@ export class ProcessManager extends EventEmitter {
   get(id: string): SessionSnapshot | null {
     const record = this.sessions.get(id);
     if (!record) {
-      // Fallback: check SQLite for sessions that were evicted from memory
       return this.storage.getSession(id) ?? null;
     }
-    // For sessions loaded from storage on startup, in-memory output starts empty.
-    // Prefer in-memory output (live PTY data), fall back to stored output.
+    const result = this.snapshot(record);
     if (!record.output && record.storedOutput) {
-      record.output = record.storedOutput;
+      result.output = record.storedOutput;
     }
-    return this.snapshot(record);
+    return result;
   }
 
   getPtyTranscript(id: string): string | null {
@@ -1586,82 +1479,6 @@ export class ProcessManager extends EventEmitter {
       this.persistDebounceTimers.delete(record.id);
     }
     this.persist(record);
-  }
-
-  private backfillExitedClaudeSessionIds(): void {
-    for (const record of this.sessions.values()) {
-      record.messages = snapshotMessages(record);
-      if (!shouldBackfillClaudeSessionId(record)) {
-        continue;
-      }
-      const discoveredSessionId = findRealClaudeProjectSessionId(record.cwd, record.startedAt);
-      if (!discoveredSessionId) {
-        continue;
-      }
-      record.claudeSessionId = discoveredSessionId;
-      this.persist(record);
-    }
-  }
-
-  /**
-   * Auto-recover the most recent exited session that has a Claude session ID.
-   * Only resumes one session per server start, using the most recent eligible
-   * session. Reuses the original session ID (in-place resume) and sets
-   * `autoRecovered: true`.
-   */
-  private autoRecoverExitedSessions(): void {
-    // Find eligible exited sessions
-    const eligibleSessions: SessionRecord[] = [];
-    for (const record of this.sessions.values()) {
-      record.messages = snapshotMessages(record);
-      if (shouldAutoResumeSession(record)) {
-        eligibleSessions.push(record);
-      }
-    }
-
-    if (eligibleSessions.length === 0) return;
-
-    // Sort by startedAt descending (most recent first)
-    eligibleSessions.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-
-    // Only auto-recover the single most recent session
-    const original = eligibleSessions[0];
-    const isClaude = /^claude\b/.test(original.command.trim());
-    if (!isClaude) return;
-
-    // If no claudeSessionId is bound yet, try to discover it via proximity search
-    if (!original.claudeSessionId) {
-      const discovered = findRealClaudeProjectSessionId(original.cwd, original.startedAt);
-      if (discovered) {
-        original.claudeSessionId = discovered;
-        process.stderr.write(`[wand] Backfilled Claude session ID for auto-recovery: ${discovered}\n`);
-        this.persist(original);
-      }
-    }
-
-    if (!original.claudeSessionId) {
-      console.error(`[ProcessManager] Skipping auto-recovery: no Claude session ID for session ${original.id}`);
-      return;
-    }
-
-    console.error(
-      `[ProcessManager] Auto-recovering session ${original.id} with Claude session ID ${original.claudeSessionId}`
-    );
-
-    const resumeCommand = `${original.command.trim()} --resume ${original.claudeSessionId}`;
-
-    try {
-      const snapshot = this.start(resumeCommand, original.cwd, original.mode, undefined, {
-        reuseId: original.id,
-        autoRecovered: true
-      });
-
-      console.error(
-        `[ProcessManager] Auto-recovered session ${snapshot.id} (in-place)`
-      );
-    } catch (err) {
-      console.error(`[ProcessManager] Auto-recovery failed: ${String(err)}`);
-    }
   }
 
   private archiveExpiredSessions(): void {

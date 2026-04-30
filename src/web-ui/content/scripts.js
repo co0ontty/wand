@@ -175,8 +175,9 @@
         gitStatusLastFetchAt: 0,
         quickCommitOpen: false,
         quickCommitSubmitting: false,
+        quickCommitGenerating: false,
         quickCommitError: "",
-        quickCommitForm: { autoMessage: true, customMessage: "", makeTag: false, tag: "", push: false },
+        quickCommitForm: { autoMessage: false, customMessage: "", makeTag: false, tag: "", push: false },
         chatAutoFollow: (function() {
           try {
             var saved = localStorage.getItem(CHAT_AUTO_FOLLOW_STORAGE_KEY);
@@ -1482,7 +1483,7 @@
         state.quickCommitOpen = true;
         state.quickCommitSubmitting = false;
         state.quickCommitError = "";
-        state.quickCommitForm = { autoMessage: true, customMessage: "", makeTag: false, tag: "", push: false };
+        state.quickCommitForm = { autoMessage: false, customMessage: "", makeTag: false, tag: "", push: false };
         closeWorktreeMergeModal();
         closeSessionModal();
         closeSettingsModal();
@@ -1544,12 +1545,8 @@
         if (cancelBtn) cancelBtn.addEventListener("click", closeQuickCommitModal);
         var submitBtn = document.getElementById("quick-commit-submit-btn");
         if (submitBtn) submitBtn.addEventListener("click", submitQuickCommit);
-        var autoCb = document.getElementById("quick-commit-auto");
-        if (autoCb) autoCb.addEventListener("change", function() {
-          state.quickCommitForm.autoMessage = autoCb.checked;
-          var row = document.getElementById("quick-commit-message-row");
-          if (row) row.classList.toggle("hidden", autoCb.checked);
-        });
+        var aiBtn = document.getElementById("quick-commit-ai-btn");
+        if (aiBtn) aiBtn.addEventListener("click", generateCommitMessageAI);
         var msgEl = document.getElementById("quick-commit-message");
         if (msgEl) msgEl.addEventListener("input", function() {
           state.quickCommitForm.customMessage = msgEl.value;
@@ -1570,19 +1567,53 @@
         });
       }
 
+      function generateCommitMessageAI() {
+        if (!state.selectedId || state.quickCommitGenerating) return;
+        var msgEl = document.getElementById("quick-commit-message");
+        if (msgEl) state.quickCommitForm.customMessage = msgEl.value;
+        state.quickCommitGenerating = true;
+        state.quickCommitError = "";
+        rerenderQuickCommitModal();
+        fetch("/api/sessions/" + encodeURIComponent(state.selectedId) + "/generate-commit-message", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        })
+          .then(function(res) {
+            return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+          })
+          .then(function(result) {
+            if (!result.ok) throw new Error((result.data && result.data.error) || "AI 生成失败。");
+            state.quickCommitForm.customMessage = (result.data && result.data.message) || "";
+            var currentMsgEl = document.getElementById("quick-commit-message");
+            if (currentMsgEl) currentMsgEl.value = state.quickCommitForm.customMessage;
+          })
+          .catch(function(error) {
+            state.quickCommitError = (error && error.message) || "AI 生成失败。";
+          })
+          .finally(function() {
+            state.quickCommitGenerating = false;
+            if (state.quickCommitOpen) rerenderQuickCommitModal();
+          });
+      }
+
       function submitQuickCommit() {
         if (!state.selectedId || state.quickCommitSubmitting) return;
+        var msgEl = document.getElementById("quick-commit-message");
+        if (msgEl) state.quickCommitForm.customMessage = msgEl.value;
         var form = state.quickCommitForm || {};
         var userTag = form.makeTag ? (form.tag || "").trim() : "";
+        var message = (form.customMessage || "").trim();
         var payload = {
-          autoMessage: form.autoMessage !== false,
-          customMessage: form.autoMessage === false ? (form.customMessage || "") : "",
+          autoMessage: false,
+          customMessage: message,
           tag: userTag,
           autoTag: form.makeTag && !userTag,
           push: !!form.push
         };
-        if (!payload.autoMessage && !payload.customMessage.trim()) {
-          state.quickCommitError = "请填写 commit message。";
+        if (!message) {
+          state.quickCommitError = "请填写 commit message，或点击 AI 生成。";
           rerenderQuickCommitModal();
           return;
         }
@@ -1626,7 +1657,7 @@
 
       function renderQuickCommitModal() {
         var s = state.gitStatus || {};
-        var f = state.quickCommitForm || { autoMessage: true, customMessage: "", makeTag: false, tag: "", push: false };
+        var f = state.quickCommitForm || { autoMessage: false, customMessage: "", makeTag: false, tag: "", push: false };
         var langValue = (state.config && (state.config.language || "")) || "";
         var langLabel = langValue ? langValue : "中文";
         var files = Array.isArray(s.files) ? s.files : [];
@@ -1665,20 +1696,18 @@
             '</div>' +
             '<div class="modal-body">' +
               '<div class="qc-files-wrap">' + fileRows + '</div>' +
-              '<label class="qc-checkbox-row">' +
-                '<input type="checkbox" id="quick-commit-auto"' + (f.autoMessage ? ' checked' : '') + '>' +
-                '<span>由 Claude 自动编写 commit message（语言：' + escapeHtml(langLabel) + '）</span>' +
-              '</label>' +
-              '<div class="qc-message-row' + (f.autoMessage ? ' hidden' : '') + '" id="quick-commit-message-row">' +
-                '<label class="field-label" for="quick-commit-message">commit message</label>' +
-                '<textarea id="quick-commit-message" class="field-input" rows="2" placeholder="请输入 commit message">' + escapeHtml(f.customMessage || "") + '</textarea>' +
+              '<div class="qc-message-row" id="quick-commit-message-row">' +
+                '<div class="qc-message-header"><label class="field-label" for="quick-commit-message">commit message</label>' +
+                  '<button type="button" id="quick-commit-ai-btn" class="btn btn-ghost btn-sm"' + (state.quickCommitGenerating ? ' disabled' : '') + '>' + (state.quickCommitGenerating ? '生成中…' : 'AI 生成') + '</button>' +
+                '</div>' +
+                '<textarea id="quick-commit-message" class="field-input" rows="2" placeholder="输入 commit message 或点击 AI 生成">' + escapeHtml(f.customMessage || "") + '</textarea>' +
               '</div>' +
               '<label class="qc-checkbox-row">' +
                 '<input type="checkbox" id="quick-commit-make-tag"' + (f.makeTag ? ' checked' : '') + '>' +
                 '<span>提交后打 tag' + (s.latestTag ? '（当前：' + escapeHtml(s.latestTag) + '）' : '') + '</span>' +
               '</label>' +
               '<div class="qc-tag-row' + (f.makeTag ? '' : ' hidden') + '" id="quick-commit-tag-row">' +
-                '<input type="text" id="quick-commit-tag" class="field-input" placeholder="留空由 Claude 自动建议' + (s.suggestedNextTag ? '（如 ' + escapeHtml(s.suggestedNextTag) + '）' : '') + '" value="' + escapeHtml(f.tag || "") + '">' +
+                '<input type="text" id="quick-commit-tag" class="field-input" placeholder="留空自动 bump patch' + (s.suggestedNextTag ? '（如 ' + escapeHtml(s.suggestedNextTag) + '）' : '') + '" value="' + escapeHtml(f.tag || "") + '">' +
               '</div>' +
               '<label class="qc-checkbox-row">' +
                 '<input type="checkbox" id="quick-commit-push"' + (f.push ? ' checked' : '') + '>' +
@@ -6322,6 +6351,9 @@
         if (!foundSession) {
           return;
         }
+        if (state.selectedId !== id) {
+          teardownTerminal();
+        }
         state.selectedId = id;
         persistSelectedId();
         state.toolContentCache = {};
@@ -9798,6 +9830,10 @@
 
       function activateSession(data) {
         if (!data || !data.id) return Promise.resolve();
+        state.selectedId = data.id;
+        persistSelectedId();
+        state.currentMessages = [];
+        teardownTerminal();
         resetChatRenderCache();
         switchToSessionView(data.id);
         updateSessionSnapshot(data);

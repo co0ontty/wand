@@ -5,7 +5,7 @@ import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
-import { getGitStatus, QuickCommitError, runQuickCommit } from "./git-quick-commit.js";
+import { getGitStatus, QuickCommitError, runQuickCommit, generateCommitMessageOnly } from "./git-quick-commit.js";
 
 export function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -390,6 +390,28 @@ export function registerSessionRoutes(
         return;
       }
       res.status(400).json({ error: getErrorMessage(error, "快捷提交失败。") });
+    }
+  });
+
+  app.post("/api/sessions/:id/generate-commit-message", express.json(), async (req, res) => {
+    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    if (!snapshot.cwd) {
+      res.status(400).json({ error: "会话没有工作目录。" });
+      return;
+    }
+    try {
+      const message = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "");
+      res.json({ message });
+    } catch (error) {
+      if (error instanceof QuickCommitError) {
+        res.status(400).json({ error: error.message, errorCode: error.code });
+        return;
+      }
+      res.status(400).json({ error: getErrorMessage(error, "生成 commit message 失败。") });
     }
   });
 

@@ -4,9 +4,10 @@ import { existsSync } from "node:fs";
 import { GitStatusFileEntry, GitStatusResult, QuickCommitResult } from "./types.js";
 
 const GIT_TIMEOUT_MS = 1500;
+const GIT_PUSH_TIMEOUT_MS = 30_000;
 const MAX_FILE_ENTRIES = 200;
-// claude 这次需要走完整 agent 循环（add/commit/可能还有 tag/push），给宽裕一点。
-const CLAUDE_AGENT_TIMEOUT_MS = 180_000;
+const CLAUDE_MESSAGE_TIMEOUT_MS = 30_000;
+const MAX_DIFF_FOR_AI = 100_000;
 
 interface GitCommandError extends Error {
   stderr?: string;
@@ -66,13 +67,6 @@ function makeEntry(path: string, status: string, sub: string | undefined): GitSt
 }
 
 function parsePorcelainV2(raw: string): GitStatusFileEntry[] {
-  // porcelain v2 行格式：
-  //   1 XY sub mH mI mW hH hI path                 -- 普通改动
-  //   2 XY sub mH mI mW hH hI X<score> path\torig  -- rename / copy
-  //   ? path                                       -- untracked
-  //   ! path                                       -- ignored
-  //   # ...                                        -- branch / stash header（忽略）
-  // sub 字段：4 字符，N....=非 submodule，S<C|.><M|.><U|.> = submodule 详细状态
   const out: GitStatusFileEntry[] = [];
   const lines = raw.split(/\r?\n/);
   for (const line of lines) {
@@ -208,147 +202,81 @@ export class QuickCommitError extends Error {
   }
 }
 
-interface PromptInput {
-  language: string;
-  autoMessage: boolean;
-  customMessage?: string;
-  makeTag: boolean;
-  explicitTag?: string;
-  push: boolean;
-  latestTag?: string;
-}
+// ── AI commit message generation ──
 
-function buildQuickCommitPrompt(input: PromptInput): string {
-  const lang = (input.language || "").trim() || "中文";
-  const lines: string[] = [];
-
-  lines.push("你正在帮我做一次快捷 git 提交。请用 Bash 工具按下面的步骤执行 git 命令，所有命令都在当前工作目录下运行。");
-  lines.push("");
-  lines.push("步骤：");
-  lines.push("1. 跑 `git add -A` 把所有改动 stage 起来（包含 submodule 的指针变化）。");
-  lines.push("2. 跑 `git diff --cached --name-only`；如果输出为空，说明没有改动可提交，跳到 \"无改动\" 分支。");
-  lines.push("3. 跑 `git diff --cached --submodule=log` 阅读 staged 改动（diff 中 submodule 段落会展开成内部 commit 列表，注意据此判断 submodule 升级的语义）。");
-
-  if (input.autoMessage) {
-    lines.push(`4. 用 ${lang} 写一条简洁的 commit message：祈使句，不超过 50 字 / 12 单词，描述「做了什么」，不要 issue 编号、不要 Markdown、不要引号包裹。`);
-  } else {
-    const safe = (input.customMessage || "").replace(/`/g, "\\`");
-    lines.push(`4. 使用我提供的 commit message（原样使用，不要修改）：\n   ${safe}`);
-  }
-
-  lines.push("5. 跑 `git commit -m \"<message>\"` 完成提交，记下生成的 commit hash（`git rev-parse HEAD`）。");
-
-  if (input.makeTag) {
-    if (input.explicitTag) {
-      lines.push(`6. 跑 \`git tag ${input.explicitTag}\` 打 tag。如果 tag 已存在，就把错误带回 JSON 不要继续。`);
-    } else {
-      const base = input.latestTag || "v0.0.0";
-      lines.push(`6. 基于最新 tag \`${base}\` 递增一个语义化版本号 tag（默认 patch +1；如果 diff 显示是较大改动，可以升 minor 或 major），然后跑 \`git tag <new-tag>\`。`);
-    }
-  }
-
-  if (input.push) {
-    lines.push(`${input.makeTag ? "7" : "6"}. push 到远端：`);
-    lines.push("   - 先跑 `git rev-parse --abbrev-ref @{upstream}` 看当前分支是否有 upstream。");
-    lines.push("   - 有 upstream：`git push --recurse-submodules=on-demand`");
-    lines.push("   - 没 upstream：`git push -u --recurse-submodules=on-demand origin HEAD`");
-    if (input.makeTag) {
-      lines.push("   - **注意**：`git push` 不带 refspec 时不会推 tag。如果上一步打了 tag，要再跑 `git push origin refs/tags/<tag>` 单独把 tag 推上去。");
-    }
-    lines.push("   - 如果 push 失败，把错误信息放到 pushError 字段，但 commit 已成功的事实仍要在 JSON 里保留。");
-  }
-
-  lines.push("");
-  lines.push("最终回复要求：你的最后一条文本回复**只**输出一行 JSON，不要 Markdown 代码块、不要任何其他说明文字。");
-  lines.push("成功格式：");
-  lines.push('{"ok":true,"commit":"<hash>","message":"<msg>","tag":"<tag 或空字符串>","pushed":<true|false>,"pushError":"<错误或空字符串>"}');
-  lines.push("没有改动可提交时：");
-  lines.push('{"ok":false,"errorCode":"NOTHING_TO_COMMIT"}');
-  lines.push("其他错误（commit/tag 等失败）：");
-  lines.push('{"ok":false,"errorCode":"<短代码>","error":"<可展示给用户的错误>"}');
-
-  return lines.join("\n");
-}
-
-interface ClaudeQuickCommitResult {
-  ok: boolean;
-  commit?: string;
-  message?: string;
-  tag?: string;
-  pushed?: boolean;
-  pushError?: string;
-  errorCode?: string;
-  error?: string;
-}
-
-function parseFinalJson(stdout: string): ClaudeQuickCommitResult {
-  // 从 stdout 反向找最后一个完整 { ... } 块解析。
-  // claude 可能在前面有思考过程，也可能用 ```json 包装；只关心最末尾那个有效 JSON。
-  const text = stdout.trim();
-  if (!text) {
-    throw new QuickCommitError("Claude 没有任何输出。", "CLAUDE_EMPTY_OUTPUT");
-  }
-  let depth = 0;
-  let endIdx = -1;
-  for (let i = text.length - 1; i >= 0; i--) {
-    const c = text[i];
-    if (c === "}") {
-      if (depth === 0) endIdx = i;
-      depth++;
-    } else if (c === "{") {
-      depth--;
-      if (depth === 0 && endIdx !== -1) {
-        const candidate = text.slice(i, endIdx + 1);
-        try {
-          return JSON.parse(candidate);
-        } catch {
-          // 这一对不合法，继续往前找
-          endIdx = -1;
-        }
-      }
-    }
-  }
-  throw new QuickCommitError("Claude 返回的内容里没有可解析的 JSON。", "PARSE_FAILED");
-}
-
-function execClaudeAgent(cwd: string, prompt: string): Promise<string> {
+function callClaudeText(prompt: string, cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       "claude",
-      [
-        "-p",
-        "--output-format", "text",
-        "--permission-mode", "bypassPermissions",
-        // 收紧到 Bash(git *)：claude 只能跑 git 子命令，不能 rm / curl 等。
-        "--allowedTools", "Bash(git *)",
-      ],
+      ["-p", "--output-format", "text"],
       {
         cwd,
         encoding: "utf8",
-        maxBuffer: 16 * 1024 * 1024,
-        timeout: CLAUDE_AGENT_TIMEOUT_MS,
+        maxBuffer: 4 * 1024 * 1024,
+        timeout: CLAUDE_MESSAGE_TIMEOUT_MS,
       },
       (error, stdout, stderr) => {
         if (error) {
           const e = error as GitCommandError;
           if (e.code === "ENOENT") {
-            reject(new QuickCommitError("未找到 claude CLI，无法执行快捷提交。", "CLAUDE_CLI_MISSING"));
+            reject(new QuickCommitError("未找到 claude CLI。", "CLAUDE_CLI_MISSING"));
             return;
           }
           if (e.code === "ETIMEDOUT") {
-            reject(new QuickCommitError("Claude 执行超时（180 秒），请稍后再试或手动 commit。", "CLAUDE_TIMEOUT"));
+            reject(new QuickCommitError("Claude 生成超时，请手动填写 commit message。", "CLAUDE_TIMEOUT"));
             return;
           }
           const msg = (stderr || "").trim() || e.message || "claude 调用失败";
           reject(new QuickCommitError(`Claude CLI 失败：${msg}`, "CLAUDE_CLI_FAILED"));
           return;
         }
-        resolve(stdout || "");
+        resolve((stdout || "").trim());
       },
     );
     child.stdin?.end(prompt);
   });
 }
+
+async function generateCommitMessage(cwd: string, language: string): Promise<string> {
+  let diff: string;
+  try {
+    diff = runGit(["diff", "--cached", "--submodule=log"], cwd, 5000);
+  } catch {
+    diff = "";
+  }
+  if (!diff) {
+    try {
+      diff = runGit(["diff", "--cached", "--name-only"], cwd, 3000);
+    } catch {
+      diff = "(no diff available)";
+    }
+  }
+  if (diff.length > MAX_DIFF_FOR_AI) {
+    diff = diff.slice(0, MAX_DIFF_FOR_AI) + "\n\n... (diff truncated) ...";
+  }
+  const lang = language.trim() || "中文";
+  const prompt = `阅读以下 git diff，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。\n\n${diff}`;
+  const raw = await callClaudeText(prompt, cwd);
+  const message = raw.replace(/^["'`]+|["'`]+$/g, "").trim();
+  if (!message) {
+    throw new QuickCommitError("Claude 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+  }
+  return message;
+}
+
+export async function generateCommitMessageOnly(cwd: string, language: string): Promise<string> {
+  if (!cwd || !existsSync(cwd)) {
+    throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
+  }
+  try {
+    runGit(["add", "-A"], cwd, 5000);
+  } catch {
+    // best-effort staging so the diff is complete
+  }
+  return generateCommitMessage(cwd, language);
+}
+
+// ── Direct git operations ──
 
 export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCommitResult> {
   const { cwd, language, autoMessage, customMessage, tag, autoTag, push } = opts;
@@ -367,47 +295,104 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     throw new QuickCommitError("当前目录不在 git 仓库内。", "NOT_A_GIT_REPO");
   }
 
-  if (!autoMessage && !(customMessage || "").trim()) {
-    throw new QuickCommitError("commit message 不能为空。", "EMPTY_MESSAGE");
-  }
-
-  let latestTag: string | undefined;
+  // Step 1: stage all
   try {
-    latestTag = runGit(["describe", "--tags", "--abbrev=0"], cwd);
-  } catch {
-    latestTag = undefined;
+    runGit(["add", "-A"], cwd, 5000);
+  } catch (error) {
+    throw new QuickCommitError(`git add 失败：${getGitErrorMessage(error)}`, "GIT_ADD_FAILED");
   }
 
-  const prompt = buildQuickCommitPrompt({
-    language,
-    autoMessage,
-    customMessage,
-    makeTag: !!(autoTag || (tag && tag.trim())),
-    explicitTag: tag && tag.trim() ? tag.trim() : undefined,
-    push: !!push,
-    latestTag,
-  });
+  // Step 2: check if anything to commit
+  let stagedFiles: string;
+  try {
+    stagedFiles = runGitAllowEmpty(["diff", "--cached", "--name-only"], cwd).trim();
+  } catch (error) {
+    throw new QuickCommitError(getGitErrorMessage(error), "GIT_DIFF_FAILED");
+  }
+  if (!stagedFiles) {
+    throw new QuickCommitError("没有任何改动可以提交。", "NOTHING_TO_COMMIT");
+  }
 
-  const stdout = await execClaudeAgent(cwd, prompt);
-  const result = parseFinalJson(stdout);
-
-  if (!result.ok) {
-    if (result.errorCode === "NOTHING_TO_COMMIT") {
-      throw new QuickCommitError("没有任何改动可以提交。", "NOTHING_TO_COMMIT");
+  // Step 3: get commit message
+  let message: string;
+  if (autoMessage) {
+    message = await generateCommitMessage(cwd, language);
+  } else {
+    message = (customMessage || "").trim();
+    if (!message) {
+      throw new QuickCommitError("commit message 不能为空。", "EMPTY_MESSAGE");
     }
-    throw new QuickCommitError(
-      result.error || "快捷提交失败。",
-      result.errorCode || "QUICK_COMMIT_FAILED",
-    );
+  }
+
+  // Step 4: commit
+  try {
+    runGit(["commit", "-m", message], cwd, 10_000);
+  } catch (error) {
+    throw new QuickCommitError(`git commit 失败：${getGitErrorMessage(error)}`, "GIT_COMMIT_FAILED");
+  }
+
+  let commitHash: string;
+  try {
+    commitHash = runGit(["rev-parse", "--short", "HEAD"], cwd);
+  } catch {
+    commitHash = "";
+  }
+
+  // Step 5: tag
+  const makeTag = !!(autoTag || (tag && tag.trim()));
+  let tagName = "";
+  if (makeTag) {
+    if (tag && tag.trim()) {
+      tagName = tag.trim();
+    } else {
+      let latestTag: string | undefined;
+      try {
+        latestTag = runGit(["describe", "--tags", "--abbrev=0"], cwd);
+      } catch {
+        latestTag = undefined;
+      }
+      tagName = bumpPatchTag(latestTag || "v0.0.0");
+    }
+    if (tagName) {
+      try {
+        runGit(["tag", tagName], cwd);
+      } catch (error) {
+        throw new QuickCommitError(`git tag 失败：${getGitErrorMessage(error)}`, "GIT_TAG_FAILED");
+      }
+    }
+  }
+
+  // Step 6: push
+  let pushed = false;
+  let pushError: string | undefined;
+  if (push) {
+    try {
+      let hasUpstream = false;
+      try {
+        runGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
+        hasUpstream = true;
+      } catch {
+        hasUpstream = false;
+      }
+      if (hasUpstream) {
+        runGit(["push", "--recurse-submodules=on-demand"], cwd, GIT_PUSH_TIMEOUT_MS);
+      } else {
+        runGit(["push", "-u", "--recurse-submodules=on-demand", "origin", "HEAD"], cwd, GIT_PUSH_TIMEOUT_MS);
+      }
+      if (tagName) {
+        runGit(["push", "origin", `refs/tags/${tagName}`], cwd, GIT_PUSH_TIMEOUT_MS);
+      }
+      pushed = true;
+    } catch (error) {
+      pushError = getGitErrorMessage(error);
+    }
   }
 
   return {
     ok: true,
-    commit: result.commit
-      ? { hash: String(result.commit), message: String(result.message || "") }
-      : undefined,
-    tag: result.tag ? { name: String(result.tag) } : undefined,
-    pushed: !!result.pushed,
-    pushError: result.pushError ? String(result.pushError) : undefined,
+    commit: { hash: commitHash, message },
+    tag: tagName ? { name: tagName } : undefined,
+    pushed,
+    pushError,
   };
 }
