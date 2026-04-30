@@ -1329,6 +1329,15 @@
                   '</div>' +
                 '</div>' +
                 '<div class="input-composer">' +
+                  '<button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="提示词优化（AI）" aria-label="提示词优化">' +
+                    '<svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                      '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/>' +
+                      '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/>' +
+                      '<path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/>' +
+                      '<path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/>' +
+                    '</svg>' +
+                    '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
+                  '</button>' +
                   '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
                   '<div id="attachment-preview" class="attachment-preview hidden"></div>' +
                   '<div class="input-composer-bar">' +
@@ -4083,6 +4092,11 @@
             fileInput.value = "";
           });
         }
+
+        var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
+        if (promptOptimizeBtn) {
+          promptOptimizeBtn.addEventListener("click", function() { optimizePromptText(); });
+        }
         var composer = document.querySelector(".input-composer");
         if (composer) {
           composer.addEventListener("dragover", function(e) {
@@ -5277,14 +5291,20 @@
       stripWideFillerForCopy();
 
       function resetTerminal() {
-        if (!state.terminal || typeof state.terminal.write !== "function") return;
-        // @wterm/dom 的 WTerm 类没有暴露 reset() 方法（grep 全包零匹配），
-        // 所以早期的 state.terminal.reset() 调用是 no-op——softResyncTerminal
-        // 实际只做了"再写一份 terminalOutput 追加"，旧 grid 不会被清空，
-        // 这就是"点刷新按钮没用、只有窗口尺寸变化才修"的根因。
-        // 改用 ANSI RIS (Reset to Initial State, ESC c) 让 WASM 状态机自己
-        // 重置 grid / 光标 / 属性 / scrollback，所有 VT 实现都支持这个序列。
-        state.terminal.write("\x1bc");
+        if (!state.terminal) return;
+        // 优先走 wterm-entry.js 自定义 WTerm 子类暴露的 reset()：它会调用
+        // bridge.init(cols, rows) 让 WASM 重新初始化整个状态机——包含
+        // grid、光标、属性 *和* scrollback。这是跨会话切换时清空旧
+        // scrollback 的唯一可靠方式，避免新会话向上滚还能看到旧会话内容。
+        // 单纯写 ANSI RIS (\x1bc) 在 WASM 实现里只清当前 grid，不动 scrollback。
+        if (typeof state.terminal.reset === "function") {
+          state.terminal.reset();
+          resetWideParserState();
+          return;
+        }
+        if (typeof state.terminal.write === "function") {
+          state.terminal.write("\x1bc");
+        }
         resetWideParserState();
       }
 
@@ -5418,6 +5438,15 @@
         }
         state.terminalInitRetries = 0;
         state.terminalInitializing = true;
+
+        // 防御式清理：teardownTerminal 已经会移除残留 termWrap，但若有
+        // 调用路径绕过 teardown（比如 outputContainer 被外部 render 重建），
+        // 这里再扫一次确保新会话不会和旧 termWrap 叠在同一位置。
+        var staleWraps = container.querySelectorAll(".terminal-scroll-wrap");
+        for (var i = 0; i < staleWraps.length; i++) {
+          var stale = staleWraps[i];
+          if (stale.parentNode === container) container.removeChild(stale);
+        }
 
         var termWrap = document.createElement("div");
         termWrap.className = "terminal-scroll-wrap";
@@ -8282,6 +8311,103 @@
         }
       }
 
+      var promptOptimizeInFlight = false;
+      function optimizePromptText() {
+        if (promptOptimizeInFlight) return;
+        var inputBox = document.getElementById("input-box");
+        var btn = document.getElementById("prompt-optimize-btn");
+        var composer = document.querySelector(".input-composer");
+        if (!inputBox) return;
+        var raw = (inputBox.value || "").trim();
+        if (!raw) {
+          if (typeof showToast === "function") showToast("请先输入要优化的内容。", "info");
+          inputBox.focus();
+          return;
+        }
+        promptOptimizeInFlight = true;
+        if (btn) {
+          btn.classList.add("is-loading");
+          btn.disabled = true;
+          btn.setAttribute("title", "正在优化…");
+        }
+        if (composer) composer.classList.add("is-optimizing");
+        inputBox.setAttribute("aria-busy", "true");
+        var prevReadOnly = inputBox.readOnly;
+        inputBox.readOnly = true;
+
+        var payload = { text: raw };
+        if (state && state.selectedId) payload.sessionId = state.selectedId;
+
+        fetch("/api/optimize-prompt", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+          .then(function(res) {
+            return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+          })
+          .then(function(result) {
+            if (!result.ok) throw new Error((result.data && result.data.error) || "提示词优化失败。");
+            var optimized = (result.data && result.data.optimized) || "";
+            if (!optimized) throw new Error("Claude 返回为空。");
+            animateOptimizedReplace(inputBox, optimized);
+          })
+          .catch(function(error) {
+            if (typeof showToast === "function") showToast((error && error.message) || "提示词优化失败。", "error");
+            if (btn) {
+              btn.classList.remove("is-loading");
+              btn.classList.add("is-shake");
+              setTimeout(function() { if (btn) btn.classList.remove("is-shake"); }, 400);
+            }
+          })
+          .finally(function() {
+            promptOptimizeInFlight = false;
+            if (btn) {
+              btn.classList.remove("is-loading");
+              btn.disabled = false;
+              btn.setAttribute("title", "提示词优化（AI）");
+            }
+            if (composer) composer.classList.remove("is-optimizing");
+            inputBox.removeAttribute("aria-busy");
+            inputBox.readOnly = prevReadOnly;
+          });
+      }
+
+      function animateOptimizedReplace(inputBox, finalText) {
+        if (!inputBox) return;
+        // Typewriter-style fill so user sees the replacement happen
+        var chars = Array.from(finalText);
+        var total = chars.length;
+        if (total === 0) {
+          inputBox.value = "";
+          setDraftValue("", true);
+          autoResizeInput(inputBox);
+          return;
+        }
+        var totalDuration = Math.min(700, Math.max(220, total * 8));
+        var stepCount = Math.min(total, 60);
+        var charsPerStep = Math.ceil(total / stepCount);
+        var stepDelay = totalDuration / stepCount;
+        var i = 0;
+        inputBox.value = "";
+        autoResizeInput(inputBox);
+        function tick() {
+          i = Math.min(total, i + charsPerStep);
+          inputBox.value = chars.slice(0, i).join("");
+          autoResizeInput(inputBox);
+          if (i < total) {
+            setTimeout(tick, stepDelay);
+          } else {
+            setDraftValue(finalText, true);
+            try { inputBox.setSelectionRange(finalText.length, finalText.length); } catch (e) { /* ignore */ }
+            inputBox.classList.add("optimize-flash");
+            setTimeout(function() { inputBox.classList.remove("optimize-flash"); }, 900);
+          }
+        }
+        tick();
+      }
+
       function autoResizeInput(el) {
         if (!el) return;
         var minHeight = 36;
@@ -11057,6 +11183,18 @@
         if (state.terminal) {
           state.terminal.destroy();
           state.terminal = null;
+        }
+        // wterm.destroy() 只把 termWrap.innerHTML 置空，节点本身还挂在
+        // #output 上。多次会话切换会让 N 个 .terminal-scroll-wrap 叠在
+        // 同一 inset:0 位置；新 init 又 appendChild 一个新 termWrap，
+        // 旧节点的 DOM 行虽被清空，但 scroll/层叠状态可能造成跨会话视觉
+        // 污染。这里把残留节点彻底移除。
+        if (output) {
+          var staleWraps = output.querySelectorAll(".terminal-scroll-wrap");
+          for (var i = 0; i < staleWraps.length; i++) {
+            var wrap = staleWraps[i];
+            if (wrap.parentNode === output) output.removeChild(wrap);
+          }
         }
         state.terminalSessionId = null;
         state.terminalOutput = "";

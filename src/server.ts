@@ -20,6 +20,7 @@ import { StructuredSessionManager } from "./structured-session-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
 import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
 import { registerUploadRoutes } from "./upload-routes.js";
+import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
@@ -1022,6 +1023,27 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config);
   registerClaudeHistoryRoutes(app, processes, storage);
   registerUploadRoutes(app, processes);
+
+  app.post("/api/optimize-prompt", express.json({ limit: "256kb" }), async (req, res) => {
+    const body = (req.body ?? {}) as { text?: string; sessionId?: string };
+    const text = typeof body.text === "string" ? body.text : "";
+    let cwd: string | undefined;
+    if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
+      const snap = storage.getSession(body.sessionId);
+      if (snap?.cwd) cwd = snap.cwd;
+    }
+    try {
+      const optimized = await optimizePrompt(text, config.language ?? "", cwd);
+      res.json({ optimized });
+    } catch (error) {
+      if (error instanceof PromptOptimizeError) {
+        const status = error.code === "EMPTY_INPUT" || error.code === "INPUT_TOO_LONG" ? 400 : 500;
+        res.status(status).json({ error: error.message, errorCode: error.code });
+        return;
+      }
+      res.status(500).json({ error: getErrorMessage(error, "提示词优化失败。") });
+    }
+  });
 
   // ── Path suggestion ──
 

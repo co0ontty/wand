@@ -5719,7 +5719,7 @@
       background: transparent;
       border: none;
       color: var(--text-primary);
-      padding: 8px 10px 3px;
+      padding: 8px 34px 3px 10px;
       outline: none;
       resize: none;
       min-height: 32px;
@@ -5845,6 +5845,152 @@
     }
     .btn-circle-attach:active {
       transform: scale(0.95);
+    }
+
+    /* Prompt optimize button — top-right of the input composer */
+    .prompt-optimize-btn {
+      position: absolute;
+      top: 5px;
+      right: 6px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid rgba(197, 101, 61, 0.22);
+      padding: 0;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, rgba(255, 250, 242, 0.95) 0%, rgba(232, 197, 174, 0.35) 100%);
+      color: var(--accent);
+      z-index: 4;
+      box-shadow: 0 1px 4px rgba(197, 101, 61, 0.10);
+      transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+    }
+    .prompt-optimize-btn:hover {
+      background: linear-gradient(135deg, rgba(255, 250, 242, 1) 0%, rgba(232, 197, 174, 0.55) 100%);
+      color: var(--accent-hover);
+      transform: scale(1.12);
+      border-color: rgba(197, 101, 61, 0.35);
+      box-shadow: 0 2px 10px rgba(197, 101, 61, 0.22), 0 0 0 3px rgba(197, 101, 61, 0.06);
+    }
+    .prompt-optimize-btn:active {
+      transform: scale(0.92);
+      box-shadow: 0 1px 3px rgba(197, 101, 61, 0.15);
+    }
+    .prompt-optimize-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+    .prompt-optimize-btn:disabled:hover {
+      transform: none;
+      background: linear-gradient(135deg, rgba(255, 250, 242, 0.95) 0%, rgba(232, 197, 174, 0.35) 100%);
+      box-shadow: 0 1px 4px rgba(197, 101, 61, 0.10);
+      border-color: rgba(197, 101, 61, 0.22);
+    }
+    .prompt-optimize-icon {
+      transition: transform 0.25s ease, opacity 0.2s ease;
+      transform-origin: center;
+      filter: drop-shadow(0 0 1px rgba(197, 101, 61, 0.3));
+    }
+    .prompt-optimize-btn:hover .prompt-optimize-icon {
+      animation: prompt-optimize-twinkle 1.4s ease-in-out infinite;
+      filter: drop-shadow(0 0 3px rgba(197, 101, 61, 0.4));
+    }
+    @keyframes prompt-optimize-twinkle {
+      0%, 100% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(12deg) scale(1.12); }
+    }
+    .prompt-optimize-spinner {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0;
+      background: conic-gradient(from 0deg, transparent 0deg, var(--accent) 270deg, transparent 360deg);
+      mask: radial-gradient(circle, transparent 10px, black 11px);
+      -webkit-mask: radial-gradient(circle, transparent 10px, black 11px);
+      transition: opacity 0.15s ease;
+    }
+    .prompt-optimize-btn.is-loading {
+      color: var(--accent);
+      background: linear-gradient(135deg, rgba(255, 250, 242, 1) 0%, rgba(232, 197, 174, 0.5) 100%);
+      border-color: rgba(197, 101, 61, 0.4);
+      box-shadow: 0 2px 12px rgba(197, 101, 61, 0.25), 0 0 0 3px rgba(197, 101, 61, 0.08);
+    }
+    .prompt-optimize-btn.is-loading .prompt-optimize-icon {
+      animation: prompt-optimize-pulse 1.1s ease-in-out infinite;
+    }
+    .prompt-optimize-btn.is-loading .prompt-optimize-spinner {
+      opacity: 1;
+      animation: prompt-optimize-spin 0.9s linear infinite;
+    }
+    @keyframes prompt-optimize-spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes prompt-optimize-pulse {
+      0%, 100% { transform: scale(0.88); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 1; }
+    }
+
+    /* Composer-wide shimmer overlay while optimizing */
+    .input-composer.is-optimizing::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: inherit;
+      background: linear-gradient(
+        110deg,
+        transparent 0%,
+        rgba(197, 101, 61, 0.04) 30%,
+        rgba(197, 101, 61, 0.14) 50%,
+        rgba(197, 101, 61, 0.04) 70%,
+        transparent 100%
+      );
+      background-size: 220% 100%;
+      animation: prompt-optimize-shimmer 1.6s linear infinite;
+      z-index: 1;
+      mix-blend-mode: normal;
+    }
+    @keyframes prompt-optimize-shimmer {
+      from { background-position: 220% 0; }
+      to { background-position: -120% 0; }
+    }
+    .input-composer.is-optimizing .input-textarea {
+      color: var(--text-muted);
+      transition: color 0.2s ease;
+    }
+    .input-textarea.optimize-flash {
+      animation: prompt-optimize-flash 0.85s ease-out;
+    }
+    @keyframes prompt-optimize-flash {
+      0% { background: rgba(197, 101, 61, 0.18); }
+      100% { background: transparent; }
+    }
+    .prompt-optimize-btn.is-shake {
+      animation: prompt-optimize-shake 0.4s ease-out;
+      color: var(--danger);
+    }
+    @keyframes prompt-optimize-shake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-3px); }
+      40% { transform: translateX(3px); }
+      60% { transform: translateX(-2px); }
+      80% { transform: translateX(2px); }
+    }
+
+    @media (max-width: 720px) {
+      .prompt-optimize-btn {
+        width: 26px;
+        height: 26px;
+        top: 3px;
+        right: 4px;
+      }
+      .prompt-optimize-icon {
+        width: 14px;
+        height: 14px;
+      }
     }
 
     .attachment-preview {
@@ -6930,7 +7076,7 @@
 
       .input-textarea {
         min-height: 32px;
-        padding: 6px 8px 3px;
+        padding: 6px 30px 3px 8px;
         font-size: 16px;
         line-height: 1.35;
       }
@@ -7256,7 +7402,7 @@
       }
 
       .input-composer { border-radius: 8px; }
-      .input-textarea { min-height: 28px; padding: 5px 6px 2px; font-size: 16px; }
+      .input-textarea { min-height: 28px; padding: 5px 28px 2px 6px; font-size: 16px; }
 
       .btn-circle { width: 28px; height: 28px; min-width: 28px; }
 
