@@ -6362,10 +6362,25 @@
             updateShellChrome();
 
             if (state.terminal && id === state.selectedId && data.output !== undefined) {
-              syncTerminalBuffer(id, data.output, { mode: "append" });
-              // Session-switch / history replay: force a real fit so wterm
-              // reflows the just-written output against the real container.
-              ensureTerminalFit("session-switch", { forceReplay: true });
+              // ws 在线时不要在这里写终端：HTTP 这边返回的是 PTY transcript
+              // 完整磁盘文件（可达数十 MB），ws 订阅 init 拿到的是内存 ring
+              // buffer 末尾窗口（约 200KB），二者长度+起点都不同。两路都
+              // syncTerminalBuffer 时，append 模式的前缀检查必然失败，
+              // 落到 else 分支的 reset+全量重写，与 ws init 的 reset+
+              // 写入交叠，造成首屏「两份内容错位重叠」。
+              // 设计原则：terminal 写入只走 ws init 与 chunk hot-path 两条
+              // 权威路径——参见 case "init" 的 replace 写入与 onmessage
+              // chunk 处理。这里只在 ws 离线兜底时才 append 写入。
+              if (!state.wsConnected) {
+                syncTerminalBuffer(id, data.output, { mode: "append" });
+                // 离线兜底路径自己负责 fit + replay，否则尺寸不对。
+                ensureTerminalFit("session-switch", { forceReplay: true });
+              } else {
+                // ws 在线场景：仅校准列宽，不重 replay（init 的
+                // ensureTerminalFitWithRetry("init") 会负责按真实
+                // 宽度的全量基线写入）。
+                ensureTerminalFit("session-switch");
+              }
             }
 
             var selectedSession = state.sessions.find(function(s) { return s.id === id; });
@@ -8907,7 +8922,8 @@
 
             return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
               if (!readySession) {
-                showToast("会话未就绪，将稍后重试。", "info");
+                // ensureSessionReadyForInput / resumeClaudeSessionById 已经在失败路径里
+                // 自行 toast，这里不再重复提示，避免叠两条消息。
                 return null;
               }
               var submitView = state.currentView;
@@ -9140,7 +9156,10 @@
       }
 
       function canAutoResumeSession(session) {
-        return !!(session && session.provider === "claude" && session.status === "exited" && session.claudeSessionId && hasRealConversationHistory(session));
+        // 只要是 Claude provider + 非运行中 + 有 claudeSessionId，
+        // 就允许在用户发送时静默触发恢复。不再要求 messages 里同时
+        // 有 user + assistant 文本（slim 列表/截断历史会让该判断失真）。
+        return !!(session && session.provider === "claude" && session.status !== "running" && session.claudeSessionId);
       }
 
       function ensureSessionReadyForInput(session, errorEl) {
@@ -9157,7 +9176,7 @@
           return Promise.resolve(null);
         }
 
-        showToast("正在恢复历史会话…", "info");
+        // 静默恢复：不再弹 "正在恢复历史会话…" 提示，让用户发送动作看起来无缝。
         return resumeClaudeSessionById(session.claudeSessionId, errorEl).then(function(data) {
           if (!data) return null;
           updateSessionSnapshot(data);
@@ -9510,17 +9529,20 @@
           }
         }
         var disableStructuredInput = !!selectedSession && structured && isCodex && !isRunning;
+        // 历史会话只要可自动恢复（Claude provider + 有 claudeSessionId），
+        // 输入框/发送按钮就保持可用——发送时由 ensureSessionReadyForInput 透明完成恢复。
+        var canResumeOnSend = !structured && !isRunning && canAutoResumeSession(selectedSession);
         if (composer) {
           composer.placeholder = getComposerPlaceholder(selectedSession, state.terminalInteractive);
-          composer.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning);
+          composer.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning && !canResumeOnSend);
           composer.setAttribute("aria-disabled", composer.disabled ? "true" : "false");
         }
         var sendBtn = document.getElementById("send-input-button");
         if (sendBtn) {
-          sendBtn.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning);
+          sendBtn.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning && !canResumeOnSend);
           sendBtn.setAttribute("title", isCodex
             ? (isRunning ? "发送给 Codex" : "Codex 会话已结束")
-            : (structured ? "发送" : (!selectedSession || isRunning ? "发送" : "会话已结束")));
+            : (structured ? "发送" : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
         }
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
