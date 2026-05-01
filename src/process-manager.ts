@@ -493,6 +493,8 @@ export class ProcessManager extends EventEmitter {
   private readonly persistDebounceTimers = new Map<string, NodeJS.Timeout>();
   /** Last persisted message state per session — used to skip redundant message writes */
   private readonly lastPersistedMessageState = new Map<string, PersistedMessageState>();
+  /** 启动时被识别为孤儿 PTY 并标记为 exited 的旧会话数（旧服务器进程已死） */
+  private orphanRecoveredCount = 0;
 
   constructor(
     private readonly config: WandConfig,
@@ -551,7 +553,7 @@ export class ProcessManager extends EventEmitter {
           claudeSessionId: resumeCommandSessionId ?? updated.claudeSessionId,
           approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
         });
-        console.error(`[ProcessManager] Restored session ${snapshot.id} marked as exited (PTY orphaned)`);
+        this.orphanRecoveredCount += 1;
       } else {
         this.sessions.set(snapshot.id, {
           ...snapshot,
@@ -596,6 +598,11 @@ export class ProcessManager extends EventEmitter {
 
   on(event: "process", listener: ProcessEventHandler): this {
     return super.on("process", listener);
+  }
+
+  /** 启动时被识别为孤儿 PTY 并标记为 exited 的旧会话数量（仅用于启动摘要展示）。 */
+  getOrphanRecoveredCount(): number {
+    return this.orphanRecoveredCount;
   }
 
   private emitEvent(event: ProcessEvent): void {

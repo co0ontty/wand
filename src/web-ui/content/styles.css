@@ -188,6 +188,10 @@
       min-height: 100dvh;
       height: 100vh;
       height: 100dvh;
+      /* 软键盘弹起时由 JS 注入 --app-viewport-height = visualViewport.height，
+         整体 flex column 自动收缩，让底部 input-panel 上移贴键盘上沿；
+         没注入时退回 100dvh 行为。 */
+      height: var(--app-viewport-height, 100dvh);
       line-height: var(--line-height-base);
       overflow: hidden;
     }
@@ -236,6 +240,8 @@
       min-height: 100dvh;
       height: 100vh;
       height: 100dvh;
+      /* 与 body 同步：键盘弹起时跟随可见视口收缩。 */
+      height: var(--app-viewport-height, 100dvh);
       overflow: hidden;
     }
 
@@ -5933,40 +5939,36 @@
       50% { transform: scale(1.15); opacity: 1; }
     }
 
-    /* Composer-wide shimmer overlay while optimizing */
-    .input-composer.is-optimizing::before {
+    /* 优化中：输入框整体出现柔和的边框光晕 + textarea 区域
+       的横向流光，文字保持原样，不打扰用户阅读。 */
+    .input-composer.is-optimizing {
+      border-color: rgba(197, 101, 61, 0.42);
+      box-shadow:
+        0 0 0 2px rgba(197, 101, 61, 0.10),
+        0 0 18px rgba(197, 101, 61, 0.14);
+    }
+    .input-composer.is-optimizing .input-textarea-wrap::before {
       content: "";
       position: absolute;
       inset: 0;
       pointer-events: none;
-      border-radius: inherit;
       background: linear-gradient(
-        110deg,
+        100deg,
         transparent 0%,
-        rgba(197, 101, 61, 0.04) 30%,
-        rgba(197, 101, 61, 0.14) 50%,
-        rgba(197, 101, 61, 0.04) 70%,
+        transparent 38%,
+        rgba(214, 123, 82, 0.16) 50%,
+        transparent 62%,
         transparent 100%
       );
       background-size: 220% 100%;
-      animation: prompt-optimize-shimmer 1.6s linear infinite;
-      z-index: 1;
-      mix-blend-mode: normal;
+      background-repeat: no-repeat;
+      background-position: 220% 0;
+      animation: prompt-optimize-flow 1.6s linear infinite;
+      z-index: 0;
     }
-    @keyframes prompt-optimize-shimmer {
+    @keyframes prompt-optimize-flow {
       from { background-position: 220% 0; }
       to { background-position: -120% 0; }
-    }
-    .input-composer.is-optimizing .input-textarea {
-      color: var(--text-muted);
-      transition: color 0.2s ease;
-    }
-    .input-textarea.optimize-flash {
-      animation: prompt-optimize-flash 0.85s ease-out;
-    }
-    @keyframes prompt-optimize-flash {
-      0% { background: rgba(197, 101, 61, 0.18); }
-      100% { background: transparent; }
     }
     .prompt-optimize-btn.is-shake {
       animation: prompt-optimize-shake 0.4s ease-out;

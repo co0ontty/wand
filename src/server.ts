@@ -22,6 +22,7 @@ import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } f
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
+import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
@@ -517,12 +518,22 @@ process.on("unhandledRejection", (reason) => {
 });
 
 function wandError(label: string, message: string, suggestion?: string): void {
+  if (isLogBusActive()) {
+    wandTuiLog("error", `✗ [wand] ${label}：${message}`);
+    if (suggestion) wandTuiLog("error", `  解决方法：${suggestion}`);
+    return;
+  }
   process.stderr.write(`\n✗ [wand] ${label}：${message}\n`);
   if (suggestion) process.stderr.write(`  解决方法：${suggestion}\n`);
   process.stderr.write("\n");
 }
 
 function wandWarn(message: string, hint?: string): void {
+  if (isLogBusActive()) {
+    wandTuiLog("warn", `⚠️  [wand] 警告：${message}`);
+    if (hint) wandTuiLog("warn", `  提示：${hint}`);
+    return;
+  }
   process.stderr.write(`⚠️  [wand] 警告：${message}\n`);
   if (hint) process.stderr.write(`  提示：${hint}\n`);
 }
@@ -575,7 +586,25 @@ function getLanguageFromExt(ext: string, filePath: string): string {
 
 // ── Main server ──
 
-export async function startServer(config: WandConfig, configPath: string): Promise<void> {
+export interface ServerUrl {
+  url: string;
+  scheme: "HTTP" | "HTTPS";
+}
+
+export interface ServerHandle {
+  processManager: ProcessManager;
+  structuredSessions: StructuredSessionManager;
+  configPath: string;
+  dbPath: string;
+  urls: ServerUrl[];
+  bindAddr: string;
+  httpsEnabled: boolean;
+  version: string;
+  orphanRecoveredCount: number;
+  close(): Promise<void>;
+}
+
+export async function startServer(config: WandConfig, configPath: string): Promise<ServerHandle> {
   const app = express();
   const storage = new WandStorage(resolveDatabasePath(configPath));
   setAuthStorage(storage);
@@ -1402,13 +1431,20 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }, 600);
   });
 
+  let bindAddr = config.host === "0.0.0.0" ? "0.0.0.0" : config.host;
+  const collectedUrls: ServerUrl[] = [];
+
   await new Promise<void>((resolve, reject) => {
     server.listen(config.port, config.host, () => {
-      const listenAddr = config.host === "0.0.0.0" ? "0.0.0.0 (所有接口)" : config.host;
-      process.stdout.write(
-        `[wand] Web console listening on ${listenAddr}:${config.port}\n` +
-        `[wand] 本地访问: ${protocol}://127.0.0.1:${config.port}\n`
-      );
+      bindAddr = `${config.host}:${config.port}`;
+      const scheme: "HTTP" | "HTTPS" = useHttps ? "HTTPS" : "HTTP";
+      // 主 URL：本机回环；若绑定 0.0.0.0 再补一个对外提示。
+      collectedUrls.push({ url: `${protocol}://127.0.0.1:${config.port}`, scheme });
+      if (config.host === "0.0.0.0") {
+        collectedUrls.push({ url: `${protocol}://0.0.0.0:${config.port}`, scheme });
+      } else if (config.host !== "127.0.0.1" && config.host !== "localhost") {
+        collectedUrls.push({ url: `${protocol}://${config.host}:${config.port}`, scheme });
+      }
       resolve();
     });
     server.on("error", (err: NodeJS.ErrnoException) => {
@@ -1521,4 +1557,36 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   setInterval(() => {
     performAutoUpdate().catch(() => {});
   }, 30 * 60 * 1000);
+
+  const close = (): Promise<void> => new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      try { storage.close(); } catch { /* ignore */ }
+      resolve();
+    };
+    try { wss.clients.forEach((c) => c.close()); } catch { /* ignore */ }
+    try { wss.close(); } catch { /* ignore */ }
+    try {
+      server.close(() => finish());
+    } catch {
+      finish();
+      return;
+    }
+    setTimeout(finish, 3000); // 兜底：3s 内未关完强制 resolve
+  });
+
+  return {
+    processManager: processes,
+    structuredSessions,
+    configPath,
+    dbPath: resolveDatabasePath(configPath),
+    urls: collectedUrls,
+    bindAddr,
+    httpsEnabled: useHttps,
+    version: PKG_VERSION,
+    orphanRecoveredCount: processes.getOrphanRecoveredCount(),
+    close,
+  };
 }

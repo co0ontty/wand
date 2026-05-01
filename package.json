@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "1.18.12",
+  "version": "1.20.4",
   "description": "A web terminal for local CLI tools like Claude.",
   "type": "module",
   "bin": {
@@ -40,11 +40,13 @@
     "compression": "^1.8.1",
     "express": "^4.21.2",
     "multer": "^2.1.1",
+    "neo-blessed": "^0.2.0",
     "node-pty": "^1.1.0",
     "puppeteer": "^24.40.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@types/blessed": "^0.1.27",
     "@types/express": "^4.17.21",
     "@types/node": "^22.13.14",
     "@types/ws": "^8.18.1",

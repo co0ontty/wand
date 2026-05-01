@@ -5439,6 +5439,19 @@
         state.terminalInitRetries = 0;
         state.terminalInitializing = true;
 
+        // wterm 构造与 init() 内部都通过 getBoundingClientRect 测字符宽高，
+        // 要求容器及祖先链都不是 display:none。.terminal-container 默认
+        // display:none，必须 .active 才变 flex。switchToSessionView 里
+        // initTerminal() 在 applyCurrentView() 之前同步执行——那时容器还是
+        // display:none，_measureCharSize 返回 null → ResizeObserver 不挂
+        // 载、首屏 cols 永远停在硬编码的 120，必须用户刷新/弹键盘/调窗口
+        // 才能恢复。这里在创建 wterm 之前先把 active 类挂上，让容器进入
+        // flex 布局，确保 _measureCharSize 拿到真实字符尺寸。
+        if (state.selectedId) {
+          container.classList.remove("hidden");
+          container.classList.add("active");
+        }
+
         // 防御式清理：teardownTerminal 已经会移除残留 termWrap，但若有
         // 调用路径绕过 teardown（比如 outputContainer 被外部 render 重建），
         // 这里再扫一次确保新会话不会和旧 termWrap 叠在同一位置。
@@ -5452,6 +5465,11 @@
         termWrap.className = "terminal-scroll-wrap";
         container.appendChild(termWrap);
 
+        // cols/rows 给一个保守默认即可：wterm-entry.js 重写的 init()
+        // 会在 super.init() 之前按 termWrap 真实尺寸做一次预校准，
+        // 保证 super.init() 里 bridge.init / renderer.setup 一上来
+        // 就按真实 cols 初始化，从源头消除"先按 120 写一遍 → 异步
+        // remeasure 纠正"的时序窗口。
         var term = new WTermLib.WTerm(termWrap, {
           cols: 120,
           rows: 36,
@@ -5489,6 +5507,23 @@
           state.terminal = term;
           state.terminalInitializing = false;
           applyTerminalScale();
+
+          // wterm 构造时 cols/rows 是硬编码的 120/36，super.init() 内部
+          // 的 ResizeObserver 要等下一个 layout 阶段异步 fire 才纠正。
+          // 如果不在写入历史前就把 bridge reflow 到容器真实尺寸，
+          // syncTerminalBuffer 会按 120 cols 把整段历史写进 WASM grid，
+          // 用户首屏看到的就是错列宽折行——必须等 ResizeObserver 触发
+          // softResync 才恢复，中间会有几帧明显错位（"刚开终端布局错乱
+          // 一下、resize 一下才正常"）。这里先强制一次 layout flush，
+          // 再同步 remeasure 把 bridge 校准到真实 cols/rows，把"写入"
+          // 卡在正确尺寸之后，避免错位帧。
+          if (termWrap.isConnected) {
+            void termWrap.offsetHeight;
+            if (typeof term.remeasure === "function") {
+              try { term.remeasure(); } catch (e) { /* ignore: 非致命 */ }
+            }
+          }
+
           state.terminalAutoFollow = true;
           clearTerminalScrollIdleTimer();
 
@@ -8416,8 +8451,6 @@
           } else {
             setDraftValue(finalText, true);
             try { inputBox.setSelectionRange(finalText.length, finalText.length); } catch (e) { /* ignore */ }
-            inputBox.classList.add("optimize-flash");
-            setTimeout(function() { inputBox.classList.remove("optimize-flash"); }, 900);
           }
         }
         tick();
@@ -10172,15 +10205,15 @@
       }
 
       function updateInputPanelViewportSpacing() {
+        // 旧实现给 input-panel 加底部 padding = 键盘高度，意图是腾出键盘
+        // 空间。但 input-panel 本身位置由 flex 决定，padding 增大只是把
+        // panel 自身撑高、内部底部多出空白，textarea（panel 顶部）反而
+        // 被往上推、离键盘更远。新方案改为让 body 高度跟随 visualViewport
+        // 收缩（见 syncAppViewportHeight），input-panel 自然贴键盘上沿。
+        // 这里清掉旧 keyboard-offset，避免新旧双重补偿。
         var inputPanel = document.querySelector('.input-panel');
         if (!inputPanel) return;
-        if (!('visualViewport' in window) || !isTouchDevice()) {
-          inputPanel.style.removeProperty('--keyboard-offset');
-          return;
-        }
-        var vv = window.visualViewport;
-        var offsetBottom = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-        inputPanel.style.setProperty('--keyboard-offset', offsetBottom + 'px');
+        inputPanel.style.removeProperty('--keyboard-offset');
       }
 
       function resetInputPanelViewportSpacing() {
@@ -10911,14 +10944,14 @@
         var terminalContainer = document.querySelector('.terminal-container');
 
         // Virtual Keyboard API (Chrome/Edge)
+        // 不再给 input-panel 直接 setPaddingBottom——新方案通过
+        // syncAppViewportHeight 让 body 跟随可见视口收缩，input-panel
+        // 自然上移。这里只把事件留作未来钩子，避免和新方案双重补偿。
         if ('virtualKeyboard' in navigator) {
           var vk = navigator.virtualKeyboard;
-
           vk.addEventListener('geometrychange', function() {
             if (!inputPanel) return;
-            var rect = vk.boundingRect;
-            var kbHeight = rect ? rect.height : 0;
-            inputPanel.style.paddingBottom = kbHeight > 0 ? kbHeight + 'px' : '';
+            inputPanel.style.removeProperty('padding-bottom');
           });
         }
 
@@ -10941,6 +10974,26 @@
         }
       }
 
+      // 把 body / .app-container 的高度从 100dvh 切换为可见视口高度，
+      // 这样键盘弹起时整个 flex column 自动收缩，input-panel 跟着上移到
+      // 键盘上沿。Android targetSdk 36 在 edge-to-edge 默认开启时，
+      // adjustResize 不再自动 resize WebView 内容；同时仅给 input-panel
+      // 加 padding-bottom 只是把 panel 内部底部撑空，并不会让 panel 自身
+      // 上移。这里通过 CSS 变量驱动整层高度，是跨 WebView/Chrome/PWA 的
+      // 统一兜底。仅在视口比窗口明显变小时（典型 = 软键盘弹起）覆盖，
+      // 桌面与无键盘场景维持 100dvh 不抖。
+      function syncAppViewportHeight() {
+        var vv = window.visualViewport;
+        if (!vv) return;
+        var diff = window.innerHeight - vv.height - vv.offsetTop;
+        var root = document.documentElement;
+        if (diff > 50) {
+          root.style.setProperty('--app-viewport-height', vv.height + 'px');
+        } else {
+          root.style.removeProperty('--app-viewport-height');
+        }
+      }
+
       // Visual viewport handling for better mobile keyboard support
       function setupVisualViewportHandlers() {
         if (!('visualViewport' in window)) return;
@@ -10955,6 +11008,10 @@
           var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
           var isKeyboardOpen = offsetBottom > 50;
           var heightChanged = Math.abs(vv.height - lastHeight) > 8;
+
+          // 键盘开/关与视口尺寸变化时同步 --app-viewport-height，
+          // 让 body 高度跟随可见区域，input-panel 自然贴键盘上沿。
+          syncAppViewportHeight();
 
           if (isKeyboardOpen && (!keyboardOpen || heightChanged) && shouldAdjustForKeyboard(vv, inputBox)) {
             syncInputBoxScroll(inputBox);
