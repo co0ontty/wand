@@ -77,10 +77,134 @@ export function isNoiseLine(line: string): boolean {
   return false;
 }
 
-/** Append text to a windowed buffer, trimming from start if over max size. */
+/**
+ * Append text to a windowed buffer, trimming from start if over max size.
+ *
+ * The cut point is chosen so it never lands inside:
+ * - a UTF-16 surrogate pair (would corrupt the leading codepoint)
+ * - an unterminated ANSI escape sequence (would feed orphan "[31m..."
+ *   text to a downstream terminal renderer)
+ *
+ * The returned buffer may be slightly shorter than maxSize.
+ */
 export function appendWindow(buffer: string, chunk: string, maxSize: number): string {
   const next = buffer + chunk;
-  return next.length > maxSize ? next.slice(-maxSize) : next;
+  if (next.length <= maxSize) return next;
+  return safeSliceTail(next, maxSize);
+}
+
+/** Slice keeping the last ~maxSize chars on a safe boundary. Exported for tests. */
+export function safeSliceTail(text: string, maxSize: number): string {
+  if (text.length <= maxSize) return text;
+  let start = text.length - maxSize;
+
+  // 1. Skip UTF-16 low surrogate half so we don't strand a high surrogate.
+  if (start > 0 && start < text.length) {
+    const code = text.charCodeAt(start);
+    if (code >= 0xdc00 && code <= 0xdfff) start++;
+  }
+
+  // 2. Prefer cutting at the next newline within a small lookahead window.
+  //    Newlines are always safe boundaries (no ANSI sequence spans a newline
+  //    in well-formed terminal output) and keep lines aligned for replay.
+  const LOOKAHEAD = 4096;
+  const upper = Math.min(start + LOOKAHEAD, text.length);
+  for (let i = start; i < upper; i++) {
+    if (text.charCodeAt(i) === 0x0a) return text.slice(i + 1);
+  }
+
+  // 3. No nearby newline. Detect whether `start` lands inside an open ANSI
+  //    escape sequence by scanning backward for an ESC (0x1b). If we find one
+  //    that is not yet terminated, advance past the sequence's final byte.
+  const lookback = Math.max(0, start - 256);
+  let escAt = -1;
+  for (let i = start - 1; i >= lookback; i--) {
+    const code = text.charCodeAt(i);
+    if (code === 0x1b) { escAt = i; break; }
+    // If we hit a terminator before an ESC, the previous sequence is closed.
+    if (code === 0x07) break;
+    if (code >= 0x40 && code <= 0x7e && i > 0 && isLikelyAnsiBody(text, i - 1)) break;
+  }
+  if (escAt !== -1) {
+    let terminated = false;
+    for (let i = escAt + 1; i < start; i++) {
+      const code = text.charCodeAt(i);
+      if (code === 0x07) { terminated = true; break; }
+      if (code >= 0x40 && code <= 0x7e) { terminated = true; break; }
+    }
+    if (!terminated) {
+      const ansiUpper = Math.min(start + 256, text.length);
+      for (let i = start; i < ansiUpper; i++) {
+        const code = text.charCodeAt(i);
+        if (code === 0x07 || (code >= 0x40 && code <= 0x7e)) {
+          return text.slice(i + 1);
+        }
+      }
+    }
+  }
+
+  return text.slice(start);
+}
+
+function isLikelyAnsiBody(text: string, idx: number): boolean {
+  // CSI parameter/intermediate range covers most common ANSI bodies.
+  const code = text.charCodeAt(idx);
+  return code === 0x5b /* [ */ || code === 0x3f /* ? */ || (code >= 0x30 && code <= 0x3f);
+}
+
+/**
+ * Strip a string down to the printable codepoints used for echo matching.
+ * Removes control characters, whitespace and ANSI escapes; keeps all other
+ * visible characters (including `/`, `()`, `:`, CJK, emoji, etc.) so that
+ * echo alignment works for any user input.
+ */
+export function stripForEchoMatch(input: string): string {
+  let out = "";
+  for (let i = 0; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    if (code === 0x1b) {
+      i = skipAnsiSequence(input, i) - 1;
+      continue;
+    }
+    if (code < 0x20 || code === 0x7f) continue;
+    if (code === 0x20) continue;
+    out += input[i];
+  }
+  return out;
+}
+
+/**
+ * Given an index pointing at ESC (0x1b), return the index of the first
+ * character AFTER the escape sequence. Handles CSI, OSC and simple ESC-
+ * letter forms. Returns idx+1 if nothing matches (best-effort skip).
+ */
+export function skipAnsiSequence(text: string, idx: number): number {
+  if (text.charCodeAt(idx) !== 0x1b) return idx;
+  const next = text.charCodeAt(idx + 1);
+  if (Number.isNaN(next)) return idx + 1;
+  // CSI: ESC [ ... final-byte (0x40-0x7E)
+  if (next === 0x5b /* [ */) {
+    let i = idx + 2;
+    while (i < text.length) {
+      const code = text.charCodeAt(i);
+      if (code >= 0x40 && code <= 0x7e) return i + 1;
+      i++;
+    }
+    return text.length;
+  }
+  // OSC: ESC ] ... terminator (BEL or ESC \)
+  if (next === 0x5d /* ] */) {
+    let i = idx + 2;
+    while (i < text.length) {
+      const code = text.charCodeAt(i);
+      if (code === 0x07) return i + 1;
+      if (code === 0x1b && text.charCodeAt(i + 1) === 0x5c) return i + 2;
+      i++;
+    }
+    return text.length;
+  }
+  // Two-character ESC sequences (ESC = / ESC > / ESC M / etc.)
+  return idx + 2;
 }
 
 const EXPLICIT_CONFIRM_PATTERNS = [

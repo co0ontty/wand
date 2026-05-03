@@ -16,6 +16,7 @@ import { ensureCertificates } from "./cert.js";
 import { isExecutionMode, normalizeCardDefaults, resolveConfigDir, saveConfig } from "./config.js";
 import { getCachedModels, refreshModels } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
+import { SessionLogger } from "./session-logger.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
 import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
@@ -611,7 +612,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const configDir = resolveConfigDir(configPath);
   const avatarSeed = await ensureAvatarSeed(configDir);
   const processes = new ProcessManager(config, storage, configDir);
-  const structuredSessions = new StructuredSessionManager(storage, config);
+  const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
+  const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger);
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
   const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
@@ -820,7 +822,10 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
-      structuredRunners: [{ label: "Claude Structured", runner: "claude-cli-print" }],
+      structuredRunners: [
+        { label: "Claude Structured", runner: "claude-cli-print" },
+        { label: "Codex Structured", runner: "codex-cli-exec" },
+      ],
       structuredChatPersona,
       cardDefaults: config.cardDefaults,
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
@@ -975,6 +980,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     const cached = getCachedModels();
     res.json({
       models: cached.models,
+      codexModels: cached.codexModels,
       claudeVersion: cached.claudeVersion,
       refreshedAt: cached.refreshedAt,
       defaultModel: config.defaultModel ?? "",
@@ -986,6 +992,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       const refreshed = await refreshModels();
       res.json({
         models: refreshed.models,
+        codexModels: refreshed.codexModels,
         claudeVersion: refreshed.claudeVersion,
         refreshedAt: refreshed.refreshedAt,
         defaultModel: config.defaultModel ?? "",
@@ -1469,6 +1476,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   // Start configured background sessions after the server is already reachable.
   processes.runStartupCommands();
+
+  // Pre-warm model cache (probes claude --version + codex debug models).
+  refreshModels().catch(() => {});
 
   // ── Auto-update endpoints ──
 

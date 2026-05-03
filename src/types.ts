@@ -1,7 +1,7 @@
 export type SessionKind = "pty" | "structured";
 export type SessionCreateKind = "pty" | "structured";
 export type SessionProvider = "claude" | "codex";
-export type SessionRunner = "claude-cli" | "claude-cli-print" | "pty";
+export type SessionRunner = "claude-cli" | "claude-cli-print" | "codex-cli-exec" | "pty";
 
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
 
@@ -17,6 +17,9 @@ export interface ProcessEvent {
   type: "output" | "status" | "started" | "ended" | "usage" | "task" | "notification";
   sessionId: string;
   data?: unknown;
+  /** Monotonic per-session sequence stamped by the WS broadcast layer for
+   *  output events. Lets clients spot gaps caused by backpressure drops. */
+  seq?: number;
 }
 
 export type ProcessEventHandler = (event: ProcessEvent) => void;
@@ -314,7 +317,7 @@ export interface SessionSnapshot {
   autonomyPolicy?: AutonomyPolicy;
   approvalPolicy?: ApprovalPolicy;
   allowedScopes?: EscalationScope[];
-  status: "running" | "exited" | "failed" | "stopped";
+  status: "idle" | "running" | "exited" | "failed" | "stopped";
   exitCode: number | null;
   startedAt: string;
   endedAt: string | null;
@@ -350,6 +353,10 @@ export interface SessionSnapshot {
   currentTaskTitle?: string;
   /** 用户为此会话选定的 Claude 模型（别名或完整 ID）。结构化会话下次 spawn 时使用；PTY 会话仅用于展示。 */
   selectedModel?: string | null;
+  /** 当前 PTY 列宽，由最近一次 resize 决定。前端用它来判断本端 fit 是否需要校准。 */
+  ptyCols?: number;
+  /** 当前 PTY 行数，由最近一次 resize 决定。 */
+  ptyRows?: number;
 }
 
 // ── Session Event (PTY Bridge Output) ──

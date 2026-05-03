@@ -38,10 +38,13 @@ const DEFAULT_SHORTCUT_LOG_MAX_BYTES = 10 * 1024 * 1024;
  * SessionLogger saves raw session content to local files for debugging and analysis.
  *
  * Directory structure: .wand/sessions/{sessionId}/
- *   - pty-output.log       Raw PTY output (current, rotated when > 50 MB)
- *   - pty-output.log.1..3  Rotated PTY output backups
- *   - stream-events.jsonl  NDJSON events from native mode (append-only)
- *   - messages.json        Final structured messages (overwritten on each update)
+ *   - pty-output.log              Raw PTY output (current, rotated when > 50 MB)
+ *   - pty-output.log.1..3         Rotated PTY output backups
+ *   - stream-events.jsonl         NDJSON events from native mode (append-only)
+ *   - messages.json               Final structured messages (overwritten on each update)
+ *   - structured-stdout.log       Raw stdout from `codex exec` / `claude -p` child (append-only)
+ *   - structured-stderr.log       Raw stderr from the same child (append-only)
+ *   - structured-spawns.jsonl     One line per spawn: args/pid/cwd/exit/error metadata
  */
 export class SessionLogger {
   private readonly baseDir: string;
@@ -149,6 +152,50 @@ export class SessionLogger {
       appendFileSync(path.join(dir, "stream-events.jsonl"), JSON.stringify(event) + "\n");
     } catch {
       // Non-critical
+    }
+  }
+
+  /** Append raw stdout chunk from a structured-mode child process. */
+  appendStructuredStdout(sessionId: string, chunk: string): void {
+    try {
+      const dir = this.ensureDir(sessionId);
+      appendFileSync(path.join(dir, "structured-stdout.log"), chunk);
+    } catch {
+      // Non-critical
+    }
+  }
+
+  /** Append raw stderr chunk from a structured-mode child process. */
+  appendStructuredStderr(sessionId: string, chunk: string): void {
+    try {
+      const dir = this.ensureDir(sessionId);
+      appendFileSync(path.join(dir, "structured-stderr.log"), chunk);
+    } catch {
+      // Non-critical
+    }
+  }
+
+  /** Append a spawn metadata record (args, pid, cwd, exit, errors, …) for a structured run. */
+  appendStructuredSpawn(sessionId: string, meta: Record<string, unknown>): void {
+    try {
+      const dir = this.ensureDir(sessionId);
+      const entry = JSON.stringify({ ts: new Date().toISOString(), ...meta }) + "\n";
+      appendFileSync(path.join(dir, "structured-spawns.jsonl"), entry);
+    } catch {
+      // Non-critical
+    }
+  }
+
+  /** Read recent stderr tail (for surfacing in failure messages). */
+  readStructuredStderrTail(sessionId: string, maxBytes = 4096): string {
+    try {
+      const dir = this.ensureDir(sessionId);
+      const filePath = path.join(dir, "structured-stderr.log");
+      if (!existsSync(filePath)) return "";
+      const content = readFileSync(filePath, "utf8");
+      return content.length <= maxBytes ? content : content.slice(content.length - maxBytes);
+    } catch {
+      return "";
     }
   }
 

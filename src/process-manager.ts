@@ -87,6 +87,9 @@ interface SessionRecord extends SessionSnapshot {
   taskDebounceTimer: NodeJS.Timeout | null;
   /** Last emitted task title to avoid duplicate events */
   lastEmittedTask: string | null;
+  /** Current PTY dimensions, last applied by resize(). */
+  ptyCols: number;
+  ptyRows: number;
   /** Claude task ids visible before this session started */
   knownClaudeTaskIds?: Set<string>;
   /** Retry timer for discovering the real Claude resumable task id */
@@ -204,6 +207,10 @@ function hasRecentProjectActivity(candidate: ClaudeProjectSessionCandidate, star
 
 function selectClaudeProjectSessionForRecord(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): ClaudeProjectSessionDetails | null {
   const knownMtimes = record.knownClaudeProjectMtimes ?? new Map<string, number>();
+  // Only consider files created/touched AFTER this wand session started — those
+  // are the ones a fresh `claude` invocation could have produced. Files that
+  // existed before (knownMtimes entry present) are tolerated only if they
+  // grew since we observed them, but we de-prioritize them below.
   const candidates = listClaudeProjectSessionCandidates(record.cwd)
     .filter((candidate) => {
       const previousMtime = knownMtimes.get(candidate.id);
@@ -224,7 +231,20 @@ function selectClaudeProjectSessionForRecord(record: Pick<SessionRecord, "cwd" |
     return null;
   }
 
-  return candidates[0] ?? null;
+  // Prefer brand-new files (id not in knownMtimes at session start). When more
+  // than one fresh candidate exists in parallel sessions, refuse to bind —
+  // mis-binding another session's history is worse than waiting for the bridge
+  // to capture the canonical session id from PTY output.
+  const fresh = candidates.filter((candidate) => !knownMtimes.has(candidate.id));
+  if (fresh.length === 1) {
+    return fresh[0];
+  }
+  if (fresh.length > 1) {
+    return null;
+  }
+
+  // Fallback: existing file that grew. Only bind if a single grown candidate.
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 function getLatestClaudeProjectSessionId(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): string | null {
@@ -532,7 +552,10 @@ export class ProcessManager extends EventEmitter {
           confirmWindow: "",
           ptyPermissionBlocked: false,
           lastAutoConfirmAt: 0,
-          autoApprovePermissions: this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode, provider),
+          // Preserve a user-toggled auto-approve setting across server restarts
+          // instead of recomputing it from the command/mode pair.
+          autoApprovePermissions: snapshot.autoApprovePermissions
+            ?? this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode, provider),
           pendingEscalation: snapshot.pendingEscalation ?? null,
           lastEscalationResult: snapshot.lastEscalationResult ?? null,
           autonomyPolicy: snapshot.autonomyPolicy ?? this.defaultAutonomyPolicy(snapshot.mode),
@@ -551,7 +574,9 @@ export class ProcessManager extends EventEmitter {
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
           claudeSessionId: resumeCommandSessionId ?? updated.claudeSessionId,
-          approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
+          approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
+          ptyCols: snapshot.ptyCols ?? 120,
+          ptyRows: snapshot.ptyRows ?? 36,
         });
         this.orphanRecoveredCount += 1;
       } else {
@@ -564,7 +589,8 @@ export class ProcessManager extends EventEmitter {
           confirmWindow: "",
           ptyPermissionBlocked: false,
           lastAutoConfirmAt: 0,
-          autoApprovePermissions: this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode, provider),
+          autoApprovePermissions: snapshot.autoApprovePermissions
+            ?? this.shouldAutoApprovePermissions(snapshot.command, snapshot.mode, provider),
           pendingEscalation: snapshot.pendingEscalation ?? null,
           lastEscalationResult: snapshot.lastEscalationResult ?? null,
           autonomyPolicy: snapshot.autonomyPolicy ?? this.defaultAutonomyPolicy(snapshot.mode),
@@ -583,7 +609,9 @@ export class ProcessManager extends EventEmitter {
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(snapshot.cwd) : undefined,
           claudeSessionId: resumeCommandSessionId ?? snapshot.claudeSessionId,
-          approvalStats: { tool: 0, command: 0, file: 0, total: 0 }
+          approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
+          ptyCols: snapshot.ptyCols ?? 120,
+          ptyRows: snapshot.ptyRows ?? 36,
         });
       }
     }
@@ -660,11 +688,20 @@ export class ProcessManager extends EventEmitter {
       : path.resolve(process.cwd(), this.config.defaultCwd);
 
     const id = opts?.reuseId || randomUUID();
+    // When a session is being resumed under the same id, capture its prior
+    // structured messages so the new bridge can present them as the chat
+    // history. We deliberately do NOT carry over rawOutput — `claude --resume`
+    // re-prints its own banner and replayed history into the new PTY, and
+    // mixing the two would surface every line twice in the terminal view.
+    let priorMessages: ConversationTurn[] = [];
     if (opts?.reuseId) {
       const oldRecord = this.sessions.get(id);
       if (oldRecord) {
+        priorMessages = oldRecord.ptyBridge?.getMessages() ?? oldRecord.messages ?? [];
         this.cleanupRecord(oldRecord);
         this.sessions.delete(id);
+      } else {
+        priorMessages = this.storage.getSession(id)?.messages ?? [];
       }
     }
     const worktreeSetup = opts?.worktreeEnabled
@@ -718,7 +755,7 @@ export class ProcessManager extends EventEmitter {
       rememberedEscalationScopes: new Set(),
       rememberedEscalationTargets: new Set(),
       storedOutput: "",
-      messages: [],
+      messages: priorMessages,
       childProcess: null,
       ptyBridge: null,
       currentTask: null,
@@ -729,6 +766,8 @@ export class ProcessManager extends EventEmitter {
       knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
+      ptyCols: 120,
+      ptyRows: 36,
     };
 
     if (isClaudeProvider) {
@@ -737,6 +776,7 @@ export class ProcessManager extends EventEmitter {
         isClaudeCommand: true,
         autoApprove: record.autoApprovePermissions,
         approvalPolicy: record.approvalPolicy,
+        initialMessages: priorMessages,
       });
       record.ptyBridge.on("event", (event: SessionEvent) => {
         this.handleBridgeEvent(record, event);
@@ -1034,12 +1074,9 @@ export class ProcessManager extends EventEmitter {
    */
   setSessionModel(id: string, model: string | null): SessionSnapshot {
     const record = this.mustGet(id);
-    if (record.provider !== "claude") {
-      throw new Error("仅 Claude 会话支持切换模型。");
-    }
     const normalized = model?.trim() || null;
     record.selectedModel = normalized;
-    if (record.status === "running" && record.ptyProcess) {
+    if (record.provider === "claude" && record.status === "running" && record.ptyProcess) {
       const value = normalized && normalized !== "default" ? normalized : "default";
       record.ptyProcess.write(`/model ${value}\r`);
     }
@@ -1124,7 +1161,20 @@ export class ProcessManager extends EventEmitter {
 
     const safeCols = clampDimension(cols, 20, 400);
     const safeRows = clampDimension(rows, 10, 160);
+    const changed = safeCols !== record.ptyCols || safeRows !== record.ptyRows;
     record.ptyProcess.resize(safeCols, safeRows);
+    record.ptyCols = safeCols;
+    record.ptyRows = safeRows;
+    if (changed) {
+      // Notify every subscribed client of the new authoritative dimensions so
+      // any other tab/device can re-fit its terminal instead of rendering
+      // wrap-broken output sized for someone else's viewport.
+      this.emitEvent({
+        type: "status",
+        sessionId: id,
+        data: { ptyCols: safeCols, ptyRows: safeRows },
+      });
+    }
     return this.snapshot(record);
   }
 
@@ -1335,6 +1385,8 @@ export class ProcessManager extends EventEmitter {
       summary: deriveSessionSummary(messages, record.currentTask?.title ?? null),
       currentTaskTitle: record.status === "running" ? record.currentTask?.title ?? undefined : undefined,
       selectedModel: record.selectedModel ?? null,
+      ptyCols: record.ptyCols,
+      ptyRows: record.ptyRows,
     };
   }
 
@@ -1749,13 +1801,18 @@ export class ProcessManager extends EventEmitter {
 
   private processCommandForMode(command: string, mode: ExecutionMode, provider: SessionProvider, model?: string): string {
     if (provider === "codex") {
-      if (mode !== "full-access") {
-        return command;
+      let result = command;
+      const trimmedModel = model?.trim();
+      if (trimmedModel && trimmedModel !== "default" && !/--model\s/.test(command) && !/-m\s/.test(command)) {
+        const escapedModel = trimmedModel.replace(/'/g, "'\\''");
+        result += ` --model '${escapedModel}'`;
       }
-      if (/--dangerously-bypass-approvals-and-sandbox(?:\s|$)/.test(command)) {
-        return command;
+      if (mode === "full-access") {
+        if (!/--dangerously-bypass-approvals-and-sandbox(?:\s|$)/.test(result)) {
+          result += " --dangerously-bypass-approvals-and-sandbox";
+        }
       }
-      return `${command} --dangerously-bypass-approvals-and-sandbox`;
+      return result;
     }
 
     const isClaudeCmd = /^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command);

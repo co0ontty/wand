@@ -21,11 +21,16 @@ import type {
   SessionEndData,
   RawOutputData,
 } from "./types.js";
-import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitConfirmSyntax, hasPermissionActionContext, scorePermissionLikelihood, FALLBACK_SCORE_THRESHOLD, isSlashCommandMenu } from "./pty-text-utils.js";
+import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitConfirmSyntax, hasPermissionActionContext, scorePermissionLikelihood, FALLBACK_SCORE_THRESHOLD, isSlashCommandMenu, stripForEchoMatch, skipAnsiSequence } from "./pty-text-utils.js";
 
 // ── Constants ──
 
-const OUTPUT_MAX_SIZE = 120000;
+/**
+ * Hard cap on the in-memory PTY replay buffer. Aligned with the non-bridge
+ * branch of `ProcessManager.start()` so a session keeps the same amount of
+ * history regardless of which capture path is active.
+ */
+const OUTPUT_MAX_SIZE = 200000;
 const SESSION_ID_WINDOW_SIZE = 16384;
 const PERMISSION_WINDOW_SIZE = 2000;
 const AUTO_APPROVE_DELAY_MS = 350;
@@ -1003,29 +1008,46 @@ export class ClaudePtyBridge extends EventEmitter {
    * Find the end index of the echoed user input in the PTY buffer.
    * The echo may contain ANSI codes between characters.
    * Returns the index after the last character of the echo.
+   *
+   * Matching strategy:
+   * - Keep every printable codepoint of `userInput` (anything that is not a
+   *   control char or whitespace) for comparison. The previous version dropped
+   *   common symbols like `/`, `(`, `:`, space — which made commands such as
+   *   `ls /tmp` mismatch and start parsing the chat response from a wrong offset.
+   * - In the buffer, skip ANSI escape sequences entirely, and skip whitespace
+   *   so wrapped echoes (line continuation, padded columns) still align.
    */
   private findEchoEndIndex(buffer: string, userInput: string): number {
-    // Keep alphanumeric and common symbols for matching
-    const inputChars = userInput.replace(/[^a-zA-Z0-9+=?!\-]/g, "");
+    const inputChars = stripForEchoMatch(userInput);
     if (inputChars.length === 0) return 0;
 
     let matchedChars = 0;
     let endIndex = 0;
-
-    for (let i = 0; i < buffer.length && matchedChars < inputChars.length; i++) {
+    let i = 0;
+    while (i < buffer.length && matchedChars < inputChars.length) {
       const ch = buffer[i];
-      // Check if this printable char matches the next expected char
-      if (/[a-zA-Z0-9+=?!\-]/.test(ch) && ch.toLowerCase() === inputChars[matchedChars].toLowerCase()) {
+      const code = ch.charCodeAt(0);
+      // Skip a complete ANSI escape sequence (CSI/OSC/etc.).
+      if (code === 0x1b) {
+        i = skipAnsiSequence(buffer, i);
+        continue;
+      }
+      // Skip control chars and whitespace — they do not appear in `inputChars`.
+      if (code < 0x20 || code === 0x7f || code === 0x20) {
+        i++;
+        continue;
+      }
+      if (ch.toLowerCase() === inputChars[matchedChars].toLowerCase()) {
         matchedChars++;
         endIndex = i + 1;
       }
-      // Skip ANSI codes and other non-matching characters
+      i++;
     }
 
     // Look for a newline or prompt marker after the echo
-    for (let i = endIndex; i < buffer.length && i < endIndex + 50; i++) {
-      if (buffer[i] === "\n" || buffer[i] === "\r") {
-        endIndex = i + 1;
+    for (let j = endIndex; j < buffer.length && j < endIndex + 50; j++) {
+      if (buffer[j] === "\n" || buffer[j] === "\r") {
+        endIndex = j + 1;
         break;
       }
     }

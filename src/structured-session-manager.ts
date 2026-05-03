@@ -3,10 +3,11 @@ import { spawn, ChildProcess } from "node:child_process";
 
 import { prepareSessionWorktree } from "./git-worktree.js";
 
+import { SessionLogger } from "./session-logger.js";
 import { WandStorage } from "./storage.js";
 import {
   ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
-  ExecutionMode, ProcessEvent, SessionRunner, SessionSnapshot, StructuredSessionState,
+  ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState,
   WandConfig,
 } from "./types.js";
 
@@ -14,10 +15,25 @@ interface CreateStructuredSessionOptions {
   cwd: string;
   mode: ExecutionMode;
   prompt?: string;
+  provider?: SessionProvider;
   runner?: SessionRunner;
   worktreeEnabled?: boolean;
   /** 用户指定的 Claude 模型（别名或完整 ID）。留空则 spawn 时不加 --model。 */
   model?: string;
+}
+
+function defaultStructuredRunner(provider: SessionProvider): SessionRunner {
+  return provider === "codex" ? "codex-cli-exec" : "claude-cli-print";
+}
+
+function defaultStructuredState(provider: SessionProvider, runner = defaultStructuredRunner(provider)): StructuredSessionState {
+  return {
+    provider,
+    runner,
+    lastError: null,
+    inFlight: false,
+    activeRequestId: null,
+  };
 }
 
 /** Accumulated state while streaming a single claude -p response. */
@@ -120,15 +136,19 @@ export class StructuredSessionManager {
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   private archiveTimer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly storage: WandStorage, private readonly config: WandConfig) {
+  constructor(
+    private readonly storage: WandStorage,
+    private readonly config: WandConfig,
+    private readonly logger: SessionLogger | null = null,
+  ) {
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
-      const restoredStatus = snapshot.status === "running" ? "stopped" : snapshot.status;
+      const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
       const restored: SessionSnapshot = {
         ...snapshot,
         sessionKind: "structured",
-        provider: snapshot.provider ?? "claude",
-        runner: snapshot.runner ?? "claude-cli-print",
+        provider: snapshot.provider ?? snapshot.structuredState?.provider ?? "claude",
+        runner: snapshot.runner ?? snapshot.structuredState?.runner ?? defaultStructuredRunner(snapshot.provider ?? snapshot.structuredState?.provider ?? "claude"),
         status: restoredStatus,
         autoApprovePermissions: snapshot.autoApprovePermissions ?? shouldAutoApproveForMode(snapshot.mode),
         approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
@@ -137,7 +157,7 @@ export class StructuredSessionManager {
         permissionBlocked: false,
         structuredState: {
           provider: snapshot.structuredState?.provider ?? snapshot.provider ?? "claude",
-          runner: snapshot.runner ?? "claude-cli-print",
+          runner: snapshot.runner ?? snapshot.structuredState?.runner ?? defaultStructuredRunner(snapshot.structuredState?.provider ?? snapshot.provider ?? "claude"),
           model: snapshot.structuredState?.model ?? snapshot.selectedModel ?? undefined,
           lastError: snapshot.structuredState?.lastError ?? null,
           inFlight: false,
@@ -200,6 +220,8 @@ export class StructuredSessionManager {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
     const prompt = options.prompt?.trim();
+    const provider: SessionProvider = options.provider === "codex" ? "codex" : "claude";
+    const runner = options.runner ?? defaultStructuredRunner(provider);
     const worktreeSetup = options.worktreeEnabled
       ? prepareSessionWorktree({ cwd: options.cwd, sessionId: id })
       : null;
@@ -207,14 +229,14 @@ export class StructuredSessionManager {
     const snapshot: SessionSnapshot = {
       id,
       sessionKind: "structured",
-      provider: "claude",
-      runner: options.runner ?? "claude-cli-print",
-      command: "claude -p --output-format stream-json",
+      provider,
+      runner,
+      command: provider === "codex" ? "codex exec --json" : "claude -p --output-format stream-json",
       cwd: worktreeSetup?.cwd ?? options.cwd,
       mode: options.mode,
       worktreeEnabled: Boolean(worktreeSetup),
       worktree: worktreeSetup?.worktree ?? null,
-      status: "running",
+      status: "idle",
       exitCode: null,
       startedAt,
       endedAt: null,
@@ -225,8 +247,8 @@ export class StructuredSessionManager {
       messages: [],
       queuedMessages: [],
       structuredState: {
-        provider: "claude",
-        runner: options.runner ?? "claude-cli-print",
+        provider,
+        runner,
         model: selectedModel ?? undefined,
         inFlight: false,
         activeRequestId: null,
@@ -241,10 +263,6 @@ export class StructuredSessionManager {
     this.sessions.set(id, snapshot);
     this.storage.saveSession(snapshot);
     this.emit({ type: "started", sessionId: id, data: { sessionKind: "structured" } });
-
-    if (prompt) {
-      void this.sendMessage(id, prompt);
-    }
 
     return snapshot;
   }
@@ -261,7 +279,7 @@ export class StructuredSessionManager {
         if (child) this.pendingChildren.delete(id);
         const recovered: SessionSnapshot = {
           ...session,
-          status: "stopped",
+          status: "idle",
           endedAt: session.endedAt ?? new Date().toISOString(),
           structuredState: {
             ...(session.structuredState as StructuredSessionState),
@@ -320,7 +338,7 @@ export class StructuredSessionManager {
       endedAt: null,
       messages: [...(session.messages ?? []), userTurn],
       structuredState: {
-        ...(session.structuredState ?? { provider: "claude", runner: "claude-cli-print", lastError: null, inFlight: false, activeRequestId: null }),
+        ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
         inFlight: true,
         activeRequestId: requestId,
         lastError: null,
@@ -342,7 +360,11 @@ export class StructuredSessionManager {
       : prompt;
 
     try {
-      await this.runClaudeStreaming(id, updated, claudePrompt);
+      if ((updated.provider ?? "claude") === "codex") {
+        await this.runCodexStreaming(id, updated, prompt);
+      } else {
+        await this.runClaudeStreaming(id, updated, claudePrompt);
+      }
       const finished = this.requireSession(id);
       return finished;
     } catch (error) {
@@ -395,7 +417,7 @@ export class StructuredSessionManager {
       ...session,
       selectedModel: normalized,
       structuredState: {
-        ...(session.structuredState ?? { provider: "claude", runner: "claude-cli-print", inFlight: false, activeRequestId: null, lastError: null }),
+        ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
         model: normalized ?? undefined,
       },
     };
@@ -462,7 +484,7 @@ export class StructuredSessionManager {
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
-        ...(session.structuredState ?? { provider: "claude", runner: "claude-cli-print", lastError: null, inFlight: false, activeRequestId: null }),
+        ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
         inFlight: false,
         activeRequestId: null,
       },
@@ -481,6 +503,7 @@ export class StructuredSessionManager {
     }
     this.sessions.delete(id);
     this.storage.deleteSession(id);
+    this.logger?.deleteSession(id);
   }
 
   // ---------------------------------------------------------------------------
@@ -625,6 +648,279 @@ export class StructuredSessionManager {
     return [];
   }
 
+  private buildCodexArgs(session: SessionSnapshot): string[] {
+    const args = ["exec", "--json", "--color", "never"];
+    const shouldBypass = session.autoApprovePermissions === true || session.mode === "full-access" || session.mode === "managed";
+    if (shouldBypass) {
+      args.push("--dangerously-bypass-approvals-and-sandbox");
+    } else if (session.mode === "auto-edit" || session.mode === "agent" || session.mode === "agent-max") {
+      args.push("--sandbox", "workspace-write");
+    } else {
+      args.push("--sandbox", "read-only");
+    }
+    args.push("--skip-git-repo-check");
+    const modelChoice = session.selectedModel?.trim();
+    if (modelChoice && modelChoice !== "default") {
+      args.push("--model", modelChoice);
+    }
+    if (session.claudeSessionId) {
+      args.push("resume", session.claudeSessionId, "-");
+    } else {
+      args.push("-");
+    }
+    return args;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Streaming codex exec --json execution
+  // ---------------------------------------------------------------------------
+
+  private runCodexStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const args = this.buildCodexArgs(session);
+      console.log("[WAND] runCodexStreaming sessionId:", sessionId, "mode:", session.mode, "threadId:", session.claudeSessionId);
+      const spawnedAt = new Date().toISOString();
+      const child = spawn("codex", args, {
+        cwd: session.cwd,
+        env: process.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      console.log("[WAND] spawned codex exec pid:", child.pid, "args:", args.join(" "));
+      this.logger?.appendStructuredSpawn(sessionId, {
+        kind: "codex-exec",
+        provider: "codex",
+        pid: child.pid ?? null,
+        cwd: session.cwd,
+        args,
+        prompt: prompt.slice(0, 2048),
+        promptLength: prompt.length,
+        threadId: session.claudeSessionId,
+        spawnedAt,
+      });
+      this.pendingChildren.set(sessionId, child);
+      child.stdin?.end(prompt);
+
+      const turnState: StreamingTurnState = {
+        blocks: [],
+        result: "",
+        sessionId: session.claudeSessionId,
+        model: session.selectedModel ?? session.structuredState?.model,
+        usage: undefined,
+      };
+      let lineBuf = "";
+      let stderr = "";
+      let emitTimer: ReturnType<typeof setTimeout> | null = null;
+      // codex 把所有错误（包括重试日志和最终失败原因）都通过 stdout 的 NDJSON 事件
+      // 输出，stderr 通常是空的。我们在 processLine 里收集这些，然后在 close 中
+      // 决定真正的报错文本。
+      const codexErrors: string[] = [];
+      let codexTurnFailed: string | null = null;
+
+      const flushEmit = (): void => {
+        if (emitTimer) {
+          clearTimeout(emitTimer);
+          emitTimer = null;
+        }
+        const current = this.sessions.get(sessionId);
+        if (!current) return;
+        this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current) });
+      };
+
+      const scheduleEmit = (): void => {
+        if (!emitTimer) emitTimer = setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS);
+      };
+
+      const syncSnapshot = (): void => {
+        const current = this.sessions.get(sessionId);
+        if (!current) return;
+        const inProgressTurn: ConversationTurn = {
+          role: "assistant",
+          content: this.compactContentBlocks([...turnState.blocks], turnState.result),
+          usage: turnState.usage,
+        };
+        const msgs = [...(current.messages ?? [])];
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg && lastMsg.role === "assistant") {
+          msgs[msgs.length - 1] = inProgressTurn;
+        } else {
+          msgs.push(inProgressTurn);
+        }
+        const patched: SessionSnapshot = {
+          ...current,
+          claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+          messages: msgs,
+          output: turnState.result || current.output,
+          structuredState: {
+            ...(current.structuredState as StructuredSessionState),
+            model: turnState.model ?? current.structuredState?.model,
+          },
+        };
+        this.sessions.set(sessionId, patched);
+        this.storage.saveSession(patched);
+      };
+
+      const processLine = (line: string): void => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let parsed: any;
+        try { parsed = JSON.parse(trimmed); } catch { return; }
+        this.logger?.appendStreamEvent(sessionId, parsed);
+        if (parsed?.type === "thread.started" && typeof parsed.thread_id === "string") {
+          turnState.sessionId = parsed.thread_id;
+          syncSnapshot();
+          return;
+        }
+        if (parsed?.type === "item.started" && parsed.item) {
+          const block = this.extractCodexItemBlock(parsed.item, false);
+          if (block) {
+            turnState.blocks.push(block);
+            syncSnapshot();
+            scheduleEmit();
+          }
+          return;
+        }
+        if (parsed?.type === "item.completed" && parsed.item) {
+          const block = this.extractCodexItemBlock(parsed.item, true);
+          if (block) {
+            if (block.type === "text") turnState.result = block.text;
+            this.upsertCodexBlock(turnState.blocks, block);
+            syncSnapshot();
+            scheduleEmit();
+          }
+          return;
+        }
+        if (parsed?.type === "turn.completed") {
+          turnState.usage = this.extractCodexUsage(parsed.usage) ?? turnState.usage;
+          syncSnapshot();
+          scheduleEmit();
+          return;
+        }
+        if (parsed?.type === "error") {
+          const message = typeof parsed.message === "string" ? parsed.message : "";
+          if (message) {
+            console.log("[WAND] codex error event:", message.slice(0, 300));
+            codexErrors.push(message);
+          }
+          return;
+        }
+        if (parsed?.type === "turn.failed") {
+          const errObj = (parsed.error && typeof parsed.error === "object") ? parsed.error as Record<string, unknown> : null;
+          const message = (errObj && typeof errObj.message === "string" && errObj.message)
+            || (typeof parsed.message === "string" ? parsed.message : "")
+            || "codex turn failed";
+          console.log("[WAND] codex turn.failed:", message.slice(0, 300));
+          codexTurnFailed = message;
+          return;
+        }
+      };
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        this.logger?.appendStructuredStdout(sessionId, text);
+        lineBuf += text;
+        const lines = lineBuf.split("\n");
+        lineBuf = lines.pop() ?? "";
+        for (const line of lines) processLine(line);
+      });
+
+      child.stderr?.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        this.logger?.appendStructuredStderr(sessionId, text);
+        stderr += text;
+      });
+
+      child.on("error", (error) => {
+        console.log("[WAND] codex exec child error:", error.message);
+        this.pendingChildren.delete(sessionId);
+        if (emitTimer) clearTimeout(emitTimer);
+        this.logger?.appendStructuredSpawn(sessionId, {
+          kind: "codex-exec-error",
+          pid: child.pid ?? null,
+          spawnedAt,
+          closedAt: new Date().toISOString(),
+          spawnError: error.message,
+        });
+        reject(error);
+      });
+
+      child.on("close", (code) => {
+        console.log("[WAND] codex exec child close code:", code, "stderr:", stderr.substring(0, 200), "errors:", codexErrors.length, "turnFailed:", codexTurnFailed?.slice(0, 100));
+        this.pendingChildren.delete(sessionId);
+        if (lineBuf.trim()) {
+          processLine(lineBuf);
+          lineBuf = "";
+        }
+        flushEmit();
+        const closedAt = new Date().toISOString();
+        this.logger?.appendStructuredSpawn(sessionId, {
+          kind: "codex-exec-close",
+          pid: child.pid ?? null,
+          spawnedAt,
+          closedAt,
+          exitCode: code,
+          stderrTail: stderr.slice(-2048),
+          codexErrors,
+          codexTurnFailed,
+        });
+        const current = this.sessions.get(sessionId);
+        if (!current) {
+          reject(new Error("Session removed during execution."));
+          return;
+        }
+        // codex 把模型/网络/沙箱等错误写到 stdout 的 NDJSON 流（type: error / turn.failed），
+        // 而不是 stderr。我们以 turn.failed 的 message 为准，其次是最后一个 error 事件。
+        const codexFailed = codexTurnFailed !== null;
+        if (codexFailed || (code !== 0 && code !== null)) {
+          const errorText = (codexTurnFailed && codexTurnFailed.trim())
+            || (codexErrors.length > 0 ? codexErrors[codexErrors.length - 1] : "")
+            || stderr.trim()
+            || `codex exec exited with code ${code}`;
+          const exitForSnapshot = typeof code === "number" ? code : 1;
+          const failed = this.finishStructuredFailure(current, exitForSnapshot, errorText, turnState);
+          this.sessions.set(sessionId, failed);
+          this.storage.saveSession(failed);
+          this.emitStructuredSnapshot(failed);
+          this.emitStructuredSnapshot(failed, "ended");
+          reject(new Error(errorText));
+          return;
+        }
+        const assistantTurn: ConversationTurn = {
+          role: "assistant",
+          content: this.compactContentBlocks([...turnState.blocks], turnState.result),
+          usage: turnState.usage,
+        };
+        const msgs = [...(current.messages ?? [])];
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = assistantTurn;
+        else msgs.push(assistantTurn);
+        const finished: SessionSnapshot = {
+          ...current,
+          status: "idle",
+          exitCode: 0,
+          endedAt: new Date().toISOString(),
+          output: turnState.result,
+          claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+          messages: msgs,
+          pendingEscalation: null,
+          permissionBlocked: false,
+          structuredState: {
+            ...(current.structuredState as StructuredSessionState),
+            model: turnState.model ?? current.structuredState?.model,
+            inFlight: false,
+            activeRequestId: null,
+            lastError: null,
+          },
+        };
+        this.sessions.set(sessionId, finished);
+        this.storage.saveSession(finished);
+        this.emitStructuredSnapshot(finished);
+        this.emitStructuredSnapshot(finished, "ended");
+        resolve();
+        setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
+      });
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Streaming claude -p execution
   // ---------------------------------------------------------------------------
@@ -693,12 +989,24 @@ export class StructuredSessionManager {
       // variadic 参数贪婪吞掉（commander 的 <tools...> 会一直吃 positional 直到
       // 下一个 flag）。表现为 claude 报 "Input must be provided either through
       // stdin or as a prompt argument when using --print"。
+      const spawnedAt = new Date().toISOString();
       const child = spawn("claude", args, {
         cwd: session.cwd,
         env: process.env,
         stdio: ["pipe", "pipe", "pipe"],
       });
       console.log("[WAND] spawned claude -p pid:", child.pid, "args:", args.join(" "));
+      this.logger?.appendStructuredSpawn(sessionId, {
+        kind: "claude-print",
+        provider: "claude",
+        pid: child.pid ?? null,
+        cwd: session.cwd,
+        args,
+        prompt: prompt.slice(0, 2048),
+        promptLength: prompt.length,
+        claudeSessionId: session.claudeSessionId,
+        spawnedAt,
+      });
       this.pendingChildren.set(sessionId, child);
       child.stdin?.end(prompt);
 
@@ -784,6 +1092,7 @@ export class StructuredSessionManager {
         } catch {
           return;
         }
+        this.logger?.appendStreamEvent(sessionId, parsed);
 
         if (parsed && parsed.type === "assistant" && parsed.message) {
           const extracted = this.extractAssistantMessage(parsed.message);
@@ -846,7 +1155,9 @@ export class StructuredSessionManager {
       let stderr = "";
 
       child.stdout?.on("data", (chunk: Buffer) => {
-        lineBuf += chunk.toString();
+        const text = chunk.toString();
+        this.logger?.appendStructuredStdout(sessionId, text);
+        lineBuf += text;
         const lines = lineBuf.split("\n");
         // Keep the last (possibly incomplete) segment in the buffer.
         lineBuf = lines.pop() ?? "";
@@ -856,19 +1167,36 @@ export class StructuredSessionManager {
       });
 
       child.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
+        const text = chunk.toString();
+        this.logger?.appendStructuredStderr(sessionId, text);
+        stderr += text;
       });
 
       child.on("error", (error) => {
         console.log("[WAND] claude -p child error:", error.message);
         this.pendingChildren.delete(sessionId);
         if (emitTimer) clearTimeout(emitTimer);
+        this.logger?.appendStructuredSpawn(sessionId, {
+          kind: "claude-print-error",
+          pid: child.pid ?? null,
+          spawnedAt,
+          closedAt: new Date().toISOString(),
+          spawnError: error.message,
+        });
         reject(error);
       });
 
       child.on("close", (code) => {
         console.log("[WAND] claude -p child close code:", code, "stderr:", stderr.substring(0, 200));
         this.pendingChildren.delete(sessionId);
+        this.logger?.appendStructuredSpawn(sessionId, {
+          kind: "claude-print-close",
+          pid: child.pid ?? null,
+          spawnedAt,
+          closedAt: new Date().toISOString(),
+          exitCode: code,
+          stderrTail: stderr.slice(-2048),
+        });
 
         // Process any remaining data in the line buffer.
         if (lineBuf.trim()) {
@@ -948,7 +1276,7 @@ export class StructuredSessionManager {
         const keepRunning = killedForAskUserQuestion || !!interruptPrompt;
         const finished: SessionSnapshot = {
           ...current,
-          status: keepRunning ? "running" : "stopped",
+          status: keepRunning ? "running" : "idle",
           exitCode: keepRunning ? null : 0,
           endedAt: keepRunning ? null : new Date().toISOString(),
           output: turnState.result,
@@ -1097,6 +1425,109 @@ export class StructuredSessionManager {
     return typeof content === "undefined" || content === null ? "" : String(content);
   }
 
+  private extractCodexText(value: unknown): string {
+    if (typeof value === "string") return value;
+    if (!value || typeof value !== "object") return "";
+    if (Array.isArray(value)) {
+      return value.map((item) => this.extractCodexText(item)).filter(Boolean).join("");
+    }
+
+    const record = value as Record<string, unknown>;
+    for (const key of ["text", "output_text", "message", "content", "summary"]) {
+      const extracted = this.extractCodexText(record[key]);
+      if (extracted) return extracted;
+    }
+    return "";
+  }
+
+  private extractCodexItemBlock(item: Record<string, unknown>, completed: boolean): ContentBlock | null {
+    const id = typeof item.id === "string" ? item.id : randomUUID();
+    const type = typeof item.type === "string" ? item.type : "unknown";
+    if (type === "agent_message") {
+      const text = this.extractCodexText(item);
+      return text ? { type: "text", text } : null;
+    }
+    if (type === "reasoning") {
+      const text = this.extractCodexText(item);
+      return text ? { type: "thinking", thinking: text } : null;
+    }
+    if (type === "command_execution") {
+      const command = typeof item.command === "string" ? item.command : "";
+      const aggregatedOutput = typeof item.aggregated_output === "string" ? item.aggregated_output : "";
+      const exitCode = typeof item.exit_code === "number" ? item.exit_code : null;
+      const status = typeof item.status === "string" ? item.status : completed ? "completed" : "in_progress";
+      if (!completed) {
+        return {
+          type: "tool_use",
+          id,
+          name: "Bash",
+          input: { command, status },
+        };
+      }
+      return {
+        type: "tool_result",
+        tool_use_id: id,
+        content: aggregatedOutput || (exitCode === null ? "" : `exit_code: ${exitCode}`),
+        is_error: typeof exitCode === "number" && exitCode !== 0,
+      };
+    }
+    if (completed) {
+      const text = this.extractCodexText(item);
+      if (text) return { type: "text", text };
+    }
+    return null;
+  }
+
+  private upsertCodexBlock(blocks: ContentBlock[], block: ContentBlock): void {
+    if (block.type === "tool_result") {
+      const toolUseIndex = blocks.findIndex((existing) => existing.type === "tool_use" && existing.id === block.tool_use_id);
+      if (toolUseIndex >= 0) {
+        const nextIndex = toolUseIndex + 1;
+        if (blocks[nextIndex]?.type === "tool_result" && blocks[nextIndex].tool_use_id === block.tool_use_id) {
+          blocks[nextIndex] = block;
+        } else {
+          blocks.splice(nextIndex, 0, block);
+        }
+        return;
+      }
+    }
+    blocks.push(block);
+  }
+
+  private finishStructuredFailure(
+    current: SessionSnapshot,
+    code: number,
+    errorText: string,
+    turnState: StreamingTurnState,
+  ): SessionSnapshot {
+    const failureTurn: ConversationTurn = {
+      role: "assistant",
+      content: [{ type: "text", text: `结构化会话执行失败：${errorText}` }],
+    };
+    const msgs = [...(current.messages ?? [])];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = failureTurn;
+    else msgs.push(failureTurn);
+    return {
+      ...current,
+      status: "failed",
+      exitCode: code,
+      endedAt: new Date().toISOString(),
+      output: errorText,
+      claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+      messages: msgs,
+      pendingEscalation: null,
+      permissionBlocked: false,
+      structuredState: {
+        ...(current.structuredState as StructuredSessionState),
+        model: turnState.model ?? current.structuredState?.model,
+        inFlight: false,
+        activeRequestId: null,
+        lastError: errorText,
+      },
+    };
+  }
+
   private extractModelName(modelUsage: Record<string, unknown> | undefined): string | undefined {
     if (!modelUsage) return undefined;
     const names = Object.keys(modelUsage);
@@ -1122,6 +1553,19 @@ export class StructuredSessionManager {
       && value.cacheCreationInputTokens === undefined
       && value.totalCostUsd === undefined
     ) {
+      return undefined;
+    }
+    return value;
+  }
+
+  private extractCodexUsage(source: Record<string, unknown> | undefined): ConversationTurn["usage"] {
+    if (!source || typeof source !== "object") return undefined;
+    const value = {
+      inputTokens: typeof source.input_tokens === "number" ? source.input_tokens : undefined,
+      outputTokens: typeof source.output_tokens === "number" ? source.output_tokens : undefined,
+      cacheReadInputTokens: typeof source.cached_input_tokens === "number" ? source.cached_input_tokens : undefined,
+    };
+    if (value.inputTokens === undefined && value.outputTokens === undefined && value.cacheReadInputTokens === undefined) {
       return undefined;
     }
     return value;

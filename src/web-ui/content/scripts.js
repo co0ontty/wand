@@ -119,6 +119,7 @@
           try { return localStorage.getItem("wand-chat-model") || ""; } catch (e) { return ""; }
         })(),
         availableModels: [],
+        availableCodexModels: [],
         modelsRefreshing: false,
         sessionCreateKind: "structured",
         sessionCreateWorktree: false,
@@ -149,6 +150,10 @@
           try { var v = localStorage.getItem("wand-notif-bubble"); return v === null ? true : v === "true"; } catch (e) { return true; }
         })(),
         toolContentCache: {},
+        // Per-session WS output sequence tracker. Reset on connect/reconnect.
+        // Used to detect gaps caused by server-side backpressure drops and
+        // request a fresh snapshot.
+        lastSeqBySession: {},
         currentView: "terminal",
         terminalScale: (function() {
           try {
@@ -1350,7 +1355,7 @@
                         renderModeOptions(preferredTool, composerMode) +
                       '</select>' +
                       '<select id="chat-model-select" class="chat-mode-select chat-model-select" title="切换模型（对运行中会话发送 /model，对新会话作为 --model 启动）">' +
-                        renderChatModelOptions(getEffectiveModel(selectedSession)) +
+                        renderChatModelOptions(getEffectiveModel(selectedSession), selectedSession) +
                       '</select>' +
                       '<button id="terminal-interactive-toggle-top" class="composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨</button>' +
                       '<span class="permission-actions hidden" id="permission-actions">' +
@@ -3135,7 +3140,9 @@
         if (!session) return "";
         if (session.archived) return "已归档";
         if (session.permissionBlocked) return "等待授权";
+        if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) return "思考中";
         var statusMap = {
+          "idle": "空闲",
           "stopped": "已停止",
           "running": "运行中",
           "exited": "已退出",
@@ -3148,6 +3155,7 @@
         if (!session) return "";
         if (session.archived) return "archived";
         if (session.permissionBlocked) return "permission-blocked";
+        if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) return "running";
         return session.status || "";
       }
 
@@ -3321,7 +3329,7 @@
       function renderProviderOptions(selectedTool) {
         var tools = [
           { id: "claude", label: "Claude", desc: "完整 Claude 会话能力" },
-          { id: "codex", label: "Codex", desc: "PTY 透传，全权限启动" }
+          { id: "codex", label: "Codex", desc: "结构化 JSONL 或 PTY 会话" }
         ];
         return tools.map(function(tool) {
           var active = tool.id === selectedTool ? " active" : "";
@@ -3339,7 +3347,7 @@
         ];
         return kinds.map(function(kind) {
           var active = kind.id === selectedKind ? " active" : "";
-          var disabled = (state.sessionTool === "codex" && kind.id === "structured") ? " disabled" : "";
+          var disabled = "";
           return '<button type="button" class="mode-card session-kind-card' + active + disabled + '" data-session-kind="' + kind.id + '">' +
             '<span class="mode-card-label">' + kind.label + '</span>' +
             '<span class="mode-card-desc">' + kind.desc + '</span>' +
@@ -3357,10 +3365,12 @@
       function getSessionKindHint(kind) {
         var tool = state.sessionTool || "claude";
         if (kind === "structured") {
-          return "结构化聊天界面，支持多轮对话、流式输出和工具调用展示。";
+          return tool === "codex"
+            ? "Codex JSONL 结构化聊天界面，支持多轮对话和工具调用展示。"
+            : "结构化聊天界面，支持多轮对话、流式输出和工具调用展示。";
         }
         if (tool === "codex") {
-          return "Codex 仅支持 PTY；terminal 是原始输出，chat 是解析后的阅读视图。";
+          return "Codex PTY 终端会话；terminal 是原始输出，chat 是解析后的阅读视图。";
         }
         return "原始 PTY 终端会话，支持持续交互、终端视图和权限流。";
       }
@@ -3748,10 +3758,9 @@
           if (provider) {
             state.sessionTool = provider;
             state.preferredCommand = provider;
-            if (provider === "codex") {
-              state.sessionCreateKind = "pty";
-              state.modeValue = "full-access";
-            }
+            // Codex 现在同时支持 PTY 与结构化 runner，不再强制把 kind 切成 pty。
+            // mode 由 syncSessionModalUI() 调用 getSafeModeForTool() 自动 clamp，
+            // 不在这里硬写。
             syncSessionModalUI();
           }
         });
@@ -5687,6 +5696,11 @@
         if (terminalInteractive) {
           return "终端交互模式开启中，请直接在终端中输入";
         }
+        if (session && isStructuredSession(session)) {
+          return session.provider === "codex"
+            ? "向 Codex 发送消息；chat 为结构化对话视图"
+            : "向 Claude 发送消息；chat 为结构化对话视图";
+        }
         if (session && session.provider === "codex") {
           if (session.status !== "running") {
             return "Codex 会话已结束，无法继续发送";
@@ -5708,7 +5722,7 @@
 
       function getToolModeHint(tool, mode) {
         if (tool === "codex") {
-          return "Codex 当前仅支持 PTY 透传，并固定以 full-access 启动。";
+          return "Codex 支持 PTY 终端与结构化（JSONL）两种会话，结构化模式按 full-access 启动。";
         }
         if (mode === "full-access") {
           return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
@@ -5812,15 +5826,20 @@
         return "";
       }
 
-      function renderChatModelOptions(selected) {
-        var models = state.availableModels || [];
+      function getModelsForCurrentProvider(session) {
+        var provider = (session && session.provider) || state.sessionTool || "claude";
+        if (provider === "codex") return state.availableCodexModels || [];
+        return state.availableModels || [];
+      }
+
+      function renderChatModelOptions(selected, session) {
+        var models = getModelsForCurrentProvider(session);
         var html = '<option value="">默认（跟随设置）</option>';
         for (var i = 0; i < models.length; i++) {
           var m = models[i];
           var label = m.label || m.id;
           html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === selected ? " selected" : "") + '>' + escapeHtml(label) + '</option>';
         }
-        // If selected is unknown (custom value), prepend it as a sticky option
         if (selected && !models.some(function(m) { return m.id === selected; })) {
           html += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(selected) + '（自定义）</option>';
         }
@@ -5831,7 +5850,7 @@
         var select = document.getElementById("chat-model-select");
         if (!select) return;
         var effective = getEffectiveModel(session);
-        select.innerHTML = renderChatModelOptions(effective);
+        select.innerHTML = renderChatModelOptions(effective, session);
         select.value = effective;
       }
 
@@ -5841,6 +5860,7 @@
           .then(function(data) {
             if (data && Array.isArray(data.models)) {
               state.availableModels = data.models;
+              state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
               syncComposerModelSelect(getSelectedSession());
               updateSettingsDefaultModelSelect(data);
             }
@@ -5859,6 +5879,7 @@
           .then(function(data) {
             if (data && Array.isArray(data.models)) {
               state.availableModels = data.models;
+              state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
               syncComposerModelSelect(getSelectedSession());
               updateSettingsDefaultModelSelect(data);
               if (typeof showToast === "function") {
@@ -5882,7 +5903,7 @@
         if (!select) return;
         var previous = select.value;
         var current = previous || state.configDefaultModel || (state.config && state.config.defaultModel) || "";
-        select.innerHTML = renderChatModelOptions(current);
+        select.innerHTML = renderChatModelOptions(current, { provider: "claude" });
         select.value = current;
         var versionEl = document.getElementById("cfg-default-model-version");
         if (versionEl && data) {
@@ -5904,7 +5925,6 @@
         try { localStorage.setItem("wand-chat-model", normalized); } catch (e) {}
         var session = getSelectedSession();
         if (!session) return;
-        if (session.provider && session.provider !== "claude") return;
         fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -5921,7 +5941,8 @@
             updateSessionSnapshot(data);
             if (typeof showToast === "function") {
               var display = normalized || "默认";
-              showToast("已切换模型 → " + display, "success");
+              var hint = session.provider === "codex" ? "（下次对话生效）" : "";
+              showToast("已切换模型 → " + display + hint, "success");
             }
           }
         })
@@ -5929,11 +5950,13 @@
       }
 
       function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled) {
+        var provider = state.sessionTool === "codex" ? "codex" : "claude";
         var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
-          runner: state.structuredRunner || "claude-cli-print",
+          provider: provider,
+          runner: provider === "codex" ? "codex-cli-exec" : (state.structuredRunner || "claude-cli-print"),
           prompt: prompt || undefined,
           worktreeEnabled: worktreeEnabled === true,
           model: modelPref || undefined
@@ -6003,11 +6026,6 @@
         var tool = state.sessionTool || "claude";
         var sessionKind = state.sessionCreateKind || "structured";
 
-        if (tool === "codex" && sessionKind === "structured") {
-          sessionKind = "pty";
-          state.sessionCreateKind = "pty";
-        }
-
         state.sessionTool = tool;
         state.modeValue = getSafeModeForTool(tool, state.modeValue || state.chatMode || "default");
 
@@ -6024,7 +6042,7 @@
         if (kindCards.length) {
           kindCards.forEach(function(card) {
             var kind = card.getAttribute("data-session-kind");
-            var disabled = tool === "codex" && kind === "structured";
+            var disabled = false;
             card.classList.toggle("active", kind === sessionKind);
             card.classList.toggle("disabled", disabled);
           });
@@ -6406,12 +6424,22 @@
               // 设计原则：terminal 写入只走 ws init 与 chunk hot-path 两条
               // 权威路径——参见 case "init" 的 replace 写入与 onmessage
               // chunk 处理。这里只在 ws 离线兜底时才 append 写入。
-              if (!state.wsConnected) {
+              //
+              // wsLikelyTakingOver: 即使 wsConnected=false（onopen 还没 fire），
+              // 只要 ws.readyState 是 CONNECTING 或 OPEN，就视为 ws 即将
+              // 接管。否则 selectSession → loadOutput resolve 比 ws onopen
+              // 早时（常见于刷新页面后的首次连接）会误走 fallback，写入
+              // terminal 后 ws init 又写一次，造成双路重叠。
+              var wsLikelyTakingOver = !!state.ws && (
+                state.ws.readyState === WebSocket.OPEN ||
+                state.ws.readyState === WebSocket.CONNECTING
+              );
+              if (!wsLikelyTakingOver) {
                 syncTerminalBuffer(id, data.output, { mode: "append" });
                 // 离线兜底路径自己负责 fit + replay，否则尺寸不对。
                 ensureTerminalFit("session-switch", { forceReplay: true });
               } else {
-                // ws 在线场景：仅校准列宽，不重 replay（init 的
+                // ws 在线/连接中：仅校准列宽，不重 replay（init 的
                 // ensureTerminalFitWithRetry("init") 会负责按真实
                 // 宽度的全量基线写入）。
                 ensureTerminalFit("session-switch");
@@ -6567,7 +6595,7 @@
           lastFocusedElement = document.activeElement;
           state.sessionTool = getPreferredTool();
           state.preferredCommand = state.sessionTool;
-          state.sessionCreateKind = state.sessionTool === "codex" ? "pty" : "structured";
+          state.sessionCreateKind = "structured";
           state.sessionCreateWorktree = false;
           state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
           syncSessionModalUI();
@@ -7829,12 +7857,13 @@
       }
 
       function startStructuredSessionFromModal(cwd, mode, worktreeEnabled, errorEl) {
-        console.log("[WAND] startStructuredSessionFromModal cwd:", cwd, "mode:", mode, "worktreeEnabled:", worktreeEnabled);
+        var provider = state.sessionTool === "codex" ? "codex" : "claude";
+        console.log("[WAND] startStructuredSessionFromModal provider:", provider, "cwd:", cwd, "mode:", mode, "worktreeEnabled:", worktreeEnabled);
         _sessionCreating = true;
         state.modeValue = mode;
         state.chatMode = mode;
-        state.sessionTool = "claude";
-        state.preferredCommand = "claude";
+        state.sessionTool = provider;
+        state.preferredCommand = provider;
         syncComposerModeSelect();
         syncComposerModelSelect(getSelectedSession());
         return createStructuredSession(undefined, cwd, mode, worktreeEnabled)
@@ -8490,6 +8519,9 @@
       function isSelectedSessionRunning() {
         if (!state.selectedId) return false;
         var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
+        if (isStructuredSession(selectedSession)) {
+          return !!(selectedSession.structuredState && selectedSession.structuredState.inFlight);
+        }
         return !!selectedSession && selectedSession.status === "running";
       }
 
@@ -8499,6 +8531,9 @@
 
       function hasAnyBusySession() {
         return state.sessions.some(function(s) {
+          if (isStructuredSession(s)) {
+            return !!(s.structuredState && s.structuredState.inFlight) && !s.archived;
+          }
           return s.status === "running" && !s.archived;
         });
       }
@@ -9536,7 +9571,9 @@
         var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
         var structured = isStructuredSession(selectedSession);
         var isCodex = selectedSession && selectedSession.provider === "codex";
-        var isRunning = !!selectedSession && selectedSession.status === "running";
+        var isRunning = structured
+          ? !!(selectedSession && selectedSession.structuredState && selectedSession.structuredState.inFlight)
+          : !!selectedSession && selectedSession.status === "running";
         var composer = document.getElementById("input-box");
         // Update both toggle buttons (topbar and terminal-header)
         var toggles = ["terminal-interactive-toggle-top"];
@@ -9561,7 +9598,7 @@
               : "Enter 发送 · Shift+Enter 换行";
           }
         }
-        var disableStructuredInput = !!selectedSession && structured && isCodex && !isRunning;
+        var disableStructuredInput = false;
         // 历史会话只要可自动恢复（Claude provider + 有 claudeSessionId），
         // 输入框/发送按钮就保持可用——发送时由 ensureSessionReadyForInput 透明完成恢复。
         var canResumeOnSend = !structured && !isRunning && canAutoResumeSession(selectedSession);
@@ -9573,9 +9610,9 @@
         var sendBtn = document.getElementById("send-input-button");
         if (sendBtn) {
           sendBtn.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning && !canResumeOnSend);
-          sendBtn.setAttribute("title", isCodex
-            ? (isRunning ? "发送给 Codex" : "Codex 会话已结束")
-            : (structured ? "发送" : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
+          sendBtn.setAttribute("title", structured
+            ? "发送"
+            : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
         }
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
@@ -11275,6 +11312,10 @@
             if (wrap.parentNode === output) output.removeChild(wrap);
           }
         }
+        // widePadAnsi 是模块级状态机，跨终端实例时若卡在 esc/csi/string 等
+        // 中间态，下一个 wterm 实例的首批字节会被错误归类（首字符被吃成
+        // ANSI 序列尾巴）。重建终端前显式复位，避免状态泄漏到新实例。
+        resetWideParserState();
         state.terminalSessionId = null;
         state.terminalOutput = "";
         state.terminalAutoFollow = true;
@@ -11498,6 +11539,9 @@
             // starts the ladder from 500ms again.
             state.wsReconnectAttempts = 0;
             cancelWsReconnect();
+            // Server's per-client output sequence counter restarts on every
+            // new socket; clear ours so the first init isn't treated as a gap.
+            state.lastSeqBySession = {};
             // Subscribe to current session if any
             subscribeToSession(state.selectedId);
             // Flush pending messages after reconnection
@@ -11514,6 +11558,43 @@
           ws.onmessage = function(event) {
             try {
               var msg = JSON.parse(event.data);
+              if (msg && msg.type === "resync_required" && msg.sessionId) {
+                // Server dropped some output events under backpressure and
+                // is asking us for a fresh snapshot. Send a resync so the
+                // server replies with a new init carrying the full output.
+                if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+                  try {
+                    state.ws.send(JSON.stringify({ type: "resync", sessionId: msg.sessionId }));
+                  } catch (sendErr) { /* ignore */ }
+                }
+                if (!state.lastSeqBySession) state.lastSeqBySession = {};
+                state.lastSeqBySession[msg.sessionId] = 0;
+                return;
+              }
+              if (msg && (msg.type === "init" || msg.type === "output") && msg.sessionId && typeof msg.seq === "number") {
+                if (!state.lastSeqBySession) state.lastSeqBySession = {};
+                var prevSeq = state.lastSeqBySession[msg.sessionId] || 0;
+                if (msg.type === "init") {
+                  state.lastSeqBySession[msg.sessionId] = msg.seq;
+                } else if (msg.seq === prevSeq + 1) {
+                  state.lastSeqBySession[msg.sessionId] = msg.seq;
+                } else if (msg.seq > prevSeq + 1 && prevSeq > 0) {
+                  // We missed at least one event — request a resync and
+                  // skip this stale event so we don't apply a partial gap.
+                  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+                    try {
+                      state.ws.send(JSON.stringify({ type: "resync", sessionId: msg.sessionId }));
+                    } catch (sendErr) { /* ignore */ }
+                  }
+                  state.lastSeqBySession[msg.sessionId] = 0;
+                  return;
+                } else {
+                  // seq <= prevSeq: duplicate or out-of-order from a stale
+                  // queue; drop quietly.
+                  if (msg.seq < prevSeq) return;
+                  state.lastSeqBySession[msg.sessionId] = msg.seq;
+                }
+              }
               handleWebSocketMessage(msg);
             } catch (e) {
               // Ignore parse errors

@@ -184,19 +184,26 @@ export function registerSessionRoutes(
     const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string };
     console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, provider: body.provider, worktreeEnabled: body.worktreeEnabled === true, hasPrompt: !!body.prompt, model: body.model }));
     try {
-      if (body.provider && body.provider !== "claude") {
-        res.status(400).json({ error: "结构化会话当前仅支持 Claude provider。" });
+      if (body.provider && body.provider !== "claude" && body.provider !== "codex") {
+        res.status(400).json({ error: "结构化会话当前仅支持 Claude 或 Codex provider。" });
         return;
       }
+      const provider = body.provider === "codex" ? "codex" : "claude";
       const snapshot = structured.createSession({
         cwd: body.cwd?.trim() || process.cwd(),
         mode: normalizeMode(body.mode, defaultMode),
-        prompt: body.prompt,
-        runner: body.runner ?? "claude-cli-print",
+        provider,
+        runner: body.runner ?? (provider === "codex" ? "codex-cli-exec" : "claude-cli-print"),
         worktreeEnabled: body.worktreeEnabled === true,
         model: typeof body.model === "string" ? body.model.trim() : undefined,
       });
       console.log("[WAND] structured session created:", JSON.stringify({ id: snapshot.id, sessionKind: snapshot.sessionKind, runner: snapshot.runner, status: snapshot.status }));
+      const prompt = body.prompt?.trim();
+      if (prompt) {
+        const finished = await structured.sendMessage(snapshot.id, prompt);
+        res.status(201).json(finished);
+        return;
+      }
       res.status(201).json(snapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法启动结构化会话。") });
