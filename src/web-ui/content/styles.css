@@ -382,8 +382,9 @@
     /* .sidebar-open class toggled for semantic purposes only; sidebar overlays without resizing main layout */
     .sidebar-open:not(.sidebar-pinned) .input-panel {
       opacity: 0;
+      visibility: hidden;
       pointer-events: none;
-      transition: opacity 0.2s ease;
+      transition: opacity 0.2s ease, visibility 0s linear 0.2s;
     }
 
     /* ===== 侧边栏常驻 ===== */
@@ -2236,6 +2237,52 @@
       gap: 8px;
       position: relative;
     }
+
+    /* 顶部细进度条：会话运行中时流动 */
+    .main-header-row::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2px;
+      pointer-events: none;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(var(--accent-rgb, 197, 101, 61), 0.85) 35%,
+        rgba(var(--accent-rgb, 197, 101, 61), 1) 50%,
+        rgba(var(--accent-rgb, 197, 101, 61), 0.85) 65%,
+        transparent 100%
+      );
+      background-size: 220% 100%;
+      background-position: 100% center;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+    .main-header-row.is-running::after {
+      opacity: 1;
+      animation: topbarProgressFlow 1.6s linear infinite;
+    }
+    .main-header-row.is-permission-blocked::after {
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(169, 106, 47, 0.85) 35%,
+        rgba(169, 106, 47, 1) 50%,
+        rgba(169, 106, 47, 0.85) 65%,
+        transparent 100%
+      );
+      background-size: 220% 100%;
+      animation-duration: 2.4s;
+    }
+    @keyframes topbarProgressFlow {
+      0%   { background-position: 100% center; }
+      100% { background-position: -100% center; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .main-header-row.is-running::after { animation: none; opacity: 0.7; }
+    }
     .topbar-left {
       display: flex;
       align-items: center;
@@ -2381,6 +2428,18 @@
     }
     .session-status-pill.failed .session-status-dot { background: var(--danger); }
     .session-status-pill.archived { opacity: 0.7; }
+    /* 运行/思考中状态的累计耗时 */
+    .session-status-pill .session-status-elapsed {
+      flex-shrink: 0;
+      margin-left: 4px;
+      padding-left: 6px;
+      border-left: 1px solid currentColor;
+      opacity: 0.75;
+      font-variant-numeric: tabular-nums;
+      font-family: var(--font-mono, monospace);
+      font-size: 0.65rem;
+      letter-spacing: -0.01em;
+    }
 
     /* Current task indicator（动态活动徽标，由 updateTaskDisplay 管理） */
     .current-task {
@@ -3413,6 +3472,31 @@
     .chat-message.assistant {
       align-self: flex-start;
       max-width: 95%;
+    }
+
+    /* 流式生成中：在最新一条 assistant 气泡左侧加呼吸竖条 */
+    .chat-message.assistant.is-streaming {
+      position: relative;
+    }
+    .chat-message.assistant.is-streaming::before {
+      content: "";
+      position: absolute;
+      left: -6px;
+      top: 8%;
+      bottom: 8%;
+      width: 3px;
+      border-radius: 2px;
+      background: rgba(var(--accent-rgb, 197, 101, 61), 0.85);
+      box-shadow: 0 0 8px rgba(var(--accent-rgb, 197, 101, 61), 0.45);
+      animation: assistantStreamingBreath 1.4s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes assistantStreamingBreath {
+      0%, 100% { opacity: 0.45; transform: scaleY(0.92); }
+      50%      { opacity: 1;    transform: scaleY(1); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .chat-message.assistant.is-streaming::before { animation: none; opacity: 0.8; }
     }
 
     .chat-message.system-info {
@@ -4864,6 +4948,7 @@
       overscroll-behavior: contain;
       touch-action: pan-y;
       border-top: 1px solid var(--border-subtle);
+      transition: opacity 0.2s ease, visibility 0s;
     }
 
     .input-composer {
@@ -5763,6 +5848,16 @@
     .input-textarea.has-dir-indicator {
       padding-bottom: 28px;
       min-height: 60px;
+    }
+    /* 终端交互模式下 textarea 设为 readonly，按键透传到 PTY。
+       视觉上给一个降饱和度 + 斜体 placeholder，让用户感知到"这里
+       不再录字、键被直接送到终端"，避免疑惑为什么打字没字落下来。 */
+    .input-textarea.is-terminal-passthrough {
+      opacity: 0.7;
+      cursor: default;
+    }
+    .input-textarea.is-terminal-passthrough::placeholder {
+      font-style: italic;
     }
 
     .input-inline-controls {

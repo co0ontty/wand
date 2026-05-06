@@ -240,8 +240,99 @@
       // ── Structured session status bar (in-flight timer) ──
       var _statusBarTimerId = null;
       var _statusBarStartTime = 0;
+      var _runningIndicatorsTimerId = null;
+      var _runningIndicatorsStartTime = 0;
+
+      // 计算会话整体的"在跑"信号，统一驱动顶部进度条/徽章计时/气泡呼吸条。
+      function computeRunningSignal(session) {
+        if (!session) return { active: false };
+        if (session.archived) return { active: false };
+        var permBlocked = !!session.permissionBlocked;
+        var inFlight = !!(isStructuredSession(session)
+          && session.structuredState && session.structuredState.inFlight);
+        var ptyRunning = !isStructuredSession(session) && session.status === "running";
+        return {
+          active: inFlight || ptyRunning || permBlocked,
+          inFlight: inFlight,
+          ptyRunning: ptyRunning,
+          permissionBlocked: permBlocked,
+        };
+      }
+
+      function formatElapsedShort(ms) {
+        var s = Math.max(0, Math.floor(ms / 1000));
+        if (s < 60) return s + "s";
+        var m = Math.floor(s / 60);
+        var rs = s % 60;
+        if (m < 60) return m + "m" + (rs ? " " + rs + "s" : "");
+        var h = Math.floor(m / 60);
+        var rm = m % 60;
+        return h + "h" + (rm ? " " + rm + "m" : "");
+      }
+
+      // 集中刷新：顶部进度条 + 顶部徽章计时 + 助手气泡左侧呼吸条。
+      function updateRunningIndicators(session) {
+        var sig = computeRunningSignal(session);
+        var headerRow = document.querySelector(".main-header-row");
+        var pill = headerRow ? headerRow.querySelector(".session-status-pill") : null;
+        var chatMessages = document.querySelector(".chat-messages");
+
+        // A. 顶部进度条
+        if (headerRow) {
+          headerRow.classList.toggle("is-running", sig.active);
+          headerRow.classList.toggle("is-permission-blocked", sig.permissionBlocked);
+        }
+
+        // B. 顶部徽章计时（仅 inFlight 显示，PTY running 不强制显示）
+        if (pill) {
+          var elapsedEl = pill.querySelector(".session-status-elapsed");
+          if (sig.inFlight) {
+            if (!_runningIndicatorsStartTime) {
+              // 优先复用 renderStructuredStatusBar 已记录的真实起点
+              _runningIndicatorsStartTime = _statusBarStartTime > 0 ? _statusBarStartTime : Date.now();
+            }
+            var label = formatElapsedShort(Date.now() - _runningIndicatorsStartTime);
+            if (!elapsedEl) {
+              elapsedEl = document.createElement("span");
+              elapsedEl.className = "session-status-elapsed";
+              pill.appendChild(elapsedEl);
+            }
+            elapsedEl.textContent = label;
+          } else {
+            _runningIndicatorsStartTime = 0;
+            if (elapsedEl) elapsedEl.remove();
+          }
+        }
+
+        // C. 助手气泡左侧呼吸条（仅最新一条 assistant 消息）
+        if (chatMessages) {
+          var prev = chatMessages.querySelectorAll(".chat-message.assistant.is-streaming");
+          for (var i = 0; i < prev.length; i++) prev[i].classList.remove("is-streaming");
+          if (sig.inFlight || sig.ptyRunning) {
+            // chat-messages 使用 column-reverse，DOM 第一个 .chat-message 即视觉最新
+            var newest = chatMessages.querySelector(".chat-message.assistant");
+            if (newest) newest.classList.add("is-streaming");
+          }
+        }
+
+        // 维持每秒一次的刷新心跳，让 elapsed 数字持续滚动
+        if (sig.active) {
+          if (!_runningIndicatorsTimerId) {
+            _runningIndicatorsTimerId = setInterval(function() {
+              var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
+              updateRunningIndicators(sel);
+            }, 1000);
+          }
+        } else if (_runningIndicatorsTimerId) {
+          clearInterval(_runningIndicatorsTimerId);
+          _runningIndicatorsTimerId = null;
+        }
+      }
 
       function renderStructuredStatusBar(chatMessages, session) {
+        // 先驱动跨视图的运行指示器（顶部进度条/徽章计时/气泡呼吸条）
+        updateRunningIndicators(session);
+
         // Status bar now lives above the input-composer, inside .input-panel
         var inputPanel = document.querySelector(".input-panel");
         var existing = document.querySelector(".structured-status-bar");
@@ -1042,6 +1133,12 @@
         // 初始加载或会话切换后惰性触发 git 状态拉取（loadGitStatus 自带节流）。
         if (isLoggedIn && state.selectedId && state.gitStatusSessionId !== state.selectedId) {
           loadGitStatus(state.selectedId);
+        }
+
+        // DOM 整体重渲后，重新挂上"运行中"指示器（顶部进度条/徽章计时/气泡呼吸条）
+        if (isLoggedIn) {
+          var __sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
+          updateRunningIndicators(__sel);
         }
       }
 
@@ -5299,6 +5396,85 @@
       }
       stripWideFillerForCopy();
 
+      // ── PTY 链路时序参数索引 ──────────────────────────────────────────
+      // 本文件中所有影响 PTY 输入/输出节流的常量集中说明（值仍在使用处定义，
+      // 方便阅读上下文，但请保持一致命名以便此索引可 grep 跳转）：
+      //
+      //   服务端（src/ws-broadcast.ts、src/process-manager.ts）：
+      //     OUTPUT_DEBOUNCE_MS = 16     PTY data → ws 推送 debounce
+      //     OUTPUT_MAX_SIZE = 200_000   record.output ring buffer 字节上限
+      //
+      //   客户端（本文件）：
+      //     CLIENT_OUTPUT_MAX / CLIENT_OUTPUT_TRIM_AT  state.terminalOutput 窗口
+      //     RESYNC_THROTTLE_MS = 400    chunk → softResync 节流最小间隔
+      //     RESYNC_TAIL_MS = 350        节流尾巴 timer 等待
+      //     RESYNC_BUDGET_*             5s 内 resync 频次告警阈值
+      //     CHAT_RENDER_LIVE_MS = 150   活跃流时 renderChat debounce
+      //     CHAT_RENDER_IDLE_MS = 30    空闲时 renderChat debounce
+      //     PENDING_INPUT_TTL_MS = 5000 ws 离线输入队列 TTL
+      //     PENDING_INPUT_MAX = 100     离线队列长度上限
+      //
+      // 调参时的关键不变式：
+      //   OUTPUT_DEBOUNCE_MS  <  CHAT_RENDER_IDLE_MS  ≤  CHAT_RENDER_LIVE_MS
+      //   RESYNC_TAIL_MS      ≤  RESYNC_THROTTLE_MS
+      // 否则会出现"上游推得比下游消化得快但下游 timer 还没到期"的堵塞。
+      var CHAT_RENDER_LIVE_MS = 150;
+      var CHAT_RENDER_IDLE_MS = 30;
+
+      // 客户端的 state.terminalOutput 仅用于 softResyncTerminal 时重放给
+      // wterm 作状态恢复，并不是用户能看到的 scrollback —— wterm 自己有
+      // 独立 scrollback。但如果不限长，长跑会话累加几 MB 后每次 resync
+      // 都会把整段重新喂给 wterm，CPU/内存随时间线性变差。
+      //
+      // 服务端 record.output 用 appendWindow(..., 200_000) 限了 200KB，这里
+      // 客户端给一个稍宽的上限做兜底；超过就按行边界裁掉头部，行边界处
+      // ANSI 状态机一定是 idle 状态，重放结果与未裁等价。找不到行边界时
+      // 退化到字节切，并避开 UTF-16 半截、ANSI 半截。
+      var CLIENT_OUTPUT_MAX = 256 * 1024;
+      var CLIENT_OUTPUT_TRIM_AT = 320 * 1024;
+      function clampClientTerminalOutput(buf) {
+        if (!buf || buf.length <= CLIENT_OUTPUT_TRIM_AT) return buf;
+        var start = buf.length - CLIENT_OUTPUT_MAX;
+        // UTF-16 low surrogate
+        if (start > 0 && start < buf.length) {
+          var c0 = buf.charCodeAt(start);
+          if (c0 >= 0xdc00 && c0 <= 0xdfff) start++;
+        }
+        // 优先在 lookahead 内找下一个换行符切割
+        var LOOKAHEAD = 4096;
+        var upper = Math.min(start + LOOKAHEAD, buf.length);
+        for (var i = start; i < upper; i++) {
+          if (buf.charCodeAt(i) === 0x0a) return buf.slice(i + 1);
+        }
+        // 没换行 → 检查 start 是否落在未结束的 ESC 序列里
+        var lookback = Math.max(0, start - 256);
+        var escAt = -1;
+        for (var j = start - 1; j >= lookback; j--) {
+          var c = buf.charCodeAt(j);
+          if (c === 0x1b) { escAt = j; break; }
+          if (c === 0x07) break;
+          if (c >= 0x40 && c <= 0x7e) break;
+        }
+        if (escAt !== -1) {
+          var terminated = false;
+          for (var k = escAt + 1; k < start; k++) {
+            var ck = buf.charCodeAt(k);
+            if (ck === 0x07) { terminated = true; break; }
+            if (ck >= 0x40 && ck <= 0x7e) { terminated = true; break; }
+          }
+          if (!terminated) {
+            var ahead = Math.min(start + 256, buf.length);
+            for (var m = start; m < ahead; m++) {
+              var cm = buf.charCodeAt(m);
+              if (cm === 0x07 || (cm >= 0x40 && cm <= 0x7e)) {
+                return buf.slice(m + 1);
+              }
+            }
+          }
+        }
+        return buf.slice(start);
+      }
+
       function resetTerminal() {
         if (!state.terminal) return;
         // 优先走 wterm-entry.js 自定义 WTerm 子类暴露的 reset()：它会调用
@@ -5324,14 +5500,44 @@
       // correctly (e.g. wterm.onResize fired this resync — bouncing back into
       // ensureTerminalFit would just trigger another remeasure → resize → onResize
       // → softResyncTerminal recursion).
+      //
+      // 重放整 buffer 而非截短：alt screen 切换 / 滚动区 / 字符集等模式开关
+      // 依赖从 buffer 开头开始消费。从中间切会丢失这些状态机指令，治标变
+      // 造反。H1 已经把 buffer 限到 256KB，对 wterm WASM 来说这是 ms 级开销。
+      var _resyncStatsWindowStart = 0;
+      var _resyncStatsCount = 0;
+      var _resyncLastWarnAt = 0;
+      var RESYNC_BUDGET_WINDOW_MS = 5000;
+      var RESYNC_BUDGET_MAX = 12;
+      var RESYNC_WARN_COOLDOWN_MS = 30000;
       function softResyncTerminal(options) {
         if (!state.terminal || !state.terminalOutput) return false;
         var opts = options || {};
+        var bufLen = state.terminalOutput.length;
+        var startedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
         resetTerminal();
         wandTerminalWrite(state.terminal, state.terminalOutput);
         state.lastTerminalResyncAt = Date.now();
         maybeScrollTerminalToBottom("output");
         if (!opts.skipFit) ensureTerminalFit("refresh");
+        // 统计 5s 窗口内的 resync 次数，过密时打 warn 帮助诊断
+        // ——比如 wterm 状态机被反复弄脏、上游持续推原地重绘的菜单。
+        // 单次 warn 后冷却 30s，避免刷屏。
+        var now = Date.now();
+        if (now - _resyncStatsWindowStart > RESYNC_BUDGET_WINDOW_MS) {
+          _resyncStatsWindowStart = now;
+          _resyncStatsCount = 1;
+        } else {
+          _resyncStatsCount++;
+          if (_resyncStatsCount > RESYNC_BUDGET_MAX && now - _resyncLastWarnAt > RESYNC_WARN_COOLDOWN_MS) {
+            _resyncLastWarnAt = now;
+            var endedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+            console.warn("[wand] softResyncTerminal high frequency",
+              "count=" + _resyncStatsCount + "/" + Math.round((now - _resyncStatsWindowStart) / 100) / 10 + "s",
+              "bufLen=" + bufLen,
+              "lastReplayMs=" + Math.round(endedAt - startedAt));
+          }
+        }
         return true;
       }
 
@@ -5349,20 +5555,43 @@
       // DOM 行经常残留或错位，导致新写入的内容被堆到 grid 顶部 ——
       // 用户体感就是"明明在改菜单，结果跑到最上面去了"。
       //
-      // 已有的 pendingEscalation/permissionBlocked 状态变化触发的
-      // scheduleSoftResyncTerminal 在这种场景下不会触发（这两个布尔
-      // 在菜单交互过程中不变），health check 的 30s 兜底也太慢，且
-      // 连续按键时 chunkPause 永远不成立（lastChunkAt 一直在刷新）。
+      // 兜底策略是"重置 wterm 状态机 + 重放整 buffer"（softResyncTerminal）。
+      // 这里的关键是触发时机：旧实现用 350ms debounce，但用户实际持续
+      // 按方向键时，每次按键都会让 PTY 回流一次原地重绘 chunk，timer
+      // 被反复 reset，永远等不到静默期，softResync 实际从不触发——
+      // 这是这个保护机制的根本逻辑错误。
       //
-      // 这里在写 chunk 时被动检测：含上述序列就 schedule 一次 350ms
-      // debounce 的 softResync。连续按键时 timer 反复被重置，仅在
-      // 停顿后真正重放一次 buffer，开销可控。
+      // 改成 leading + tail 的节流：第一次进入立即 resync（leading），
+      // 节流窗口内的连续 chunk 只挂一个尾巴 timer 兜底，不重置。这样
+      // 持续按键期间每 RESYNC_THROTTLE_MS 强制 resync 一次，用户停手
+      // 时由尾巴 timer 收尾。不依赖按键停顿这种永远不发生的条件。
       var IN_PLACE_REDRAW_RE = /\x1b\[\d*(?:;\d*)?[ABCDfHJK]/;
+      var RESYNC_THROTTLE_MS = 400;
+      var RESYNC_TAIL_MS = 350;
+      var _resyncChunkLastAt = 0;
+      var _resyncChunkTailTimer = null;
       function maybeScheduleResyncForChunk(chunk) {
         if (!chunk || typeof chunk !== "string") return;
         if (chunk.indexOf("\x1b[") === -1) return;
         if (!IN_PLACE_REDRAW_RE.test(chunk)) return;
-        scheduleSoftResyncTerminal(350);
+        var now = Date.now();
+        var sinceLast = now - _resyncChunkLastAt;
+        if (sinceLast >= RESYNC_THROTTLE_MS) {
+          if (_resyncChunkTailTimer) {
+            clearTimeout(_resyncChunkTailTimer);
+            _resyncChunkTailTimer = null;
+          }
+          _resyncChunkLastAt = now;
+          softResyncTerminal();
+          return;
+        }
+        if (_resyncChunkTailTimer) return;
+        var wait = Math.max(RESYNC_TAIL_MS, RESYNC_THROTTLE_MS - sinceLast);
+        _resyncChunkTailTimer = setTimeout(function() {
+          _resyncChunkTailTimer = null;
+          _resyncChunkLastAt = Date.now();
+          softResyncTerminal();
+        }, wait);
       }
 
       function syncTerminalBuffer(sessionId, output, options) {
@@ -9056,7 +9285,9 @@
         // the HTTP response arrives.
         var epochBeforePost = state.queueEpoch;
 
-        return fetch("/api/structured-sessions/" + state.selectedId + "/messages", {
+        // 用 session.id（参数绑定，in-flight 期间不变）而不是 state.selectedId
+        // 拼 URL，避免用户切到别的会话后 fetch 落到错误 sessionId。
+        return fetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -9079,11 +9310,14 @@
               delete snapshot.queuedMessages;
             }
             updateSessionSnapshot(snapshot);
-            var refreshedSession = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
-            state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot.output, false));
-            renderChat(true);
-            if (isInterrupting) {
-              showToast("已中断上一条回复，正在处理新消息…", "info");
+            // 仅当 snapshot 仍属当前选中会话时才覆盖视图状态，否则只更新底层数据。
+            if (snapshot.id === state.selectedId) {
+              var refreshedSession = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
+              state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot.output, false));
+              renderChat(true);
+              if (isInterrupting) {
+                showToast("已中断上一条回复，正在处理新消息…", "info");
+              }
             }
           }
         })
@@ -9283,13 +9517,26 @@
         }, Promise.resolve());
       }
 
+      // pendingMessages 用于 ws 离线时缓存输入，重连后批量回放。
+      // 旧实现：按字符串入队，仅靠长度上限 100 控制；超出 shift 最早一条。
+      // 问题：用户连续按方向键时几秒就把队列填满；shift 把最早按下的丢
+      // 掉，剩下的反而是后期按的——重连后回放的"输入序列"和用户实际
+      // 按下的顺序矛盾。给每条消息打时间戳，flush 时直接丢弃过期项，
+      // 让"离线超过 N 秒后重连"恢复成一个干净状态而不是错位重放。
+      var PENDING_INPUT_TTL_MS = 5000;
+      var PENDING_INPUT_MAX = 100;
+      function enqueuePendingInput(input) {
+        if (!input) return;
+        if (state.pendingMessages.length >= PENDING_INPUT_MAX) {
+          state.pendingMessages.shift();
+        }
+        state.pendingMessages.push({ input: input, at: Date.now() });
+      }
+
       function queueOfflineTerminalChunks(chunks) {
         var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) { return !!chunk; }) : [];
         sequence.forEach(function(chunk) {
-          if (state.pendingMessages.length >= 100) {
-            state.pendingMessages.shift();
-          }
-          state.pendingMessages.push(chunk);
+          enqueuePendingInput(chunk);
         });
       }
 
@@ -9307,16 +9554,21 @@
 
       function postInput(input, shortcutKey, viewOverride) {
         if (!state.selectedId) return Promise.resolve();
+        // 锁定本次请求归属的 sessionId。fetch 发起后用户可能切到别的会话，
+        // 后续 then 回调里直接用 state.selectedId 会误把 A 的响应应用到 B：
+        //   - URL 上拼错会话（虽然 fetch 已经求值过 URL，但 markSessionStopped
+        //     等 in-flight 引用会读最新值 → 把 B 标为 stopped 但实际是 A 失败）
+        //   - response.snapshot 属于 A，被 setCurrentMessages 误覆盖到 B 视图
+        // 用 requestSessionId 锁住请求方，渲染相关动作再单独判断 snapshot.id
+        // === 当前 state.selectedId 才执行。
+        var requestSessionId = state.selectedId;
         var effectiveView = viewOverride || state.currentView;
 
         // Pre-check: don't send if session is not running
         if (!isSelectedSessionRunning()) {
           // If WebSocket is disconnected, queue for flush on reconnect
           if (!state.wsConnected) {
-            if (state.pendingMessages.length >= 100) {
-              state.pendingMessages.shift();
-            }
-            state.pendingMessages.push(input);
+            enqueuePendingInput(input);
             console.log("[wand] postInput: session not running, queued for reconnect", {
               sessionId: state.selectedId,
               inputLength: input.length
@@ -9332,10 +9584,7 @@
 
         // If WebSocket is disconnected, queue the message (no HTTP fetch while offline)
         if (!state.wsConnected) {
-          if (state.pendingMessages.length >= 100) {
-            state.pendingMessages.shift();
-          }
-          state.pendingMessages.push(input);
+          enqueuePendingInput(input);
           console.log("[wand] postInput: WebSocket disconnected, queued message", {
             sessionId: state.selectedId,
             inputLength: input.length
@@ -9350,7 +9599,7 @@
           wsConnected: state.wsConnected
         });
 
-        return fetch("/api/sessions/" + state.selectedId + "/input", {
+        return fetch("/api/sessions/" + requestSessionId + "/input", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -9365,11 +9614,11 @@
                 status: res.status,
                 errorCode: error.errorCode,
                 message: error.message,
-                sessionId: state.selectedId
+                sessionId: requestSessionId
               });
               // Mark session as stopped for unavailable errors
               if (isSessionUnavailableError(error)) {
-                markSessionStopped(state.selectedId, error.sessionStatus || "exited");
+                markSessionStopped(requestSessionId, error.sessionStatus || "exited");
               }
               throw error;
             });
@@ -9378,11 +9627,18 @@
         })
         .then(function(snapshot) {
           if (snapshot && snapshot.id) {
+            // 底层 sessions 数据按 id 索引，无论是否仍是当前选中都可以
+            // 安全更新（不会污染其他会话）。
             updateSessionSnapshot(snapshot);
-            if (snapshot.messages && snapshot.messages.length > 0) {
-              state.currentMessages = snapshot.messages;
+            // 但 currentMessages / renderChat 是当前视图状态，必须仅当
+            // snapshot 仍属当前选中会话时才执行；否则会把 A 的消息列表
+            // 渲染到 B 的 chat 视图。
+            if (snapshot.id === state.selectedId) {
+              if (snapshot.messages && snapshot.messages.length > 0) {
+                state.currentMessages = snapshot.messages;
+              }
+              renderChat(true);
             }
-            renderChat(true);
           }
           return snapshot;
         });
@@ -9402,6 +9658,18 @@
 
       function isTerminalInteractionAvailable() {
         return !!state.selectedId && state.currentView === "terminal";
+      }
+
+      // 判断一条带 sessionId 的 ws 消息是否应该被当前 wterm 实例消费。
+      // 收敛多处散落的"selectedId 一致 + terminalSessionId 兼容"判断，避免
+      // 后续重构时漏改某一处导致旧会话的输出污染当前终端。
+      // terminalSessionId 为空（尚未首次 init/切换刚发生）视为可接受任何
+      // sessionId —— 这是首条 chunk 触发自我初始化的场景。
+      function isCurrentTerminalSession(sessionId) {
+        if (!state.terminal || !sessionId) return false;
+        if (sessionId !== state.selectedId) return false;
+        if (state.terminalSessionId && state.terminalSessionId !== sessionId) return false;
+        return true;
       }
 
       function shouldCaptureTerminalEvent(event) {
@@ -9606,6 +9874,13 @@
           composer.placeholder = getComposerPlaceholder(selectedSession, state.terminalInteractive);
           composer.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning && !canResumeOnSend);
           composer.setAttribute("aria-disabled", composer.disabled ? "true" : "false");
+          // 终端交互模式下，按键由 document capture phase 直接透传到 PTY；
+          // 把 textarea 设为 readonly 避免浏览器同时把字符落进输入框
+          // （IME 组合输入、preventDefault 不彻底等边界场景下会出现"键
+          // 发到了 PTY、输入框里也留下了字"的双状态）。disabled 会让
+          // textarea 失去焦点能力影响一些场景，readOnly 更轻、保留焦点。
+          composer.readOnly = !!state.terminalInteractive;
+          composer.classList.toggle("is-terminal-passthrough", !!state.terminalInteractive);
         }
         var sendBtn = document.getElementById("send-input-button");
         if (sendBtn) {
@@ -9783,8 +10058,20 @@
 
         // Send queued messages in order, bypassing the session-running check
         // since our local state may be stale right after reconnect
-        var queue = state.pendingMessages.slice();
+        var now = Date.now();
+        var queue = [];
+        var dropped = 0;
+        state.pendingMessages.forEach(function(item) {
+          // Backward-compatible: 老逻辑里 entries 可能是裸字符串。
+          if (typeof item === "string") { queue.push(item); return; }
+          if (!item || typeof item.input !== "string") return;
+          if (now - (item.at || 0) > PENDING_INPUT_TTL_MS) { dropped++; return; }
+          queue.push(item.input);
+        });
         state.pendingMessages = [];
+        if (dropped > 0) {
+          console.log("[wand] flushPendingMessages: dropped " + dropped + " stale input(s)");
+        }
 
         var sendPromise = Promise.resolve();
         queue.forEach(function(input) {
@@ -9798,7 +10085,10 @@
 
       function sendInputDirect(input) {
         if (!input || !state.selectedId) return Promise.resolve();
-        return fetch("/api/sessions/" + state.selectedId + "/input", {
+        // 同 postInput：flushPendingMessages 重连后批量回放离线消息时，
+        // 用户可能已在切到别的会话，必须用本次请求的 sessionId 快照。
+        var requestSessionId = state.selectedId;
+        return fetch("/api/sessions/" + requestSessionId + "/input", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -9813,7 +10103,7 @@
               // on the user's next message, and stale queue items would cause duplicates
               if (isSessionUnavailableError(error)) {
                 console.log("[wand] sendInputDirect: session unavailable, dropping", {
-                  sessionId: state.selectedId,
+                  sessionId: requestSessionId,
                   errorCode: error.errorCode
                 });
                 return null;
@@ -9826,10 +10116,13 @@
         .then(function(snapshot) {
           if (snapshot && snapshot.id) {
             updateSessionSnapshot(snapshot);
-            if (snapshot.messages && snapshot.messages.length > 0) {
-              state.currentMessages = snapshot.messages;
+            // 仅当 snapshot 仍属当前选中会话时才覆盖视图，否则只更新底层数据。
+            if (snapshot.id === state.selectedId) {
+              if (snapshot.messages && snapshot.messages.length > 0) {
+                state.currentMessages = snapshot.messages;
+              }
+              renderChat(true);
             }
-            renderChat(true);
           }
           return snapshot;
         });
@@ -11321,6 +11614,22 @@
         state.terminalAutoFollow = true;
         state.showTerminalJumpToBottom = false;
         updateTerminalJumpToBottomButton();
+        // 清理本轮新增的、依赖当前 wterm 实例的模块级 timer 和频次统计。
+        // 不清掉的话，旧会话上挂起的 tail timer 在新 wterm 实例上触发会
+        // 用 state.terminalOutput 做一次无意义的 resync；resyncStats 计数
+        // 跨会话累加也会让告警阈值在新会话立即触发误报。
+        if (state.softResyncTimer) {
+          clearTimeout(state.softResyncTimer);
+          state.softResyncTimer = null;
+        }
+        if (_resyncChunkTailTimer) {
+          clearTimeout(_resyncChunkTailTimer);
+          _resyncChunkTailTimer = null;
+        }
+        _resyncChunkLastAt = 0;
+        _resyncStatsWindowStart = 0;
+        _resyncStatsCount = 0;
+        _resyncLastWarnAt = 0;
       }
 
       function sendTerminalResize(cols, rows) {
@@ -11698,7 +12007,7 @@
             }
             // Real-time terminal output
             if (msg.sessionId === state.selectedId && state.terminal && msg.data) {
-              if (msg.data.chunk && (!state.terminalSessionId || state.terminalSessionId === msg.sessionId)) {
+              if (msg.data.chunk && isCurrentTerminalSession(msg.sessionId)) {
                 // Fast path: write chunk directly to avoid full-output comparison.
                 state.lastChunkAt = Date.now();
                 state.terminalLiveStreamSessions[msg.sessionId] = true;
@@ -11712,9 +12021,9 @@
                 maybeScheduleResyncForChunk(msg.data.chunk);
                 state.terminalSessionId = msg.sessionId;
                 if (msg.data.output) {
-                  state.terminalOutput = normalizeTerminalOutput(msg.data.output);
+                  state.terminalOutput = clampClientTerminalOutput(normalizeTerminalOutput(msg.data.output));
                 } else {
-                  state.terminalOutput = (state.terminalOutput || "") + normalizeTerminalOutput(msg.data.chunk);
+                  state.terminalOutput = clampClientTerminalOutput((state.terminalOutput || "") + normalizeTerminalOutput(msg.data.chunk));
                 }
                 maybeScrollTerminalToBottom("output");
                 updateTerminalJumpToBottomButton();
@@ -12239,7 +12548,9 @@
         var selectedForDelay = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var isActiveStream = selectedForDelay && selectedForDelay.status === "running"
           && selectedForDelay.sessionKind !== "structured";
-        var delay = isActiveStream ? 150 : 30;
+        // 活跃流时拉到 CHAT_RENDER_LIVE_MS 减少高频重渲；空闲时用 IDLE 快速响应。
+        // 旧实现里这两档在 setTimeout 调用时被覆盖成固定 30ms，分档逻辑形同虚设。
+        var delay = isActiveStream ? CHAT_RENDER_LIVE_MS : CHAT_RENDER_IDLE_MS;
         chatRenderTimer = setTimeout(function() {
           chatRenderTimer = null;
           var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
@@ -12247,7 +12558,7 @@
               state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, selectedSession.output, true));
           }
           renderChat();
-        }, 30);
+        }, delay);
       }
 
       // Extract system info from PTY output that's not in structured messages

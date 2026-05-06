@@ -126,19 +126,35 @@ export function safeSliceTail(text: string, maxSize: number): string {
     if (code >= 0x40 && code <= 0x7e && i > 0 && isLikelyAnsiBody(text, i - 1)) break;
   }
   if (escAt !== -1) {
+    // OSC 序列以 `ESC ]` (0x1b 0x5d) 开头，必须用 BEL (0x07) 或
+    // ST (`ESC \\` = 0x1b 0x5c) 终止。其它范围内字节（包括裸 `\`）
+    // 都属于 payload，不能当终止符。CSI 等序列才用 0x40-0x7e final byte。
+    const isOsc = escAt + 1 < text.length && text.charCodeAt(escAt + 1) === 0x5d;
     let terminated = false;
     for (let i = escAt + 1; i < start; i++) {
       const code = text.charCodeAt(i);
       if (code === 0x07) { terminated = true; break; }
+      if (isOsc) {
+        if (code === 0x1b && i + 1 < start && text.charCodeAt(i + 1) === 0x5c) {
+          terminated = true;
+          break;
+        }
+        continue;
+      }
       if (code >= 0x40 && code <= 0x7e) { terminated = true; break; }
     }
     if (!terminated) {
       const ansiUpper = Math.min(start + 256, text.length);
       for (let i = start; i < ansiUpper; i++) {
         const code = text.charCodeAt(i);
-        if (code === 0x07 || (code >= 0x40 && code <= 0x7e)) {
-          return text.slice(i + 1);
+        if (code === 0x07) return text.slice(i + 1);
+        if (isOsc) {
+          if (code === 0x1b && i + 1 < ansiUpper && text.charCodeAt(i + 1) === 0x5c) {
+            return text.slice(i + 2);
+          }
+          continue;
         }
+        if (code >= 0x40 && code <= 0x7e) return text.slice(i + 1);
       }
     }
   }

@@ -368,20 +368,27 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   if (push) {
     try {
       let hasUpstream = false;
+      let pushRemote = "origin";
       try {
         runGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
         hasUpstream = true;
+        try {
+          const currentBranch = runGit(["branch", "--show-current"], cwd);
+          if (currentBranch) {
+            pushRemote = runGit(["config", "--get", `branch.${currentBranch}.remote`], cwd) || "origin";
+          }
+        } catch {
+          pushRemote = "origin";
+        }
       } catch {
         hasUpstream = false;
       }
       if (hasUpstream) {
         runGit(["push", "--recurse-submodules=on-demand"], cwd, GIT_PUSH_TIMEOUT_MS);
       } else {
-        runGit(["push", "-u", "--recurse-submodules=on-demand", "origin", "HEAD"], cwd, GIT_PUSH_TIMEOUT_MS);
+        runGit(["push", "-u", "--recurse-submodules=on-demand", pushRemote, "HEAD"], cwd, GIT_PUSH_TIMEOUT_MS);
       }
-      if (tagName) {
-        runGit(["push", "origin", `refs/tags/${tagName}`], cwd, GIT_PUSH_TIMEOUT_MS);
-      }
+      runGit(["push", pushRemote, "--tags"], cwd, GIT_PUSH_TIMEOUT_MS);
       pushed = true;
     } catch (error) {
       pushError = getGitErrorMessage(error);
