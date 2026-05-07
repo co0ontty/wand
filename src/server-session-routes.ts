@@ -172,7 +172,8 @@ export function registerSessionRoutes(
   structured: StructuredSessionManager,
   storage: WandStorage,
   defaultMode: ExecutionMode,
-  config: WandConfig
+  config: WandConfig,
+  onSessionCreated?: (cwd: string | undefined | null) => void
 ): void {
   app.get("/api/sessions", (_req, res) => {
     const all = listAllSessionsSlim(processes, structured);
@@ -198,6 +199,7 @@ export function registerSessionRoutes(
         model: typeof body.model === "string" ? body.model.trim() : undefined,
       });
       console.log("[WAND] structured session created:", JSON.stringify({ id: snapshot.id, sessionKind: snapshot.sessionKind, runner: snapshot.runner, status: snapshot.status }));
+      onSessionCreated?.(body.cwd ?? snapshot.cwd);
       const prompt = body.prompt?.trim();
       if (prompt) {
         const finished = await structured.sendMessage(snapshot.id, prompt);

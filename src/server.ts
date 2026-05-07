@@ -559,6 +559,30 @@ function parseStoredPathList<T>(raw: string | null): T[] {
 
 const MAX_RECENT_PATHS = 10;
 
+/** Persist a cwd to recent paths. Used by both REST and session creation hooks. */
+export function recordRecentPath(storage: WandStorage, cwd: string | undefined | null): void {
+  if (!cwd) return;
+  const trimmed = cwd.trim();
+  if (!trimmed) return;
+  let resolved: string;
+  try {
+    resolved = normalizeFolderPath(trimmed);
+  } catch {
+    return;
+  }
+  if (isBlockedFolderPath(resolved)) return;
+  const stored = storage.getConfigValue("recent_paths");
+  let recent = parseStoredPathList<RecentPath>(stored);
+  recent = recent.filter((r) => normalizeFolderPath(r.path) !== resolved);
+  recent.unshift({
+    path: resolved,
+    name: path.basename(resolved),
+    lastUsedAt: new Date().toISOString(),
+  });
+  recent = recent.slice(0, MAX_RECENT_PATHS);
+  storage.setConfigValue("recent_paths", JSON.stringify(recent));
+}
+
 // ── File language detection ──
 
 function getLanguageFromExt(ext: string, filePath: string): string {
@@ -1056,7 +1080,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
-  registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config);
+  registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config, (cwd) => {
+    recordRecentPath(storage, cwd);
+  });
   registerClaudeHistoryRoutes(app, processes, storage);
   registerUploadRoutes(app, processes);
 
@@ -1249,18 +1275,12 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.status(403).json({ error: "访问被拒绝：无法保存系统敏感目录。" });
       return;
     }
-    const stored = storage.getConfigValue("recent_paths");
-    let recent = parseStoredPathList<RecentPath>(stored);
-    recent = recent.filter((r) => normalizeFolderPath(r.path) !== resolvedRecentPath);
-    const newRecent: RecentPath = {
+    recordRecentPath(storage, resolvedRecentPath);
+    res.json({
       path: resolvedRecentPath,
       name: path.basename(resolvedRecentPath),
       lastUsedAt: new Date().toISOString(),
-    };
-    recent.unshift(newRecent);
-    recent = recent.slice(0, MAX_RECENT_PATHS);
-    storage.setConfigValue("recent_paths", JSON.stringify(recent));
-    res.json(newRecent);
+    });
   });
 
   app.get("/api/validate-path", async (req, res) => {
@@ -1377,6 +1397,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           model: effectiveModel,
         }
       );
+      recordRecentPath(storage, body.cwd ?? snapshot.cwd);
       res.status(201).json(snapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法启动命令。请检查命令是否安装。") });
