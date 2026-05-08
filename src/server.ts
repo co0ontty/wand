@@ -1386,6 +1386,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     try {
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const effectiveModel = rawModel || (config.defaultModel ?? "").trim() || undefined;
+      const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
+      const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
       const snapshot = processes.start(
         body.command,
         body.cwd,
@@ -1395,6 +1397,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           worktreeEnabled: body.worktreeEnabled === true,
           provider: body.provider,
           model: effectiveModel,
+          cols: reqCols,
+          rows: reqRows,
         }
       );
       recordRecentPath(storage, body.cwd ?? snapshot.cwd);

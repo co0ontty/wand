@@ -206,6 +206,10 @@ export interface CommandRequest {
   worktreeEnabled?: boolean;
   /** Claude 模型（别名或完整 ID）。仅对 claude provider 生效。留空则回落到 config.defaultModel。 */
   model?: string;
+  /** 创建会话时由前端测得的真实列数。后端用它直接 spawn PTY，避免"先 120 列再 resize"的早期错位。 */
+  cols?: number;
+  /** 创建会话时由前端测得的真实行数。 */
+  rows?: number;
 }
 
 export interface InputRequest {

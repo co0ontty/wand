@@ -9,7 +9,7 @@ import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
 import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
-import { ApprovalPolicy, AutonomyPolicy, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
+import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
@@ -680,7 +680,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string }): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number }): SessionSnapshot {
     this.assertCommandAllowed(command);
 
     const baseCwd = cwd
@@ -766,8 +766,8 @@ export class ProcessManager extends EventEmitter {
       knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
-      ptyCols: 120,
-      ptyRows: 36,
+      ptyCols: opts?.cols !== undefined ? clampDimension(opts.cols, 20, 400) : 120,
+      ptyRows: opts?.rows !== undefined ? clampDimension(opts.rows, 10, 160) : 36,
     };
 
     if (isClaudeProvider) {
@@ -803,8 +803,10 @@ export class ProcessManager extends EventEmitter {
           WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0"
         },
         name: "xterm-color",
-        cols: 120,
-        rows: 36
+        // 使用 record 上由前端协商好的真实尺寸，避免"先 120 列、几百毫秒后再 resize"
+        // 期间 Claude/Codex 用错列宽渲染出 \x1b[120G 这类绝对列定位序列。
+        cols: record.ptyCols,
+        rows: record.ptyRows
       });
     } catch (err) {
       console.error("[ProcessManager] pty.spawn threw", { sessionId: id, error: String(err) });
@@ -1633,10 +1635,17 @@ export class ProcessManager extends EventEmitter {
         record.output = record.ptyBridge?.getRawOutput() ?? record.output;
         const rawMessages = record.ptyBridge?.getMessages() ?? [];
         const isStreaming = record.status === "running";
+        const bridgeData = event.data as ChatOutputData | undefined;
 
         const data: Record<string, unknown> = {
           permissionBlocked: this.isPermissionBlocked(record),
         };
+        // 透传 bridge 给出的 isResponding（true=流式中, false=本轮已完成）。
+        // 前端用它检测 thinking→idle 边界并主动做一次终端 resync，把 Claude/Codex
+        // 在流式渲染过程中残留的错位光标定位序列洗掉（等价于按一次右上角缩放）。
+        if (bridgeData && typeof bridgeData.isResponding === "boolean") {
+          data.isResponding = bridgeData.isResponding;
+        }
 
         if (isStreaming && rawMessages.length > 0) {
           data.incremental = true;

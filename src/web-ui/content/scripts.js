@@ -8031,6 +8031,29 @@
         el.classList.remove("hidden");
       }
 
+      // 创建 PTY 会话时把当前终端的真实 cols/rows 注入 body，让后端 pty.spawn
+      // 直接落在正确尺寸下。否则 PTY 先按 cols=120 启动，Claude/Codex 会基于
+      // 120 列输出 \x1b[120G 这类绝对列定位序列；等前端 remeasure 触发 resize
+      // 时这些早期内容已经被以 80 等真实列数渲染，整条历史就错位。
+      function withTerminalDimensions(body) {
+        if (!body || typeof body !== "object") return body;
+        if (!state.terminal) return body;
+        try {
+          if (typeof state.terminal.remeasure === "function") {
+            state.terminal.remeasure();
+          }
+        } catch (e) {}
+        var cols = state.terminal.cols;
+        var rows = state.terminal.rows;
+        if (typeof cols === "number" && typeof rows === "number"
+            && Number.isFinite(cols) && Number.isFinite(rows)
+            && cols > 0 && rows > 0) {
+          body.cols = cols;
+          body.rows = rows;
+        }
+        return body;
+      }
+
       function quickStartSession() {
         var command = getPreferredTool();
         var defaultCwd = getEffectiveCwd();
@@ -8041,7 +8064,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ command: command, provider: command, cwd: defaultCwd, mode: defaultMode })
+          body: JSON.stringify(withTerminalDimensions({ command: command, provider: command, cwd: defaultCwd, mode: defaultMode }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -8122,13 +8145,13 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             command: command,
             provider: command,
             cwd: cwd,
             mode: mode,
             worktreeEnabled: worktreeEnabled
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -8792,12 +8815,12 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             command: item.tool,
             cwd: item.cwd,
             mode: item.mode,
             initialInput: item.text
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -8832,12 +8855,12 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             command: item.tool,
             cwd: item.cwd,
             mode: item.mode,
             initialInput: item.text
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -9013,13 +9036,13 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             command: preferredTool,
             provider: preferredTool,
             cwd: defaultCwd,
             mode: mode,
             initialInput: value
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -9083,13 +9106,13 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             command: preferredTool,
             provider: preferredTool,
             cwd: defaultCwd,
             mode: mode,
             initialInput: value || undefined
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -10251,12 +10274,12 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             command: command,
             cwd: cwd || "",
             mode: state.chatMode || state.config.defaultMode || "default",
             model: modelPref || undefined
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -10281,9 +10304,9 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             mode: state.chatMode || state.config.defaultMode || "default"
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -10312,9 +10335,9 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             mode: state.chatMode || state.config.defaultMode || "default"
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -10392,13 +10415,13 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             command: preferredTool,
             cwd: defaultCwd,
             mode: mode,
             initialInput: value,
             model: modelPref || undefined
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -10430,13 +10453,13 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             command: preferredTool,
             cwd: defaultCwd,
             mode: mode,
             initialInput: value || undefined,
             model: modelPref || undefined
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -10492,10 +10515,10 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({
+          body: JSON.stringify(withTerminalDimensions({
             mode: state.chatMode || (state.config && state.config.defaultMode) || "default",
             cwd: cwd
-          })
+          }))
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -11934,6 +11957,30 @@
           case 'output':
             // Update session output (for terminal display and local message parsing)
             // NOTE: For structured sessions, output may be "" during streaming — check messages too
+            // thinking → idle 边界自愈：桥接层在 output.chat 事件里把 isResponding
+            // 透传过来。当某会话由 true 变 false（assistant 完成一轮响应）时，
+            // 主动做一次 softResyncTerminal —— 等价于自动按一次右上角缩放按钮，
+            // 把 Claude/Codex 流式渲染中残留的错位光标定位序列洗掉。
+            // 用 120ms 微延迟 + 单 timer 防抖，避免连续 false→true→false 触发多次重放。
+            if (msg.data && msg.sessionId
+                && Object.prototype.hasOwnProperty.call(msg.data, 'isResponding')) {
+              if (!state._lastIsResponding) state._lastIsResponding = {};
+              var _prevResp = !!state._lastIsResponding[msg.sessionId];
+              var _nextResp = !!msg.data.isResponding;
+              state._lastIsResponding[msg.sessionId] = _nextResp;
+              if (_prevResp && !_nextResp
+                  && msg.sessionId === state.selectedId
+                  && state.terminal
+                  && state.terminalOutput) {
+                if (state._idleResyncTimer) clearTimeout(state._idleResyncTimer);
+                var _idleResyncSid = msg.sessionId;
+                state._idleResyncTimer = setTimeout(function() {
+                  state._idleResyncTimer = null;
+                  if (state.selectedId !== _idleResyncSid) return;
+                  try { softResyncTerminal({ skipFit: true }); } catch (e) {}
+                }, 120);
+              }
+            }
             if (msg.data && msg.sessionId) {
               var isIncremental = !!msg.data.incremental;
               var snapshot = { id: msg.sessionId };

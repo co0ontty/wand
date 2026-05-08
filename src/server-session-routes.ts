@@ -497,7 +497,7 @@ export function registerSessionRoutes(
 
   app.post("/api/sessions/:id/resume", (req, res) => {
     const sessionId = req.params.id;
-    const body = req.body as { mode?: ExecutionMode; view?: "chat" | "terminal" };
+    const body = req.body as { mode?: ExecutionMode; view?: "chat" | "terminal"; cols?: number; rows?: number };
     console.log("[WAND] POST /api/sessions/:id/resume sessionId:", sessionId);
     try {
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
@@ -526,7 +526,9 @@ export function registerSessionRoutes(
       }
       const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
       const resumeCommand = `${command} --resume ${claudeSessionId}`;
-      const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: sessionId });
+      const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
+      const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
+      const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: sessionId, cols: reqCols, rows: reqRows });
       res.status(201).json(newSnapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
@@ -535,7 +537,7 @@ export function registerSessionRoutes(
 
   app.post("/api/claude-sessions/:claudeSessionId/resume", (req, res) => {
     const claudeSessionId = String(req.params.claudeSessionId || "").trim();
-    const body = req.body as { mode?: ExecutionMode; cwd?: string };
+    const body = req.body as { mode?: ExecutionMode; cwd?: string; cols?: number; rows?: number };
     console.log("[WAND] POST /api/claude-sessions/:claudeSessionId/resume claudeSessionId:", claudeSessionId, "cwd:", body.cwd);
     try {
       if (!claudeSessionId) {
@@ -563,7 +565,9 @@ export function registerSessionRoutes(
         }
         const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
         const resumeCommand = `${command} --resume ${claudeSessionId}`;
-        const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: existingSession.id });
+        const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
+        const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
+        const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: existingSession.id, cols: reqCols, rows: reqRows });
         res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
       } else {
         const cwd = body.cwd?.trim();
@@ -573,7 +577,9 @@ export function registerSessionRoutes(
         }
         const newMode = normalizeMode(body.mode, defaultMode);
         const resumeCommand = `claude --resume ${claudeSessionId}`;
-        const newSnapshot = processes.start(resumeCommand, cwd, newMode);
+        const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
+        const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
+        const newSnapshot = processes.start(resumeCommand, cwd, newMode, undefined, { cols: reqCols, rows: reqRows });
         res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
       }
     } catch (error) {
