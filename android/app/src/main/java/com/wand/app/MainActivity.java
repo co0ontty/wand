@@ -720,6 +720,8 @@ public class MainActivity extends AppCompatActivity {
             String sessionLabel = data.optString("sessionLabel", sessionId);
             String status = data.optString("status", "running");
             String currentTask = data.optString("currentTask", "");
+            String latestUserText = data.optString("latestUserText", "");
+            String latestAssistantText = data.optString("latestAssistantText", "");
             JSONArray todosArray = data.optJSONArray("todos");
 
             int total = todosArray != null ? todosArray.length() : 0;
@@ -743,9 +745,24 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            String contentText = !activeForm.isEmpty() ? activeForm
-                    : !currentTask.isEmpty() ? currentTask
-                    : "运行中";
+            // Pick the most informative line for the secondary text. sessionLabel
+            // is frozen to round-1's prompt (session.summary), so without falling
+            // back to latestAssistantText / latestUserText the lock-screen card
+            // would keep showing the very first message even after many turns.
+            String contentText = pickFirstNonEmpty(
+                    activeForm,
+                    currentTask,
+                    latestAssistantText,
+                    latestUserText,
+                    "运行中");
+
+            // Title: keep sessionLabel as the anchor (round-1 summary), but if
+            // the user has sent later prompts, prefix with "Q:" + latestUserText
+            // so the OPPO Live Activity actually moves with the conversation.
+            String displayTitle = sessionLabel;
+            if (!latestUserText.isEmpty() && !latestUserText.equals(sessionLabel)) {
+                displayTitle = latestUserText;
+            }
 
             Intent intent = new Intent(this, MainActivity.class);
             intent.putExtra("server_url", serverUrl);
@@ -760,7 +777,7 @@ public class MainActivity extends AppCompatActivity {
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID_PROGRESS)
                     .setSmallIcon(R.drawable.ic_notification)
-                    .setContentTitle(sessionLabel)
+                    .setContentTitle(displayTitle)
                     .setContentText(contentText)
                     .setContentIntent(pi)
                     .setOngoing(isOngoing)
@@ -768,13 +785,20 @@ public class MainActivity extends AppCompatActivity {
                     .setSilent(true)
                     .setAutoCancel(!isOngoing);
 
+            // Subtext shows the session label so the user always sees which
+            // session this is, even when the title now mirrors the latest prompt.
+            if (!sessionLabel.isEmpty() && !sessionLabel.equals(displayTitle)) {
+                builder.setSubText(sessionLabel);
+            }
+
             if (Build.VERSION.SDK_INT >= 36 && total > 0) {
                 buildProgressStyleNotification(builder, todosArray, total, completed, inProgress);
             } else if (total > 0) {
                 buildFallbackProgressNotification(builder, total, completed, inProgress,
-                        activeForm, currentTask);
+                        activeForm, currentTask, latestAssistantText, latestUserText);
             } else {
-                builder.setStyle(new NotificationCompat.BigTextStyle().bigText(contentText));
+                String bigText = buildBigTextLines(contentText, latestAssistantText, latestUserText);
+                builder.setStyle(new NotificationCompat.BigTextStyle().bigText(bigText));
             }
 
             if (total > 0) {
@@ -786,6 +810,31 @@ public class MainActivity extends AppCompatActivity {
 
             NotificationManagerCompat.from(this).notify("progress:" + sessionId, 0, builder.build());
         } catch (Exception ignored) {}
+    }
+
+    private static String pickFirstNonEmpty(String... candidates) {
+        if (candidates == null) return "";
+        for (String c : candidates) {
+            if (c != null && !c.isEmpty()) return c;
+        }
+        return "";
+    }
+
+    private static String buildBigTextLines(String primary, String latestAssistant, String latestUser) {
+        StringBuilder sb = new StringBuilder();
+        if (primary != null && !primary.isEmpty()) sb.append(primary);
+        // Include latest user prompt and assistant reply only when they add
+        // information beyond `primary` — avoids double-printing the same line.
+        if (latestUser != null && !latestUser.isEmpty() && !latestUser.equals(primary)) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append("Q: ").append(latestUser);
+        }
+        if (latestAssistant != null && !latestAssistant.isEmpty()
+                && !latestAssistant.equals(primary)) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append("A: ").append(latestAssistant);
+        }
+        return sb.toString();
     }
 
     private void buildProgressStyleNotification(NotificationCompat.Builder builder,
@@ -818,20 +867,31 @@ public class MainActivity extends AppCompatActivity {
             builder.setStyle(progressStyle);
         } catch (Exception e) {
             // Fallback if ProgressStyle API is unavailable at runtime
-            buildFallbackProgressNotification(builder, total, completed, inProgress, "", "");
+            buildFallbackProgressNotification(builder, total, completed, inProgress, "", "", "", "");
         }
     }
 
     private void buildFallbackProgressNotification(NotificationCompat.Builder builder,
-            int total, int completed, int inProgress, String activeForm, String currentTask) {
+            int total, int completed, int inProgress, String activeForm, String currentTask,
+            String latestAssistantText, String latestUserText) {
         builder.setProgress(total, completed, false);
         StringBuilder bigText = new StringBuilder();
         bigText.append(completed).append("/").append(total).append(" 完成");
-        if (inProgress > 0 && !activeForm.isEmpty()) {
+        if (inProgress > 0 && activeForm != null && !activeForm.isEmpty()) {
             bigText.append(" · ").append(activeForm);
         }
-        if (!currentTask.isEmpty()) {
+        if (currentTask != null && !currentTask.isEmpty()) {
             bigText.append("\n").append(currentTask);
+        }
+        // Surface latest round so the card moves with the conversation; skip
+        // the assistant line when it would duplicate currentTask/activeForm.
+        if (latestUserText != null && !latestUserText.isEmpty()) {
+            bigText.append("\nQ: ").append(latestUserText);
+        }
+        if (latestAssistantText != null && !latestAssistantText.isEmpty()
+                && !latestAssistantText.equals(currentTask)
+                && !latestAssistantText.equals(activeForm)) {
+            bigText.append("\nA: ").append(latestAssistantText);
         }
         builder.setStyle(new NotificationCompat.BigTextStyle().bigText(bigText.toString()));
         builder.setSubText(completed + "/" + total);

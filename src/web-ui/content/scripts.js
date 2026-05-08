@@ -304,17 +304,6 @@
           }
         }
 
-        // C. 助手气泡左侧呼吸条（仅最新一条 assistant 消息）
-        if (chatMessages) {
-          var prev = chatMessages.querySelectorAll(".chat-message.assistant.is-streaming");
-          for (var i = 0; i < prev.length; i++) prev[i].classList.remove("is-streaming");
-          if (sig.inFlight || sig.ptyRunning) {
-            // chat-messages 使用 column-reverse，DOM 第一个 .chat-message 即视觉最新
-            var newest = chatMessages.querySelector(".chat-message.assistant");
-            if (newest) newest.classList.add("is-streaming");
-          }
-        }
-
         // 维持每秒一次的刷新心跳，让 elapsed 数字持续滚动
         if (sig.active) {
           if (!_runningIndicatorsTimerId) {
@@ -333,8 +322,8 @@
         // 先驱动跨视图的运行指示器（顶部进度条/徽章计时/气泡呼吸条）
         updateRunningIndicators(session);
 
-        // Status bar now lives above the input-composer, inside .input-panel
-        var inputPanel = document.querySelector(".input-panel");
+        // Status bar now lives in .composer-top-row alongside the todo-progress collapse bar
+        var topRow = document.querySelector(".composer-top-row");
         var existing = document.querySelector(".structured-status-bar");
         var composer = document.querySelector(".input-composer");
         if (!session || !isStructuredSession(session)) {
@@ -356,15 +345,15 @@
           // Add glow to input composer
           if (composer) composer.classList.add("in-flight");
 
-          if (!existing && inputPanel && composer) {
+          if (!existing && topRow) {
             var bar = document.createElement("div");
             bar.className = "structured-status-bar";
             bar.innerHTML =
               '<span class="status-bar-dot"></span>' +
               '<span class="status-bar-label">回复中</span>' +
               '<span class="status-bar-timer">0.0s</span>';
-            // Insert right before the input-composer element
-            inputPanel.insertBefore(bar, composer);
+            // Append as last child of the top row so it sits to the right of the todo bar
+            topRow.appendChild(bar);
             existing = bar;
           } else if (existing && existing.classList.contains("completed")) {
             // Was completed, now in-flight again — reset
@@ -1417,17 +1406,19 @@
                 '</div>' +
               '</div>' +
               '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
-                '<div id="todo-progress" class="todo-progress hidden">' +
-                  '<div class="todo-progress-header" id="todo-progress-toggle">' +
-                    '<div class="todo-progress-left">' +
-                      '<span class="todo-progress-spinner"></span>' +
-                      '<span class="todo-progress-counter" id="todo-progress-counter">0/0</span>' +
-                      '<span class="todo-progress-task" id="todo-progress-task"></span>' +
+                '<div class="composer-top-row">' +
+                  '<div id="todo-progress" class="todo-progress hidden">' +
+                    '<div class="todo-progress-header" id="todo-progress-toggle">' +
+                      '<div class="todo-progress-left">' +
+                        '<span class="todo-progress-spinner"></span>' +
+                        '<span class="todo-progress-counter" id="todo-progress-counter">0/0</span>' +
+                        '<span class="todo-progress-task" id="todo-progress-task"></span>' +
+                      '</div>' +
+                      '<svg class="todo-progress-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
                     '</div>' +
-                    '<svg class="todo-progress-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
-                  '</div>' +
-                  '<div class="todo-progress-body hidden" id="todo-progress-body">' +
-                    '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
+                    '<div class="todo-progress-body hidden" id="todo-progress-body">' +
+                      '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
+                    '</div>' +
                   '</div>' +
                 '</div>' +
                 '<div class="input-composer">' +
@@ -2774,10 +2765,16 @@
 
       function applyTerminalScale() {
         if (!state.terminal || !state.terminal.element) return;
-        var newSize = (state.terminalBaseFontSize * state.terminalScale) + "px";
-        var newRowHeight = (state.terminalBaseFontSize * state.terminalScale * 1.5) + "px";
-        state.terminal.element.style.setProperty("--term-font-size", newSize);
-        state.terminal.element.style.setProperty("--term-row-height", newRowHeight);
+        // 字号和行高都向上取整到整数像素：PC 端 1× DPR 下浏览器对亚像素
+        // 字号/行高的舍入策略不一致（fontSize 16.25 → 16 或 17，行高
+        // 19.5 → 19 或 20），相邻行/列的吸附方向不同就会让 wterm 网格
+        // 错位。强制整数 px 让 cell 高度、字符高度都稳定一致，等价于
+        // 之前桌面端必须按右上角缩放才能恢复的"整像素重排"路径。
+        var rawFontSize = state.terminalBaseFontSize * state.terminalScale;
+        var fontPx = Math.max(1, Math.round(rawFontSize));
+        var rowPx = Math.max(1, Math.round(rawFontSize * 1.5));
+        state.terminal.element.style.setProperty("--term-font-size", fontPx + "px");
+        state.terminal.element.style.setProperty("--term-row-height", rowPx + "px");
         if (typeof state.terminal.remeasure === "function") {
           requestAnimationFrame(function() {
             if (state.terminal) state.terminal.remeasure();
@@ -5035,6 +5032,17 @@
         return distance <= state.terminalScrollThreshold;
       }
 
+      // 严格"真正到底"判定（仅亚像素 jitter 容忍）：用于把 autoFollow 从 false
+      // 翻回 true。不能用 isTerminalNearBottom 的 12px 阈值，否则用户在底部小幅
+      // 向上滚时，wheel handler 把 autoFollow 设 false 后紧接着触发的 scroll
+      // 事件会因为"还没滚出阈值"而把 autoFollow 反转回 true，丢失用户意图。
+      function isTerminalAtBottom() {
+        var viewport = getTerminalViewport();
+        if (!viewport) return true;
+        var distance = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+        return distance <= 2;
+      }
+
       function scrollTerminalToBottom(smooth) {
         if (!state.terminal) return;
         var viewport = getTerminalViewport();
@@ -5075,11 +5083,13 @@
           updateTerminalJumpToBottomButton();
           return;
         }
-        if (!state.terminalAutoFollow && !isTerminalNearBottom()) {
+        // 只看 autoFollow 标志：用户主动 wheel/touch 后该标志被设为 false，
+        // 即使当前位置仍在底部 12px 阈值内也不再强行滚回，避免把用户刚滚上去
+        // 的几像素吞掉。autoFollow 由 scroll handler 在"真正到底"时恢复。
+        if (!state.terminalAutoFollow) {
           updateTerminalJumpToBottomButton();
           return;
         }
-        state.terminalAutoFollow = true;
         scrollTerminalToBottom(false);
         updateTerminalJumpToBottomButton();
       }
@@ -5368,6 +5378,13 @@
         if (!terminal || data == null) return;
         if (!state.wideParserState) state.wideParserState = createWideParserState();
         terminal.write(widePadAnsi(data, state.wideParserState));
+        // wterm.write 内部用 5px 阈值判定"在底部"，下一帧 _doRender 据此强制
+        // scrollTop = scrollHeight。这与 wand 的 autoFollow（"真正到底"才为
+        // true，2px 阈值）独立，会把用户主动向上滚的几像素吞掉。覆写为 wand
+        // 的 autoFollow 状态，让 autoFollow 成为唯一真相。
+        if ("_shouldScrollToBottom" in terminal) {
+          terminal._shouldScrollToBottom = state.terminalAutoFollow !== false;
+        }
       }
 
       function resetWideParserState() {
@@ -5768,7 +5785,9 @@
           var viewport = getTerminalViewport();
           if (viewport) {
             state.terminalViewportScrollHandler = function() {
-              if (isTerminalNearBottom()) {
+              // 严格"真正到底"才恢复 autoFollow：避免 wheel 设 false 后被
+              // 紧接着的 scroll 事件因"接近底部 12px"而反转回 true。
+              if (isTerminalAtBottom()) {
                 state.terminalAutoFollow = true;
                 clearTerminalScrollIdleTimer();
                 updateTerminalJumpToBottomButton();
@@ -9941,6 +9960,7 @@
         var sequence = buildPtySequence(key, { ctrl: state.modifiers.ctrl, alt: state.modifiers.alt, shift: state.modifiers.shift });
         if (sequence) sendTerminalSequence(sequence, key);
         clearModifiers();
+        scheduleShortcutResync();
       }
 
       function handleInlineKeyboardClick(event) {
@@ -9957,12 +9977,28 @@
         if (key === "ctrl_enter") {
           var sequence = buildPtySequence("enter", { ctrl: true, alt: false, shift: false });
           if (sequence) sendTerminalSequence(sequence, "ctrl_enter");
+          scheduleShortcutResync();
           return;
         }
         var sequence = buildPtySequence(key, { ctrl: state.modifiers.ctrl, alt: state.modifiers.alt, shift: false });
         if (sequence) sendTerminalSequence(sequence, key);
         clearModifiers();
         updateKeyboardPopupUI();
+        scheduleShortcutResync();
+      }
+
+      // 用户点击下方快捷键栏（↑↓←→/Enter/Esc 等）后，PTY 通常会回流大量
+      // 原地重绘序列（CSI A-D / J / K / H / f）。maybeScheduleResyncForChunk
+      // 已经在收到这类 chunk 时做节流 resync，但 wterm 状态机偶尔会漏抓
+      // （比如 Codex 的菜单切换），导致 DOM 行残留 / 错位 —— 表现就是用户
+      // 反馈"按方向键之后画面错位，必须按一下右上角缩放才恢复"。
+      // 这里在每次快捷键点击之后安排一次延迟的 softResyncTerminal 兜底，
+      // 等价于自动按一次缩放按钮：reset 状态机 + 重放 buffer，把残留的
+      // 错位洗掉。延迟 ~500ms 是为了让服务端先把这次按键的回执完整推过来，
+      // 避免 resync 时只回放到 chunk 一半。
+      function scheduleShortcutResync() {
+        if (!state.terminal) return;
+        scheduleSoftResyncTerminal(500);
       }
 
       function updateKeyboardPopupUI() {
@@ -15443,6 +15479,21 @@
       var _progressSyncTimers = {};
       var _PROGRESS_SYNC_DEBOUNCE_MS = 300;
 
+      // Strip markdown formatting and clamp to a single short line so the
+      // native Live Activity / lock-screen card stays readable. 100 chars
+      // matches getLastAssistantSummary; OPPO truncates harder anyway.
+      function _compactNotificationText(text) {
+        if (!text) return "";
+        var t = String(text)
+          .replace(/^#+\s+/gm, "")
+          .replace(/\*\*/g, "")
+          .replace(/`/g, "")
+          .trim();
+        var firstLine = t.split("\n")[0].trim();
+        if (firstLine.length > 100) firstLine = firstLine.slice(0, 100) + "…";
+        return firstLine;
+      }
+
       function syncSessionProgressToNative(sessionId) {
         if (!_hasNativeBridge || typeof WandNative.updateSessionProgress !== "function") return;
         if (!sessionId) return;
@@ -15468,21 +15519,56 @@
           return;
         }
 
-        // Get latest todos from session messages
+        // Get latest todos from session messages, plus the most recent user
+        // prompt and assistant text in the same scan. sessionLabel is frozen
+        // to the first prompt (session.summary), so without these fields the
+        // OPPO Live Activity / lock-screen card stays stuck on round-1 text
+        // forever. We carry the latest round across so native can refresh.
         var todos = null;
+        var latestUserText = "";
+        var latestAssistantText = "";
         var messages = session.messages || [];
         for (var i = messages.length - 1; i >= 0; i--) {
           var msg = messages[i];
           if (!msg.content || !Array.isArray(msg.content)) continue;
-          for (var j = msg.content.length - 1; j >= 0; j--) {
-            var block = msg.content[j];
-            if (block.type === "tool_use" && block.name === "TodoWrite"
-                && block.input && block.input.todos) {
-              todos = block.input.todos;
-              break;
+
+          if (!latestAssistantText && msg.role === "assistant") {
+            for (var ai = msg.content.length - 1; ai >= 0; ai--) {
+              var ablock = msg.content[ai];
+              if (ablock && ablock.type === "text" && ablock.text && ablock.text.trim()) {
+                latestAssistantText = _compactNotificationText(ablock.text);
+                break;
+              }
             }
           }
-          if (todos) break;
+
+          if (!latestUserText && msg.role === "user") {
+            // Skip queued / synthetic placeholder turns — they don't represent
+            // user-visible "I just asked this" prompts.
+            var isPlaceholder = msg.content.some(function(b) { return b && b.__queued; });
+            if (!isPlaceholder) {
+              for (var ui = 0; ui < msg.content.length; ui++) {
+                var ublock = msg.content[ui];
+                if (ublock && ublock.type === "text" && ublock.text && ublock.text.trim()) {
+                  latestUserText = _compactNotificationText(ublock.text);
+                  break;
+                }
+              }
+            }
+          }
+
+          if (!todos) {
+            for (var j = msg.content.length - 1; j >= 0; j--) {
+              var block = msg.content[j];
+              if (block && block.type === "tool_use" && block.name === "TodoWrite"
+                  && block.input && block.input.todos) {
+                todos = block.input.todos;
+                break;
+              }
+            }
+          }
+
+          if (todos && latestUserText && latestAssistantText) break;
         }
 
         // Get current task
@@ -15495,6 +15581,8 @@
           sessionLabel: sessionLabel,
           status: sessionStatus,
           currentTask: currentTask,
+          latestUserText: latestUserText,
+          latestAssistantText: latestAssistantText,
           todos: todos || []
         };
 
