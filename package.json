@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "1.21.0",
+  "version": "1.21.4",
   "description": "A web terminal for local CLI tools like Claude.",
   "type": "module",
   "bin": {
@@ -33,6 +33,7 @@
     "node": ">=22.5.0"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.138",
     "@types/compression": "^1.8.1",
     "@types/cookie": "^0.6.0",
     "@types/multer": "^2.1.0",

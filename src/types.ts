@@ -1,7 +1,7 @@
 export type SessionKind = "pty" | "structured";
 export type SessionCreateKind = "pty" | "structured";
 export type SessionProvider = "claude" | "codex";
-export type SessionRunner = "claude-cli" | "claude-cli-print" | "codex-cli-exec" | "pty";
+export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "pty";
 
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
 
@@ -104,6 +104,8 @@ export interface WandConfig {
   cardDefaults?: CardExpandDefaults;
   /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */
   defaultModel?: string;
+  /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */
+  structuredRunner?: "cli" | "sdk";
 }
 
 export interface ClaudeModelInfo {

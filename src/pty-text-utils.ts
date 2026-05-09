@@ -2,6 +2,13 @@
  * Shared PTY text processing utilities for consistent ANSI stripping and noise filtering.
  */
 
+/**
+ * Hard cap on the in-memory PTY replay buffer. Shared between ProcessManager
+ * and ClaudePtyBridge so a session keeps the same amount of history regardless
+ * of which capture path is active.
+ */
+export const PTY_OUTPUT_MAX_SIZE = 200_000;
+
 /** Strip ANSI escape sequences and control characters from raw PTY output. */
 export function stripAnsi(text: string): string {
   return text

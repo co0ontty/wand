@@ -12,7 +12,7 @@ import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
-import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText } from "./pty-text-utils.js";
+import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getResumeCommandSessionId } from "./resume-policy.js";
 
@@ -885,7 +885,7 @@ export class ProcessManager extends EventEmitter {
         rec.ptyBridge.processChunk(chunk);
         rec.output = rec.ptyBridge.getRawOutput();
       } else {
-        rec.output = appendWindow(rec.output, chunk, 200_000);
+        rec.output = appendWindow(rec.output, chunk, PTY_OUTPUT_MAX_SIZE);
       }
 
       this.logger.appendPtyOutput(id, chunk);

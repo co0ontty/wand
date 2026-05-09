@@ -49,6 +49,8 @@ const DEFAULT_SHORTCUT_LOG_MAX_BYTES = 10 * 1024 * 1024;
 export class SessionLogger {
   private readonly baseDir: string;
   private readonly dirs = new Map<string, string>();
+  /** Cached on-disk size of hot-path log files so we can rotate without stat'ing on every chunk. */
+  private readonly logSizes = new Map<string, { pty: number; shortcut: number }>();
   private readonly shortcutLogMaxBytes: number;
 
   constructor(configDir: string, shortcutLogMaxBytes?: number) {
@@ -71,6 +73,10 @@ export class SessionLogger {
       // ignore
     }
     this.dirs.set(sessionId, dir);
+    // Seed the size cache from disk on first use; subsequent appends maintain
+    // the counter in memory so the hot path no longer touches stat/exists.
+    const sizes = { pty: tryStatSize(path.join(dir, "pty-output.log")), shortcut: tryStatSize(path.join(dir, "shortcut-interactions.jsonl")) };
+    this.logSizes.set(sessionId, sizes);
     return dir;
   }
 
@@ -107,17 +113,14 @@ export class SessionLogger {
   appendPtyOutput(sessionId: string, chunk: string): void {
     try {
       const dir = this.ensureDir(sessionId);
-      const logPath = path.join(dir, "pty-output.log");
-
-      // Check size and rotate if needed
-      if (existsSync(logPath)) {
-        const stats = statSync(logPath);
-        if (stats.size >= PTY_LOG_MAX_SIZE) {
-          this.rotatePtyLog(dir);
-        }
+      const sizes = this.logSizes.get(sessionId)!;
+      if (sizes.pty >= PTY_LOG_MAX_SIZE) {
+        this.rotatePtyLog(dir);
+        sizes.pty = 0;
       }
-
+      const logPath = path.join(dir, "pty-output.log");
       appendFileSync(logPath, chunk);
+      sizes.pty += Buffer.byteLength(chunk);
     } catch {
       // Non-critical — don't let logging failures affect main flow
     }
@@ -228,6 +231,7 @@ export class SessionLogger {
       // Non-critical
     }
     this.dirs.delete(sessionId);
+    this.logSizes.delete(sessionId);
   }
 
   /** Append a shortcut key interaction log entry (for analyzing auto-confirm gaps) */
@@ -235,6 +239,7 @@ export class SessionLogger {
     if (this.shortcutLogMaxBytes <= 0) return;
     try {
       const dir = this.ensureDir(sessionId);
+      const sizes = this.logSizes.get(sessionId)!;
       const logPath = path.join(dir, "shortcut-interactions.jsonl");
       const entry = JSON.stringify({
         ts: new Date().toISOString(),
@@ -246,32 +251,38 @@ export class SessionLogger {
         tail: tailLines,
       }) + "\n";
 
-      // Check size and truncate if needed
-      if (existsSync(logPath)) {
-        const size = statSync(logPath).size;
-        if (size + entry.length > this.shortcutLogMaxBytes) {
-          this.truncateShortcutLog(logPath);
-        }
+      const entryBytes = Buffer.byteLength(entry);
+      if (sizes.shortcut + entryBytes > this.shortcutLogMaxBytes) {
+        sizes.shortcut = this.truncateShortcutLog(logPath);
       }
 
       appendFileSync(logPath, entry);
+      sizes.shortcut += entryBytes;
     } catch {
       // Non-critical
     }
   }
 
-  /** Truncate shortcut log by keeping only the most recent half of entries */
-  private truncateShortcutLog(logPath: string): void {
+  /** Truncate shortcut log by keeping only the most recent half of entries. Returns the new on-disk size. */
+  private truncateShortcutLog(logPath: string): number {
     try {
       const content = readFileSync(logPath, "utf8");
       const lines = content.split("\n").filter(Boolean);
-      // Keep the latter half
       const keepFrom = Math.floor(lines.length / 2);
       const trimmed = lines.slice(keepFrom).join("\n") + "\n";
       writeFileSync(logPath, trimmed);
+      return Buffer.byteLength(trimmed);
     } catch {
-      // If truncation fails, delete the file to prevent unbounded growth
       try { unlinkSync(logPath); } catch { /* ignore */ }
+      return 0;
     }
+  }
+}
+
+function tryStatSize(filePath: string): number {
+  try {
+    return existsSync(filePath) ? statSync(filePath).size : 0;
+  } catch {
+    return 0;
   }
 }

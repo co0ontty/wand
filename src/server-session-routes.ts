@@ -247,12 +247,18 @@ export function registerSessionRoutes(
   app.post("/api/structured-sessions/:id/messages", express.json(), async (req, res) => {
     const input = String(req.body?.input ?? "");
     const interrupt = !!req.body?.interrupt;
-    console.log("[WAND] POST /api/structured-sessions/:id/messages id:", req.params.id, "input:", input.substring(0, 50), "interrupt:", interrupt);
+    const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
+    console.log("[WAND] POST /api/structured-sessions/:id/messages id:", req.params.id, "input:", input.substring(0, 50), "interrupt:", interrupt, "idempotencyKey:", idempotencyKey);
     try {
-      const snapshot = await structured.sendMessage(req.params.id, input, { interrupt });
+      const snapshot = await structured.sendMessage(req.params.id, input, { interrupt, idempotencyKey });
       res.json(snapshot);
     } catch (error) {
-      res.status(400).json({ error: getErrorMessage(error, "无法发送结构化消息。") });
+      const errorCode = (error as { code?: string } | null | undefined)?.code;
+      const status = errorCode === "duplicate_idempotency_key" ? 409 : 400;
+      res.status(status).json({
+        error: getErrorMessage(error, "无法发送结构化消息。"),
+        errorCode,
+      });
     }
   });
 

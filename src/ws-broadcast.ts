@@ -26,8 +26,6 @@ interface WsClient {
   lastOutputBySession: Map<string, { output: string; messages?: string; timestamp: number }>;
   /** Per-session monotonically increasing sequence number for output events. */
   outputSeqBySession: Map<string, number>;
-  /** True when at least one event has been dropped since the last successful send. */
-  droppedSinceLast: boolean;
   /** Sessions for which we owe the client a resync notice. */
   pendingResyncSessions: Set<string>;
 }
@@ -64,7 +62,6 @@ export class WsBroadcastManager {
         backpressurePaused: false,
         lastOutputBySession: new Map(),
         outputSeqBySession: new Map(),
-        droppedSinceLast: false,
         pendingResyncSessions: new Set(),
       };
       this.clients.add(client);
@@ -83,21 +80,7 @@ export class WsBroadcastManager {
           if (msg.type === "subscribe" && msg.sessionId) {
             const snapshot = getSession(msg.sessionId);
             if (snapshot) {
-              const truncatedMessages = snapshot.messages
-                ? truncateMessagesForTransport(snapshot.messages, this.getCardDefaults())
-                : undefined;
-              // Reset the per-client sequence counter for this session so the
-              // client can detect missed output events between init and the
-              // first incremental update.
-              const initSeq = (client.outputSeqBySession.get(msg.sessionId) ?? 0) + 1;
-              client.outputSeqBySession.set(msg.sessionId, initSeq);
-              client.pendingResyncSessions.delete(msg.sessionId);
-              ws.send(JSON.stringify({
-                type: "init",
-                sessionId: msg.sessionId,
-                seq: initSeq,
-                data: { ...snapshot, messages: truncatedMessages, output: snapshot.output },
-              }));
+              this.sendInit(client, msg.sessionId, snapshot, false);
             } else {
               ws.send(JSON.stringify({
                 type: "error",
@@ -106,23 +89,8 @@ export class WsBroadcastManager {
               }));
             }
           } else if (msg.type === "resync" && msg.sessionId) {
-            // Client noticed a gap and asks for a fresh snapshot.
             const snapshot = getSession(msg.sessionId);
-            if (snapshot) {
-              const truncatedMessages = snapshot.messages
-                ? truncateMessagesForTransport(snapshot.messages, this.getCardDefaults())
-                : undefined;
-              const seq = (client.outputSeqBySession.get(msg.sessionId) ?? 0) + 1;
-              client.outputSeqBySession.set(msg.sessionId, seq);
-              client.pendingResyncSessions.delete(msg.sessionId);
-              ws.send(JSON.stringify({
-                type: "init",
-                sessionId: msg.sessionId,
-                seq,
-                resync: true,
-                data: { ...snapshot, messages: truncatedMessages, output: snapshot.output },
-              }));
-            }
+            if (snapshot) this.sendInit(client, msg.sessionId, snapshot, true);
           }
         } catch {
           // Ignore malformed messages
@@ -178,6 +146,27 @@ export class WsBroadcastManager {
 
   // ── Internal ──
 
+  /**
+   * Send an init/resync snapshot to a single client. Bumps the per-session
+   * sequence counter so the client can detect gaps between the init payload
+   * and the first incremental update.
+   */
+  private sendInit(client: WsClient, sessionId: string, snapshot: SessionSnapshot, resync: boolean): void {
+    const truncatedMessages = snapshot.messages
+      ? truncateMessagesForTransport(snapshot.messages, this.getCardDefaults())
+      : undefined;
+    const seq = (client.outputSeqBySession.get(sessionId) ?? 0) + 1;
+    client.outputSeqBySession.set(sessionId, seq);
+    client.pendingResyncSessions.delete(sessionId);
+    client.ws.send(JSON.stringify({
+      type: "init",
+      sessionId,
+      seq,
+      ...(resync ? { resync: true } : {}),
+      data: { ...snapshot, messages: truncatedMessages, output: snapshot.output },
+    }));
+  }
+
   private broadcast(event: ProcessEvent): void {
     for (const client of this.clients) {
       if (client.ws.readyState !== WebSocket.OPEN) continue;
@@ -196,17 +185,11 @@ export class WsBroadcastManager {
       // request a fresh snapshot once it sees the resync hint.
       if (client.sendQueue.length >= MAX_QUEUE_SIZE) {
         client.backpressurePaused = true;
-        if (event.type === "output") {
-          client.pendingResyncSessions.add(event.sessionId);
-          client.droppedSinceLast = true;
-        }
+        if (event.type === "output") client.pendingResyncSessions.add(event.sessionId);
         continue;
       }
       if (client.backpressurePaused) {
-        if (event.type === "output") {
-          client.pendingResyncSessions.add(event.sessionId);
-          client.droppedSinceLast = true;
-        }
+        if (event.type === "output") client.pendingResyncSessions.add(event.sessionId);
         continue;
       }
 

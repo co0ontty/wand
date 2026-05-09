@@ -2127,6 +2127,14 @@
                 '</div>' +
                 '<p class="field-hint" style="margin-top:-4px;">设置回复语言后，Claude 将尽量使用指定语言回复。</p>' +
                 '<div class="field">' +
+                  '<label class="field-label" for="cfg-structured-runner">结构化会话 Runner</label>' +
+                  '<select id="cfg-structured-runner" class="field-input">' +
+                    '<option value="cli">CLI（spawn claude -p，默认）</option>' +
+                    '<option value="sdk">SDK（@anthropic-ai/claude-agent-sdk）</option>' +
+                  '</select>' +
+                  '<p class="field-hint" style="margin-top:4px;">SDK 模式使用官方 Agent SDK 替代 CLI subprocess，接口更整洁，功能等价。重启后生效。</p>' +
+                '</div>' +
+                '<div class="field">' +
                   '<label class="field-label" for="cfg-default-model">默认模型</label>' +
                   '<div class="settings-row-with-action">' +
                     '<select id="cfg-default-model" class="field-input field-select">' +
@@ -3093,11 +3101,14 @@
         // Code blocks with syntax highlighting
         escaped = escaped.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
           var highlighted = highlightCodePreview(code.trim(), lang);
-          return '<pre><code class="language-' + lang + '">' + highlighted + '</code></pre>';
+          var protectedHighlighted = highlighted.replace(/_/g, '&#95;').replace(/\*/g, '&#42;');
+          return '<pre><code class="language-' + lang + '">' + protectedHighlighted + '</code></pre>';
         });
 
         // Inline code
-        escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
+        escaped = escaped.replace(/`([^`]+)`/g, function(_, code) {
+          return '<code>' + code.replace(/_/g, '&#95;').replace(/\*/g, '&#42;') + '</code>';
+        });
 
         // Headers
         escaped = escaped.replace(/^######\s+(.*)$/gm, '<h6>$1</h6>');
@@ -3111,9 +3122,9 @@
         escaped = escaped.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
         escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         escaped = escaped.replace(/\*(.+?)\*/g, '<em>$1</em>');
-        escaped = escaped.replace(/___(.+?)___/g, '<strong><em>$1</em></strong>');
-        escaped = escaped.replace(/__(.+?)__/g, '<strong>$1</strong>');
-        escaped = escaped.replace(/_(.+?)_/g, '<em>$1</em>');
+        escaped = escaped.replace(/(^|[^\w])___(\S(?:[^\n]*?\S)?)___(?!\w)/g, '$1<strong><em>$2</em></strong>');
+        escaped = escaped.replace(/(^|[^\w])__(\S(?:[^\n]*?\S)?)__(?!\w)/g, '$1<strong>$2</strong>');
+        escaped = escaped.replace(/(^|[^\w])_(\S(?:[^\n_]*?\S)?)_(?!\w)/g, '$1<em>$2</em>');
 
         // Strikethrough
         escaped = escaped.replace(/~~(.+?)~~/g, '<del>$1</del>');
@@ -5413,40 +5424,17 @@
       }
       stripWideFillerForCopy();
 
-      // ── PTY 链路时序参数索引 ──────────────────────────────────────────
-      // 本文件中所有影响 PTY 输入/输出节流的常量集中说明（值仍在使用处定义，
-      // 方便阅读上下文，但请保持一致命名以便此索引可 grep 跳转）：
-      //
-      //   服务端（src/ws-broadcast.ts、src/process-manager.ts）：
-      //     OUTPUT_DEBOUNCE_MS = 16     PTY data → ws 推送 debounce
-      //     OUTPUT_MAX_SIZE = 200_000   record.output ring buffer 字节上限
-      //
-      //   客户端（本文件）：
-      //     CLIENT_OUTPUT_MAX / CLIENT_OUTPUT_TRIM_AT  state.terminalOutput 窗口
-      //     RESYNC_THROTTLE_MS = 400    chunk → softResync 节流最小间隔
-      //     RESYNC_TAIL_MS = 350        节流尾巴 timer 等待
-      //     RESYNC_BUDGET_*             5s 内 resync 频次告警阈值
-      //     CHAT_RENDER_LIVE_MS = 150   活跃流时 renderChat debounce
-      //     CHAT_RENDER_IDLE_MS = 30    空闲时 renderChat debounce
-      //     PENDING_INPUT_TTL_MS = 5000 ws 离线输入队列 TTL
-      //     PENDING_INPUT_MAX = 100     离线队列长度上限
-      //
-      // 调参时的关键不变式：
-      //   OUTPUT_DEBOUNCE_MS  <  CHAT_RENDER_IDLE_MS  ≤  CHAT_RENDER_LIVE_MS
-      //   RESYNC_TAIL_MS      ≤  RESYNC_THROTTLE_MS
-      // 否则会出现"上游推得比下游消化得快但下游 timer 还没到期"的堵塞。
+      // PTY 链路节流不变式：
+      //   服务端 OUTPUT_DEBOUNCE_MS  <  CHAT_RENDER_IDLE_MS  ≤  CHAT_RENDER_LIVE_MS
+      //   RESYNC_TAIL_MS            ≤  RESYNC_THROTTLE_MS
+      // 违反这两条会出现"上游推得比下游消化得快但下游 timer 还没到期"的堵塞。
       var CHAT_RENDER_LIVE_MS = 150;
       var CHAT_RENDER_IDLE_MS = 30;
 
-      // 客户端的 state.terminalOutput 仅用于 softResyncTerminal 时重放给
-      // wterm 作状态恢复，并不是用户能看到的 scrollback —— wterm 自己有
-      // 独立 scrollback。但如果不限长，长跑会话累加几 MB 后每次 resync
-      // 都会把整段重新喂给 wterm，CPU/内存随时间线性变差。
-      //
-      // 服务端 record.output 用 appendWindow(..., 200_000) 限了 200KB，这里
-      // 客户端给一个稍宽的上限做兜底；超过就按行边界裁掉头部，行边界处
-      // ANSI 状态机一定是 idle 状态，重放结果与未裁等价。找不到行边界时
-      // 退化到字节切，并避开 UTF-16 半截、ANSI 半截。
+      // state.terminalOutput 仅作 softResyncTerminal 的重放源（wterm 有自己的
+      // scrollback），所以必须限长，否则长跑会话每次 resync 都喂几 MB 给 wterm。
+      // 裁切优先在行边界（ANSI 状态机此时一定 idle，重放等价），找不到再按字节切
+      // 并避开 UTF-16 半截 / ANSI 半截。
       var CLIENT_OUTPUT_MAX = 256 * 1024;
       var CLIENT_OUTPUT_TRIM_AT = 320 * 1024;
       function clampClientTerminalOutput(buf) {
@@ -5510,17 +5498,13 @@
         resetWideParserState();
       }
 
-      // Soft resync terminal: reset WASM grid and replay full output buffer.
-      // Clears any stale DOM rows left over from CSI cursor-jump sequences
-      // (e.g. Claude permission menus redrawing in place while user holds arrow keys).
-      // Pass { skipFit: true } when the caller knows the grid was just sized
-      // correctly (e.g. wterm.onResize fired this resync — bouncing back into
-      // ensureTerminalFit would just trigger another remeasure → resize → onResize
-      // → softResyncTerminal recursion).
-      //
-      // 重放整 buffer 而非截短：alt screen 切换 / 滚动区 / 字符集等模式开关
-      // 依赖从 buffer 开头开始消费。从中间切会丢失这些状态机指令，治标变
-      // 造反。H1 已经把 buffer 限到 256KB，对 wterm WASM 来说这是 ms 级开销。
+      // Reset wterm WASM grid and replay the full output buffer to clear stale
+      // DOM rows left by CSI cursor-jump sequences (Claude permission menus etc.).
+      // Replays the *whole* buffer because alt-screen / scroll-region / charset
+      // mode switches must be consumed from the start; cutting the middle drops
+      // those state-machine instructions and corrupts the grid.
+      // Pass { skipFit: true } when the caller already sized the grid (e.g.
+      // wterm.onResize fired this resync) — otherwise ensureTerminalFit recurses.
       var _resyncStatsWindowStart = 0;
       var _resyncStatsCount = 0;
       var _resyncLastWarnAt = 0;
@@ -5566,22 +5550,13 @@
         }, typeof delayMs === "number" ? delayMs : 150);
       }
 
-      // Claude CLI 的 permission 菜单 / 选择列表，在用户按方向键时会
-      // 发送光标定位 (CSI H/f)、光标移动 (CSI A-D)、擦除显示/行 (CSI
-      // J/K) 等序列在原地重绘整块区域。wterm 在这种高频原地重绘下，
-      // DOM 行经常残留或错位，导致新写入的内容被堆到 grid 顶部 ——
-      // 用户体感就是"明明在改菜单，结果跑到最上面去了"。
+      // Claude CLI 的 permission 菜单 / 选择列表在方向键下会发原地重绘序列
+      // (CSI A-D / J / K / H / f)。wterm 在这种高频原地重绘下 DOM 行容易残留
+      // 或错位，必须用 softResyncTerminal 兜底。
       //
-      // 兜底策略是"重置 wterm 状态机 + 重放整 buffer"（softResyncTerminal）。
-      // 这里的关键是触发时机：旧实现用 350ms debounce，但用户实际持续
-      // 按方向键时，每次按键都会让 PTY 回流一次原地重绘 chunk，timer
-      // 被反复 reset，永远等不到静默期，softResync 实际从不触发——
-      // 这是这个保护机制的根本逻辑错误。
-      //
-      // 改成 leading + tail 的节流：第一次进入立即 resync（leading），
-      // 节流窗口内的连续 chunk 只挂一个尾巴 timer 兜底，不重置。这样
-      // 持续按键期间每 RESYNC_THROTTLE_MS 强制 resync 一次，用户停手
-      // 时由尾巴 timer 收尾。不依赖按键停顿这种永远不发生的条件。
+      // 触发用 leading + tail 节流而非 debounce：用户持续按键时每次 chunk 都会
+      // reset debounce timer，永远等不到静默期。leading 立即 resync、窗口内
+      // 用尾巴 timer 收尾，不依赖按键停顿。
       var IN_PLACE_REDRAW_RE = /\x1b\[\d*(?:;\d*)?[ABCDfHJK]/;
       var RESYNC_THROTTLE_MS = 400;
       var RESYNC_TAIL_MS = 350;
@@ -6204,7 +6179,7 @@
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
           provider: provider,
-          runner: provider === "codex" ? "codex-cli-exec" : (state.structuredRunner || "claude-cli-print"),
+          runner: provider === "codex" ? "codex-cli-exec" : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print")),
           prompt: prompt || undefined,
           worktreeEnabled: worktreeEnabled === true,
           model: modelPref || undefined
@@ -6371,19 +6346,28 @@
             return block && block.__processing;
           });
         })());
-        var preserveLocalStructuredProgress = (localSession.sessionKind === "structured")
-          && !!localStructuredState
-          && localStructuredState.inFlight === true
-          && (!serverStructuredState || serverStructuredState.inFlight !== true)
-          && localHasPendingAssistant
-          && !!localStructuredState.activeRequestId
-          && (!serverStructuredState || !serverStructuredState.activeRequestId || serverStructuredState.activeRequestId === localStructuredState.activeRequestId);
         var localMessages = Array.isArray(localSession.messages)
           ? (structuredSession ? stripRenderOnlyStructuredMessages(localSession.messages) : localSession.messages)
           : [];
         var serverMessages = Array.isArray(serverSession.messages)
           ? (structuredSession ? stripRenderOnlyStructuredMessages(serverSession.messages) : serverSession.messages)
           : [];
+        // 服务端已经返回了完整的 assistant 回复（非 __processing 占位）时，
+        // 不应再保留本地的 inFlight=true 状态，否则用户会看到"思考中"转圈永远不停。
+        var serverHasCompletedAssistant = serverMessages.length > 0 && (function() {
+          var last = serverMessages[serverMessages.length - 1];
+          return last && last.role === "assistant" && Array.isArray(last.content)
+            && !last.content.some(function(b) { return b && b.__processing; });
+        })();
+        var preserveLocalStructuredProgress = (localSession.sessionKind === "structured")
+          && !!localStructuredState
+          && localStructuredState.inFlight === true
+          && (!serverStructuredState || serverStructuredState.inFlight !== true)
+          && localHasPendingAssistant
+          && !!localStructuredState.activeRequestId
+          && !!serverStructuredState && !!serverStructuredState.activeRequestId
+          && serverStructuredState.activeRequestId === localStructuredState.activeRequestId
+          && !serverHasCompletedAssistant;
         var preserveLocalMessages = localMessages.length > serverMessages.length
           || (localMessages.length > 0 && serverMessages.length > 0
             && JSON.stringify(localMessages[localMessages.length - 1]) !== JSON.stringify(serverMessages[serverMessages.length - 1])
@@ -7479,6 +7463,9 @@
             var langEl = document.getElementById("cfg-language");
             if (langEl) langEl.value = cfg.language || "";
 
+            var srEl = document.getElementById("cfg-structured-runner");
+            if (srEl) srEl.value = cfg.structuredRunner || "cli";
+
             // Default model
             state.configDefaultModel = cfg.defaultModel || "";
             updateSettingsDefaultModelSelect();
@@ -7537,6 +7524,7 @@
           shell: (document.getElementById("cfg-shell") || {}).value,
           language: (document.getElementById("cfg-language") || {}).value || "",
           defaultModel: (document.getElementById("cfg-default-model") || {}).value || "",
+          structuredRunner: (document.getElementById("cfg-structured-runner") || {}).value || "cli",
         };
 
         var previousDefaultModel = (state.config && state.config.defaultModel) || "";
@@ -9288,11 +9276,19 @@
         return Promise.resolve();
       }
 
+      // 防止同一会话并发提交（快速双击 / 重复触发）
+      var _structuredSubmittingSessions = {};
+
       function postStructuredInput(input, inputBox, session) {
         console.log("[WAND] postStructuredInput selectedId:", state.selectedId, "input:", input && input.substring(0, 50), "session:", session && { id: session.id, sessionKind: session.sessionKind, runner: session.runner, status: session.status, inFlight: session.structuredState && session.structuredState.inFlight });
         if (!state.selectedId || !input) return Promise.resolve();
         if (!session) {
           showToast("会话不存在，请重新选择或新建会话。", "error");
+          return Promise.resolve();
+        }
+        // 同一会话的上一次提交尚未落地，直接忽略防止重复发送
+        if (_structuredSubmittingSessions[session.id]) {
+          console.log("[wand] postStructuredInput: duplicate submit ignored for session", session.id);
           return Promise.resolve();
         }
 
@@ -9327,23 +9323,36 @@
         // the HTTP response arrives.
         var epochBeforePost = state.queueEpoch;
 
+        // 给每次发送生成唯一 idempotency key。Android WebView 进程被冻结再恢复
+        // 的边界场景下，底层网络栈偶尔会把上次未收到响应的 POST 重发一次（前端
+        // JS 拦不住），导致同一条消息被 backend 处理两遍。带上 key 让 backend
+        // 在窗口内识别重发并丢弃。
+        var idempotencyKey = (typeof crypto !== "undefined" && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
+
         // 用 session.id（参数绑定，in-flight 期间不变）而不是 state.selectedId
         // 拼 URL，避免用户切到别的会话后 fetch 落到错误 sessionId。
+        _structuredSubmittingSessions[session.id] = true;
         return fetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ input: input, interrupt: isInterrupting || undefined })
+          body: JSON.stringify({ input: input, interrupt: isInterrupting || undefined, idempotencyKey: idempotencyKey })
         })
         .then(function(res) {
           if (!res.ok) {
             return res.json().catch(function() { return { error: "请求失败" }; }).then(function(payload) {
-              throw new Error((payload && payload.error) || "无法发送结构化消息。");
+              var err = new Error((payload && payload.error) || "无法发送结构化消息。");
+              err.errorCode = payload && payload.errorCode;
+              err.httpStatus = res.status;
+              throw err;
             });
           }
           return res.json();
         })
         .then(function(snapshot) {
+          _structuredSubmittingSessions[session.id] = false;
           if (snapshot && snapshot.error) {
             throw new Error(snapshot.error);
           }
@@ -9364,10 +9373,33 @@
           }
         })
         .catch(function(error) {
+          _structuredSubmittingSessions[session.id] = false;
+
+          // duplicate_idempotency_key：服务端识别出 WebView 底层重发的副本，
+          // 直接拦截不处理。这里**不**回滚乐观更新——第一次的请求实际上已经
+          // 被服务端接收并处理（或正在处理），ws 推送会带回真实状态；如果在
+          // 这里把 user turn rollback 掉，第一次的 user 消息会从 UI 上消失。
+          if (error && error.errorCode === "duplicate_idempotency_key") {
+            showToast(error.message || "检测到重复发送，已拦截。", "warning");
+            updateInputHint("Enter 发送 · Shift+Enter 换行");
+            return;
+          }
+
+          // 回滚乐观更新：恢复发送前的 messages（去掉刚加的 userTurn）和 inFlight 状态
+          var rollbackMsgs = userMsgs.slice(0, -1);
           updateSessionSnapshot({
             id: session.id,
+            status: session.status,
+            messages: rollbackMsgs,
             structuredState: Object.assign({}, session.structuredState || {}, { inFlight: false }),
           });
+          if (session.id === state.selectedId) {
+            state.currentMessages = buildMessagesForRender(
+              Object.assign({}, session, { messages: rollbackMsgs, structuredState: Object.assign({}, session.structuredState || {}, { inFlight: false }) }),
+              rollbackMsgs
+            );
+            renderChat(true);
+          }
           var message = (error && error.message) || "";
           var isTransientAbort =
             message === "Failed to fetch" ||
@@ -9559,12 +9591,8 @@
         }, Promise.resolve());
       }
 
-      // pendingMessages 用于 ws 离线时缓存输入，重连后批量回放。
-      // 旧实现：按字符串入队，仅靠长度上限 100 控制；超出 shift 最早一条。
-      // 问题：用户连续按方向键时几秒就把队列填满；shift 把最早按下的丢
-      // 掉，剩下的反而是后期按的——重连后回放的"输入序列"和用户实际
-      // 按下的顺序矛盾。给每条消息打时间戳，flush 时直接丢弃过期项，
-      // 让"离线超过 N 秒后重连"恢复成一个干净状态而不是错位重放。
+      // pendingMessages 缓存 ws 离线时的输入，重连后回放。每条带时间戳，
+      // flush 时丢弃过期项——离线 >TTL 后回放老按键序列只会让 PTY 错位。
       var PENDING_INPUT_TTL_MS = 5000;
       var PENDING_INPUT_MAX = 100;
       function enqueuePendingInput(input) {
@@ -9633,13 +9661,6 @@
           });
           return Promise.resolve();
         }
-
-        console.log("[wand] postInput: sending", {
-          sessionId: state.selectedId,
-          inputLength: input.length,
-          view: effectiveView,
-          wsConnected: state.wsConnected
-        });
 
         return fetch("/api/sessions/" + requestSessionId + "/input", {
           method: "POST",
@@ -9908,25 +9929,22 @@
               : "Enter 发送 · Shift+Enter 换行";
           }
         }
-        var disableStructuredInput = false;
-        // 历史会话只要可自动恢复（Claude provider + 有 claudeSessionId），
-        // 输入框/发送按钮就保持可用——发送时由 ensureSessionReadyForInput 透明完成恢复。
+        // 历史会话只要可自动恢复（Claude provider + 有 claudeSessionId），输入框/发送按钮
+        // 就保持可用——发送时由 ensureSessionReadyForInput 透明完成恢复。
         var canResumeOnSend = !structured && !isRunning && canAutoResumeSession(selectedSession);
         if (composer) {
           composer.placeholder = getComposerPlaceholder(selectedSession, state.terminalInteractive);
-          composer.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning && !canResumeOnSend);
+          composer.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
           composer.setAttribute("aria-disabled", composer.disabled ? "true" : "false");
-          // 终端交互模式下，按键由 document capture phase 直接透传到 PTY；
-          // 把 textarea 设为 readonly 避免浏览器同时把字符落进输入框
-          // （IME 组合输入、preventDefault 不彻底等边界场景下会出现"键
-          // 发到了 PTY、输入框里也留下了字"的双状态）。disabled 会让
-          // textarea 失去焦点能力影响一些场景，readOnly 更轻、保留焦点。
+          // 终端交互模式下按键由 document capture phase 透传到 PTY；用
+          // readOnly 而非 disabled 防止 IME 组合输入等边界场景下字符同时
+          // 落到 textarea，又保留 focus 能力。
           composer.readOnly = !!state.terminalInteractive;
           composer.classList.toggle("is-terminal-passthrough", !!state.terminalInteractive);
         }
         var sendBtn = document.getElementById("send-input-button");
         if (sendBtn) {
-          sendBtn.disabled = structured ? disableStructuredInput : (!!selectedSession && !isRunning && !canResumeOnSend);
+          sendBtn.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
           sendBtn.setAttribute("title", structured
             ? "发送"
             : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
@@ -9987,15 +10005,9 @@
         scheduleShortcutResync();
       }
 
-      // 用户点击下方快捷键栏（↑↓←→/Enter/Esc 等）后，PTY 通常会回流大量
-      // 原地重绘序列（CSI A-D / J / K / H / f）。maybeScheduleResyncForChunk
-      // 已经在收到这类 chunk 时做节流 resync，但 wterm 状态机偶尔会漏抓
-      // （比如 Codex 的菜单切换），导致 DOM 行残留 / 错位 —— 表现就是用户
-      // 反馈"按方向键之后画面错位，必须按一下右上角缩放才恢复"。
-      // 这里在每次快捷键点击之后安排一次延迟的 softResyncTerminal 兜底，
-      // 等价于自动按一次缩放按钮：reset 状态机 + 重放 buffer，把残留的
-      // 错位洗掉。延迟 ~500ms 是为了让服务端先把这次按键的回执完整推过来，
-      // 避免 resync 时只回放到 chunk 一半。
+      // 快捷键点击后做一次延迟 resync 兜底：maybeScheduleResyncForChunk 偶尔会漏
+      // 抓 Codex 菜单切换之类的原地重绘，导致 DOM 行残留。500ms 是为了等服务端把
+      // 本次按键的回执完整推过来，避免 resync 只回放到 chunk 一半。
       function scheduleShortcutResync() {
         if (!state.terminal) return;
         scheduleSoftResyncTerminal(500);
@@ -10594,12 +10606,8 @@
       }
 
       function updateInputPanelViewportSpacing() {
-        // 旧实现给 input-panel 加底部 padding = 键盘高度，意图是腾出键盘
-        // 空间。但 input-panel 本身位置由 flex 决定，padding 增大只是把
-        // panel 自身撑高、内部底部多出空白，textarea（panel 顶部）反而
-        // 被往上推、离键盘更远。新方案改为让 body 高度跟随 visualViewport
-        // 收缩（见 syncAppViewportHeight），input-panel 自然贴键盘上沿。
-        // 这里清掉旧 keyboard-offset，避免新旧双重补偿。
+        // 键盘空间通过 syncAppViewportHeight 让 body 跟随 visualViewport 收缩处理；
+        // 这里清掉历史遗留的 --keyboard-offset 避免双重补偿。
         var inputPanel = document.querySelector('.input-panel');
         if (!inputPanel) return;
         inputPanel.style.removeProperty('--keyboard-offset');
@@ -11991,13 +11999,10 @@
       function handleWebSocketMessage(msg) {
         switch (msg.type) {
           case 'output':
-            // Update session output (for terminal display and local message parsing)
-            // NOTE: For structured sessions, output may be "" during streaming — check messages too
-            // thinking → idle 边界自愈：桥接层在 output.chat 事件里把 isResponding
-            // 透传过来。当某会话由 true 变 false（assistant 完成一轮响应）时，
-            // 主动做一次 softResyncTerminal —— 等价于自动按一次右上角缩放按钮，
-            // 把 Claude/Codex 流式渲染中残留的错位光标定位序列洗掉。
-            // 用 120ms 微延迟 + 单 timer 防抖，避免连续 false→true→false 触发多次重放。
+            // For structured sessions, output may be "" during streaming — check messages too.
+            // thinking → idle 边界自愈：bridge 把 isResponding 透传过来，true→false 时
+            // 主动 softResyncTerminal，洗掉流式渲染残留的错位光标定位序列。
+            // 120ms 微延迟 + 单 timer 防抖，避免连续 false→true→false 多次重放。
             if (msg.data && msg.sessionId
                 && Object.prototype.hasOwnProperty.call(msg.data, 'isResponding')) {
               if (!state._lastIsResponding) state._lastIsResponding = {};
@@ -12192,6 +12197,8 @@
 
             if (isStructuredEnded && msg.sessionId === state.selectedId) {
               flushStructuredInputQueue();
+              // 结构化会话结束时也清 localStorage，防止下次加载恢复僵尸队列
+              clearStructuredQueuePersistence(msg.sessionId);
             } else if (!isStructuredEnded) {
               state.structuredInputQueue = [];
               clearStructuredQueuePersistence(state.selectedId);
@@ -12235,18 +12242,12 @@
               renderChat(true);
               updateTaskDisplay();
               updateApprovalStats();
-              // ws 重新订阅时拿到的是服务端 ring buffer 的最新窗口（最多
-              // 120KB）；客户端缓存的 terminalOutput 可能早于服务端窗口
-              // 的起点。append 模式有 prefix 检查，prefix 不匹配就 reset+
-              // 全量重写、全等就直接 return false——前者会把 alt-screen
-              // 中的 Claude TUI 切走，后者会把"应该按真实 cols 重写"的
-              // 机会跳过。改用 replace 强制 reset+按当前 cols 重写一次，
-              // 这是订阅时唯一可信的全量基线。
+              // 订阅返回的是服务端 ring buffer 最新窗口，与客户端 terminalOutput
+              // 可能不连续。强制 replace（reset + 按当前 cols 重写）是订阅时唯一
+              // 可信的全量基线，避免 append 的 prefix 检查走错分支。
               updateTerminalOutput(msg.data.output || "", msg.sessionId, "replace");
-              // 紧接着等容器有真实尺寸再 fit + softResync：wterm 启动
-              // 硬编码 cols=120，replace 写入也可能落在错的列宽上，
-              // ResizeObserver 的回调是异步的，得用 fit-with-retry 兜
-              // 一次，确保最终一定按真实宽度重排。
+              // wterm 启动 cols=120，replace 写入可能落在错的列宽上；ResizeObserver
+              // 回调异步，用 fit-with-retry 兜一次确保按真实宽度重排。
               ensureTerminalFitWithRetry("init");
             }
             break;
@@ -12631,8 +12632,7 @@
         var selectedForDelay = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var isActiveStream = selectedForDelay && selectedForDelay.status === "running"
           && selectedForDelay.sessionKind !== "structured";
-        // 活跃流时拉到 CHAT_RENDER_LIVE_MS 减少高频重渲；空闲时用 IDLE 快速响应。
-        // 旧实现里这两档在 setTimeout 调用时被覆盖成固定 30ms，分档逻辑形同虚设。
+        // 活跃流时拉到 LIVE 减少高频重渲；空闲时用 IDLE 快速响应。
         var delay = isActiveStream ? CHAT_RENDER_LIVE_MS : CHAT_RENDER_IDLE_MS;
         chatRenderTimer = setTimeout(function() {
           chatRenderTimer = null;
@@ -15005,6 +15005,49 @@
           return source;
         }
 
+        function isWordChar(code) {
+          return (code >= 48 && code <= 57) ||
+            (code >= 65 && code <= 90) ||
+            (code >= 97 && code <= 122) ||
+            code === 95;
+        }
+
+        function replaceUnderscoreEmphasis(source, openTag, closeTag) {
+          var cursor = 0;
+          while (cursor < source.length) {
+            var start = source.indexOf("_", cursor);
+            if (start === -1) break;
+            var leftCode = start > 0 ? source.charCodeAt(start - 1) : 0;
+            if (isWordChar(leftCode)) {
+              cursor = start + 1;
+              continue;
+            }
+            var searchFrom = start + 1;
+            var end = -1;
+            while (searchFrom < source.length) {
+              var candidate = source.indexOf("_", searchFrom);
+              if (candidate === -1) break;
+              var rightIdx = candidate + 1;
+              var rightCode = rightIdx < source.length ? source.charCodeAt(rightIdx) : 0;
+              if (!isWordChar(rightCode)) {
+                end = candidate;
+                break;
+              }
+              searchFrom = candidate + 1;
+            }
+            if (end === -1) break;
+            var inner = source.slice(start + 1, end);
+            if (!inner) {
+              cursor = end + 1;
+              continue;
+            }
+            var replacement = openTag + inner + closeTag;
+            source = source.slice(0, start) + replacement + source.slice(end + 1);
+            cursor = start + replacement.length;
+          }
+          return source;
+        }
+
         function replaceLinePrefix(source, marker, openTag, closeTag) {
           return source.split(newline).map(function(line) {
             if (line.indexOf(marker) !== 0) return line;
@@ -15066,12 +15109,13 @@
           }
 
           var highlighted = highlightCode(code.trim(), lang);
+          var protectedHighlighted = highlighted.replace(/_/g, '&#95;').replace(/\*/g, '&#42;');
           var replacement = '<div class="code-block">' +
             '<div class="code-block-header">' +
               '<span class="code-lang">' + (lang || "code") + '</span>' +
               '<button class="code-copy">Copy</button>' +
             '</div>' +
-            '<pre><code>' + highlighted + '</code></pre>' +
+            '<pre><code>' + protectedHighlighted + '</code></pre>' +
           '</div>';
           result = result.slice(0, start) + replacement + result.slice(endTag + 3);
           pos = start + replacement.length;
@@ -15088,14 +15132,15 @@
             continue;
           }
           var inlineCode = result.slice(inlineStart + 1, inlineEnd);
-          var inlineReplacement = '<code class="code-inline">' + inlineCode + '</code>';
+          var protectedInlineCode = inlineCode.replace(/_/g, '&#95;').replace(/\*/g, '&#42;');
+          var inlineReplacement = '<code class="code-inline">' + protectedInlineCode + '</code>';
           result = result.slice(0, inlineStart) + inlineReplacement + result.slice(inlineEnd + 1);
           pos = inlineStart + inlineReplacement.length;
         }
 
         result = replacePair(result, "**", '<strong>', '</strong>');
         result = replacePair(result, "*", '<em>', '</em>');
-        result = replacePair(result, "_", '<em>', '</em>');
+        result = replaceUnderscoreEmphasis(result, '<em>', '</em>');
         result = replaceLinePrefix(result, "### ", '<h3>', '</h3>');
         result = replaceLinePrefix(result, "## ", '<h2>', '</h2>');
         result = replaceLinePrefix(result, "# ", '<h1>', '</h1>');

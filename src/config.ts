@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, StructuredChatPersonaConfig, WandConfig } from "./types.js";
+type StructuredRunnerOption = WandConfig["structuredRunner"];
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -23,6 +24,7 @@ export const defaultConfig = (): WandConfig => ({
   android: defaultAndroidApkConfig(),
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
+  structuredRunner: "cli" as StructuredRunnerOption,
   commandPresets: [
     {
       label: "Claude",
@@ -202,6 +204,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
+    structuredRunner: (input.structuredRunner === "sdk" || input.structuredRunner === "cli") ? input.structuredRunner : defaults.structuredRunner,
   };
 }
 

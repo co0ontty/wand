@@ -21,16 +21,11 @@ import type {
   SessionEndData,
   RawOutputData,
 } from "./types.js";
-import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitConfirmSyntax, hasPermissionActionContext, scorePermissionLikelihood, FALLBACK_SCORE_THRESHOLD, isSlashCommandMenu, stripForEchoMatch, skipAnsiSequence } from "./pty-text-utils.js";
+import { stripAnsi, isNoiseLine, appendWindow, normalizePromptText, hasExplicitConfirmSyntax, hasPermissionActionContext, scorePermissionLikelihood, FALLBACK_SCORE_THRESHOLD, isSlashCommandMenu, stripForEchoMatch, skipAnsiSequence, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 
 // ── Constants ──
 
-/**
- * Hard cap on the in-memory PTY replay buffer. Aligned with the non-bridge
- * branch of `ProcessManager.start()` so a session keeps the same amount of
- * history regardless of which capture path is active.
- */
-const OUTPUT_MAX_SIZE = 200000;
+const OUTPUT_MAX_SIZE = PTY_OUTPUT_MAX_SIZE;
 const SESSION_ID_WINDOW_SIZE = 16384;
 const PERMISSION_WINDOW_SIZE = 2000;
 const AUTO_APPROVE_DELAY_MS = 350;
@@ -1006,16 +1001,11 @@ export class ClaudePtyBridge extends EventEmitter {
 
   /**
    * Find the end index of the echoed user input in the PTY buffer.
-   * The echo may contain ANSI codes between characters.
-   * Returns the index after the last character of the echo.
+   * Returns 0 if the echo cannot be fully matched.
    *
-   * Matching strategy:
-   * - Keep every printable codepoint of `userInput` (anything that is not a
-   *   control char or whitespace) for comparison. The previous version dropped
-   *   common symbols like `/`, `(`, `:`, space — which made commands such as
-   *   `ls /tmp` mismatch and start parsing the chat response from a wrong offset.
-   * - In the buffer, skip ANSI escape sequences entirely, and skip whitespace
-   *   so wrapped echoes (line continuation, padded columns) still align.
+   * Why: ANSI escapes and whitespace can interleave the echoed characters
+   * (line wrapping, padding, color codes), so matching skips them while
+   * comparing every printable codepoint of `userInput` in order.
    */
   private findEchoEndIndex(buffer: string, userInput: string): number {
     const inputChars = stripForEchoMatch(userInput);

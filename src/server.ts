@@ -846,6 +846,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
+      structuredRunner: config.structuredRunner ?? "cli",
       structuredRunners: [
         { label: "Claude Structured", runner: "claude-cli-print" },
         { label: "Codex Structured", runner: "codex-cli-exec" },
@@ -942,7 +943,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.post("/api/settings/config", async (req, res) => {
     const body = req.body as Partial<WandConfig>;
-    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "language", "defaultModel"] as const;
+    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "language", "defaultModel", "structuredRunner"] as const;
     let changed = false;
 
     for (const field of allowedFields) {
@@ -972,6 +973,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           config.language = typeof body.language === "string" ? body.language.trim() : "";
         } else if (field === "defaultModel") {
           config.defaultModel = typeof body.defaultModel === "string" ? body.defaultModel.trim() : "";
+        } else if (field === "structuredRunner") {
+          config.structuredRunner = body.structuredRunner === "sdk" ? "sdk" : "cli";
         }
         changed = true;
       }

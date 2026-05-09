@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { spawn, ChildProcess } from "node:child_process";
+import type { query as SdkQueryFn, Options as SdkOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { prepareSessionWorktree } from "./git-worktree.js";
 
 import { SessionLogger } from "./session-logger.js";
 import { WandStorage } from "./storage.js";
 import {
-  ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
+  CardExpandDefaults, ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
   ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState,
   WandConfig,
 } from "./types.js";
+import { truncateMessagesForTransport } from "./message-truncator.js";
 
 interface CreateStructuredSessionOptions {
   cwd: string;
@@ -46,6 +48,11 @@ interface StreamingTurnState {
 }
 
 const STREAM_EMIT_DEBOUNCE_MS = 16;
+/** Min interval between full saveSession() calls for an in-progress streaming turn.
+ *  saveSession serializes the entire messages array, so doing it on every NDJSON
+ *  event is N². close-path always calls saveSession unconditionally to take the
+ *  authoritative final snapshot. */
+const STREAM_SAVE_THROTTLE_MS = 200;
 const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
 
 function isRunningAsRoot(): boolean {
@@ -117,14 +124,22 @@ function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["
   };
 }
 
-function buildIncrementalStructuredPayload(snapshot: SessionSnapshot): ProcessEvent["data"] {
+function buildIncrementalStructuredPayload(
+  snapshot: SessionSnapshot,
+  cardDefaults: CardExpandDefaults,
+): ProcessEvent["data"] {
   const messages = snapshot.messages ?? [];
+  const lastTurn = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  // Streaming turn (index 0 here) is preserved verbatim; truncation only kicks
+  // in if the live response is already bigger than the transport threshold,
+  // matching the PTY runner's behaviour in process-manager.ts.
+  const lastMessage = lastTurn ? truncateMessagesForTransport([lastTurn], cardDefaults, 0)[0] : undefined;
   return {
     incremental: true,
     queuedMessages: snapshot.queuedMessages,
     sessionKind: "structured",
     structuredState: snapshot.structuredState,
-    lastMessage: messages.length > 0 ? messages[messages.length - 1] : undefined,
+    lastMessage,
     messageCount: messages.length,
   };
 }
@@ -132,7 +147,18 @@ function buildIncrementalStructuredPayload(snapshot: SessionSnapshot): ProcessEv
 export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   private readonly pendingChildren = new Map<string, ChildProcess>();
+  private readonly pendingSdkAbort = new Map<string, AbortController>();
   private readonly interruptedWith = new Map<string, string>();
+  /** Last wall-clock time (ms) we did a full saveSession for a streaming session. */
+  private readonly lastStreamSaveAt = new Map<string, number>();
+  /**
+   * Idempotency keys we've already accepted, mapped to their wall-clock timestamp.
+   * Android WebView 在进程恢复时偶尔会重发上一个未收到响应的 POST（HTTP/2 stream
+   * reset 等场景），客户端 JS 没有重试逻辑也拦不住。这里用 (sessionId, key) 永
+   * 久去重，重复就抛错让前端弹 toast 提示，**不**做任何处理。timestamp 仅用于
+   * map 大小溢出时按时间裁剪。
+   */
+  private readonly seenIdempotencyKeys = new Map<string, number>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   private archiveTimer: NodeJS.Timeout | null = null;
 
@@ -192,6 +218,20 @@ export class StructuredSessionManager {
 
   setEventEmitter(emitEvent: (event: ProcessEvent) => void): void {
     this.emitEvent = emitEvent;
+  }
+
+  /**
+   * In-memory snapshot is updated unconditionally; the SQLite write is rate-
+   * limited to once per STREAM_SAVE_THROTTLE_MS. Caller must still invoke
+   * `storage.saveSession` directly at terminal events (close / failure) so the
+   * final state is durable.
+   */
+  private saveStreamingSnapshot(snapshot: SessionSnapshot): void {
+    const now = Date.now();
+    const last = this.lastStreamSaveAt.get(snapshot.id) ?? 0;
+    if (now - last < STREAM_SAVE_THROTTLE_MS) return;
+    this.lastStreamSaveAt.set(snapshot.id, now);
+    this.storage.saveSession(snapshot);
   }
 
   list(): SessionSnapshot[] {
@@ -267,11 +307,31 @@ export class StructuredSessionManager {
     return snapshot;
   }
 
-  async sendMessage(id: string, input: string, opts?: { interrupt?: boolean }): Promise<SessionSnapshot> {
+  async sendMessage(
+    id: string,
+    input: string,
+    opts?: { interrupt?: boolean; idempotencyKey?: string },
+  ): Promise<SessionSnapshot> {
     let session = this.requireSession(id);
     const prompt = input.trim();
     if (!prompt) return session;
-    console.log("[WAND] StructuredSessionManager.sendMessage id:", id, "inFlight:", session.structuredState?.inFlight, "hasPendingChild:", this.pendingChildren.has(id), "status:", session.status);
+    if (opts?.idempotencyKey) {
+      const mapKey = `${id}:${opts.idempotencyKey}`;
+      if (this.seenIdempotencyKeys.has(mapKey)) {
+        console.log("[WAND] sendMessage: duplicate idempotency key rejected", { id, key: opts.idempotencyKey });
+        const err = new Error("检测到重复发送，已拦截。") as Error & { code?: string };
+        err.code = "duplicate_idempotency_key";
+        throw err;
+      }
+      this.seenIdempotencyKeys.set(mapKey, Date.now());
+      // 防止 map 无限增长：超过 1024 条时按时间裁掉一半最早的
+      if (this.seenIdempotencyKeys.size > 1024) {
+        const sorted = Array.from(this.seenIdempotencyKeys.entries()).sort((a, b) => a[1] - b[1]);
+        for (let i = 0; i < sorted.length / 2; i++) {
+          this.seenIdempotencyKeys.delete(sorted[i][0]);
+        }
+      }
+    }
     if (session.structuredState?.inFlight) {
       const child = this.pendingChildren.get(id);
       const childAlive = child && !child.killed && child.exitCode === null;
@@ -293,6 +353,8 @@ export class StructuredSessionManager {
       } else if (opts?.interrupt) {
         this.interruptedWith.set(id, prompt);
         try { child.kill("SIGTERM"); } catch (_err) { /* ignore */ }
+        const sdkAbort = this.pendingSdkAbort.get(id);
+        if (sdkAbort) sdkAbort.abort();
         return session;
       } else {
         const queue = [...(session.queuedMessages ?? [])];
@@ -362,6 +424,8 @@ export class StructuredSessionManager {
     try {
       if ((updated.provider ?? "claude") === "codex") {
         await this.runCodexStreaming(id, updated, prompt);
+      } else if (this.config.structuredRunner === "sdk") {
+        await this.runClaudeSdkStreaming(id, updated, claudePrompt);
       } else {
         await this.runClaudeStreaming(id, updated, claudePrompt);
       }
@@ -477,6 +541,11 @@ export class StructuredSessionManager {
       child.kill();
       this.pendingChildren.delete(id);
     }
+    const sdkAbort = this.pendingSdkAbort.get(id);
+    if (sdkAbort) {
+      sdkAbort.abort();
+      this.pendingSdkAbort.delete(id);
+    }
     const stopped: SessionSnapshot = {
       ...session,
       status: "stopped",
@@ -501,7 +570,13 @@ export class StructuredSessionManager {
       child.kill();
       this.pendingChildren.delete(id);
     }
+    const sdkAbort = this.pendingSdkAbort.get(id);
+    if (sdkAbort) {
+      sdkAbort.abort();
+      this.pendingSdkAbort.delete(id);
+    }
     this.sessions.delete(id);
+    this.lastStreamSaveAt.delete(id);
     this.storage.deleteSession(id);
     this.logger?.deleteSession(id);
   }
@@ -570,6 +645,17 @@ export class StructuredSessionManager {
       await this.sendMessage(sessionId, nextInput);
     } catch (error) {
       console.error("[WAND] flushNextQueuedMessage failed:", error);
+      // 发送失败时把消息放回队首，避免永久丢失
+      const afterFail = this.sessions.get(sessionId);
+      if (afterFail) {
+        const rescued: SessionSnapshot = {
+          ...afterFail,
+          queuedMessages: [nextInput, ...(afterFail.queuedMessages ?? [])],
+        };
+        this.sessions.set(sessionId, rescued);
+        this.storage.saveSession(rescued);
+        this.emitStructuredSnapshot(rescued);
+      }
     }
   }
 
@@ -678,14 +764,12 @@ export class StructuredSessionManager {
   private runCodexStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const args = this.buildCodexArgs(session);
-      console.log("[WAND] runCodexStreaming sessionId:", sessionId, "mode:", session.mode, "threadId:", session.claudeSessionId);
       const spawnedAt = new Date().toISOString();
       const child = spawn("codex", args, {
         cwd: session.cwd,
         env: process.env,
         stdio: ["pipe", "pipe", "pipe"],
       });
-      console.log("[WAND] spawned codex exec pid:", child.pid, "args:", args.join(" "));
       this.logger?.appendStructuredSpawn(sessionId, {
         kind: "codex-exec",
         provider: "codex",
@@ -723,7 +807,7 @@ export class StructuredSessionManager {
         }
         const current = this.sessions.get(sessionId);
         if (!current) return;
-        this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current) });
+        this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}) });
       };
 
       const scheduleEmit = (): void => {
@@ -756,7 +840,7 @@ export class StructuredSessionManager {
           },
         };
         this.sessions.set(sessionId, patched);
-        this.storage.saveSession(patched);
+        this.saveStreamingSnapshot(patched);
       };
 
       const processLine = (line: string): void => {
@@ -797,10 +881,7 @@ export class StructuredSessionManager {
         }
         if (parsed?.type === "error") {
           const message = typeof parsed.message === "string" ? parsed.message : "";
-          if (message) {
-            console.log("[WAND] codex error event:", message.slice(0, 300));
-            codexErrors.push(message);
-          }
+          if (message) codexErrors.push(message);
           return;
         }
         if (parsed?.type === "turn.failed") {
@@ -808,7 +889,6 @@ export class StructuredSessionManager {
           const message = (errObj && typeof errObj.message === "string" && errObj.message)
             || (typeof parsed.message === "string" ? parsed.message : "")
             || "codex turn failed";
-          console.log("[WAND] codex turn.failed:", message.slice(0, 300));
           codexTurnFailed = message;
           return;
         }
@@ -830,8 +910,8 @@ export class StructuredSessionManager {
       });
 
       child.on("error", (error) => {
-        console.log("[WAND] codex exec child error:", error.message);
         this.pendingChildren.delete(sessionId);
+        this.lastStreamSaveAt.delete(sessionId);
         if (emitTimer) clearTimeout(emitTimer);
         this.logger?.appendStructuredSpawn(sessionId, {
           kind: "codex-exec-error",
@@ -844,8 +924,8 @@ export class StructuredSessionManager {
       });
 
       child.on("close", (code) => {
-        console.log("[WAND] codex exec child close code:", code, "stderr:", stderr.substring(0, 200), "errors:", codexErrors.length, "turnFailed:", codexTurnFailed?.slice(0, 100));
         this.pendingChildren.delete(sessionId);
+        this.lastStreamSaveAt.delete(sessionId);
         if (lineBuf.trim()) {
           processLine(lineBuf);
           lineBuf = "";
@@ -867,10 +947,13 @@ export class StructuredSessionManager {
           reject(new Error("Session removed during execution."));
           return;
         }
+        // 主动中断时（interruptedWith 里有新消息），不走失败路径
+        const interruptedByUser = this.interruptedWith.has(sessionId);
+        const interruptPrompt = this.interruptedWith.get(sessionId);
         // codex 把模型/网络/沙箱等错误写到 stdout 的 NDJSON 流（type: error / turn.failed），
         // 而不是 stderr。我们以 turn.failed 的 message 为准，其次是最后一个 error 事件。
         const codexFailed = codexTurnFailed !== null;
-        if (codexFailed || (code !== 0 && code !== null)) {
+        if ((codexFailed || (code !== 0 && code !== null)) && !interruptedByUser) {
           const errorText = (codexTurnFailed && codexTurnFailed.trim())
             || (codexErrors.length > 0 ? codexErrors[codexErrors.length - 1] : "")
             || stderr.trim()
@@ -893,14 +976,16 @@ export class StructuredSessionManager {
         const lastMsg = msgs[msgs.length - 1];
         if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = assistantTurn;
         else msgs.push(assistantTurn);
+        const keepRunning = !!interruptPrompt;
         const finished: SessionSnapshot = {
           ...current,
-          status: "idle",
-          exitCode: 0,
-          endedAt: new Date().toISOString(),
+          status: keepRunning ? "running" : "idle",
+          exitCode: keepRunning ? null : 0,
+          endedAt: keepRunning ? null : new Date().toISOString(),
           output: turnState.result,
           claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
           messages: msgs,
+          queuedMessages: interruptPrompt ? [] : current.queuedMessages,
           pendingEscalation: null,
           permissionBlocked: false,
           structuredState: {
@@ -914,7 +999,36 @@ export class StructuredSessionManager {
         this.sessions.set(sessionId, finished);
         this.storage.saveSession(finished);
         this.emitStructuredSnapshot(finished);
-        this.emitStructuredSnapshot(finished, "ended");
+        if (!keepRunning) {
+          this.emitStructuredSnapshot(finished, "ended");
+        }
+        if (interruptPrompt) {
+          this.interruptedWith.delete(sessionId);
+          resolve();
+          setImmediate(() => {
+            this.sendMessage(sessionId, interruptPrompt).catch((err) => {
+              console.error("[WAND] codex interrupt-and-send failed:", err);
+              const afterFail = this.sessions.get(sessionId);
+              if (afterFail) {
+                const recovered: SessionSnapshot = {
+                  ...afterFail,
+                  status: "idle",
+                  exitCode: 0,
+                  endedAt: new Date().toISOString(),
+                  structuredState: {
+                    ...(afterFail.structuredState as StructuredSessionState),
+                    inFlight: false,
+                    activeRequestId: null,
+                  },
+                };
+                this.sessions.set(sessionId, recovered);
+                this.storage.saveSession(recovered);
+                this.emitStructuredSnapshot(recovered);
+              }
+            });
+          });
+          return;
+        }
         resolve();
         setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
       });
@@ -939,7 +1053,6 @@ export class StructuredSessionManager {
   private runClaudeStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const args = ["-p", "--verbose", "--output-format", "stream-json"];
-      console.log("[WAND] runClaudeStreaming sessionId:", sessionId, "mode:", session.mode, "claudeSessionId:", session.claudeSessionId);
 
       // Add permission args based on mode + autoApprovePermissions toggle
       const permArgs = this.buildPermissionArgs(session.mode, session.autoApprovePermissions ?? false);
@@ -995,7 +1108,6 @@ export class StructuredSessionManager {
         env: process.env,
         stdio: ["pipe", "pipe", "pipe"],
       });
-      console.log("[WAND] spawned claude -p pid:", child.pid, "args:", args.join(" "));
       this.logger?.appendStructuredSpawn(sessionId, {
         kind: "claude-print",
         provider: "claude",
@@ -1039,7 +1151,7 @@ export class StructuredSessionManager {
         this.emit({
           type: "output",
           sessionId,
-          data: buildIncrementalStructuredPayload(current),
+          data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}),
         });
       };
 
@@ -1078,8 +1190,9 @@ export class StructuredSessionManager {
         };
         this.sessions.set(sessionId, patched);
         // Persist streaming progress so a server restart does not roll back the
-        // latest assistant turn to the pre-stream snapshot.
-        this.storage.saveSession(patched);
+        // latest assistant turn to the pre-stream snapshot. Throttled because
+        // saveSession serializes the full messages array.
+        this.saveStreamingSnapshot(patched);
       };
 
       const processLine = (line: string): void => {
@@ -1173,8 +1286,8 @@ export class StructuredSessionManager {
       });
 
       child.on("error", (error) => {
-        console.log("[WAND] claude -p child error:", error.message);
         this.pendingChildren.delete(sessionId);
+        this.lastStreamSaveAt.delete(sessionId);
         if (emitTimer) clearTimeout(emitTimer);
         this.logger?.appendStructuredSpawn(sessionId, {
           kind: "claude-print-error",
@@ -1187,8 +1300,8 @@ export class StructuredSessionManager {
       });
 
       child.on("close", (code) => {
-        console.log("[WAND] claude -p child close code:", code, "stderr:", stderr.substring(0, 200));
         this.pendingChildren.delete(sessionId);
+        this.lastStreamSaveAt.delete(sessionId);
         this.logger?.appendStructuredSpawn(sessionId, {
           kind: "claude-print-close",
           pid: child.pid ?? null,
@@ -1214,7 +1327,11 @@ export class StructuredSessionManager {
           return;
         }
 
-        if (code !== 0 && code !== null) {
+        // 如果是用户主动中断（interruptedWith 里有新消息），claude -p 收到 SIGTERM 后
+        // 可能以非零 exit code 退出（内部 handler 调了 exit(1)）。这种情况属于正常
+        // 中断流程，不应走失败路径——后续 interruptedWith 逻辑会发送新消息。
+        const interruptedByUser = this.interruptedWith.has(sessionId);
+        if (code !== 0 && code !== null && !interruptedByUser) {
           const errorText = stderr.trim() || `claude -p exited with code ${code}`;
           const failureTurn: ConversationTurn = {
             role: "assistant",
@@ -1310,11 +1427,28 @@ export class StructuredSessionManager {
         // 用户中断当前回复：保存部分回复后立即发送新消息。
         if (interruptPrompt) {
           this.interruptedWith.delete(sessionId);
-          console.log("[WAND] interrupt-and-send for session:", sessionId, "prompt:", interruptPrompt.substring(0, 50));
           resolve();
           setImmediate(() => {
             this.sendMessage(sessionId, interruptPrompt).catch((err) => {
               console.error("[WAND] interrupt-and-send failed:", err);
+              // 续接失败：把状态回滚到 idle，让用户可以重新输入而不是卡在 running 状态
+              const afterFail = this.sessions.get(sessionId);
+              if (afterFail) {
+                const recovered: SessionSnapshot = {
+                  ...afterFail,
+                  status: "idle",
+                  exitCode: 0,
+                  endedAt: new Date().toISOString(),
+                  structuredState: {
+                    ...(afterFail.structuredState as StructuredSessionState),
+                    inFlight: false,
+                    activeRequestId: null,
+                  },
+                };
+                this.sessions.set(sessionId, recovered);
+                this.storage.saveSession(recovered);
+                this.emitStructuredSnapshot(recovered);
+              }
             });
           });
           return;
@@ -1328,7 +1462,6 @@ export class StructuredSessionManager {
           (b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use",
         );
         if (lastToolUse && lastToolUse.name === "ExitPlanMode" && turnState.sessionId) {
-          console.log("[WAND] ExitPlanMode detected – auto-continuing plan execution for session:", sessionId);
           resolve();
           setImmediate(() => {
             this.sendMessage(sessionId, "Plan approved. Proceed with the implementation.").catch((err) => {
@@ -1343,6 +1476,412 @@ export class StructuredSessionManager {
           void this.flushNextQueuedMessage(sessionId);
         });
       });    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Streaming claude-agent-sdk execution
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Use @anthropic-ai/claude-agent-sdk instead of spawning claude -p directly.
+   * The SDK still spawns the claude binary but provides typed AsyncGenerator<SDKMessage>
+   * messages, so we skip NDJSON parsing. Options are 1:1 with the CLI flags.
+   *
+   * Streaming is enabled via includePartialMessages: true — the SDK emits
+   * SDKPartialAssistantMessage (type: "stream_event") with BetaRawMessageStreamEvent
+   * payloads for incremental text/thinking/tool_use updates, followed by a final
+   * SDKAssistantMessage with the authoritative complete content.
+   */
+  private runClaudeSdkStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      void this._runClaudeSdkStreamingAsync(sessionId, session, prompt).then(resolve, reject);
+    });
+  }
+
+  private async _runClaudeSdkStreamingAsync(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
+    let sdkQuery: typeof SdkQueryFn;
+    try {
+      const sdkMod = await import("@anthropic-ai/claude-agent-sdk");
+      sdkQuery = sdkMod.query as typeof SdkQueryFn;
+    } catch {
+      throw new Error("@anthropic-ai/claude-agent-sdk 未安装，无法使用 SDK runner。");
+    }
+
+    const abortController = new AbortController();
+    this.pendingSdkAbort.set(sessionId, abortController);
+
+    const isManaged = session.mode === "managed";
+    let killedForAskUserQuestion = false;
+
+    // Derive permission mode (mirrors buildPermissionArgs logic)
+    const shouldBypass = (session.autoApprovePermissions ?? false) || session.mode === "full-access" || session.mode === "managed";
+    const shouldAcceptEdits = session.mode === "auto-edit";
+
+    let permissionMode: SdkOptions["permissionMode"] = "default";
+    let allowedToolsForRoot: string[] | undefined;
+    if (!isRunningAsRoot()) {
+      if (shouldBypass) permissionMode = "bypassPermissions";
+      else if (shouldAcceptEdits) permissionMode = "acceptEdits";
+    } else {
+      // Root: acceptEdits + allowedTools (same workaround as CLI runner)
+      if (shouldBypass || shouldAcceptEdits) {
+        permissionMode = "acceptEdits";
+        allowedToolsForRoot = ["Bash", "Edit", "Write", "Read", "Glob", "Grep", "NotebookEdit", "WebFetch", "WebSearch"];
+      }
+    }
+
+    // System prompt additions
+    const isChinese = this.config.language?.trim() === "中文";
+    const systemPromptParts: string[] = [];
+    if (isManaged) {
+      systemPromptParts.push(
+        isChinese
+          ? "你正在完全托管的自主模式下运行。用户可能无法及时回复问题或确认。你必须独立做出所有决策——自行选择最佳方案，而不是向用户询问偏好、确认或澄清。如果有多种可行方案，选择你认为最合适的并继续执行。除非任务本身存在根本性的歧义且无法合理推断，否则不要等待用户输入。果断行动，自主决策。"
+          : "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.",
+      );
+    }
+    const language = this.config.language?.trim();
+    if (language) {
+      systemPromptParts.push(
+        isChinese
+          ? "请使用中文回复。所有解释、注释和对话文本都使用中文。"
+          : `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`,
+      );
+    }
+
+    const sdkOptions: SdkOptions = {
+      cwd: session.cwd,
+      abortController,
+      permissionMode,
+      ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(allowedToolsForRoot ? { allowedTools: allowedToolsForRoot } : {}),
+      ...(isManaged ? { disallowedTools: ["AskUserQuestion"] } : {}),
+      includePartialMessages: true,
+      ...(systemPromptParts.length > 0 ? { appendSystemPrompt: systemPromptParts.join("\n\n") } : {}),
+    };
+
+    if (session.claudeSessionId) (sdkOptions as Record<string, unknown>).resume = session.claudeSessionId;
+
+    const modelChoice = session.selectedModel?.trim();
+    if (modelChoice && modelChoice !== "default") sdkOptions.model = modelChoice;
+
+    const turnState: StreamingTurnState = {
+      blocks: [],
+      result: "",
+      sessionId: null,
+      model: undefined,
+      usage: undefined,
+    };
+
+    // Tracks in-progress streaming blocks keyed by content_block index from stream_event
+    const streamingBlockByIndex = new Map<number, {
+      type: "text" | "thinking" | "tool_use";
+      id?: string;
+      name?: string;
+      text: string;
+      thinking: string;
+      partialInput: string;
+      finalized: boolean;
+    }>();
+
+    let emitTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushEmit = (): void => {
+      if (emitTimer) { clearTimeout(emitTimer); emitTimer = null; }
+      const current = this.sessions.get(sessionId);
+      if (!current) return;
+      this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}) });
+    };
+
+    const scheduleEmit = (): void => {
+      if (!emitTimer) emitTimer = setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS);
+    };
+
+    // Rebuild ContentBlock[] from the in-progress streaming blocks map
+    const rebuildStreamingBlocks = (): ContentBlock[] => {
+      const sorted = [...streamingBlockByIndex.entries()].sort((a, b) => a[0] - b[0]);
+      const blocks: ContentBlock[] = [];
+      for (const [, sb] of sorted) {
+        if (sb.type === "text") {
+          blocks.push({ type: "text", text: sb.text });
+        } else if (sb.type === "thinking") {
+          blocks.push({ type: "thinking", thinking: sb.thinking });
+        } else if (sb.type === "tool_use" && sb.id && sb.name) {
+          let input: Record<string, unknown> = {};
+          if (sb.finalized && sb.partialInput) {
+            try { input = JSON.parse(sb.partialInput) as Record<string, unknown>; } catch { /* partial json */ }
+          }
+          blocks.push({ type: "tool_use", id: sb.id, name: sb.name, input });
+        }
+      }
+      return blocks;
+    };
+
+    const syncSnapshot = (): void => {
+      const current = this.sessions.get(sessionId);
+      if (!current) return;
+      const inProgressTurn: ConversationTurn = {
+        role: "assistant",
+        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
+        usage: turnState.usage,
+      };
+      const msgs = [...(current.messages ?? [])];
+      const lastMsg = msgs[msgs.length - 1];
+      if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = inProgressTurn;
+      else msgs.push(inProgressTurn);
+      const patched: SessionSnapshot = {
+        ...current,
+        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+        messages: msgs,
+        output: turnState.result || current.output,
+        structuredState: {
+          ...(current.structuredState as StructuredSessionState),
+          model: turnState.model ?? current.structuredState?.model,
+        },
+      };
+      this.sessions.set(sessionId, patched);
+      this.saveStreamingSnapshot(patched);
+    };
+
+    const spawnedAt = new Date().toISOString();
+    this.logger?.appendStructuredSpawn(sessionId, {
+      kind: "claude-sdk",
+      provider: "claude",
+      cwd: session.cwd,
+      permissionMode,
+      prompt: prompt.slice(0, 2048),
+      promptLength: prompt.length,
+      claudeSessionId: session.claudeSessionId,
+      spawnedAt,
+    });
+
+    try {
+      for await (const msg of sdkQuery({ prompt, options: sdkOptions }) as AsyncIterable<SDKMessage>) {
+        if (abortController.signal.aborted) break;
+
+        // Incremental streaming events (opt-in via includePartialMessages: true)
+        if (msg.type === "stream_event") {
+          const ev = (msg as unknown as { type: "stream_event"; event: Record<string, unknown> }).event;
+          if (ev.type === "content_block_start") {
+            const cb = ev.content_block as Record<string, unknown>;
+            const blockType = cb.type as string;
+            if (blockType === "text" || blockType === "thinking" || blockType === "tool_use") {
+              streamingBlockByIndex.set(ev.index as number, {
+                type: blockType as "text" | "thinking" | "tool_use",
+                id: typeof cb.id === "string" ? cb.id : undefined,
+                name: typeof cb.name === "string" ? cb.name : undefined,
+                text: typeof cb.text === "string" ? cb.text : "",
+                thinking: typeof cb.thinking === "string" ? cb.thinking : "",
+                partialInput: "",
+                finalized: false,
+              });
+              turnState.blocks = rebuildStreamingBlocks();
+              syncSnapshot();
+              scheduleEmit();
+            }
+          } else if (ev.type === "content_block_delta") {
+            const sb = streamingBlockByIndex.get(ev.index as number);
+            if (sb) {
+              const delta = ev.delta as Record<string, unknown>;
+              if (delta.type === "text_delta" && typeof delta.text === "string") {
+                sb.text += delta.text;
+                turnState.result = sb.text;
+              } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
+                sb.thinking += delta.thinking;
+              } else if (delta.type === "input_json_delta" && typeof delta.partial_json === "string") {
+                sb.partialInput += delta.partial_json;
+              }
+              turnState.blocks = rebuildStreamingBlocks();
+              syncSnapshot();
+              scheduleEmit();
+            }
+          } else if (ev.type === "content_block_stop") {
+            const sb = streamingBlockByIndex.get(ev.index as number);
+            if (sb) {
+              sb.finalized = true;
+              turnState.blocks = rebuildStreamingBlocks();
+              syncSnapshot();
+              scheduleEmit();
+            }
+          }
+          continue;
+        }
+
+        // Complete assistant turn — authoritative content replaces streaming blocks
+        if (msg.type === "assistant") {
+          const assistantMsg = msg as unknown as { type: "assistant"; message: Record<string, unknown>; session_id: string };
+          const extracted = this.extractAssistantMessage(assistantMsg.message);
+          // Keep tool_result blocks from previous user messages, replace streaming assistant content
+          const toolResults = turnState.blocks.filter(b => b.type === "tool_result");
+          turnState.blocks = [...extracted.content, ...toolResults];
+          streamingBlockByIndex.clear();
+          if (assistantMsg.session_id) turnState.sessionId = assistantMsg.session_id;
+          syncSnapshot();
+          scheduleEmit();
+
+          // Non-managed mode: detect AskUserQuestion, abort to let user answer
+          if (!isManaged && !killedForAskUserQuestion) {
+            const askBlock = extracted.content.find(
+              (b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use" && b.name === "AskUserQuestion",
+            );
+            if (askBlock) {
+              killedForAskUserQuestion = true;
+              flushEmit();
+              abortController.abort();
+            }
+          }
+          continue;
+        }
+
+        // Tool results fed back from the claude subprocess
+        if (msg.type === "user") {
+          const userMsg = msg as unknown as { type: "user"; message: Record<string, unknown> };
+          const content = Array.isArray(userMsg.message?.content) ? userMsg.message.content as unknown[] : [];
+          for (const block of content) {
+            const b = block as Record<string, unknown>;
+            if (b?.type === "tool_result") {
+              turnState.blocks.push({
+                type: "tool_result",
+                tool_use_id: typeof b.tool_use_id === "string" ? b.tool_use_id : "",
+                content: this.normalizeToolResultContent(b.content),
+                is_error: b.is_error === true,
+              });
+            }
+          }
+          syncSnapshot();
+          scheduleEmit();
+          continue;
+        }
+
+        // Final result — capture session_id, usage, model
+        if (msg.type === "result") {
+          const resultMsg = msg as Record<string, unknown>;
+          if (typeof resultMsg.result === "string") turnState.result = resultMsg.result.trim();
+          if (typeof resultMsg.session_id === "string") turnState.sessionId = resultMsg.session_id;
+          turnState.model = this.extractModelName(resultMsg.modelUsage as Record<string, unknown> | undefined) ?? turnState.model;
+          turnState.usage = this.extractSdkUsage(resultMsg);
+          syncSnapshot();
+          scheduleEmit();
+          continue;
+        }
+      }
+    } catch (err) {
+      // AbortError from abortController.abort() is intentional — fall through to finish logic
+      const isAbort = abortController.signal.aborted || (err instanceof Error && err.name === "AbortError");
+      if (!isAbort) {
+        this.pendingSdkAbort.delete(sessionId);
+        this.lastStreamSaveAt.delete(sessionId);
+        if (emitTimer) clearTimeout(emitTimer);
+        this.logger?.appendStructuredSpawn(sessionId, {
+          kind: "claude-sdk-error",
+          spawnedAt,
+          closedAt: new Date().toISOString(),
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+    }
+
+    // Cleanup
+    this.pendingSdkAbort.delete(sessionId);
+    this.lastStreamSaveAt.delete(sessionId);
+    if (emitTimer) clearTimeout(emitTimer);
+    flushEmit();
+
+    const current = this.sessions.get(sessionId);
+    if (!current) throw new Error("Session removed during execution.");
+
+    this.logger?.appendStructuredSpawn(sessionId, {
+      kind: "claude-sdk-close",
+      spawnedAt,
+      closedAt: new Date().toISOString(),
+      killedForAskUserQuestion,
+      sessionId: turnState.sessionId,
+    });
+
+    const interruptedByUser = this.interruptedWith.has(sessionId);
+
+    // Build final assistant turn
+    const finalContent = this.compactContentBlocks([...turnState.blocks], turnState.result);
+    const assistantTurn: ConversationTurn = {
+      role: "assistant",
+      content: finalContent,
+      usage: turnState.usage,
+    };
+    const msgs = [...(current.messages ?? [])];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = assistantTurn;
+    else msgs.push(assistantTurn);
+
+    const interruptPrompt = this.interruptedWith.get(sessionId);
+    const keepRunning = killedForAskUserQuestion || !!interruptPrompt;
+    const finished: SessionSnapshot = {
+      ...current,
+      status: keepRunning ? "running" : "idle",
+      exitCode: keepRunning ? null : 0,
+      endedAt: keepRunning ? null : new Date().toISOString(),
+      output: turnState.result,
+      claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+      messages: msgs,
+      queuedMessages: interruptPrompt ? [] : current.queuedMessages,
+      pendingEscalation: null,
+      permissionBlocked: false,
+      structuredState: {
+        ...(current.structuredState as StructuredSessionState),
+        model: turnState.model ?? current.structuredState?.model,
+        inFlight: false,
+        activeRequestId: null,
+        lastError: null,
+      },
+    };
+    this.sessions.set(sessionId, finished);
+    this.storage.saveSession(finished);
+    this.emitStructuredSnapshot(finished);
+    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
+
+    if (killedForAskUserQuestion) return;
+
+    if (interruptPrompt) {
+      this.interruptedWith.delete(sessionId);
+      setImmediate(() => {
+        this.sendMessage(sessionId, interruptPrompt).catch((err) => {
+          console.error("[WAND] sdk interrupt-and-send failed:", err);
+          const afterFail = this.sessions.get(sessionId);
+          if (afterFail) {
+            const recovered: SessionSnapshot = {
+              ...afterFail,
+              status: "idle",
+              exitCode: 0,
+              endedAt: new Date().toISOString(),
+              structuredState: {
+                ...(afterFail.structuredState as StructuredSessionState),
+                inFlight: false,
+                activeRequestId: null,
+              },
+            };
+            this.sessions.set(sessionId, recovered);
+            this.storage.saveSession(recovered);
+            this.emitStructuredSnapshot(recovered);
+          }
+        });
+      });
+      return;
+    }
+
+    // Auto-continue after ExitPlanMode (same as CLI runner)
+    const lastToolUse = [...turnState.blocks].reverse().find(
+      (b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use",
+    );
+    if (lastToolUse && lastToolUse.name === "ExitPlanMode" && turnState.sessionId) {
+      setImmediate(() => {
+        this.sendMessage(sessionId, "Plan approved. Proceed with the implementation.").catch((err) => {
+          console.error("[WAND] sdk auto-continue after ExitPlanMode failed:", err);
+        });
+      });
+      return;
+    }
+
+    setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
   }
 
   // ---------------------------------------------------------------------------
@@ -1555,6 +2094,20 @@ export class StructuredSessionManager {
     ) {
       return undefined;
     }
+    return value;
+  }
+
+  /** Extract usage from an SDKResultSuccess message (sdk runner). */
+  private extractSdkUsage(result: Record<string, unknown>): ConversationTurn["usage"] {
+    const usage = result?.usage as Record<string, unknown> | undefined;
+    const value = {
+      inputTokens: typeof usage?.input_tokens === "number" ? usage.input_tokens : undefined,
+      outputTokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : undefined,
+      cacheReadInputTokens: typeof usage?.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : undefined,
+      cacheCreationInputTokens: typeof usage?.cache_creation_input_tokens === "number" ? usage.cache_creation_input_tokens : undefined,
+      totalCostUsd: typeof result?.total_cost_usd === "number" ? result.total_cost_usd : undefined,
+    };
+    if (Object.values(value).every(v => v === undefined)) return undefined;
     return value;
   }
 
