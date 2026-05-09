@@ -6553,42 +6553,727 @@
     }
     .field-input::placeholder { color: var(--text-muted); }
 
+    /* ============================================================ */
+    /* ── Liquid Glass dialog system                              ── */
+    /* The MODAL itself is the glass. Internal elements stay flat,  */
+    /* clean, opaque-feeling — content sits ON the glass, not       */
+    /* INSIDE more glass.                                           */
+    /* ============================================================ */
+
     .modal-backdrop {
       position: fixed;
       inset: 0;
       z-index: 500;
-      background: rgba(42, 28, 18, 0.52);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      /* Quiet dark wash so the page beneath fades back. No warm tint
+         here — the modal carries the warmth, the backdrop just dims */
+      background: rgba(20, 14, 8, 0.34);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px;
-      animation: modalFadeIn 0.2s ease;
+      padding: 32px;
+      animation: liquidBackdropIn 0.28s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
     }
 
-    @keyframes modalFadeIn {
+    .modal-backdrop.closing {
+      animation: liquidBackdropOut 0.18s var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1)) both;
+      pointer-events: none;
+    }
+
+    @keyframes liquidBackdropIn {
       from { opacity: 0; }
-      to { opacity: 1; }
+      to   { opacity: 1; }
+    }
+    @keyframes liquidBackdropOut {
+      from { opacity: 1; }
+      to   { opacity: 0; }
     }
 
     .modal {
+      position: relative;
       width: 100%;
-      max-width: 540px;
-      max-height: 90vh;
+      max-width: 560px;
+      max-height: 88vh;
       display: flex;
       flex-direction: column;
-      background: rgba(255, 251, 245, 0.98);
-      border: 1px solid rgba(150, 118, 85, 0.22);
-      border-radius: 20px;
+      /* The actual glass material — single translucent layer, heavily
+         blurred. NO ::before sheen, NO multi-layer rim lights. Just a
+         clean piece of frosted glass. */
+      background: rgba(255, 252, 247, 0.74);
+      border: 0.5px solid rgba(255, 255, 255, 0.6);
+      border-radius: 26px;
       overflow: hidden;
-      box-shadow: 0 32px 64px rgba(89, 58, 32, 0.18), 0 4px 16px rgba(89, 58, 32, 0.08);
-      animation: modalSlideIn 0.22s cubic-bezier(0.34, 1.3, 0.64, 1);
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+      /* One large soft drop shadow + a single hairline rim. That's it. */
+      box-shadow:
+        0 32px 80px -16px rgba(20, 14, 8, 0.34),
+        0 8px 24px -8px rgba(20, 14, 8, 0.18),
+        0 0 0 0.5px rgba(125, 91, 57, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+      animation: liquidModalIn 0.32s cubic-bezier(0.34, 1.4, 0.64, 1) both;
     }
 
-    @keyframes modalSlideIn {
+    .modal-backdrop.closing .modal {
+      animation: liquidModalOut 0.18s var(--ease-in-out-smooth, cubic-bezier(0.4, 0, 0.2, 1)) both;
+    }
+
+    @keyframes liquidModalIn {
       from { opacity: 0; transform: scale(0.94) translateY(12px); }
-      to { opacity: 1; transform: scale(1) translateY(0); }
+      to   { opacity: 1; transform: scale(1)     translateY(0); }
+    }
+    @keyframes liquidModalOut {
+      from { opacity: 1; transform: scale(1)     translateY(0); }
+      to   { opacity: 0; transform: scale(0.97)  translateY(4px); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .modal-backdrop,
+      .modal-backdrop.closing,
+      .modal,
+      .modal-backdrop.closing .modal {
+        animation: none !important;
+      }
+    }
+
+    /* Fallback for browsers without backdrop-filter — solid surface */
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .modal-backdrop { background: rgba(20, 14, 8, 0.6); }
+      .modal { background: #fffaf2; border-color: rgba(125, 91, 57, 0.18); }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .modal-backdrop { background: rgba(8, 5, 2, 0.5); }
+      @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+        .modal-backdrop { background: rgba(8, 5, 2, 0.78); }
+      }
+    }
+
+    /* ============================================================ */
+    /* ── Liquid Glass dialog internals (refined)                ── */
+    /* Philosophy: the modal IS the glass. Internal elements are    */
+    /* solid, flat, restrained — they sit on the glass surface.     */
+    /* Hierarchy comes from typography & shadow, not stacked blur.  */
+    /* Scoped to .session-modal / .settings-modal only.             */
+    /* ============================================================ */
+
+    /* ── Header — generous breathing room, big title, hairline ── */
+    .session-modal .modal-header,
+    .settings-modal .settings-modal-header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid rgba(125, 91, 57, 0.08);
+      align-items: flex-start;
+      gap: 16px;
+      min-height: 0;
+    }
+    .session-modal .modal-title,
+    .settings-modal .settings-modal-title-group .modal-title {
+      font-size: 1.3125rem;
+      font-weight: 700;
+      letter-spacing: -0.022em;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+    .session-modal .modal-subtitle,
+    .settings-modal .settings-modal-subtitle {
+      margin-top: 5px;
+      font-size: 0.8125rem;
+      font-weight: 400;
+      color: var(--text-muted);
+      line-height: 1.5;
+      max-width: 44ch;
+    }
+
+    /* ── Modal close button (× → crisp SVG, rotate on hover) ── */
+    .modal-close-btn,
+    .session-modal .modal-header > .btn-icon.btn-ghost,
+    .settings-modal .settings-modal-header > .btn-icon.btn-ghost {
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      min-height: 32px;
+      padding: 0;
+      border-radius: 50%;
+      background: rgba(125, 91, 57, 0.07);
+      border: none;
+      color: var(--text-tertiary);
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition:
+        background 0.18s ease,
+        color 0.18s ease,
+        transform 0.28s cubic-bezier(0.34, 1.4, 0.64, 1),
+        box-shadow 0.18s ease;
+    }
+    .modal-close-btn svg { display: block; pointer-events: none; }
+    .modal-close-btn:hover,
+    .session-modal .modal-header > .btn-icon.btn-ghost:hover,
+    .settings-modal .settings-modal-header > .btn-icon.btn-ghost:hover {
+      background: rgba(178, 79, 69, 0.12);
+      color: var(--danger);
+      transform: rotate(90deg);
+      box-shadow: 0 2px 8px rgba(178, 79, 69, 0.18);
+    }
+    .modal-close-btn:active,
+    .session-modal .modal-header > .btn-icon.btn-ghost:active,
+    .settings-modal .settings-modal-header > .btn-icon.btn-ghost:active {
+      background: rgba(178, 79, 69, 0.2);
+      transform: rotate(90deg) scale(0.92);
+      transition-duration: 0.06s;
+    }
+    .modal-close-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    /* Body breathing room */
+    .session-modal .modal-body,
+    .settings-modal .settings-modal-body {
+      padding: 20px 28px;
+    }
+    .session-modal .modal-footer {
+      padding: 16px 28px 22px;
+      border-top: 1px solid rgba(125, 91, 57, 0.08);
+    }
+
+    /* ── Form inputs — solid, clean, single hairline ── */
+    .session-modal .field-input,
+    .settings-modal .field-input,
+    .settings-modal .settings-card .field-input,
+    .session-modal select.field-input,
+    .settings-modal select.field-input {
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(125, 91, 57, 0.14);
+      border-radius: 12px;
+      padding: 11px 14px;
+      box-shadow: inset 0 1px 1.5px rgba(125, 91, 57, 0.04);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .session-modal .field-input:hover,
+    .settings-modal .field-input:hover {
+      border-color: rgba(125, 91, 57, 0.24);
+      background: rgba(255, 255, 255, 0.92);
+    }
+    .session-modal .field-input:focus,
+    .settings-modal .field-input:focus,
+    .settings-modal .settings-card .field-input:focus,
+    .session-modal select.field-input:focus,
+    .settings-modal select.field-input:focus {
+      background: #ffffff;
+      border-color: var(--accent);
+      box-shadow:
+        inset 0 1px 1.5px rgba(125, 91, 57, 0.04),
+        0 0 0 3px var(--accent-muted);
+    }
+
+    /* ── Mode/segment cards — iOS-segmented look ── */
+    .session-modal .mode-cards {
+      gap: 8px;
+    }
+    .session-modal .mode-card {
+      padding: 12px 10px;
+      border: 1px solid rgba(125, 91, 57, 0.1);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.6);
+      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+      transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .session-modal .mode-card:hover {
+      background: rgba(255, 255, 255, 0.92);
+      border-color: rgba(125, 91, 57, 0.2);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(125, 91, 57, 0.08);
+    }
+    .session-modal .mode-card.active {
+      background: linear-gradient(180deg, #fff7ef 0%, #ffeed8 100%);
+      border-color: var(--accent);
+      box-shadow:
+        0 0 0 3px var(--accent-muted),
+        0 4px 12px rgba(197, 101, 61, 0.12);
+      transform: none;
+    }
+    .session-modal .mode-card.active .mode-card-label {
+      color: var(--accent);
+    }
+
+    /* ── Tool cards — same family, larger ── */
+    .session-modal .tool-card {
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      border-radius: 14px;
+      padding: 14px 16px;
+      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+      transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .session-modal .tool-card:hover {
+      background: #ffffff;
+      border-color: rgba(125, 91, 57, 0.22);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(125, 91, 57, 0.1);
+    }
+    .session-modal .tool-card.active {
+      background: linear-gradient(180deg, #fff8f1 0%, #fff1de 100%);
+      border-color: var(--accent);
+      box-shadow:
+        0 0 0 3px var(--accent-muted),
+        0 6px 16px rgba(197, 101, 61, 0.12);
+      transform: none;
+    }
+
+    .session-modal .tool-chip {
+      background: rgba(197, 101, 61, 0.12);
+      border: none;
+      color: var(--accent);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    /* Recent path bubbles — quiet pills */
+    .session-modal .recent-path-bubble {
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+      transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+    }
+    .session-modal .recent-path-bubble:hover {
+      background: #fff7ef;
+      border-color: var(--accent);
+      color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    /* ── Worktree inline toggle — iOS switch row ── */
+    .session-modal .session-inline-toggle {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px 6px 12px;
+      border-radius: 999px;
+      background: rgba(125, 91, 57, 0.05);
+      border: 1px solid rgba(125, 91, 57, 0.08);
+      cursor: pointer;
+      user-select: none;
+      transition:
+        background 0.18s ease,
+        border-color 0.18s ease,
+        box-shadow 0.18s ease,
+        color 0.18s ease;
+      color: var(--text-secondary);
+    }
+    .session-modal .session-inline-toggle:hover {
+      background: rgba(125, 91, 57, 0.09);
+      border-color: rgba(125, 91, 57, 0.16);
+    }
+    /* When the hidden checkbox is on, glow the whole pill in accent color */
+    .session-modal .session-inline-toggle:has(.switch-toggle:checked) {
+      background: linear-gradient(180deg, #fff7ef 0%, #ffeed8 100%);
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow:
+        0 0 0 3px var(--accent-muted),
+        0 4px 12px rgba(197, 101, 61, 0.12);
+    }
+    .session-modal .session-inline-toggle-icon {
+      flex-shrink: 0;
+      color: var(--text-muted);
+      transition: color 0.18s ease, transform 0.28s cubic-bezier(0.34, 1.4, 0.64, 1);
+    }
+    .session-modal .session-inline-toggle:has(.switch-toggle:checked) .session-inline-toggle-icon {
+      color: var(--accent);
+      transform: rotate(8deg);
+    }
+    .session-modal .session-inline-toggle-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.005em;
+      color: inherit;
+      transition: color 0.18s ease;
+    }
+
+    /* The hidden checkbox + visible iOS-style switch — scoped to inline toggle
+       so it doesn't conflict with .switch-card-list switches. */
+    .session-modal .session-inline-toggle .switch-toggle {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
+    .session-modal .session-inline-toggle .switch-slider {
+      position: relative;
+      display: inline-block;
+      width: 32px;
+      height: 20px;
+      min-width: 32px;
+      border-radius: 10px;
+      background: rgba(125, 91, 57, 0.22);
+      box-shadow: inset 0 1px 1px rgba(125, 91, 57, 0.18);
+      transition: background 0.22s ease, box-shadow 0.22s ease;
+    }
+    .session-modal .session-inline-toggle .switch-slider::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow:
+        0 1.5px 3px rgba(20, 14, 8, 0.22),
+        0 0 0 0.5px rgba(125, 91, 57, 0.06);
+      transition: transform 0.24s cubic-bezier(0.34, 1.4, 0.64, 1);
+    }
+    .session-modal .session-inline-toggle .switch-toggle:checked + .switch-slider {
+      background: var(--accent);
+      box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.1);
+    }
+    .session-modal .session-inline-toggle .switch-toggle:checked + .switch-slider::after {
+      transform: translateX(12px);
+    }
+    .session-modal .session-inline-toggle .switch-toggle:focus-visible + .switch-slider {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* Layout — let the hint row breathe and align nicely */
+    .session-modal .session-kind-hint-row {
+      align-items: center;
+      gap: 14px;
+    }
+
+    /* Suggestions floating panel — clean white card */
+    .session-modal .suggestions {
+      background: rgba(255, 252, 247, 0.96);
+      border: 1px solid rgba(125, 91, 57, 0.14);
+      border-radius: 12px;
+      box-shadow:
+        0 0 0 0.5px rgba(125, 91, 57, 0.05),
+        0 12px 28px -8px rgba(20, 14, 8, 0.18);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      overflow: hidden;
+    }
+    .session-modal .suggestion-item:hover {
+      background: rgba(232, 197, 174, 0.32);
+    }
+
+    /* Command preview — quiet code box */
+    .session-modal .command-preview {
+      background: rgba(125, 91, 57, 0.04);
+      border: 1px dashed rgba(125, 91, 57, 0.2);
+      border-radius: 10px;
+    }
+
+    /* Error message */
+    .session-modal .error-message,
+    .settings-modal .error-message {
+      background: rgba(178, 79, 69, 0.1);
+      border: 1px solid rgba(178, 79, 69, 0.2);
+      color: var(--danger);
+      border-radius: 10px;
+      padding: 10px 12px;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    /* Field labels — softer & slightly upper-case feel */
+    .session-modal .field-label,
+    .settings-modal .field-label {
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 0.8125rem;
+      margin-bottom: 8px;
+    }
+
+    /* ── Primary button — solid accent, soft shadow (no glass) ── */
+    .session-modal .modal-footer .btn-primary,
+    .settings-modal .btn-primary {
+      box-shadow:
+        0 6px 16px -4px rgba(197, 101, 61, 0.4),
+        0 2px 6px -2px rgba(197, 101, 61, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+    }
+    .session-modal .modal-footer .btn-primary:hover,
+    .settings-modal .btn-primary:hover {
+      box-shadow:
+        0 10px 24px -4px rgba(197, 101, 61, 0.46),
+        0 4px 10px -2px rgba(197, 101, 61, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+
+    /* Secondary button — quiet white card */
+    .session-modal .btn-secondary,
+    .settings-modal .btn-secondary {
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(125, 91, 57, 0.14);
+      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.04);
+      border-radius: 12px;
+    }
+    .session-modal .btn-secondary:hover,
+    .settings-modal .btn-secondary:hover {
+      background: #ffffff;
+      border-color: rgba(125, 91, 57, 0.24);
+      box-shadow: 0 4px 12px rgba(125, 91, 57, 0.08);
+    }
+
+    /* ============================================================ */
+    /* ── Settings modal — sidebar + content layout              ── */
+    /* ============================================================ */
+
+    /* Sidebar — clean column, soft hairline seam */
+    .settings-modal .settings-sidebar {
+      border-right: 1px solid rgba(125, 91, 57, 0.08);
+      padding-right: 12px;
+    }
+    .settings-modal .settings-sidebar-title {
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+
+    /* Sidebar tab — iOS Settings list row, clean and quiet */
+    .settings-modal .settings-tabs { gap: 2px; }
+    .settings-modal .settings-tab {
+      padding: 11px 14px;
+      border: none;
+      border-radius: 10px;
+      background: transparent;
+      box-shadow: none;
+      color: var(--text-secondary);
+      transition: background 0.14s ease, color 0.14s ease, transform 0.14s ease;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .settings-modal .settings-tab::before { display: none; }
+    .settings-modal .settings-tab:hover {
+      background: rgba(125, 91, 57, 0.06);
+      color: var(--text-primary);
+      transform: none;
+      border-color: transparent;
+    }
+    .settings-modal .settings-tab.active {
+      background: linear-gradient(180deg, #fff7ef 0%, #ffeed8 100%);
+      color: var(--accent);
+      box-shadow:
+        inset 0 0 0 1px rgba(197, 101, 61, 0.22),
+        0 1px 3px rgba(197, 101, 61, 0.08);
+    }
+    .settings-modal .settings-tab.active .settings-tab-meta {
+      color: var(--text-secondary);
+    }
+    .settings-modal .settings-tab-main {
+      font-size: 0.875rem;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+    }
+    .settings-modal .settings-tab-meta {
+      font-size: 0.7125rem;
+      color: var(--text-muted);
+    }
+
+    /* Panel header — bigger title, softer divider */
+    .settings-modal .settings-panel-header {
+      margin: 0 0 16px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid rgba(125, 91, 57, 0.08);
+    }
+    .settings-modal .settings-panel-title {
+      font-size: 1.1875rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .settings-modal .settings-panel-desc {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+
+    /* Settings cards — solid white cards, single hairline, soft shadow */
+    .settings-modal .settings-card,
+    .settings-modal .settings-update-section,
+    .settings-modal .settings-notification-section,
+    .settings-modal .settings-about-info,
+    .settings-modal .preset-item {
+      background: rgba(255, 255, 255, 0.65);
+      border: 1px solid rgba(125, 91, 57, 0.1);
+      border-radius: 16px;
+      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    .settings-modal .settings-about-row {
+      border-bottom-color: rgba(125, 91, 57, 0.08);
+    }
+
+    /* Switch card — clean clickable row */
+    .settings-modal .switch-card-list { gap: 8px; }
+    .settings-modal .switch-card {
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid rgba(125, 91, 57, 0.1);
+      border-radius: 14px;
+      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+      transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .settings-modal .switch-card:hover {
+      background: rgba(255, 255, 255, 0.85);
+      border-color: rgba(125, 91, 57, 0.18);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(125, 91, 57, 0.06);
+    }
+    .settings-modal .switch-card:has(.switch-toggle:checked) {
+      background: linear-gradient(180deg, #fff7ef 0%, #fff1de 100%);
+      border-color: var(--accent);
+      box-shadow:
+        0 0 0 1px var(--accent-muted),
+        0 4px 12px rgba(197, 101, 61, 0.1);
+    }
+
+    /* iOS-style switch — precise & tactile */
+    .settings-modal .switch-slider {
+      width: 44px;
+      height: 26px;
+      min-width: 44px;
+      border-radius: 13px;
+      background: rgba(125, 91, 57, 0.22);
+      box-shadow: inset 0 1px 1px rgba(125, 91, 57, 0.18);
+      transition: background 0.22s ease;
+    }
+    .settings-modal .switch-slider::after {
+      width: 22px;
+      height: 22px;
+      top: 2px;
+      left: 2px;
+      box-shadow:
+        0 2px 4px rgba(20, 14, 8, 0.18),
+        0 0 0 0.5px rgba(125, 91, 57, 0.06);
+      transition: transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1);
+    }
+    .settings-modal .switch-toggle:checked + .switch-slider {
+      background: var(--accent);
+      box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.1);
+    }
+    .settings-modal .switch-toggle:checked + .switch-slider::after {
+      transform: translateX(18px);
+    }
+
+    /* Toggle/range rows — quiet container row */
+    .settings-modal .settings-toggle-row,
+    .settings-modal .settings-range-row,
+    .settings-modal .field-inline {
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid rgba(125, 91, 57, 0.08);
+      border-radius: 12px;
+      box-shadow: 0 1px 1px rgba(125, 91, 57, 0.02);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    /* Settings panel intro — subtle accent banner */
+    .settings-modal .settings-panel-intro {
+      background: rgba(197, 101, 61, 0.06);
+      border: 1px solid rgba(197, 101, 61, 0.16);
+      border-radius: 12px;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    /* Card-head / section-head icon mini-badge */
+    .settings-modal .settings-card-icon,
+    .settings-modal .settings-section-icon {
+      background: linear-gradient(180deg, rgba(197, 101, 61, 0.16), rgba(197, 101, 61, 0.06));
+      border: 1px solid rgba(197, 101, 61, 0.18);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+      color: var(--accent);
+    }
+
+    /* App-icon options — clean cards with crisp active state */
+    .settings-modal .settings-app-icon-option {
+      background: rgba(255, 255, 255, 0.65);
+      border: 1px solid rgba(125, 91, 57, 0.1);
+      border-radius: 14px;
+      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+      transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .settings-modal .settings-app-icon-option:hover {
+      background: #ffffff;
+      border-color: rgba(125, 91, 57, 0.2);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(125, 91, 57, 0.08);
+    }
+    .settings-modal .settings-app-icon-option.selected,
+    .settings-modal .settings-app-icon-option[aria-pressed="true"] {
+      background: linear-gradient(180deg, #fff7ef 0%, #fff1de 100%);
+      border-color: var(--accent);
+      box-shadow:
+        0 0 0 3px var(--accent-muted),
+        0 4px 12px rgba(197, 101, 61, 0.12);
+    }
+
+    /* Connect URL box */
+    .settings-modal .settings-connect-url-box {
+      background: rgba(125, 91, 57, 0.05);
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      border-radius: 12px;
+    }
+
+    /* Sticky save bar — clean translucent footer */
+    .settings-modal .settings-actions-sticky {
+      background: linear-gradient(180deg, rgba(255, 252, 247, 0) 0%, rgba(255, 252, 247, 0.85) 28px);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    /* Settings divider — soft hairline */
+    .settings-modal .settings-divider {
+      border-top: 1px solid rgba(125, 91, 57, 0.08);
+    }
+
+    /* Section title — better letterspacing */
+    .settings-modal .settings-section-title {
+      font-size: 0.8125rem;
+      font-weight: 700;
+      letter-spacing: 0.005em;
+      color: var(--text-primary);
+    }
+
+    /* ── Mobile — keep generous spacing without overflowing ── */
+    @media (max-width: 640px) {
+      .session-modal .modal-header,
+      .settings-modal .settings-modal-header {
+        padding: 16px 18px 14px;
+      }
+      .session-modal .modal-body,
+      .settings-modal .settings-modal-body {
+        padding: 14px 18px;
+      }
+      .session-modal .modal-footer {
+        padding: 12px 18px 18px;
+      }
+      .session-modal .modal-title,
+      .settings-modal .settings-modal-title-group .modal-title {
+        font-size: 1.125rem;
+      }
+      .settings-modal .settings-panel-title {
+        font-size: 1.0625rem;
+      }
     }
 
     .modal-header {

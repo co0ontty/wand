@@ -1467,19 +1467,15 @@
                     '</div>' +
                   '</div>' +
                   renderExpandedShortcutsRow() +
-                  // Session info bar at bottom
-                  '<div class="input-session-info-bar">' +
-                    '<span id="session-cwd-display" class="session-cwd-display">' + (selectedSession && selectedSession.cwd ? escapeHtml(selectedSession.cwd) : '未设置目录') + '</span>' +
-                    '<span class="session-info-separator">|</span>' +
-                    '<span id="session-mode-display" class="session-mode-display">' + (selectedSession ? getModeLabel(selectedSession.mode) : '默认') + '</span>' +
-                    (selectedSession && selectedSession.autoApprovePermissions ? '<span class="session-info-separator">|</span><span id="auto-approve-toggle" class="auto-approve-indicator active" title="自动批准已启用 — 点击关闭">🛡 自动批准</span>' : '<span class="session-info-separator">|</span><span id="auto-approve-toggle" class="auto-approve-indicator" title="自动批准已关闭 — 点击开启">🛡 手动</span>') +
-                    '<span class="session-info-separator">|</span>' +
-                    '<span id="session-kind-display" class="session-kind-display">' + (selectedSession ? getSessionKindLabel(selectedSession) : '终端') + '</span>' +
-                    '<span class="session-info-separator">|</span>' +
-                    '<span id="session-status-display" class="session-status-display">' + (selectedSession ? getSessionStatusLabel(selectedSession) : '-') + '</span>' +
-                    (selectedSession && selectedSession.provider === "claude" && selectedSession.claudeSessionId ? '<span class="session-info-separator">|</span><span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>' : '') +
-                    (selectedSession && !isStructuredSession(selectedSession) ? '<span class="session-info-separator">|</span><span id="session-exit-display" class="session-exit-display">退出码=' + (selectedSession.exitCode !== undefined ? selectedSession.exitCode : 'n/a') + '</span>' : '') +
-                  '</div>' +
+                  // Session info bar at bottom — only keeps unique controls/info
+                  // (cwd / mode / status / kind are already shown in topbar or composer dropdown)
+                  (selectedSession
+                    ? '<div class="input-session-info-bar">' +
+                        (selectedSession.autoApprovePermissions ? '<span id="auto-approve-toggle" class="auto-approve-indicator active" title="自动批准已启用 — 点击关闭">🛡 自动批准</span>' : '<span id="auto-approve-toggle" class="auto-approve-indicator" title="自动批准已关闭 — 点击开启">🛡 手动</span>') +
+                        (selectedSession.provider === "claude" && selectedSession.claudeSessionId ? '<span class="session-info-separator">|</span><span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>' : '') +
+                        (!isStructuredSession(selectedSession) && selectedSession.exitCode !== undefined && selectedSession.exitCode !== null ? '<span class="session-info-separator">|</span><span id="session-exit-display" class="session-exit-display">退出码=' + selectedSession.exitCode + '</span>' : '') +
+                      '</div>'
+                    : '') +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
               '</div>' +
@@ -1855,7 +1851,7 @@
                 '<h2 class="modal-title">设置</h2>' +
                 '<p class="settings-modal-subtitle">调整应用配置、通知、安全和显示偏好</p>' +
               '</div>' +
-              '<button id="close-settings-button" class="btn btn-ghost btn-icon">×</button>' +
+              '<button id="close-settings-button" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
             '</div>' +
             '<div class="modal-body settings-modal-body">' +
               '<div class="settings-layout">' +
@@ -3461,9 +3457,17 @@
       }
 
       function renderWorktreeToggle(enabled) {
-        return '<label class="session-inline-toggle" for="session-worktree-toggle">' +
-          '<input id="session-worktree-toggle" type="checkbox" class="field-checkbox"' + (enabled ? ' checked' : '') + ' />' +
+        return '<label class="session-inline-toggle" for="session-worktree-toggle" title="为该会话创建独立的 git worktree 分支">' +
+          '<svg class="session-inline-toggle-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<circle cx="6" cy="6" r="2.2"/>' +
+            '<circle cx="18" cy="6" r="2.2"/>' +
+            '<circle cx="12" cy="18" r="2.2"/>' +
+            '<path d="M6 8.2v3.4a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8.2"/>' +
+            '<path d="M12 13.6v2.2"/>' +
+          '</svg>' +
           '<span class="session-inline-toggle-label">Worktree 模式</span>' +
+          '<input id="session-worktree-toggle" type="checkbox" class="switch-toggle"' + (enabled ? ' checked' : '') + ' />' +
+          '<span class="switch-slider" aria-hidden="true"></span>' +
         '</label>';
       }
 
@@ -3492,7 +3496,7 @@
                 '<h2 class="modal-title">新对话</h2>' +
                 '<p class="modal-subtitle">启动 Claude 或 Codex 会话，选择 provider、会话类型、模式和工作目录。</p>' +
               '</div>' +
-              '<button id="close-modal-button" class="btn btn-ghost btn-icon">&times;</button>' +
+              '<button id="close-modal-button" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
             '</div>' +
             '<div class="modal-body">' +
               '<div class="field">' +
@@ -6823,6 +6827,8 @@
         updateDrawerState();
         var modal = document.getElementById("session-modal");
         if (modal) {
+          if (modal._wandCloseTimer) { clearTimeout(modal._wandCloseTimer); modal._wandCloseTimer = null; }
+          modal.classList.remove("closing");
           modal.classList.remove("hidden");
           lastFocusedElement = document.activeElement;
           state.sessionTool = getPreferredTool();
@@ -6844,8 +6850,7 @@
         state.modalOpen = false;
         var modal = document.getElementById("session-modal");
         if (modal) {
-          modal.classList.add("hidden");
-          // Remove focus trap
+          // Remove focus trap before kicking off the exit animation
           if (focusTrapHandler) {
             document.removeEventListener("keydown", focusTrapHandler);
             focusTrapHandler = null;
@@ -6854,8 +6859,36 @@
           if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
             lastFocusedElement.focus();
           }
+          animateModalClose(modal);
         }
         hidePathSuggestions();
+      }
+
+      // Run the liquid-glass exit animation on a modal-backdrop, then mark it hidden.
+      // Falls back to instant hide when reduced-motion is requested or a tab is in the background.
+      function animateModalClose(modal) {
+        if (!modal) return;
+        if (modal.classList.contains("hidden")) return;
+        var prefersReducedMotion = false;
+        try {
+          prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        } catch (_e) {}
+        if (prefersReducedMotion || document.hidden) {
+          modal.classList.remove("closing");
+          modal.classList.add("hidden");
+          return;
+        }
+        // Cancel any outstanding pending hide on the same node
+        if (modal._wandCloseTimer) {
+          clearTimeout(modal._wandCloseTimer);
+          modal._wandCloseTimer = null;
+        }
+        modal.classList.add("closing");
+        modal._wandCloseTimer = setTimeout(function() {
+          modal.classList.remove("closing");
+          modal.classList.add("hidden");
+          modal._wandCloseTimer = null;
+        }, 170);
       }
 
       function setupFocusTrap(modal) {
@@ -7054,6 +7087,8 @@
         closeSessionModal();
         var modal = document.getElementById("settings-modal");
         if (modal) {
+          if (modal._wandCloseTimer) { clearTimeout(modal._wandCloseTimer); modal._wandCloseTimer = null; }
+          modal.classList.remove("closing");
           modal.classList.remove("hidden");
           lastFocusedElement = document.activeElement;
           var passEl = document.getElementById("new-password");
@@ -7113,8 +7148,7 @@
       function closeSettingsModal() {
         var modal = document.getElementById("settings-modal");
         if (modal) {
-          modal.classList.add("hidden");
-          // Remove focus trap
+          // Remove focus trap before kicking off the exit animation
           if (focusTrapHandler) {
             document.removeEventListener("keydown", focusTrapHandler);
             focusTrapHandler = null;
@@ -7123,6 +7157,7 @@
           if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
             lastFocusedElement.focus();
           }
+          animateModalClose(modal);
         }
       }
 

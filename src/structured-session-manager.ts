@@ -1130,6 +1130,29 @@ export class StructuredSessionManager {
         usage: undefined,
       };
 
+      // claude -p --output-format stream-json 在同一条消息流式生成期间会重复
+      // emit 同一个 message.id 的 "assistant" 事件，每次 content 略多一些；子
+      // agent 流（Task 工具）则会插入若干 parent_tool_use_id 不同的 message.id。
+      // 朴素的 push(...content) 会让早期片段被反复合并复制，最终被 compact 出
+      // 怪异结果，导致 UI 上 tool_use / 子 agent 输出"显示一下就消失"。
+      // 这里按 (message.id) 去重，相同 id 视作同一消息的更新覆盖；tool_result
+      // 用单调递增的合成 key 顺序追加。每次事件后用插入顺序重建 turnState.blocks。
+      const blocksByKey = new Map<string, ContentBlock[]>();
+      const keyOrder: string[] = [];
+      let toolResultSeq = 0;
+      const upsertBlocks = (key: string, blocks: ContentBlock[]): void => {
+        if (!blocksByKey.has(key)) keyOrder.push(key);
+        blocksByKey.set(key, blocks);
+      };
+      const rebuildTurnBlocks = (): void => {
+        const flat: ContentBlock[] = [];
+        for (const key of keyOrder) {
+          const entry = blocksByKey.get(key);
+          if (entry && entry.length > 0) flat.push(...entry);
+        }
+        turnState.blocks = flat;
+      };
+
       // Line buffer for NDJSON: chunks from stdout may split mid-line.
       let lineBuf = "";
 
@@ -1209,8 +1232,15 @@ export class StructuredSessionManager {
 
         if (parsed && parsed.type === "assistant" && parsed.message) {
           const extracted = this.extractAssistantMessage(parsed.message);
+          // 用 message.id 作为 key：claude -p 流式重发同一条消息时整段覆盖
+          // （而不是与早期片段累加），子 agent 的不同消息 id 各占一格、保留
+          // 父子完整顺序。没有 id 时退化为合成 key 走追加模式。
+          const msgId = typeof parsed.message.id === "string" && parsed.message.id
+            ? `assistant:${parsed.message.id}`
+            : `assistant:anon:${keyOrder.length}`;
           if (extracted.content.length > 0) {
-            turnState.blocks.push(...extracted.content);
+            upsertBlocks(msgId, extracted.content);
+            rebuildTurnBlocks();
           }
           // NOTE: usage from streaming "assistant" events contains partial/incremental
           // token counts (e.g. output_tokens=1 during streaming) and is NOT accurate.
@@ -1236,15 +1266,21 @@ export class StructuredSessionManager {
         }
 
         if (parsed && parsed.type === "user" && parsed.message && Array.isArray(parsed.message.content)) {
+          // tool_result 没有自身 id，按到达顺序用合成 key 追加（永远不被覆盖）。
+          const collected: ContentBlock[] = [];
           for (const block of parsed.message.content) {
             if (block && block.type === "tool_result") {
-              turnState.blocks.push({
+              collected.push({
                 type: "tool_result",
                 tool_use_id: typeof block.tool_use_id === "string" ? block.tool_use_id : "",
                 content: this.normalizeToolResultContent(block.content),
                 is_error: block.is_error === true,
               });
             }
+          }
+          if (collected.length > 0) {
+            upsertBlocks(`tool_result:${toolResultSeq++}`, collected);
+            rebuildTurnBlocks();
           }
           syncSnapshot();
           scheduleEmit();
@@ -1573,7 +1609,9 @@ export class StructuredSessionManager {
       usage: undefined,
     };
 
-    // Tracks in-progress streaming blocks keyed by content_block index from stream_event
+    // Tracks in-progress streaming blocks keyed by content_block index from stream_event.
+    // The map is cleared whenever a complete `assistant` message arrives — its blocks
+    // are then promoted into `finalizedBlocks` below.
     const streamingBlockByIndex = new Map<number, {
       type: "text" | "thinking" | "tool_use";
       id?: string;
@@ -1583,6 +1621,13 @@ export class StructuredSessionManager {
       partialInput: string;
       finalized: boolean;
     }>();
+
+    // Blocks from messages that have already completed within this turn — including
+    // the parent assistant's prior messages, every subagent assistant message, and
+    // every tool_result. Subagent (Task tool) flows produce many assistant messages
+    // back-to-back; without this list, each new streaming message would visually
+    // erase everything that came before it in the same turn.
+    const finalizedBlocks: ContentBlock[] = [];
 
     let emitTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1597,24 +1642,26 @@ export class StructuredSessionManager {
       if (!emitTimer) emitTimer = setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS);
     };
 
-    // Rebuild ContentBlock[] from the in-progress streaming blocks map
+    // Rebuild ContentBlock[] from finalized history + the in-progress streaming map.
+    // Returning only the streaming blocks would drop every prior parent/subagent
+    // message in this turn (the original disappearing-output bug).
     const rebuildStreamingBlocks = (): ContentBlock[] => {
       const sorted = [...streamingBlockByIndex.entries()].sort((a, b) => a[0] - b[0]);
-      const blocks: ContentBlock[] = [];
+      const streaming: ContentBlock[] = [];
       for (const [, sb] of sorted) {
         if (sb.type === "text") {
-          blocks.push({ type: "text", text: sb.text });
+          streaming.push({ type: "text", text: sb.text });
         } else if (sb.type === "thinking") {
-          blocks.push({ type: "thinking", thinking: sb.thinking });
+          streaming.push({ type: "thinking", thinking: sb.thinking });
         } else if (sb.type === "tool_use" && sb.id && sb.name) {
           let input: Record<string, unknown> = {};
           if (sb.finalized && sb.partialInput) {
             try { input = JSON.parse(sb.partialInput) as Record<string, unknown>; } catch { /* partial json */ }
           }
-          blocks.push({ type: "tool_use", id: sb.id, name: sb.name, input });
+          streaming.push({ type: "tool_use", id: sb.id, name: sb.name, input });
         }
       }
-      return blocks;
+      return [...finalizedBlocks, ...streaming];
     };
 
     const syncSnapshot = (): void => {
@@ -1707,14 +1754,15 @@ export class StructuredSessionManager {
           continue;
         }
 
-        // Complete assistant turn — authoritative content replaces streaming blocks
+        // Complete assistant turn — promote streaming content into the finalized
+        // history so subsequent messages (subagents, follow-up parent messages)
+        // append to it instead of erasing it.
         if (msg.type === "assistant") {
           const assistantMsg = msg as unknown as { type: "assistant"; message: Record<string, unknown>; session_id: string };
           const extracted = this.extractAssistantMessage(assistantMsg.message);
-          // Keep tool_result blocks from previous user messages, replace streaming assistant content
-          const toolResults = turnState.blocks.filter(b => b.type === "tool_result");
-          turnState.blocks = [...extracted.content, ...toolResults];
+          finalizedBlocks.push(...extracted.content);
           streamingBlockByIndex.clear();
+          turnState.blocks = rebuildStreamingBlocks();
           if (assistantMsg.session_id) turnState.sessionId = assistantMsg.session_id;
           syncSnapshot();
           scheduleEmit();
@@ -1733,14 +1781,15 @@ export class StructuredSessionManager {
           continue;
         }
 
-        // Tool results fed back from the claude subprocess
+        // Tool results fed back from the claude subprocess (parent's view of a
+        // tool call, or a subagent's tool_result during Task execution).
         if (msg.type === "user") {
           const userMsg = msg as unknown as { type: "user"; message: Record<string, unknown> };
           const content = Array.isArray(userMsg.message?.content) ? userMsg.message.content as unknown[] : [];
           for (const block of content) {
             const b = block as Record<string, unknown>;
             if (b?.type === "tool_result") {
-              turnState.blocks.push({
+              finalizedBlocks.push({
                 type: "tool_result",
                 tool_use_id: typeof b.tool_use_id === "string" ? b.tool_use_id : "",
                 content: this.normalizeToolResultContent(b.content),
@@ -1748,6 +1797,7 @@ export class StructuredSessionManager {
               });
             }
           }
+          turnState.blocks = rebuildStreamingBlocks();
           syncSnapshot();
           scheduleEmit();
           continue;
@@ -1930,7 +1980,10 @@ export class StructuredSessionManager {
         && previous.type === "text"
         && block.type === "text"
       ) {
-        previous.text = `${previous.text}${block.text}`;
+        // 用新对象替换 compacted 末尾，**不要**就地改 previous.text —— previous
+        // 通常和调用方持有的 turnState.blocks 共享引用，原地 mutate 会让下次
+        // syncSnapshot 把已合并的内容再合并一次，呈指数级复制。
+        compacted[compacted.length - 1] = { type: "text", text: `${previous.text}${block.text}` };
         continue;
       }
       compacted.push(block);
