@@ -656,6 +656,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     ? path.join(SERVER_MODULE_DIR, "web-ui", "content")
     : path.join(RUNTIME_ROOT_DIR, "src", "web-ui", "content");
   app.use("/vendor/wterm", express.static(path.join(contentDir, "vendor", "wterm"), vendorCacheOpts));
+  app.use("/vendor/qrcode", express.static(path.join(contentDir, "vendor", "qrcode"), vendorCacheOpts));
 
   // ── Web UI and PWA endpoints ──
 

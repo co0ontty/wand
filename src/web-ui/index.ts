@@ -40,6 +40,7 @@ ${cssStyles}
 <body>
   <div id="app"></div>
 ${scriptOpen} src="/vendor/wterm/wterm.bundle.js">${scriptClose}
+${scriptOpen} src="/vendor/qrcode/qrcode.bundle.js">${scriptClose}
 ${scriptOpen}>
 ${scriptContent}
 ${scriptClose}

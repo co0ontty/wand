@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "1.21.9",
+  "version": "1.21.10",
   "description": "A web terminal for local CLI tools like Claude.",
   "type": "module",
   "bin": {
@@ -16,7 +16,7 @@
   ],
   "preferGlobal": true,
   "scripts": {
-    "build": "node scripts/bundle-wterm.js && tsc -p tsconfig.json && npm run build:copy-content",
+    "build": "node scripts/bundle-wterm.js && node scripts/bundle-qrcode.js && tsc -p tsconfig.json && npm run build:copy-content",
     "build:copy-content": "cp -r src/web-ui/content dist/web-ui/",
     "dev": "tsx src/cli.ts web",
     "check": "tsc --noEmit -p tsconfig.json",
@@ -51,6 +51,7 @@
     "@types/node": "^22.13.14",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.0",
+    "qrcode": "^1.5.4",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }

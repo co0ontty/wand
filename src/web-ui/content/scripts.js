@@ -1233,6 +1233,13 @@
                 '<p id="login-error" class="error-message hidden" role="alert"></p>' +
               '</div>' +
               '<button id="login-button" class="btn btn-primary btn-block">进入控制台</button>' +
+              (hasNativeSwitchServer() ?
+                '<button id="login-switch-server-button" class="btn btn-ghost btn-block login-switch-server" type="button">' +
+                  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>' +
+                  '<span>切换服务器</span>' +
+                '</button>'
+                : ''
+              ) +
             '</div>' +
           '</div>' +
         '</div>';
@@ -1300,6 +1307,13 @@
                     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
                     '<span>安装</span>' +
                   '</button>' +
+                  (hasNativeSwitchServer() ?
+                    '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="切换服务器">' +
+                      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>' +
+                      '<span>切换</span>' +
+                    '</button>'
+                    : ''
+                  ) +
                   '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="退出登录">' +
                     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
                     '<span>退出</span>' +
@@ -1338,6 +1352,7 @@
                       '<button class="topbar-more-item" data-action="settings" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>' +
                       '<button class="topbar-more-item" data-action="refresh" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>刷新</span></button>' +
                       '<button class="topbar-more-item' + (state.showInstallPrompt && state.deferredPrompt ? '' : ' hidden') + '" id="topbar-install-item" data-action="install" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>安装应用</span></button>' +
+                      (hasNativeSwitchServer() ? '<button class="topbar-more-item" data-action="switch-server" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>切换服务器</span></button>' : '') +
                       '<button class="topbar-more-item topbar-more-item-danger" data-action="logout" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>退出</span></button>' +
                     '</div>' +
                   '</div>' +
@@ -1981,6 +1996,13 @@
                   '<div class="settings-connect-url-box">' +
                     '<code id="android-connect-code" class="settings-connect-url-text">-</code>' +
                     '<button id="copy-connect-code-button" class="btn btn-secondary btn-sm" type="button" title="复制连接码">复制</button>' +
+                  '</div>' +
+                  '<div class="settings-connect-qr-box">' +
+                    '<div class="settings-connect-qr-wrap" id="android-connect-qr-wrap" title="点击放大">' +
+                      '<canvas id="android-connect-qr" width="180" height="180"></canvas>' +
+                      '<div class="settings-connect-qr-empty" id="android-connect-qr-empty">生成中…</div>' +
+                    '</div>' +
+                    '<p class="settings-connect-qr-hint">用 Wand App 扫一扫，即可一键填入服务器地址与连接码。</p>' +
                   '</div>' +
                 '</div>' +
               '</div>' +
@@ -3809,6 +3831,8 @@
         var loginButton = document.getElementById("login-button");
         if (loginButton) {
           loginButton.addEventListener("click", login);
+          var loginSwitchServerBtn = document.getElementById("login-switch-server-button");
+          if (loginSwitchServerBtn) loginSwitchServerBtn.addEventListener("click", switchServer);
           var passwordEl = document.getElementById("password");
           var togglePasswordButton = document.getElementById("toggle-password-button");
           if (togglePasswordButton && passwordEl) {
@@ -3971,6 +3995,8 @@
         });
         var logoutBtn = document.getElementById("logout-button");
         if (logoutBtn) logoutBtn.addEventListener("click", logout);
+        var switchServerBtn = document.getElementById("switch-server-button");
+        if (switchServerBtn) switchServerBtn.addEventListener("click", switchServer);
         var settingsBtn = document.getElementById("settings-button");
         if (settingsBtn) settingsBtn.addEventListener("click", openSettingsModal);
         var closeSettingsBtn = document.getElementById("close-settings-button");
@@ -4407,6 +4433,9 @@
                 break;
               case "logout":
                 logout();
+                break;
+              case "switch-server":
+                switchServer();
                 break;
             }
           });
@@ -5918,6 +5947,15 @@
         });
       }
 
+      function hasNativeSwitchServer() {
+        return typeof WandNative !== "undefined" && typeof WandNative.switchServer === "function";
+      }
+
+      function switchServer() {
+        if (!hasNativeSwitchServer()) return;
+        try { WandNative.switchServer(); } catch (e) {}
+      }
+
       function logout() {
         fetch("/api/logout", { method: "POST", credentials: "same-origin" }).catch(function() {});
         stopPolling();
@@ -7336,6 +7374,78 @@
       }
 
 
+      function renderConnectQrCode(code) {
+        var canvas = document.getElementById("android-connect-qr");
+        var empty = document.getElementById("android-connect-qr-empty");
+        var lib = window.QRCodeLib;
+        if (!canvas) return;
+        if (!lib || typeof lib.toCanvas !== "function") {
+          if (empty) empty.textContent = "二维码库未加载";
+          return;
+        }
+        try {
+          lib.toCanvas(canvas, code, {
+            width: 220,
+            margin: 1,
+            errorCorrectionLevel: "M",
+            color: { dark: "#1f1b17", light: "#ffffff00" }
+          }, function(err) {
+            if (err) {
+              if (empty) {
+                empty.textContent = "二维码生成失败";
+                empty.style.display = "";
+              }
+              canvas.style.visibility = "hidden";
+              return;
+            }
+            if (empty) empty.style.display = "none";
+            canvas.style.visibility = "visible";
+          });
+        } catch (e) {
+          if (empty) {
+            empty.textContent = "二维码生成失败";
+            empty.style.display = "";
+          }
+          canvas.style.visibility = "hidden";
+        }
+      }
+
+      function showConnectQrModal(code) {
+        var lib = window.QRCodeLib;
+        if (!lib || typeof lib.toCanvas !== "function") return;
+        // Reuse existing overlay if open
+        var existing = document.getElementById("connect-qr-modal");
+        if (existing) existing.remove();
+        var overlay = document.createElement("div");
+        overlay.id = "connect-qr-modal";
+        overlay.className = "connect-qr-modal-overlay";
+        overlay.innerHTML =
+          '<div class="connect-qr-modal-card">' +
+            '<canvas id="connect-qr-modal-canvas"></canvas>' +
+            '<p class="connect-qr-modal-hint">用 Wand App 扫一扫，连接当前服务器</p>' +
+            '<button type="button" class="btn btn-secondary btn-sm connect-qr-modal-close">关闭</button>' +
+          '</div>';
+        document.body.appendChild(overlay);
+        var modalCanvas = overlay.querySelector("#connect-qr-modal-canvas");
+        var size = Math.min(window.innerWidth, window.innerHeight) * 0.7;
+        if (size < 240) size = 240;
+        if (size > 480) size = 480;
+        try {
+          lib.toCanvas(modalCanvas, code, {
+            width: size,
+            margin: 2,
+            errorCorrectionLevel: "M",
+            color: { dark: "#1f1b17", light: "#ffffff" }
+          });
+        } catch (e) {}
+        function close() { overlay.remove(); }
+        overlay.addEventListener("click", function(e) {
+          if (e.target === overlay) close();
+        });
+        var closeBtn = overlay.querySelector(".connect-qr-modal-close");
+        if (closeBtn) closeBtn.addEventListener("click", close);
+      }
+
       function copyToClipboard(text, triggerBtn, successCallback) {
         if (!text) return;
         function onSuccess() {
@@ -7521,12 +7631,32 @@
 
             // App connect code (encrypted)
             var connectCodeEl = document.getElementById("android-connect-code");
+            var connectQrCanvas = document.getElementById("android-connect-qr");
+            var connectQrEmpty = document.getElementById("android-connect-qr-empty");
+            var connectQrWrap = document.getElementById("android-connect-qr-wrap");
             if (connectCodeEl) {
               connectCodeEl.textContent = "加载中...";
+              if (connectQrEmpty) connectQrEmpty.textContent = "生成中…";
+              if (connectQrCanvas) connectQrCanvas.style.visibility = "hidden";
               fetch("/api/app-connect-code").then(function(r) { return r.json(); }).then(function(d) {
-                if (d.code) connectCodeEl.textContent = d.code;
-                else connectCodeEl.textContent = "生成失败";
-              }).catch(function() { connectCodeEl.textContent = "获取失败"; });
+                if (d.code) {
+                  connectCodeEl.textContent = d.code;
+                  state.androidConnectCode = d.code;
+                  renderConnectQrCode(d.code);
+                } else {
+                  connectCodeEl.textContent = "生成失败";
+                  if (connectQrEmpty) connectQrEmpty.textContent = "生成失败";
+                }
+              }).catch(function() {
+                connectCodeEl.textContent = "获取失败";
+                if (connectQrEmpty) connectQrEmpty.textContent = "获取失败";
+              });
+            }
+            if (connectQrWrap && !connectQrWrap.dataset.bound) {
+              connectQrWrap.dataset.bound = "1";
+              connectQrWrap.addEventListener("click", function() {
+                if (state.androidConnectCode) showConnectQrModal(state.androidConnectCode);
+              });
             }
 
             // Config fields

@@ -48,4 +48,6 @@ dependencies {
     implementation 'androidx.webkit:webkit:1.9.0'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
     implementation 'androidx.core:core:1.18.0'
+    // QR scanner — wraps ZXing for camera-based decoding
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
 }

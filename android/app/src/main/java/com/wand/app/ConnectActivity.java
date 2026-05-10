@@ -1,6 +1,8 @@
 package com.wand.app;
 
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
@@ -10,11 +12,16 @@ import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.textfield.TextInputEditText;
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
 
 import org.json.JSONObject;
 
@@ -34,8 +41,11 @@ import javax.net.ssl.X509TrustManager;
 
 public class ConnectActivity extends AppCompatActivity {
 
+    private static final int REQUEST_CAMERA_PERMISSION = 4242;
+
     private TextInputEditText urlInput;
     private MaterialButton connectButton;
+    private MaterialButton scanQrButton;
     private TextView statusText;
     private LinearLayout recentList;
     private TextView recentLabel;
@@ -52,6 +62,7 @@ public class ConnectActivity extends AppCompatActivity {
         serverStore = new ServerStore(this);
         urlInput = findViewById(R.id.urlInput);
         connectButton = findViewById(R.id.connectButton);
+        scanQrButton = findViewById(R.id.scanQrButton);
         statusText = findViewById(R.id.statusText);
         recentList = findViewById(R.id.recentList);
         recentLabel = findViewById(R.id.recentLabel);
@@ -77,6 +88,10 @@ public class ConnectActivity extends AppCompatActivity {
 
         connectButton.setOnClickListener(v -> attemptConnect());
 
+        if (scanQrButton != null) {
+            scanQrButton.setOnClickListener(v -> requestQrScan());
+        }
+
         urlInput.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_DONE) {
                 attemptConnect();
@@ -84,6 +99,73 @@ public class ConnectActivity extends AppCompatActivity {
             }
             return false;
         });
+    }
+
+    private void requestQrScan() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION);
+            return;
+        }
+        launchQrScanner();
+    }
+
+    private void launchQrScanner() {
+        IntentIntegrator integrator = new IntentIntegrator(this);
+        integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE);
+        integrator.setPrompt(getString(R.string.scan_qr_prompt));
+        integrator.setBeepEnabled(false);
+        integrator.setOrientationLocked(false);
+        integrator.setBarcodeImageEnabled(false);
+        integrator.initiateScan();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_CAMERA_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                launchQrScanner();
+            } else {
+                Toast.makeText(this, R.string.scan_qr_camera_denied, Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+        if (result != null) {
+            String contents = result.getContents();
+            if (TextUtils.isEmpty(contents)) {
+                super.onActivityResult(requestCode, resultCode, data);
+                return;
+            }
+            String trimmed = contents.trim();
+            // Accept either a Wand connect code (base64 URL#TOKEN), a wand://connect deep link,
+            // or a plain server URL.
+            String candidate = trimmed;
+            if (candidate.startsWith("wand://")) {
+                Uri uri = Uri.parse(candidate);
+                if ("wand".equals(uri.getScheme()) && "connect".equals(uri.getHost())) {
+                    String urlParam = uri.getQueryParameter("url");
+                    if (!TextUtils.isEmpty(urlParam)) {
+                        candidate = urlParam;
+                    }
+                }
+            }
+            String[] decoded = tryDecodeConnectCode(candidate);
+            boolean looksLikeUrl = candidate.startsWith("http://") || candidate.startsWith("https://");
+            if (decoded == null && !looksLikeUrl) {
+                Toast.makeText(this, R.string.scan_qr_invalid, Toast.LENGTH_LONG).show();
+                return;
+            }
+            urlInput.setText(candidate);
+            attemptConnect();
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override
@@ -401,34 +483,49 @@ public class ConnectActivity extends AppCompatActivity {
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(0, dpToPx(8), 0, dpToPx(8));
 
+            // Left column: primary URL + optional secondary "\ud83d\udd11 \u5df2\u7ed1\u5b9a\u8fde\u63a5\u7801" label.
+            LinearLayout textColumn = new LinearLayout(this);
+            textColumn.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams columnParams = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            textColumn.setLayoutParams(columnParams);
+
+            String[] decoded = tryDecodeConnectCode(entry);
+            String primaryText = decoded != null ? decoded[0] : entry;
+
             TextView urlText = new TextView(this);
-            String displayText = entry;
-            if (entry.length() > 60 && tryDecodeConnectCode(entry) != null) {
-                displayText = entry.substring(0, 16) + "..." + entry.substring(entry.length() - 8);
-            }
-            urlText.setText(displayText);
+            urlText.setText(primaryText);
             urlText.setTextSize(14f);
             urlText.setTextColor(getColor(R.color.primary));
             urlText.setTypeface(Typeface.MONOSPACE);
             urlText.setSingleLine(true);
             urlText.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
-                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-            urlText.setLayoutParams(textParams);
+            textColumn.addView(urlText);
+
+            if (decoded != null) {
+                TextView tag = new TextView(this);
+                tag.setText("\ud83d\udd11 \u5df2\u7ed1\u5b9a\u8fde\u63a5\u7801");
+                tag.setTextSize(11f);
+                tag.setTextColor(getColor(R.color.text_secondary));
+                tag.setPadding(0, dpToPx(2), 0, 0);
+                textColumn.addView(tag);
+            }
 
             TextView deleteBtn = new TextView(this);
             deleteBtn.setText("\u00d7");
             deleteBtn.setTextSize(18f);
             deleteBtn.setTextColor(getColor(R.color.text_hint));
-            deleteBtn.setPadding(dpToPx(12), 0, 0, 0);
+            deleteBtn.setPadding(dpToPx(12), 0, dpToPx(4), 0);
 
-            row.addView(urlText);
+            row.addView(textColumn);
             row.addView(deleteBtn);
 
-            urlText.setOnClickListener(v -> {
+            View.OnClickListener pickEntry = v -> {
                 urlInput.setText(entry);
                 attemptConnect();
-            });
+            };
+            textColumn.setOnClickListener(pickEntry);
+            urlText.setOnClickListener(pickEntry);
 
             deleteBtn.setOnClickListener(v -> {
                 serverStore.removeRecentUrl(entry);

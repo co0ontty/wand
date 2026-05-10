@@ -389,6 +389,22 @@ public class MainActivity extends AppCompatActivity {
 
     private class NotificationBridge {
 
+        /**
+         * Allow the in-WebView UI to jump back to the connect screen, which lists
+         * recent servers — used by the "switch server" buttons on the logout area
+         * and the login form.
+         */
+        @JavascriptInterface
+        public void switchServer() {
+            runOnUiThread(() -> {
+                Intent connectIntent = new Intent(MainActivity.this, ConnectActivity.class);
+                connectIntent.putExtra("skip_auto_connect", true);
+                connectIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(connectIntent);
+                finish();
+            });
+        }
+
         @JavascriptInterface
         public String getPermission() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
