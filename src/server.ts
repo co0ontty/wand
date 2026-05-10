@@ -13,6 +13,7 @@ import { WebSocketServer } from "ws";
 import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
 import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
 import { ensureCertificates } from "./cert.js";
+import { buildChildEnv } from "./env-utils.js";
 import {
   isExecutionMode,
   PREFERENCE_KEYS,
@@ -933,6 +934,46 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       source: resolvedApk?.source ?? null,
       local: localApk ? { fileName: localApk.fileName, version: localApk.version, size: localApk.size, updatedAt: localApk.updatedAt, downloadUrl: localApk.downloadUrl } : null,
       github: ghApk ? { fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, downloadUrl: ghApk.downloadUrl } : null,
+    });
+  });
+
+  // 返回当前 inheritEnv 配置下，wand 启动 PTY / 结构化子进程时实际会传给
+  // claude / codex 的环境变量集合。值会按下面的规则做掩码：
+  //   - 名字里含 KEY/TOKEN/SECRET/PASSWORD/AUTH/CREDENTIAL/COOKIE/SESSION 的视为敏感
+  //   - 敏感值默认显示为 ***（保留长度提示），可通过 ?reveal=1 取消掩码
+  // 即使开启 reveal，仍只对已认证用户可见（路由由全局 requireAuth 保护）。
+  app.get("/api/settings/env-preview", (req, res) => {
+    const inheritEnv = config.inheritEnv !== false;
+    // 复用与 process-manager / structured-session-manager 相同的组装逻辑，
+    // 这样 UI 上看到的就是真正会被注入到子进程的那一份环境。
+    const env = buildChildEnv(inheritEnv, {
+      // PTY runner 还会注入 WAND_* 用于 mode 协调，这里也展示出来便于排查。
+      WAND_MODE: "<runtime>",
+      WAND_AUTO_CONFIRM: "<runtime>",
+      WAND_AUTO_EDIT: "<runtime>",
+    });
+    const reveal = req.query.reveal === "1" || req.query.reveal === "true";
+    const SENSITIVE_PATTERN = /(KEY|TOKEN|SECRET|PASSWORD|AUTH|CREDENTIAL|COOKIE|SESSION)/i;
+    const entries = Object.keys(env)
+      .sort()
+      .map((name) => {
+        const raw = env[name] ?? "";
+        const sensitive = SENSITIVE_PATTERN.test(name);
+        const masked = sensitive && !reveal;
+        // WAND_* 占位值不算敏感，保持原样。
+        const isPlaceholder = raw.startsWith("<") && raw.endsWith(">");
+        return {
+          name,
+          value: masked && !isPlaceholder ? "***" : raw,
+          length: raw.length,
+          sensitive,
+        };
+      });
+    res.json({
+      inheritEnv,
+      total: entries.length,
+      reveal,
+      entries,
     });
   });
 

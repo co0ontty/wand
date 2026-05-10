@@ -2169,10 +2169,13 @@
                     '<label class="settings-toggle-title" for="cfg-inherit-env">继承环境变量</label>' +
                     '<span class="settings-toggle-desc">启动 PTY / 结构化子进程时，把当前服务进程的环境变量传给 claude / codex。关闭后子进程仅获得最小可用环境（PATH/HOME/SHELL/LANG/TERM 等），可用于隔离 API key 等敏感凭据。</span>' +
                   '</div>' +
-                  '<label class="settings-switch">' +
-                    '<input id="cfg-inherit-env" type="checkbox" class="switch-toggle" />' +
-                    '<span class="switch-slider"></span>' +
-                  '</label>' +
+                  '<div class="settings-toggle-aside">' +
+                    '<button type="button" id="cfg-view-env-btn" class="btn btn-secondary btn-sm" title="查看实际会注入到子进程的环境变量">查看</button>' +
+                    '<label class="settings-switch">' +
+                      '<input id="cfg-inherit-env" type="checkbox" class="switch-toggle" />' +
+                      '<span class="switch-slider"></span>' +
+                    '</label>' +
+                  '</div>' +
                 '</div>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-default-model">默认模型</label>' +
@@ -4020,6 +4023,8 @@
         if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
         var defaultModelRefreshBtn = document.getElementById("cfg-default-model-refresh");
         if (defaultModelRefreshBtn) defaultModelRefreshBtn.addEventListener("click", refreshAvailableModels);
+        var viewEnvBtn = document.getElementById("cfg-view-env-btn");
+        if (viewEnvBtn) viewEnvBtn.addEventListener("click", openEnvPreviewModal);
         var saveDisplayBtn = document.getElementById("save-display-button");
         if (saveDisplayBtn) saveDisplayBtn.addEventListener("click", saveDisplaySettings);
         // App icon picker (APK only)
@@ -6002,31 +6007,14 @@
       }
 
       function getComposerPlaceholder(session, terminalInteractive) {
-        if (terminalInteractive) {
-          return "终端交互模式开启中，请直接在终端中输入";
+        // Keep placeholders short so they don't wrap on portrait mobile screens.
+        // Only show informative state hints; drop the redundant "send to X" labels.
+        if (terminalInteractive) return "终端交互中";
+        if (session && session.status !== "running") {
+          if (canAutoResumeSession(session)) return "";
+          return "会话已结束";
         }
-        if (session && isStructuredSession(session)) {
-          return session.provider === "codex"
-            ? "向 Codex 发送消息；chat 为结构化对话视图"
-            : "向 Claude 发送消息；chat 为结构化对话视图";
-        }
-        if (session && session.provider === "codex") {
-          if (session.status !== "running") {
-            return "Codex 会话已结束，无法继续发送";
-          }
-          return state.currentView === "terminal"
-            ? "向 Codex 发送输入；terminal 为原始 TUI 输出"
-            : "向 Codex 发送输入；chat 为解析后的阅读视图";
-        }
-        if (session && !isStructuredSession(session) && session.status !== "running") {
-          if (canAutoResumeSession(session)) {
-            return "输入消息...";
-          }
-          return "会话已结束，无法继续发送";
-        }
-        return session && isStructuredSession(session) && session.structuredState && session.structuredState.inFlight
-          ? "思考中 · 发送新消息将中断当前回复"
-          : "输入消息...";
+        return "";
       }
 
       function getToolModeHint(tool, mode) {
@@ -6205,6 +6193,143 @@
             state.modelsRefreshing = false;
             if (btn) { btn.disabled = false; btn.textContent = "刷新"; }
           });
+      }
+
+      // ── Environment-variable preview modal ──
+      // Lazily creates a modal showing the exact env vars wand will inject
+      // into PTY / structured child processes (mirrors buildChildEnv()).
+      function openEnvPreviewModal() {
+        var modal = document.getElementById("env-preview-modal");
+        if (!modal) {
+          modal = document.createElement("section");
+          modal.id = "env-preview-modal";
+          modal.className = "modal-backdrop hidden";
+          modal.innerHTML =
+            '<div class="modal env-preview-modal" role="dialog" aria-labelledby="env-preview-title" aria-modal="true">' +
+              '<div class="modal-header">' +
+                '<div>' +
+                  '<h2 class="modal-title" id="env-preview-title">将注入子进程的环境变量</h2>' +
+                  '<p class="modal-subtitle" id="env-preview-subtitle">这些变量会被传给 claude / codex（PTY 与结构化运行器一致）。</p>' +
+                '</div>' +
+                '<button id="env-preview-close" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭">' +
+                  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">' +
+                    '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>' +
+                  '</svg>' +
+                '</button>' +
+              '</div>' +
+              '<div class="modal-body env-preview-body">' +
+                '<div class="env-preview-toolbar">' +
+                  '<div class="env-preview-meta" id="env-preview-meta">加载中…</div>' +
+                  '<div class="env-preview-controls">' +
+                    '<input id="env-preview-search" class="env-preview-search" type="search" placeholder="搜索变量名…" />' +
+                    '<label class="env-preview-reveal">' +
+                      '<input id="env-preview-reveal-toggle" type="checkbox" />' +
+                      '<span>显示敏感值</span>' +
+                    '</label>' +
+                  '</div>' +
+                '</div>' +
+                '<div class="env-preview-list" id="env-preview-list" tabindex="0">' +
+                  '<div class="env-preview-loading">加载中…</div>' +
+                '</div>' +
+              '</div>' +
+              '<div class="modal-footer env-preview-footer">' +
+                '<span class="env-preview-hint">敏感字段（含 KEY/TOKEN/SECRET 等）默认掩码，可勾选「显示敏感值」临时还原。</span>' +
+                '<button id="env-preview-close-2" class="btn btn-secondary btn-sm" type="button">关闭</button>' +
+              '</div>' +
+            '</div>';
+          document.body.appendChild(modal);
+
+          // Click outside to close
+          modal.addEventListener("click", function(e) {
+            if (e.target === modal) closeEnvPreviewModal();
+          });
+          var closeBtn = modal.querySelector("#env-preview-close");
+          if (closeBtn) closeBtn.addEventListener("click", closeEnvPreviewModal);
+          var closeBtn2 = modal.querySelector("#env-preview-close-2");
+          if (closeBtn2) closeBtn2.addEventListener("click", closeEnvPreviewModal);
+          var searchEl = modal.querySelector("#env-preview-search");
+          if (searchEl) searchEl.addEventListener("input", function() { renderEnvPreviewList(); });
+          var revealEl = modal.querySelector("#env-preview-reveal-toggle");
+          if (revealEl) revealEl.addEventListener("change", function() { loadEnvPreview(revealEl.checked); });
+        }
+
+        modal.classList.remove("closing");
+        modal.classList.remove("hidden");
+        var revealEl = modal.querySelector("#env-preview-reveal-toggle");
+        if (revealEl) revealEl.checked = false;
+        var searchEl = modal.querySelector("#env-preview-search");
+        if (searchEl) searchEl.value = "";
+        loadEnvPreview(false);
+      }
+
+      function closeEnvPreviewModal() {
+        var modal = document.getElementById("env-preview-modal");
+        if (!modal) return;
+        animateModalClose(modal);
+      }
+
+      function loadEnvPreview(reveal) {
+        var listEl = document.getElementById("env-preview-list");
+        var metaEl = document.getElementById("env-preview-meta");
+        if (listEl) listEl.innerHTML = '<div class="env-preview-loading">加载中…</div>';
+        if (metaEl) metaEl.textContent = "加载中…";
+        var url = "/api/settings/env-preview" + (reveal ? "?reveal=1" : "");
+        fetch(url, { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (!data || !Array.isArray(data.entries)) {
+              if (listEl) listEl.innerHTML = '<div class="env-preview-empty">读取失败。</div>';
+              if (metaEl) metaEl.textContent = "读取失败";
+              return;
+            }
+            state._envPreview = data;
+            if (metaEl) {
+              var inheritLabel = data.inheritEnv ? "继承父进程" : "最小白名单";
+              metaEl.innerHTML =
+                '<span class="env-preview-pill ' + (data.inheritEnv ? "is-inherit" : "is-minimal") + '">' + inheritLabel + '</span>' +
+                '<span class="env-preview-count">共 ' + data.total + ' 项</span>';
+            }
+            renderEnvPreviewList();
+          })
+          .catch(function() {
+            if (listEl) listEl.innerHTML = '<div class="env-preview-empty">读取失败，请稍后重试。</div>';
+            if (metaEl) metaEl.textContent = "读取失败";
+          });
+      }
+
+      function renderEnvPreviewList() {
+        var listEl = document.getElementById("env-preview-list");
+        if (!listEl) return;
+        var data = state._envPreview;
+        if (!data || !Array.isArray(data.entries)) {
+          listEl.innerHTML = '<div class="env-preview-empty">尚未加载。</div>';
+          return;
+        }
+        var searchEl = document.getElementById("env-preview-search");
+        var query = (searchEl && searchEl.value || "").trim().toLowerCase();
+        var html = "";
+        var shown = 0;
+        for (var i = 0; i < data.entries.length; i++) {
+          var entry = data.entries[i];
+          if (query && entry.name.toLowerCase().indexOf(query) === -1) continue;
+          shown++;
+          var isPlaceholder = typeof entry.value === "string" && entry.value.charAt(0) === "<" && entry.value.charAt(entry.value.length - 1) === ">";
+          html += '<div class="env-preview-row' + (entry.sensitive ? " is-sensitive" : "") + '">' +
+            '<div class="env-preview-name">' +
+              escapeHtml(entry.name) +
+              (entry.sensitive ? '<span class="env-preview-badge" title="被识别为敏感字段">敏感</span>' : '') +
+              (isPlaceholder ? '<span class="env-preview-badge env-preview-badge-runtime" title="按会话动态注入">运行时</span>' : '') +
+            '</div>' +
+            '<div class="env-preview-value' + (isPlaceholder ? " is-runtime" : "") + '" title="' + escapeHtml(String(entry.value)) + '">' +
+              escapeHtml(String(entry.value)) +
+            '</div>' +
+            '<div class="env-preview-len">' + entry.length + ' 字符</div>' +
+          '</div>';
+        }
+        if (shown === 0) {
+          html = '<div class="env-preview-empty">没有匹配的变量。</div>';
+        }
+        listEl.innerHTML = html;
       }
 
       function updateSettingsDefaultModelSelect(data) {
@@ -9253,7 +9378,7 @@
         var todoEl = document.getElementById("todo-progress");
         if (todoEl) todoEl.classList.add("hidden");
         welcomeInput.value = "";
-        welcomeInput.placeholder = "正在启动会话...";
+        welcomeInput.placeholder = "正在启动…";
         welcomeInput.disabled = true;
         var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
@@ -9274,7 +9399,7 @@
         .then(function(data) {
           if (data.error) {
             showToast(data.error, "error");
-            welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+            welcomeInput.placeholder = "输入消息";
             welcomeInput.disabled = false;
             return;
           }
@@ -9287,7 +9412,7 @@
           switchToSessionView(data.id);
           subscribeToSession(data.id);
           loadOutput(data.id).then(function() {
-            welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+            welcomeInput.placeholder = "输入消息";
             welcomeInput.disabled = false;
             focusInputBox(true);
           });
@@ -9296,7 +9421,7 @@
           showToast((error && error.message) || (preferredTool === "codex"
             ? "无法启动 Codex 会话。"
             : "无法启动 Claude 会话。"), "error");
-          welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+          welcomeInput.placeholder = "输入消息";
           welcomeInput.disabled = false;
         });
       }
@@ -10672,7 +10797,7 @@
       function createSessionFromWelcomeInput(value) {
         var welcomeInput = document.getElementById("welcome-input");
         if (!welcomeInput) return;
-        welcomeInput.placeholder = "Claude 正在思考，请稍候...";
+        welcomeInput.placeholder = "正在思考…";
         welcomeInput.disabled = true;
         var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
@@ -10694,7 +10819,7 @@
         .then(function(data) {
           if (data.error) {
             showToast(data.error, "error");
-            welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+            welcomeInput.placeholder = "输入消息";
             welcomeInput.disabled = false;
             return null;
           }
@@ -10702,11 +10827,11 @@
         })
         .catch(function(error) {
           showToast((error && error.message) || "无法启动会话。", "error");
-          welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+          welcomeInput.placeholder = "输入消息";
           welcomeInput.disabled = false;
         })
         .finally(function() {
-          welcomeInput.placeholder = "输入你的问题，按 Enter 发送...";
+          welcomeInput.placeholder = "输入消息";
           welcomeInput.disabled = false;
         });
       }
@@ -15972,43 +16097,87 @@
         playNotificationSound();
 
         var id = ++notificationIdCounter;
-        var bubble = document.createElement("div");
-        bubble.className = "notification-bubble";
-        bubble.setAttribute("data-nid", id);
+        var card = document.createElement("div");
+        // Reuse the notification stacking system but with a richer card style.
+        card.className = "notification-bubble update-card";
+        card.setAttribute("data-nid", id);
 
-        bubble.innerHTML =
-          '<div class="notification-bubble-header">' +
-            '<span class="notification-bubble-icon info">\u2191</span>' +
-            '<span class="notification-bubble-title">\u53d1\u73b0\u65b0\u7248\u672c</span>' +
-            '<button class="notification-bubble-close" title="\u5173\u95ed">\u00d7</button>' +
+        card.innerHTML =
+          '<div class="update-card-shine" aria-hidden="true"></div>' +
+          '<div class="update-card-header">' +
+            '<div class="update-card-icon" aria-hidden="true">' +
+              '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+                '<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>' +
+              '</svg>' +
+            '</div>' +
+            '<div class="update-card-heading">' +
+              '<div class="update-card-title">\u53d1\u73b0\u65b0\u7248\u672c</div>' +
+              '<div class="update-card-subtitle" id="update-card-subtitle">\u70b9\u51fb\u4e0b\u65b9\u6309\u94ae\u4e00\u952e\u66f4\u65b0</div>' +
+            '</div>' +
+            '<button class="update-card-close" title="\u7a0d\u540e\u63d0\u9192" aria-label="\u5173\u95ed">' +
+              '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+                '<path d="M18 6L6 18"/><path d="M6 6l12 12"/>' +
+              '</svg>' +
+            '</button>' +
           '</div>' +
-          '<div class="notification-bubble-body">' +
-            escapeHtml(currentVer) + ' \u2192 ' + escapeHtml(latestVer) +
+          '<div class="update-card-version">' +
+            '<span class="update-card-version-chip update-card-version-current">v' + escapeHtml(String(currentVer).replace(/^v/, "")) + '</span>' +
+            '<svg class="update-card-version-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+              '<path d="M5 12h14"/><path d="M13 5l7 7-7 7"/>' +
+            '</svg>' +
+            '<span class="update-card-version-chip update-card-version-latest">v' + escapeHtml(String(latestVer).replace(/^v/, "")) + '</span>' +
           '</div>' +
-          '<div class="notification-bubble-actions">' +
-            '<button class="primary" id="update-bubble-action">\u7acb\u5373\u66f4\u65b0</button>' +
+          '<div class="update-card-progress" id="update-card-progress" aria-hidden="true">' +
+            '<div class="update-card-progress-track"><div class="update-card-progress-fill"></div></div>' +
+          '</div>' +
+          '<div class="update-card-status hidden" id="update-card-status"></div>' +
+          '<div class="update-card-actions">' +
+            '<button class="update-card-action update-card-action-primary" id="update-bubble-action" type="button">' +
+              '<span class="update-card-action-label">\u7acb\u5373\u66f4\u65b0</span>' +
+            '</button>' +
           '</div>';
 
-        document.body.appendChild(bubble);
+        document.body.appendChild(card);
 
-        var entry = { id: id, el: bubble };
+        var entry = { id: id, el: card };
         notificationStack.push(entry);
         repositionNotifications();
 
-        var closeBtn = bubble.querySelector(".notification-bubble-close");
+        var closeBtn = card.querySelector(".update-card-close");
         if (closeBtn) closeBtn.onclick = function() {
           dismissNotification(id);
           state._updateBubbleShown = false;
         };
 
-        var actionBtn = bubble.querySelector("#update-bubble-action");
-        var bodyEl = bubble.querySelector(".notification-bubble-body");
+        var actionBtn = card.querySelector("#update-bubble-action");
+        var actionLabel = card.querySelector(".update-card-action-label");
+        var subtitleEl = card.querySelector("#update-card-subtitle");
+        var statusEl = card.querySelector("#update-card-status");
+        var progressEl = card.querySelector("#update-card-progress");
+
+        function setStatus(text, kind) {
+          if (!statusEl) return;
+          statusEl.textContent = text || "";
+          statusEl.classList.remove("hidden", "error", "success");
+          if (!text) { statusEl.classList.add("hidden"); return; }
+          if (kind) statusEl.classList.add(kind);
+        }
+        function setSubtitle(text) {
+          if (subtitleEl) subtitleEl.textContent = text || "";
+        }
+        function setProgress(active) {
+          if (!progressEl) return;
+          progressEl.classList.toggle("active", !!active);
+        }
 
         if (actionBtn) actionBtn.onclick = function() {
           // Phase 1: Performing update
           actionBtn.disabled = true;
-          actionBtn.textContent = "\u66f4\u65b0\u4e2d\u2026";
-          if (bodyEl) bodyEl.textContent = "\u6b63\u5728\u4e0b\u8f7d\u5e76\u5b89\u88c5\u65b0\u7248\u672c\u2026";
+          card.classList.add("is-busy");
+          if (actionLabel) actionLabel.textContent = "\u66f4\u65b0\u4e2d\u2026";
+          setSubtitle("\u6b63\u5728\u4e0b\u8f7d\u5e76\u5b89\u88c5\u65b0\u7248\u672c\u2026");
+          setProgress(true);
+          setStatus("");
 
           fetch("/api/update", {
             method: "POST",
@@ -16017,37 +16186,56 @@
           })
           .then(function(res) { return res.json(); })
           .then(function(data) {
+            setProgress(false);
+            card.classList.remove("is-busy");
             if (data.error) {
               // Update failed
-              if (bodyEl) {
-                bodyEl.textContent = data.error;
-                bodyEl.style.color = "var(--error)";
-              }
+              setSubtitle("\u66f4\u65b0\u672a\u5b8c\u6210");
+              setStatus(data.error, "error");
               actionBtn.disabled = false;
-              actionBtn.textContent = "\u91cd\u8bd5";
+              if (actionLabel) actionLabel.textContent = "\u91cd\u8bd5";
               return;
             }
             // Phase 2: Update succeeded, show restart button
-            if (bodyEl) {
-              bodyEl.textContent = data.message || "\u66f4\u65b0\u5b8c\u6210";
-              bodyEl.style.color = "var(--success)";
-            }
-            actionBtn.textContent = "\u91cd\u542f\u751f\u6548";
+            setSubtitle(data.message || "\u66f4\u65b0\u5b8c\u6210\uff0c\u91cd\u542f\u540e\u751f\u6548");
+            setStatus("");
+            card.classList.add("is-success");
+            if (actionLabel) actionLabel.textContent = "\u91cd\u542f\u751f\u6548";
             actionBtn.disabled = false;
-            actionBtn.className = "primary success";
             actionBtn.onclick = function() {
-              performRestart(actionBtn, bodyEl);
+              actionBtn.disabled = true;
+              if (actionLabel) actionLabel.textContent = "\u6b63\u5728\u91cd\u542f\u2026";
+              setSubtitle("\u670d\u52a1\u6b63\u5728\u91cd\u542f\u2026");
+              setProgress(true);
+              performRestartCard(actionBtn, actionLabel, subtitleEl, statusEl, progressEl);
             };
           })
           .catch(function() {
-            if (bodyEl) {
-              bodyEl.textContent = "\u66f4\u65b0\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u8fde\u63a5\u3002";
-              bodyEl.style.color = "var(--error)";
-            }
+            setProgress(false);
+            card.classList.remove("is-busy");
+            setSubtitle("\u66f4\u65b0\u672a\u5b8c\u6210");
+            setStatus("\u8bf7\u68c0\u67e5\u7f51\u7edc\u8fde\u63a5\u540e\u91cd\u8bd5", "error");
             actionBtn.disabled = false;
-            actionBtn.textContent = "\u91cd\u8bd5";
+            if (actionLabel) actionLabel.textContent = "\u91cd\u8bd5";
           });
         };
+      }
+
+      // Restart driver used by the new update card.
+      function performRestartCard(btn, labelEl, subtitleEl, statusEl, progressEl) {
+        fetch("/api/restart", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin"
+        })
+        .then(function(res) { return res.json(); })
+        .then(function() {
+          showRestartOverlay();
+        })
+        .catch(function() {
+          // Network error likely means the server already shut down \u2014 show overlay anyway
+          showRestartOverlay();
+        });
       }
 
       /**

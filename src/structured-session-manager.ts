@@ -1631,9 +1631,13 @@ export class StructuredSessionManager {
     }
 
     const sdkClaudeBinary = resolveSdkClaudeBinary();
+    // SDK 默认会把整个 process.env 透传给 claude 子进程；这里显式按 inheritEnv 配置组装，
+    // 否则关闭"继承环境变量"开关时 SDK 路径会被静默忽略。
+    const sdkEnv = buildChildEnv(this.config.inheritEnv !== false);
     const sdkOptions: SdkOptions = {
       cwd: session.cwd,
       abortController,
+      env: sdkEnv as Record<string, string | undefined>,
       permissionMode,
       ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
       ...(allowedToolsForRoot ? { allowedTools: allowedToolsForRoot } : {}),
