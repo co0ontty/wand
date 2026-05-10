@@ -1277,7 +1277,7 @@
                   '<button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? ' pinned' : '') + '" type="button" title="' + (state.sidebarPinned ? '取消固定侧栏' : '固定侧栏') + '">' +
                     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg>' +
                   '</button>' +
-                  '<button id="close-drawer-button" class="btn btn-ghost btn-sm sidebar-close" type="button" aria-label="关闭菜单">×</button>' +
+                  '<button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="关闭菜单"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                 '</div>' +
               '</div>' +
               '<div class="sidebar-body">' +
@@ -2069,10 +2069,10 @@
                     '<span class="settings-value" id="notification-permission-status">-</span>' +
                   '</div>' +
                   '<div class="settings-update-actions">' +
-                    '<button id="notification-request-btn" class="btn btn-secondary btn-sm hidden" type="button">授权通知</button>' +
-                    '<button id="notification-reset-btn" class="btn btn-secondary btn-sm hidden" type="button">重新授权</button>' +
+                    '<button id="notification-request-btn" class="btn btn-primary btn-sm hidden" type="button">授权通知</button>' +
+                    '<button id="notification-reset-btn" class="btn btn-ghost btn-sm hidden" type="button">重新授权</button>' +
                     '<button id="notification-test-btn" class="btn btn-secondary btn-sm" type="button">发送测试通知</button>' +
-                    '<button id="notification-test-delay-btn" class="btn btn-secondary btn-sm" type="button">10 秒后发送</button>' +
+                    '<button id="notification-test-delay-btn" class="btn btn-ghost btn-sm" type="button">10 秒后发送</button>' +
                   '</div>' +
                   '<p id="notification-test-message" class="hint hidden"></p>' +
                 '</div>' +
@@ -2137,10 +2137,10 @@
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-structured-runner">结构化会话 Runner</label>' +
                   '<select id="cfg-structured-runner" class="field-input">' +
-                    '<option value="cli">CLI（spawn claude -p，默认）</option>' +
-                    '<option value="sdk">SDK（@anthropic-ai/claude-agent-sdk）</option>' +
+                    '<option value="sdk">SDK（@anthropic-ai/claude-agent-sdk，默认）</option>' +
+                    '<option value="cli">CLI（spawn claude -p）</option>' +
                   '</select>' +
-                  '<p class="field-hint" style="margin-top:4px;">SDK 模式使用官方 Agent SDK 替代 CLI subprocess，接口更整洁，功能等价。重启后生效。</p>' +
+                  '<p class="field-hint" style="margin-top:4px;">SDK 模式使用官方 Agent SDK 替代 CLI subprocess，接口更整洁，功能等价。保存后对新建会话立即生效。</p>' +
                 '</div>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-default-model">默认模型</label>' +
@@ -2358,7 +2358,10 @@
         if (!state.sessionsManageMode) {
           return '<div class="session-manage-bar">' +
             '<span class="sidebar-intro">最近的会话记录</span>' +
-            '<button class="session-manage-toggle" data-action="toggle-manage-mode" type="button">管理</button>' +
+            '<button class="btn btn-ghost btn-xs session-manage-toggle" data-action="toggle-manage-mode" type="button">' +
+              '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>' +
+              '<span>管理</span>' +
+            '</button>' +
           '</div>';
         }
 
@@ -2372,13 +2375,19 @@
         var selectAllAction = allSelected ? "clear-selection" : "select-all-visible";
         var selectAllDisabled = selectable === 0 ? ' disabled' : '';
 
+        // Linear-style toolbar:
+        //   [N selected]  ─────────  [全选] [清空]  [delete (danger)] [完成 (primary)]
         return '<div class="session-manage-bar active">' +
-          '<div class="session-manage-summary">已选择 ' + totalCount + ' 项</div>' +
+          '<div class="session-manage-summary">' +
+            '<span class="session-manage-count">' + totalCount + '</span>' +
+            '<span class="session-manage-summary-label">已选择</span>' +
+          '</div>' +
           '<div class="session-manage-actions">' +
-            '<button class="session-manage-btn" data-action="' + selectAllAction + '" type="button"' + selectAllDisabled + '>' + selectAllLabel + '</button>' +
-            '<button class="session-manage-btn" data-action="clear-selection" type="button"' + (hasAny ? '' : ' disabled') + '>清空</button>' +
-            '<button class="session-manage-btn danger" data-action="delete-selected" type="button"' + (hasAny ? '' : ' disabled') + '>删除所选</button>' +
-            '<button class="session-manage-btn" data-action="toggle-manage-mode" type="button">完成</button>' +
+            '<button class="btn btn-ghost btn-xs" data-action="' + selectAllAction + '" type="button"' + selectAllDisabled + '>' + selectAllLabel + '</button>' +
+            '<button class="btn btn-ghost btn-xs" data-action="clear-selection" type="button"' + (hasAny ? '' : ' disabled') + '>清空</button>' +
+            '<span class="session-manage-divider"></span>' +
+            '<button class="btn btn-danger btn-xs" data-action="delete-selected" type="button"' + (hasAny ? '' : ' disabled') + '>删除</button>' +
+            '<button class="btn btn-primary btn-xs" data-action="toggle-manage-mode" type="button">完成</button>' +
           '</div>' +
         '</div>';
       }
@@ -2424,7 +2433,7 @@
           ? ' <span class="history-count">' + visibleHistory.length + '</span>'
           : '';
         var clearAllButton = state.claudeHistoryExpanded && state.claudeHistoryLoaded && visibleHistory.length > 0
-          ? '<button class="session-manage-btn danger compact" data-action="clear-all-history" type="button">清空历史</button>'
+          ? '<button class="btn btn-danger btn-xs session-history-clear" data-action="clear-all-history" type="button">清空</button>'
           : '';
         var header = '<div class="session-group-title claude-history-toggle" id="claude-history-toggle">' +
           '<span class="chevron">' + chevron + '</span> Claude 历史' + countBadge +
@@ -2634,7 +2643,7 @@
           '<div class="session-group-title claude-history-directory-title">' +
             '<span class="chevron">' + chevron + '</span>' +
             '<span class="claude-history-directory-label">' + escapeHtml(cwdShort) + ' (' + count + ')</span>' +
-            '<button class="session-manage-btn danger compact claude-history-directory-clear-btn" data-action="delete-history-directory" data-cwd="' +
+            '<button class="btn btn-danger btn-xs claude-history-directory-clear-btn" data-action="delete-history-directory" data-cwd="' +
             escapeHtml(cwd) + '" type="button" aria-label="清空此目录的历史会话" title="清空此目录的历史会话">清空此目录</button>' +
           '</div>' +
         '</div>';
@@ -7528,7 +7537,7 @@
             if (langEl) langEl.value = cfg.language || "";
 
             var srEl = document.getElementById("cfg-structured-runner");
-            if (srEl) srEl.value = cfg.structuredRunner || "cli";
+            if (srEl) srEl.value = cfg.structuredRunner || "sdk";
 
             // Default model
             state.configDefaultModel = cfg.defaultModel || "";
@@ -7588,7 +7597,7 @@
           shell: (document.getElementById("cfg-shell") || {}).value,
           language: (document.getElementById("cfg-language") || {}).value || "",
           defaultModel: (document.getElementById("cfg-default-model") || {}).value || "",
-          structuredRunner: (document.getElementById("cfg-structured-runner") || {}).value || "cli",
+          structuredRunner: (document.getElementById("cfg-structured-runner") || {}).value || "sdk",
         };
 
         var previousDefaultModel = (state.config && state.config.defaultModel) || "";
@@ -7607,7 +7616,9 @@
               msgEl.textContent = data.error;
               msgEl.style.color = "var(--error)";
             } else {
-              msgEl.textContent = "配置已保存，部分更改需要重启后生效。";
+              msgEl.textContent = data.restartRequired
+                ? "配置已保存，部分部署字段（host/port/https/shell）需要重启服务才生效。"
+                : "配置已保存。";
               msgEl.style.color = "var(--success)";
             }
             msgEl.classList.remove("hidden");

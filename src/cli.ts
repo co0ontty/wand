@@ -1,7 +1,14 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 
 import process from "node:process";
-import { ensureConfig, hasConfigFile, isExecutionMode, resolveConfigPath, saveConfig } from "./config.js";
+import {
+  hasConfigFile,
+  isPreferenceKey,
+  loadConfigWithStorage,
+  resolveConfigPath,
+  saveConfig,
+  writePreferenceToStorage,
+} from "./config.js";
 import { WandConfig } from "./types.js";
 
 async function main(): Promise<void> {
@@ -53,8 +60,17 @@ async function main(): Promise<void> {
       break;
     }
     case "config:show": {
-      const config = await ensureConfig(configPath);
-      process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
+      // 展示合并后的视图（JSON 部署字段 + DB 偏好字段）。
+      const { ensureDatabaseFile, resolveDatabasePath, WandStorage } = await import("./storage.js");
+      const dbPath = resolveDatabasePath(configPath);
+      ensureDatabaseFile(dbPath);
+      const storage = new WandStorage(dbPath);
+      try {
+        const config = await loadConfigWithStorage(configPath, storage);
+        process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
+      } finally {
+        storage.close();
+      }
       break;
     }
     case "config:set": {
@@ -64,10 +80,24 @@ async function main(): Promise<void> {
         throw new Error("Usage: wand config:set <key> <value>");
       }
 
-      const config = await ensureConfig(configPath);
-      const nextConfig = setConfigValue(config, key, value);
-      await saveConfig(configPath, nextConfig);
-      process.stdout.write(`[wand] Updated ${key} in ${configPath}\n`);
+      const { ensureDatabaseFile, resolveDatabasePath, WandStorage } = await import("./storage.js");
+      const dbPath = resolveDatabasePath(configPath);
+      ensureDatabaseFile(dbPath);
+      const storage = new WandStorage(dbPath);
+      try {
+        const config = await loadConfigWithStorage(configPath, storage);
+        if (isPreferenceKey(key)) {
+          // 偏好字段写 DB，无需重启
+          writePreferenceToStorage(config, storage, key, value);
+          process.stdout.write(`[wand] Updated preference ${key} in ${dbPath}\n`);
+        } else {
+          const nextConfig = setConfigValue(config, key, value);
+          await saveConfig(configPath, nextConfig);
+          process.stdout.write(`[wand] Updated ${key} in ${configPath}\n`);
+        }
+      } finally {
+        storage.close();
+      }
       break;
     }
     case "help":
@@ -105,11 +135,18 @@ async function ensureRequiredFiles(
   configPath: string,
   opts: { silentReady?: boolean } = {}
 ): Promise<WandConfig> {
-  const { ensureDatabaseFile, resolveDatabasePath } = await import("./storage.js");
+  const { ensureDatabaseFile, resolveDatabasePath, WandStorage } = await import("./storage.js");
   const dbPath = resolveDatabasePath(configPath);
   const hadConfig = hasConfigFile(configPath);
-  const config = await ensureConfig(configPath);
+  // 先建 DB 文件，再加载 config（loadConfigWithStorage 需要 storage 来迁移老 JSON 偏好字段并应用 DB 覆盖）。
   const createdDb = ensureDatabaseFile(dbPath);
+  const storage = new WandStorage(dbPath);
+  let config: WandConfig;
+  try {
+    config = await loadConfigWithStorage(configPath, storage);
+  } finally {
+    storage.close();
+  }
 
   // 已存在的 ready 信息在 TUI 模式下由启动 banner 统一展示，此处静默；
   // 但 created 是首次创建事件，无论 TUI 与否都值得提示。
@@ -178,11 +215,11 @@ function setConfigValue(
   key: string,
   value: string
 ): WandConfig {
+  // 偏好字段（defaultMode/defaultCwd/...）由调用方分流到 storage，这里只处理 JSON 字段。
   switch (key) {
     case "host":
     case "password":
     case "shell":
-    case "defaultCwd":
       return {
         ...config,
         [key]: value
@@ -194,14 +231,6 @@ function setConfigValue(
       return {
         ...config,
         port: Number(value)
-      };
-    case "defaultMode":
-      if (!isExecutionMode(value)) {
-        throw new Error(`defaultMode must be one of: assist, agent, agent-max, auto-edit, default, full-access, managed, native`);
-      }
-      return {
-        ...config,
-        defaultMode: value
       };
     case "https":
       if (value !== "true" && value !== "false") {

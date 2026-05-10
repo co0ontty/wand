@@ -325,6 +325,37 @@ export class WandStorage {
     this.db.prepare("DELETE FROM app_config WHERE key = ?").run(key);
   }
 
+  // ============ Preference Methods ============
+  // Preferences 与 getConfigValue/setConfigValue 共用 app_config 表，
+  // 区别在于：preference 自动 JSON 序列化/反序列化，并按"未设置时返回 fallback"语义返回。
+  // 用于存放 UI 设置面板可改的用户偏好（defaultMode/defaultModel/cardDefaults 等），
+  // 与 JSON 配置中的部署期参数（host/port/shell 等）分开。
+
+  /** 读取偏好。未设置或 JSON 解析失败时返回 fallback。 */
+  getPreference<T>(key: string, fallback: T): T {
+    const raw = this.getConfigValue(key);
+    if (raw === null) return fallback;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
+  /** 写入偏好。undefined / null 视为删除。 */
+  setPreference<T>(key: string, value: T | null | undefined): void {
+    if (value === undefined || value === null) {
+      this.deleteConfigValue(key);
+      return;
+    }
+    this.setConfigValue(key, JSON.stringify(value));
+  }
+
+  /** 判断偏好是否在 DB 中存在（区别于值为 null/false/""）。 */
+  hasPreference(key: string): boolean {
+    return this.getConfigValue(key) !== null;
+  }
+
   /** Get password from database */
   getPassword(): string | null {
     return this.getConfigValue("password");

@@ -13,7 +13,13 @@ import { WebSocketServer } from "ws";
 import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
 import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
 import { ensureCertificates } from "./cert.js";
-import { isExecutionMode, normalizeCardDefaults, resolveConfigDir, saveConfig } from "./config.js";
+import {
+  isExecutionMode,
+  PREFERENCE_KEYS,
+  resolveConfigDir,
+  saveConfig,
+  writePreferenceToStorage,
+} from "./config.js";
 import { getCachedModels, refreshModels } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
@@ -846,7 +852,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
-      structuredRunner: config.structuredRunner ?? "cli",
+      structuredRunner: config.structuredRunner ?? "sdk",
       structuredRunners: [
         { label: "Claude Structured", runner: "claude-cli-print" },
         { label: "Codex Structured", runner: "codex-cli-exec" },
@@ -943,61 +949,59 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.post("/api/settings/config", async (req, res) => {
     const body = req.body as Partial<WandConfig>;
-    const allowedFields = ["host", "port", "https", "defaultMode", "defaultCwd", "shell", "language", "defaultModel", "structuredRunner"] as const;
-    let changed = false;
+    // 部署字段：写 JSON，需要重启服务才生效（host/port/https 影响监听，shell 影响新 PTY）
+    const deployFields = ["host", "port", "https", "shell"] as const;
+    let touchedDeployField = false;
+    let touchedPreferenceField = false;
 
-    for (const field of allowedFields) {
-      if (field in body && body[field] !== undefined) {
-        if (field === "port") {
-          const p = Number(body.port);
-          if (!Number.isInteger(p) || p < 1 || p > 65535) {
-            res.status(400).json({ error: `无效端口号: ${body.port}` });
-            return;
-          }
-          config.port = p;
-        } else if (field === "https") {
-          config.https = body.https === true;
-        } else if (field === "defaultMode") {
-          if (!isExecutionMode(body.defaultMode)) {
-            res.status(400).json({ error: `无效执行模式: ${body.defaultMode}` });
-            return;
-          }
-          config.defaultMode = body.defaultMode;
-        } else if (field === "host") {
-          config.host = String(body.host);
-        } else if (field === "defaultCwd") {
-          config.defaultCwd = String(body.defaultCwd);
-        } else if (field === "shell") {
-          config.shell = String(body.shell);
-        } else if (field === "language") {
-          config.language = typeof body.language === "string" ? body.language.trim() : "";
-        } else if (field === "defaultModel") {
-          config.defaultModel = typeof body.defaultModel === "string" ? body.defaultModel.trim() : "";
-        } else if (field === "structuredRunner") {
-          config.structuredRunner = body.structuredRunner === "sdk" ? "sdk" : "cli";
+    for (const field of deployFields) {
+      if (!(field in body) || body[field] === undefined) continue;
+      if (field === "port") {
+        const p = Number(body.port);
+        if (!Number.isInteger(p) || p < 1 || p > 65535) {
+          res.status(400).json({ error: `无效端口号: ${body.port}` });
+          return;
         }
-        changed = true;
+        config.port = p;
+      } else if (field === "https") {
+        config.https = body.https === true;
+      } else if (field === "host") {
+        config.host = String(body.host);
+      } else if (field === "shell") {
+        config.shell = String(body.shell);
       }
+      touchedDeployField = true;
     }
 
-    // Handle cardDefaults separately (nested object, no restart needed)
-    if (body.cardDefaults !== undefined) {
-      config.cardDefaults = normalizeCardDefaults(body.cardDefaults);
-      changed = true;
+    // 偏好字段：写 SQLite app_config，立即热生效（manager 持有 config 同一引用）。
+    // defaultMode 单独做严格校验以保留 400 错误响应，其余字段走 writePreferenceToStorage 的统一类型化处理。
+    if (body.defaultMode !== undefined && !isExecutionMode(body.defaultMode)) {
+      res.status(400).json({ error: `无效执行模式: ${body.defaultMode}` });
+      return;
+    }
+    for (const field of PREFERENCE_KEYS) {
+      if (!(field in body) || (body as Record<string, unknown>)[field] === undefined) continue;
+      try {
+        writePreferenceToStorage(config, storage, field, (body as Record<string, unknown>)[field]);
+      } catch (err) {
+        res.status(400).json({ error: getErrorMessage(err, `字段 ${field} 校验失败`) });
+        return;
+      }
+      touchedPreferenceField = true;
     }
 
-    if (!changed) {
+    if (!touchedDeployField && !touchedPreferenceField) {
       res.status(400).json({ error: "没有可更新的配置字段。" });
       return;
     }
 
-    // cardDefaults-only changes don't need restart
-    const restartRequired = allowedFields.some((f) => f in body && body[f] !== undefined);
-
     try {
-      await saveConfig(configPath, config);
+      if (touchedDeployField) {
+        await saveConfig(configPath, config);
+      }
       const { password: _pw, ...safeConfig } = config;
-      res.json({ ok: true, config: safeConfig, restartRequired });
+      // 只有部署字段才需要重启；偏好字段已经热生效。
+      res.json({ ok: true, config: safeConfig, restartRequired: touchedDeployField });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "保存配置失败。") });
     }

@@ -890,88 +890,9 @@
     .session-group { margin-bottom: 20px; }
     .session-group:last-child { margin-bottom: 0; }
 
-    .session-manage-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-      padding: 6px 8px;
-      border-radius: var(--radius-sm);
-      background: rgba(150, 118, 85, 0.04);
-      transition: all var(--transition-fast);
-    }
-
-    .session-manage-bar:hover {
-      background: rgba(150, 118, 85, 0.07);
-    }
-
-    .session-manage-bar.active {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 8px;
-      padding: 10px 12px;
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
-      background: var(--bg-surface);
-    }
-
-    .session-manage-summary {
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-      font-weight: 600;
-    }
-
-    .session-manage-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .session-manage-toggle {
-      border: 1px solid rgba(197, 101, 61, 0.15);
-      background: rgba(197, 101, 61, 0.05);
-      color: var(--accent);
-      border-radius: var(--radius-md);
-      padding: 6px 10px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-    }
-
-    .session-manage-toggle:hover {
-      background: rgba(197, 101, 61, 0.12);
-      border-color: rgba(197, 101, 61, 0.25);
-    }
-
-    .session-manage-btn {
-      border: 1px solid var(--border-subtle);
-      background: var(--bg-surface);
-      color: var(--text-primary);
-      border-radius: var(--radius-md);
-      padding: 6px 10px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .session-manage-btn.compact {
-      padding: 4px 8px;
-      font-size: 0.6875rem;
-      margin-left: 8px;
-    }
-
-    .session-manage-btn.danger,
-    .session-manage-toggle.danger {
-      color: #c84636;
-      border-color: rgba(200, 70, 54, 0.25);
-      background: rgba(200, 70, 54, 0.06);
-    }
-
-    .session-manage-btn:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-    }
+    /* Legacy .session-manage-bar / .session-manage-toggle / .session-manage-btn
+       styles removed — toolbar is now built from .btn variants and styled in
+       the "Liquid Glass — sidebar" section below. */
 
     .session-group-title {
       padding: 8px 8px 12px;
@@ -1439,17 +1360,7 @@
       font-family: inherit;
     }
 
-    .worktree-merge-actions .btn-secondary {
-      background: transparent;
-    }
-
-    .worktree-merge-actions .btn-secondary:hover {
-      background: rgba(0, 0, 0, 0.04);
-    }
-
-    .worktree-merge-actions .btn-secondary:active {
-      background: rgba(0, 0, 0, 0.07);
-    }
+    /* worktree-merge cancel button uses the global .btn-secondary look */
 
     .worktree-merge-content .field-hint:last-child {
       margin-bottom: 0;
@@ -2043,172 +1954,239 @@
     }
 
     /* ===== 通用按钮组件 ===== */
+    /* ============================================================ */
+    /* ── Button system (shadcn/ui-inspired, warm palette)         ── */
+    /* Variants:  primary (CTA) · secondary (utility filled)        */
+    /*            ghost (toolbar/text) · outline (hairline)         */
+    /*            danger (destructive) · success (positive done)    */
+    /* Sizes:     xs · sm (default in toolbars) · md (default)      */
+    /*            lg (major CTAs)                                   */
+    /* ============================================================ */
+
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
+      gap: 6px;
       font-family: var(--font-sans);
       font-size: 0.875rem;
-      font-weight: 500;
-      padding: 10px 18px;
-      border-radius: var(--radius-md);
+      font-weight: 600;
+      letter-spacing: -0.005em;
+      padding: 0 16px;
+      height: 38px;
+      min-height: 38px;
+      border-radius: 10px;
       border: 1px solid transparent;
       cursor: pointer;
-      transition: all 0.25s var(--ease-out-expo);
-      min-height: 42px;
       white-space: nowrap;
       position: relative;
-      overflow: hidden;
+      user-select: none;
+      transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease,
+        box-shadow 0.18s ease,
+        transform 0.18s cubic-bezier(0.34, 1.4, 0.64, 1);
+      -webkit-tap-highlight-color: transparent;
     }
 
-    .btn::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at center, rgba(255,255,255,0.4) 0%, transparent 70%);
-      opacity: 0;
-      transform: scale(0);
-      transition: transform 0.5s ease, opacity 0.3s ease;
-      border-radius: inherit;
+    .btn:focus { outline: none; }
+    .btn:focus-visible {
+      outline: none;
+      box-shadow:
+        0 0 0 2px var(--bg-primary),
+        0 0 0 4px var(--accent);
     }
 
-    .btn:active::before {
-      opacity: 1;
-      transform: scale(2.5);
-      transition-duration: 0s;
+    .btn:disabled,
+    .btn[disabled] {
+      opacity: 0.45;
+      cursor: not-allowed;
+      pointer-events: none;
+      transform: none !important;
+      box-shadow: none !important;
     }
 
-    /* ----- 主要按钮 ----- */
+    /* ── Primary: solid accent CTA (gradient + soft shadow) ── */
     .btn-primary {
-      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+      background: linear-gradient(180deg, var(--accent-hover) 0%, var(--accent) 100%);
       color: var(--text-inverse);
-      box-shadow: 0 4px 14px rgba(197, 101, 61, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      box-shadow:
+        0 1px 2px rgba(197, 101, 61, 0.32),
+        0 4px 10px -2px rgba(197, 101, 61, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22),
+        inset 0 -1px 0 rgba(89, 58, 32, 0.18);
     }
-
     .btn-primary:hover {
-      background: linear-gradient(135deg, var(--accent-hover) 0%, #c96b44 100%);
-      transform: translateY(-2px) scale(1.02);
-      box-shadow: 0 8px 24px rgba(197, 101, 61, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    }
-
-    .btn-primary:active {
-      transform: translateY(0) scale(0.98);
-      box-shadow: 0 2px 10px rgba(197, 101, 61, 0.2);
-      transition-duration: 0.1s;
-    }
-
-    .btn-primary:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 3px;
-    }
-
-    /* ----- 次要按钮 ----- */
-    .btn-secondary {
-      background: var(--bg-surface);
-      color: var(--text-secondary);
-      border-color: var(--border-default);
-      box-shadow: var(--shadow-xs);
-    }
-
-    .btn-secondary:hover {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-      border-color: var(--accent-soft);
+      background: linear-gradient(180deg, #d6855e 0%, var(--accent-hover) 100%);
       transform: translateY(-1px);
-      box-shadow: var(--shadow-sm);
+      box-shadow:
+        0 2px 4px rgba(197, 101, 61, 0.32),
+        0 8px 20px -4px rgba(197, 101, 61, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -1px 0 rgba(89, 58, 32, 0.18);
     }
-
-    .btn-secondary:active {
+    .btn-primary:active {
       transform: translateY(0);
-      transition-duration: 0.1s;
+      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-active) 100%);
+      box-shadow:
+        0 1px 2px rgba(197, 101, 61, 0.28),
+        inset 0 1px 0 rgba(89, 58, 32, 0.18);
+      transition-duration: 0.06s;
     }
 
-    .btn-secondary:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 3px;
+    /* ── Secondary: soft tinted fill (utility actions) ── */
+    .btn-secondary {
+      background: rgba(125, 91, 57, 0.08);
+      color: var(--text-primary);
+      border-color: transparent;
+    }
+    .btn-secondary:hover {
+      background: rgba(125, 91, 57, 0.14);
+      color: var(--text-primary);
+    }
+    .btn-secondary:active {
+      background: rgba(125, 91, 57, 0.2);
+      transition-duration: 0.06s;
     }
 
-    /* ----- 幽灵按钮 ----- */
+    /* ── Outline: hairline border, transparent fill ── */
+    .btn-outline {
+      background: transparent;
+      color: var(--text-primary);
+      border-color: rgba(125, 91, 57, 0.2);
+    }
+    .btn-outline:hover {
+      background: rgba(125, 91, 57, 0.06);
+      border-color: rgba(125, 91, 57, 0.32);
+    }
+    .btn-outline:active {
+      background: rgba(125, 91, 57, 0.12);
+      transition-duration: 0.06s;
+    }
+
+    /* ── Ghost: transparent, hover-revealed (toolbars / text actions) ── */
     .btn-ghost {
       background: transparent;
       color: var(--text-secondary);
       border-color: transparent;
-      box-shadow: none;
     }
-
     .btn-ghost:hover {
-      background: var(--bg-tertiary);
+      background: rgba(125, 91, 57, 0.08);
       color: var(--text-primary);
-      transform: translateY(-1px);
     }
-
     .btn-ghost:active {
-      background: var(--bg-tertiary);
-      transform: translateY(0);
-      transition-duration: 0.1s;
+      background: rgba(125, 91, 57, 0.14);
+      transition-duration: 0.06s;
     }
 
-    .btn-ghost:focus-visible {
-      outline: 2px solid var(--text-tertiary);
-      outline-offset: 3px;
-    }
-
-    /* ----- 危险按钮 ----- */
+    /* ── Danger: soft red ghost-fill, hover deepens ── */
     .btn-danger {
-      background: var(--danger-muted);
+      background: rgba(178, 79, 69, 0.08);
       color: var(--danger);
       border-color: transparent;
     }
-
     .btn-danger:hover {
-      background: var(--danger);
-      color: var(--text-inverse);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 14px rgba(178, 79, 69, 0.3);
+      background: rgba(178, 79, 69, 0.16);
+      color: var(--danger);
     }
-
     .btn-danger:active {
-      transform: translateY(0);
-      transition-duration: 0.1s;
+      background: rgba(178, 79, 69, 0.24);
+      transition-duration: 0.06s;
     }
-
+    .btn-danger.btn-danger-solid {
+      background: linear-gradient(180deg, var(--danger-hover) 0%, var(--danger) 100%);
+      color: var(--text-inverse);
+      box-shadow:
+        0 1px 2px rgba(178, 79, 69, 0.32),
+        0 4px 10px -2px rgba(178, 79, 69, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    .btn-danger.btn-danger-solid:hover {
+      background: linear-gradient(180deg, #c4655a 0%, var(--danger-hover) 100%);
+      transform: translateY(-1px);
+    }
     .btn-danger:focus-visible {
-      outline: 2px solid var(--danger);
-      outline-offset: 3px;
+      box-shadow:
+        0 0 0 2px var(--bg-primary),
+        0 0 0 4px var(--danger);
     }
 
-    /* ----- 按钮尺寸变体 ----- */
+    /* ── Success: soft green ── */
+    .btn-success {
+      background: rgba(79, 122, 88, 0.1);
+      color: var(--success);
+      border-color: transparent;
+    }
+    .btn-success:hover {
+      background: rgba(79, 122, 88, 0.18);
+      color: var(--success);
+    }
+    .btn-success:active {
+      background: rgba(79, 122, 88, 0.26);
+      transition-duration: 0.06s;
+    }
+    .btn-success:focus-visible {
+      box-shadow:
+        0 0 0 2px var(--bg-primary),
+        0 0 0 4px var(--success);
+    }
+
+    /* ── Sizes ── */
     .btn-block { width: 100%; }
 
+    .btn-xs {
+      height: 26px;
+      min-height: 26px;
+      padding: 0 10px;
+      font-size: 0.75rem;
+      border-radius: 7px;
+      gap: 4px;
+    }
     .btn-sm {
+      height: 32px;
+      min-height: 32px;
+      padding: 0 12px;
       font-size: 0.8125rem;
-      padding: 6px 12px;
-      min-height: 34px;
+      border-radius: 8px;
+      gap: 5px;
     }
-
     .btn-lg {
+      height: 46px;
+      min-height: 46px;
+      padding: 0 22px;
       font-size: 0.9375rem;
-      padding: 12px 24px;
-      min-height: 48px;
+      border-radius: 12px;
+      gap: 8px;
     }
 
+    /* ── Icon-only square button ── */
     .btn-icon {
       padding: 0;
+      width: 36px;
       min-width: 36px;
+      height: 36px;
       min-height: 36px;
-      border-radius: var(--radius-sm);
+      border-radius: 8px;
+      gap: 0;
     }
-
-    .btn-icon.sm {
-      min-width: 28px;
-      min-height: 28px;
+    .btn-icon.sm,
+    .btn-icon.btn-sm {
+      width: 30px;
+      min-width: 30px;
+      height: 30px;
+      min-height: 30px;
+      border-radius: 7px;
     }
-
-    .btn-icon.lg {
-      min-width: 44px;
-      min-height: 44px;
+    .btn-icon.lg,
+    .btn-icon.btn-lg {
+      width: 42px;
+      min-width: 42px;
+      height: 42px;
+      min-height: 42px;
+      border-radius: 10px;
     }
+    .btn-icon svg { flex-shrink: 0; }
 
     .main-content {
       flex: 1;
@@ -7250,6 +7228,481 @@
       }
     }
 
+    /* ============================================================ */
+    /* ── Liquid Glass — sidebar (会话侧边栏)                     ── */
+    /* Same hierarchy: the SIDEBAR is the glass surface, items     */
+    /* inside it are clean cards. No double-glass, no busy borders. */
+    /* ============================================================ */
+
+    /* Sidebar shell — push the glass material */
+    .sidebar {
+      background: rgba(255, 252, 247, 0.72);
+      border-right: 0.5px solid rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(36px) saturate(180%);
+      -webkit-backdrop-filter: blur(36px) saturate(180%);
+      box-shadow:
+        0 0 0 0.5px rgba(125, 91, 57, 0.06),
+        4px 0 32px -8px rgba(20, 14, 8, 0.18);
+    }
+    .sidebar.open {
+      box-shadow:
+        0 0 0 0.5px rgba(125, 91, 57, 0.06),
+        12px 0 48px -12px rgba(20, 14, 8, 0.28);
+    }
+    .sidebar.pinned {
+      box-shadow:
+        0 0 0 0.5px rgba(125, 91, 57, 0.06),
+        2px 0 12px -8px rgba(20, 14, 8, 0.12);
+    }
+
+    /* Drawer backdrop — calmer dark wash, matches modal-backdrop */
+    .drawer-backdrop {
+      background: rgba(20, 14, 8, 0.32);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .drawer-backdrop.open {
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+    }
+
+    /* Sidebar header — hairline divider, transparent so glass shows through */
+    .sidebar-header {
+      background: transparent;
+      border-bottom: 1px solid rgba(125, 91, 57, 0.06);
+      padding: 14px 16px;
+    }
+
+    .sidebar-title {
+      font-size: 0.9375rem;
+      font-weight: 700;
+      letter-spacing: -0.012em;
+      color: var(--text-primary);
+    }
+
+    /* Session count badge — quiet pill */
+    .session-count {
+      background: rgba(125, 91, 57, 0.08);
+      color: var(--text-secondary);
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.5;
+    }
+
+    /* Sidebar header icon buttons — pin / more / close — uniform 32×32 ghost */
+    .sidebar-header-actions .btn-ghost.btn-sm,
+    .sidebar-pin-toggle,
+    .drawer-close-btn {
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      min-height: 32px;
+      padding: 0;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: var(--text-tertiary);
+      border: none;
+      transition:
+        background 0.16s ease,
+        color 0.16s ease,
+        transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1);
+    }
+    .sidebar-header-actions .btn-ghost.btn-sm:hover,
+    .sidebar-pin-toggle:hover {
+      background: rgba(125, 91, 57, 0.08);
+      color: var(--text-primary);
+    }
+    .sidebar-pin-toggle.pinned {
+      background: rgba(197, 101, 61, 0.12);
+      color: var(--accent);
+    }
+
+    /* Drawer close — same pattern as modal-close (rotate + danger tint) */
+    .drawer-close-btn {
+      background: rgba(125, 91, 57, 0.07);
+    }
+    .drawer-close-btn:hover {
+      background: rgba(178, 79, 69, 0.12);
+      color: var(--danger);
+      transform: rotate(90deg);
+      box-shadow: 0 2px 8px rgba(178, 79, 69, 0.16);
+    }
+    .drawer-close-btn:active {
+      background: rgba(178, 79, 69, 0.2);
+      transform: rotate(90deg) scale(0.92);
+      transition-duration: 0.06s;
+    }
+    .drawer-close-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    /* Sidebar overflow dropdown — frosted floating menu */
+    .sidebar-header-overflow {
+      background: rgba(255, 252, 247, 0.86);
+      border: 0.5px solid rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(24px) saturate(180%);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      box-shadow:
+        0 0 0 0.5px rgba(125, 91, 57, 0.08),
+        0 12px 28px -8px rgba(20, 14, 8, 0.22);
+      border-radius: 12px;
+      padding: 6px;
+    }
+    .sidebar-header-overflow .overflow-item {
+      border-radius: 8px;
+      padding: 9px 10px;
+      font-size: 0.8125rem;
+      font-weight: 500;
+    }
+    .sidebar-header-overflow .overflow-item:hover {
+      background: rgba(125, 91, 57, 0.08);
+      color: var(--text-primary);
+    }
+    .sidebar-header-overflow .overflow-item:active {
+      background: rgba(125, 91, 57, 0.14);
+      transform: scale(0.98);
+    }
+
+    /* ── Manage bar — Linear-style toolbar ── */
+    .session-manage-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 4px 4px 10px;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      background: transparent;
+      transition: background 0.16s ease;
+    }
+    .session-manage-bar:hover {
+      background: rgba(125, 91, 57, 0.05);
+    }
+    .session-manage-bar .sidebar-intro {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      letter-spacing: 0.005em;
+    }
+
+    /* Active toolbar — iOS toolbar look: card with hairline + summary + actions */
+    .session-manage-bar.active {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid rgba(125, 91, 57, 0.1);
+      border-radius: 14px;
+      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+    }
+
+    .session-manage-summary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .session-manage-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 7px;
+      background: var(--accent);
+      color: var(--text-inverse);
+      font-size: 0.6875rem;
+      font-weight: 700;
+      border-radius: 999px;
+      font-variant-numeric: tabular-nums;
+      box-shadow: 0 1px 2px rgba(197, 101, 61, 0.32);
+    }
+    .session-manage-summary-label {
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+
+    .session-manage-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .session-manage-divider {
+      width: 1px;
+      height: 16px;
+      background: rgba(125, 91, 57, 0.16);
+      margin: 0 4px;
+      flex-shrink: 0;
+    }
+
+    /* Toggle button (the "管理" entry point) — show icon + label */
+    .session-manage-toggle {
+      gap: 5px;
+    }
+
+    /* History inline clear buttons */
+    .session-history-clear,
+    .claude-history-directory-clear-btn {
+      margin-left: auto;
+    }
+
+    /* Group title — refine the dash + label */
+    .session-group-title {
+      padding: 10px 6px 8px;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+    }
+    .session-group-title::before {
+      width: 3px;
+      height: 12px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, var(--accent), rgba(197, 101, 61, 0.4));
+      opacity: 1;
+    }
+
+    /* ── Session item — clean card on glass ── */
+    .session-item {
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid rgba(125, 91, 57, 0.08);
+      border-radius: 12px;
+      padding: 11px 14px;
+      margin-bottom: 6px;
+      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+      transition:
+        background 0.18s ease,
+        border-color 0.18s ease,
+        box-shadow 0.18s ease,
+        transform 0.18s ease;
+    }
+    .session-item::before {
+      left: 4px;
+      top: 10px;
+      bottom: 10px;
+      width: 3px;
+      border-radius: 2px;
+      background: var(--accent);
+    }
+    .session-item:hover {
+      background: rgba(255, 255, 255, 0.85);
+      border-color: rgba(125, 91, 57, 0.16);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(125, 91, 57, 0.08);
+    }
+    .session-item:hover::before {
+      opacity: 0.45;
+      transform: scaleY(1);
+    }
+    .session-item.active {
+      background: linear-gradient(180deg, #fff7ef 0%, #fff1de 100%);
+      border-color: var(--accent);
+      box-shadow:
+        0 0 0 1px var(--accent-muted),
+        0 4px 14px rgba(197, 101, 61, 0.14);
+    }
+    .session-item.active::before {
+      opacity: 1;
+      transform: scaleY(1);
+    }
+    .session-item.selected {
+      background: linear-gradient(180deg, #fff7ef 0%, #fff3e3 100%);
+      border-color: rgba(197, 101, 61, 0.4);
+    }
+    .session-item.selected::before {
+      opacity: 0.7;
+      transform: scaleY(1);
+    }
+    .session-item:active {
+      transform: translateY(0) scale(0.99);
+      transition-duration: 0.08s;
+    }
+
+    /* Title typography */
+    .session-title,
+    .session-command {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+    }
+    .session-title-row { gap: 10px; }
+
+    /* Time stamp — lighter */
+    .session-time {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .session-activity { opacity: 1; color: var(--accent); font-weight: 500; }
+
+    /* Status badge — keep functional colors but soften the pill */
+    .session-status {
+      padding: 2px 8px;
+      font-size: 0.625rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    /* ID chip — quiet mono */
+    .session-id {
+      background: rgba(125, 91, 57, 0.08);
+      color: var(--text-tertiary);
+      font-size: 0.625rem;
+      padding: 1.5px 6px;
+      border-radius: 4px;
+    }
+
+    /* ── Session action mini-buttons (resume / merge / delete) ── */
+    .session-action-btn {
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      min-height: 28px;
+      border-radius: 50%;
+      background: rgba(125, 91, 57, 0.06);
+      color: var(--text-tertiary);
+      border: none;
+      transition:
+        background 0.16s ease,
+        color 0.16s ease,
+        transform 0.18s cubic-bezier(0.34, 1.4, 0.64, 1);
+    }
+    .session-action-btn:hover {
+      background: rgba(125, 91, 57, 0.14);
+      color: var(--text-primary);
+      transform: translateY(-1px);
+    }
+    .session-action-btn.delete-btn:hover {
+      background: rgba(178, 79, 69, 0.14);
+      color: var(--danger);
+    }
+    .session-action-btn.merge-btn:hover {
+      background: rgba(79, 122, 88, 0.16);
+      color: var(--success);
+    }
+    .session-action-btn:active {
+      transform: scale(0.9);
+      transition-duration: 0.06s;
+    }
+    .session-action-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* Session manage check — iOS-style mini checkbox */
+    .session-manage-check span {
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      border: 1.5px solid rgba(125, 91, 57, 0.22);
+      background: rgba(255, 255, 255, 0.6);
+      box-shadow: inset 0 1px 1px rgba(125, 91, 57, 0.04);
+      transition:
+        background 0.16s ease,
+        border-color 0.16s ease,
+        box-shadow 0.16s ease;
+    }
+    .session-manage-check input:checked + span {
+      background: var(--accent);
+      border-color: var(--accent);
+      box-shadow:
+        0 1px 3px rgba(197, 101, 61, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    .session-manage-check input:checked + span::after {
+      content: "";
+      width: 6px;
+      height: 10px;
+      border-right: 2px solid #fff;
+      border-bottom: 2px solid #fff;
+      transform: rotate(45deg) translate(-1px, -1px);
+    }
+
+    /* ── Sidebar footer — hairline + clean tile actions ── */
+    .sidebar-footer {
+      background: transparent;
+      border-top: 1px solid rgba(125, 91, 57, 0.06);
+      padding: 14px;
+    }
+    .sidebar-footer-actions .btn {
+      background: rgba(255, 255, 255, 0.45);
+      border: 1px solid rgba(125, 91, 57, 0.06);
+      border-radius: 10px;
+      padding: 8px 4px;
+      gap: 4px;
+      font-size: 0.625rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: var(--text-tertiary);
+      transition:
+        background 0.16s ease,
+        border-color 0.16s ease,
+        color 0.16s ease,
+        transform 0.16s ease,
+        box-shadow 0.16s ease;
+    }
+    .sidebar-footer-actions .btn:hover {
+      background: rgba(255, 255, 255, 0.85);
+      border-color: rgba(125, 91, 57, 0.16);
+      color: var(--text-primary);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(125, 91, 57, 0.06);
+    }
+    .sidebar-footer-actions .btn:active {
+      transform: scale(0.96);
+      transition-duration: 0.06s;
+    }
+    .sidebar-footer-actions .btn.active {
+      background: linear-gradient(180deg, #fff7ef 0%, #fff1de 100%);
+      border-color: rgba(197, 101, 61, 0.32);
+      color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-muted);
+    }
+    .sidebar-footer-actions .btn.sidebar-logout:hover {
+      background: rgba(178, 79, 69, 0.08);
+      border-color: rgba(178, 79, 69, 0.2);
+      color: var(--danger);
+      opacity: 1;
+    }
+
+    /* New-session primary button — slightly larger shadow to distinguish */
+    .sidebar-footer .btn-primary {
+      box-shadow:
+        0 6px 16px -4px rgba(197, 101, 61, 0.4),
+        0 2px 6px -2px rgba(197, 101, 61, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+    }
+    .sidebar-footer .btn-primary:hover {
+      box-shadow:
+        0 10px 24px -4px rgba(197, 101, 61, 0.46),
+        0 4px 10px -2px rgba(197, 101, 61, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+
+    /* Sidebar empty state */
+    .sessions-list:empty::before {
+      color: var(--text-muted);
+      font-size: 0.8125rem;
+      letter-spacing: 0.01em;
+    }
+
+    /* Fallback for browsers without backdrop-filter */
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .sidebar { background: rgba(255, 251, 245, 0.98); }
+      .drawer-backdrop { background: rgba(20, 14, 8, 0.55); }
+      .sidebar-header-overflow { background: #fffaf2; }
+    }
+
     .modal-header {
       display: flex;
       align-items: center;
@@ -7585,8 +8038,7 @@
       /* 平板触摸优化 - 44px触摸区域 */
       .session-item { min-height: 52px; padding: 12px 12px; }
       .session-action-btn { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
-      .session-manage-toggle,
-      .session-manage-btn { min-height: 36px; padding: 8px 12px; }
+      .session-manage-bar .btn { min-height: 32px; }
       .claude-history-toggle { min-height: 40px; display: flex; align-items: center; }
       .sidebar-footer-actions .btn { min-height: 44px; }
       .tree-item { min-height: 44px; padding: 8px 12px; }
@@ -8705,15 +9157,7 @@
       filter: brightness(1.1);
     }
 
-    /* Settings restart button */
-    .btn-success {
-      background: var(--success);
-      color: white;
-      border-color: var(--success);
-    }
-    .btn-success:hover:not(:disabled) {
-      filter: brightness(1.1);
-    }
+    /* .btn-success defined globally in the button system above */
 
     /* Restart overlay */
     .restart-overlay {

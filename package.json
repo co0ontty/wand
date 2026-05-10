@@ -43,7 +43,6 @@
     "multer": "^2.1.1",
     "neo-blessed": "^0.2.0",
     "node-pty": "^1.1.0",
-    "puppeteer": "^24.40.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {
@@ -52,7 +51,6 @@
     "@types/node": "^22.13.14",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.0",
-    "playwright": "^1.58.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }
