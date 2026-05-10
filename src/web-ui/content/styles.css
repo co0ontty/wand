@@ -9050,21 +9050,22 @@
     }
     .toast-message {
       position: fixed;
-      bottom: 24px;
+      top: 24px;
       left: 50%;
       transform: translateX(-50%);
       padding: 10px 20px;
       border-radius: var(--radius-md);
       font-size: 0.875rem;
       z-index: 9999;
-      animation: toast-in 0.2s ease;
+      box-shadow: var(--shadow-lg);
+      animation: toast-in 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
     .toast-error {
       background: var(--danger);
       color: white;
     }
     @keyframes toast-in {
-      from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+      from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
       to { opacity: 1; transform: translateX(-50%) translateY(0); }
     }
 
@@ -10963,9 +10964,9 @@
     /* ── Mini toast for in-app feedback ── */
     .wand-mini-toast {
       position: fixed;
-      bottom: 30px;
+      top: 30px;
       left: 50%;
-      transform: translate(-50%, 14px);
+      transform: translate(-50%, -14px);
       z-index: 1200;
       padding: 8px 16px;
       background: rgba(20, 20, 20, 0.92);
@@ -12978,15 +12979,17 @@
       max-width: 420px;
       display: flex;
       flex-direction: column;
-      background: rgba(255, 252, 247, 0.86);
-      border: 0.5px solid rgba(255, 255, 255, 0.6);
+      background:
+        radial-gradient(120% 120% at 0% 0%, var(--accent-muted) 0%, transparent 55%),
+        linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-secondary) 100%);
+      border: 0.5px solid var(--border-subtle);
       border-radius: 22px;
       overflow: hidden;
       backdrop-filter: blur(40px) saturate(180%);
       -webkit-backdrop-filter: blur(40px) saturate(180%);
       box-shadow:
-        0 24px 64px -12px rgba(20, 14, 8, 0.32),
-        0 6px 20px -6px rgba(20, 14, 8, 0.18),
+        0 24px 64px -12px rgba(89, 58, 32, 0.28),
+        0 6px 20px -6px rgba(89, 58, 32, 0.16),
         0 0 0 0.5px rgba(125, 91, 57, 0.08),
         inset 0 1px 0 rgba(255, 255, 255, 0.7);
       animation: wandDialogIn 0.28s cubic-bezier(0.34, 1.4, 0.64, 1) both;
@@ -13023,24 +13026,24 @@
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
     }
     .wand-dialog-icon.info {
-      background: linear-gradient(180deg, #f8e4cf 0%, #ecc8a3 100%);
-      color: #7d4f23;
+      background: linear-gradient(180deg, var(--accent-soft) 0%, var(--accent-hover) 100%);
+      color: #fff;
     }
     .wand-dialog-icon.warning {
-      background: linear-gradient(180deg, #f7d6a3 0%, #e6a866 100%);
-      color: #6f3e0a;
+      background: linear-gradient(180deg, #f0c891 0%, var(--warning) 100%);
+      color: #fff;
     }
     .wand-dialog-icon.danger {
-      background: linear-gradient(180deg, #f3b9b4 0%, #d97a72 100%);
-      color: #6e1f1a;
+      background: linear-gradient(180deg, #d98178 0%, var(--danger) 100%);
+      color: #fff;
     }
     .wand-dialog-icon.success {
-      background: linear-gradient(180deg, #c8e3c0 0%, #8fbc7e 100%);
-      color: #28461e;
+      background: linear-gradient(180deg, #8caf94 0%, var(--success) 100%);
+      color: #fff;
     }
     .wand-dialog-icon.question {
-      background: linear-gradient(180deg, #f8e4cf 0%, #e0a06f 100%);
-      color: #6e3a14;
+      background: linear-gradient(180deg, var(--accent-soft) 0%, var(--accent) 100%);
+      color: #fff;
     }
     .wand-dialog-textwrap {
       flex: 1 1 auto;
@@ -13072,8 +13075,8 @@
     }
     .wand-dialog-input {
       width: 100%;
-      background: rgba(255, 255, 255, 0.78);
-      border: 1px solid rgba(125, 91, 57, 0.18);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
       border-radius: 12px;
       padding: 11px 14px;
       font-family: var(--font-sans);
@@ -13085,11 +13088,11 @@
     }
     .wand-dialog-input:focus {
       outline: none;
-      background: #ffffff;
+      background: var(--bg-elevated);
       border-color: var(--accent);
       box-shadow:
         inset 0 1px 1.5px rgba(125, 91, 57, 0.04),
-        0 0 0 3px var(--accent-muted, rgba(197, 101, 61, 0.18));
+        0 0 0 3px var(--accent-glow);
     }
 
     .wand-dialog-footer {
@@ -13097,7 +13100,7 @@
       gap: 8px;
       justify-content: flex-end;
       padding: 14px 20px 20px;
-      border-top: 1px solid rgba(125, 91, 57, 0.06);
+      border-top: 1px solid var(--border-subtle);
       margin-top: 6px;
     }
     .wand-dialog-footer .btn {
@@ -13105,27 +13108,27 @@
     }
     /* Danger primary variant for destructive confirms */
     .wand-dialog .btn-danger {
-      background: linear-gradient(180deg, #d97a72 0%, #b24f45 100%);
-      color: #fff;
+      background: linear-gradient(180deg, var(--danger-hover) 0%, var(--danger) 100%);
+      color: var(--text-inverse);
       border-color: transparent;
       box-shadow:
-        0 1px 2px rgba(178, 79, 69, 0.32),
-        0 4px 10px -2px rgba(178, 79, 69, 0.32),
+        0 1px 2px var(--danger-muted),
+        0 4px 10px -2px var(--danger-muted),
         inset 0 1px 0 rgba(255, 255, 255, 0.22),
         inset 0 -1px 0 rgba(96, 30, 24, 0.18);
     }
     .wand-dialog .btn-danger:hover {
-      background: linear-gradient(180deg, #e08c84 0%, #c25a4f 100%);
+      background: linear-gradient(180deg, #c96055 0%, #b24f45 100%);
       transform: translateY(-1px);
       box-shadow:
-        0 2px 4px rgba(178, 79, 69, 0.32),
-        0 8px 20px -4px rgba(178, 79, 69, 0.4),
+        0 2px 4px var(--danger-muted),
+        0 8px 20px -4px var(--danger-glow),
         inset 0 1px 0 rgba(255, 255, 255, 0.28),
         inset 0 -1px 0 rgba(96, 30, 24, 0.18);
     }
     .wand-dialog .btn-danger:active {
       transform: translateY(0);
-      background: linear-gradient(180deg, #b24f45 0%, #93392f 100%);
+      background: linear-gradient(180deg, var(--danger) 0%, #93392f 100%);
       transition-duration: 0.06s;
     }
 
@@ -13140,11 +13143,11 @@
 
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
       .wand-dialog-backdrop { background: rgba(20, 14, 8, 0.6); }
-      .wand-dialog { background: #fffaf2; border-color: rgba(125, 91, 57, 0.18); }
+      .wand-dialog { background: var(--bg-elevated); border-color: var(--border-subtle); }
     }
 
     @media (max-width: 480px) {
-      .wand-dialog-backdrop { padding: 16px; align-items: flex-end; }
+      .wand-dialog-backdrop { padding: 16px; align-items: center; }
       .wand-dialog { max-width: 100%; border-radius: 20px; }
       .wand-dialog-footer { flex-wrap: wrap; }
       .wand-dialog-footer .btn { flex: 1 1 auto; }
