@@ -1735,8 +1735,11 @@
 
       function generateCommitMessageAI() {
         if (!state.selectedId || state.quickCommitGenerating) return;
+        // Sync any in-flight DOM input back into state so "empty?" checks read the latest value
         var msgEl = document.getElementById("quick-commit-message");
         if (msgEl) state.quickCommitForm.customMessage = msgEl.value;
+        var tagEl = document.getElementById("quick-commit-tag");
+        if (tagEl) state.quickCommitForm.tag = tagEl.value;
         state.quickCommitGenerating = true;
         state.quickCommitError = "";
         rerenderQuickCommitModal();
@@ -1751,9 +1754,19 @@
           })
           .then(function(result) {
             if (!result.ok) throw new Error((result.data && result.data.error) || "AI 生成失败。");
-            state.quickCommitForm.customMessage = (result.data && result.data.message) || "";
-            var currentMsgEl = document.getElementById("quick-commit-message");
-            if (currentMsgEl) currentMsgEl.value = state.quickCommitForm.customMessage;
+            var data = result.data || {};
+            var aiMessage = typeof data.message === "string" ? data.message : "";
+            var aiTag = typeof data.suggestedTag === "string" ? data.suggestedTag.trim() : "";
+            // Only fill fields that are currently empty; never overwrite user input.
+            var currentMessage = (state.quickCommitForm.customMessage || "").trim();
+            if (!currentMessage && aiMessage) {
+              state.quickCommitForm.customMessage = aiMessage;
+            }
+            var currentTag = (state.quickCommitForm.tag || "").trim();
+            if (!currentTag && aiTag) {
+              state.quickCommitForm.tag = aiTag;
+              state.quickCommitForm.makeTag = true;
+            }
           })
           .catch(function(error) {
             state.quickCommitError = (error && error.message) || "AI 生成失败。";
@@ -1768,21 +1781,24 @@
         if (!state.selectedId || state.quickCommitSubmitting) return;
         var msgEl = document.getElementById("quick-commit-message");
         if (msgEl) state.quickCommitForm.customMessage = msgEl.value;
+        var tagEl = document.getElementById("quick-commit-tag");
+        if (tagEl) state.quickCommitForm.tag = tagEl.value;
         var form = state.quickCommitForm || {};
         var userTag = form.makeTag ? (form.tag || "").trim() : "";
         var message = (form.customMessage || "").trim();
-        var payload = {
-          autoMessage: false,
-          customMessage: message,
-          tag: userTag,
-          autoTag: form.makeTag && !userTag,
-          push: !!form.push
-        };
         if (!message) {
           state.quickCommitError = "请填写 commit message，或点击 AI 生成。";
           rerenderQuickCommitModal();
           return;
         }
+        // 开了 tag 开关但没填 → 由后端在提交时调 AI 生成
+        var payload = {
+          autoMessage: false,
+          customMessage: message,
+          tag: userTag,
+          autoTag: !!(form.makeTag && !userTag),
+          push: !!form.push
+        };
         state.quickCommitSubmitting = true;
         state.quickCommitError = "";
         rerenderQuickCommitModal();
@@ -1869,14 +1885,14 @@
                 '<textarea id="quick-commit-message" class="field-input" rows="2" placeholder="输入 commit message 或点击 AI 生成">' + escapeHtml(f.customMessage || "") + '</textarea>' +
               '</div>' +
               '<div class="qc-checkbox-row">' +
-                '<label class="qc-checkbox-label" for="quick-commit-make-tag">提交后打 tag' + (s.latestTag ? '（当前：' + escapeHtml(s.latestTag) + '）' : '') + '</label>' +
+                '<label class="qc-checkbox-label" for="quick-commit-make-tag">提交后打 tag</label>' +
                 '<label class="qc-switch">' +
                   '<input type="checkbox" id="quick-commit-make-tag" class="switch-toggle"' + (f.makeTag ? ' checked' : '') + '>' +
                   '<span class="switch-slider"></span>' +
                 '</label>' +
               '</div>' +
               '<div class="qc-tag-row' + (f.makeTag ? '' : ' hidden') + '" id="quick-commit-tag-row">' +
-                '<input type="text" id="quick-commit-tag" class="field-input" placeholder="留空自动 bump patch' + (s.suggestedNextTag ? '（如 ' + escapeHtml(s.suggestedNextTag) + '）' : '') + '" value="' + escapeHtml(f.tag || "") + '">' +
+                '<input type="text" id="quick-commit-tag" class="field-input" placeholder="输入 tag 名称；留空将由 AI 在提交时自动生成" value="' + escapeHtml(f.tag || "") + '">' +
               '</div>' +
               '<div class="qc-checkbox-row">' +
                 '<label class="qc-checkbox-label" for="quick-commit-push">提交后 push 到远端</label>' +

@@ -151,17 +151,6 @@ export function getGitStatus(cwd: string): GitStatusResult {
   const allEntries = parsePorcelainV2(porcelain);
   const files = allEntries.slice(0, MAX_FILE_ENTRIES);
 
-  let latestTag: string | undefined;
-  let suggestedNextTag: string | undefined;
-  try {
-    latestTag = runGit(["describe", "--tags", "--abbrev=0"], cwd);
-  } catch {
-    latestTag = undefined;
-  }
-  if (latestTag) {
-    suggestedNextTag = bumpPatchTag(latestTag);
-  }
-
   return {
     isGit: true,
     branch,
@@ -170,19 +159,7 @@ export function getGitStatus(cwd: string): GitStatusResult {
     head,
     repoRoot,
     initialCommit,
-    latestTag,
-    suggestedNextTag,
   };
-}
-
-function bumpPatchTag(tag: string): string {
-  const m = tag.match(/^(v?)(\d+)\.(\d+)\.(\d+)(.*)/);
-  if (!m) return "";
-  const prefix = m[1];
-  const major = m[2];
-  const minor = m[3];
-  const patch = parseInt(m[4], 10) + 1;
-  return `${prefix}${major}.${minor}.${patch}`;
 }
 
 interface QuickCommitOptions {
@@ -191,6 +168,7 @@ interface QuickCommitOptions {
   autoMessage: boolean;
   customMessage?: string;
   tag?: string;
+  /** When `tag` is empty, ask Claude to generate one based on the diff + commit message. */
   autoTag?: boolean;
   push?: boolean;
 }
@@ -237,7 +215,7 @@ function callClaudeText(prompt: string, cwd: string): Promise<string> {
   });
 }
 
-async function generateCommitMessage(cwd: string, language: string): Promise<string> {
+function collectStagedDiff(cwd: string): string {
   let diff: string;
   try {
     diff = runGit(["diff", "--cached", "--submodule=log"], cwd, 5000);
@@ -254,6 +232,11 @@ async function generateCommitMessage(cwd: string, language: string): Promise<str
   if (diff.length > MAX_DIFF_FOR_AI) {
     diff = diff.slice(0, MAX_DIFF_FOR_AI) + "\n\n... (diff truncated) ...";
   }
+  return diff;
+}
+
+async function generateCommitMessage(cwd: string, language: string): Promise<string> {
+  const diff = collectStagedDiff(cwd);
   const lang = language.trim() || "中文";
   const prompt = `阅读以下 git diff，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。\n\n${diff}`;
   const raw = await callClaudeText(prompt, cwd);
@@ -264,7 +247,84 @@ async function generateCommitMessage(cwd: string, language: string): Promise<str
   return message;
 }
 
-export async function generateCommitMessageOnly(cwd: string, language: string): Promise<string> {
+export interface GenerateCommitMessageResult {
+  message: string;
+  /** AI-suggested next tag derived from the staged diff and the latest existing tag. */
+  suggestedTag?: string;
+}
+
+function tryParseJson(raw: string): { message?: unknown; tag?: unknown } | null {
+  let text = raw.trim();
+  // Strip ```json … ``` or ``` … ``` fences if Claude wrapped the response
+  text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  // Find the first balanced-looking JSON object substring
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeSuggestedTag(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleaned = value.trim().replace(/^["'`]+|["'`]+$/g, "").trim();
+  if (!cleaned) return undefined;
+  // Accept common semver-ish forms (v1.2.3, 1.2.3, v1.2.3-rc.1, v1.2.3+build.5)
+  if (!/^v?\d+\.\d+\.\d+([.\-+][0-9A-Za-z.\-+]*)?$/.test(cleaned)) return undefined;
+  return cleaned;
+}
+
+async function generateCommitMessageWithTag(
+  cwd: string,
+  language: string,
+): Promise<GenerateCommitMessageResult> {
+  const diff = collectStagedDiff(cwd);
+  let latestTag: string | undefined;
+  try {
+    latestTag = runGit(["describe", "--tags", "--abbrev=0"], cwd) || undefined;
+  } catch {
+    latestTag = undefined;
+  }
+  const lang = language.trim() || "中文";
+  const tagHint = latestTag
+    ? `当前最新 tag 是 \`${latestTag}\`，请基于它给出下一个版本号（保持原有前缀风格，例如有 \`v\` 就保留 \`v\`）。`
+    : `仓库还没有任何 tag，请直接给一个起始版本号（建议 \`v0.0.1\` / \`v0.1.0\` / \`v1.0.0\` 之一，按改动幅度选择）。`;
+  const prompt = `阅读以下 git diff，完成两件事：
+1. 用${lang}写一条简洁的 commit message（祈使句，不超过 50 字，描述「做了什么」）。
+2. 根据改动幅度推荐下一个语义化版本 tag（破坏性变更 → 升 major；新增功能 → 升 minor；修复 / 文档 / 重构 / 维护 → 升 patch）。${tagHint}
+
+请严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
+{"message":"...","tag":"v1.2.3"}
+
+git diff:
+${diff}`;
+  const raw = await callClaudeText(prompt, cwd);
+  const parsed = tryParseJson(raw);
+
+  let message: string;
+  let suggestedTag: string | undefined;
+  if (parsed && typeof parsed.message === "string") {
+    message = parsed.message.replace(/^["'`]+|["'`]+$/g, "").trim();
+    suggestedTag = sanitizeSuggestedTag(parsed.tag);
+  } else {
+    // Fallback: treat whole output as message, no tag suggestion
+    message = raw.replace(/^["'`]+|["'`]+$/g, "").trim();
+    suggestedTag = undefined;
+  }
+  if (!message) {
+    throw new QuickCommitError("Claude 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+  }
+
+  return { message, suggestedTag };
+}
+
+export async function generateCommitMessageOnly(
+  cwd: string,
+  language: string,
+): Promise<GenerateCommitMessageResult> {
   if (!cwd || !existsSync(cwd)) {
     throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
   }
@@ -273,7 +333,68 @@ export async function generateCommitMessageOnly(cwd: string, language: string): 
   } catch {
     // best-effort staging so the diff is complete
   }
-  return generateCommitMessage(cwd, language);
+  return generateCommitMessageWithTag(cwd, language);
+}
+
+/**
+ * Ask Claude for a single tag string. Called from `runQuickCommit` after the commit has
+ * already landed, so we look at `git show HEAD` and use `HEAD~1` for the previous tag.
+ */
+async function generateTagAfterCommit(
+  cwd: string,
+  language: string,
+  commitMessage: string,
+): Promise<string> {
+  let diff: string;
+  try {
+    diff = runGit(["show", "HEAD", "--no-color", "--submodule=log"], cwd, 5000);
+  } catch {
+    diff = "";
+  }
+  if (!diff) {
+    try {
+      diff = runGit(["show", "HEAD", "--name-only"], cwd, 3000);
+    } catch {
+      diff = "(no diff available)";
+    }
+  }
+  if (diff.length > MAX_DIFF_FOR_AI) {
+    diff = diff.slice(0, MAX_DIFF_FOR_AI) + "\n\n... (diff truncated) ...";
+  }
+
+  let latestTag: string | undefined;
+  try {
+    // We just made a commit, so look for the most recent tag reachable from HEAD~1.
+    latestTag = runGit(["describe", "--tags", "--abbrev=0", "HEAD~1"], cwd) || undefined;
+  } catch {
+    latestTag = undefined;
+  }
+
+  const lang = language.trim() || "中文";
+  const tagHint = latestTag
+    ? `当前最新 tag 是 \`${latestTag}\`，请基于它给出下一个版本号（保持原有前缀风格，例如有 \`v\` 就保留 \`v\`）。`
+    : `仓库还没有任何 tag，请给一个起始版本号（建议 \`v0.0.1\` / \`v0.1.0\` / \`v1.0.0\` 之一，按改动幅度选择）。`;
+  const prompt = `根据以下 commit message 和 git diff 推荐一个语义化版本 tag（破坏性变更 → 升 major；新增功能 → 升 minor；修复 / 文档 / 重构 / 维护 → 升 patch）。${tagHint}
+
+请用${lang}思考但严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
+{"tag":"v1.2.3"}
+
+commit message：${commitMessage}
+
+git diff：
+${diff}`;
+  const raw = await callClaudeText(prompt, cwd);
+  const parsed = tryParseJson(raw);
+  let suggested: string | undefined;
+  if (parsed && typeof parsed.tag === "string") {
+    suggested = sanitizeSuggestedTag(parsed.tag);
+  } else {
+    suggested = sanitizeSuggestedTag(raw);
+  }
+  if (!suggested) {
+    throw new QuickCommitError("AI 没有给出合法的 tag，请手动填写。", "INVALID_AI_TAG");
+  }
+  return suggested;
 }
 
 // ── Direct git operations ──
@@ -339,26 +460,18 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   }
 
   // Step 5: tag
-  const makeTag = !!(autoTag || (tag && tag.trim()));
-  let tagName = "";
-  if (makeTag) {
-    if (tag && tag.trim()) {
-      tagName = tag.trim();
-    } else {
-      let latestTag: string | undefined;
-      try {
-        latestTag = runGit(["describe", "--tags", "--abbrev=0"], cwd);
-      } catch {
-        latestTag = undefined;
-      }
-      tagName = bumpPatchTag(latestTag || "v0.0.0");
-    }
-    if (tagName) {
-      try {
-        runGit(["tag", tagName], cwd);
-      } catch (error) {
-        throw new QuickCommitError(`git tag 失败：${getGitErrorMessage(error)}`, "GIT_TAG_FAILED");
-      }
+  // - explicit `tag` wins
+  // - if `tag` is empty and `autoTag` is on, ask Claude to generate one
+  // - otherwise no tag
+  let tagName = (tag || "").trim();
+  if (!tagName && autoTag) {
+    tagName = await generateTagAfterCommit(cwd, language, message);
+  }
+  if (tagName) {
+    try {
+      runGit(["tag", tagName], cwd);
+    } catch (error) {
+      throw new QuickCommitError(`git tag 失败：${getGitErrorMessage(error)}`, "GIT_TAG_FAILED");
     }
   }
 

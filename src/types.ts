@@ -189,10 +189,6 @@ export interface GitStatusResult {
   repoRoot?: string;
   /** Truthy when the repo has no commits yet (initial state). */
   initialCommit?: boolean;
-  /** Most recent reachable tag (e.g. "v1.2.3"). */
-  latestTag?: string;
-  /** Auto-suggested next tag derived by bumping the patch segment. */
-  suggestedNextTag?: string;
   error?: string;
 }
 

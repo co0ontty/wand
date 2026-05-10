@@ -419,8 +419,8 @@ export function registerSessionRoutes(
       return;
     }
     try {
-      const message = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "");
-      res.json({ message });
+      const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "");
+      res.json(result);
     } catch (error) {
       if (error instanceof QuickCommitError) {
         res.status(400).json({ error: error.message, errorCode: error.code });
