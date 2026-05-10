@@ -22,6 +22,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -78,7 +79,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
     private static final int FILE_CHOOSER_REQUEST = 1002;
     private static final int NOTIFICATION_ID_BASE = 2000;
-    private static final long PROGRESS_UPDATE_DEBOUNCE_MS = 500;
+    private static final long PROGRESS_UPDATE_DEBOUNCE_MS = 150;
 
     private static final String[][] SOUND_PRESETS = {
         {"chime",  "叮咚"},
@@ -217,6 +218,26 @@ public class MainActivity extends AppCompatActivity {
                     startActivity(intent);
                 } catch (Exception e) {
                     // ignore
+                }
+                return true;
+            }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                // 渲染进程崩溃（OOM 或未处理异常）时重建 WebView，避免整个 Activity 闪退
+                try {
+                    android.view.ViewGroup parent = (android.view.ViewGroup) view.getParent();
+                    if (parent != null) parent.removeView(view);
+                    view.destroy();
+                    webView = new WebView(MainActivity.this);
+                    webView.setLayoutParams(new android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+                    if (parent != null) parent.addView(webView, 0);
+                    setupWebView();
+                    webView.loadUrl(serverUrl);
+                } catch (Exception e) {
+                    recreate();
                 }
                 return true;
             }
@@ -721,8 +742,8 @@ public class MainActivity extends AppCompatActivity {
             String status = data.optString("status", "running");
             String currentTask = data.optString("currentTask", "");
             String latestUserText = data.optString("latestUserText", "");
-            String latestAssistantText = data.optString("latestAssistantText", "");
             JSONArray todosArray = data.optJSONArray("todos");
+            JSONArray recentUserTexts = data.optJSONArray("recentUserTexts");
 
             int total = todosArray != null ? todosArray.length() : 0;
             int completed = 0;
@@ -745,24 +766,14 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            // Pick the most informative line for the secondary text. sessionLabel
-            // is frozen to round-1's prompt (session.summary), so without falling
-            // back to latestAssistantText / latestUserText the lock-screen card
-            // would keep showing the very first message even after many turns.
-            String contentText = pickFirstNonEmpty(
-                    activeForm,
-                    currentTask,
-                    latestAssistantText,
-                    latestUserText,
-                    "运行中");
+            // Capsule (minimized live activity): current step → count → fallback
+            String capsuleText = pickFirstNonEmpty(activeForm, currentTask,
+                    total > 0 ? (completed + "/" + total) : null, "运行中");
+            if (capsuleText.length() > 24) capsuleText = capsuleText.substring(0, 23) + "…";
 
-            // Title: keep sessionLabel as the anchor (round-1 summary), but if
-            // the user has sent later prompts, prefix with "Q:" + latestUserText
-            // so the OPPO Live Activity actually moves with the conversation.
-            String displayTitle = sessionLabel;
-            if (!latestUserText.isEmpty() && !latestUserText.equals(sessionLabel)) {
-                displayTitle = latestUserText;
-            }
+            // Title: always session label; content: current step or latest prompt
+            String displayTitle = sessionLabel.isEmpty() ? "Wand" : sessionLabel;
+            String contentText = pickFirstNonEmpty(activeForm, currentTask, latestUserText, "运行中");
 
             Intent intent = new Intent(this, MainActivity.class);
             intent.putExtra("server_url", serverUrl);
@@ -785,25 +796,17 @@ public class MainActivity extends AppCompatActivity {
                     .setSilent(true)
                     .setAutoCancel(!isOngoing);
 
-            // Subtext shows the session label so the user always sees which
-            // session this is, even when the title now mirrors the latest prompt.
-            if (!sessionLabel.isEmpty() && !sessionLabel.equals(displayTitle)) {
-                builder.setSubText(sessionLabel);
-            }
-
             if (Build.VERSION.SDK_INT >= 36 && total > 0) {
-                buildProgressStyleNotification(builder, todosArray, total, completed, inProgress);
+                buildProgressStyleNotification(builder, todosArray, total, completed, inProgress,
+                        recentUserTexts);
             } else if (total > 0) {
                 buildFallbackProgressNotification(builder, total, completed, inProgress,
-                        activeForm, currentTask, latestAssistantText, latestUserText);
+                        activeForm, currentTask, recentUserTexts);
             } else {
-                String bigText = buildBigTextLines(contentText, latestAssistantText, latestUserText);
-                builder.setStyle(new NotificationCompat.BigTextStyle().bigText(bigText));
+                buildInboxStyleNotification(builder, recentUserTexts, activeForm, currentTask);
             }
 
-            if (total > 0) {
-                builder.setShortCriticalText(completed + "/" + total);
-            }
+            builder.setShortCriticalText(capsuleText);
             if (isOngoing) {
                 builder.setRequestPromotedOngoing(true);
             }
@@ -820,25 +823,9 @@ public class MainActivity extends AppCompatActivity {
         return "";
     }
 
-    private static String buildBigTextLines(String primary, String latestAssistant, String latestUser) {
-        StringBuilder sb = new StringBuilder();
-        if (primary != null && !primary.isEmpty()) sb.append(primary);
-        // Include latest user prompt and assistant reply only when they add
-        // information beyond `primary` — avoids double-printing the same line.
-        if (latestUser != null && !latestUser.isEmpty() && !latestUser.equals(primary)) {
-            if (sb.length() > 0) sb.append("\n");
-            sb.append("Q: ").append(latestUser);
-        }
-        if (latestAssistant != null && !latestAssistant.isEmpty()
-                && !latestAssistant.equals(primary)) {
-            if (sb.length() > 0) sb.append("\n");
-            sb.append("A: ").append(latestAssistant);
-        }
-        return sb.toString();
-    }
-
     private void buildProgressStyleNotification(NotificationCompat.Builder builder,
-            JSONArray todosArray, int total, int completed, int inProgress) {
+            JSONArray todosArray, int total, int completed, int inProgress,
+            JSONArray recentUserTexts) {
         try {
             NotificationCompat.ProgressStyle progressStyle = new NotificationCompat.ProgressStyle();
             int currentProgress = completed * 100 + (inProgress > 0 ? 50 : 0);
@@ -865,36 +852,53 @@ public class MainActivity extends AppCompatActivity {
             }
 
             builder.setStyle(progressStyle);
+            builder.setSubText(completed + "/" + total);
         } catch (Exception e) {
-            // Fallback if ProgressStyle API is unavailable at runtime
-            buildFallbackProgressNotification(builder, total, completed, inProgress, "", "", "", "");
+            buildFallbackProgressNotification(builder, total, completed, inProgress, "", "",
+                    recentUserTexts);
         }
     }
 
     private void buildFallbackProgressNotification(NotificationCompat.Builder builder,
             int total, int completed, int inProgress, String activeForm, String currentTask,
-            String latestAssistantText, String latestUserText) {
+            JSONArray recentUserTexts) {
         builder.setProgress(total, completed, false);
-        StringBuilder bigText = new StringBuilder();
-        bigText.append(completed).append("/").append(total).append(" 完成");
+        NotificationCompat.InboxStyle inbox = new NotificationCompat.InboxStyle();
+        String header = completed + "/" + total + " 完成";
         if (inProgress > 0 && activeForm != null && !activeForm.isEmpty()) {
-            bigText.append(" · ").append(activeForm);
+            header += " · " + activeForm;
+        } else if (currentTask != null && !currentTask.isEmpty()) {
+            header += " · " + currentTask;
         }
-        if (currentTask != null && !currentTask.isEmpty()) {
-            bigText.append("\n").append(currentTask);
+        inbox.addLine(header);
+        if (recentUserTexts != null) {
+            for (int i = 0; i < recentUserTexts.length(); i++) {
+                String line = recentUserTexts.optString(i, "");
+                if (!line.isEmpty()) inbox.addLine(line);
+            }
         }
-        // Surface latest round so the card moves with the conversation; skip
-        // the assistant line when it would duplicate currentTask/activeForm.
-        if (latestUserText != null && !latestUserText.isEmpty()) {
-            bigText.append("\nQ: ").append(latestUserText);
-        }
-        if (latestAssistantText != null && !latestAssistantText.isEmpty()
-                && !latestAssistantText.equals(currentTask)
-                && !latestAssistantText.equals(activeForm)) {
-            bigText.append("\nA: ").append(latestAssistantText);
-        }
-        builder.setStyle(new NotificationCompat.BigTextStyle().bigText(bigText.toString()));
+        builder.setStyle(inbox);
         builder.setSubText(completed + "/" + total);
+    }
+
+    private void buildInboxStyleNotification(NotificationCompat.Builder builder,
+            JSONArray recentUserTexts, String activeForm, String currentTask) {
+        if (recentUserTexts == null || recentUserTexts.length() == 0) {
+            String step = pickFirstNonEmpty(activeForm, currentTask, "运行中");
+            builder.setStyle(new NotificationCompat.BigTextStyle().bigText(step));
+            return;
+        }
+        NotificationCompat.InboxStyle inbox = new NotificationCompat.InboxStyle();
+        for (int i = 0; i < recentUserTexts.length(); i++) {
+            String line = recentUserTexts.optString(i, "");
+            if (!line.isEmpty()) inbox.addLine(line);
+        }
+        if (activeForm != null && !activeForm.isEmpty()) {
+            inbox.setSummaryText(activeForm);
+        } else if (currentTask != null && !currentTask.isEmpty()) {
+            inbox.setSummaryText(currentTask);
+        }
+        builder.setStyle(inbox);
     }
 
     @Override

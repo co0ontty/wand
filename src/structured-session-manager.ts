@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { spawn, ChildProcess } from "node:child_process";
+import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
 import type { query as SdkQueryFn, Options as SdkOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { prepareSessionWorktree } from "./git-worktree.js";
@@ -57,6 +59,48 @@ const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
 
 function isRunningAsRoot(): boolean {
   return process.getuid?.() === 0 || process.geteuid?.() === 0;
+}
+
+/**
+ * 检测当前系统是否使用 musl libc（Alpine Linux 等）。
+ * Node.js 进程报告中 glibcVersionRuntime 仅在 glibc 系统存在；musl 系统为 undefined。
+ */
+function isMuslSystem(): boolean {
+  try {
+    const header = (process.report?.getReport() as Record<string, unknown> | undefined)?.header as Record<string, unknown> | undefined;
+    return !header?.glibcVersionRuntime;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 解析 claude-agent-sdk 应使用的 native binary 路径。
+ * SDK 默认在 Linux 上优先选 musl 包，但 glibc 系统（Debian/Ubuntu 等）跑不动 musl binary，
+ * 会抛 "Claude Code native binary not found" 错误。这里手动按 libc 类型选正确的包，
+ * 找不到时回退到系统 PATH 上的 `claude`。
+ */
+function resolveSdkClaudeBinary(): string | undefined {
+  if (process.platform !== "linux") return undefined;
+
+  const musl = isMuslSystem();
+  const arch = process.arch;
+  const require = createRequire(import.meta.url);
+
+  // 按当前 libc 类型决定优先顺序
+  const candidates = musl
+    ? [`@anthropic-ai/claude-agent-sdk-linux-${arch}-musl/claude`, `@anthropic-ai/claude-agent-sdk-linux-${arch}/claude`]
+    : [`@anthropic-ai/claude-agent-sdk-linux-${arch}/claude`, `@anthropic-ai/claude-agent-sdk-linux-${arch}-musl/claude`];
+
+  for (const pkg of candidates) {
+    try {
+      const resolved = require.resolve(pkg);
+      if (existsSync(resolved)) return resolved;
+    } catch {
+      // 包不存在，继续
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -1585,6 +1629,7 @@ export class StructuredSessionManager {
       );
     }
 
+    const sdkClaudeBinary = resolveSdkClaudeBinary();
     const sdkOptions: SdkOptions = {
       cwd: session.cwd,
       abortController,
@@ -1594,6 +1639,7 @@ export class StructuredSessionManager {
       ...(isManaged ? { disallowedTools: ["AskUserQuestion"] } : {}),
       includePartialMessages: true,
       ...(systemPromptParts.length > 0 ? { appendSystemPrompt: systemPromptParts.join("\n\n") } : {}),
+      ...(sdkClaudeBinary ? { pathToClaudeCodeExecutable: sdkClaudeBinary } : {}),
     };
 
     if (session.claudeSessionId) (sdkOptions as Record<string, unknown>).resume = session.claudeSessionId;

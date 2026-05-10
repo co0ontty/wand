@@ -2,10 +2,10 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="62"
-    android:viewportHeight="62">
-    <!-- Cat silhouette for notification (single-color white) -->
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Bold W lettermark for notification bar -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M6,0h6v6h-6z M48,0h6v6h-6z M0,6h18v6h-18z M42,6h18v6h-18z M0,12h60v30h-60z M6,42h48v6h-48z M12,48h36v6h-36z M18,54h6v6h-6z M36,54h6v6h-6z" />
+        android:pathData="M2,3 L5,3 L9.5,18 L10.5,12 L13.5,12 L14.5,18 L19,3 L22,3 L18,21 L14.5,21 L12,15 L9.5,21 L6,21 Z"/>
 </vector>

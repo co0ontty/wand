@@ -15597,7 +15597,7 @@
       // ── Native Live Progress Sync ──
 
       var _progressSyncTimers = {};
-      var _PROGRESS_SYNC_DEBOUNCE_MS = 300;
+      var _PROGRESS_SYNC_DEBOUNCE_MS = 100;
 
       // Strip markdown formatting and clamp to a single short line so the
       // native Live Activity / lock-screen card stays readable. 100 chars
@@ -15647,6 +15647,7 @@
         var todos = null;
         var latestUserText = "";
         var latestAssistantText = "";
+        var recentUserTexts = [];
         var messages = session.messages || [];
         for (var i = messages.length - 1; i >= 0; i--) {
           var msg = messages[i];
@@ -15662,7 +15663,7 @@
             }
           }
 
-          if (!latestUserText && msg.role === "user") {
+          if (msg.role === "user") {
             // Skip queued / synthetic placeholder turns — they don't represent
             // user-visible "I just asked this" prompts.
             var isPlaceholder = msg.content.some(function(b) { return b && b.__queued; });
@@ -15670,7 +15671,9 @@
               for (var ui = 0; ui < msg.content.length; ui++) {
                 var ublock = msg.content[ui];
                 if (ublock && ublock.type === "text" && ublock.text && ublock.text.trim()) {
-                  latestUserText = _compactNotificationText(ublock.text);
+                  var utext = _compactNotificationText(ublock.text);
+                  if (!latestUserText) latestUserText = utext;
+                  if (recentUserTexts.length < 4) recentUserTexts.push(utext);
                   break;
                 }
               }
@@ -15688,8 +15691,9 @@
             }
           }
 
-          if (todos && latestUserText && latestAssistantText) break;
+          if (todos && recentUserTexts.length >= 4 && latestAssistantText) break;
         }
+        recentUserTexts.reverse();
 
         // Get current task
         var currentTask = "";
@@ -15703,7 +15707,8 @@
           currentTask: currentTask,
           latestUserText: latestUserText,
           latestAssistantText: latestAssistantText,
-          todos: todos || []
+          todos: todos || [],
+          recentUserTexts: recentUserTexts
         };
 
         try {
