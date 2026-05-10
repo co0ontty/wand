@@ -852,7 +852,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
       commandPresets: config.commandPresets,
-      structuredRunner: config.structuredRunner ?? "sdk",
+      structuredRunner: config.structuredRunner ?? "cli",
       structuredRunners: [
         { label: "Claude Structured", runner: "claude-cli-print" },
         { label: "Codex Structured", runner: "codex-cli-exec" },

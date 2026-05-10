@@ -206,7 +206,7 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     if (typeof v === "string") config.defaultModel = v.trim();
   }
   if (storage.hasPreference(preferenceStorageKey("structuredRunner"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("structuredRunner"), defaults.structuredRunner ?? "sdk");
+    const v = storage.getPreference<string>(preferenceStorageKey("structuredRunner"), defaults.structuredRunner ?? "cli");
     if (v === "cli" || v === "sdk") config.structuredRunner = v;
   }
   if (storage.hasPreference(preferenceStorageKey("language"))) {

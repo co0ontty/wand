@@ -7537,7 +7537,7 @@
             if (langEl) langEl.value = cfg.language || "";
 
             var srEl = document.getElementById("cfg-structured-runner");
-            if (srEl) srEl.value = cfg.structuredRunner || "sdk";
+            if (srEl) srEl.value = cfg.structuredRunner || "cli";
 
             // Default model
             state.configDefaultModel = cfg.defaultModel || "";
@@ -7597,7 +7597,7 @@
           shell: (document.getElementById("cfg-shell") || {}).value,
           language: (document.getElementById("cfg-language") || {}).value || "",
           defaultModel: (document.getElementById("cfg-default-model") || {}).value || "",
-          structuredRunner: (document.getElementById("cfg-structured-runner") || {}).value || "sdk",
+          structuredRunner: (document.getElementById("cfg-structured-runner") || {}).value || "cli",
         };
 
         var previousDefaultModel = (state.config && state.config.defaultModel) || "";
