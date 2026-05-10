@@ -390,7 +390,12 @@ export class StructuredSessionManager {
       sessionKind: "structured",
       provider,
       runner,
-      command: provider === "codex" ? "codex exec --json" : "claude -p --output-format stream-json",
+      command:
+        provider === "codex"
+          ? "codex exec --json"
+          : runner === "claude-sdk"
+            ? "claude-agent-sdk (stream-json)"
+            : "claude -p --output-format stream-json",
       cwd: worktreeSetup?.cwd ?? options.cwd,
       mode: options.mode,
       worktreeEnabled: Boolean(worktreeSetup),
