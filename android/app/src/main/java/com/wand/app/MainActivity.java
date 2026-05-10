@@ -758,6 +758,14 @@ public class MainActivity extends AppCompatActivity {
             String status = data.optString("status", "running");
             String currentTask = data.optString("currentTask", "");
             String latestUserText = data.optString("latestUserText", "");
+            // 与 web 通知条同源的状态文字 / 步骤文字（"运行中"｜"正在运行"｜"已完成" + "第 X/N 步"）
+            String statusLabel = data.optString("statusLabel", "");
+            String stepLabel = data.optString("stepLabel", "");
+            // isRunning 是流体云胶囊"是否常驻"的唯一权威信号；缺省时回退到 status 字符串
+            boolean isRunning = data.has("isRunning")
+                    ? data.optBoolean("isRunning", false)
+                    : ("running".equals(status) || "thinking".equals(status)
+                            || "initializing".equals(status));
             JSONArray todosArray = data.optJSONArray("todos");
             JSONArray recentUserTexts = data.optJSONArray("recentUserTexts");
 
@@ -782,14 +790,20 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            // Capsule (minimized live activity): current step → count → fallback
-            String capsuleText = pickFirstNonEmpty(activeForm, currentTask,
-                    total > 0 ? (completed + "/" + total) : null, "运行中");
+            // 胶囊文字：优先用 statusLabel(+stepLabel) 与 web 通知条保持一致
+            String capsuleText;
+            if (!statusLabel.isEmpty()) {
+                capsuleText = stepLabel.isEmpty() ? statusLabel : (statusLabel + " " + stepLabel);
+            } else {
+                capsuleText = pickFirstNonEmpty(activeForm, currentTask,
+                        total > 0 ? (completed + "/" + total) : null, "运行中");
+            }
             if (capsuleText.length() > 24) capsuleText = capsuleText.substring(0, 23) + "…";
 
-            // Title: always session label; content: current step or latest prompt
+            // Title: always session label; content: latestUserText 镜像 web 通知条左侧
             String displayTitle = sessionLabel.isEmpty() ? "Wand" : sessionLabel;
-            String contentText = pickFirstNonEmpty(activeForm, currentTask, latestUserText, "运行中");
+            String contentText = pickFirstNonEmpty(latestUserText, activeForm, currentTask,
+                    statusLabel, "运行中");
 
             Intent intent = new Intent(this, MainActivity.class);
             intent.putExtra("server_url", serverUrl);
@@ -799,8 +813,8 @@ public class MainActivity extends AppCompatActivity {
             PendingIntent pi = PendingIntent.getActivity(this, requestCode, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-            boolean isOngoing = "running".equals(status) || "thinking".equals(status)
-                    || "initializing".equals(status);
+            // isRunning 决定是否常驻；非运行态允许用户左滑清除（autoCancel）
+            boolean isOngoing = isRunning;
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID_PROGRESS)
                     .setSmallIcon(R.drawable.ic_notification)
