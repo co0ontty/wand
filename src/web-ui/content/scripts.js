@@ -2142,6 +2142,16 @@
                   '</select>' +
                   '<p class="field-hint" style="margin-top:4px;">SDK 模式使用官方 Agent SDK 替代 CLI subprocess，接口更整洁，功能等价。保存后对新建会话立即生效。</p>' +
                 '</div>' +
+                '<div class="settings-toggle-row">' +
+                  '<div class="settings-toggle-text">' +
+                    '<label class="settings-toggle-title" for="cfg-inherit-env">继承环境变量</label>' +
+                    '<span class="settings-toggle-desc">启动 PTY / 结构化子进程时，把当前服务进程的环境变量传给 claude / codex。关闭后子进程仅获得最小可用环境（PATH/HOME/SHELL/LANG/TERM 等），可用于隔离 API key 等敏感凭据。</span>' +
+                  '</div>' +
+                  '<label class="settings-switch">' +
+                    '<input id="cfg-inherit-env" type="checkbox" class="switch-toggle" />' +
+                    '<span class="switch-slider"></span>' +
+                  '</label>' +
+                '</div>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-default-model">默认模型</label>' +
                   '<div class="settings-row-with-action">' +
@@ -7539,6 +7549,9 @@
             var srEl = document.getElementById("cfg-structured-runner");
             if (srEl) srEl.value = cfg.structuredRunner || "cli";
 
+            var inheritEnvEl = document.getElementById("cfg-inherit-env");
+            if (inheritEnvEl) inheritEnvEl.checked = cfg.inheritEnv !== false;
+
             // Default model
             state.configDefaultModel = cfg.defaultModel || "";
             updateSettingsDefaultModelSelect();
@@ -7598,6 +7611,7 @@
           language: (document.getElementById("cfg-language") || {}).value || "",
           defaultModel: (document.getElementById("cfg-default-model") || {}).value || "",
           structuredRunner: (document.getElementById("cfg-structured-runner") || {}).value || "cli",
+          inheritEnv: (document.getElementById("cfg-inherit-env") || {}).checked !== false,
         };
 
         var previousDefaultModel = (state.config && state.config.defaultModel) || "";

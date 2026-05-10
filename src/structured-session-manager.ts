@@ -14,6 +14,7 @@ import {
   WandConfig,
 } from "./types.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
+import { buildChildEnv } from "./env-utils.js";
 
 interface CreateStructuredSessionOptions {
   cwd: string;
@@ -811,7 +812,7 @@ export class StructuredSessionManager {
       const spawnedAt = new Date().toISOString();
       const child = spawn("codex", args, {
         cwd: session.cwd,
-        env: process.env,
+        env: buildChildEnv(this.config.inheritEnv !== false),
         stdio: ["pipe", "pipe", "pipe"],
       });
       this.logger?.appendStructuredSpawn(sessionId, {
@@ -1149,7 +1150,7 @@ export class StructuredSessionManager {
       const spawnedAt = new Date().toISOString();
       const child = spawn("claude", args, {
         cwd: session.cwd,
-        env: process.env,
+        env: buildChildEnv(this.config.inheritEnv !== false),
         stdio: ["pipe", "pipe", "pipe"],
       });
       this.logger?.appendStructuredSpawn(sessionId, {

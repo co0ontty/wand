@@ -24,6 +24,7 @@ export const PREFERENCE_KEYS = [
   "structuredRunner",
   "language",
   "cardDefaults",
+  "inheritEnv",
 ] as const satisfies readonly (keyof WandConfig)[];
 
 export type PreferenceKey = (typeof PREFERENCE_KEYS)[number];
@@ -54,6 +55,7 @@ export const defaultConfig = (): WandConfig => ({
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
   structuredRunner: "cli" as StructuredRunnerOption,
+  inheritEnv: true,
   commandPresets: [
     {
       label: "Claude",
@@ -217,6 +219,10 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<unknown>(preferenceStorageKey("cardDefaults"), defaults.cardDefaults);
     config.cardDefaults = normalizeCardDefaults(v);
   }
+  if (storage.hasPreference(preferenceStorageKey("inheritEnv"))) {
+    const v = storage.getPreference<unknown>(preferenceStorageKey("inheritEnv"), defaults.inheritEnv ?? true);
+    config.inheritEnv = v === false ? false : true;
+  }
   return config;
 }
 
@@ -263,6 +269,12 @@ export function writePreferenceToStorage(
       const normalized = normalizeCardDefaults(value);
       storage.setPreference(dbKey, normalized);
       config.cardDefaults = normalized;
+      break;
+    }
+    case "inheritEnv": {
+      const v = value === false ? false : true;
+      storage.setPreference(dbKey, v);
+      config.inheritEnv = v;
       break;
     }
   }
@@ -378,6 +390,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
     structuredRunner: (input.structuredRunner === "sdk" || input.structuredRunner === "cli") ? input.structuredRunner : defaults.structuredRunner,
+    inheritEnv: typeof input.inheritEnv === "boolean" ? input.inheritEnv : (defaults.inheritEnv ?? true),
   };
 }
 

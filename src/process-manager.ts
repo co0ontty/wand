@@ -13,6 +13,7 @@ import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, Escal
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
+import { buildChildEnv } from "./env-utils.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getResumeCommandSessionId } from "./resume-policy.js";
 
@@ -796,12 +797,11 @@ export class ProcessManager extends EventEmitter {
     try {
       child = pty.spawn(this.config.shell, shellArgs, {
         cwd: resolvedCwd,
-        env: {
-          ...process.env,
+        env: buildChildEnv(this.config.inheritEnv !== false, {
           WAND_MODE: effectiveMode,
           WAND_AUTO_CONFIRM: effectiveMode === "full-access" ? "1" : "0",
           WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0"
-        },
+        }),
         name: "xterm-color",
         // 使用 record 上由前端协商好的真实尺寸，避免"先 120 列、几百毫秒后再 resize"
         // 期间 Claude/Codex 用错列宽渲染出 \x1b[120G 这类绝对列定位序列。

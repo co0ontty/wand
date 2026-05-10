@@ -106,6 +106,12 @@ export interface WandConfig {
   defaultModel?: string;
   /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */
   structuredRunner?: "cli" | "sdk";
+  /**
+   * 启动 PTY / 结构化子进程时是否继承父进程的环境变量（process.env）。默认 true。
+   * 关闭后子进程仅获得最小可用环境（PATH/HOME/SHELL/LANG/LC_ALL/TERM 等）外加 WAND_* 控制变量，
+   * 用于隔离敏感凭据或避免 API key 泄漏到子命令。
+   */
+  inheritEnv?: boolean;
 }
 
 export interface ClaudeModelInfo {
