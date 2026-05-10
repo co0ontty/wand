@@ -793,15 +793,12 @@ public class MainActivity extends AppCompatActivity {
             JSONObject data = new JSONObject(jsonData);
             String sessionLabel = data.optString("sessionLabel", sessionId);
             String status = data.optString("status", "running");
-            String currentTask = data.optString("currentTask", "");
             String latestUserText = data.optString("latestUserText", "");
             JSONArray todosArray = data.optJSONArray("todos");
-            JSONArray recentUserTexts = data.optJSONArray("recentUserTexts");
 
             int total = todosArray != null ? todosArray.length() : 0;
             int completed = 0;
             int inProgress = 0;
-            String activeForm = "";
 
             if (todosArray != null) {
                 for (int i = 0; i < todosArray.length(); i++) {
@@ -811,27 +808,36 @@ public class MainActivity extends AppCompatActivity {
                         completed++;
                     } else if ("in_progress".equals(todoStatus)) {
                         inProgress++;
-                        if (activeForm.isEmpty()) {
-                            activeForm = todo.optString("activeForm",
-                                    todo.optString("content", ""));
-                        }
                     }
                 }
             }
 
-            // Capsule (minimized live activity): current step → count → fallback
-            String capsuleText = pickFirstNonEmpty(activeForm, currentTask,
-                    total > 0 ? (completed + "/" + total) : null, "运行中");
-            if (capsuleText.length() > 24) capsuleText = capsuleText.substring(0, 23) + "…";
+            boolean isOngoingState = "running".equals(status) || "thinking".equals(status)
+                    || "initializing".equals(status);
 
-            // Expanded view should stay tidy: title is a SHORT excerpt of the
-            // session's first prompt, body is ONLY the user's latest message
-            // (not historical prompts, not the running tool name). Progress bar
-            // + sub-text already convey live state.
+            // Capsule (minimized live activity): just the count of in-progress
+            // tasks, or a short status word. Keep it minimal.
+            String capsuleText;
+            if (!isOngoingState) {
+                capsuleText = "完成";
+            } else if (inProgress > 0) {
+                capsuleText = String.valueOf(inProgress);
+            } else {
+                capsuleText = "运行";
+            }
+
+            // Expanded view: title is the user's most recent prompt (the
+            // message they just sent), body is just the live status.
             String displayTitle = truncateForNotification(
-                    sessionLabel.isEmpty() ? "Wand" : sessionLabel, 24);
-            String contentText = truncateForNotification(
-                    pickFirstNonEmpty(latestUserText, activeForm, currentTask, "运行中"), 80);
+                    pickFirstNonEmpty(latestUserText, sessionLabel, "Wand"), 40);
+            String contentText;
+            if (!isOngoingState) {
+                contentText = "已完成";
+            } else if (total > 0) {
+                contentText = "执行中";
+            } else {
+                contentText = "正在执行";
+            }
 
             Intent intent = new Intent(this, MainActivity.class);
             intent.putExtra("server_url", serverUrl);
@@ -841,31 +847,30 @@ public class MainActivity extends AppCompatActivity {
             PendingIntent pi = PendingIntent.getActivity(this, requestCode, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-            boolean isOngoing = "running".equals(status) || "thinking".equals(status)
-                    || "initializing".equals(status);
-
             NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID_PROGRESS)
                     .setSmallIcon(R.drawable.ic_notification)
                     .setContentTitle(displayTitle)
                     .setContentText(contentText)
                     .setContentIntent(pi)
-                    .setOngoing(isOngoing)
+                    .setOngoing(isOngoingState)
                     .setOnlyAlertOnce(true)
                     .setSilent(true)
-                    .setAutoCancel(!isOngoing);
+                    .setAutoCancel(!isOngoingState);
 
-            if (Build.VERSION.SDK_INT >= 36 && total > 0) {
-                buildProgressStyleNotification(builder, todosArray, total, completed, inProgress,
-                        recentUserTexts);
-            } else if (total > 0) {
-                buildFallbackProgressNotification(builder, total, completed, inProgress,
-                        activeForm, currentTask, recentUserTexts);
-            } else {
-                buildInboxStyleNotification(builder, recentUserTexts, activeForm, currentTask);
+            // Only attach a progress style when there are todos AND we're still
+            // running — that's where the "spinner / progress" feedback belongs.
+            // No todos → no extra style; the single-line title + status is the
+            // whole story.
+            if (isOngoingState && total > 0) {
+                if (Build.VERSION.SDK_INT >= 36) {
+                    buildProgressStyleNotification(builder, todosArray, total, completed, inProgress);
+                } else {
+                    buildFallbackProgressNotification(builder, total, completed);
+                }
             }
 
             builder.setShortCriticalText(capsuleText);
-            if (isOngoing) {
+            if (isOngoingState) {
                 builder.setRequestPromotedOngoing(true);
             }
 
@@ -891,8 +896,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void buildProgressStyleNotification(NotificationCompat.Builder builder,
-            JSONArray todosArray, int total, int completed, int inProgress,
-            JSONArray recentUserTexts) {
+            JSONArray todosArray, int total, int completed, int inProgress) {
         try {
             NotificationCompat.ProgressStyle progressStyle = new NotificationCompat.ProgressStyle();
             int currentProgress = completed * 100 + (inProgress > 0 ? 50 : 0);
@@ -921,44 +925,15 @@ public class MainActivity extends AppCompatActivity {
             builder.setStyle(progressStyle);
             builder.setSubText(completed + "/" + total);
         } catch (Exception e) {
-            buildFallbackProgressNotification(builder, total, completed, inProgress, "", "",
-                    recentUserTexts);
+            buildFallbackProgressNotification(builder, total, completed);
         }
     }
 
     private void buildFallbackProgressNotification(NotificationCompat.Builder builder,
-            int total, int completed, int inProgress, String activeForm, String currentTask,
-            JSONArray recentUserTexts) {
-        // Pre-API-36 fallback: classic determinate bar plus only the latest
-        // user prompt — no inbox-style history wall.
+            int total, int completed) {
+        // Pre-API-36 fallback: just a determinate bar — no extra body wall.
         builder.setProgress(total, completed, false);
-        String latest = pickLatestUserText(recentUserTexts);
-        String body = truncateForNotification(
-                pickFirstNonEmpty(latest, activeForm, currentTask, "运行中"), 120);
-        builder.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
         builder.setSubText(completed + "/" + total);
-    }
-
-    private void buildInboxStyleNotification(NotificationCompat.Builder builder,
-            JSONArray recentUserTexts, String activeForm, String currentTask) {
-        // No todos available — still keep it to a single short line: the
-        // user's most recent prompt, falling back to the running step name.
-        String latest = pickLatestUserText(recentUserTexts);
-        String body = truncateForNotification(
-                pickFirstNonEmpty(latest, activeForm, currentTask, "运行中"), 120);
-        builder.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
-    }
-
-    private static String pickLatestUserText(JSONArray recentUserTexts) {
-        // recentUserTexts is ordered oldest → newest by the JS side
-        // (see _doSyncSessionProgress), so the last non-empty entry is the
-        // user's most recent prompt.
-        if (recentUserTexts == null) return "";
-        for (int i = recentUserTexts.length() - 1; i >= 0; i--) {
-            String line = recentUserTexts.optString(i, "");
-            if (line != null && !line.isEmpty()) return line;
-        }
-        return "";
     }
 
     @Override

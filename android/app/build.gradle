@@ -29,8 +29,26 @@ android {
         versionName appVersionName
     }
 
+    // Stable signing config — committed to the repo so APKs built locally,
+    // by publish.sh, and by GitHub Actions all share the same signature.
+    // Without this, every machine generates its own debug keystore and users
+    // hit "package signatures do not match" when updating across sources.
+    // This is a self-signed distribution key, NOT a Play Store upload key.
+    signingConfigs {
+        wand {
+            storeFile rootProject.file('wand-release.keystore')
+            storePassword 'wand-release'
+            keyAlias 'wand'
+            keyPassword 'wand-release'
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.wand
+        }
         release {
+            signingConfig signingConfigs.wand
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
