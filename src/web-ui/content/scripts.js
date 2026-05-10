@@ -1484,7 +1484,7 @@
                 '<div class="modal folder-picker-modal">' +
                   '<div class="modal-header">' +
                     '<h2 class="modal-title">选择工作目录</h2>' +
-                    '<button id="close-folder-picker" class="btn btn-ghost btn-icon">×</button>' +
+                    '<button id="close-folder-picker" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                   '</div>' +
                   '<div class="modal-body">' +
                     '<div class="folder-picker-quick-row">' +
@@ -1790,7 +1790,7 @@
                 '<h2 id="quick-commit-title" class="modal-title">快捷提交</h2>' +
                 '<p class="modal-subtitle">' + escapeHtml((s.branch || "(no branch)") + ' · ' + (s.modifiedCount || 0) + ' 个改动') + '</p>' +
               '</div>' +
-              '<button id="quick-commit-close-btn" class="btn btn-ghost btn-icon" type="button" aria-label="关闭">&times;</button>' +
+              '<button id="quick-commit-close-btn" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
             '</div>' +
             '<div class="modal-body">' +
               '<div class="qc-files-wrap">' + fileRows + '</div>' +
@@ -1800,17 +1800,23 @@
                 '</div>' +
                 '<textarea id="quick-commit-message" class="field-input" rows="2" placeholder="输入 commit message 或点击 AI 生成">' + escapeHtml(f.customMessage || "") + '</textarea>' +
               '</div>' +
-              '<label class="qc-checkbox-row">' +
-                '<input type="checkbox" id="quick-commit-make-tag"' + (f.makeTag ? ' checked' : '') + '>' +
-                '<span>提交后打 tag' + (s.latestTag ? '（当前：' + escapeHtml(s.latestTag) + '）' : '') + '</span>' +
-              '</label>' +
+              '<div class="qc-checkbox-row">' +
+                '<label class="qc-checkbox-label" for="quick-commit-make-tag">提交后打 tag' + (s.latestTag ? '（当前：' + escapeHtml(s.latestTag) + '）' : '') + '</label>' +
+                '<label class="qc-switch">' +
+                  '<input type="checkbox" id="quick-commit-make-tag" class="switch-toggle"' + (f.makeTag ? ' checked' : '') + '>' +
+                  '<span class="switch-slider"></span>' +
+                '</label>' +
+              '</div>' +
               '<div class="qc-tag-row' + (f.makeTag ? '' : ' hidden') + '" id="quick-commit-tag-row">' +
                 '<input type="text" id="quick-commit-tag" class="field-input" placeholder="留空自动 bump patch' + (s.suggestedNextTag ? '（如 ' + escapeHtml(s.suggestedNextTag) + '）' : '') + '" value="' + escapeHtml(f.tag || "") + '">' +
               '</div>' +
-              '<label class="qc-checkbox-row">' +
-                '<input type="checkbox" id="quick-commit-push"' + (f.push ? ' checked' : '') + '>' +
-                '<span>提交后 push 到远端</span>' +
-              '</label>' +
+              '<div class="qc-checkbox-row">' +
+                '<label class="qc-checkbox-label" for="quick-commit-push">提交后 push 到远端</label>' +
+                '<label class="qc-switch">' +
+                  '<input type="checkbox" id="quick-commit-push" class="switch-toggle"' + (f.push ? ' checked' : '') + '>' +
+                  '<span class="switch-slider"></span>' +
+                '</label>' +
+              '</div>' +
               '<p id="quick-commit-error" class="error-message' + (state.quickCommitError ? '' : ' hidden') + '">' + escapeHtml(state.quickCommitError || "") + '</p>' +
               '<div class="worktree-merge-actions">' +
                 '<button id="quick-commit-cancel-btn" class="btn btn-secondary" type="button">取消</button>' +
@@ -1829,7 +1835,7 @@
                 '<h2 class="modal-title">合并 Worktree</h2>' +
                 '<p class="modal-subtitle">检查当前任务分支并快捷合并到主分支。</p>' +
               '</div>' +
-              '<button id="close-worktree-merge-button" class="btn btn-ghost btn-icon">&times;</button>' +
+              '<button id="close-worktree-merge-button" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
             '</div>' +
             '<div class="modal-body">' +
               '<div id="worktree-merge-content" class="worktree-merge-content"></div>' +
@@ -2088,9 +2094,15 @@
                     '<input id="cfg-port" type="number" class="field-input" placeholder="8443" min="1" max="65535" />' +
                   '</div>' +
                 '</div>' +
-                '<div class="field field-inline">' +
-                  '<input id="cfg-https" type="checkbox" class="field-checkbox" />' +
-                  '<label class="field-label" for="cfg-https">启用 HTTPS</label>' +
+                '<div class="settings-toggle-row">' +
+                  '<div class="settings-toggle-text">' +
+                    '<label class="settings-toggle-title" for="cfg-https">启用 HTTPS</label>' +
+                    '<span class="settings-toggle-desc">使用自签名证书加密浏览器到服务的连接，host 为非 127.0.0.1 时建议开启。</span>' +
+                  '</div>' +
+                  '<label class="settings-switch">' +
+                    '<input id="cfg-https" type="checkbox" class="switch-toggle" />' +
+                    '<span class="switch-slider"></span>' +
+                  '</label>' +
                 '</div>' +
                 '<div class="field-row">' +
                   '<div class="field">' +
@@ -4043,9 +4055,21 @@
         // Volume slider
         var notifVolumeEl = document.getElementById("cfg-notif-volume");
         var notifVolumeVal = document.getElementById("cfg-notif-volume-val");
+        // Helper to keep the iOS-style range fill in sync with the input value
+        var _syncRangeFill = function(el) {
+          if (!el) return;
+          var minVal = Number(el.min || 0);
+          var maxVal = Number(el.max || 100);
+          var curVal = Number(el.value || 0);
+          var pct = maxVal > minVal
+            ? Math.max(0, Math.min(100, ((curVal - minVal) / (maxVal - minVal)) * 100))
+            : 0;
+          el.style.setProperty("--range-fill", pct + "%");
+        };
         if (notifVolumeEl) {
           notifVolumeEl.value = state.notifVolume;
           if (notifVolumeVal) notifVolumeVal.textContent = state.notifVolume + "%";
+          _syncRangeFill(notifVolumeEl);
           // Hide if sound is off
           var volField = document.getElementById("notif-volume-field");
           if (volField) volField.style.display = state.notifSound ? "" : "none";
@@ -4053,6 +4077,7 @@
           notifVolumeEl.addEventListener("input", function() {
             state.notifVolume = parseInt(notifVolumeEl.value, 10);
             if (notifVolumeVal) notifVolumeVal.textContent = state.notifVolume + "%";
+            _syncRangeFill(notifVolumeEl);
             try { localStorage.setItem("wand-notif-volume", String(state.notifVolume)); } catch (e) {}
             // Also sync to native bridge if available
             if (_hasNativeBridge && typeof WandNative.setNotificationVolume === "function") {
@@ -7112,6 +7137,8 @@
           if (volEl) {
             volEl.value = state.notifVolume;
             if (volValEl) volValEl.textContent = state.notifVolume + "%";
+            // Sync the iOS-style fill via the input listener (calls _syncRangeFill)
+            try { volEl.dispatchEvent(new Event("input", { bubbles: true })); } catch (_e) {}
           }
           var volField = document.getElementById("notif-volume-field");
           if (volField) volField.style.display = state.notifSound ? "" : "none";
@@ -7133,6 +7160,8 @@
               state.notifVolume = nativeVol;
               if (volEl) volEl.value = nativeVol;
               if (volValEl) volValEl.textContent = nativeVol + "%";
+              // Sync the iOS-style fill so the orange track matches
+              if (volEl) { try { volEl.dispatchEvent(new Event("input", { bubbles: true })); } catch (_e) {} }
               try { localStorage.setItem("wand-notif-volume", String(nativeVol)); } catch (_e) {}
             } catch (_e) {}
           }
