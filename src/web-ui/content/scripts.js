@@ -1350,7 +1350,7 @@
                   ) +
                 '</div>' +
                 '<div class="topbar-right">' +
-                  (selectedSession && selectedSession.cwd ? '<button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? ' active' : '') + '" type="button" aria-label="文件" title="文件"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>' : '') +
+                  '<button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? ' active' : '') + '" type="button" aria-label="文件" title="查看文件（可修改路径）"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>' +
                   '<span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + '</span>' +
                   (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : '') +
                 '</div>' +
@@ -1366,7 +1366,7 @@
                 '<div class="file-side-panel-body">' +
                   '<div class="file-explorer-header">' +
                     '<button class="file-explorer-up" id="file-explorer-up" type="button" title="返回上级目录" aria-label="返回上级目录">⬆</button>' +
-                    '<span class="file-explorer-path" id="file-explorer-cwd" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '">' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</span>' +
+                    '<input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="输入路径并回车..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="当前路径，可直接修改后回车" />' +
                     '<button class="file-explorer-toggle-hidden' + (state.fileExplorerShowHidden ? ' active' : '') + '" id="file-explorer-toggle-hidden" type="button" title="' + (state.fileExplorerShowHidden ? "隐藏点开头文件" : "显示隐藏文件") + '" aria-pressed="' + (state.fileExplorerShowHidden ? "true" : "false") + '">' + (state.fileExplorerShowHidden ? "👁" : "👁‍🗨") + '</button>' +
                     '<button class="file-explorer-refresh" id="file-explorer-refresh" title="刷新" aria-label="刷新文件列表">↻</button>' +
                   '</div>' +
@@ -2877,7 +2877,15 @@
         var cwdEl = document.getElementById("file-explorer-cwd");
         if (!cwdEl) return;
         var cwd = session && session.cwd ? session.cwd : getConfigCwd();
-        cwdEl.textContent = cwd;
+        // Don't clobber the user's in-progress edit when the input is focused.
+        if (cwdEl.tagName === "INPUT") {
+          if (document.activeElement !== cwdEl) {
+            cwdEl.value = cwd;
+          }
+        } else {
+          cwdEl.textContent = cwd;
+        }
+        cwdEl.title = cwd;
       }
 
       function closeFilePanel() {
@@ -3029,7 +3037,14 @@
         state.fileExplorerTotal = 0;
         explorer.innerHTML = '<div class="file-explorer"><div class="tree-loading" style="padding:12px;color:var(--text-muted);font-size:0.8125rem;">加载中…</div></div>';
         if (cwdEl) {
-          cwdEl.textContent = cwd;
+          if (cwdEl.tagName === "INPUT") {
+            // Avoid clobbering in-progress text while the user is typing.
+            if (document.activeElement !== cwdEl) {
+              cwdEl.value = cwd;
+            }
+          } else {
+            cwdEl.textContent = cwd;
+          }
           cwdEl.title = cwd;
         }
         var url = "/api/directory?q=" + encodeURIComponent(cwd) +
@@ -5083,6 +5098,56 @@
         if (fileUp) fileUp.addEventListener("click", navigateExplorerUp);
         var fileToggleHidden = document.getElementById("file-explorer-toggle-hidden");
         if (fileToggleHidden) fileToggleHidden.addEventListener("click", toggleExplorerHidden);
+
+        // 路径输入框：支持点击修改路径，回车跳转，Esc 撤销。
+        var fileCwdInput = document.getElementById("file-explorer-cwd");
+        if (fileCwdInput && fileCwdInput.tagName === "INPUT") {
+          var lastCommittedCwd = fileCwdInput.value;
+          var normalizeCwdInput = function(raw) {
+            var s = (raw || "").trim();
+            if (!s) return "";
+            // 折叠重复斜杠，去掉尾随斜杠（根目录除外）。
+            s = s.replace(/\/{2,}/g, "/");
+            if (s.length > 1) s = s.replace(/\/+$/, "");
+            return s;
+          };
+          fileCwdInput.addEventListener("focus", function() {
+            lastCommittedCwd = fileCwdInput.value;
+            // Select all on focus so the user can immediately overwrite.
+            setTimeout(function() {
+              try { fileCwdInput.select(); } catch (e) {}
+            }, 0);
+          });
+          fileCwdInput.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              var next = normalizeCwdInput(fileCwdInput.value);
+              if (!next) return;
+              lastCommittedCwd = next;
+              fileCwdInput.value = next;
+              refreshFileExplorer({ cwd: next });
+              fileCwdInput.blur();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              fileCwdInput.value = lastCommittedCwd;
+              fileCwdInput.blur();
+            }
+          });
+          fileCwdInput.addEventListener("blur", function() {
+            var next = normalizeCwdInput(fileCwdInput.value);
+            if (!next) {
+              fileCwdInput.value = lastCommittedCwd;
+              return;
+            }
+            if (next === lastCommittedCwd) {
+              fileCwdInput.value = next;
+              return;
+            }
+            lastCommittedCwd = next;
+            fileCwdInput.value = next;
+            refreshFileExplorer({ cwd: next });
+          });
+        }
 
         // File search
         var fileSearchInput = document.getElementById("file-search-input");
