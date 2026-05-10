@@ -1,16 +1,15 @@
 package com.wand.app;
 
 import android.annotation.SuppressLint;
-import android.app.AlertDialog;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
-import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.ComponentName;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Handler;
 import android.os.Looper;
@@ -32,10 +31,12 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
@@ -44,6 +45,7 @@ import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -79,7 +81,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
     private static final int FILE_CHOOSER_REQUEST = 1002;
     private static final int NOTIFICATION_ID_BASE = 2000;
-    private static final long PROGRESS_UPDATE_DEBOUNCE_MS = 150;
+    private static final long PROGRESS_UPDATE_DEBOUNCE_MS = 50;
 
     private static final String[][] SOUND_PRESETS = {
         {"chime",  "叮咚"},
@@ -135,6 +137,14 @@ public class MainActivity extends AppCompatActivity {
             startActivity(connectIntent);
             finish();
         });
+
+        // Volume keys in this activity should adjust the notification stream,
+        // so users see the "Notification volume" slider when they press volume
+        // buttons — and lowering it to 0 actually mutes our notification sounds.
+        // (Default for activities is STREAM_MUSIC, which is why volume keys
+        // previously controlled media volume even though our sound routes to
+        // STREAM_NOTIFICATION via AudioAttributes.)
+        setVolumeControlStream(AudioManager.STREAM_NOTIFICATION);
 
         createNotificationChannels();
         setupWebView();
@@ -344,9 +354,30 @@ public class MainActivity extends AppCompatActivity {
     private static final AudioAttributes NOTIF_AUDIO_ATTRS = new AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_NOTIFICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            // Belt-and-suspenders: ensure routing to STREAM_NOTIFICATION even on
+            // OEM ROMs that don't honor USAGE_NOTIFICATION strictly.
+            .setLegacyStreamType(AudioManager.STREAM_NOTIFICATION)
             .build();
 
+    /**
+     * Returns true when the device's ringer mode means we should not play any
+     * audible notification sound (silent or vibrate).
+     */
+    private boolean isSystemMuted() {
+        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am == null) return false;
+        int mode = am.getRingerMode();
+        if (mode == AudioManager.RINGER_MODE_SILENT
+                || mode == AudioManager.RINGER_MODE_VIBRATE) {
+            return true;
+        }
+        // Defensive: if the notification stream itself is at 0, also skip.
+        return am.getStreamVolume(AudioManager.STREAM_NOTIFICATION) == 0;
+    }
+
     private void playNotificationSound() {
+        if (isSystemMuted()) return;
+
         ServerStore store = new ServerStore(this);
         String soundName = store.getNotificationSound();
         float vol = store.getNotificationVolume() / 100f;
@@ -577,6 +608,12 @@ public class MainActivity extends AppCompatActivity {
             if (!valid) return;
 
             runOnUiThread(() -> {
+                if (isSystemMuted()) {
+                    Toast.makeText(MainActivity.this,
+                            "系统已静音/振动模式，无法预览声音",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 try {
                     int resId = getResources().getIdentifier("notif_" + name, "raw", getPackageName());
                     if (resId == 0) return;
@@ -787,9 +824,14 @@ public class MainActivity extends AppCompatActivity {
                     total > 0 ? (completed + "/" + total) : null, "运行中");
             if (capsuleText.length() > 24) capsuleText = capsuleText.substring(0, 23) + "…";
 
-            // Title: always session label; content: current step or latest prompt
-            String displayTitle = sessionLabel.isEmpty() ? "Wand" : sessionLabel;
-            String contentText = pickFirstNonEmpty(activeForm, currentTask, latestUserText, "运行中");
+            // Expanded view should stay tidy: title is a SHORT excerpt of the
+            // session's first prompt, body is ONLY the user's latest message
+            // (not historical prompts, not the running tool name). Progress bar
+            // + sub-text already convey live state.
+            String displayTitle = truncateForNotification(
+                    sessionLabel.isEmpty() ? "Wand" : sessionLabel, 24);
+            String contentText = truncateForNotification(
+                    pickFirstNonEmpty(latestUserText, activeForm, currentTask, "运行中"), 80);
 
             Intent intent = new Intent(this, MainActivity.class);
             intent.putExtra("server_url", serverUrl);
@@ -839,6 +881,15 @@ public class MainActivity extends AppCompatActivity {
         return "";
     }
 
+    private static String truncateForNotification(String text, int max) {
+        if (text == null) return "";
+        // Collapse newlines so the expanded view stays a tight one/two lines
+        // rather than wrapping into a five-line wall.
+        String compact = text.replace('\n', ' ').replace('\r', ' ').trim();
+        if (compact.length() <= max) return compact;
+        return compact.substring(0, Math.max(0, max - 1)) + "…";
+    }
+
     private void buildProgressStyleNotification(NotificationCompat.Builder builder,
             JSONArray todosArray, int total, int completed, int inProgress,
             JSONArray recentUserTexts) {
@@ -878,43 +929,36 @@ public class MainActivity extends AppCompatActivity {
     private void buildFallbackProgressNotification(NotificationCompat.Builder builder,
             int total, int completed, int inProgress, String activeForm, String currentTask,
             JSONArray recentUserTexts) {
+        // Pre-API-36 fallback: classic determinate bar plus only the latest
+        // user prompt — no inbox-style history wall.
         builder.setProgress(total, completed, false);
-        NotificationCompat.InboxStyle inbox = new NotificationCompat.InboxStyle();
-        String header = completed + "/" + total + " 完成";
-        if (inProgress > 0 && activeForm != null && !activeForm.isEmpty()) {
-            header += " · " + activeForm;
-        } else if (currentTask != null && !currentTask.isEmpty()) {
-            header += " · " + currentTask;
-        }
-        inbox.addLine(header);
-        if (recentUserTexts != null) {
-            for (int i = 0; i < recentUserTexts.length(); i++) {
-                String line = recentUserTexts.optString(i, "");
-                if (!line.isEmpty()) inbox.addLine(line);
-            }
-        }
-        builder.setStyle(inbox);
+        String latest = pickLatestUserText(recentUserTexts);
+        String body = truncateForNotification(
+                pickFirstNonEmpty(latest, activeForm, currentTask, "运行中"), 120);
+        builder.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
         builder.setSubText(completed + "/" + total);
     }
 
     private void buildInboxStyleNotification(NotificationCompat.Builder builder,
             JSONArray recentUserTexts, String activeForm, String currentTask) {
-        if (recentUserTexts == null || recentUserTexts.length() == 0) {
-            String step = pickFirstNonEmpty(activeForm, currentTask, "运行中");
-            builder.setStyle(new NotificationCompat.BigTextStyle().bigText(step));
-            return;
-        }
-        NotificationCompat.InboxStyle inbox = new NotificationCompat.InboxStyle();
-        for (int i = 0; i < recentUserTexts.length(); i++) {
+        // No todos available — still keep it to a single short line: the
+        // user's most recent prompt, falling back to the running step name.
+        String latest = pickLatestUserText(recentUserTexts);
+        String body = truncateForNotification(
+                pickFirstNonEmpty(latest, activeForm, currentTask, "运行中"), 120);
+        builder.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
+    }
+
+    private static String pickLatestUserText(JSONArray recentUserTexts) {
+        // recentUserTexts is ordered oldest → newest by the JS side
+        // (see _doSyncSessionProgress), so the last non-empty entry is the
+        // user's most recent prompt.
+        if (recentUserTexts == null) return "";
+        for (int i = recentUserTexts.length() - 1; i >= 0; i--) {
             String line = recentUserTexts.optString(i, "");
-            if (!line.isEmpty()) inbox.addLine(line);
+            if (line != null && !line.isEmpty()) return line;
         }
-        if (activeForm != null && !activeForm.isEmpty()) {
-            inbox.setSummaryText(activeForm);
-        } else if (currentTask != null && !currentTask.isEmpty()) {
-            inbox.setSummaryText(currentTask);
-        }
-        builder.setStyle(inbox);
+        return "";
     }
 
     @Override
@@ -1029,7 +1073,7 @@ public class MainActivity extends AppCompatActivity {
         String sizeText = size > 0 ? "\n文件大小: " + formatSize(size) : "";
         String sourceText = "github".equals(source) ? "\n来源: GitHub Release" : "";
 
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this, R.style.Theme_Wand_Dialog)
                 .setTitle(R.string.update_title)
                 .setMessage("当前版本: " + currentVer + "\n最新版本: " + latestVer + sizeText + sourceText)
                 .setPositiveButton(R.string.update_now, (dialog, which) ->
@@ -1041,7 +1085,6 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    @SuppressWarnings("deprecation")
     private void downloadAndInstall(String downloadUrl, String fileName, String source, String latestVersion) {
         if (downloadUrl == null || downloadUrl.isEmpty()) {
             Toast.makeText(this, "下载地址为空", Toast.LENGTH_LONG).show();
@@ -1052,11 +1095,16 @@ public class MainActivity extends AppCompatActivity {
         }
         final String safeFileName = fileName;
 
-        ProgressDialog progress = new ProgressDialog(this);
-        progress.setMessage(getString(R.string.downloading_update));
-        progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
-        progress.setMax(100);
-        progress.setCancelable(false);
+        // Inflate custom progress dialog (replaces deprecated ProgressDialog)
+        View progressView = getLayoutInflater().inflate(R.layout.dialog_download_progress, null);
+        final ProgressBar progressBar = progressView.findViewById(R.id.progressBar);
+        final TextView progressPercent = progressView.findViewById(R.id.progressPercent);
+        final TextView progressBytes = progressView.findViewById(R.id.progressBytes);
+
+        final AlertDialog progress = new MaterialAlertDialogBuilder(this, R.style.Theme_Wand_Dialog)
+                .setView(progressView)
+                .setCancelable(false)
+                .create();
         progress.show();
 
         new Thread(() -> {
@@ -1110,12 +1158,27 @@ public class MainActivity extends AppCompatActivity {
                     byte[] buffer = new byte[8192];
                     long total = 0;
                     int count;
+                    long lastUiUpdate = 0;
                     while ((count = in.read(buffer)) != -1) {
                         total += count;
                         out.write(buffer, 0, count);
-                        if (fileLength > 0) {
-                            int percent = (int) (total * 100 / fileLength);
-                            runOnUiThread(() -> progress.setProgress(percent));
+                        long now = System.currentTimeMillis();
+                        // Throttle UI updates to ~50ms
+                        if (now - lastUiUpdate > 50 || total == fileLength) {
+                            lastUiUpdate = now;
+                            final long totalSnap = total;
+                            final int totalLen = fileLength;
+                            runOnUiThread(() -> {
+                                if (totalLen > 0) {
+                                    int percent = (int) (totalSnap * 100 / totalLen);
+                                    progressBar.setProgress(percent);
+                                    progressPercent.setText(percent + "%");
+                                    progressBytes.setText(formatSize(totalSnap) + " / " + formatSize(totalLen));
+                                } else {
+                                    progressBar.setIndeterminate(true);
+                                    progressBytes.setText(formatSize(totalSnap));
+                                }
+                            });
                         }
                     }
                 }
@@ -1137,7 +1200,7 @@ public class MainActivity extends AppCompatActivity {
                 final String errMsg = e.getMessage() != null ? e.getMessage() : "未知错误";
                 runOnUiThread(() -> {
                     progress.dismiss();
-                    new AlertDialog.Builder(MainActivity.this)
+                    new MaterialAlertDialogBuilder(MainActivity.this, R.style.Theme_Wand_Dialog)
                         .setTitle("下载失败")
                         .setMessage(errMsg)
                         .setPositiveButton(android.R.string.ok, null)
@@ -1161,7 +1224,7 @@ public class MainActivity extends AppCompatActivity {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
         } catch (Exception e) {
-            new AlertDialog.Builder(this)
+            new MaterialAlertDialogBuilder(this, R.style.Theme_Wand_Dialog)
                 .setTitle("安装失败")
                 .setMessage(e.getMessage())
                 .setPositiveButton(android.R.string.ok, null)

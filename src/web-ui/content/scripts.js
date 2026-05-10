@@ -2659,8 +2659,13 @@
         '</label>';
       }
 
-      function confirmDelete(message) {
-        return window.confirm(message);
+      // Returns a Promise<boolean>. Uses the Liquid Glass styled wandConfirm
+      // when available, falls back to native confirm during early page boot.
+      function confirmDelete(message, options) {
+        if (typeof window.wandConfirm === "function") {
+          return window.wandConfirm(message, Object.assign({ type: "danger", danger: true, okLabel: "删除" }, options || {}));
+        }
+        return Promise.resolve(window.confirm(message));
       }
 
       function batchDeleteSelected() {
@@ -2668,44 +2673,46 @@
         var historyIds = getSelectedClaudeHistoryIds();
         var total = sessionIds.length + historyIds.length;
         if (!total) return;
-        if (!confirmDelete('确认删除所选 ' + total + ' 项吗？')) {
-          return;
-        }
+        confirmDelete('确认删除所选 ' + total + ' 项吗？此操作无法撤销。', {
+          title: "删除所选 " + total + " 项",
+        }).then(function(ok) {
+          if (!ok) return;
 
-        var requests = [];
-        if (sessionIds.length > 0) {
-          requests.push(fetch('/api/sessions/batch-delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ sessionIds: sessionIds })
-          }).then(function(res) { return res.json(); }));
-        }
-        if (historyIds.length > 0) {
-          requests.push(fetch('/api/claude-history/batch-delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ claudeSessionIds: historyIds })
-          }).then(function(res) { return res.json(); }));
-        }
+          var requests = [];
+          if (sessionIds.length > 0) {
+            requests.push(fetch('/api/sessions/batch-delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ sessionIds: sessionIds })
+            }).then(function(res) { return res.json(); }));
+          }
+          if (historyIds.length > 0) {
+            requests.push(fetch('/api/claude-history/batch-delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ claudeSessionIds: historyIds })
+            }).then(function(res) { return res.json(); }));
+          }
 
-        Promise.all(requests)
-          .then(function() {
-            if (sessionIds.indexOf(state.selectedId) !== -1) {
-              state.selectedId = null;
-              persistSelectedId();
-            }
-            state.claudeHistory = state.claudeHistory.filter(function(session) {
-              return historyIds.indexOf(session.claudeSessionId) === -1;
+          Promise.all(requests)
+            .then(function() {
+              if (sessionIds.indexOf(state.selectedId) !== -1) {
+                state.selectedId = null;
+                persistSelectedId();
+              }
+              state.claudeHistory = state.claudeHistory.filter(function(session) {
+                return historyIds.indexOf(session.claudeSessionId) === -1;
+              });
+              clearManageSelections();
+              return refreshAll();
+            })
+            .catch(function() {
+              var errorEl = document.getElementById('action-error');
+              showError(errorEl, '无法批量删除所选项目。');
             });
-            clearManageSelections();
-            return refreshAll();
-          })
-          .catch(function() {
-            var errorEl = document.getElementById('action-error');
-            showError(errorEl, '无法批量删除所选项目。');
-          });
+        });
       }
 
       function clearAllClaudeHistory() {
@@ -2714,11 +2721,13 @@
           return !s.timestamp || new Date(s.timestamp).getTime() <= cutoff;
         });
         if (!visibleHistory.length) return;
-        if (!confirmDelete('确认清空当前显示的 ' + visibleHistory.length + ' 条 Claude 历史吗？')) {
-          return;
-        }
-        var deleteIds = visibleHistory.map(function(session) { return session.claudeSessionId; });
-        return fetch('/api/claude-history/batch-delete', {
+        return confirmDelete('确认清空当前显示的 ' + visibleHistory.length + ' 条 Claude 历史吗？', {
+          title: "清空 Claude 历史",
+          okLabel: "清空",
+        }).then(function(ok) {
+          if (!ok) return;
+          var deleteIds = visibleHistory.map(function(session) { return session.claudeSessionId; });
+          return fetch('/api/claude-history/batch-delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
@@ -2739,6 +2748,7 @@
             var errorEl = document.getElementById('action-error');
             showError(errorEl, '无法清空历史会话。');
           });
+        });
       }
 
       function renderClaudeHistoryDirectoryHeader(cwd, cwdShort, count, isExpanded) {
@@ -5005,10 +5015,10 @@
                 break;
               case "delete-session":
                 if (state.selectedId) {
-                  var pendingId = state.selectedId;
-                  if (confirm("确定要删除当前会话吗？")) {
-                    deleteSession(pendingId);
-                  }
+                  (function(pendingId) {
+                    confirmDelete("确定要删除当前会话吗？此操作无法撤销。", { title: "删除当前会话" })
+                      .then(function(ok) { if (ok) deleteSession(pendingId); });
+                  })(state.selectedId);
                 }
                 break;
             }
@@ -5542,25 +5552,34 @@
           } else if (actionButton.dataset.action === "toggle-selection") {
             toggleManagedItemSelection(actionButton.dataset.kind, actionButton.dataset.id);
           } else if (actionButton.dataset.action === "delete-session" && actionButton.dataset.sessionId) {
-            if (confirmDelete("确认删除这个会话吗？")) {
-              deleteSession(actionButton.dataset.sessionId);
-            }
+            (function(sid) {
+              confirmDelete("确认删除这个会话吗？此操作无法撤销。", { title: "删除会话" }).then(function(ok) {
+                if (ok) deleteSession(sid);
+              });
+            })(actionButton.dataset.sessionId);
           } else if (actionButton.dataset.action === "delete-history" && actionButton.dataset.claudeSessionId) {
-            if (confirmDelete("确认隐藏这条 Claude 历史吗？")) {
-              executeDeleteHistory(actionButton.dataset.claudeSessionId, actionButton.closest(".session-item"));
-            }
+            (function(cid, item) {
+              confirmDelete("确认隐藏这条 Claude 历史吗？", { title: "隐藏历史会话", okLabel: "隐藏" }).then(function(ok) {
+                if (ok) executeDeleteHistory(cid, item);
+              });
+            })(actionButton.dataset.claudeSessionId, actionButton.closest(".session-item"));
           } else if (actionButton.dataset.action === "toggle-history-directory" && actionButton.dataset.cwd) {
             var dirCwd = actionButton.dataset.cwd;
             state.claudeHistoryExpandedDirs[dirCwd] = !state.claudeHistoryExpandedDirs[dirCwd];
             updateSessionsList();
           } else if (actionButton.dataset.action === "delete-history-directory" && actionButton.dataset.cwd) {
-            var deleteCwd = actionButton.dataset.cwd;
-            var items = getHistoryItemsByCwd(deleteCwd);
-            var dirCount = getVisibleClaudeHistorySessions().filter(function(s) { return s.cwd === deleteCwd; }).length;
-            if (confirmDelete("确认清空此目录下的 " + dirCount + " 条 Claude 历史吗？")) {
-              setDeletingState(items, true);
-              deleteClaudeHistoryDirectory(deleteCwd, actionButton, items);
-            }
+            (function(deleteCwd, btn) {
+              var items = getHistoryItemsByCwd(deleteCwd);
+              var dirCount = getVisibleClaudeHistorySessions().filter(function(s) { return s.cwd === deleteCwd; }).length;
+              confirmDelete("确认清空此目录下的 " + dirCount + " 条 Claude 历史吗？", {
+                title: "清空目录历史",
+                okLabel: "清空",
+              }).then(function(ok) {
+                if (!ok) return;
+                setDeletingState(items, true);
+                deleteClaudeHistoryDirectory(deleteCwd, btn, items);
+              });
+            })(actionButton.dataset.cwd, actionButton);
           } else if (actionButton.dataset.action === "clear-all-history") {
             clearAllClaudeHistory();
           } else if (actionButton.dataset.action === "toggle-archived-group") {
@@ -8273,7 +8292,13 @@
                     try {
                       WandNative.downloadUpdate(androidApk.github.downloadUrl, androidApk.github.fileName || "wand-update.apk", "github");
                     } catch (e) {
-                      alert("调用下载失败: " + e.message);
+                      if (typeof window.wandAlert === "function") {
+                        window.wandAlert("调用下载失败: " + e.message, { type: "danger", title: "下载失败" });
+                      } else if (typeof showToast === "function") {
+                        showToast("调用下载失败: " + e.message, "error");
+                      } else {
+                        alert("调用下载失败: " + e.message);
+                      }
                     }
                   };
                 }
@@ -8291,7 +8316,13 @@
                     try {
                       WandNative.downloadUpdate(androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", "local");
                     } catch (e) {
-                      alert("调用下载失败: " + e.message);
+                      if (typeof window.wandAlert === "function") {
+                        window.wandAlert("调用下载失败: " + e.message, { type: "danger", title: "下载失败" });
+                      } else if (typeof showToast === "function") {
+                        showToast("调用下载失败: " + e.message, "error");
+                      } else {
+                        alert("调用下载失败: " + e.message);
+                      }
                     }
                   };
                 }
@@ -14085,9 +14116,10 @@
           }
         }
 
-        // 显示当前执行步骤 = 已完成 + 正在进行（如果有）
-        var currentStep = completed + inProgress;
+        // 显示"正在干第 N 个"（1-indexed）：已完成 + 1，封顶到总数
+        // 这样 pending → in_progress → completed 的过渡空档不会出现 0/N 或漏一位的现象
         var allDone = completed === todos.length;
+        var currentStep = allDone ? todos.length : Math.min(completed + 1, todos.length);
         if (allDone) {
           // Hide todo when all tasks are completed
           container.classList.add("hidden");
@@ -16177,6 +16209,274 @@
         }, type === "error" ? 4000 : 2200);
       }
 
+      // ── Wand Dialog (alert / confirm / prompt) ──
+      // Replaces window.alert / window.confirm / window.prompt with a Liquid Glass
+      // styled modal so confirmations and notices match the rest of wand's UI.
+
+      var _wandDialogStack = [];
+
+      function _wandDialogIcon(type) {
+        switch (type) {
+          case "warning": return "!";
+          case "danger":  return "⚠︎"; // ⚠ (text style)
+          case "success": return "✓";       // ✓
+          case "question": return "?";
+          default: return "i";
+        }
+      }
+
+      /**
+       * Open a Liquid-Glass styled dialog. Returns a Promise resolving to the
+       * value returned by the clicked button's `value`, or `cancelValue` if
+       * dismissed via Esc / backdrop click / cancel button.
+       *
+       * @param {object} opts
+       * @param {string} [opts.title]
+       * @param {string} [opts.message]
+       * @param {"info"|"warning"|"danger"|"success"|"question"} [opts.type]
+       * @param {string} [opts.icon] - Override icon glyph.
+       * @param {Array<{label:string, value:any, kind?:"primary"|"secondary"|"ghost"|"outline"|"danger", autofocus?:boolean}>} opts.buttons
+       * @param {boolean} [opts.input] - Show a single-line text input (prompt).
+       * @param {string} [opts.inputValue] - Initial text input value.
+       * @param {string} [opts.inputPlaceholder]
+       * @param {any} [opts.cancelValue] - Value resolved on Esc / backdrop click. Default: false for confirm, null for prompt, undefined for alert.
+       * @param {boolean} [opts.dismissable] - Allow Esc / backdrop close (default true).
+       * @returns {Promise<any>}
+       */
+      function openWandDialog(opts) {
+        opts = opts || {};
+        var dismissable = opts.dismissable !== false;
+        var type = opts.type || "info";
+        var iconChar = opts.icon || _wandDialogIcon(type);
+        var hasInput = !!opts.input;
+
+        return new Promise(function(resolve) {
+          var backdrop = document.createElement("div");
+          backdrop.className = "wand-dialog-backdrop";
+          backdrop.setAttribute("role", "presentation");
+
+          var dialog = document.createElement("div");
+          dialog.className = "wand-dialog";
+          dialog.setAttribute("role", hasInput ? "dialog" : "alertdialog");
+          dialog.setAttribute("aria-modal", "true");
+          if (opts.title) dialog.setAttribute("aria-label", opts.title);
+
+          // Header
+          var header = document.createElement("div");
+          header.className = "wand-dialog-header";
+
+          var iconEl = document.createElement("div");
+          iconEl.className = "wand-dialog-icon " + type;
+          iconEl.textContent = iconChar;
+          header.appendChild(iconEl);
+
+          var textWrap = document.createElement("div");
+          textWrap.className = "wand-dialog-textwrap";
+          if (opts.title) {
+            var titleEl = document.createElement("div");
+            titleEl.className = "wand-dialog-title";
+            titleEl.textContent = opts.title;
+            textWrap.appendChild(titleEl);
+          }
+          if (opts.message) {
+            var msgEl = document.createElement("div");
+            msgEl.className = "wand-dialog-message";
+            msgEl.textContent = opts.message;
+            textWrap.appendChild(msgEl);
+          }
+          header.appendChild(textWrap);
+          dialog.appendChild(header);
+
+          // Optional input (prompt mode)
+          var inputEl = null;
+          if (hasInput) {
+            var bodyEl = document.createElement("div");
+            bodyEl.className = "wand-dialog-body";
+            inputEl = document.createElement("input");
+            inputEl.type = "text";
+            inputEl.className = "wand-dialog-input";
+            if (opts.inputPlaceholder) inputEl.placeholder = opts.inputPlaceholder;
+            if (opts.inputValue != null) inputEl.value = String(opts.inputValue);
+            bodyEl.appendChild(inputEl);
+            dialog.appendChild(bodyEl);
+          }
+
+          // Footer / buttons
+          var buttons = (opts.buttons && opts.buttons.length) ? opts.buttons : [
+            { label: "好", value: true, kind: "primary", autofocus: true },
+          ];
+
+          var footer = document.createElement("div");
+          footer.className = "wand-dialog-footer";
+
+          var firstFocusable = null;
+          var autofocusTarget = null;
+
+          function close(value) {
+            if (backdrop.classList.contains("closing")) return;
+            backdrop.classList.add("closing");
+            document.removeEventListener("keydown", keyHandler, true);
+            var idx = _wandDialogStack.indexOf(close);
+            if (idx >= 0) _wandDialogStack.splice(idx, 1);
+            setTimeout(function() {
+              if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+              resolve(value);
+            }, 160);
+          }
+
+          buttons.forEach(function(btnSpec) {
+            var btn = document.createElement("button");
+            var kind = btnSpec.kind || "secondary";
+            btn.className = "btn btn-" + kind;
+            btn.type = "button";
+            btn.textContent = btnSpec.label;
+            btn.addEventListener("click", function() {
+              if (hasInput && btnSpec.kind === "primary") {
+                close(inputEl ? inputEl.value : "");
+              } else {
+                close(btnSpec.value);
+              }
+            });
+            if (!firstFocusable) firstFocusable = btn;
+            if (btnSpec.autofocus) autofocusTarget = btn;
+            footer.appendChild(btn);
+          });
+          dialog.appendChild(footer);
+
+          backdrop.appendChild(dialog);
+
+          // Backdrop click → cancel (if dismissable)
+          backdrop.addEventListener("click", function(e) {
+            if (e.target === backdrop && dismissable) {
+              close(opts.cancelValue !== undefined ? opts.cancelValue : (hasInput ? null : false));
+            }
+          });
+
+          // Key handler — Esc cancels, Enter triggers primary (when not in textarea-like input)
+          function keyHandler(e) {
+            // Only handle keys for the topmost dialog
+            if (_wandDialogStack[_wandDialogStack.length - 1] !== close) return;
+            if (e.key === "Escape" && dismissable) {
+              e.preventDefault();
+              e.stopPropagation();
+              close(opts.cancelValue !== undefined ? opts.cancelValue : (hasInput ? null : false));
+              return;
+            }
+            if (e.key === "Enter") {
+              // For prompt: Enter on input → submit. For alert/confirm: Enter → primary action.
+              var primary = null;
+              for (var i = 0; i < buttons.length; i++) {
+                if (buttons[i].kind === "primary") {
+                  primary = buttons[i];
+                  break;
+                }
+              }
+              if (!primary) primary = buttons[buttons.length - 1];
+              if (primary) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (hasInput && primary.kind === "primary") {
+                  close(inputEl ? inputEl.value : "");
+                } else {
+                  close(primary.value);
+                }
+              }
+            }
+          }
+          document.addEventListener("keydown", keyHandler, true);
+          _wandDialogStack.push(close);
+
+          document.body.appendChild(backdrop);
+
+          // Focus the most appropriate target
+          requestAnimationFrame(function() {
+            if (hasInput && inputEl) {
+              inputEl.focus();
+              try { inputEl.select(); } catch (e2) {}
+            } else if (autofocusTarget) {
+              autofocusTarget.focus();
+            } else if (firstFocusable) {
+              firstFocusable.focus();
+            }
+          });
+        });
+      }
+
+      /**
+       * Liquid-glass replacement for window.alert.
+       * @param {string} message
+       * @param {object} [options] - { title, type, okLabel }
+       * @returns {Promise<void>}
+       */
+      function wandAlert(message, options) {
+        options = options || {};
+        return openWandDialog({
+          title: options.title || "提示",
+          message: typeof message === "string" ? message : String(message == null ? "" : message),
+          type: options.type || "info",
+          buttons: [
+            { label: options.okLabel || "好", value: undefined, kind: "primary", autofocus: true },
+          ],
+        });
+      }
+
+      /**
+       * Liquid-glass replacement for window.confirm. Resolves to true/false.
+       * @param {string} message
+       * @param {object} [options] - { title, type ("question"|"warning"|"danger"), okLabel, cancelLabel, danger }
+       * @returns {Promise<boolean>}
+       */
+      function wandConfirm(message, options) {
+        options = options || {};
+        var danger = !!options.danger || options.type === "danger";
+        return openWandDialog({
+          title: options.title || (danger ? "确认操作" : "请确认"),
+          message: typeof message === "string" ? message : String(message == null ? "" : message),
+          type: options.type || (danger ? "danger" : "question"),
+          cancelValue: false,
+          buttons: [
+            { label: options.cancelLabel || "取消", value: false, kind: "secondary" },
+            {
+              label: options.okLabel || (danger ? "删除" : "确定"),
+              value: true,
+              kind: danger ? "danger" : "primary",
+              autofocus: !danger,
+            },
+          ],
+        }).then(function(v) { return v === true; });
+      }
+
+      /**
+       * Liquid-glass replacement for window.prompt. Resolves to entered string,
+       * or null if cancelled.
+       * @param {string} message
+       * @param {string} [defaultValue]
+       * @param {object} [options] - { title, placeholder, okLabel, cancelLabel }
+       * @returns {Promise<string|null>}
+       */
+      function wandPrompt(message, defaultValue, options) {
+        options = options || {};
+        return openWandDialog({
+          title: options.title || "请输入",
+          message: typeof message === "string" ? message : String(message == null ? "" : message),
+          type: options.type || "question",
+          input: true,
+          inputValue: defaultValue == null ? "" : String(defaultValue),
+          inputPlaceholder: options.placeholder || "",
+          cancelValue: null,
+          buttons: [
+            { label: options.cancelLabel || "取消", value: null, kind: "secondary" },
+            { label: options.okLabel || "确定", value: undefined, kind: "primary" },
+          ],
+        });
+      }
+
+      // Expose globally for ad-hoc use from inline handlers / future code
+      window.wandAlert = wandAlert;
+      window.wandConfirm = wandConfirm;
+      window.wandPrompt = wandPrompt;
+      window.openWandDialog = openWandDialog;
+
       // ── Notification Bubble System ──
 
       var notificationStack = [];
@@ -16464,7 +16764,7 @@
       // ── Native Live Progress Sync ──
 
       var _progressSyncTimers = {};
-      var _PROGRESS_SYNC_DEBOUNCE_MS = 100;
+      var _PROGRESS_SYNC_DEBOUNCE_MS = 30;
 
       // Strip markdown formatting and clamp to a single short line so the
       // native Live Activity / lock-screen card stays readable. 100 chars

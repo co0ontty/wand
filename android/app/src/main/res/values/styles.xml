@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Custom MaterialAlertDialog theme: rounded, warm card, brand-coloured buttons -->
+    <style name="Theme.Wand.Dialog" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorAccent">@color/primary</item>
+        <item name="android:colorBackground">@color/card_bg</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+
+        <item name="materialAlertDialogBodyTextStyle">@style/Wand.Dialog.Body</item>
+        <item name="materialAlertDialogTitleTextStyle">@style/Wand.Dialog.Title</item>
+
+        <item name="buttonBarPositiveButtonStyle">@style/Wand.Dialog.Button.Positive</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Wand.Dialog.Button.Neutral</item>
+        <item name="buttonBarNeutralButtonStyle">@style/Wand.Dialog.Button.Neutral</item>
+
+        <item name="shapeAppearanceOverlay">@style/Wand.Dialog.Shape</item>
+        <item name="dialogCornerRadius">22dp</item>
+        <item name="android:windowBackground">@drawable/dialog_background</item>
+    </style>
+
+    <style name="Wand.Dialog.Shape" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">22dp</item>
+    </style>
+
+    <style name="Wand.Dialog.Title" parent="MaterialAlertDialog.MaterialComponents.Title.Text">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.01</item>
+    </style>
+
+    <style name="Wand.Dialog.Body" parent="MaterialAlertDialog.MaterialComponents.Body.Text">
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:lineSpacingExtra">4sp</item>
+    </style>
+
+    <style name="Wand.Dialog.Button.Positive" parent="Widget.MaterialComponents.Button.TextButton.Dialog">
+        <item name="android:textColor">@color/primary</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">14sp</item>
+        <item name="rippleColor">#33C5653D</item>
+    </style>
+
+    <style name="Wand.Dialog.Button.Neutral" parent="Widget.MaterialComponents.Button.TextButton.Dialog">
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">14sp</item>
+        <item name="rippleColor">#22C5653D</item>
+    </style>
+
+</resources>
