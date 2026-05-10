@@ -328,29 +328,81 @@
         // 先驱动跨视图的运行指示器（顶部进度条/徽章计时/气泡呼吸条）
         updateRunningIndicators(session);
 
-        // 旧的 .structured-status-bar（在 composer-top-row 里独立的小条）
-        // 已经合并进 #todo-progress 顶部状态条。这里只清理可能残留的旧节点 +
-        // 维护 composer in-flight 的发光态 + 同步 _statusBarStartTime 给
-        // 顶部徽章计时复用。
-        var legacy = document.querySelector(".structured-status-bar");
-        if (legacy) legacy.remove();
-
+        // Status bar now lives in .composer-top-row alongside the todo-progress collapse bar
+        var topRow = document.querySelector(".composer-top-row");
+        var existing = document.querySelector(".structured-status-bar");
         var composer = document.querySelector(".input-composer");
         if (!session || !isStructuredSession(session)) {
+          if (existing) existing.remove();
           if (composer) composer.classList.remove("in-flight");
-          if (_statusBarTimerId) { clearInterval(_statusBarTimerId); _statusBarTimerId = null; }
-          _statusBarStartTime = 0;
+          clearInterval(_statusBarTimerId);
+          _statusBarTimerId = null;
           return;
         }
 
-        var isInFlight = !!(session.structuredState && session.structuredState.inFlight);
+        var isInFlight = session.structuredState && session.structuredState.inFlight;
+
         if (isInFlight) {
-          if (!_statusBarStartTime) _statusBarStartTime = Date.now();
+          // Start timer if not already running
+          if (!_statusBarTimerId) {
+            _statusBarStartTime = Date.now();
+          }
+
+          // Add glow to input composer
           if (composer) composer.classList.add("in-flight");
+
+          if (!existing && topRow) {
+            var bar = document.createElement("div");
+            bar.className = "structured-status-bar";
+            bar.innerHTML =
+              '<span class="status-bar-dot"></span>' +
+              '<span class="status-bar-label">回复中</span>' +
+              '<span class="status-bar-timer">0.0s</span>';
+            // Append as last child of the top row so it sits to the right of the todo bar
+            topRow.appendChild(bar);
+            existing = bar;
+          } else if (existing && existing.classList.contains("completed")) {
+            // Was completed, now in-flight again — reset
+            existing.classList.remove("completed");
+            existing.style.animation = "none";
+            existing.querySelector(".status-bar-label").textContent = "回复中";
+            var dot = existing.querySelector(".status-bar-dot");
+            if (dot) dot.style.display = "";
+            _statusBarStartTime = Date.now();
+          }
+
+          // Start interval to update timer
+          if (!_statusBarTimerId) {
+            _statusBarTimerId = setInterval(function() {
+              var bar = document.querySelector(".structured-status-bar:not(.completed)");
+              if (!bar) { clearInterval(_statusBarTimerId); _statusBarTimerId = null; return; }
+              var elapsed = ((Date.now() - _statusBarStartTime) / 1000).toFixed(1);
+              var timerEl = bar.querySelector(".status-bar-timer");
+              if (timerEl) timerEl.textContent = elapsed + "s";
+            }, 100);
+          }
         } else {
+          // Not in-flight: show completion or remove
+          clearInterval(_statusBarTimerId);
+          _statusBarTimerId = null;
+
+          // Remove glow from input composer
           if (composer) composer.classList.remove("in-flight");
-          _statusBarStartTime = 0;
-          if (_statusBarTimerId) { clearInterval(_statusBarTimerId); _statusBarTimerId = null; }
+
+          if (existing && !existing.classList.contains("completed")) {
+            // Just finished — transition to completed state
+            var elapsed = _statusBarStartTime ? ((Date.now() - _statusBarStartTime) / 1000).toFixed(1) : "0.0";
+            existing.classList.add("completed");
+            existing.querySelector(".status-bar-label").textContent = "完成";
+            existing.querySelector(".status-bar-timer").textContent = elapsed + "s";
+            var dot = existing.querySelector(".status-bar-dot");
+            if (dot) dot.style.display = "none";
+            _statusBarStartTime = 0;
+            // Remove after animation ends
+            setTimeout(function() {
+              if (existing.parentNode) existing.remove();
+            }, 3000);
+          }
         }
       }
 
@@ -1373,12 +1425,10 @@
                     '<div class="todo-progress-header" id="todo-progress-toggle">' +
                       '<div class="todo-progress-left">' +
                         '<span class="todo-progress-spinner"></span>' +
-                        '<span class="todo-progress-message" id="todo-progress-message"></span>' +
+                        '<span class="todo-progress-counter" id="todo-progress-counter">0/0</span>' +
+                        '<span class="todo-progress-task" id="todo-progress-task"></span>' +
                       '</div>' +
-                      '<div class="todo-progress-right">' +
-                        '<span class="todo-progress-status" id="todo-progress-status">运行中</span>' +
-                        '<svg class="todo-progress-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
-                      '</div>' +
+                      '<svg class="todo-progress-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>' +
                     '</div>' +
                     '<div class="todo-progress-body hidden" id="todo-progress-body">' +
                       '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
@@ -13981,122 +14031,77 @@
       });
 
       function updateTodoProgress(messages) {
+        var todos = null;
+        // Scan all messages for latest TodoWrite tool_use
+        for (var i = messages.length - 1; i >= 0; i--) {
+          var msg = messages[i];
+          if (!msg.content || !Array.isArray(msg.content)) continue;
+          for (var j = msg.content.length - 1; j >= 0; j--) {
+            var block = msg.content[j];
+            if (block.type === "tool_use" && block.name === "TodoWrite" && block.input && block.input.todos) {
+              todos = block.input.todos;
+              break;
+            }
+          }
+          if (todos) break;
+        }
+
         var container = document.getElementById("todo-progress");
         if (!container) return;
 
-        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (!session) {
+        if (!todos || todos.length === 0) {
           container.classList.add("hidden");
           return;
         }
 
-        // ── 左侧：用户最新发出的一条消息 ──
-        var lastUserText = "";
-        if (Array.isArray(messages)) {
-          for (var i = messages.length - 1; i >= 0; i--) {
-            var umsg = messages[i];
-            if (!umsg || umsg.role !== "user" || !Array.isArray(umsg.content)) continue;
-            for (var uj = 0; uj < umsg.content.length; uj++) {
-              var ublock = umsg.content[uj];
-              if (ublock && ublock.type === "text" && ublock.text && ublock.text.trim()) {
-                lastUserText = ublock.text.trim().replace(/\s+/g, " ");
-                break;
-              }
-            }
-            if (lastUserText) break;
-          }
-        }
-
-        // 没有任何用户消息（例如刚新建的空会话）才隐藏
-        if (!lastUserText) {
-          container.classList.add("hidden");
-          return;
-        }
         container.classList.remove("hidden");
 
-        // ── 右侧：当前运行状态 ──
-        var sig = computeRunningSignal(session);
-        var isStructured = isStructuredSession(session);
-        var isRunning = isStructured ? !!sig.inFlight : !!sig.ptyRunning;
-        var statusText = isRunning
-          ? (isStructured ? "运行中" : "正在运行")
-          : "已完成";
-
-        // ── 步骤数：来自最近一次 TodoWrite ──
-        var todos = null;
-        if (Array.isArray(messages)) {
-          for (var ti = messages.length - 1; ti >= 0; ti--) {
-            var tmsg = messages[ti];
-            if (!tmsg.content || !Array.isArray(tmsg.content)) continue;
-            for (var tj = tmsg.content.length - 1; tj >= 0; tj--) {
-              var tblock = tmsg.content[tj];
-              if (tblock && tblock.type === "tool_use" && tblock.name === "TodoWrite" && tblock.input && tblock.input.todos) {
-                todos = tblock.input.todos;
-                break;
-              }
+        var completed = 0;
+        var inProgress = 0;
+        var activeTask = "";
+        for (var k = 0; k < todos.length; k++) {
+          if (todos[k].status === "completed") completed++;
+          if (todos[k].status === "in_progress") {
+            inProgress++;
+            if (!activeTask) {
+              activeTask = todos[k].activeForm || todos[k].content || "";
             }
-            if (todos) break;
           }
         }
 
-        var hasTodos = !!(todos && todos.length > 0);
-        var allTodosDone = false;
-        var stepLabel = "";
-        if (hasTodos) {
-          var completedCount = 0;
-          var inProgressCount = 0;
-          for (var k = 0; k < todos.length; k++) {
-            if (todos[k].status === "completed") completedCount++;
-            if (todos[k].status === "in_progress") inProgressCount++;
-          }
-          allTodosDone = completedCount === todos.length;
-          if (isRunning && !allTodosDone) {
-            var stepIdx = Math.max(1, completedCount + (inProgressCount > 0 ? 1 : 0));
-            stepLabel = " · 第 " + stepIdx + "/" + todos.length + " 步";
-          }
+        // 显示当前执行步骤 = 已完成 + 正在进行（如果有）
+        var currentStep = completed + inProgress;
+        var allDone = completed === todos.length;
+        if (allDone) {
+          // Hide todo when all tasks are completed
+          container.classList.add("hidden");
+          return;
+        } else {
+          container.classList.remove("all-done");
         }
 
-        // ── 应用状态类 ──
-        container.classList.toggle("is-running", isRunning);
-        // 复用已有 .all-done 样式（隐藏 spinner + 显示绿色 ✓）
-        container.classList.toggle("all-done", !isRunning);
-        container.classList.toggle("has-todos", hasTodos);
+        var counter = document.getElementById("todo-progress-counter");
+        if (counter) counter.textContent = currentStep + "/" + todos.length;
 
-        // ── 写入 DOM ──
-        var msgEl = document.getElementById("todo-progress-message");
-        if (msgEl) msgEl.textContent = lastUserText;
+        var task = document.getElementById("todo-progress-task");
+        if (task) task.textContent = activeTask;
 
-        var statusEl = document.getElementById("todo-progress-status");
-        if (statusEl) statusEl.textContent = statusText + stepLabel;
-
-        // ── 渲染展开后的 todo 列表（仅当有 todos 时） ──
+        // Render expanded list
         var list = document.getElementById("todo-progress-list");
         if (list) {
-          if (!hasTodos) {
-            list.innerHTML = "";
-          } else {
-            var html = "";
-            for (var m = 0; m < todos.length; m++) {
-              var t = todos[m];
-              var st = t.status || "pending";
-              var itemClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "";
-              var iconClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "pending";
-              var icon = st === "completed" ? "✓" : st === "in_progress" ? "›" : "○";
-              html += '<li class="todo-progress-item ' + itemClass + '">' +
-                '<span class="todo-item-icon ' + iconClass + '">' + icon + '</span>' +
-                '<span>' + escapeHtml(t.content || "") + '</span>' +
-              '</li>';
-            }
-            list.innerHTML = html;
+          var html = "";
+          for (var m = 0; m < todos.length; m++) {
+            var t = todos[m];
+            var st = t.status || "pending";
+            var itemClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "";
+            var iconClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "pending";
+            var icon = st === "completed" ? "✓" : st === "in_progress" ? "›" : "○";
+            html += '<li class="todo-progress-item ' + itemClass + '">' +
+              '<span class="todo-item-icon ' + iconClass + '">' + icon + '</span>' +
+              '<span>' + escapeHtml(t.content || "") + '</span>' +
+            '</li>';
           }
-        }
-
-        // 没有 todos 时强制收起 body（没东西可展开）
-        if (!hasTodos) {
-          todoExpanded = false;
-          container.classList.remove("expanded");
-          var body = document.getElementById("todo-progress-body");
-          if (body) body.classList.add("hidden");
+          list.innerHTML = html;
         }
 
         // Sync todo progress to native notification
@@ -16479,9 +16484,8 @@
         var sessionLabel = session.summary || session.command || sessionId;
         var sessionStatus = session.status || "running";
 
-        // 真正消亡的会话才清掉通知；idle / exited 仍然要把"已完成"推上去，
-        // 让流体云 / 锁屏卡片显示与 web 通知条一致的最终状态。
-        if (sessionStatus === "archived") {
+        // Clear notification for inactive sessions
+        if (sessionStatus === "idle" || sessionStatus === "archived" || sessionStatus === "exited") {
           clearSessionProgressNative(sessionId);
           return;
         }
@@ -16548,37 +16552,9 @@
           currentTask = state.currentTask.title;
         }
 
-        // ── 与 web 通知条同源的 statusLabel / stepLabel / isRunning ──
-        // 复用 computeRunningSignal & isStructuredSession，确保胶囊文字和顶部
-        // 通知条永远保持一致。
-        var sig = computeRunningSignal(session);
-        var isStructured = isStructuredSession(session);
-        var isRunning = isStructured ? !!sig.inFlight : !!sig.ptyRunning;
-        var statusLabel = isRunning
-          ? (isStructured ? "运行中" : "正在运行")
-          : "已完成";
-
-        var stepLabel = "";
-        if (todos && todos.length > 0) {
-          var completedCount = 0;
-          var inProgressCount = 0;
-          for (var sk = 0; sk < todos.length; sk++) {
-            if (todos[sk].status === "completed") completedCount++;
-            if (todos[sk].status === "in_progress") inProgressCount++;
-          }
-          var allTodosDone = completedCount === todos.length;
-          if (isRunning && !allTodosDone) {
-            var stepIdx = Math.max(1, completedCount + (inProgressCount > 0 ? 1 : 0));
-            stepLabel = "第 " + stepIdx + "/" + todos.length + " 步";
-          }
-        }
-
         var data = {
           sessionLabel: sessionLabel,
           status: sessionStatus,
-          isRunning: isRunning,
-          statusLabel: statusLabel,
-          stepLabel: stepLabel,
           currentTask: currentTask,
           latestUserText: latestUserText,
           latestAssistantText: latestAssistantText,
