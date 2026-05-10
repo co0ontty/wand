@@ -2522,6 +2522,14 @@
     .topbar-more-item.topbar-more-item-danger { color: var(--danger); }
     .topbar-more-item.topbar-more-item-danger:hover { background: var(--danger-muted); color: var(--danger-hover); }
     .topbar-more-item.hidden { display: none; }
+    .topbar-more-item[disabled] { opacity: 0.5; cursor: not-allowed; }
+    .topbar-more-item[disabled]:hover { background: transparent; color: var(--text-primary); }
+    .topbar-more-divider {
+      height: 1px;
+      margin: 4px 6px;
+      background: var(--border-default);
+      opacity: 0.6;
+    }
 
     /* 桌面端显示所有按钮 */
     .terminal-scale-toggle { display: flex; }
@@ -10859,6 +10867,311 @@
     }
 
     .tree-item[data-type='file']:hover .tree-name {
+      color: var(--accent);
+    }
+
+    /* ── File explorer header extras ── */
+    .file-explorer-up,
+    .file-explorer-toggle-hidden {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 4px;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background var(--transition-fast), color var(--transition-fast);
+      flex-shrink: 0;
+    }
+    .file-explorer-up:hover,
+    .file-explorer-toggle-hidden:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+    }
+    .file-explorer-toggle-hidden.active {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    /* ── File tree size/meta column ── */
+    .tree-meta {
+      flex-shrink: 0;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      margin-left: 6px;
+      padding-left: 6px;
+      max-width: 70px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      opacity: 0.85;
+    }
+    .tree-item:hover .tree-meta { color: var(--text-secondary); }
+
+    /* ── Truncation notice in file tree ── */
+    .tree-truncated {
+      padding: 8px 14px;
+      margin: 4px 6px 8px;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      background: var(--bg-secondary);
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      text-align: center;
+    }
+
+    /* ── File context menu (right-click / long-press) ── */
+    .file-context-menu {
+      position: fixed;
+      z-index: 1100;
+      min-width: 200px;
+      padding: 4px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
+      animation: ctx-fade-in 0.12s ease;
+    }
+    @keyframes ctx-fade-in {
+      from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .file-context-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 0.8125rem;
+      text-align: left;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: background 0.12s;
+    }
+    .file-context-menu-item:hover { background: var(--bg-tertiary); }
+    .file-context-menu-item .ctx-icon { width: 18px; text-align: center; opacity: 0.85; }
+
+    /* ── Mini toast for in-app feedback ── */
+    .wand-mini-toast {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translate(-50%, 14px);
+      z-index: 1200;
+      padding: 8px 16px;
+      background: rgba(20, 20, 20, 0.92);
+      color: #fff;
+      font-size: 0.8125rem;
+      border-radius: 999px;
+      opacity: 0;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      pointer-events: none;
+    }
+    .wand-mini-toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    /* ── Preview toolbar ── */
+    .file-preview-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+      margin-left: 8px;
+    }
+    .file-preview-toolbar-btn {
+      background: none;
+      border: 1px solid transparent;
+      cursor: pointer;
+      padding: 4px 8px;
+      min-width: 32px;
+      height: 28px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .file-preview-toolbar-btn:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border-color: var(--border);
+    }
+    .file-preview-toolbar-btn.toolbar-active {
+      background: var(--accent-muted);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    /* ── Code preview wrap mode ── */
+    .code-preview-content pre.wrap {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* ── Image preview ── */
+    .file-preview-body.kind-image {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        linear-gradient(45deg, rgba(0,0,0,0.04) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.04) 75%),
+        linear-gradient(45deg, rgba(0,0,0,0.04) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.04) 75%),
+        var(--bg-primary);
+      background-size: 16px 16px;
+      background-position: 0 0, 8px 8px;
+    }
+    .image-preview-wrapper {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+      padding: 16px;
+    }
+    .image-preview-img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      cursor: zoom-in;
+      transition: transform 0.2s ease;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+      border-radius: 4px;
+      background: #fff;
+    }
+    .image-preview-img.zoomed {
+      max-width: none;
+      max-height: none;
+      cursor: zoom-out;
+      transform: scale(1);
+    }
+
+    /* ── PDF preview ── */
+    .file-preview-body.kind-pdf {
+      padding: 0;
+      background: var(--bg-secondary);
+    }
+    .pdf-preview-frame {
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: var(--bg-secondary);
+    }
+
+    /* ── Video / audio preview ── */
+    .file-preview-body.kind-video,
+    .file-preview-body.kind-audio {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0d0d0d;
+    }
+    .file-preview-body.kind-audio { background: var(--bg-secondary); }
+    .media-preview-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      max-width: 100%;
+      max-height: 100%;
+      padding: 24px;
+    }
+    .media-preview-video {
+      max-width: 100%;
+      max-height: calc(100% - 40px);
+      background: #000;
+      border-radius: 4px;
+    }
+    .media-preview-audio { width: min(420px, 90%); }
+    .media-preview-icon { font-size: 3.5rem; opacity: 0.7; }
+    .media-preview-name {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 1rem;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .media-preview-meta {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .file-preview-body.kind-video .media-preview-meta { color: rgba(255,255,255,0.7); }
+
+    /* ── Binary fallback card ── */
+    .file-preview-body.kind-binary {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .binary-preview-card {
+      max-width: 480px;
+      padding: 32px 28px;
+      text-align: center;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .binary-preview-icon { font-size: 3rem; opacity: 0.6; }
+    .binary-preview-name {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 1rem;
+      word-break: break-all;
+    }
+    .binary-preview-meta {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+    }
+    .binary-preview-path {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .binary-preview-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .binary-preview-btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 0.8125rem;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .binary-preview-btn:hover {
+      background: var(--accent-muted);
+      border-color: var(--accent);
       color: var(--accent);
     }
 

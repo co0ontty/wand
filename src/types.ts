@@ -254,6 +254,39 @@ export interface FileEntry {
   name: string;
   type: 'dir' | 'file';
   gitStatus?: GitFileStatus;
+  /** File size in bytes; absent for directories. */
+  size?: number;
+  /** ISO timestamp of the last modification. */
+  mtime?: string;
+}
+
+export interface DirectoryListing {
+  items: FileEntry[];
+  /** True when the result was capped before all entries were returned. */
+  truncated: boolean;
+  /** Total number of entries in the directory (before truncation). */
+  total: number;
+}
+
+export type FilePreviewKind =
+  | "text"
+  | "image"
+  | "pdf"
+  | "video"
+  | "audio"
+  | "binary";
+
+export interface FilePreviewResponse {
+  kind: FilePreviewKind;
+  path: string;
+  name: string;
+  ext: string;
+  size: number;
+  mime?: string;
+  /** Detected language for text/code; only present when kind === "text". */
+  lang?: string;
+  /** File content; only present when kind === "text". */
+  content?: string;
 }
 
 export interface ChatMessage {

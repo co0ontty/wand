@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import compression from "compression";
 import express, { NextFunction, Request, Response } from "express";
 import { createReadStream, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { exec, spawn } from "node:child_process";
@@ -37,8 +37,11 @@ import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/
 import { isPathWithinBase, isBlockedFolderPath, normalizeFolderPath } from "./middleware/path-safety.js";
 import {
   CommandRequest,
+  DirectoryListing,
   ExecutionMode,
   FileEntry,
+  FilePreviewKind,
+  FilePreviewResponse,
   GitFileStatus,
   InputRequest,
   PathSuggestion,
@@ -616,6 +619,105 @@ function getLanguageFromExt(ext: string, filePath: string): string {
   return map[ext] || "plaintext";
 }
 
+// ── File preview classification ──
+
+const TEXT_PREVIEWABLE_EXTS = new Set<string>([
+  ".md", ".markdown", ".mdown", ".mkd", ".mkdn", ".mdx",
+  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+  ".json", ".jsonc", ".html", ".htm", ".css", ".scss", ".less",
+  ".py", ".rb", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp",
+  ".cs", ".swift", ".kt", ".scala", ".php", ".sh", ".bash", ".zsh", ".fish",
+  ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env",
+  ".xml", ".sql", ".graphql", ".proto",
+  ".dockerfile", ".gitignore", ".editorconfig",
+  ".vue", ".svelte",
+  ".txt", ".log", ".diff", ".patch",
+  ".lua", ".r", ".dart", ".pl", ".pm",
+]);
+
+const IMAGE_EXTS = new Set<string>([
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif",
+  ".bmp", ".ico", ".heic", ".heif",
+]);
+const VIDEO_EXTS = new Set<string>([
+  ".mp4", ".webm", ".mov", ".mkv", ".m4v", ".ogv",
+]);
+const AUDIO_EXTS = new Set<string>([
+  ".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac", ".opus",
+]);
+const PDF_EXTS = new Set<string>([".pdf"]);
+
+const MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+  ".pdf": "application/pdf",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".mkv": "video/x-matroska",
+  ".m4v": "video/x-m4v",
+  ".ogv": "video/ogg",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".m4a": "audio/mp4",
+  ".flac": "audio/flac",
+  ".aac": "audio/aac",
+  ".opus": "audio/opus",
+};
+
+const TEXT_BASENAME_ALLOW = new Set<string>([
+  "dockerfile", ".gitignore", ".dockerignore", ".env", ".env.local",
+  ".env.development", ".env.production", ".env.test",
+  "makefile", "readme", "license", "changelog",
+]);
+
+function classifyFile(ext: string, baseName: string): FilePreviewKind {
+  const lowerExt = ext.toLowerCase();
+  const lowerBase = baseName.toLowerCase();
+  if (IMAGE_EXTS.has(lowerExt)) return "image";
+  if (PDF_EXTS.has(lowerExt)) return "pdf";
+  if (VIDEO_EXTS.has(lowerExt)) return "video";
+  if (AUDIO_EXTS.has(lowerExt)) return "audio";
+  if (TEXT_PREVIEWABLE_EXTS.has(lowerExt)) return "text";
+  if (TEXT_BASENAME_ALLOW.has(lowerBase)) return "text";
+  // Files with no extension that look like text-y dotfiles
+  if (lowerExt === "" && /^[a-z0-9._-]+$/i.test(lowerBase)) return "text";
+  return "binary";
+}
+
+function mimeForExt(ext: string): string {
+  return MIME_BY_EXT[ext.toLowerCase()] || "application/octet-stream";
+}
+
+/** Hidden files that should still surface even when "show hidden" is off. */
+const HIDDEN_ALLOWLIST = new Set<string>([
+  ".gitignore", ".gitattributes", ".gitmodules",
+  ".env", ".env.local", ".env.example",
+  ".editorconfig", ".prettierrc", ".eslintrc",
+  ".dockerignore", ".npmrc", ".nvmrc",
+  ".browserslistrc", ".babelrc",
+]);
+
+function isHiddenEntry(name: string): boolean {
+  if (!name.startsWith(".")) return false;
+  if (HIDDEN_ALLOWLIST.has(name)) return false;
+  // Common patterns like `.env.production` are also kept visible
+  for (const allowed of HIDDEN_ALLOWLIST) {
+    if (name.startsWith(allowed + ".")) return false;
+  }
+  return true;
+}
+
 // ── Main server ──
 
 export interface ServerUrl {
@@ -1170,9 +1272,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   // ── File browsing ──
 
+  const DIRECTORY_MAX_ITEMS = 200;
   app.get("/api/directory", async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q : "";
     const includeGitStatus = req.query.gitStatus === "true";
+    const showHidden = req.query.showHidden === "true";
     const targetPath = path.resolve(q || config.defaultCwd);
     if (isBlockedFolderPath(targetPath)) {
       res.status(403).json({ error: "访问被拒绝：无法访问系统敏感目录。" });
@@ -1181,30 +1285,48 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
     try {
       const entries = await readdir(targetPath, { withFileTypes: true });
-      let items: FileEntry[] = entries
-        .sort((a, b) => {
-          if (a.isDirectory() && !b.isDirectory()) return -1;
-          if (!a.isDirectory() && b.isDirectory()) return 1;
-          return a.name.localeCompare(b.name);
-        })
-        .slice(0, 100)
-        .map((entry) => ({
-          path: path.join(targetPath, entry.name),
+      const visible = showHidden ? entries : entries.filter((e) => !isHiddenEntry(e.name));
+      const sorted = visible.sort((a, b) => {
+        if (a.isDirectory() && !b.isDirectory()) return -1;
+        if (!a.isDirectory() && b.isDirectory()) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      const total = sorted.length;
+      const truncated = total > DIRECTORY_MAX_ITEMS;
+      const sliced = sorted.slice(0, DIRECTORY_MAX_ITEMS);
+
+      // Fetch size/mtime in parallel; tolerate per-entry failures.
+      let items: FileEntry[] = await Promise.all(sliced.map(async (entry) => {
+        const fullPath = path.join(targetPath, entry.name);
+        const isDir = entry.isDirectory();
+        const base: FileEntry = {
+          path: fullPath,
           name: entry.name,
-          type: entry.isDirectory() ? "dir" : "file" as const,
-        }));
+          type: isDir ? "dir" : "file",
+        };
+        if (isDir) return base;
+        try {
+          const st = await lstat(fullPath);
+          base.size = st.size;
+          base.mtime = st.mtime.toISOString();
+        } catch {
+          // Permission errors etc — leave size/mtime undefined.
+        }
+        return base;
+      }));
 
       if (includeGitStatus) {
         items = await enrichWithGitStatus(items, targetPath);
       }
 
-      res.json(items);
+      const payload: DirectoryListing = { items, truncated, total };
+      res.json(payload);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法读取目录。可能原因：路径不存在或权限不足。") });
     }
   });
 
-  const MAX_FILE_SIZE = 512 * 1024;
+  const MAX_TEXT_PREVIEW_SIZE = 512 * 1024;
   app.get("/api/file-preview", async (req, res) => {
     const filePath = typeof req.query.path === "string" ? req.query.path : "";
     if (!filePath) {
@@ -1224,36 +1346,147 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         res.status(400).json({ error: "Cannot preview a directory" });
         return;
       }
-      if (fileStat.size > MAX_FILE_SIZE) {
-        res.status(413).json({ error: "File too large", truncated: true, size: fileStat.size, maxSize: MAX_FILE_SIZE });
+
+      const ext = path.extname(filePath).toLowerCase();
+      const baseName = path.basename(filePath);
+      const kind = classifyFile(ext, baseName);
+      const mime = mimeForExt(ext);
+
+      // Non-text kinds: respond with metadata so the client can pick a renderer.
+      if (kind !== "text") {
+        const payload: FilePreviewResponse = {
+          kind,
+          path: resolvedPath,
+          name: baseName,
+          ext,
+          size: fileStat.size,
+          mime,
+        };
+        res.json(payload);
         return;
       }
 
-      const ext = path.extname(filePath).toLowerCase();
-      const previewableExts = [
-        ".md", ".markdown", ".mdown", ".mkd", ".mkdn",
-        ".ts", ".tsx", ".js", ".jsx", ".json", ".html", ".css", ".scss", ".less",
-        ".py", ".rb", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp",
-        ".cs", ".swift", ".kt", ".scala", ".php", ".sh", ".bash", ".zsh",
-        ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env",
-        ".xml", ".sql", ".graphql", ".proto",
-        ".dockerfile", ".gitignore", ".env", ".editorconfig",
-        ".mdx", ".vue", ".svelte",
-        ".txt", ".log", ".diff", ".patch",
-      ];
-
-      const isText = previewableExts.includes(ext) ||
-        ext === "" ||
-        [".gitignore", "dockerfile", ".env.local", ".env.development"].some((e) => filePath.toLowerCase().endsWith(e));
-
-      if (!isText) {
-        res.status(415).json({ error: "Unsupported file type", ext });
+      // Text/code preview path — still subject to the 512 KB cap.
+      if (fileStat.size > MAX_TEXT_PREVIEW_SIZE) {
+        res.status(413).json({
+          error: "文件太大，无法在线预览（限 512 KB）。",
+          truncated: true,
+          size: fileStat.size,
+          maxSize: MAX_TEXT_PREVIEW_SIZE,
+        });
         return;
       }
 
       const content = await readFile(resolvedPath, "utf-8");
       const lang = getLanguageFromExt(ext, filePath);
-      res.json({ path: resolvedPath, name: path.basename(filePath), ext, lang, content, size: fileStat.size });
+      const payload: FilePreviewResponse = {
+        kind: "text",
+        path: resolvedPath,
+        name: baseName,
+        ext,
+        size: fileStat.size,
+        mime,
+        lang,
+        content,
+      };
+      res.json(payload);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "Failed to read file") });
+    }
+  });
+
+  // Streams the raw bytes of a file for inline media previews (image/PDF/video/audio)
+  // and downloads. Honors HTTP Range so video/audio scrubbing works.
+  const RAW_MAX_BYTES_BY_KIND: Record<FilePreviewKind, number> = {
+    text: 5 * 1024 * 1024,
+    image: 50 * 1024 * 1024,
+    pdf: 50 * 1024 * 1024,
+    video: 200 * 1024 * 1024,
+    audio: 200 * 1024 * 1024,
+    binary: 50 * 1024 * 1024,
+  };
+
+  app.get("/api/file-raw", async (req, res) => {
+    const filePath = typeof req.query.path === "string" ? req.query.path : "";
+    const asDownload = req.query.download === "1" || req.query.download === "true";
+    if (!filePath) {
+      res.status(400).json({ error: "Missing path parameter" });
+      return;
+    }
+
+    const resolvedPath = path.resolve(filePath);
+    if (isBlockedFolderPath(resolvedPath)) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+
+    try {
+      const fileStat = await stat(resolvedPath);
+      if (!fileStat.isFile()) {
+        res.status(400).json({ error: "Not a regular file" });
+        return;
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
+      const baseName = path.basename(filePath);
+      const kind = classifyFile(ext, baseName);
+      const cap = RAW_MAX_BYTES_BY_KIND[kind] ?? RAW_MAX_BYTES_BY_KIND.binary;
+      if (fileStat.size > cap) {
+        res.status(413).json({
+          error: `文件超出可在线预览的上限（${Math.round(cap / 1024 / 1024)} MB）。`,
+          size: fileStat.size,
+          maxSize: cap,
+        });
+        return;
+      }
+
+      const mime = mimeForExt(ext);
+      // SVG can be served with its proper type; binary fallback uses octet-stream.
+      const contentType = kind === "binary" ? "application/octet-stream" : mime;
+
+      // Encode the filename for Content-Disposition (RFC 5987).
+      const encodedName = encodeURIComponent(baseName);
+      const disposition = asDownload
+        ? `attachment; filename*=UTF-8''${encodedName}`
+        : `inline; filename*=UTF-8''${encodedName}`;
+
+      const total = fileStat.size;
+      const range = req.headers.range;
+      // Safe to cache raw bytes briefly inside the user's browser.
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", disposition);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+
+      if (range && /^bytes=/.test(range)) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+        if (!match) {
+          res.status(416).setHeader("Content-Range", `bytes */${total}`).end();
+          return;
+        }
+        const startStr = match[1];
+        const endStr = match[2];
+        let start = startStr === "" ? 0 : parseInt(startStr, 10);
+        let end = endStr === "" ? total - 1 : parseInt(endStr, 10);
+        if (Number.isNaN(start) || Number.isNaN(end) || start > end || start < 0 || end >= total) {
+          res.status(416).setHeader("Content-Range", `bytes */${total}`).end();
+          return;
+        }
+        const chunkSize = end - start + 1;
+        res.status(206);
+        res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+        res.setHeader("Content-Length", String(chunkSize));
+        const stream = createReadStream(resolvedPath, { start, end });
+        stream.on("error", () => res.destroy());
+        stream.pipe(res);
+        return;
+      }
+
+      res.setHeader("Content-Length", String(total));
+      const stream = createReadStream(resolvedPath);
+      stream.on("error", () => res.destroy());
+      stream.pipe(res);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "Failed to read file") });
     }

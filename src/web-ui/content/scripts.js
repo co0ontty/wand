@@ -215,6 +215,12 @@
         fileSearchQuery: "",
         fileExplorerLoading: false,
         allFiles: [],
+        fileExplorerCwd: "",
+        fileExplorerTruncated: false,
+        fileExplorerTotal: 0,
+        fileExplorerShowHidden: (function() {
+          try { return localStorage.getItem("wand-file-show-hidden") === "1"; } catch (e) { return false; }
+        })(),
         claudeHistory: [],
         claudeHistoryLoaded: false,
         claudeHistoryExpanded: true,
@@ -1346,16 +1352,7 @@
                 '<div class="topbar-right">' +
                   (selectedSession && selectedSession.cwd ? '<button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? ' active' : '') + '" type="button" aria-label="文件" title="文件"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>' : '') +
                   '<span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + '</span>' +
-                  '<div class="topbar-more-wrap">' +
-                    '<button id="topbar-more-button" class="topbar-btn square' + (state.topbarMoreOpen ? ' active' : '') + '" type="button" aria-label="更多" aria-haspopup="menu" aria-expanded="' + (state.topbarMoreOpen ? 'true' : 'false') + '" title="更多"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>' +
-                    '<div id="topbar-more-menu" class="topbar-more-menu' + (state.topbarMoreOpen ? '' : ' hidden') + '" role="menu">' +
-                      '<button class="topbar-more-item" data-action="settings" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>设置</span></button>' +
-                      '<button class="topbar-more-item" data-action="refresh" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>刷新</span></button>' +
-                      '<button class="topbar-more-item' + (state.showInstallPrompt && state.deferredPrompt ? '' : ' hidden') + '" id="topbar-install-item" data-action="install" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>安装应用</span></button>' +
-                      (hasNativeSwitchServer() ? '<button class="topbar-more-item" data-action="switch-server" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>切换服务器</span></button>' : '') +
-                      '<button class="topbar-more-item topbar-more-item-danger" data-action="logout" type="button" role="menuitem"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>退出</span></button>' +
-                    '</div>' +
-                  '</div>' +
+                  (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : '') +
                 '</div>' +
               '</div>' +
               // File panel backdrop (mobile)
@@ -1368,7 +1365,9 @@
                 '</div>' +
                 '<div class="file-side-panel-body">' +
                   '<div class="file-explorer-header">' +
-                    '<span class="file-explorer-path" id="file-explorer-cwd">' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</span>' +
+                    '<button class="file-explorer-up" id="file-explorer-up" type="button" title="返回上级目录" aria-label="返回上级目录">⬆</button>' +
+                    '<span class="file-explorer-path" id="file-explorer-cwd" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '">' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</span>' +
+                    '<button class="file-explorer-toggle-hidden' + (state.fileExplorerShowHidden ? ' active' : '') + '" id="file-explorer-toggle-hidden" type="button" title="' + (state.fileExplorerShowHidden ? "隐藏点开头文件" : "显示隐藏文件") + '" aria-pressed="' + (state.fileExplorerShowHidden ? "true" : "false") + '">' + (state.fileExplorerShowHidden ? "👁" : "👁‍🗨") + '</button>' +
                     '<button class="file-explorer-refresh" id="file-explorer-refresh" title="刷新" aria-label="刷新文件列表">↻</button>' +
                   '</div>' +
                   '<div class="file-search-box">' +
@@ -1547,6 +1546,60 @@
             openQuickCommitModal();
           });
         }
+      }
+
+      /**
+       * Render the topbar three-dot menu. Items are scoped to the currently
+       * selected session — global actions (settings/install/switch-server/
+       * logout) live in the sidebar footer, so we don't duplicate them here.
+       */
+      function renderTopbarMoreMenuHtml(session) {
+        if (!session) return "";
+        var open = state.topbarMoreOpen;
+        var hasClaudeId = !!session.claudeSessionId;
+        var hasCwd = !!session.cwd;
+        var canOpenMerge = session.worktreeEnabled && session.worktree && session.worktree.branch && session.worktree.path;
+        var needsCleanup = session.worktreeMergeStatus === "merged" && session.worktreeMergeInfo && session.worktreeMergeInfo.cleanupDone === false;
+        var mergeDisabled = session.status === "running" || session.worktreeMergeStatus === "merging";
+        var showMerge = canOpenMerge && session.worktreeMergeStatus !== "merged";
+        var showCleanup = needsCleanup;
+        var hasInfoGroup = hasClaudeId || hasCwd || true; // session-id button always renders
+        var hasActionGroup = showMerge || showCleanup || true; // delete button always renders
+
+        var copyIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        var cloudIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.5-8.74A6 6 0 1 0 6 14h11.5z"/></svg>';
+        var folderIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+        var hashIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>';
+        var mergeIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h10"/><path d="M5 7l-2 2 2 2"/><path d="M19 15l2 2-2 2"/></svg>';
+        var trashIconSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>';
+
+        var infoItems = "";
+        if (hasClaudeId) {
+          infoItems += '<button class="topbar-more-item" data-action="copy-claude-session-id" type="button" role="menuitem">' + cloudIconSvg + '<span>复制 Claude 会话 ID</span></button>';
+        }
+        if (hasCwd) {
+          infoItems += '<button class="topbar-more-item" data-action="copy-cwd" type="button" role="menuitem">' + folderIconSvg + '<span>复制工作目录</span></button>';
+        }
+        infoItems += '<button class="topbar-more-item" data-action="copy-session-id" type="button" role="menuitem">' + hashIconSvg + '<span>复制会话 ID</span></button>';
+
+        var actionItems = "";
+        if (showMerge) {
+          actionItems += '<button class="topbar-more-item" data-action="worktree-merge" type="button" role="menuitem"' + (mergeDisabled ? ' disabled' : '') + '>' + mergeIconSvg + '<span>合并到主分支…</span></button>';
+        } else if (showCleanup) {
+          actionItems += '<button class="topbar-more-item" data-action="worktree-cleanup" type="button" role="menuitem">' + mergeIconSvg + '<span>重试 worktree 清理</span></button>';
+        }
+        actionItems += '<button class="topbar-more-item topbar-more-item-danger" data-action="delete-session" type="button" role="menuitem">' + trashIconSvg + '<span>删除当前会话</span></button>';
+
+        var divider = (hasInfoGroup && hasActionGroup) ? '<div class="topbar-more-divider" role="separator"></div>' : '';
+
+        return '<div class="topbar-more-wrap">' +
+          '<button id="topbar-more-button" class="topbar-btn square' + (open ? ' active' : '') + '" type="button" aria-label="当前会话操作" aria-haspopup="menu" aria-expanded="' + (open ? 'true' : 'false') + '" title="当前会话操作"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>' +
+          '<div id="topbar-more-menu" class="topbar-more-menu' + (open ? '' : ' hidden') + '" role="menu" aria-label="当前会话">' +
+            infoItems +
+            divider +
+            actionItems +
+          '</div>' +
+        '</div>';
       }
 
       function loadGitStatus(sessionId, options) {
@@ -2852,118 +2905,205 @@
       function renderFileExplorer(cwd) {
         var root = cwd || getConfigCwd();
         if (!root) {
-          return '<div class="file-explorer empty">No working directory configured.</div>';
+          return '<div class="file-explorer empty">未配置工作目录。</div>';
         }
         return '<div class="file-tree" id="file-tree" data-cwd="' + escapeHtml(root) + '">' +
-          '<div class="tree-loading">Loading...</div>' +
+          '<div class="tree-loading">加载中…</div>' +
         '</div>';
       }
 
-      function refreshFileExplorer() {
+      // ── File tree helpers ──
+
+      var FILE_ICON_MAP = {
+        // images
+        png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", webp: "🖼️", svg: "🖼️",
+        avif: "🖼️", bmp: "🖼️", ico: "🖼️", heic: "🖼️", heif: "🖼️",
+        // pdf / doc
+        pdf: "📕", doc: "📘", docx: "📘", odt: "📘",
+        xls: "📊", xlsx: "📊", csv: "📊", tsv: "📊",
+        ppt: "📙", pptx: "📙",
+        // video / audio
+        mp4: "🎬", webm: "🎬", mov: "🎬", mkv: "🎬", m4v: "🎬", ogv: "🎬",
+        mp3: "🎵", wav: "🎵", ogg: "🎵", m4a: "🎵", flac: "🎵", aac: "🎵", opus: "🎵",
+        // archives
+        zip: "📦", tar: "📦", gz: "📦", tgz: "📦", bz2: "📦", "7z": "📦", rar: "📦", xz: "📦",
+        // markup / docs
+        md: "📝", markdown: "📝", mdx: "📝", rst: "📝", txt: "📝", log: "📝",
+        // web / styles
+        html: "🌐", htm: "🌐", xml: "🌐",
+        css: "🎨", scss: "🎨", less: "🎨",
+        // configs
+        json: "⚙️", jsonc: "⚙️", yaml: "⚙️", yml: "⚙️", toml: "⚙️",
+        ini: "⚙️", cfg: "⚙️", conf: "⚙️", env: "⚙️", editorconfig: "⚙️",
+        // code (default 📜)
+        ts: "📜", tsx: "📜", js: "📜", jsx: "📜", mjs: "📜", cjs: "📜",
+        py: "📜", rb: "📜", go: "📜", rs: "📜", java: "📜", c: "📜", cpp: "📜",
+        h: "📜", hpp: "📜", cs: "📜", swift: "📜", kt: "📜", scala: "📜",
+        php: "📜", sh: "📜", bash: "📜", zsh: "📜", fish: "📜", lua: "📜",
+        sql: "📜", graphql: "📜", proto: "📜", vue: "📜", svelte: "📜",
+        diff: "📜", patch: "📜",
+        // fonts / binary
+        ttf: "🔤", otf: "🔤", woff: "🔤", woff2: "🔤", eot: "🔤",
+      };
+
+      function getFileIcon(item) {
+        if (!item) return "📄";
+        if (item.type === "dir") return "📁";
+        var name = (item.name || "").toLowerCase();
+        // basename-only matches first
+        if (name === "dockerfile") return "🐳";
+        if (name === "makefile") return "🛠️";
+        if (name === "license") return "📜";
+        if (name === "readme") return "📝";
+        var dot = name.lastIndexOf(".");
+        if (dot < 0 || dot === name.length - 1) return "📄";
+        var ext = name.slice(dot + 1);
+        return FILE_ICON_MAP[ext] || "📄";
+      }
+
+      function formatFileSize(bytes) {
+        if (typeof bytes !== "number" || !isFinite(bytes) || bytes < 0) return "";
+        if (bytes < 1024) return bytes + " B";
+        var kb = bytes / 1024;
+        if (kb < 1024) return (kb >= 10 ? Math.round(kb) : kb.toFixed(1)) + " KB";
+        var mb = kb / 1024;
+        if (mb < 1024) return (mb >= 10 ? Math.round(mb) : mb.toFixed(1)) + " MB";
+        var gb = mb / 1024;
+        return (gb >= 10 ? Math.round(gb) : gb.toFixed(1)) + " GB";
+      }
+
+      function formatRelativeTime(iso) {
+        if (!iso) return "";
+        var t = Date.parse(iso);
+        if (isNaN(t)) return "";
+        return new Date(t).toLocaleString();
+      }
+
+      function getEffectiveExplorerCwd() {
+        if (state.fileExplorerCwd) return state.fileExplorerCwd;
+        if (state.selectedId) {
+          var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+          if (session && session.cwd) return session.cwd;
+        }
+        return getConfigCwd();
+      }
+
+      function refreshFileExplorer(opts) {
+        opts = opts || {};
         var explorer = document.getElementById("file-explorer");
         var cwdEl = document.getElementById("file-explorer-cwd");
         if (!explorer) return;
-        // Get cwd from current session or config
-        var cwd = "";
-        if (state.selectedId) {
-          var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-          if (session) cwd = session.cwd || "";
-        }
+        var cwd = opts.cwd || getEffectiveExplorerCwd();
         if (!cwd) {
-          cwd = getConfigCwd();
-        }
-        if (!cwd) {
-          explorer.innerHTML = '<div class="file-explorer empty">No working directory.</div>';
+          explorer.innerHTML = '<div class="file-explorer empty">没有可显示的工作目录。</div>';
           return;
         }
+        state.fileExplorerCwd = cwd;
         state.fileExplorerLoading = true;
         state.allFiles = [];
-        explorer.innerHTML = '<div class="file-explorer"><div class="tree-loading" style="padding:12px;color:var(--text-muted);font-size:0.8125rem;">Loading...</div></div>';
-        // Update the cwd display
-        if (cwdEl) cwdEl.textContent = cwd;
-        // Fetch with git status
-        fetch("/api/directory?q=" + encodeURIComponent(cwd) + "&gitStatus=true", { credentials: "same-origin" })
+        state.fileExplorerTruncated = false;
+        state.fileExplorerTotal = 0;
+        explorer.innerHTML = '<div class="file-explorer"><div class="tree-loading" style="padding:12px;color:var(--text-muted);font-size:0.8125rem;">加载中…</div></div>';
+        if (cwdEl) {
+          cwdEl.textContent = cwd;
+          cwdEl.title = cwd;
+        }
+        var url = "/api/directory?q=" + encodeURIComponent(cwd) +
+          "&gitStatus=true" +
+          (state.fileExplorerShowHidden ? "&showHidden=true" : "");
+        fetch(url, { credentials: "same-origin" })
           .then(function(res) {
-            if (!res.ok) {
-              throw new Error("Failed to load directory.");
-            }
+            if (!res.ok) throw new Error("Failed to load directory.");
             return res.json();
           })
-          .then(function(items) {
+          .then(function(payload) {
             state.fileExplorerLoading = false;
+            // Backend returns { items, truncated, total }; tolerate the legacy array shape too.
+            var items, truncated, total;
+            if (Array.isArray(payload)) {
+              items = payload; truncated = false; total = payload.length;
+            } else {
+              items = (payload && payload.items) || [];
+              truncated = !!(payload && payload.truncated);
+              total = (payload && payload.total) || items.length;
+            }
             if (!items || items.length === 0) {
-              explorer.innerHTML = '<div class="file-explorer empty">Empty directory or inaccessible.</div>';
+              explorer.innerHTML = '<div class="file-explorer empty">空目录或无法访问。</div>';
               return;
             }
             state.allFiles = items;
+            state.fileExplorerTruncated = truncated;
+            state.fileExplorerTotal = total;
             filterFileTree();
           })
           .catch(function() {
             state.fileExplorerLoading = false;
-            explorer.innerHTML = '<div class="file-explorer empty">Failed to load files.</div>';
+            explorer.innerHTML = '<div class="file-explorer empty">加载失败，请检查路径或权限。</div>';
           });
       }
 
       function filterFileTree() {
         var explorer = document.getElementById("file-explorer");
-        var cwdEl = document.getElementById("file-explorer-cwd");
         if (!explorer) return;
-        var cwd = cwdEl ? cwdEl.textContent : "";
+        var cwd = state.fileExplorerCwd || "";
         if (!cwd) return;
 
         var query = state.fileSearchQuery;
         var items = state.allFiles || [];
+        var filtered = items;
 
-        // 如果没有搜索词，显示所有文件
-        if (!query) {
-          explorer.innerHTML = '<div class="file-tree" id="file-tree" data-cwd="' + escapeHtml(cwd) + '">' +
-            items.map(function(item) {
-              return renderFileTreeItem(item);
-            }).join("") +
-          '</div>';
-          attachFileTreeListeners();
+        if (query) {
+          var lowerQuery = query.toLowerCase();
+          filtered = items.filter(function(item) {
+            return item.name.toLowerCase().indexOf(lowerQuery) !== -1;
+          });
+        }
+
+        if (filtered.length === 0) {
+          explorer.innerHTML = '<div class="file-explorer empty">' + (query ? '没有找到匹配的文件' : '空目录') + '</div>';
           return;
         }
 
-        // 模糊匹配文件名（大小写不敏感）
-        var lowerQuery = query.toLowerCase();
-        var filtered = items.filter(function(item) {
-          return item.name.toLowerCase().indexOf(lowerQuery) !== -1;
-        });
-
-        if (filtered.length === 0) {
-          explorer.innerHTML = '<div class="file-explorer empty">没有找到匹配的文件</div>';
-          return;
+        var truncatedNotice = "";
+        if (!query && state.fileExplorerTruncated) {
+          var shown = items.length;
+          truncatedNotice = '<div class="tree-truncated" title="后端按字母序最多返回 ' + shown + ' 项">显示前 ' + shown + ' 项 / 共 ' + state.fileExplorerTotal + ' 项</div>';
         }
 
         explorer.innerHTML = '<div class="file-tree" id="file-tree" data-cwd="' + escapeHtml(cwd) + '">' +
           filtered.map(function(item) {
             return renderFileTreeItem(item);
           }).join("") +
-        '</div>';
+        '</div>' + truncatedNotice;
         attachFileTreeListeners();
       }
 
-      function renderFileTreeItem(item) {
+      function renderFileTreeItem(item, depth) {
+        depth = depth || 0;
         var name = escapeHtml(item.name);
         var isDir = item.type === "dir";
-        // Use clear emoji icons: 📁 for folders, 📄 for files
-        var displayIcon = isDir ? "📁" : "📄";
+        var displayIcon = getFileIcon(item);
         var toggleIcon = isDir ? "▸" : "";
         var toggleClass = isDir ? "" : " empty";
         var gitStatus = item.gitStatus;
         var statusBadge = renderGitStatusBadge(gitStatus);
-        return '<div class="tree-item" data-path="' + escapeHtml(item.path) + '" data-type="' + escapeHtml(item.type) + '">' +
+        var meta = "";
+        if (!isDir && typeof item.size === "number") {
+          meta = '<span class="tree-meta" title="大小：' + escapeHtml(formatFileSize(item.size)) +
+            (item.mtime ? '\n修改时间：' + escapeHtml(formatRelativeTime(item.mtime)) : '') +
+            '">' + escapeHtml(formatFileSize(item.size)) + '</span>';
+        }
+        return '<div class="tree-item" data-path="' + escapeHtml(item.path) + '" data-type="' + escapeHtml(item.type) + '" data-name="' + escapeHtml(item.name) + '" tabindex="0">' +
           '<span class="tree-toggle' + toggleClass + '">' + toggleIcon + '</span>' +
           '<span class="tree-icon">' + displayIcon + '</span>' +
           '<span class="tree-name">' + name + '</span>' +
+          meta +
           (statusBadge ? '<span class="git-status-badge ' + statusBadge.class + '" title="' + statusBadge.title + '">' + statusBadge.text + '</span>' : '') +
         '</div>';
       }
 
       function renderGitStatusBadge(gitStatus) {
         if (!gitStatus) return null;
-        // Priority: staged > unstaged > untracked
         if (gitStatus.staged === "added") return { text: "A", class: "git-added", title: "已暂存（新增）" };
         if (gitStatus.staged === "modified") return { text: "M", class: "git-modified", title: "已暂存（修改）" };
         if (gitStatus.staged === "deleted") return { text: "D", class: "git-deleted", title: "已暂存（删除）" };
@@ -2978,19 +3118,44 @@
         var tree = document.getElementById("file-tree");
         if (!tree) return;
         tree.querySelectorAll(".tree-item[data-type='dir']").forEach(function(item) {
-          item.addEventListener("click", function() {
+          item.addEventListener("click", function(e) {
+            // Don't toggle when click came from the meta/badge area
             toggleTreeNode(item);
           });
         });
         tree.querySelectorAll(".tree-item[data-type='file']").forEach(function(item) {
-          item.addEventListener("dblclick", function() {
-            openFilePreview(item.dataset.path);
+          var openHandler = function() { openFilePreview(item.dataset.path); };
+          item.addEventListener("click", openHandler);
+          // Keep dblclick for old muscle memory; both work.
+          item.addEventListener("dblclick", openHandler);
+        });
+        // Long-press / right-click context menu (path actions)
+        var pressTimer = null;
+        var pressFired = false;
+        tree.querySelectorAll(".tree-item").forEach(function(item) {
+          item.addEventListener("contextmenu", function(e) {
+            e.preventDefault();
+            showFileContextMenu(e.clientX, e.clientY, item);
+          });
+          item.addEventListener("touchstart", function(e) {
+            pressFired = false;
+            pressTimer = setTimeout(function() {
+              pressFired = true;
+              var t = e.touches && e.touches[0];
+              showFileContextMenu(t ? t.clientX : 0, t ? t.clientY : 0, item);
+            }, 500);
+          }, { passive: true });
+          item.addEventListener("touchend", function() {
+            if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+          });
+          item.addEventListener("touchmove", function() {
+            if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
           });
         });
       }
 
       function toggleTreeNode(item) {
-        var path = item.dataset.path;
+        var p = item.dataset.path;
         var toggle = item.querySelector(".tree-toggle");
         var children = item.nextElementSibling;
 
@@ -2998,14 +3163,24 @@
           var isOpen = children.classList.contains("open");
           children.classList.toggle("open");
           if (toggle) toggle.classList.toggle("open", !isOpen);
+          // swap folder icon between 📁 and 📂
+          var iconEl = item.querySelector(".tree-icon");
+          if (iconEl) iconEl.textContent = isOpen ? "📁" : "📂";
           return;
         }
 
-        // Load children with git status
         if (toggle) toggle.classList.add("open");
-        fetch("/api/directory?q=" + encodeURIComponent(path) + "&gitStatus=true", { credentials: "same-origin" })
+        var iconEl2 = item.querySelector(".tree-icon");
+        if (iconEl2) iconEl2.textContent = "📂";
+        var url = "/api/directory?q=" + encodeURIComponent(p) +
+          "&gitStatus=true" +
+          (state.fileExplorerShowHidden ? "&showHidden=true" : "");
+        fetch(url, { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
-          .then(function(items) {
+          .then(function(payload) {
+            var items;
+            if (Array.isArray(payload)) items = payload;
+            else items = (payload && payload.items) || [];
             var childrenDiv = document.createElement("div");
             childrenDiv.className = "tree-children open";
             if (!items || items.length === 0) {
@@ -3021,79 +3196,456 @@
           .catch(function() {});
       }
 
-      function openFilePreview(filePath) {
-        var overlay = document.createElement("div");
-        overlay.className = "file-preview-overlay";
-        overlay.innerHTML =
-          '<div class="file-preview-modal">' +
-            '<div class="file-preview-header">' +
-              '<div class="file-preview-title">' +
-                '<span>📄</span>' +
-                '<span class="file-preview-filename">Loading...</span>' +
-              '</div>' +
-              '<div class="file-preview-path" title="' + escapeHtml(filePath) + '">' + escapeHtml(filePath) + '</div>' +
-              '<button class="file-preview-close" title="Close">✕</button>' +
-            '</div>' +
-            '<div class="file-preview-body">' +
-              '<div class="file-preview-loading">Loading preview...</div>' +
-            '</div>' +
-          '</div>';
-        document.body.appendChild(overlay);
+      // Walk up to the parent directory and re-render the tree.
+      function navigateExplorerUp() {
+        var cwd = getEffectiveExplorerCwd();
+        if (!cwd) return;
+        var parent = cwd.replace(/\/+$/, "").replace(/\/[^\/]+$/, "");
+        if (!parent) parent = "/";
+        if (parent === cwd) return;
+        refreshFileExplorer({ cwd: parent });
+      }
 
-        var closeBtn = overlay.querySelector(".file-preview-close");
-        var closeModal = function() {
-          overlay.remove();
-          document.removeEventListener("keydown", escHandler);
-        };
-        closeBtn.addEventListener("click", closeModal);
-        overlay.addEventListener("click", function(e) {
-          if (e.target === overlay) closeModal();
+      // Toggle the show-hidden flag and persist it.
+      function toggleExplorerHidden() {
+        state.fileExplorerShowHidden = !state.fileExplorerShowHidden;
+        try { localStorage.setItem("wand-file-show-hidden", state.fileExplorerShowHidden ? "1" : "0"); } catch (e) {}
+        var btn = document.getElementById("file-explorer-toggle-hidden");
+        if (btn) {
+          btn.classList.toggle("active", state.fileExplorerShowHidden);
+          btn.setAttribute("aria-pressed", state.fileExplorerShowHidden ? "true" : "false");
+          btn.textContent = state.fileExplorerShowHidden ? "👁" : "👁‍🗨";
+          btn.title = state.fileExplorerShowHidden ? "隐藏点开头文件" : "显示隐藏文件";
+        }
+        refreshFileExplorer();
+      }
+
+      function appendToComposer(text) {
+        var inputBox = document.getElementById("input-box");
+        if (!inputBox) return false;
+        var current = inputBox.value || "";
+        var sep = current && !current.endsWith(" ") && !current.endsWith("\n") ? " " : "";
+        inputBox.value = current + sep + text;
+        inputBox.dispatchEvent(new Event("input", { bubbles: true }));
+        try { inputBox.focus(); inputBox.setSelectionRange(inputBox.value.length, inputBox.value.length); } catch (e) {}
+        return true;
+      }
+
+      function copyTextSafely(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          return navigator.clipboard.writeText(text).then(function() { return true; }).catch(function() { return fallback(); });
+        }
+        return Promise.resolve(fallback());
+        function fallback() {
+          try {
+            var ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.position = "fixed";
+            ta.style.left = "-9999px";
+            document.body.appendChild(ta);
+            ta.select();
+            var ok = document.execCommand("copy");
+            document.body.removeChild(ta);
+            return ok;
+          } catch (e) { return false; }
+        }
+      }
+
+      function showToastIfPossible(msg) {
+        if (typeof window.showToast === "function") { window.showToast(msg); return; }
+        // Lightweight transient toast.
+        var t = document.createElement("div");
+        t.className = "wand-mini-toast";
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(function() { t.classList.add("show"); }, 10);
+        setTimeout(function() {
+          t.classList.remove("show");
+          setTimeout(function() { t.remove(); }, 220);
+        }, 1600);
+      }
+
+      function dismissFileContextMenu() {
+        var menu = document.getElementById("file-context-menu");
+        if (menu) menu.remove();
+        document.removeEventListener("click", dismissFileContextMenu, true);
+        document.removeEventListener("scroll", dismissFileContextMenu, true);
+      }
+
+      function showFileContextMenu(x, y, item) {
+        dismissFileContextMenu();
+        var fullPath = item.dataset.path || "";
+        var type = item.dataset.type || "file";
+        var cwd = state.fileExplorerCwd || "";
+        var relativePath = fullPath;
+        if (cwd && fullPath.indexOf(cwd) === 0) {
+          relativePath = fullPath.slice(cwd.length).replace(/^\/+/, "") || ".";
+        }
+
+        var menu = document.createElement("div");
+        menu.id = "file-context-menu";
+        menu.className = "file-context-menu";
+        var actions = [];
+        if (type === "file") {
+          actions.push({ label: "打开预览", icon: "👁", run: function() { openFilePreview(fullPath); } });
+        } else {
+          actions.push({ label: "进入此目录", icon: "📂", run: function() { refreshFileExplorer({ cwd: fullPath }); } });
+        }
+        actions.push({ label: "复制完整路径", icon: "📋", run: function() {
+          copyTextSafely(fullPath).then(function() { showToastIfPossible("已复制路径"); });
+        }});
+        if (relativePath && relativePath !== fullPath) {
+          actions.push({ label: "复制相对路径", icon: "📋", run: function() {
+            copyTextSafely(relativePath).then(function() { showToastIfPossible("已复制相对路径"); });
+          }});
+        }
+        actions.push({ label: "粘贴路径到输入框", icon: "✏️", run: function() {
+          if (appendToComposer(fullPath)) showToastIfPossible("已粘贴到输入框");
+        }});
+        if (type === "file") {
+          actions.push({ label: "下载文件", icon: "⬇", run: function() {
+            var a = document.createElement("a");
+            a.href = "/api/file-raw?download=1&path=" + encodeURIComponent(fullPath);
+            a.rel = "noopener";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          }});
+        }
+
+        menu.innerHTML = actions.map(function(act, i) {
+          return '<button type="button" class="file-context-menu-item" data-idx="' + i + '"><span class="ctx-icon">' + act.icon + '</span><span class="ctx-label">' + escapeHtml(act.label) + '</span></button>';
+        }).join("");
+        document.body.appendChild(menu);
+
+        // Position with viewport-bound clamp
+        var vw = window.innerWidth;
+        var vh = window.innerHeight;
+        var rect = menu.getBoundingClientRect();
+        var left = Math.min(x, vw - rect.width - 8);
+        var top = Math.min(y, vh - rect.height - 8);
+        menu.style.left = Math.max(8, left) + "px";
+        menu.style.top = Math.max(8, top) + "px";
+
+        menu.querySelectorAll(".file-context-menu-item").forEach(function(btn) {
+          btn.addEventListener("click", function(ev) {
+            ev.stopPropagation();
+            var idx = parseInt(btn.dataset.idx, 10);
+            dismissFileContextMenu();
+            if (actions[idx]) actions[idx].run();
+          });
         });
-        var escHandler = function(e) {
-          if (e.key === "Escape") closeModal();
-        };
-        document.addEventListener("keydown", escHandler);
+
+        // Close on outside click / scroll
+        setTimeout(function() {
+          document.addEventListener("click", dismissFileContextMenu, true);
+          document.addEventListener("scroll", dismissFileContextMenu, true);
+        }, 0);
+      }
+
+      // Module-level handle for keyboard nav between siblings.
+      var _activeFilePreview = null;
+
+      function openFilePreview(filePath) {
+        // If a modal is already open, just swap content (used by ←/→ navigation).
+        var overlay = _activeFilePreview && _activeFilePreview.overlay;
+        if (!overlay) {
+          overlay = document.createElement("div");
+          overlay.className = "file-preview-overlay";
+          overlay.innerHTML =
+            '<div class="file-preview-modal" tabindex="-1">' +
+              '<div class="file-preview-header">' +
+                '<div class="file-preview-title">' +
+                  '<span class="file-preview-icon">📄</span>' +
+                  '<span class="file-preview-filename">加载中…</span>' +
+                '</div>' +
+                '<div class="file-preview-path" title=""></div>' +
+                '<div class="file-preview-toolbar"></div>' +
+                '<button class="file-preview-close" title="关闭 (Esc)" aria-label="关闭">✕</button>' +
+              '</div>' +
+              '<div class="file-preview-body">' +
+                '<div class="file-preview-loading">加载预览…</div>' +
+              '</div>' +
+            '</div>';
+          document.body.appendChild(overlay);
+
+          var closeBtn = overlay.querySelector(".file-preview-close");
+          var closeModal = function() {
+            overlay.remove();
+            document.removeEventListener("keydown", keyHandler);
+            _activeFilePreview = null;
+          };
+          closeBtn.addEventListener("click", closeModal);
+          overlay.addEventListener("click", function(e) {
+            if (e.target === overlay) closeModal();
+          });
+          var keyHandler = function(e) {
+            if (e.key === "Escape") { closeModal(); return; }
+            if (!_activeFilePreview) return;
+            if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+            if (e.key === "ArrowLeft") { e.preventDefault(); navigatePreviewSibling(-1); }
+            else if (e.key === "ArrowRight") { e.preventDefault(); navigatePreviewSibling(1); }
+          };
+          document.addEventListener("keydown", keyHandler);
+
+          _activeFilePreview = { overlay: overlay, close: closeModal, path: filePath, data: null };
+        } else {
+          _activeFilePreview.path = filePath;
+          // Reset header / body for the new file.
+          var titleEl = overlay.querySelector(".file-preview-title");
+          if (titleEl) {
+            titleEl.innerHTML = '<span class="file-preview-icon">📄</span><span class="file-preview-filename">加载中…</span>';
+          }
+          var toolbarEl = overlay.querySelector(".file-preview-toolbar");
+          if (toolbarEl) toolbarEl.innerHTML = "";
+          var pathEl = overlay.querySelector(".file-preview-path");
+          if (pathEl) { pathEl.textContent = ""; pathEl.title = ""; }
+          var bodyReset = overlay.querySelector(".file-preview-body");
+          if (bodyReset) bodyReset.innerHTML = '<div class="file-preview-loading">加载预览…</div>';
+        }
+
+        var pathDisplayEl = overlay.querySelector(".file-preview-path");
+        if (pathDisplayEl) {
+          pathDisplayEl.textContent = filePath;
+          pathDisplayEl.title = filePath;
+        }
 
         fetch("/api/file-preview?path=" + encodeURIComponent(filePath), { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data.error) {
-              var body = overlay.querySelector(".file-preview-body");
-              body.innerHTML = '<div class="file-preview-error"><span class="preview-error-icon">⚠</span><span>' + escapeHtml(data.error) + '</span></div>';
+          .then(function(res) {
+            return res.json().then(function(data) { return { ok: res.ok, status: res.status, data: data }; });
+          })
+          .then(function(result) {
+            var body = overlay.querySelector(".file-preview-body");
+            if (!result.ok || (result.data && result.data.error)) {
+              var msg = (result.data && result.data.error) || "加载失败";
+              if (result.status === 413 && result.data && result.data.size) {
+                msg += "（文件大小：" + formatFileSize(result.data.size) + "）";
+              }
+              body.innerHTML = '<div class="file-preview-error"><span class="preview-error-icon">⚠</span><span>' + escapeHtml(msg) + '</span></div>';
+              // Even when text preview is rejected for size, still allow download.
+              if (result.status === 413) {
+                renderPreviewToolbar(overlay, {
+                  kind: "binary",
+                  path: filePath,
+                  name: filePath.split("/").pop() || filePath,
+                  ext: "",
+                  size: (result.data && result.data.size) || 0,
+                });
+              }
               return;
             }
-            renderPreviewContent(overlay, data);
+            _activeFilePreview.data = result.data;
+            renderPreviewContent(overlay, result.data);
           })
-          .catch(function(err) {
+          .catch(function() {
             var body = overlay.querySelector(".file-preview-body");
-            body.innerHTML = '<div class="file-preview-error"><span class="preview-error-icon">⚠</span><span>Failed to load preview</span></div>';
+            body.innerHTML = '<div class="file-preview-error"><span class="preview-error-icon">⚠</span><span>加载预览失败</span></div>';
           });
       }
 
-      function renderPreviewContent(overlay, data) {
-        var filename = overlay.querySelector(".file-preview-filename");
-        filename.textContent = data.name;
+      // Move to the previous/next file sibling in the current explorer view.
+      function navigatePreviewSibling(direction) {
+        if (!_activeFilePreview) return;
+        var siblings = (state.allFiles || []).filter(function(item) { return item.type === "file"; });
+        if (!siblings.length) return;
+        var currentPath = _activeFilePreview.path;
+        var idx = -1;
+        for (var i = 0; i < siblings.length; i++) {
+          if (siblings[i].path === currentPath) { idx = i; break; }
+        }
+        if (idx < 0) return;
+        var nextIdx = (idx + direction + siblings.length) % siblings.length;
+        var nextPath = siblings[nextIdx].path;
+        if (nextPath && nextPath !== currentPath) openFilePreview(nextPath);
+      }
 
+      function renderPreviewContent(overlay, data) {
+        var filenameEl = overlay.querySelector(".file-preview-filename");
+        if (filenameEl) filenameEl.textContent = data.name;
+        var iconEl = overlay.querySelector(".file-preview-icon");
+        if (iconEl) iconEl.textContent = getFileIcon({ name: data.name, type: "file" });
+
+        // Title-bar badge: language for text, kind label for media/binary
+        var titleEl = overlay.querySelector(".file-preview-title");
+        var existingBadge = overlay.querySelector(".file-preview-lang");
+        if (existingBadge) existingBadge.remove();
         var langBadge = document.createElement("span");
         langBadge.className = "file-preview-lang";
-        langBadge.textContent = data.lang || data.ext.replace(".", "");
-        overlay.querySelector(".file-preview-title").appendChild(langBadge);
+        var labelMap = { image: "图片", pdf: "PDF", video: "视频", audio: "音频", binary: "二进制" };
+        if (data.kind === "text") {
+          langBadge.textContent = data.lang || (data.ext || "").replace(".", "") || "text";
+        } else {
+          langBadge.textContent = labelMap[data.kind] || (data.ext || "").replace(".", "") || data.kind;
+        }
+        if (titleEl) titleEl.appendChild(langBadge);
+
+        renderPreviewToolbar(overlay, data);
 
         var body = overlay.querySelector(".file-preview-body");
+        body.innerHTML = "";
+        body.classList.remove("kind-text", "kind-image", "kind-pdf", "kind-video", "kind-audio", "kind-binary");
+        body.classList.add("kind-" + (data.kind || "text"));
 
-        if (data.lang === "markdown") {
-          body.innerHTML = '<div class="markdown-preview">' + renderMarkdownPreview(data.content) + '</div>';
+        if (data.kind === "image") {
+          renderImagePreview(body, data);
+        } else if (data.kind === "pdf") {
+          renderPdfPreview(body, data);
+        } else if (data.kind === "video") {
+          renderVideoPreview(body, data);
+        } else if (data.kind === "audio") {
+          renderAudioPreview(body, data);
+        } else if (data.kind === "binary") {
+          renderBinaryPreview(body, data);
+        } else if ((data.lang === "markdown") || /\.(md|markdown|mdx)$/i.test(data.name || "")) {
+          body.innerHTML = '<div class="markdown-preview">' + renderMarkdownPreview(data.content || "") + '</div>';
         } else {
-          var highlighted = highlightCodePreview(data.content, data.lang);
-          var lines = highlighted.split("\n");
-          var lineNums = lines.map(function(_, i) { return i + 1; });
-
-          body.innerHTML =
-            '<div class="code-preview-wrapper">' +
-              '<div class="code-preview-lines">' + lineNums.join("\n") + '</div>' +
-              '<div class="code-preview-content"><pre>' + lines.join("\n") + '</pre></div>' +
-            '</div>';
+          renderTextPreview(body, data);
         }
+      }
+
+      function renderTextPreview(body, data) {
+        var highlighted = highlightCodePreview(data.content || "", data.lang);
+        var lines = highlighted.split("\n");
+        var lineNums = lines.map(function(_, i) { return i + 1; });
+        body.innerHTML =
+          '<div class="code-preview-wrapper">' +
+            '<div class="code-preview-lines">' + lineNums.join("\n") + '</div>' +
+            '<div class="code-preview-content"><pre>' + lines.join("\n") + '</pre></div>' +
+          '</div>';
+      }
+
+      function renderImagePreview(body, data) {
+        var src = "/api/file-raw?path=" + encodeURIComponent(data.path);
+        body.innerHTML =
+          '<div class="image-preview-wrapper">' +
+            '<img class="image-preview-img" src="' + src + '" alt="' + escapeHtml(data.name) + '" />' +
+          '</div>';
+        var img = body.querySelector(".image-preview-img");
+        if (!img) return;
+        var zoomed = false;
+        img.addEventListener("click", function() {
+          zoomed = !zoomed;
+          img.classList.toggle("zoomed", zoomed);
+        });
+      }
+
+      function renderPdfPreview(body, data) {
+        var src = "/api/file-raw?path=" + encodeURIComponent(data.path);
+        body.innerHTML =
+          '<iframe class="pdf-preview-frame" src="' + src + '" title="' + escapeHtml(data.name) + '"></iframe>';
+      }
+
+      function renderVideoPreview(body, data) {
+        var src = "/api/file-raw?path=" + encodeURIComponent(data.path);
+        body.innerHTML =
+          '<div class="media-preview-wrapper">' +
+            '<video class="media-preview-video" controls preload="metadata" src="' + src + '">您的浏览器不支持 video 标签。</video>' +
+            '<div class="media-preview-meta">' + escapeHtml(formatFileSize(data.size)) + '</div>' +
+          '</div>';
+      }
+
+      function renderAudioPreview(body, data) {
+        var src = "/api/file-raw?path=" + encodeURIComponent(data.path);
+        body.innerHTML =
+          '<div class="media-preview-wrapper audio">' +
+            '<div class="media-preview-icon">🎵</div>' +
+            '<div class="media-preview-name">' + escapeHtml(data.name) + '</div>' +
+            '<audio class="media-preview-audio" controls preload="metadata" src="' + src + '">您的浏览器不支持 audio 标签。</audio>' +
+            '<div class="media-preview-meta">' + escapeHtml(formatFileSize(data.size)) + '</div>' +
+          '</div>';
+      }
+
+      function renderBinaryPreview(body, data) {
+        var rawUrl = "/api/file-raw?download=1&path=" + encodeURIComponent(data.path);
+        body.innerHTML =
+          '<div class="binary-preview-card">' +
+            '<div class="binary-preview-icon">📦</div>' +
+            '<div class="binary-preview-name">' + escapeHtml(data.name) + '</div>' +
+            '<div class="binary-preview-meta">' +
+              '<span>' + escapeHtml((data.ext || "").replace(/^\./, "") || "未知格式") + '</span>' +
+              '<span>·</span>' +
+              '<span>' + escapeHtml(formatFileSize(data.size)) + '</span>' +
+            '</div>' +
+            '<div class="binary-preview-path" title="' + escapeHtml(data.path) + '">' + escapeHtml(data.path) + '</div>' +
+            '<div class="binary-preview-actions">' +
+              '<a class="binary-preview-btn" href="' + rawUrl + '" download="' + escapeHtml(data.name) + '">下载文件</a>' +
+              '<button class="binary-preview-btn" type="button" data-action="view-cat">在终端中查看</button>' +
+            '</div>' +
+          '</div>';
+        var catBtn = body.querySelector('[data-action="view-cat"]');
+        if (catBtn) catBtn.addEventListener("click", function() {
+          if (appendToComposer('cat -- "' + data.path + '"')) {
+            showToastIfPossible("命令已粘贴到输入框");
+          }
+        });
+      }
+
+      function renderPreviewToolbar(overlay, data) {
+        var bar = overlay.querySelector(".file-preview-toolbar");
+        if (!bar) return;
+        bar.innerHTML = "";
+        var buttons = [];
+
+        // Common actions across all kinds
+        buttons.push({ label: "复制路径", icon: "📋", action: function() {
+          copyTextSafely(data.path).then(function() { showToastIfPossible("已复制路径"); });
+        }});
+        buttons.push({ label: "粘贴到输入框", icon: "✏️", action: function() {
+          if (appendToComposer(data.path)) showToastIfPossible("已粘贴到输入框");
+        }});
+        buttons.push({ label: "下载", icon: "⬇", action: function() {
+          var a = document.createElement("a");
+          a.href = "/api/file-raw?download=1&path=" + encodeURIComponent(data.path);
+          a.download = data.name || "";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }});
+
+        if (data.kind === "text") {
+          buttons.push({ label: "复制全部", icon: "📄", action: function() {
+            copyTextSafely(data.content || "").then(function() { showToastIfPossible("已复制内容"); });
+          }});
+          buttons.push({ label: "自动换行", icon: "↩", toggleClass: "toolbar-active",
+            getInitial: function() {
+              var pre = overlay.querySelector(".code-preview-content pre");
+              return pre && pre.classList.contains("wrap");
+            },
+            action: function(btn) {
+              var pre = overlay.querySelector(".code-preview-content pre");
+              if (!pre) return;
+              pre.classList.toggle("wrap");
+              btn.classList.toggle("toolbar-active", pre.classList.contains("wrap"));
+            }
+          });
+          buttons.push({ label: "字号 −", icon: "A−", action: function() { adjustPreviewFontSize(overlay, -1); }});
+          buttons.push({ label: "字号 +", icon: "A+", action: function() { adjustPreviewFontSize(overlay, +1); }});
+        }
+
+        buttons.forEach(function(b) {
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "file-preview-toolbar-btn";
+          btn.title = b.label;
+          btn.setAttribute("aria-label", b.label);
+          btn.innerHTML = '<span class="toolbar-icon">' + b.icon + '</span>';
+          if (b.getInitial && b.getInitial()) btn.classList.add("toolbar-active");
+          btn.addEventListener("click", function(ev) {
+            ev.stopPropagation();
+            b.action(btn);
+          });
+          bar.appendChild(btn);
+        });
+      }
+
+      function adjustPreviewFontSize(overlay, delta) {
+        var pre = overlay.querySelector(".code-preview-content pre");
+        var nums = overlay.querySelector(".code-preview-lines");
+        if (!pre) return;
+        var current = parseFloat(getComputedStyle(pre).fontSize) || 13;
+        var next = Math.max(10, Math.min(22, current + delta));
+        pre.style.fontSize = next + "px";
+        if (nums) nums.style.fontSize = next + "px";
       }
 
       function highlightCodePreview(code, lang) {
@@ -4420,27 +4972,28 @@
             topbarMoreBtn.classList.remove("active");
             topbarMoreBtn.setAttribute("aria-expanded", "false");
             switch (action) {
-              case "settings":
-                openSettingsModal();
+              case "copy-claude-session-id":
+                copySelectedSessionField("claudeSessionId", "Claude 会话 ID 已复制");
                 break;
-              case "refresh":
-                window.location.reload();
+              case "copy-cwd":
+                copySelectedSessionField("cwd", "工作目录已复制");
                 break;
-              case "install":
-                if (state.deferredPrompt) {
-                  state.deferredPrompt.prompt();
-                  state.deferredPrompt.userChoice.then(function() {
-                    state.deferredPrompt = null;
-                    state.showInstallPrompt = false;
-                    updateInstallPrompt();
-                  });
+              case "copy-session-id":
+                copySelectedSessionField("id", "会话 ID 已复制");
+                break;
+              case "worktree-merge":
+                if (state.selectedId) openWorktreeMergeModal(state.selectedId);
+                break;
+              case "worktree-cleanup":
+                if (state.selectedId) retryWorktreeCleanup(state.selectedId);
+                break;
+              case "delete-session":
+                if (state.selectedId) {
+                  var pendingId = state.selectedId;
+                  if (confirm("确定要删除当前会话吗？")) {
+                    deleteSession(pendingId);
+                  }
                 }
-                break;
-              case "logout":
-                logout();
-                break;
-              case "switch-server":
-                switchServer();
                 break;
             }
           });
@@ -4501,7 +5054,11 @@
           setChatAutoFollow(true, { scrollNow: true, smooth: true });
         });
         var fileRefresh = document.getElementById("file-explorer-refresh");
-        if (fileRefresh) fileRefresh.addEventListener("click", refreshFileExplorer);
+        if (fileRefresh) fileRefresh.addEventListener("click", function() { refreshFileExplorer(); });
+        var fileUp = document.getElementById("file-explorer-up");
+        if (fileUp) fileUp.addEventListener("click", navigateExplorerUp);
+        var fileToggleHidden = document.getElementById("file-explorer-toggle-hidden");
+        if (fileToggleHidden) fileToggleHidden.addEventListener("click", toggleExplorerHidden);
 
         // File search
         var fileSearchInput = document.getElementById("file-search-input");
@@ -5072,6 +5629,20 @@
               }
             });
         }
+      }
+
+      /** Copy a string field of the currently selected session to clipboard. */
+      function copySelectedSessionField(field, successMsg) {
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!session) return;
+        var value = session[field];
+        if (!value) {
+          showToast("当前会话没有可复制的内容。", "error");
+          return;
+        }
+        copyToClipboard(String(value), null, function() {
+          showToast(successMsg || "已复制", "info");
+        });
       }
 
       /** Copy Claude session ID from badge to clipboard */

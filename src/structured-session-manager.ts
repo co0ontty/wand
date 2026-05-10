@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import type { query as SdkQueryFn, Options as SdkOptions, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query as sdkQuery, type Options as SdkOptions, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { prepareSessionWorktree } from "./git-worktree.js";
 
@@ -159,6 +159,74 @@ function shouldAutoApproveForMode(mode: ExecutionMode): boolean {
   return mode === "full-access" || mode === "managed" || mode === "auto-edit";
 }
 
+/**
+ * Root 模式下绕过权限的工具白名单。Claude CLI 拒绝以 root 身份用 bypassPermissions，
+ * 退而求其次用 acceptEdits + 显式 allowedTools 覆盖 CWD 之外的路径。
+ */
+const ROOT_FALLBACK_ALLOWED_TOOLS = [
+  "Bash", "Edit", "Write", "Read", "Glob", "Grep", "NotebookEdit", "WebFetch", "WebSearch",
+];
+
+/** 我们实际用到的权限子集——SDK PermissionMode 还包括 plan/dontAsk/auto 等，wand 用不上。 */
+type WandPermissionMode = "default" | "acceptEdits" | "bypassPermissions";
+
+interface PermissionPolicy {
+  permissionMode: WandPermissionMode;
+  /** Root + (bypass|accept) 才有值；其它情况 undefined。 */
+  allowedTools: string[] | undefined;
+}
+
+/**
+ * 把 (执行模式, 自动批准开关) 映射成 Claude CLI / SDK 的权限决策。
+ * CLI runner 把它转成 --permission-mode / --allowedTools flag，
+ * SDK runner 直接塞进 Options。两边的决策规则保持一字不差。
+ */
+function derivePermissionPolicy(mode: ExecutionMode, autoApprove: boolean): PermissionPolicy {
+  const shouldBypass = autoApprove || mode === "full-access" || mode === "managed";
+  const shouldAcceptEdits = mode === "auto-edit";
+
+  if (!isRunningAsRoot()) {
+    if (shouldBypass) return { permissionMode: "bypassPermissions", allowedTools: undefined };
+    if (shouldAcceptEdits) return { permissionMode: "acceptEdits", allowedTools: undefined };
+    return { permissionMode: "default", allowedTools: undefined };
+  }
+
+  if (shouldBypass || shouldAcceptEdits) {
+    return { permissionMode: "acceptEdits", allowedTools: ROOT_FALLBACK_ALLOWED_TOOLS };
+  }
+  return { permissionMode: "default", allowedTools: undefined };
+}
+
+/**
+ * 拼装要追加到系统提示词里的片段：托管模式的自主决策提示 + 用户配置的语言偏好。
+ * CLI runner 每段单独 push 一对 `--append-system-prompt <part>` flag，
+ * SDK runner 用 "\n\n" 串成一个 appendSystemPrompt 字符串塞 Options。
+ * 文本统一到这里维护，避免两个 runner 各抄一份导致漂移。
+ */
+function buildAppendSystemPromptParts(language: string | undefined, mode: ExecutionMode): string[] {
+  const trimmedLanguage = language?.trim();
+  const isChinese = trimmedLanguage === "中文";
+  const parts: string[] = [];
+
+  if (mode === "managed") {
+    parts.push(
+      isChinese
+        ? "你正在完全托管的自主模式下运行。用户可能无法及时回复问题或确认。你必须独立做出所有决策——自行选择最佳方案，而不是向用户询问偏好、确认或澄清。如果有多种可行方案，选择你认为最合适的并继续执行。除非任务本身存在根本性的歧义且无法合理推断，否则不要等待用户输入。果断行动，自主决策。"
+        : "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.",
+    );
+  }
+
+  if (trimmedLanguage) {
+    parts.push(
+      isChinese
+        ? "请使用中文回复。所有解释、注释和对话文本都使用中文。"
+        : `Please respond in ${trimmedLanguage}. Use ${trimmedLanguage} for all your explanations, comments, and conversational text.`,
+    );
+  }
+
+  return parts;
+}
+
 function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["data"] {
   return {
     output: snapshot.output,
@@ -193,6 +261,12 @@ export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   private readonly pendingChildren = new Map<string, ChildProcess>();
   private readonly pendingSdkAbort = new Map<string, AbortController>();
+  /**
+   * Active SDK Query handle per session, kept around so we can call
+   * `query.interrupt()` for a graceful stop instead of aborting via signal.
+   * Only populated while an SDK call is in flight.
+   */
+  private readonly pendingSdkQueries = new Map<string, { interrupt(): Promise<void> }>();
   private readonly interruptedWith = new Map<string, string>();
   /** Last wall-clock time (ms) we did a full saveSession for a streaming session. */
   private readonly lastStreamSaveAt = new Map<string, number>();
@@ -398,6 +472,10 @@ export class StructuredSessionManager {
       } else if (opts?.interrupt) {
         this.interruptedWith.set(id, prompt);
         try { child.kill("SIGTERM"); } catch (_err) { /* ignore */ }
+        const sdkQueryHandle = this.pendingSdkQueries.get(id);
+        if (sdkQueryHandle) {
+          void sdkQueryHandle.interrupt().catch(() => { /* ignore */ });
+        }
         const sdkAbort = this.pendingSdkAbort.get(id);
         if (sdkAbort) sdkAbort.abort();
         return session;
@@ -460,9 +538,14 @@ export class StructuredSessionManager {
       data: { status: "running", sessionKind: "structured", queuedMessages: updated.queuedMessages, structuredState: updated.structuredState },
     });
 
-    // 续接 AskUserQuestion 时给 Claude 加上下文，避免它把刚才悬挂的 tool_use 当作
-    // 异常重试。结构化模式 (claude -p) 没有 tool_result 回传通道，所以用文本告知。
-    const claudePrompt = pendingAsk
+    // 续接 AskUserQuestion 的两条不同路线：
+    //   - CLI runner (`claude -p`)：stdin 是 ignore，没有 tool_result 回传通道，
+    //     只能把答案当作普通文本塞回去，靠提示词让 Claude 自己脑补"这是工具回答"。
+    //   - SDK runner：streaming input mode 下 prompt 是 AsyncIterable，可以把
+    //     用户答案直接 yield 成真正的 tool_result block，对 Claude 来说就是标准
+    //     的工具结果，不需要任何 hack。runner 自己从 session.messages 末尾读取
+    //     新加的 userTurn，所以传原始 prompt 即可。
+    const cliClaudePrompt = pendingAsk
       ? `[对刚才 AskUserQuestion 工具的回答 — 结构化模式不支持工具结果回传，下面是用户从选项中的选择]\n${prompt}`
       : prompt;
 
@@ -470,9 +553,9 @@ export class StructuredSessionManager {
       if ((updated.provider ?? "claude") === "codex") {
         await this.runCodexStreaming(id, updated, prompt);
       } else if (this.config.structuredRunner === "sdk") {
-        await this.runClaudeSdkStreaming(id, updated, claudePrompt);
+        await this.runClaudeSdkStreaming(id, updated, prompt);
       } else {
-        await this.runClaudeStreaming(id, updated, claudePrompt);
+        await this.runClaudeStreaming(id, updated, cliClaudePrompt);
       }
       const finished = this.requireSession(id);
       return finished;
@@ -586,6 +669,13 @@ export class StructuredSessionManager {
       child.kill();
       this.pendingChildren.delete(id);
     }
+    // SDK runner：先尝试 query.interrupt() 优雅停止，失败再走 abort。
+    // 两个都清掉避免后续重复操作。
+    const sdkQuery = this.pendingSdkQueries.get(id);
+    if (sdkQuery) {
+      void sdkQuery.interrupt().catch(() => { /* ignore */ });
+      this.pendingSdkQueries.delete(id);
+    }
     const sdkAbort = this.pendingSdkAbort.get(id);
     if (sdkAbort) {
       sdkAbort.abort();
@@ -614,6 +704,11 @@ export class StructuredSessionManager {
     if (child) {
       child.kill();
       this.pendingChildren.delete(id);
+    }
+    const sdkQuery = this.pendingSdkQueries.get(id);
+    if (sdkQuery) {
+      void sdkQuery.interrupt().catch(() => { /* ignore */ });
+      this.pendingSdkQueries.delete(id);
     }
     const sdkAbort = this.pendingSdkAbort.get(id);
     if (sdkAbort) {
@@ -753,31 +848,8 @@ export class StructuredSessionManager {
   // ---------------------------------------------------------------------------
   // CLI argument construction
   // ---------------------------------------------------------------------------
-  private buildPermissionArgs(mode: ExecutionMode, autoApprove: boolean): string[] {
-    const shouldBypass = autoApprove || mode === "full-access" || mode === "managed";
-    const shouldAcceptEdits = mode === "auto-edit";
-
-    if (!isRunningAsRoot()) {
-      if (shouldBypass) {
-        return ["--permission-mode", "bypassPermissions"];
-      }
-      if (shouldAcceptEdits) {
-        return ["--permission-mode", "acceptEdits"];
-      }
-      return [];
-    }
-
-    // Root: Claude CLI refuses bypassPermissions.
-    // acceptEdits auto-approves within CWD; --allowedTools extends to all paths.
-    if (shouldBypass || shouldAcceptEdits) {
-      return [
-        "--permission-mode", "acceptEdits",
-        "--allowedTools", "Bash", "Edit", "Write", "Read", "Glob", "Grep",
-        "NotebookEdit", "WebFetch", "WebSearch",
-      ];
-    }
-    return [];
-  }
+  // claude CLI 的权限/系统提示 flag 由模块级 derivePermissionPolicy() +
+  // buildAppendSystemPromptParts() 派生，定义在文件顶部，与 SDK runner 共用。
 
   private buildCodexArgs(session: SessionSnapshot): string[] {
     const args = ["exec", "--json", "--color", "never"];
@@ -1099,32 +1171,22 @@ export class StructuredSessionManager {
     return new Promise<void>((resolve, reject) => {
       const args = ["-p", "--verbose", "--output-format", "stream-json"];
 
-      // Add permission args based on mode + autoApprovePermissions toggle
-      const permArgs = this.buildPermissionArgs(session.mode, session.autoApprovePermissions ?? false);
-      args.push(...permArgs);
-
-      // Append language-aware system prompts
-      const language = this.config.language?.trim();
-      const isChinese = language === "中文";
-
-      // In managed mode, append autonomous system prompt
-      if (session.mode === "managed") {
-        args.push(
-          "--append-system-prompt",
-          isChinese
-            ? "你正在完全托管的自主模式下运行。用户可能无法及时回复问题或确认。你必须独立做出所有决策——自行选择最佳方案，而不是向用户询问偏好、确认或澄清。如果有多种可行方案，选择你认为最合适的并继续执行。除非任务本身存在根本性的歧义且无法合理推断，否则不要等待用户输入。果断行动，自主决策。"
-            : "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.",
-        );
+      // 权限策略：决策规则与 SDK runner 共享 derivePermissionPolicy()，CLI 这边把
+      // 结果转成对应的 flag。--allowedTools 是 commander 的 variadic（<tools...>），
+      // 紧跟其后的所有非 flag 形 token 都会被吞进工具列表，因此后面任何位置参数
+      // 都得是 -- 开头的 flag——下面追加 --append-system-prompt / --model / --resume
+      // 都满足这个条件。
+      const permPolicy = derivePermissionPolicy(session.mode, session.autoApprovePermissions ?? false);
+      if (permPolicy.permissionMode !== "default") {
+        args.push("--permission-mode", permPolicy.permissionMode);
+      }
+      if (permPolicy.allowedTools) {
+        args.push("--allowedTools", ...permPolicy.allowedTools);
       }
 
-      // Append language preference if configured
-      if (language) {
-        args.push(
-          "--append-system-prompt",
-          isChinese
-            ? "请使用中文回复。所有解释、注释和对话文本都使用中文。"
-            : `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`,
-        );
+      // 追加系统提示词（托管模式自主决策 + 语言偏好），文本与 SDK runner 共享。
+      for (const part of buildAppendSystemPromptParts(this.config.language, session.mode)) {
+        args.push("--append-system-prompt", part);
       }
 
       const modelChoice = session.selectedModel?.trim();
@@ -1573,62 +1635,16 @@ export class StructuredSessionManager {
    * payloads for incremental text/thinking/tool_use updates, followed by a final
    * SDKAssistantMessage with the authoritative complete content.
    */
-  private runClaudeSdkStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      void this._runClaudeSdkStreamingAsync(sessionId, session, prompt).then(resolve, reject);
-    });
-  }
-
-  private async _runClaudeSdkStreamingAsync(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
-    let sdkQuery: typeof SdkQueryFn;
-    try {
-      const sdkMod = await import("@anthropic-ai/claude-agent-sdk");
-      sdkQuery = sdkMod.query as typeof SdkQueryFn;
-    } catch {
-      throw new Error("@anthropic-ai/claude-agent-sdk 未安装，无法使用 SDK runner。");
-    }
-
+  private async runClaudeSdkStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
     const abortController = new AbortController();
     this.pendingSdkAbort.set(sessionId, abortController);
 
     const isManaged = session.mode === "managed";
     let killedForAskUserQuestion = false;
 
-    // Derive permission mode (mirrors buildPermissionArgs logic)
-    const shouldBypass = (session.autoApprovePermissions ?? false) || session.mode === "full-access" || session.mode === "managed";
-    const shouldAcceptEdits = session.mode === "auto-edit";
-
-    let permissionMode: SdkOptions["permissionMode"] = "default";
-    let allowedToolsForRoot: string[] | undefined;
-    if (!isRunningAsRoot()) {
-      if (shouldBypass) permissionMode = "bypassPermissions";
-      else if (shouldAcceptEdits) permissionMode = "acceptEdits";
-    } else {
-      // Root: acceptEdits + allowedTools (same workaround as CLI runner)
-      if (shouldBypass || shouldAcceptEdits) {
-        permissionMode = "acceptEdits";
-        allowedToolsForRoot = ["Bash", "Edit", "Write", "Read", "Glob", "Grep", "NotebookEdit", "WebFetch", "WebSearch"];
-      }
-    }
-
-    // System prompt additions
-    const isChinese = this.config.language?.trim() === "中文";
-    const systemPromptParts: string[] = [];
-    if (isManaged) {
-      systemPromptParts.push(
-        isChinese
-          ? "你正在完全托管的自主模式下运行。用户可能无法及时回复问题或确认。你必须独立做出所有决策——自行选择最佳方案，而不是向用户询问偏好、确认或澄清。如果有多种可行方案，选择你认为最合适的并继续执行。除非任务本身存在根本性的歧义且无法合理推断，否则不要等待用户输入。果断行动，自主决策。"
-          : "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.",
-      );
-    }
-    const language = this.config.language?.trim();
-    if (language) {
-      systemPromptParts.push(
-        isChinese
-          ? "请使用中文回复。所有解释、注释和对话文本都使用中文。"
-          : `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`,
-      );
-    }
+    // 权限策略 + 系统提示词都通过共享 helper 派生，与 CLI runner 一字不差。
+    const permPolicy = derivePermissionPolicy(session.mode, session.autoApprovePermissions ?? false);
+    const systemPromptParts = buildAppendSystemPromptParts(this.config.language, session.mode);
 
     const sdkClaudeBinary = resolveSdkClaudeBinary();
     // SDK 默认会把整个 process.env 透传给 claude 子进程；这里显式按 inheritEnv 配置组装，
@@ -1638,19 +1654,64 @@ export class StructuredSessionManager {
       cwd: session.cwd,
       abortController,
       env: sdkEnv as Record<string, string | undefined>,
-      permissionMode,
-      ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
-      ...(allowedToolsForRoot ? { allowedTools: allowedToolsForRoot } : {}),
+      permissionMode: permPolicy.permissionMode,
+      ...(permPolicy.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(permPolicy.allowedTools ? { allowedTools: permPolicy.allowedTools } : {}),
       ...(isManaged ? { disallowedTools: ["AskUserQuestion"] } : {}),
       includePartialMessages: true,
       ...(systemPromptParts.length > 0 ? { appendSystemPrompt: systemPromptParts.join("\n\n") } : {}),
       ...(sdkClaudeBinary ? { pathToClaudeCodeExecutable: sdkClaudeBinary } : {}),
     };
 
-    if (session.claudeSessionId) (sdkOptions as Record<string, unknown>).resume = session.claudeSessionId;
+    if (session.claudeSessionId) sdkOptions.resume = session.claudeSessionId;
 
     const modelChoice = session.selectedModel?.trim();
     if (modelChoice && modelChoice !== "default") sdkOptions.model = modelChoice;
+
+    // Streaming input mode：把这一轮的 user turn 重建成一条 SDKUserMessage 喂给 SDK。
+    // 上层 sendMessage 已经把 userTurn 写进 session.messages 末尾——如果它的内容是
+    // tool_result，说明本次是用户在回答上一轮 AskUserQuestion，否则就是普通文本。
+    // 走 streaming input 而非 string prompt 的好处：tool_result 是真的 tool_result
+    // block，对 Claude 来说就是标准工具回传，不需要 "[对刚才工具的回答…]" 这种文本
+    // 提示让模型脑补语义。
+    const lastUserTurn = (session.messages ?? []).slice().reverse().find((m) => m.role === "user");
+    const lastUserBlock = lastUserTurn?.content?.[0];
+
+    let sdkInitialMessage: SDKUserMessage;
+    if (lastUserBlock?.type === "tool_result") {
+      // Anthropic 的 tool_result.content 原生支持 string 或 content-block 数组（text/image
+      // 等）。wand 内部 ToolResultBlock 的 array 形态是 `{type: string; ...}` 比官方 union
+      // 宽，但实际取值都是 `{type: "text", text}`，结构上兼容；用 `as` 把宽类型缩到 SDK
+      // 接受的形态即可，比 JSON.stringify 把数组拍成一坨 JSON 文本更忠实。
+      sdkInitialMessage = {
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: lastUserBlock.tool_use_id,
+              content: lastUserBlock.content as string | Array<{ type: "text"; text: string }>,
+              is_error: lastUserBlock.is_error === true,
+            },
+          ],
+        },
+        parent_tool_use_id: null,
+      };
+    } else {
+      sdkInitialMessage = {
+        type: "user",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: prompt }],
+        },
+        parent_tool_use_id: null,
+      };
+    }
+
+    async function* singleShotPrompt(): AsyncGenerator<SDKUserMessage> {
+      yield sdkInitialMessage;
+    }
 
     const turnState: StreamingTurnState = {
       blocks: [],
@@ -1746,15 +1807,18 @@ export class StructuredSessionManager {
       kind: "claude-sdk",
       provider: "claude",
       cwd: session.cwd,
-      permissionMode,
+      permissionMode: permPolicy.permissionMode,
       prompt: prompt.slice(0, 2048),
       promptLength: prompt.length,
       claudeSessionId: session.claudeSessionId,
       spawnedAt,
     });
 
+    const queryHandle = sdkQuery({ prompt: singleShotPrompt(), options: sdkOptions });
+    this.pendingSdkQueries.set(sessionId, queryHandle);
+
     try {
-      for await (const msg of sdkQuery({ prompt, options: sdkOptions }) as AsyncIterable<SDKMessage>) {
+      for await (const msg of queryHandle as AsyncIterable<SDKMessage>) {
         if (abortController.signal.aborted) break;
 
         // Incremental streaming events (opt-in via includePartialMessages: true)
@@ -1818,7 +1882,14 @@ export class StructuredSessionManager {
           syncSnapshot();
           scheduleEmit();
 
-          // Non-managed mode: detect AskUserQuestion, abort to let user answer
+          // Non-managed mode: detect AskUserQuestion. Prefer query.interrupt()
+          // (streaming input mode 的 control message，让 SDK 优雅地停掉当前 turn）
+          // 而不是 abortController.abort()——abort 会让 SDK throw AbortError，整段
+          // try/catch 走异常路径；interrupt 让 for-await 自然结束，行为更干净。
+          // 失败时 fallback 到 abort，保证一定能跳出。
+          //
+          // 注意：interrupt 之后下一次 sendMessage 会重新 spawn 一次 SDK 调用并通过
+          // resume 续接 + tool_result block 回答，不用文本伪造。
           if (!isManaged && !killedForAskUserQuestion) {
             const askBlock = extracted.content.find(
               (b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use" && b.name === "AskUserQuestion",
@@ -1826,7 +1897,13 @@ export class StructuredSessionManager {
             if (askBlock) {
               killedForAskUserQuestion = true;
               flushEmit();
-              abortController.abort();
+              try {
+                await queryHandle.interrupt();
+              } catch (_err) {
+                // interrupt 在某些情况下（已经结束 / SDK 版本不支持）会 reject，
+                // 兜底用 abort 强制退出。
+                abortController.abort();
+              }
             }
           }
           continue;
@@ -1871,6 +1948,7 @@ export class StructuredSessionManager {
       const isAbort = abortController.signal.aborted || (err instanceof Error && err.name === "AbortError");
       if (!isAbort) {
         this.pendingSdkAbort.delete(sessionId);
+        this.pendingSdkQueries.delete(sessionId);
         this.lastStreamSaveAt.delete(sessionId);
         if (emitTimer) clearTimeout(emitTimer);
         this.logger?.appendStructuredSpawn(sessionId, {
@@ -1885,6 +1963,7 @@ export class StructuredSessionManager {
 
     // Cleanup
     this.pendingSdkAbort.delete(sessionId);
+    this.pendingSdkQueries.delete(sessionId);
     this.lastStreamSaveAt.delete(sessionId);
     if (emitTimer) clearTimeout(emitTimer);
     flushEmit();
