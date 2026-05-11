@@ -151,12 +151,24 @@
        Android 自 targetSdk=35 起强制边到边, WebView 内容会绘制到状态栏底下,
        但 Android WebView 不会主动把 WindowInsets 暴露给 env(safe-area-inset-*),
        所以纯 env() 在绝大多数 Android 机器上回落到 0 -> 顶部直接撞到状态栏。
-       这里给 Wand APK 兜一个 32px 最小值, 确保即使旧版 APK 还没装 inset 注入
-       桥的时候, 顶部抽屉/模态也不会撞到状态栏。新版 APK 注入实际 inset 后,
-       max() 会自动取更精准的值。*/
+       这里给旧版 Wand APK 兜一个 32px 最小值, 确保它们的顶部抽屉/模态不撞
+       状态栏。新版 APK 已经在原生层 setPadding 把 WebView 整体往里缩 (见
+       MainActivity.installWindowInsetsBridge) 并注入 .is-wand-app-native-insets
+       类来关掉这个兜底, 否则会双重 inset 浪费空间。*/
     .is-wand-app {
       --wand-safe-top: max(var(--app-inset-top), env(safe-area-inset-top, 0px), 32px);
       --wand-safe-bottom: max(var(--app-inset-bottom), env(safe-area-inset-bottom, 0px), 0px);
+    }
+
+    /* 新版 APK 原生已经 padding 过, 不需要 CSS 再加任何 safe-area。把所有
+       --wand-safe-* / --pwa-safe-top 全部归零, 让顶部抽屉 / 模态 / 顶栏直接顶
+       到 WebView 内容上沿 (= 状态栏下沿)。*/
+    .is-wand-app-native-insets {
+      --wand-safe-top: 0px;
+      --wand-safe-bottom: 0px;
+      --wand-safe-left: 0px;
+      --wand-safe-right: 0px;
+      --pwa-safe-top: 0px;
     }
 
     /* 在普通移动浏览器 / Android WebView 边到边渲染 / 旋转后地址栏隐藏等场景下,
@@ -10824,10 +10836,10 @@
       .file-preview-modal {
         width: 100vw;
         max-width: 100vw;
-        height: 100vh;
-        height: 100dvh;
-        max-height: 100vh;
-        max-height: 100dvh;
+        /* 键盘弹起时跟随 --app-viewport-height (= visualViewport.height) 收缩,
+           否则 100dvh 不响应键盘, 编辑文本框会被键盘盖住。 */
+        height: var(--app-viewport-height, 100dvh);
+        max-height: var(--app-viewport-height, 100dvh);
         border-radius: 0;
         border: none;
         box-shadow: none;

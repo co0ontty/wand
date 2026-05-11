@@ -45,7 +45,10 @@ import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsAnimationCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -123,6 +126,10 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        // 让状态栏/导航栏图标颜色匹配 wand 主题; 同时初始化 inset bridge 之前
+        // 先确认控制器在位。
+        applySystemBarAppearance();
 
         serverUrl = getIntent().getStringExtra("server_url");
         appToken = getIntent().getStringExtra("app_token");
@@ -216,9 +223,9 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 hasLoadedPage = true;
                 hideError();
-                // Inject the latest known insets so the freshly-loaded page has
-                // correct --app-inset-* from frame 0 (no flash of bad layout).
-                injectInsetsCss();
+                // 注入原生 inset marker 类, 让 CSS 关掉 32px 兜底 (因为我们已经
+                // 在 WebView 上加了原生 padding, 不需要再多一层 CSS padding)。
+                injectNativeInsetsMarker();
                 if (!updateCheckDone) {
                     updateCheckDone = true;
                     checkForApkUpdate();
@@ -1315,53 +1322,152 @@ public class MainActivity extends AppCompatActivity {
         webView.setVisibility(View.VISIBLE);
     }
 
+    // 跟踪软键盘 (IME) 当前是否处于动画 / 已展开状态。WindowInsetsAnimation
+    // 在动画期间会一帧一帧 dispatch 中间 inset, 我们用 lastDispatchedImeBottom
+    // 缓存最近一次写到 padding 上的 IME 高度, 防止动画结束时静态 listener 又
+    // 重复覆盖一次 padding 导致跳变。
+    private boolean imeAnimating = false;
+    private int lastSysBarTopPx = 0;
+    private int lastSysBarBottomPx = 0;
+    private int lastSysBarLeftPx = 0;
+    private int lastSysBarRightPx = 0;
+    private int lastImeBottomPx = 0;
+
     /**
-     * Register a WindowInsets listener so we capture status-bar / nav-bar /
-     * display-cutout insets in CSS-pixel (dp) units. Returns CONSUMED=false so
-     * other views (notably the WebView itself) still receive insets normally —
-     * we only want to *observe* them and forward them to the page.
+     * 用 Android 原生 WindowInsets 把整个 activity 内容根 (含 WebView + 错误
+     * overlay) 朝里缩 — 这是 Google 在 targetSdk >= 35 强制边到边渲染时推荐
+     * 的标准做法, 完全在 APK 层处理, 不依赖任何 CSS / JS。
      *
-     * Why this exists: targetSdk 35+ forces edge-to-edge rendering, so the
-     * WebView is drawn behind the status bar, but Android WebView (unlike iOS
-     * Safari) does NOT propagate WindowInsets to env(safe-area-inset-*). The
-     * page-side CSS reads our injected --app-inset-* vars to pad fixed
-     * top/bottom drawers and modals so they don't slide under the system bars.
+     * 处理三类 inset:
+     *   1. 静态系统栏 (status bar / navigation bar / display cutout) —
+     *      永远 padding 在内容根上, 页面顶/底自然贴系统栏沿。
+     *   2. IME (软键盘) — 静态 listener 处理"不带动画"的情况 (如旋转后
+     *      键盘已经在屏上、分屏直接出现键盘等), 把键盘高度同样 padding
+     *      在底部, WebView 收缩, 网页 input-panel 自动上浮。
+     *   3. IME 动画 — WindowInsetsAnimationCompat.Callback 在键盘 slide-in /
+     *      slide-out 的每一帧 dispatch 中间 inset, 我们每帧更新 padding,
+     *      WebView 跟着键盘动画平滑 resize, 不会有"先卡住再啪嗒"的跳变。
+     *
+     * CONSUMED 不需要返回, 因为我们用 Builder 归零自己消费过的部分, 子 view
+     * 仍可拿到 IME inset 用于 visualViewport 等 (虽然现在已经不依赖它)。
      */
     private void installWindowInsetsBridge() {
-        if (webView == null) return;
-        ViewCompat.setOnApplyWindowInsetsListener(webView, (v, insetsCompat) -> {
+        // 装在 android.R.id.content 而不是 WebView 上, 这样 WebView + errorOverlay
+        // (它们是同一个 FrameLayout 的子 view) 一起被父容器的 padding 顶下去。
+        View root = findViewById(android.R.id.content);
+        if (root == null) return;
+
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insetsCompat) -> {
             Insets bars = insetsCompat.getInsets(
                 WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout()
             );
-            float density = getResources().getDisplayMetrics().density;
-            if (density <= 0) density = 1f;
-            lastInsetTopDp = bars.top / density;
-            lastInsetBottomDp = bars.bottom / density;
-            lastInsetLeftDp = bars.left / density;
-            lastInsetRightDp = bars.right / density;
-            // Re-inject so a rotation or split-screen change updates the page live.
-            injectInsetsCss();
-            return insetsCompat;
+            Insets ime = insetsCompat.getInsets(WindowInsetsCompat.Type.ime());
+
+            // 缓存静态系统栏值, 后续 IME 动画进度回调会用它做基线。
+            lastSysBarTopPx = bars.top;
+            lastSysBarBottomPx = bars.bottom;
+            lastSysBarLeftPx = bars.left;
+            lastSysBarRightPx = bars.right;
+
+            // 动画期间不在这里碰 padding — 让 onProgress 一帧一帧推。
+            if (!imeAnimating) {
+                lastImeBottomPx = ime.bottom;
+                applyInsetPadding(v);
+            }
+
+            // 旋转 / 分屏 / 重连等场景下重新 dispatch 时, marker 类补一次。
+            injectNativeInsetsMarker();
+
+            // 把消费过的部分归零返回 (IME 仍保留, 给可能的下游观察者)。
+            return new WindowInsetsCompat.Builder(insetsCompat)
+                .setInsets(WindowInsetsCompat.Type.systemBars(), Insets.NONE)
+                .setInsets(WindowInsetsCompat.Type.displayCutout(), Insets.NONE)
+                .build();
         });
-        // Ask Android to dispatch insets once on the next layout pass.
-        ViewCompat.requestApplyInsets(webView);
+
+        // 软键盘动画回调: 跟随 Android 原生 IME 的 slide-in / slide-out 节奏
+        // 一帧一帧地更新 padding, WebView 跟键盘同步移动, 无跳变。
+        ViewCompat.setWindowInsetsAnimationCallback(root, new WindowInsetsAnimationCompat.Callback(
+                WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+
+            @Override
+            public void onPrepare(WindowInsetsAnimationCompat animation) {
+                if ((animation.getTypeMask() & WindowInsetsCompat.Type.ime()) != 0) {
+                    imeAnimating = true;
+                }
+            }
+
+            @Override
+            public WindowInsetsCompat onProgress(WindowInsetsCompat insets,
+                                                 java.util.List<WindowInsetsAnimationCompat> running) {
+                Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
+                lastImeBottomPx = ime.bottom;
+                applyInsetPadding(root);
+                return insets;
+            }
+
+            @Override
+            public void onEnd(WindowInsetsAnimationCompat animation) {
+                if ((animation.getTypeMask() & WindowInsetsCompat.Type.ime()) != 0) {
+                    imeAnimating = false;
+                    // 动画收尾时, 用 root 当前最新 inset 校准一次, 避免和
+                    // 系统的最终值差 1 像素引起的细微抖动。
+                    applyInsetPadding(root);
+                }
+            }
+        });
+
+        ViewCompat.requestApplyInsets(root);
     }
 
     /**
-     * Push the latest captured insets to the page as CSS custom properties.
-     * Safe to call on every page load and on every inset change; the JS is
-     * idempotent and uses setProperty, not stylesheet mutation.
+     * Apply the cached system-bar + IME padding to the content root.
+     * Pulled out so both the static listener and the animation callback can
+     * use the same logic.
      */
-    private void injectInsetsCss() {
+    private void applyInsetPadding(View v) {
+        int bottom = Math.max(lastSysBarBottomPx, lastImeBottomPx);
+        v.setPadding(lastSysBarLeftPx, lastSysBarTopPx, lastSysBarRightPx, bottom);
+
+        // 更新 dp 缓存, 仅供调试 / 旧逻辑兜底用。
+        float density = getResources().getDisplayMetrics().density;
+        if (density <= 0) density = 1f;
+        lastInsetTopDp = lastSysBarTopPx / density;
+        lastInsetBottomDp = bottom / density;
+        lastInsetLeftDp = lastSysBarLeftPx / density;
+        lastInsetRightDp = lastSysBarRightPx / density;
+    }
+
+    /**
+     * 让状态栏 / 导航栏的图标颜色匹配它们各自的背景:
+     *   - statusBarColor = primary_dark (深棕) -> 图标要亮 (light icons = false)
+     *   - navigationBarColor = background (奶油) -> 图标要暗 (light icons = true)
+     * 否则会出现 "深底深字" / "浅底浅字" 的视觉冲突。
+     */
+    private void applySystemBarAppearance() {
+        WindowInsetsControllerCompat controller =
+            WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        if (controller == null) return;
+        controller.setAppearanceLightStatusBars(false);
+        controller.setAppearanceLightNavigationBars(true);
+    }
+
+    /**
+     * 告诉页面 CSS "我已经在原生层处理了系统栏 inset"。CSS 看到这个类后会
+     * 关掉 .is-wand-app 上的 32px 兜底, 因为再加 padding 就重复了。
+     * --app-inset-* 显式置 0, 同样目的是抵消任何旧版 CSS 残留。
+     */
+    private void injectNativeInsetsMarker() {
         if (webView == null) return;
         String js =
             "(function(){try{" +
                 "var r=document.documentElement;" +
-                "r.style.setProperty('--app-inset-top'," + lastInsetTopDp + "+'px');" +
-                "r.style.setProperty('--app-inset-bottom'," + lastInsetBottomDp + "+'px');" +
-                "r.style.setProperty('--app-inset-left'," + lastInsetLeftDp + "+'px');" +
-                "r.style.setProperty('--app-inset-right'," + lastInsetRightDp + "+'px');" +
+                "r.classList.add('is-wand-app-native-insets');" +
+                "r.style.setProperty('--app-inset-top','0px');" +
+                "r.style.setProperty('--app-inset-bottom','0px');" +
+                "r.style.setProperty('--app-inset-left','0px');" +
+                "r.style.setProperty('--app-inset-right','0px');" +
             "}catch(e){}})();";
         try {
             webView.evaluateJavascript(js, null);
