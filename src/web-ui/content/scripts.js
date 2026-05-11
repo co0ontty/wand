@@ -1076,6 +1076,30 @@
           scheduleForegroundSync("android-resume", { immediate: true });
           ensureTerminalFitWithRetry("android-resume");
         });
+
+        // Bridge from Android ConnectivityManager.NetworkCallback. State values:
+        //   "available"  — 默认网络刚刚可用 (启动期没网 → 接上)
+        //   "changed"    — 已有网络切到另一个 (Wi-Fi ↔ 4G), socket 必死
+        //   "validated"  — captive portal / VPN 验证完成, internet 才真正通
+        //   "lost"       — 默认网络断了, 还没有备援网络
+        // 前三种都强制重连; "lost" 不动 socket, 只更新 isOnline 让 UI 提示。
+        // 这条路径比 navigator.online / visibilitychange 早 2-8 秒触发,
+        // 切网后用户基本看不到断线提示。
+        window.addEventListener("wand-android-network", function(e) {
+          var which = e && e.detail && e.detail.state;
+          if (which === "lost") {
+            state.isOnline = false;
+            try { updateOfflineBanner(); } catch (_e) {}
+            return;
+          }
+          if (which === "available" || which === "changed" || which === "validated") {
+            // 以原生信号为权威, 立刻翻 isOnline 给 UI; 有些 ROM 上
+            // navigator.onLine 要等几秒才更新, 否则 banner 会闪一下。
+            state.isOnline = true;
+            try { updateOfflineBanner(); } catch (_e) {}
+            forceReconnectWebSocket("android-network-" + which);
+          }
+        });
       }
 
       function restoreLoginSession() {

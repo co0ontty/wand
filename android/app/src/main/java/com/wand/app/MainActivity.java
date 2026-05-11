@@ -13,6 +13,10 @@ import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Handler;
 import android.os.Looper;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
@@ -114,6 +118,13 @@ public class MainActivity extends AppCompatActivity {
     private boolean keepAliveRunning = false;
     private long lastBackPressedTime = 0;
 
+    // ConnectivityManager 监听: 切 Wi-Fi/4G、Doze 恢复网络、机场模式开关等
+    // 场景下, JS 的 navigator.onLine / visibilitychange 都不够灵敏 (尤其
+    // 在前台没有 lifecycle 变化时, 唯一信号源就是这里)。我们把网络变化
+    // 桥到 WebView, JS 侧立刻 forceReconnectWebSocket, 不再等 8s backoff。
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private boolean hasUsableNetwork = true;
+
     // Last known system-bar safe-area insets, in CSS pixels (dp). Android
     // targetSdk 35+ forces edge-to-edge, so the WebView renders behind the
     // status bar; but Android WebView does NOT propagate these insets to
@@ -172,6 +183,7 @@ public class MainActivity extends AppCompatActivity {
 
         createNotificationChannels();
         setupWebView();
+        registerNetworkCallback();
         webView.loadUrl(serverUrl);
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -1334,6 +1346,7 @@ public class MainActivity extends AppCompatActivity {
             try { stopService(new Intent(this, WandForegroundService.class)); } catch (Exception ignored) {}
             keepAliveRunning = false;
         }
+        unregisterNetworkCallback();
         NotificationManagerCompat nm = NotificationManagerCompat.from(this);
         for (String sessionId : progressUpdateTimestamps.keySet()) {
             nm.cancel("progress:" + sessionId, 0);
@@ -1521,6 +1534,104 @@ public class MainActivity extends AppCompatActivity {
         lastInsetBottomDp = bottom / density;
         lastInsetLeftDp = lastSysBarLeftPx / density;
         lastInsetRightDp = lastSysBarRightPx / density;
+    }
+
+    /**
+     * 注册系统级网络回调, 把"网络可用"/"网络断开"/"网络容量变化" (Wi-Fi
+     * → 4G、4G → Wi-Fi、机场模式切换、Doze 网络挂起恢复) 桥到 WebView。
+     *
+     * 收到 onAvailable 后, JS 端 dispatch 'wand-android-network' 事件,
+     * 收 detail.state === "available" 时 forceReconnectWebSocket — 这比
+     * 等 JS 的 navigator.onLine 或 visibilitychange 早 2-8 秒, 切网场景
+     * 下用户基本感知不到断线。
+     *
+     * NetworkRequest 显式只关注 INTERNET 能力, 避免 VPN 拨上 / 断开等
+     * 噪声触发误重连。监听 default network 即可, 多网卡设备 Android
+     * 自己会路由。
+     */
+    private void registerNetworkCallback() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager)
+                    getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return;
+            // 启动时若已有 active network, 缓存初始状态。后续 onLost /
+            // onAvailable 跟这个比较, 避免冗余 dispatch。
+            android.net.Network active = cm.getActiveNetwork();
+            hasUsableNetwork = (active != null);
+
+            NetworkRequest request = new NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build();
+            networkCallback = new ConnectivityManager.NetworkCallback() {
+                @Override
+                public void onAvailable(Network network) {
+                    if (!hasUsableNetwork) {
+                        hasUsableNetwork = true;
+                        dispatchNetworkChange("available");
+                    } else {
+                        // 已有可用网络, 但换了一条 (Wi-Fi → 4G 等), socket
+                        // 通常会因为 IP 变化而无声死亡。也强制重连一次。
+                        dispatchNetworkChange("changed");
+                    }
+                }
+
+                @Override
+                public void onLost(Network network) {
+                    // 仍可能有其他 network 兜底, 这里只做标记, 由 onAvailable
+                    // 来决定是否真正触发重连; 同时通知 JS 进入降级 UI。
+                    ConnectivityManager cm2 = (ConnectivityManager)
+                            getSystemService(CONNECTIVITY_SERVICE);
+                    android.net.Network nowActive = cm2 != null ? cm2.getActiveNetwork() : null;
+                    if (nowActive == null) {
+                        hasUsableNetwork = false;
+                        dispatchNetworkChange("lost");
+                    }
+                }
+
+                @Override
+                public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
+                    // 容量从无 INTERNET 跳到有 INTERNET (验证型 captive
+                    // portal 通过、VPN 完成握手) 也走 available 路径。
+                    if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                            && !hasUsableNetwork) {
+                        hasUsableNetwork = true;
+                        dispatchNetworkChange("validated");
+                    }
+                }
+            };
+            cm.registerNetworkCallback(request, networkCallback);
+        } catch (Exception ignored) {
+            // 极端 OEM ROM 可能拒绝注册, 这里失败不影响主流程 — JS 还有
+            // navigator.onLine + 前台 resume 路径兜底。
+        }
+    }
+
+    private void unregisterNetworkCallback() {
+        if (networkCallback == null) return;
+        try {
+            ConnectivityManager cm = (ConnectivityManager)
+                    getSystemService(CONNECTIVITY_SERVICE);
+            if (cm != null) cm.unregisterNetworkCallback(networkCallback);
+        } catch (Exception ignored) {}
+        networkCallback = null;
+    }
+
+    /**
+     * 通过 evaluateJavascript 派发自定义事件给页面。挑事件 + detail 是为了
+     * 让 JS 侧用 addEventListener 自然消费, 不污染 window 全局命名空间。
+     */
+    private void dispatchNetworkChange(String state) {
+        runOnUiThread(() -> {
+            if (webView == null) return;
+            try {
+                String safe = state == null ? "" : state.replace("'", "");
+                webView.evaluateJavascript(
+                        "(function(){try{window.dispatchEvent(new CustomEvent('wand-android-network',"
+                                + "{detail:{state:'" + safe + "'}}));}catch(e){}})();",
+                        null);
+            } catch (Exception ignored) {}
+        });
     }
 
     /**
