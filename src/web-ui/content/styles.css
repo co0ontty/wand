@@ -126,15 +126,37 @@
        WebView、普通移动浏览器、桌面) 中都可用。在没有 inset 的设备上回退到
        0px,所以不会影响桌面浏览体验。固定定位 (position: fixed) 的顶部元素
        (如文件面板抽屉、各类预览/对话框) 必须自己消费这些 inset,因为它们脱离
-       了 .app-container 的 padding 流。*/
+       了 .app-container 的 padding 流。
+
+       注: Android WebView (targetSdk >= 35 强制边到边渲染) 不会主动把
+       WindowInsets 暴露给 env(safe-area-inset-*), 所以纯 env() 在很多 Android
+       机器上会回落到 0 -> 顶部抽屉/模态直接撞到状态栏。我们用 var(--app-inset-top)
+       (由 Android 端通过 JS 注入实测像素值) 作为优先来源, 再 fallback 到 env(),
+       最后在窄视口下保证至少 28px 视觉缓冲。*/
     :root {
-      --wand-safe-top: env(safe-area-inset-top, 0px);
-      --wand-safe-bottom: env(safe-area-inset-bottom, 0px);
-      --wand-safe-left: env(safe-area-inset-left, 0px);
-      --wand-safe-right: env(safe-area-inset-right, 0px);
-      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --app-inset-top: 0px;     /* Android side injects actual status-bar height here */
+      --app-inset-bottom: 0px;
+      --app-inset-left: 0px;
+      --app-inset-right: 0px;
+      --wand-safe-top: max(var(--app-inset-top), env(safe-area-inset-top, 0px));
+      --wand-safe-bottom: max(var(--app-inset-bottom), env(safe-area-inset-bottom, 0px));
+      --wand-safe-left: max(var(--app-inset-left), env(safe-area-inset-left, 0px));
+      --wand-safe-right: max(var(--app-inset-right), env(safe-area-inset-right, 0px));
+      --safe-bottom: var(--wand-safe-bottom);
       /* 默认与 wand-safe-top 等价; PWA / .is-pwa 下被覆盖为 max(inset, 14px) */
-      --pwa-safe-top: env(safe-area-inset-top, 0px);
+      --pwa-safe-top: var(--wand-safe-top);
+    }
+
+    /* Wand Android APK (UA 后缀 WandApp/*) 的兜底:
+       Android 自 targetSdk=35 起强制边到边, WebView 内容会绘制到状态栏底下,
+       但 Android WebView 不会主动把 WindowInsets 暴露给 env(safe-area-inset-*),
+       所以纯 env() 在绝大多数 Android 机器上回落到 0 -> 顶部直接撞到状态栏。
+       这里给 Wand APK 兜一个 32px 最小值, 确保即使旧版 APK 还没装 inset 注入
+       桥的时候, 顶部抽屉/模态也不会撞到状态栏。新版 APK 注入实际 inset 后,
+       max() 会自动取更精准的值。*/
+    .is-wand-app {
+      --wand-safe-top: max(var(--app-inset-top), env(safe-area-inset-top, 0px), 32px);
+      --wand-safe-bottom: max(var(--app-inset-bottom), env(safe-area-inset-bottom, 0px), 0px);
     }
 
     /* 在普通移动浏览器 / Android WebView 边到边渲染 / 旋转后地址栏隐藏等场景下,

@@ -43,6 +43,9 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -104,6 +107,16 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> pendingFileChooserCallback;
     private boolean keepAliveRunning = false;
     private long lastBackPressedTime = 0;
+
+    // Last known system-bar safe-area insets, in CSS pixels (dp). Android
+    // targetSdk 35+ forces edge-to-edge, so the WebView renders behind the
+    // status bar; but Android WebView does NOT propagate these insets to
+    // env(safe-area-inset-*). We capture them in onApplyWindowInsetsListener
+    // and inject them into --app-inset-* CSS variables on every page load.
+    private float lastInsetTopDp = 0f;
+    private float lastInsetBottomDp = 0f;
+    private float lastInsetLeftDp = 0f;
+    private float lastInsetRightDp = 0f;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -194,11 +207,18 @@ public class MainActivity extends AppCompatActivity {
         cookieManager.setAcceptCookie(true);
         cookieManager.setAcceptThirdPartyCookies(webView, true);
 
+        // Capture system-bar insets so we can inject them as CSS variables.
+        // (See lastInsetTopDp comment above for why.)
+        installWindowInsetsBridge();
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
                 hasLoadedPage = true;
                 hideError();
+                // Inject the latest known insets so the freshly-loaded page has
+                // correct --app-inset-* from frame 0 (no flash of bad layout).
+                injectInsetsCss();
                 if (!updateCheckDone) {
                     updateCheckDone = true;
                     checkForApkUpdate();
@@ -1293,5 +1313,58 @@ public class MainActivity extends AppCompatActivity {
     private void hideError() {
         errorOverlay.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * Register a WindowInsets listener so we capture status-bar / nav-bar /
+     * display-cutout insets in CSS-pixel (dp) units. Returns CONSUMED=false so
+     * other views (notably the WebView itself) still receive insets normally —
+     * we only want to *observe* them and forward them to the page.
+     *
+     * Why this exists: targetSdk 35+ forces edge-to-edge rendering, so the
+     * WebView is drawn behind the status bar, but Android WebView (unlike iOS
+     * Safari) does NOT propagate WindowInsets to env(safe-area-inset-*). The
+     * page-side CSS reads our injected --app-inset-* vars to pad fixed
+     * top/bottom drawers and modals so they don't slide under the system bars.
+     */
+    private void installWindowInsetsBridge() {
+        if (webView == null) return;
+        ViewCompat.setOnApplyWindowInsetsListener(webView, (v, insetsCompat) -> {
+            Insets bars = insetsCompat.getInsets(
+                WindowInsetsCompat.Type.systemBars()
+                    | WindowInsetsCompat.Type.displayCutout()
+            );
+            float density = getResources().getDisplayMetrics().density;
+            if (density <= 0) density = 1f;
+            lastInsetTopDp = bars.top / density;
+            lastInsetBottomDp = bars.bottom / density;
+            lastInsetLeftDp = bars.left / density;
+            lastInsetRightDp = bars.right / density;
+            // Re-inject so a rotation or split-screen change updates the page live.
+            injectInsetsCss();
+            return insetsCompat;
+        });
+        // Ask Android to dispatch insets once on the next layout pass.
+        ViewCompat.requestApplyInsets(webView);
+    }
+
+    /**
+     * Push the latest captured insets to the page as CSS custom properties.
+     * Safe to call on every page load and on every inset change; the JS is
+     * idempotent and uses setProperty, not stylesheet mutation.
+     */
+    private void injectInsetsCss() {
+        if (webView == null) return;
+        String js =
+            "(function(){try{" +
+                "var r=document.documentElement;" +
+                "r.style.setProperty('--app-inset-top'," + lastInsetTopDp + "+'px');" +
+                "r.style.setProperty('--app-inset-bottom'," + lastInsetBottomDp + "+'px');" +
+                "r.style.setProperty('--app-inset-left'," + lastInsetLeftDp + "+'px');" +
+                "r.style.setProperty('--app-inset-right'," + lastInsetRightDp + "+'px');" +
+            "}catch(e){}})();";
+        try {
+            webView.evaluateJavascript(js, null);
+        } catch (Exception ignored) {}
     }
 }

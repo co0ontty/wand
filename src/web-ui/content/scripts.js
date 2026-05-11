@@ -54,6 +54,20 @@
       ['standalone', 'window-controls-overlay', 'fullscreen'].forEach(function(m) {
         window.matchMedia('(display-mode: ' + m + ')').addEventListener('change', detectDisplayMode);
       });
+
+      // Wand Android APK detection: the native shell appends "WandApp/<version>"
+      // to the WebView user-agent. On Android (targetSdk >= 35 forces edge-to-edge
+      // rendering) the WebView extends behind the status bar, but Android WebView
+      // doesn't propagate WindowInsets to env(safe-area-inset-*). Tagging the
+      // document root lets CSS apply a sane min top inset so top-pinned drawers
+      // and modals don't sit under the status bar. Newer APK builds also inject
+      // exact pixel values into --app-inset-top via the AndroidInsets bridge.
+      try {
+        var ua = (navigator && navigator.userAgent) || "";
+        if (/WandApp\//.test(ua)) {
+          document.documentElement.classList.add('is-wand-app');
+        }
+      } catch (e) {}
     })();
 
     (function() {
