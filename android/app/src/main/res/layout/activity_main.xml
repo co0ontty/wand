@@ -57,4 +57,51 @@
 
     </LinearLayout>
 
+    <!-- 启动期 loading overlay: WebView 首帧 (onPageFinished) 之前盖住, 给用户一个
+         有图标+文案+spinner 的过渡, 替代以前"裸 WebView 白底闪一下再到 boot-loading
+         卡片"的体验。装在 FrameLayout 最上层 (子 view 顺序靠后 = 绘制层级靠前),
+         WebView 准备好后从 Java 端 fade out 并 gone 掉 -->
+    <LinearLayout
+        android:id="@+id/loadingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp"
+        android:background="@color/background"
+        android:visibility="visible">
+
+        <ImageView
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:src="@drawable/ic_launcher_foreground"
+            android:contentDescription="@string/app_name" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/app_name"
+            android:textSize="22sp"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold"
+            android:letterSpacing="0.04" />
+
+        <ProgressBar
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/primary" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/loading_text"
+            android:textSize="13sp"
+            android:textColor="@color/text_secondary" />
+
+    </LinearLayout>
+
 </FrameLayout>

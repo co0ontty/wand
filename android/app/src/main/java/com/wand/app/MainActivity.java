@@ -49,6 +49,8 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsAnimationCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewFeature;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -98,6 +100,7 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
     private LinearLayout errorOverlay;
+    private LinearLayout loadingOverlay;
     private TextView errorMessage;
     private String serverUrl;
     private String appToken;
@@ -140,6 +143,7 @@ public class MainActivity extends AppCompatActivity {
 
         webView = findViewById(R.id.webView);
         errorOverlay = findViewById(R.id.errorOverlay);
+        loadingOverlay = findViewById(R.id.loadingOverlay);
         errorMessage = findViewById(R.id.errorMessage);
 
         MaterialButton retryButton = findViewById(R.id.retryButton);
@@ -202,6 +206,24 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
 
+        // 设 WebView 背景色匹配主题 background, 避免 (a) 首次 loadUrl 之前
+        // WebView 默认白底闪一下; (b) 暗黑色页面切换时露出 WebView 的白底。
+        // 跟 themes.xml 的 windowBackground 同一色, 整个启动 → ConnectActivity
+        // → MainActivity → WebView 首帧, 色温保持一致。
+        webView.setBackgroundColor(ContextCompat.getColor(this, R.color.background));
+
+        // 让后台 WebView 渲染进程保持高优先级, 这样切到其他 App 再回来时
+        // Chromium 不会因为内存抖动重启 renderer (renderer 重启 = WebSocket
+        // 整路重建, 用户看到的就是"切回来卡顿几秒、消息延迟到"的体感)。
+        // RENDERER_PRIORITY_IMPORTANT 在 minSdk 24 就有, 不需要版本守卫。
+        webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+
+        // 让 WebView 在视口外多保留一帧栅格化结果, 滚动 / 切换抽屉时的
+        // 重绘成本明显下降。AndroidX webkit 1.0+ 支持, minSdk OK。
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.OFF_SCREEN_PRERASTER)) {
+            WebSettingsCompat.setOffscreenPreRaster(settings, true);
+        }
+
         // Dynamic version in User-Agent
         String versionName = "1.0";
         try {
@@ -223,6 +245,10 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 hasLoadedPage = true;
                 hideError();
+                // 首帧到达, fade out 启动 loading overlay (原生层接力 web 的
+                // boot-loading 卡片, 全程无白闪)。淡出 200ms 后 gone 掉, 这样
+                // 触摸事件直接落到 WebView 上。
+                hideLoadingOverlay();
                 // 注入原生 inset marker 类, 让 CSS 关掉 32px 兜底 (因为我们已经
                 // 在 WebView 上加了原生 padding, 不需要再多一层 CSS padding)。
                 injectNativeInsetsMarker();
@@ -271,6 +297,14 @@ public class MainActivity extends AppCompatActivity {
                             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                             android.view.ViewGroup.LayoutParams.MATCH_PARENT));
                     if (parent != null) parent.addView(webView, 0);
+                    // 重建期间 loading overlay 重新可见, 让用户知道"页面在恢复"
+                    // 而不是"App 自己刷新了一下" (静默重建容易让用户以为是 bug)。
+                    if (loadingOverlay != null) {
+                        loadingOverlay.setAlpha(1f);
+                        loadingOverlay.setVisibility(View.VISIBLE);
+                    }
+                    Toast.makeText(MainActivity.this, R.string.renderer_crashed,
+                            Toast.LENGTH_SHORT).show();
                     setupWebView();
                     webView.loadUrl(serverUrl);
                 } catch (Exception e) {
@@ -1315,11 +1349,61 @@ public class MainActivity extends AppCompatActivity {
         errorMessage.setText(message);
         errorOverlay.setVisibility(View.VISIBLE);
         webView.setVisibility(View.GONE);
+        // 错误页比 loading 优先, 把 loading 立刻 gone 掉 (不淡出 — 避免和
+        // errorOverlay 同时可见时 alpha 透出后面的 WebView 错误状态)。
+        if (loadingOverlay != null && loadingOverlay.getVisibility() == View.VISIBLE) {
+            loadingOverlay.animate().cancel();
+            loadingOverlay.setAlpha(1f);
+            loadingOverlay.setVisibility(View.GONE);
+        }
     }
 
     private void hideError() {
         errorOverlay.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * 把启动 loading overlay 淡出并 gone 掉。idempotent — onPageFinished 可能
+     * 被多次触发 (重定向 / hash 变更 / SPA 路由), 第二次以后这里直接 no-op。
+     */
+    private void hideLoadingOverlay() {
+        if (loadingOverlay == null) return;
+        if (loadingOverlay.getVisibility() != View.VISIBLE) return;
+        loadingOverlay.animate()
+                .alpha(0f)
+                .setDuration(220)
+                .withEndAction(() -> {
+                    if (loadingOverlay != null) {
+                        loadingOverlay.setVisibility(View.GONE);
+                    }
+                })
+                .start();
+    }
+
+    /**
+     * 系统内存吃紧时通知 WebView 内的页面释放可丢弃的缓存 (大图缓存 /
+     * 不活跃会话的 terminal scrollback 等)。页面侧可选地实现
+     * window.wandTrimCache(level) — 没有实现也无害, evaluateJavascript
+     * 静默忽略。同时调 WebView 自己的 trim 让 Chromium 也回收一些字节码。
+     */
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (webView == null) return;
+        try {
+            if (level >= TRIM_MEMORY_RUNNING_LOW) {
+                webView.evaluateJavascript(
+                        "(function(){try{if(window.wandTrimCache)window.wandTrimCache(" + level + ");}catch(e){}})();",
+                        null);
+            }
+            if (level >= TRIM_MEMORY_UI_HIDDEN) {
+                // UI 在后台 + 系统压力中等以上, 让 Chromium 释放渲染缓存。
+                // freeMemory 是历史 API, 但仍然是触发 Chromium 主动 GC 最直接
+                // 的 hook (即使官方标 deprecated, AOSP 内部仍会做 trim)。
+                webView.freeMemory();
+            }
+        } catch (Exception ignored) {}
     }
 
     // 跟踪软键盘 (IME) 当前是否处于动画 / 已展开状态。WindowInsetsAnimation

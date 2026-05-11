@@ -24,4 +24,6 @@
     <string name="skip_version">跳过此版本</string>
     <string name="downloading_update">正在下载更新…</string>
     <string name="download_failed">下载失败</string>
+    <string name="loading_text">正在启动…</string>
+    <string name="renderer_crashed">页面渲染进程已恢复</string>
 </resources>
