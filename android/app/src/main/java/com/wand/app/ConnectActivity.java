@@ -33,6 +33,9 @@ import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import android.util.Base64;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -54,12 +57,21 @@ public class ConnectActivity extends AppCompatActivity {
     private ServerStore serverStore;
     private boolean autoConnecting = false;
 
+    // 用 single-thread executor 替代裸 new Thread, 配合 Future 在 onDestroy
+    // 时 cancel(true) 中断未完成的连接探测 / cookie 写入。用户秒退或快速
+    // 切服务器场景下, 之前的 raw Thread 还在跑, runOnUiThread 在 Activity
+    // 已经 finish 之后调 setText / launchWebView 会触发 IllegalStateException
+    // (尤其在低端机网络慢的时候比较常见)。
+    private ExecutorService networkExecutor;
+    private Future<?> currentTask;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_connect);
 
         serverStore = new ServerStore(this);
+        networkExecutor = Executors.newSingleThreadExecutor();
         urlInput = findViewById(R.id.urlInput);
         connectButton = findViewById(R.id.connectButton);
         scanQrButton = findViewById(R.id.scanQrButton);
@@ -193,7 +205,8 @@ public class ConnectActivity extends AppCompatActivity {
         autoConnectGroup.setVisibility(View.VISIBLE);
         formGroup.setVisibility(View.GONE);
 
-        new Thread(() -> {
+        cancelCurrentTask();
+        currentTask = networkExecutor.submit(() -> {
             String[] decoded = tryDecodeConnectCode(savedInput);
 
             if (decoded != null) {
@@ -241,7 +254,7 @@ public class ConnectActivity extends AppCompatActivity {
                     }
                 });
             }
-        }).start();
+        });
     }
 
     private void showForm() {
@@ -291,7 +304,8 @@ public class ConnectActivity extends AppCompatActivity {
         connectButton.setText(R.string.connecting);
         statusText.setVisibility(View.GONE);
 
-        new Thread(() -> {
+        cancelCurrentTask();
+        currentTask = networkExecutor.submit(() -> {
             String[] decoded = tryDecodeConnectCode(rawInput);
 
             if (decoded != null) {
@@ -337,7 +351,24 @@ public class ConnectActivity extends AppCompatActivity {
                     }
                 });
             }
-        }).start();
+        });
+    }
+
+    private void cancelCurrentTask() {
+        if (currentTask != null && !currentTask.isDone()) {
+            currentTask.cancel(true);
+        }
+        currentTask = null;
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        cancelCurrentTask();
+        if (networkExecutor != null) {
+            networkExecutor.shutdownNow();
+            networkExecutor = null;
+        }
     }
 
     private String testConnectionWithToken(String baseUrl, String appToken, int timeout) {

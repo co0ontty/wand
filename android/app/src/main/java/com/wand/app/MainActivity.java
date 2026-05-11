@@ -73,6 +73,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
@@ -124,6 +126,12 @@ public class MainActivity extends AppCompatActivity {
     // 桥到 WebView, JS 侧立刻 forceReconnectWebSocket, 不再等 8s backoff。
     private ConnectivityManager.NetworkCallback networkCallback;
     private boolean hasUsableNetwork = true;
+
+    // 后台任务 (update check, APK 下载) 用 executor 而不是裸 Thread, 这样
+    // Activity 切换 / WebView render 进程崩溃重建时, onDestroy 可以
+    // shutdownNow 中断未完成的下载 — 之前 raw Thread 会跑完整个下载流程,
+    // 然后在已 finish 的 Activity 上 runOnUiThread 弹 dialog 触发崩溃。
+    private ExecutorService backgroundExecutor;
 
     // Last known system-bar safe-area insets, in CSS pixels (dp). Android
     // targetSdk 35+ forces edge-to-edge, so the WebView renders behind the
@@ -184,6 +192,8 @@ public class MainActivity extends AppCompatActivity {
         createNotificationChannels();
         setupWebView();
         registerNetworkCallback();
+        // 2 个线程足够: 1 个 update check + 1 个 download 同时跑顶天了。
+        backgroundExecutor = Executors.newFixedThreadPool(2);
         webView.loadUrl(serverUrl);
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -1056,7 +1066,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         final String cv = currentVersion;
-        new Thread(() -> {
+        if (backgroundExecutor == null || backgroundExecutor.isShutdown()) return;
+        backgroundExecutor.execute(() -> {
             try {
                 String apiUrl = serverUrl + "/api/android-apk-update?currentVersion=" +
                         java.net.URLEncoder.encode(cv, "UTF-8");
@@ -1112,7 +1123,7 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) {
                 // Silently ignore update check failures
             }
-        }).start();
+        });
     }
 
     @SuppressLint("DefaultLocale")
@@ -1155,7 +1166,12 @@ public class MainActivity extends AppCompatActivity {
                 .create();
         progress.show();
 
-        new Thread(() -> {
+        if (backgroundExecutor == null || backgroundExecutor.isShutdown()) {
+            progress.dismiss();
+            Toast.makeText(this, R.string.download_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        backgroundExecutor.execute(() -> {
             HttpURLConnection conn = null;
             try {
                 String fullUrl;
@@ -1259,7 +1275,7 @@ public class MainActivity extends AppCompatActivity {
                     try { conn.disconnect(); } catch (Exception ignored) {}
                 }
             }
-        }).start();
+        });
     }
 
     private void installApk(File apkFile) {
@@ -1347,6 +1363,12 @@ public class MainActivity extends AppCompatActivity {
             keepAliveRunning = false;
         }
         unregisterNetworkCallback();
+        // 中断后台 update/download — 防止在 Activity 已 finish 之后, 后台
+        // 线程跑完 download 又 runOnUiThread 弹 dialog 撞 IllegalStateException。
+        if (backgroundExecutor != null) {
+            backgroundExecutor.shutdownNow();
+            backgroundExecutor = null;
+        }
         NotificationManagerCompat nm = NotificationManagerCompat.from(this);
         for (String sessionId : progressUpdateTimestamps.keySet()) {
             nm.cancel("progress:" + sessionId, 0);
