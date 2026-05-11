@@ -3268,157 +3268,188 @@
       background: linear-gradient(180deg, rgba(255, 252, 248, 0.5) 0%, transparent 100%);
     }
 
-    .chat-overlay-controls {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      display: inline-flex;
-      align-items: center;
-      z-index: 12;
-      pointer-events: auto;
-      opacity: 0;
-      transform: translateY(-4px);
-      transition: opacity 0.22s ease, transform 0.26s var(--ease-out-expo);
-    }
-
-    .chat-container:hover .chat-overlay-controls,
-    .chat-overlay-controls:focus-within {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .chat-follow-toggle {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: unset;
-      padding: 6px 11px;
-      color: var(--text-tertiary);
-      background: rgba(255, 250, 242, 0.7);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(125, 91, 57, 0.1);
-      border-radius: 999px;
-      box-shadow: 0 1px 4px rgba(89, 58, 32, 0.06);
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .chat-follow-toggle svg {
-      flex-shrink: 0;
-      opacity: 0.7;
-      transition: opacity 0.18s ease, transform 0.2s var(--ease-out-expo);
-    }
-
-    .chat-follow-toggle.active {
-      color: var(--accent);
-      background: rgba(255, 250, 242, 0.88);
-      border-color: rgba(197, 101, 61, 0.18);
-      box-shadow:
-        0 1px 4px rgba(89, 58, 32, 0.08),
-        0 0 0 1px rgba(197, 101, 61, 0.06);
-    }
-
-    .chat-follow-toggle.active svg {
-      opacity: 0.85;
-      stroke: var(--accent);
-    }
-
-    .chat-follow-toggle:hover {
-      color: var(--text-primary);
-      background: rgba(255, 252, 248, 0.92);
-      border-color: rgba(125, 91, 57, 0.16);
-      box-shadow: 0 2px 8px rgba(89, 58, 32, 0.1);
-    }
-
-    .chat-follow-toggle:hover svg {
-      opacity: 0.8;
-    }
-
-    .chat-follow-toggle.active:hover {
-      color: var(--accent-hover);
-      background: rgba(255, 248, 240, 0.94);
-      border-color: rgba(197, 101, 61, 0.24);
-      box-shadow: 0 2px 8px rgba(184, 92, 55, 0.12);
-    }
-
-    .chat-follow-toggle.active:hover svg {
-      stroke: var(--accent-hover);
-      transform: translateY(1px);
-    }
-
-    .chat-follow-toggle:active {
-      transform: scale(0.94);
-      transition-duration: 0.06s;
-    }
-
-    .chat-jump-bottom {
+    /* ===== Telegram 风格的"回到最新"胶囊 =====
+       规则：
+       - 用户贴在底部时 → 胶囊隐藏，新消息自然出现。
+       - 用户滚上去时 → 胶囊浮现在 chat-container 右下角，正好压在输入框上方边缘。
+       - 没有未读时 → 紧凑圆形小胶囊，只显示一个回到底部的箭头。
+       - 有未读时   → 胶囊横向展开成"↓ N 条新消息"，行内显示数字。
+       - 点胶囊     → 平滑滚回最新消息，未读分割线消失。 */
+    .chat-unread-bubble {
       position: absolute;
       right: 14px;
-      bottom: 16px;
+      bottom: 10px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 34px;
-      height: 34px;
-      padding: 0;
-      border: 1px solid rgba(255, 255, 255, 0.65);
-      border-radius: 50%;
-      background: var(--accent);
-      color: #fff;
+      gap: 6px;
+      height: 32px;
+      min-width: 32px;
+      padding: 0 10px;
+      box-sizing: border-box;
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      border-radius: 999px;
+      background: rgba(255, 252, 248, 0.92);
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
       box-shadow:
-        0 1px 2px rgba(89, 58, 32, 0.18),
-        0 8px 22px rgba(184, 92, 55, 0.28),
-        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        0 1px 3px rgba(89, 58, 32, 0.12),
+        0 10px 24px rgba(184, 92, 55, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6);
       cursor: pointer;
       z-index: 13;
       opacity: 0;
-      transform: translateY(10px) scale(0.86);
+      transform: translateY(8px) scale(0.9);
       pointer-events: none;
       transition:
         opacity 0.26s var(--ease-out-expo),
         transform 0.32s var(--ease-spring),
         background 0.18s ease,
         border-color 0.18s ease,
-        box-shadow 0.2s ease;
+        box-shadow 0.2s ease,
+        color 0.18s ease,
+        padding 0.22s var(--ease-out-expo);
     }
 
-    .chat-jump-bottom.visible {
+    .chat-unread-bubble.visible {
       opacity: 1;
       transform: translateY(0) scale(1);
       pointer-events: auto;
     }
 
-    .chat-jump-bottom svg {
+    /* 有未读时升级成"高亮色"——胶囊变成主题色实心，更显眼。 */
+    .chat-unread-bubble.has-unread {
+      background: var(--accent);
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.78);
+      padding: 0 12px 0 10px;
+      box-shadow:
+        0 1px 3px rgba(89, 58, 32, 0.18),
+        0 12px 28px rgba(184, 92, 55, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    }
+
+    .chat-unread-bubble-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
       transition: transform 0.2s var(--ease-out-expo);
     }
 
-    .chat-jump-bottom:hover {
-      background: var(--accent-hover);
-      border-color: rgba(255, 255, 255, 0.85);
+    .chat-unread-bubble:hover {
+      background: rgba(255, 250, 242, 1);
       box-shadow:
-        0 2px 4px rgba(89, 58, 32, 0.20),
-        0 12px 28px rgba(184, 92, 55, 0.38),
+        0 2px 4px rgba(89, 58, 32, 0.16),
+        0 14px 30px rgba(184, 92, 55, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    }
+
+    .chat-unread-bubble.has-unread:hover {
+      background: var(--accent-hover);
+      box-shadow:
+        0 2px 5px rgba(89, 58, 32, 0.22),
+        0 14px 32px rgba(184, 92, 55, 0.42),
         inset 0 1px 0 rgba(255, 255, 255, 0.32);
     }
 
-    .chat-jump-bottom:hover svg {
+    .chat-unread-bubble:hover .chat-unread-bubble-icon {
       transform: translateY(1.5px);
     }
 
-    .chat-jump-bottom:active {
-      transform: translateY(0) scale(0.92);
-      background: var(--accent-active);
+    .chat-unread-bubble:active {
+      transform: translateY(0) scale(0.94);
       transition-duration: 0.08s;
     }
 
-    .chat-jump-bottom:focus-visible {
+    .chat-unread-bubble:focus-visible {
       outline: none;
       box-shadow:
         0 2px 4px rgba(89, 58, 32, 0.20),
-        0 12px 28px rgba(184, 92, 55, 0.38),
+        0 12px 28px rgba(184, 92, 55, 0.32),
         inset 0 1px 0 rgba(255, 255, 255, 0.32),
         0 0 0 3px rgba(197, 101, 61, 0.32);
+    }
+
+    /* 未读计数：胶囊里行内显示，"↓ 3 条新消息"那种。
+       没有未读时 (.visible 不挂) 直接占 0 宽度，胶囊退化成圆形。 */
+    .chat-unread-bubble-count {
+      display: none;
+      align-items: center;
+      font-size: 0.78rem;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: 0.01em;
+      pointer-events: none;
+    }
+
+    .chat-unread-bubble-count.visible {
+      display: inline-flex;
+      animation: chatUnreadCountPop 0.22s var(--ease-out-back, cubic-bezier(0.34, 1.56, 0.64, 1));
+    }
+
+    .chat-unread-bubble-count::after {
+      content: " 条新消息";
+      margin-left: 2px;
+      font-weight: 500;
+      opacity: 0.95;
+    }
+
+    @keyframes chatUnreadCountPop {
+      from { transform: scale(0.6); opacity: 0; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
+
+    /* ===== 未读消息分隔线 =====
+       在第一条未读消息的"上方"渲染一条带文字的横线。
+       column-reverse 下：分隔线在 DOM 里挂在第一条已读消息的前面（DOM 顺序：
+       新→旧），视觉上自然落在未读和已读之间。 */
+    .chat-unread-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 6px 4px 2px;
+      padding: 0 2px;
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.04em;
+      user-select: none;
+      pointer-events: none;
+      opacity: 0;
+      animation: chatUnreadDividerIn 0.32s var(--ease-out-expo) forwards;
+    }
+
+    .chat-unread-divider-line {
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(
+        to right,
+        rgba(197, 101, 61, 0.05),
+        rgba(197, 101, 61, 0.32),
+        rgba(197, 101, 61, 0.05)
+      );
+    }
+
+    .chat-unread-divider-label {
+      flex-shrink: 0;
+      padding: 3px 10px;
+      background: rgba(255, 248, 240, 0.95);
+      border: 1px solid rgba(197, 101, 61, 0.18);
+      border-radius: 999px;
+      box-shadow: 0 1px 3px rgba(184, 92, 55, 0.1);
+      white-space: nowrap;
+    }
+
+    @keyframes chatUnreadDividerIn {
+      from { opacity: 0; transform: translateY(-2px); }
+      to   { opacity: 1; transform: translateY(0); }
     }
 
     .chat-container.active { display: flex; }
@@ -8505,13 +8536,29 @@
       }
 
       /* 回到底部按钮 - 紧凑 */
-      .terminal-jump-bottom,
-      .chat-jump-bottom {
+      .terminal-jump-bottom {
         width: 32px;
         height: 32px;
         padding: 0;
         right: 10px;
         bottom: 12px;
+      }
+
+      /* 移动端的未读胶囊 —— 略矮一点，贴紧 chat-container 的右下角，
+         离输入框边缘更近、避开虚拟键盘那一坨。 */
+      .chat-unread-bubble {
+        height: 30px;
+        min-width: 30px;
+        right: 10px;
+        bottom: 8px;
+        padding: 0 9px;
+        font-size: 0.72rem;
+      }
+      .chat-unread-bubble.has-unread {
+        padding: 0 11px 0 9px;
+      }
+      .chat-unread-bubble-count {
+        font-size: 0.72rem;
       }
 
       /* 小键盘 FAB */

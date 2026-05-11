@@ -59,7 +59,6 @@
     (function() {
       var configPath = "${escapeHtml(configPath)}";
       var CHAT_EXPAND_STATE_STORAGE_KEY = "wand-chat-expand-state-v1";
-      var CHAT_AUTO_FOLLOW_STORAGE_KEY = "wand-chat-auto-follow";
 
       var state = {
         selectedId: (function() {
@@ -183,16 +182,13 @@
         quickCommitGenerating: false,
         quickCommitError: "",
         quickCommitForm: { autoMessage: false, customMessage: "", makeTag: false, tag: "", push: false },
-        chatAutoFollow: (function() {
-          try {
-            var saved = localStorage.getItem(CHAT_AUTO_FOLLOW_STORAGE_KEY);
-            return saved === null ? true : saved === "true";
-          } catch (e) {
-            return true;
-          }
-        })(),
-        showChatJumpToBottom: false,
-        chatScrollThreshold: 200,
+        // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
+        // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
+        chatStickToBottom: true,
+        chatUnreadCount: 0,
+        // state.currentMessages 中第一条未读消息的 index，-1 表示没有未读。
+        chatUnreadStartIndex: -1,
+        chatScrollThreshold: 120,
         chatIsProgrammaticScroll: false,
         chatScrollElement: null,
         chatScrollHandler: null,
@@ -406,14 +402,6 @@
         }
       }
 
-      function persistChatAutoFollow() {
-        try {
-          localStorage.setItem(CHAT_AUTO_FOLLOW_STORAGE_KEY, state.chatAutoFollow ? "true" : "false");
-        } catch (e) {
-          // Ignore localStorage errors
-        }
-      }
-
       function getChatScrollElement() {
         var chatOutput = document.getElementById("chat-output");
         if (!chatOutput) {
@@ -429,36 +417,106 @@
         return null;
       }
 
+      // column-reverse: scrollTop=0 是视觉底部，越往上看 scrollTop 绝对值越大。
+      // 部分浏览器历史上在 column-reverse 里给负 scrollTop，所以用绝对值更稳。
       function isChatNearBottom(chatMsgs) {
         var el = chatMsgs || getChatScrollElement();
         if (!el) return true;
-        return el.scrollTop < state.chatScrollThreshold;
+        return Math.abs(el.scrollTop) < state.chatScrollThreshold;
       }
 
-      function updateChatFollowToggleButton() {
-        var button = document.getElementById("chat-follow-toggle");
-        if (!button) return;
-        var enabled = !!state.chatAutoFollow;
-        button.classList.toggle("active", enabled);
-        button.setAttribute("aria-pressed", enabled ? "true" : "false");
-        button.setAttribute("title", enabled ? "追踪底部：开启（点击暂停）" : "追踪底部：已暂停（点击开启）");
-        button.setAttribute("aria-label", enabled ? "追踪底部：开启" : "追踪底部：已暂停");
-        button.innerHTML = enabled
-          ? '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 2.5l4.5 4.5 4.5-4.5"/><path d="M3.5 8.5l4.5 4.5 4.5-4.5"/></svg>'
-          : '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 3v10"/><path d="M10.5 3v10"/></svg>';
+      // 没有手动 toggle 了——是否贴底完全由用户的滚动行为决定。
+      // 这个函数只用来在某些场景（点未读气泡）下显式把状态扳回 true。
+      function setChatStickToBottom(enabled) {
+        state.chatStickToBottom = !!enabled;
+        if (state.chatStickToBottom) clearChatUnread({ removeDivider: true });
+        updateChatUnreadBubble();
       }
 
-      function updateChatJumpToBottomButton() {
-        var button = document.getElementById("chat-jump-bottom");
-        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        var shouldShow = !!selectedSession
-          && state.currentView === "chat"
-          && !state.chatAutoFollow
-          && !isChatNearBottom();
-        state.showChatJumpToBottom = shouldShow;
-        if (button) {
-          button.classList.toggle("visible", shouldShow);
+      function clearChatUnread(options) {
+        options = options || {};
+        var hadUnread = state.chatUnreadCount > 0 || state.chatUnreadStartIndex >= 0;
+        state.chatUnreadCount = 0;
+        state.chatUnreadStartIndex = -1;
+        if (options.removeDivider !== false) {
+          var chatMsgs = getChatScrollElement();
+          if (chatMsgs) {
+            var divider = chatMsgs.querySelector(".chat-unread-divider");
+            if (divider && divider.parentNode) divider.parentNode.removeChild(divider);
+          }
         }
+        if (hadUnread) updateChatUnreadBubble();
+      }
+
+      // 在 chatMessages 容器里把"未读分割线"放到正确位置——visually 在
+      // 最后一条已读和第一条未读中间。column-reverse 下 DOM[0] 是最新（视觉底部），
+      // 所以分割线在 DOM 里应该插到"第一条已读消息"之前。
+      function refreshChatUnreadDivider(chatMessages) {
+        if (!chatMessages) chatMessages = getChatScrollElement();
+        if (!chatMessages) return;
+        var existing = chatMessages.querySelector(".chat-unread-divider");
+        if (state.chatUnreadStartIndex < 0 || state.chatUnreadCount <= 0) {
+          if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+          return;
+        }
+        var startIdx = state.chatUnreadStartIndex;
+        // 找到 DOM 里第一条 originalIndex < startIdx 的消息——它紧邻分割线下方（DOM 顺序），
+        // 也就是视觉上紧贴在分割线"上方"（column-reverse）。
+        var nodes = chatMessages.querySelectorAll(".chat-message");
+        var boundary = null;
+        for (var i = 0; i < nodes.length; i++) {
+          var idxAttr = nodes[i].getAttribute("data-msg-index");
+          if (idxAttr === null) continue;
+          var idx = parseInt(idxAttr, 10);
+          if (!isNaN(idx) && idx < startIdx) { boundary = nodes[i]; break; }
+        }
+        // 没找到 boundary：未读消息覆盖了整个可见窗口——把分割线挂到末尾即可。
+        var label = state.chatUnreadCount + " 条新消息";
+        if (!existing) {
+          existing = document.createElement("div");
+          existing.className = "chat-unread-divider";
+          existing.setAttribute("role", "separator");
+          existing.innerHTML = '<span class="chat-unread-divider-line"></span>'
+            + '<span class="chat-unread-divider-label"></span>'
+            + '<span class="chat-unread-divider-line"></span>';
+        }
+        existing.querySelector(".chat-unread-divider-label").textContent = label;
+        if (boundary) {
+          if (existing.nextSibling !== boundary || existing.parentNode !== chatMessages) {
+            chatMessages.insertBefore(existing, boundary);
+          }
+        } else {
+          if (existing.parentNode !== chatMessages || existing.nextSibling !== null) {
+            chatMessages.appendChild(existing);
+          }
+        }
+      }
+
+      function updateChatUnreadBubble() {
+        var bubble = document.getElementById("chat-unread-bubble");
+        if (!bubble) return;
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var notAtBottom = !isChatNearBottom();
+        // 显示条件：有选中会话 + 在 chat 视图 + 用户已经滚开了底部。
+        // 不强制要求有未读——用户主动滚上去时也给一个"回到底部"的入口。
+        var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom;
+        bubble.classList.toggle("visible", shouldShow);
+        bubble.classList.toggle("has-unread", state.chatUnreadCount > 0);
+        var countEl = bubble.querySelector(".chat-unread-bubble-count");
+        if (countEl) {
+          if (state.chatUnreadCount > 0) {
+            countEl.textContent = state.chatUnreadCount > 99 ? "99+" : String(state.chatUnreadCount);
+            countEl.classList.add("visible");
+          } else {
+            countEl.textContent = "";
+            countEl.classList.remove("visible");
+          }
+        }
+        var label = state.chatUnreadCount > 0
+          ? (state.chatUnreadCount + " 条新消息，点击查看")
+          : "回到最新消息";
+        bubble.setAttribute("aria-label", label);
+        bubble.setAttribute("title", label);
         var chatContainer = document.getElementById("chat-output");
         if (chatContainer) chatContainer.classList.toggle("has-jump-btn", shouldShow);
       }
@@ -467,38 +525,26 @@
         var chatMsgs = getChatScrollElement();
         if (!chatMsgs || !chatMsgs.isConnected) return;
         state.chatIsProgrammaticScroll = true;
+        var done = function() {
+          state.chatIsProgrammaticScroll = false;
+          state.chatStickToBottom = true;
+          clearChatUnread({ removeDivider: true });
+          updateChatUnreadBubble();
+        };
         if (smooth && typeof chatMsgs.scrollTo === "function") {
           chatMsgs.scrollTo({ top: 0, behavior: "smooth" });
-          setTimeout(function() {
-            state.chatIsProgrammaticScroll = false;
-            updateChatJumpToBottomButton();
-          }, 220);
+          setTimeout(done, 260);
           return;
         }
         chatMsgs.scrollTop = 0;
-        requestAnimationFrame(function() {
-          state.chatIsProgrammaticScroll = false;
-          updateChatJumpToBottomButton();
-        });
-      }
-
-      function setChatAutoFollow(enabled, options) {
-        options = options || {};
-        state.chatAutoFollow = !!enabled;
-        persistChatAutoFollow();
-        updateChatFollowToggleButton();
-        if (state.chatAutoFollow && options.scrollNow !== false) {
-          scrollChatToBottom(!!options.smooth);
-        } else {
-          updateChatJumpToBottomButton();
-        }
+        requestAnimationFrame(done);
       }
 
       function bindChatScrollListener() {
         var chatMsgs = getChatScrollElement();
         if (!chatMsgs || !chatMsgs.isConnected) return;
         if (state.chatScrollElement === chatMsgs && state.chatScrollHandler) {
-          updateChatJumpToBottomButton();
+          updateChatUnreadBubble();
           return;
         }
         if (state.chatScrollElement && state.chatScrollHandler) {
@@ -507,22 +553,24 @@
         state.chatScrollElement = chatMsgs;
         state.chatScrollHandler = function() {
           if (!chatMsgs.isConnected) return;
+          // 程序触发的滚动（点了气泡）不算"用户翻页"——别把状态弄乱。
           if (state.chatIsProgrammaticScroll) {
-            updateChatJumpToBottomButton();
+            updateChatUnreadBubble();
             return;
           }
-          if (!isChatNearBottom(chatMsgs)) {
-            if (state.chatAutoFollow) {
-              setChatAutoFollow(false, { scrollNow: false });
-            } else {
-              updateChatJumpToBottomButton();
-            }
-            return;
+          var atBottom = isChatNearBottom(chatMsgs);
+          if (atBottom) {
+            // 用户自己滚到底了——清未读、贴回底部、撤下气泡。
+            state.chatStickToBottom = true;
+            clearChatUnread({ removeDivider: true });
+          } else {
+            // 用户主动往上翻——脱离贴底状态。新消息只会累积到气泡，不滚视图。
+            state.chatStickToBottom = false;
           }
-          updateChatJumpToBottomButton();
+          updateChatUnreadBubble();
         };
         chatMsgs.addEventListener("scroll", state.chatScrollHandler, { passive: true });
-        updateChatJumpToBottomButton();
+        updateChatUnreadBubble();
       }
 
       /** Load older messages by expanding the visible window */
@@ -865,8 +913,11 @@
         }
         state.chatScrollElement = null;
         state.chatScrollHandler = null;
-        state.showChatJumpToBottom = false;
         state.chatIsProgrammaticScroll = false;
+        // 切会话时未读状态归零、贴底重置——避免上一个会话残留的"未读气泡"。
+        state.chatStickToBottom = true;
+        state.chatUnreadCount = 0;
+        state.chatUnreadStartIndex = -1;
       }
 
       function getEffectiveCwd() {
@@ -1388,10 +1439,10 @@
                 '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
               '</div>' +
               '<div id="chat-output" class="chat-container hidden">' +
-                '<div class="chat-overlay-controls">' +
-                  '<button id="chat-follow-toggle" class="chat-follow-toggle topbar-btn' + (state.chatAutoFollow ? ' active' : '') + '" type="button" aria-pressed="' + (state.chatAutoFollow ? 'true' : 'false') + '" aria-label="' + (state.chatAutoFollow ? '追踪底部：开启' : '追踪底部：已暂停') + '" title="' + (state.chatAutoFollow ? '追踪底部：开启（点击暂停）' : '追踪底部：已暂停（点击开启）') + '">' + (state.chatAutoFollow ? '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 2.5l4.5 4.5 4.5-4.5"/><path d="M3.5 8.5l4.5 4.5 4.5-4.5"/></svg>' : '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 3v10"/><path d="M10.5 3v10"/></svg>') + '</button>' +
-                '</div>' +
-                '<button id="chat-jump-bottom" class="chat-jump-bottom' + (state.showChatJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部并继续追底" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
+                '<button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="回到最新消息" aria-label="回到最新消息">' +
+                  '<span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span>' +
+                  '<span class="chat-unread-bubble-count" aria-hidden="true"></span>' +
+                '</button>' +
               '</div>' +
               '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
                 '<div class="blank-chat-inner">' +
@@ -5087,17 +5138,10 @@
         if (jumpBottomBtn) jumpBottomBtn.addEventListener("click", function() {
           maybeScrollTerminalToBottom("force");
         });
-        var chatFollowToggle = document.getElementById("chat-follow-toggle");
-        if (chatFollowToggle) chatFollowToggle.addEventListener("click", function() {
-          if (state.chatAutoFollow) {
-            setChatAutoFollow(false, { scrollNow: false });
-          } else {
-            setChatAutoFollow(true, { scrollNow: true, smooth: false });
-          }
-        });
-        var chatJumpBottomBtn = document.getElementById("chat-jump-bottom");
-        if (chatJumpBottomBtn) chatJumpBottomBtn.addEventListener("click", function() {
-          setChatAutoFollow(true, { scrollNow: true, smooth: true });
+        // 未读气泡：点一下就贴回最新消息，顺手清掉未读分割线和计数。
+        var chatUnreadBubble = document.getElementById("chat-unread-bubble");
+        if (chatUnreadBubble) chatUnreadBubble.addEventListener("click", function() {
+          scrollChatToBottom(true);
         });
         var fileRefresh = document.getElementById("file-explorer-refresh");
         if (fileRefresh) fileRefresh.addEventListener("click", function() { refreshFileExplorer(); });
@@ -7125,8 +7169,7 @@
           ensureChatMessagesContainer(chatContainer);
         }
         bindChatScrollListener();
-        updateChatFollowToggleButton();
-        updateChatJumpToBottomButton();
+        updateChatUnreadBubble();
         updateInteractiveControls();
       }
 
@@ -13783,8 +13826,7 @@
         if (!chatMessages) return null;
         chatMessages.innerHTML = html;
         bindChatScrollListener();
-        updateChatFollowToggleButton();
-        updateChatJumpToBottomButton();
+        updateChatUnreadBubble();
         return chatMessages;
       }
 
@@ -13818,9 +13860,10 @@
         }
 
         // Lazy loading: only render the most recent chatRenderedCount messages.
-        // Auto-expand when new messages arrive during active streaming to avoid hiding them.
+        // 新消息进来时永远展开渲染窗口，避免用户正在看的旧消息被挤进"加载更早"里——
+        // Telegram 风格下我们不主动挪用户的视线，最稳妥的办法就是别让他看的那条消失。
         var totalMsgCount = allMessages.length;
-        if (totalMsgCount > state.chatRenderedCount && state.chatAutoFollow) {
+        if (totalMsgCount > state.chatRenderedCount) {
           state.chatRenderedCount = totalMsgCount;
         }
         var visibleOffset = Math.max(0, totalMsgCount - state.chatRenderedCount);
@@ -13876,6 +13919,13 @@
         var chatMessages = ensureChatMessagesContainer(chatOutput);
         if (!chatMessages) return;
 
+        // 在动 DOM 之前先看用户是不是贴在底部——这决定后面我们要不要让视图
+        // "继续粘在底部"。column-reverse 下 scrollTop 接近 0 = 视觉底部。
+        // 同时把 state.chatStickToBottom 同步到当前真实状态，避免长时间不滚动后
+        // 的状态漂移（比如新会话 init 的瞬间）。
+        var renderWasAtBottom = isChatNearBottom(chatMessages);
+        if (renderWasAtBottom) state.chatStickToBottom = true;
+
         var existingCount = chatMessages.querySelectorAll(".chat-message").length;
         // Full render when: forced, no existing messages, or message count decreased/changed
         var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
@@ -13925,15 +13975,28 @@
           }
 
           chatMessages.innerHTML = html;
+          // 给每条消息打 data-msg-index（用 state.currentMessages 的全局索引），
+          // 后面 refreshChatUnreadDivider 用它找未读分割线的位置。
+          (function() {
+            var msgEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
+            // column-reverse: DOM[0] = 最新（最高 originalIndex）
+            var totalVisible = msgEls.length;
+            for (var idx = 0; idx < totalVisible; idx++) {
+              msgEls[idx].setAttribute("data-msg-index", String(visibleOffset + totalVisible - 1 - idx));
+            }
+          })();
           // 会话切换 / 首次渲染后，浏览器会把旧的 scrollTop 钳制到新内容
           // 的最大值——column-reverse 下这意味着视觉上跳到最上面（最旧消息），
           // 也就是用户反馈的"退出再回来时被重定向到最上面"。这里在
           // prevMsgCount === 0（resetChatRenderCache 后或刚从空状态进入）
           // 强制 scrollTop=0（视觉底部 = 最新消息），避免错位。
-          // 注意：仅在"换会话/初次渲染"时强制重置；同一会话内的全量重渲染
-          // （prevMsgCount > 0，比如 forceFullRender 或消息数减少）继续走
-          // smartScrollToBottom，尊重用户的 chatAutoFollow 选择。
           if (prevMsgCount === 0) {
+            chatMessages.scrollTop = 0;
+            state.chatStickToBottom = true;
+            clearChatUnread({ removeDivider: true });
+          } else if (renderWasAtBottom) {
+            // 同一会话内的全量重渲染：用户原本贴底就保持贴底，浏览器在 innerHTML
+            // 重置后可能把 scrollTop 钳到一个奇怪的值，这里显式拉回 0。
             chatMessages.scrollTop = 0;
           }
           attachAllCopyHandlers(chatMessages);
@@ -13959,9 +14022,13 @@
               }
             }
           }
-          // Scroll to bottom (newest message) - column-reverse: scrollTop=0 is visual bottom
+          // 不主动 smartScrollToBottom——同一会话的全量重渲染要么是
+          // streaming fallback（页面位置应保持），要么是 msgCount 减少（极少见，
+          // 走 prevMsgCount===0 那条分支已经处理）。让浏览器自带的 scroll
+          // anchoring 接手，避免在用户阅读时把视图拽走。
           requestAnimationFrame(function() {
-            smartScrollToBottom(chatMessages);
+            refreshChatUnreadDivider(chatMessages);
+            updateChatUnreadBubble();
             observeLoadMoreSentinel();
           });
         }
@@ -14036,6 +14103,11 @@
           newMessages.reverse();
           var fragment = document.createDocumentFragment();
           var insertedEls = [];
+          // 记录每条新消息的 originalIndex，方便后面打标签 / 计算未读起点。
+          var insertedOrigIdx = [];
+          // 第一条新消息（数组里 index 最小的，时间上最早的那条）对应的全局索引——
+          // 用作未读起点。
+          var firstNewOrigIdx = visibleOffset + existingCount;
           for (var i = 0; i < newMessages.length; i++) {
             var div = document.createElement("div");
             var nmOrigIdx = visibleOffset + existingCount + (newMessages.length - 1 - i);
@@ -14043,7 +14115,9 @@
             var el = div.firstElementChild;
             if (el) {
               el.classList.add("animate-in");
+              el.setAttribute("data-msg-index", String(nmOrigIdx));
               insertedEls.push(el);
+              insertedOrigIdx.push(nmOrigIdx);
               fragment.appendChild(el);
             }
           }
@@ -14053,10 +14127,31 @@
           applyPersistedExpandState(chatMessages);
           // Collapse all existing cards; new cards (with animate-in) stay expanded
           collapseOldToolCards(chatMessages, insertedEls);
-          // Scroll to bottom (newest message) - column-reverse: scrollTop=0 is visual bottom
-          requestAnimationFrame(function() {
-            smartScrollToBottom(chatMessages);
-          });
+          // Telegram 行为：
+          // - 用户原本就贴在底部 → 维持贴底（column-reverse 通常会自动留在底部，
+          //   但浏览器的 scroll anchoring 在某些边界场景会把 scrollTop 调成非 0；
+          //   这里显式拉回 0 做兜底，不用动画，不会让用户感觉"被甩"）。
+          // - 用户已经滚上去 → 一根毛都不动他的视图，只把未读累到气泡里。
+          if (renderWasAtBottom) {
+            requestAnimationFrame(function() {
+              if (chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
+                state.chatIsProgrammaticScroll = true;
+                chatMessages.scrollTop = 0;
+                requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
+              }
+              // 视为已读 —— 用户当前就在底部看着，这些新消息直接进入"已读"。
+              clearChatUnread({ removeDivider: true });
+              updateChatUnreadBubble();
+            });
+          } else {
+            // 累计未读。如果之前没有未读，就用这一批的最早一条做分割线起点。
+            if (state.chatUnreadStartIndex < 0) {
+              state.chatUnreadStartIndex = firstNewOrigIdx;
+            }
+            state.chatUnreadCount += insertedEls.length;
+            refreshChatUnreadDivider(chatMessages);
+            updateChatUnreadBubble();
+          }
         } else if (msgCount === existingCount && outputHash !== prevHash) {
           // Same message count but content changed (streaming update).
           // Optimization: only re-render the newest N messages (column-reverse: first children)
@@ -14091,8 +14186,18 @@
           if (replacedAny) {
             bindChatScrollListener();
             applyPersistedExpandState(chatMessages);
+            // Streaming 更新只是改最新一条的内容，不改条数。column-reverse 下
+            // 浏览器的 scroll anchoring 会自动保持视觉位置；用户贴底时新内容
+            // 自然出现在底部，用户上滚时视图也不受打扰——不需要再 smartScroll。
             requestAnimationFrame(function() {
-              smartScrollToBottom(chatMessages);
+              // 兜底：用户贴底时如果浏览器把 scrollTop 调成非零，拉回来。
+              if (renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
+                state.chatIsProgrammaticScroll = true;
+                chatMessages.scrollTop = 0;
+                requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
+              }
+              refreshChatUnreadDivider(chatMessages);
+              updateChatUnreadBubble();
             });
             var newestMsgEl = chatMessages.querySelector(".chat-message");
             var allCards = chatMessages.querySelectorAll(".tool-use-card, .inline-diff[data-expand-key]");
@@ -14121,19 +14226,11 @@
         updateTodoProgress(allMessages);
       }
 
-      // Smart scroll: only auto-scroll if user is near bottom
-      // column-reverse: scrollTop near 0 = visual bottom (newest messages)
-      function smartScrollToBottom(container) {
-        if (!state.chatAutoFollow) {
-          updateChatJumpToBottomButton();
-          return;
-        }
-        var chatMsgs = (container && container.classList && container.classList.contains("chat-messages"))
-          ? container
-          : getChatScrollElement();
-        if (!chatMsgs || !chatMsgs.isConnected) return;
-        scrollChatToBottom(false);
-      }
+      // 注：旧版的 smartScrollToBottom / chatAutoFollow / chat-follow-toggle 都已经
+      // 拆掉，改成 Telegram 风格：贴底状态完全由用户的滚动行为驱动，未读靠
+      // chat-unread-bubble 气泡提示，不再主动滚动用户的视图。
+      // 相关入口：scrollChatToBottom（用户点气泡时强制贴底）、
+      // refreshChatUnreadDivider（分割线渲染）、updateChatUnreadBubble（气泡 UI）。
 
       // --- Todo progress bar ---
       var todoExpanded = false;
