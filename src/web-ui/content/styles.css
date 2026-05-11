@@ -121,12 +121,33 @@
       }
     }
 
-    /* ===== PWA 独立窗口模式 ===== */
-    /* 顶部安全区:用 max() 保底,避免 iPad 横屏/Stage Manager 等 inset 为 0 的场景下贴顶,
-       同时为 iPadOS Stage Manager 浮动控件预留视觉缓冲 */
+    /* ===== 设备安全区 (notch / 状态栏 / 圆角) =====
+       全局 --wand-safe-top/bottom/left/right 在所有上下文(PWA、Android APK 内嵌
+       WebView、普通移动浏览器、桌面) 中都可用。在没有 inset 的设备上回退到
+       0px,所以不会影响桌面浏览体验。固定定位 (position: fixed) 的顶部元素
+       (如文件面板抽屉、各类预览/对话框) 必须自己消费这些 inset,因为它们脱离
+       了 .app-container 的 padding 流。*/
+    :root {
+      --wand-safe-top: env(safe-area-inset-top, 0px);
+      --wand-safe-bottom: env(safe-area-inset-bottom, 0px);
+      --wand-safe-left: env(safe-area-inset-left, 0px);
+      --wand-safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      /* 默认与 wand-safe-top 等价; PWA / .is-pwa 下被覆盖为 max(inset, 14px) */
+      --pwa-safe-top: env(safe-area-inset-top, 0px);
+    }
+
+    /* 在普通移动浏览器 / Android WebView 边到边渲染 / 旋转后地址栏隐藏等场景下,
+       .app-container 同样需要消费 safe-area-inset-top, 否则 .main-header-row
+       会被状态栏挡住。inset 为 0 的设备上为 0px, 不影响桌面。*/
+    .app-container {
+      padding-top: var(--wand-safe-top);
+    }
+
+    /* PWA 独立窗口模式: 加一个最小 14px 的视觉缓冲, 避开 iPadOS Stage Manager
+       浮动控件 / iOS 状态栏底色和 UI 太贴的视觉粘连。 */
     @media (display-mode: standalone) {
       :root {
-        --safe-bottom: env(safe-area-inset-bottom, 0px);
         --pwa-safe-top: max(env(safe-area-inset-top, 0px), 14px);
       }
       .app-container {
@@ -143,7 +164,6 @@
 
     /* iOS Safari PWA fallback (navigator.standalone adds .is-pwa via JS) */
     .is-pwa {
-      --safe-bottom: env(safe-area-inset-bottom, 0px);
       --pwa-safe-top: max(env(safe-area-inset-top, 0px), 14px);
     }
     .is-pwa .app-container {
@@ -175,6 +195,9 @@
       text-rendering: optimizeLegibility;
       min-height: 100%;
       height: 100%;
+      /* 兜底背景：iOS Safari 在键盘弹起 / 地址栏收起 / 安全区时
+         body 可能短于 html，露出的部分必须也是奶油色，否则会看到默认白底。 */
+      background-color: #f6f1e8;
     }
 
     body {
@@ -666,10 +689,10 @@
     .tree-children.open { display: block; }
 
     .file-explorer-header {
-      padding: 10px 14px 8px;
+      padding: 10px 14px 6px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       flex-shrink: 0;
     }
 
@@ -688,11 +711,11 @@
     /* When rendered as <input> (editable path) keep the same look but reveal
        an editable affordance on hover/focus. */
     input.file-explorer-path {
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: var(--radius-sm);
-      padding: 4px 8px;
-      height: 28px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 6px 10px;
+      height: 30px;
       line-height: 1.2;
       cursor: text;
       transition: background-color var(--transition-fast),
@@ -708,7 +731,7 @@
       opacity: 0.6;
     }
     input.file-explorer-path:hover {
-      background: rgba(255, 255, 255, 0.5);
+      background: var(--bg-primary);
       border-color: var(--border);
       color: var(--text-secondary);
     }
@@ -717,6 +740,7 @@
       border-color: var(--accent);
       color: var(--text-primary);
       text-overflow: clip;
+      box-shadow: 0 0 0 3px rgba(212, 152, 99, 0.12);
     }
 
     .file-explorer-actions { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
@@ -751,6 +775,10 @@
       display: flex;
       flex-direction: column;
       box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
+      /* 抽屉是 position:fixed, 脱离了 app-container 的 padding, 必须自己消费
+         状态栏 / notch 安全区, 否则 .file-side-panel-header 会被刘海/状态栏挡住。*/
+      padding-top: var(--wand-safe-top);
+      padding-bottom: var(--wand-safe-bottom);
     }
 
     .file-side-panel.open {
@@ -788,15 +816,95 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border);
+      padding: 12px 14px 10px;
+      border-bottom: 1px solid var(--border-subtle);
       flex-shrink: 0;
+      gap: 8px;
+      background: linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.4),
+        rgba(255, 255, 255, 0)
+      );
+    }
+
+    .file-side-panel-title-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .file-side-panel-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      opacity: 0.85;
     }
 
     .file-side-panel-title {
       font-size: 0.875rem;
       font-weight: 600;
       color: var(--text-primary);
+      letter-spacing: 0.01em;
+    }
+
+    .file-side-panel-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+
+    .file-side-panel-iconbtn {
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background var(--transition-fast),
+                  color var(--transition-fast),
+                  border-color var(--transition-fast),
+                  transform var(--transition-fast);
+    }
+
+    .file-side-panel-iconbtn:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border-color: var(--border-subtle);
+    }
+
+    .file-side-panel-iconbtn:active {
+      transform: scale(0.94);
+    }
+
+    .file-side-panel-iconbtn.active {
+      color: var(--accent);
+      background: var(--accent-muted);
+      border-color: rgba(212, 152, 99, 0.35);
+    }
+
+    .file-side-panel-iconbtn.close:hover {
+      color: var(--text-primary);
+      background: rgba(220, 70, 70, 0.08);
+      border-color: rgba(220, 70, 70, 0.25);
+    }
+
+    .file-side-panel-iconbtn .wand-icon {
+      display: block;
+    }
+
+    /* The refresh icon nudges with a subtle spin on hover to reinforce its purpose. */
+    .file-side-panel-iconbtn:hover .wand-icon-refresh {
+      transform: rotate(60deg);
+      transition: transform 0.25s var(--ease-out-expo);
     }
 
     .file-side-panel-body {
@@ -861,30 +969,44 @@
     }
 
     .file-search-box {
-      padding: 8px 12px;
+      padding: 8px 12px 10px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 0;
       border-bottom: 1px solid var(--border-subtle);
       flex-shrink: 0;
+      position: relative;
+    }
+
+    .file-search-icon {
+      position: absolute;
+      left: 22px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+      display: inline-flex;
+      align-items: center;
+      opacity: 0.7;
     }
 
     .file-search-input {
       flex: 1;
-      padding: 6px 10px;
+      padding: 7px 32px 7px 30px;
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: 8px;
       font-size: 0.8125rem;
       font-family: var(--font-sans);
       background: var(--bg-secondary);
       color: var(--text-primary);
       outline: none;
-      transition: border-color 0.15s ease;
+      transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
     }
 
     .file-search-input:focus {
       border-color: var(--accent);
       background: var(--bg-primary);
+      box-shadow: 0 0 0 3px rgba(212, 152, 99, 0.12);
     }
 
     .file-search-input::placeholder {
@@ -892,20 +1014,31 @@
     }
 
     .file-search-clear {
+      position: absolute;
+      right: 18px;
+      top: 50%;
+      transform: translateY(-50%);
       background: none;
       border: none;
       cursor: pointer;
-      font-size: 1rem;
       padding: 4px;
-      border-radius: 4px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
       color: var(--text-muted);
       display: none;
       align-items: center;
       justify-content: center;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .file-search-clear:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
     }
 
     .file-search-clear.visible {
-      display: flex;
+      display: inline-flex;
     }
 
     .file-search-clear:hover {
@@ -6712,7 +6845,11 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 32px;
+      /* 给安全区让位, 避免 iPhone notch / Dynamic Island / 横屏圆角切到模态内容 */
+      padding-top: max(32px, var(--wand-safe-top));
+      padding-bottom: max(32px, var(--wand-safe-bottom));
+      padding-left: max(32px, var(--wand-safe-left));
+      padding-right: max(32px, var(--wand-safe-right));
       animation: liquidBackdropIn 0.28s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
     }
 
@@ -8237,6 +8374,10 @@
       .app-container {
         min-height: 100dvh;
         height: 100dvh;
+        /* 与 body 同步：键盘弹起时 JS 注入 --app-viewport-height，
+           app-container 跟随 visualViewport 收缩，input-panel 自动贴键盘上沿；
+           键盘收起后变量被移除，回到 100dvh，input-panel 自然回到屏幕底部。 */
+        height: var(--app-viewport-height, 100dvh);
         overflow: hidden;
       }
 
@@ -8378,7 +8519,11 @@
         padding-bottom: calc(6px + var(--safe-bottom, 0px) + var(--keyboard-offset, 0px));
         flex: 0 0 auto;
         margin-top: auto;
-        background: linear-gradient(180deg, rgba(246, 241, 232, 0.5) 0%, rgba(246, 241, 232, 0.88) 30%, rgba(246, 241, 232, 0.96) 100%);
+        /* 渐变只覆盖上半段做平滑过渡，下半段用纯色铺满 safe-area 区域，
+           避免 iOS Safari 在 home indicator / 安全区域露出 html 背景。 */
+        background:
+          linear-gradient(180deg, rgba(246, 241, 232, 0.5) 0%, rgba(246, 241, 232, 0.88) 30%, #f6f1e8 100%),
+          #f6f1e8;
         backdrop-filter: blur(12px);
       }
 
@@ -8706,6 +8851,9 @@
       /* 模态框移动端优化 */
       .modal-backdrop {
         padding: 8px;
+        padding-top: max(8px, var(--wand-safe-top));
+        padding-left: max(8px, var(--wand-safe-left));
+        padding-right: max(8px, var(--wand-safe-right));
         align-items: flex-end;
       }
 
@@ -8729,10 +8877,14 @@
       /* 文件面板 */
       .main-content.file-panel-open { margin-right: 0; }
       .file-side-panel { width: 100%; }
-      .file-side-panel-header { padding: 6px 8px; min-height: 36px; }
-      .file-explorer-header { padding: 4px 6px; }
-      .file-search-box { padding: 4px; }
-      .file-search-input { min-height: 32px; font-size: 14px; }
+      .file-side-panel-header { padding: 10px 12px; min-height: 48px; }
+      .file-side-panel-iconbtn { width: 34px; height: 34px; }
+      .file-explorer-header { padding: 6px 10px 4px; gap: 6px; }
+      .file-explorer-up { width: 32px; height: 32px; }
+      .file-search-box { padding: 6px 10px 8px; }
+      .file-search-icon { left: 20px; }
+      .file-search-clear { right: 16px; }
+      .file-search-input { min-height: 34px; font-size: 14px; padding: 7px 32px 7px 30px; }
       .file-item { padding: 6px 8px; min-height: 32px; }
 
       /* 欢迎页移动端 */
@@ -10685,12 +10837,16 @@
         flex-shrink: 0;
       }
       .file-preview-toolbar-btn {
-        padding: 4px 6px;
+        padding: 0 6px;
         font-size: 0.75rem;
       }
       .file-preview-close {
-        font-size: 1.375rem;
-        padding: 6px 10px;
+        width: 34px;
+        height: 34px;
+        padding: 0;
+      }
+      .file-preview-icon {
+        font-size: 1.125rem;
       }
       /* 底部安全区（小白条 / 圆角） */
       .file-preview-body {
@@ -10702,8 +10858,8 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 10px 16px;
-      border-bottom: 1px solid var(--border);
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border-subtle);
       background: var(--bg-secondary);
       flex-shrink: 0;
     }
@@ -10711,57 +10867,114 @@
     .file-preview-title {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       font-size: 0.9375rem;
       font-weight: 600;
       color: var(--text-primary);
+      flex: 1;
+      min-width: 0;
+    }
+
+    .file-preview-icon {
+      font-size: 1.25rem;
+      line-height: 1;
       flex-shrink: 0;
+    }
+
+    .file-preview-name-block {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .file-preview-name-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
     }
 
     .file-preview-filename {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: 0.01em;
+      min-width: 0;
     }
 
     .file-preview-path {
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       color: var(--text-muted);
       font-family: var(--font-mono);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      flex: 1;
       min-width: 0;
-      margin: 0 12px;
+      opacity: 0.8;
+    }
+
+    .file-preview-dirty {
+      font-size: 0.6875rem;
+      color: #c66a1a;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      flex-shrink: 0;
+      padding: 1px 8px;
+      background: rgba(198, 106, 26, 0.1);
+      border: 1px solid rgba(198, 106, 26, 0.25);
+      border-radius: 999px;
+      animation: dirty-pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes dirty-pulse {
+      0%, 100% { opacity: 0.65; }
+      50% { opacity: 1; }
     }
 
     .file-preview-lang {
-      font-size: 0.75rem;
-      font-weight: 500;
+      font-size: 0.6875rem;
+      font-weight: 600;
       padding: 2px 8px;
-      border-radius: 4px;
-      background: var(--bg-tertiary);
-      color: var(--text-secondary);
-      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--accent-muted);
+      color: var(--accent);
+      border: 1px solid rgba(212, 152, 99, 0.3);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      flex-shrink: 0;
+      align-self: center;
     }
 
     .file-preview-close {
       background: none;
-      border: none;
-      font-size: 1.25rem;
+      border: 1px solid transparent;
       cursor: pointer;
       color: var(--text-muted);
-      padding: 4px 8px;
-      border-radius: var(--radius-sm);
-      transition: background 0.15s, color 0.15s;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
       line-height: 1;
       flex-shrink: 0;
     }
 
     .file-preview-close:hover {
-      background: var(--bg-tertiary);
+      background: rgba(220, 70, 70, 0.08);
       color: var(--text-primary);
+      border-color: rgba(220, 70, 70, 0.25);
+    }
+
+    .file-preview-close:active {
+      transform: scale(0.94);
     }
 
     .file-preview-body {
@@ -11078,31 +11291,31 @@
     }
 
     /* ── File explorer header extras ── */
-    .file-explorer-up,
-    .file-explorer-toggle-hidden {
-      background: none;
-      border: none;
+    .file-explorer-up {
+      background: transparent;
+      border: 1px solid transparent;
       cursor: pointer;
-      font-size: 1rem;
-      padding: 4px;
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
+      padding: 0;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
       color: var(--text-muted);
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      transition: background var(--transition-fast), color var(--transition-fast);
+      transition: background var(--transition-fast),
+                  color var(--transition-fast),
+                  border-color var(--transition-fast),
+                  transform var(--transition-fast);
       flex-shrink: 0;
     }
-    .file-explorer-up:hover,
-    .file-explorer-toggle-hidden:hover {
+    .file-explorer-up:hover {
       background: var(--bg-tertiary);
-      color: var(--text-secondary);
+      color: var(--text-primary);
+      border-color: var(--border-subtle);
     }
-    .file-explorer-toggle-hidden.active {
-      color: var(--accent);
-      background: var(--accent-muted);
+    .file-explorer-up:active {
+      transform: translateY(-1px);
     }
 
     /* ── File tree size/meta column ── */
@@ -11194,35 +11407,177 @@
       margin-left: 8px;
     }
     .file-preview-toolbar-btn {
-      background: none;
-      border: 1px solid transparent;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-subtle);
       cursor: pointer;
-      padding: 4px 8px;
-      min-width: 32px;
-      height: 28px;
-      border-radius: 6px;
-      color: var(--text-muted);
+      padding: 0 8px;
+      min-width: 30px;
+      height: 30px;
+      gap: 6px;
+      border-radius: 8px;
+      color: var(--text-secondary);
       font-size: 0.75rem;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      transition: background 0.15s, color 0.15s, border-color 0.15s,
+                  box-shadow 0.15s, transform 0.1s;
     }
     .file-preview-toolbar-btn:hover {
       background: var(--bg-tertiary);
       color: var(--text-primary);
       border-color: var(--border);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+    .file-preview-toolbar-btn:active {
+      transform: scale(0.95);
+    }
+    .file-preview-toolbar-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .file-preview-toolbar-btn .toolbar-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .file-preview-toolbar-btn .toolbar-text {
+      font-weight: 600;
+      letter-spacing: 0.01em;
     }
     .file-preview-toolbar-btn.toolbar-active {
       background: var(--accent-muted);
       color: var(--accent);
+      border-color: rgba(212, 152, 99, 0.4);
+    }
+    .file-preview-toolbar-btn.primary {
+      background: var(--accent);
+      color: #fff;
       border-color: var(--accent);
+      box-shadow: 0 1px 2px rgba(89, 58, 32, 0.15);
+    }
+    .file-preview-toolbar-btn.primary:hover {
+      background: #b87a47;
+      border-color: #b87a47;
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(89, 58, 32, 0.2);
+    }
+    .file-preview-toolbar-btn.danger {
+      color: #c0392b;
+    }
+    .file-preview-toolbar-btn.danger:hover {
+      background: rgba(220, 70, 70, 0.08);
+      border-color: rgba(220, 70, 70, 0.3);
+      color: #a02818;
+    }
+
+    /* Grouped chip (e.g. font-size −/+ combo) */
+    .file-preview-toolbar-group {
+      display: inline-flex;
+      align-items: stretch;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--bg-primary);
+    }
+    .file-preview-toolbar-group .file-preview-toolbar-btn {
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      min-width: 28px;
+      height: 28px;
+      box-shadow: none;
+    }
+    .file-preview-toolbar-group .file-preview-toolbar-btn:hover {
+      background: var(--bg-tertiary);
+    }
+    .file-preview-toolbar-grouplabel {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 6px;
+      color: var(--text-muted);
+      border-left: 1px solid var(--border-subtle);
+      border-right: 1px solid var(--border-subtle);
+      background: var(--bg-secondary);
+    }
+
+    /* In edit mode the toolbar shows only save / revert / cancel; emphasize the
+       primary save action visually. */
+    .file-preview-toolbar.editing {
+      gap: 6px;
+    }
+
+    /* Mobile: shrink toolbar buttons a hair so they fit. */
+    @media (max-width: 768px) {
+      .file-preview-toolbar-btn {
+        height: 28px;
+        min-width: 28px;
+        padding: 0 6px;
+      }
+      .file-preview-toolbar-btn .toolbar-text {
+        display: none;
+      }
+      .file-preview-toolbar-btn.primary .toolbar-text {
+        display: inline-flex;
+      }
+    }
+
+    /* ── Inline file-icon glyph (header) ── */
+    .wand-icon {
+      flex-shrink: 0;
+      vertical-align: middle;
     }
 
     /* ── Code preview wrap mode ── */
     .code-preview-content pre.wrap {
       white-space: pre-wrap;
       word-break: break-word;
+    }
+
+    /* ── Code editor (inline file edit mode) ── */
+    .file-preview-body.editing {
+      padding: 0;
+      background: var(--bg-primary);
+    }
+    .code-editor-wrapper {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      background: var(--bg-primary);
+    }
+    .code-editor-textarea {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      box-sizing: border-box;
+      padding: 16px 20px;
+      margin: 0;
+      border: none;
+      outline: none;
+      resize: none;
+      font-family: var(--font-mono);
+      font-size: var(--font-size-sm);
+      line-height: var(--line-height);
+      color: var(--text-primary);
+      background: var(--bg-primary);
+      tab-size: 2;
+      -moz-tab-size: 2;
+      white-space: pre;
+      overflow: auto;
+      caret-color: var(--accent);
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-default) transparent;
+    }
+    .code-editor-textarea::-webkit-scrollbar { width: 8px; height: 8px; }
+    .code-editor-textarea::-webkit-scrollbar-track { background: transparent; }
+    .code-editor-textarea::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 4px; }
+    .code-editor-textarea::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+    .code-editor-textarea:focus {
+      box-shadow: inset 0 0 0 2px rgba(212, 152, 99, 0.15);
     }
 
     /* ── Image preview ── */
@@ -13168,7 +13523,11 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 24px;
+      /* 给安全区让位, 避免对话框在 iPhone 横屏 / 小屏被刘海或 Home Indicator 切到 */
+      padding-top: max(24px, var(--wand-safe-top));
+      padding-bottom: max(24px, var(--wand-safe-bottom));
+      padding-left: max(24px, var(--wand-safe-left));
+      padding-right: max(24px, var(--wand-safe-right));
       background: rgba(20, 14, 8, 0.34);
       backdrop-filter: blur(18px) saturate(140%);
       -webkit-backdrop-filter: blur(18px) saturate(140%);

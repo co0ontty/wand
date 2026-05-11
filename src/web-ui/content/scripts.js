@@ -1411,19 +1411,38 @@
               // File side panel
               '<div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '">' +
                 '<div class="file-side-panel-header">' +
-                  '<span class="file-side-panel-title">文件</span>' +
-                  '<button id="file-side-panel-close" class="btn btn-ghost btn-sm" type="button" aria-label="关闭">×</button>' +
+                  '<div class="file-side-panel-title-group">' +
+                    '<span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span>' +
+                    '<span class="file-side-panel-title">文件</span>' +
+                  '</div>' +
+                  '<div class="file-side-panel-header-actions">' +
+                    '<button class="file-side-panel-iconbtn file-explorer-toggle-hidden' +
+                      (state.fileExplorerShowHidden ? ' active' : '') + '" id="file-explorer-toggle-hidden" type="button" title="' +
+                      (state.fileExplorerShowHidden ? "隐藏点开头文件" : "显示隐藏文件") + '" aria-pressed="' +
+                      (state.fileExplorerShowHidden ? "true" : "false") + '" aria-label="切换显示隐藏文件">' +
+                      wandFileIcon(state.fileExplorerShowHidden ? "eye" : "eye-off", { size: 15 }) +
+                    '</button>' +
+                    '<button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="刷新" aria-label="刷新文件列表">' +
+                      wandFileIcon("refresh", { size: 15 }) +
+                    '</button>' +
+                    '<button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="关闭文件面板" title="关闭">' +
+                      wandFileIcon("x", { size: 16 }) +
+                    '</button>' +
+                  '</div>' +
                 '</div>' +
                 '<div class="file-side-panel-body">' +
                   '<div class="file-explorer-header">' +
-                    '<button class="file-explorer-up" id="file-explorer-up" type="button" title="返回上级目录" aria-label="返回上级目录">⬆</button>' +
+                    '<button class="file-explorer-up" id="file-explorer-up" type="button" title="返回上级目录" aria-label="返回上级目录">' +
+                      wandFileIcon("arrow-up", { size: 15 }) +
+                    '</button>' +
                     '<input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="输入路径并回车..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="当前路径，可直接修改后回车" />' +
-                    '<button class="file-explorer-toggle-hidden' + (state.fileExplorerShowHidden ? ' active' : '') + '" id="file-explorer-toggle-hidden" type="button" title="' + (state.fileExplorerShowHidden ? "隐藏点开头文件" : "显示隐藏文件") + '" aria-pressed="' + (state.fileExplorerShowHidden ? "true" : "false") + '">' + (state.fileExplorerShowHidden ? "👁" : "👁‍🗨") + '</button>' +
-                    '<button class="file-explorer-refresh" id="file-explorer-refresh" title="刷新" aria-label="刷新文件列表">↻</button>' +
                   '</div>' +
                   '<div class="file-search-box">' +
-                    '<input type="text" id="file-search-input" class="file-search-input" placeholder="搜索文件..." autocomplete="off" />' +
-                    '<button class="file-search-clear" id="file-search-clear" type="button" aria-label="清除搜索">×</button>' +
+                    '<span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span>' +
+                    '<input type="text" id="file-search-input" class="file-search-input" placeholder="搜索当前目录…" autocomplete="off" />' +
+                    '<button class="file-search-clear" id="file-search-clear" type="button" aria-label="清除搜索" title="清除">' +
+                      wandFileIcon("x", { size: 13 }) +
+                    '</button>' +
                   '</div>' +
                   '<div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div>' +
                 '</div>' +
@@ -1501,18 +1520,20 @@
                     '</svg>' +
                     '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
                   '</button>' +
-                  '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1">' + escapeHtml(currentDraft) + '</textarea>' +
+                  '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
                   '<div id="attachment-preview" class="attachment-preview hidden"></div>' +
                   '<div class="input-composer-bar">' +
                     '<div class="input-composer-left">' +
                       '<button id="attach-btn" class="btn-circle btn-circle-attach" type="button" title="附加文件">' +
                         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>' +
                       '</button>' +
-                      '<input type="file" id="file-upload-input" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
-                      '<select id="chat-mode-select" class="chat-mode-select" title="仅对新建会话生效">' +
+                      // tabindex="-1": 把这些控件移出 iOS Safari 的表单导航链，
+                      // 这样 textarea 聚焦时键盘上方就不会出现 ⌃ ⌄ ✓ 表单辅助栏。
+                      '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
+                      '<select id="chat-mode-select" class="chat-mode-select" tabindex="-1" title="仅对新建会话生效">' +
                         renderModeOptions(preferredTool, composerMode) +
                       '</select>' +
-                      '<select id="chat-model-select" class="chat-mode-select chat-model-select" title="切换模型（对运行中会话发送 /model，对新会话作为 --model 启动）">' +
+                      '<select id="chat-model-select" class="chat-mode-select chat-model-select" tabindex="-1" title="切换模型（对运行中会话发送 /model，对新会话作为 --model 启动）">' +
                         renderChatModelOptions(getEffectiveModel(selectedSession), selectedSession) +
                       '</select>' +
                       '<button id="terminal-interactive-toggle-top" class="composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨</button>' +
@@ -2992,6 +3013,49 @@
         }
       }
 
+      // ── Inline SVG icon library for file UI ──
+      // The previous design used unicode/emoji glyphs (⬆ ↻ 👁 ✕ 📋 ✏️ ⬇ ↩ A−) for
+      // toolbar/header buttons. Those render inconsistently across OSes and don't
+      // visually convey their action. These SVG icons are stroke-based, follow
+      // currentColor, and stay crisp at any zoom.
+      var WAND_FILE_ICONS = {
+        "chevron-left":  '<path d="M15 18l-6-6 6-6"/>',
+        "arrow-up":      '<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>',
+        "refresh":       '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/>',
+        "eye":           '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
+        "eye-off":       '<path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a19.86 19.86 0 0 1 4.22-5.18"/><path d="M1 1l22 22"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a19.83 19.83 0 0 1-3.36 4.27"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>',
+        "x":             '<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',
+        "search":        '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+        "copy":          '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+        "clipboard":     '<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/>',
+        "download":      '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
+        "edit":          '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+        "save":          '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/>',
+        "rotate-ccw":    '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
+        "wrap-text":     '<path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><path d="M16 16l-2 2 2 2"/><path d="M3 18h6"/>',
+        "type":          '<path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/>',
+        "minus":         '<path d="M5 12h14"/>',
+        "plus":          '<path d="M12 5v14"/><path d="M5 12h14"/>',
+        "send-to-input": '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
+        "terminal":      '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+        "folder-open":   '<path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/>',
+        "info":          '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+      };
+
+      // Render a stroke-based 16x16 SVG icon by name. Extra classes get appended
+      // to the outer svg, so callers can target specific icons in CSS.
+      function wandFileIcon(name, opts) {
+        opts = opts || {};
+        var body = WAND_FILE_ICONS[name] || "";
+        var size = opts.size || 16;
+        var extraClass = opts.className ? " " + opts.className : "";
+        return '<svg class="wand-icon wand-icon-' + name + extraClass +
+          '" width="' + size + '" height="' + size +
+          '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"' +
+          ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          body + '</svg>';
+      }
+
       function renderFileExplorer(cwd) {
         var root = cwd || getConfigCwd();
         if (!root) {
@@ -3311,7 +3375,7 @@
         if (btn) {
           btn.classList.toggle("active", state.fileExplorerShowHidden);
           btn.setAttribute("aria-pressed", state.fileExplorerShowHidden ? "true" : "false");
-          btn.textContent = state.fileExplorerShowHidden ? "👁" : "👁‍🗨";
+          btn.innerHTML = wandFileIcon(state.fileExplorerShowHidden ? "eye" : "eye-off", { size: 15 });
           btn.title = state.fileExplorerShowHidden ? "隐藏点开头文件" : "显示隐藏文件";
         }
         refreshFileExplorer();
@@ -3454,11 +3518,15 @@
               '<div class="file-preview-header">' +
                 '<div class="file-preview-title">' +
                   '<span class="file-preview-icon">📄</span>' +
-                  '<span class="file-preview-filename">加载中…</span>' +
+                  '<div class="file-preview-name-block">' +
+                    '<div class="file-preview-name-row">' +
+                      '<span class="file-preview-filename">加载中…</span>' +
+                    '</div>' +
+                    '<span class="file-preview-path" title=""></span>' +
+                  '</div>' +
                 '</div>' +
-                '<div class="file-preview-path" title=""></div>' +
                 '<div class="file-preview-toolbar"></div>' +
-                '<button class="file-preview-close" title="关闭 (Esc)" aria-label="关闭">✕</button>' +
+                '<button class="file-preview-close" title="关闭 (Esc)" aria-label="关闭">' + wandFileIcon("x", { size: 18 }) + '</button>' +
               '</div>' +
               '<div class="file-preview-body">' +
                 '<div class="file-preview-loading">加载预览…</div>' +
@@ -3468,6 +3536,25 @@
 
           var closeBtn = overlay.querySelector(".file-preview-close");
           var closeModal = function() {
+            // Guard: warn before discarding unsaved edits.
+            if (_activeFilePreview && _activeFilePreview.dirty) {
+              if (typeof openWandDialog === "function") {
+                openWandDialog({
+                  type: "warning",
+                  title: "放弃未保存的修改？",
+                  message: "当前文件有未保存的改动，关闭后会丢失。",
+                  buttons: [
+                    { label: "继续编辑", value: false, kind: "ghost" },
+                    { label: "放弃修改", value: true, kind: "danger", autofocus: true },
+                  ],
+                  cancelValue: false,
+                }).then(function(go) { if (go) doClose(); });
+                return;
+              }
+            }
+            doClose();
+          };
+          var doClose = function() {
             overlay.remove();
             document.removeEventListener("keydown", keyHandler);
             _activeFilePreview = null;
@@ -3477,21 +3564,49 @@
             if (e.target === overlay) closeModal();
           });
           var keyHandler = function(e) {
-            if (e.key === "Escape") { closeModal(); return; }
+            // Ctrl/Cmd+S to save in edit mode.
+            if ((e.key === "s" || e.key === "S") && (e.ctrlKey || e.metaKey)) {
+              if (_activeFilePreview && _activeFilePreview.editing) {
+                e.preventDefault();
+                saveFileEdit();
+                return;
+              }
+            }
+            if (e.key === "Escape") {
+              // Inside edit mode, Esc exits edit instead of closing the modal.
+              if (_activeFilePreview && _activeFilePreview.editing) {
+                e.preventDefault();
+                exitFileEdit();
+                return;
+              }
+              closeModal();
+              return;
+            }
             if (!_activeFilePreview) return;
+            // Don't intercept arrow keys while typing.
             if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+            if (_activeFilePreview.editing) return;
             if (e.key === "ArrowLeft") { e.preventDefault(); navigatePreviewSibling(-1); }
             else if (e.key === "ArrowRight") { e.preventDefault(); navigatePreviewSibling(1); }
           };
           document.addEventListener("keydown", keyHandler);
 
-          _activeFilePreview = { overlay: overlay, close: closeModal, path: filePath, data: null };
+          _activeFilePreview = { overlay: overlay, close: closeModal, path: filePath, data: null, editing: false, dirty: false };
         } else {
           _activeFilePreview.path = filePath;
+          _activeFilePreview.editing = false;
+          _activeFilePreview.dirty = false;
           // Reset header / body for the new file.
           var titleEl = overlay.querySelector(".file-preview-title");
           if (titleEl) {
-            titleEl.innerHTML = '<span class="file-preview-icon">📄</span><span class="file-preview-filename">加载中…</span>';
+            titleEl.innerHTML =
+              '<span class="file-preview-icon">📄</span>' +
+              '<div class="file-preview-name-block">' +
+                '<div class="file-preview-name-row">' +
+                  '<span class="file-preview-filename">加载中…</span>' +
+                '</div>' +
+                '<span class="file-preview-path" title=""></span>' +
+              '</div>';
           }
           var toolbarEl = overlay.querySelector(".file-preview-toolbar");
           if (toolbarEl) toolbarEl.innerHTML = "";
@@ -3681,16 +3796,31 @@
         var bar = overlay.querySelector(".file-preview-toolbar");
         if (!bar) return;
         bar.innerHTML = "";
+        bar.classList.remove("editing");
+
+        // ── Edit mode renders its own dedicated toolbar (save / revert / cancel). ──
+        if (_activeFilePreview && _activeFilePreview.editing) {
+          bar.classList.add("editing");
+          renderEditToolbar(overlay, data);
+          return;
+        }
+
         var buttons = [];
 
+        if (data.kind === "text") {
+          buttons.push({ label: "编辑文件 (E)", icon: wandFileIcon("edit"), primary: true, action: function() {
+            enterFileEdit();
+          }});
+        }
+
         // Common actions across all kinds
-        buttons.push({ label: "复制路径", icon: "📋", action: function() {
+        buttons.push({ label: "复制路径", icon: wandFileIcon("clipboard"), action: function() {
           copyTextSafely(data.path).then(function() { showToastIfPossible("已复制路径"); });
         }});
-        buttons.push({ label: "粘贴到输入框", icon: "✏️", action: function() {
+        buttons.push({ label: "粘贴到输入框", icon: wandFileIcon("send-to-input"), action: function() {
           if (appendToComposer(data.path)) showToastIfPossible("已粘贴到输入框");
         }});
-        buttons.push({ label: "下载", icon: "⬇", action: function() {
+        buttons.push({ label: "下载", icon: wandFileIcon("download"), action: function() {
           var a = document.createElement("a");
           a.href = "/api/file-raw?download=1&path=" + encodeURIComponent(data.path);
           a.download = data.name || "";
@@ -3700,10 +3830,10 @@
         }});
 
         if (data.kind === "text") {
-          buttons.push({ label: "复制全部", icon: "📄", action: function() {
+          buttons.push({ label: "复制全部内容", icon: wandFileIcon("copy"), action: function() {
             copyTextSafely(data.content || "").then(function() { showToastIfPossible("已复制内容"); });
           }});
-          buttons.push({ label: "自动换行", icon: "↩", toggleClass: "toolbar-active",
+          buttons.push({ label: "切换自动换行", icon: wandFileIcon("wrap-text"), toggleClass: "toolbar-active",
             getInitial: function() {
               var pre = overlay.querySelector(".code-preview-content pre");
               return pre && pre.classList.contains("wrap");
@@ -3715,24 +3845,233 @@
               btn.classList.toggle("toolbar-active", pre.classList.contains("wrap"));
             }
           });
-          buttons.push({ label: "字号 −", icon: "A−", action: function() { adjustPreviewFontSize(overlay, -1); }});
-          buttons.push({ label: "字号 +", icon: "A+", action: function() { adjustPreviewFontSize(overlay, +1); }});
+          // Font-size adjustments — render as a single grouped chip with two halves.
+          buttons.push({ kind: "group", className: "toolbar-group-fontsize",
+            children: [
+              { label: "缩小字号", icon: wandFileIcon("minus"), action: function() { adjustPreviewFontSize(overlay, -1); }},
+              { kind: "label", icon: wandFileIcon("type"), label: "字号" },
+              { label: "放大字号", icon: wandFileIcon("plus"), action: function() { adjustPreviewFontSize(overlay, +1); }},
+            ],
+          });
         }
 
+        renderToolbarButtons(bar, buttons, overlay);
+      }
+
+      // Render a flat list of toolbar buttons (with optional grouped chips).
+      function renderToolbarButtons(bar, buttons, overlay) {
         buttons.forEach(function(b) {
-          var btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "file-preview-toolbar-btn";
-          btn.title = b.label;
-          btn.setAttribute("aria-label", b.label);
-          btn.innerHTML = '<span class="toolbar-icon">' + b.icon + '</span>';
-          if (b.getInitial && b.getInitial()) btn.classList.add("toolbar-active");
-          btn.addEventListener("click", function(ev) {
-            ev.stopPropagation();
-            b.action(btn);
-          });
-          bar.appendChild(btn);
+          if (b.kind === "group") {
+            var group = document.createElement("div");
+            group.className = "file-preview-toolbar-group" + (b.className ? " " + b.className : "");
+            b.children.forEach(function(child) {
+              if (child.kind === "label") {
+                var lab = document.createElement("span");
+                lab.className = "file-preview-toolbar-grouplabel";
+                lab.title = child.label || "";
+                lab.innerHTML = child.icon || "";
+                group.appendChild(lab);
+                return;
+              }
+              group.appendChild(buildToolbarButton(child));
+            });
+            bar.appendChild(group);
+            return;
+          }
+          bar.appendChild(buildToolbarButton(b));
         });
+      }
+
+      function buildToolbarButton(b) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "file-preview-toolbar-btn";
+        if (b.primary) btn.classList.add("primary");
+        if (b.danger) btn.classList.add("danger");
+        btn.title = b.label;
+        btn.setAttribute("aria-label", b.label);
+        btn.innerHTML = '<span class="toolbar-icon">' + (b.icon || "") + '</span>' +
+          (b.text ? '<span class="toolbar-text">' + escapeHtml(b.text) + '</span>' : '');
+        if (b.getInitial && b.getInitial()) btn.classList.add("toolbar-active");
+        btn.addEventListener("click", function(ev) {
+          ev.stopPropagation();
+          if (typeof b.action === "function") b.action(btn);
+        });
+        return btn;
+      }
+
+      // ── Edit mode ──
+      function renderEditToolbar(overlay, data) {
+        var bar = overlay.querySelector(".file-preview-toolbar");
+        if (!bar) return;
+        bar.innerHTML = "";
+        var saving = _activeFilePreview && _activeFilePreview.saving;
+        var buttons = [
+          { label: "保存 (Ctrl+S)", icon: wandFileIcon("save"), text: "保存", primary: true,
+            action: function() { saveFileEdit(); } },
+          { label: "撤销改动", icon: wandFileIcon("rotate-ccw"),
+            action: function() { revertFileEdit(); } },
+          { label: "退出编辑 (Esc)", icon: wandFileIcon("x"),
+            action: function() { exitFileEdit(); } },
+        ];
+        renderToolbarButtons(bar, buttons, overlay);
+        if (saving) {
+          bar.querySelectorAll(".file-preview-toolbar-btn").forEach(function(b) { b.disabled = true; });
+        }
+      }
+
+      function enterFileEdit() {
+        if (!_activeFilePreview || !_activeFilePreview.data) return;
+        var data = _activeFilePreview.data;
+        if (data.kind !== "text") return;
+        _activeFilePreview.editing = true;
+        _activeFilePreview.dirty = false;
+        _activeFilePreview.originalContent = data.content || "";
+        var overlay = _activeFilePreview.overlay;
+        var body = overlay.querySelector(".file-preview-body");
+        if (!body) return;
+        body.classList.add("editing");
+        body.innerHTML =
+          '<div class="code-editor-wrapper">' +
+            '<textarea class="code-editor-textarea" spellcheck="false" autocomplete="off"' +
+              ' autocorrect="off" autocapitalize="off" wrap="off"></textarea>' +
+          '</div>';
+        var ta = body.querySelector(".code-editor-textarea");
+        if (ta) {
+          ta.value = data.content || "";
+          ta.addEventListener("input", function() {
+            var dirty = ta.value !== (_activeFilePreview.originalContent || "");
+            if (dirty !== _activeFilePreview.dirty) {
+              _activeFilePreview.dirty = dirty;
+              updateDirtyBadge();
+            }
+          });
+          // Tab key inserts spaces (2-space indent) instead of moving focus.
+          ta.addEventListener("keydown", function(e) {
+            if (e.key === "Tab") {
+              e.preventDefault();
+              var start = ta.selectionStart, end = ta.selectionEnd;
+              var indent = "  ";
+              ta.value = ta.value.slice(0, start) + indent + ta.value.slice(end);
+              ta.selectionStart = ta.selectionEnd = start + indent.length;
+              ta.dispatchEvent(new Event("input"));
+            }
+          });
+          // Focus and place caret at start so user sees the top of the file.
+          setTimeout(function() {
+            ta.focus();
+            ta.setSelectionRange(0, 0);
+            ta.scrollTop = 0;
+          }, 30);
+        }
+        renderPreviewToolbar(overlay, data);
+        updateDirtyBadge();
+      }
+
+      function exitFileEdit() {
+        if (!_activeFilePreview || !_activeFilePreview.editing) return;
+        var doExit = function() {
+          _activeFilePreview.editing = false;
+          _activeFilePreview.dirty = false;
+          var overlay = _activeFilePreview.overlay;
+          var body = overlay.querySelector(".file-preview-body");
+          if (body) body.classList.remove("editing");
+          // Re-render preview from latest data.
+          renderPreviewContent(overlay, _activeFilePreview.data);
+          updateDirtyBadge();
+        };
+        if (_activeFilePreview.dirty && typeof openWandDialog === "function") {
+          openWandDialog({
+            type: "warning",
+            title: "放弃未保存的修改？",
+            message: "当前文件有未保存的改动，退出编辑后会丢失。",
+            buttons: [
+              { label: "继续编辑", value: false, kind: "ghost" },
+              { label: "放弃修改", value: true, kind: "danger", autofocus: true },
+            ],
+            cancelValue: false,
+          }).then(function(go) { if (go) doExit(); });
+          return;
+        }
+        doExit();
+      }
+
+      function revertFileEdit() {
+        if (!_activeFilePreview || !_activeFilePreview.editing) return;
+        var overlay = _activeFilePreview.overlay;
+        var ta = overlay.querySelector(".code-editor-textarea");
+        if (!ta) return;
+        ta.value = _activeFilePreview.originalContent || "";
+        _activeFilePreview.dirty = false;
+        updateDirtyBadge();
+        ta.focus();
+      }
+
+      function saveFileEdit() {
+        if (!_activeFilePreview || !_activeFilePreview.editing) return;
+        if (_activeFilePreview.saving) return;
+        var overlay = _activeFilePreview.overlay;
+        var ta = overlay.querySelector(".code-editor-textarea");
+        if (!ta) return;
+        var newContent = ta.value;
+        if (newContent === (_activeFilePreview.originalContent || "")) {
+          showToastIfPossible("没有改动");
+          return;
+        }
+        _activeFilePreview.saving = true;
+        renderEditToolbar(overlay, _activeFilePreview.data);
+        fetch("/api/file-write", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: _activeFilePreview.path, content: newContent }),
+        }).then(function(res) {
+          return res.json().then(function(json) { return { ok: res.ok, status: res.status, data: json }; });
+        }).then(function(result) {
+          _activeFilePreview.saving = false;
+          if (!result.ok || (result.data && result.data.error)) {
+            var msg = (result.data && result.data.error) || ("保存失败 (" + result.status + ")");
+            showToastIfPossible(msg);
+            renderEditToolbar(overlay, _activeFilePreview.data);
+            return;
+          }
+          // Sync local cache so revert points at the new baseline.
+          _activeFilePreview.data.content = newContent;
+          _activeFilePreview.data.size = (result.data && result.data.size) || newContent.length;
+          _activeFilePreview.originalContent = newContent;
+          _activeFilePreview.dirty = false;
+          showToastIfPossible("已保存");
+          updateDirtyBadge();
+          renderEditToolbar(overlay, _activeFilePreview.data);
+          // Quietly refresh the file tree so size/git-status update.
+          if (typeof refreshFileExplorer === "function") {
+            try { refreshFileExplorer(); } catch (e) {}
+          }
+        }).catch(function(err) {
+          _activeFilePreview.saving = false;
+          showToastIfPossible("保存失败：" + (err && err.message ? err.message : "网络错误"));
+          renderEditToolbar(overlay, _activeFilePreview.data);
+        });
+      }
+
+      function updateDirtyBadge() {
+        if (!_activeFilePreview) return;
+        var overlay = _activeFilePreview.overlay;
+        if (!overlay) return;
+        var row = overlay.querySelector(".file-preview-name-row");
+        if (!row) return;
+        var existing = row.querySelector(".file-preview-dirty");
+        if (_activeFilePreview.dirty) {
+          if (!existing) {
+            var dot = document.createElement("span");
+            dot.className = "file-preview-dirty";
+            dot.title = "有未保存的修改";
+            dot.textContent = "● 未保存";
+            row.appendChild(dot);
+          }
+        } else if (existing) {
+          existing.remove();
+        }
       }
 
       function adjustPreviewFontSize(overlay, delta) {
@@ -12508,7 +12847,27 @@
           // Keyboard just closed — force terminal refit and scroll to bottom
           // after a delay so the keyboard dismiss animation and layout settle.
           if (keyboardOpen && !isKeyboardOpen) {
+            // iOS Safari quirk: 用户按系统 Done / 下滑收起键盘 / 应用切换回来时，
+            // 经常不会触发 textarea 的 blur 事件，导致 handleInputBoxBlur 里的
+            // window.scrollTo(0,0) 不跑，页面停在键盘抬起时被 iOS 推上去的
+            // 偏移位置，input-panel 看起来"没回到底"。
+            // 这里在 visualViewport 检测到键盘收起的瞬间直接强制复位一次，
+            // 并把 --app-viewport-height 兜底清掉，确保 .app-container 回到
+            // 100dvh、input-panel 重新贴屏幕底部。
+            var rootEl = document.documentElement;
+            rootEl.style.removeProperty('--app-viewport-height');
+            window.scrollTo(0, 0);
+            if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+            rootEl.scrollTop = 0;
+            if (document.body) document.body.scrollTop = 0;
             setTimeout(function() {
+              // 二次复位：等键盘收起动画 + iOS 自身的回滚跑完后再清一次，
+              // 防止 iOS 在动画过程中又把 scrollTop 推上去。
+              window.scrollTo(0, 0);
+              if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+              rootEl.scrollTop = 0;
+              if (document.body) document.body.scrollTop = 0;
+              syncAppViewportHeight();
               ensureTerminalFit("keyboard-close", { forceReplay: true });
               maybeScrollTerminalToBottom("force");
             }, 200);
@@ -14317,11 +14676,12 @@
         var task = document.getElementById("todo-progress-task");
         if (task) task.textContent = activeTask;
 
-        // Drive the circular progress ring with the honest "completed / total" fraction
-        // (counter text shows the 1-indexed current step, ring shows actual done ratio).
+        // Keep the ring aligned with the counter text: both reflect the 1-indexed
+        // "current step" (completed + 1, capped at total). Otherwise the ring lags
+        // one step behind whenever a task is in_progress (e.g. text "6/6" but ring 5/6).
         var ring = document.getElementById("todo-progress-ring");
         if (ring) {
-          var ratio = todos.length > 0 ? completed / todos.length : 0;
+          var ratio = todos.length > 0 ? currentStep / todos.length : 0;
           ring.style.setProperty("--progress", ratio.toFixed(3));
         }
 

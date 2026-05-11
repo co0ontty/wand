@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import compression from "compression";
 import express, { NextFunction, Request, Response } from "express";
 import { createReadStream, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { exec, spawn } from "node:child_process";
@@ -1200,6 +1200,24 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
+  // ── Global npm install with ENOTEMPTY fallback ──
+
+  async function npmInstallGlobal(pkg: string, timeoutMs: number): Promise<void> {
+    try {
+      await execAsync(`npm install -g ${pkg}`, { timeout: timeoutMs });
+    } catch (error) {
+      const msg = getErrorMessage(error, "");
+      if (msg.includes("ENOTEMPTY")) {
+        // Running process holds files in the install dir; uninstall first, then reinstall with --force.
+        process.stdout.write(`[wand] npm install 遇到 ENOTEMPTY，尝试先卸载再安装...\n`);
+        await execAsync(`npm uninstall -g ${pkg}`, { timeout: timeoutMs });
+        await execAsync(`npm install -g --force ${pkg}`, { timeout: timeoutMs });
+      } else {
+        throw error;
+      }
+    }
+  }
+
   app.get("/api/check-update", async (_req, res) => {
     try {
       const result = await checkNpmLatestVersion(true);
@@ -1222,7 +1240,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         res.json({ ok: true, message: "已经是最新版本。" });
         return;
       }
-      await execAsync(`npm install -g ${PKG_NAME}@latest`, { timeout: 120000 });
+      await npmInstallGlobal(`${PKG_NAME}@latest`, 120000);
       res.json({ ok: true, message: `已更新到 ${latest}，请重启 wand 服务以生效。` });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "更新失败。") });
@@ -1392,6 +1410,83 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.json(payload);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "Failed to read file") });
+    }
+  });
+
+  // Write/overwrite a text file's content. Used by the file-preview modal's
+  // edit mode. Only text-classified files are writable, and only when the file
+  // already exists (we never create files via this endpoint to keep the surface
+  // narrow). Atomic via tmp-file + rename to avoid partial writes.
+  const MAX_TEXT_WRITE_SIZE = 1024 * 1024; // 1 MB cap for safety
+  app.post("/api/file-write", express.json({ limit: "2mb" }), async (req, res) => {
+    const body = (req.body ?? {}) as { path?: unknown; content?: unknown };
+    const filePath = typeof body.path === "string" ? body.path : "";
+    const content = typeof body.content === "string" ? body.content : null;
+    if (!filePath || content === null) {
+      res.status(400).json({ error: "缺少 path 或 content 参数。" });
+      return;
+    }
+
+    const resolvedPath = path.resolve(filePath);
+    if (isBlockedFolderPath(resolvedPath)) {
+      res.status(403).json({ error: "访问被拒绝：无法修改系统目录下的文件。" });
+      return;
+    }
+
+    // Encode-size check (UTF-8 byte length, not character length).
+    const byteLength = Buffer.byteLength(content, "utf-8");
+    if (byteLength > MAX_TEXT_WRITE_SIZE) {
+      res.status(413).json({
+        error: `内容超出保存上限（${Math.round(MAX_TEXT_WRITE_SIZE / 1024)} KB）。`,
+        size: byteLength,
+        maxSize: MAX_TEXT_WRITE_SIZE,
+      });
+      return;
+    }
+
+    try {
+      const fileStat = await stat(resolvedPath);
+      if (fileStat.isDirectory()) {
+        res.status(400).json({ error: "目标是目录，无法写入。" });
+        return;
+      }
+      if (!fileStat.isFile()) {
+        res.status(400).json({ error: "目标不是普通文件。" });
+        return;
+      }
+
+      const ext = path.extname(resolvedPath).toLowerCase();
+      const baseName = path.basename(resolvedPath);
+      const kind = classifyFile(ext, baseName);
+      if (kind !== "text") {
+        res.status(415).json({ error: "仅支持编辑文本类文件。" });
+        return;
+      }
+
+      // Atomic write: dump to a sibling temp file, then rename.
+      const dir = path.dirname(resolvedPath);
+      const tmpPath = path.join(
+        dir,
+        `.${baseName}.wand-tmp-${crypto.randomBytes(6).toString("hex")}`,
+      );
+      try {
+        await writeFile(tmpPath, content, { encoding: "utf-8", mode: fileStat.mode & 0o777 });
+        await rename(tmpPath, resolvedPath);
+      } catch (writeError) {
+        // Best-effort cleanup if rename failed but tmp got created.
+        try { await unlink(tmpPath); } catch {}
+        throw writeError;
+      }
+
+      const newStat = await stat(resolvedPath);
+      res.json({
+        ok: true,
+        path: resolvedPath,
+        size: newStat.size,
+        mtime: newStat.mtime.toISOString(),
+      });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "保存文件失败。") });
     }
   });
 
@@ -1841,7 +1936,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     });
 
     try {
-      await execAsync(`npm install -g ${PKG_NAME}@latest`, { timeout: 120000 });
+      await npmInstallGlobal(`${PKG_NAME}@latest`, 120000);
       process.stdout.write(`[wand] 自动更新完成，正在重启...\n`);
       wsManager.emitEvent({
         type: "notification",
