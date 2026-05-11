@@ -1485,6 +1485,12 @@ public class MainActivity extends AppCompatActivity {
 
         // 软键盘动画回调: 跟随 Android 原生 IME 的 slide-in / slide-out 节奏
         // 一帧一帧地更新 padding, WebView 跟键盘同步移动, 无跳变。
+        //
+        // 同时向 WebView 派发 'wand-ime-state' 事件 (state = "start" / "end"),
+        // JS 侧 (setupVisualViewportHandlers) 检测到 APK 环境下 IME 由原生
+        // padding 处理后, 会跳过专为 iOS Safari 写的 window.scrollTo(0,0)
+        // 复位 hack — 那段 hack 在 Android 上会跟原生 setPadding 打架, 偶尔
+        // 看到一帧抖。原生层全权接管后, JS 只负责终端 refit 这种纯展示活。
         ViewCompat.setWindowInsetsAnimationCallback(root, new WindowInsetsAnimationCompat.Callback(
                 WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
 
@@ -1492,6 +1498,7 @@ public class MainActivity extends AppCompatActivity {
             public void onPrepare(WindowInsetsAnimationCompat animation) {
                 if ((animation.getTypeMask() & WindowInsetsCompat.Type.ime()) != 0) {
                     imeAnimating = true;
+                    dispatchImeState("start");
                 }
             }
 
@@ -1511,6 +1518,10 @@ public class MainActivity extends AppCompatActivity {
                     // 动画收尾时, 用 root 当前最新 inset 校准一次, 避免和
                     // 系统的最终值差 1 像素引起的细微抖动。
                     applyInsetPadding(root);
+                    // 通知 JS 键盘动画收尾, 触发 terminal refit。lastImeBottomPx
+                    // 在 onProgress 已经收尾到 0 (键盘收起) 或最终高度 (键盘展开),
+                    // JS 直接读 visualViewport 即可。
+                    dispatchImeState(lastImeBottomPx > 0 ? "shown" : "hidden");
                 }
             }
         });
@@ -1629,6 +1640,36 @@ public class MainActivity extends AppCompatActivity {
                 webView.evaluateJavascript(
                         "(function(){try{window.dispatchEvent(new CustomEvent('wand-android-network',"
                                 + "{detail:{state:'" + safe + "'}}));}catch(e){}})();",
+                        null);
+            } catch (Exception ignored) {}
+        });
+    }
+
+    /**
+     * IME 动画状态桥。state 取值:
+     *   "start"  — 键盘动画刚启动 (onPrepare)
+     *   "shown"  — 键盘动画结束且已展开
+     *   "hidden" — 键盘动画结束且已收起
+     *
+     * JS 侧用这个信号关掉 iOS Safari 专用的 window.scrollTo(0,0) 复位
+     * hack — 那个 hack 在 Android 上会跟原生 padding 打架。同时把
+     * window.__wandImeNative = true 立一面旗, JS 可以早 return。
+     *
+     * 标记是粘性的 (一旦收到 start 就永远视为"原生 IME 已接管"), 因为
+     * 第一次开键盘前 JS 不知道我们存在; 只要触发过一次, 后续 IME 不动
+     * 也算原生处理。
+     */
+    private void dispatchImeState(String state) {
+        runOnUiThread(() -> {
+            if (webView == null) return;
+            try {
+                String safe = state == null ? "" : state.replace("'", "");
+                webView.evaluateJavascript(
+                        "(function(){try{"
+                                + "window.__wandImeNative=true;"
+                                + "window.dispatchEvent(new CustomEvent('wand-ime-state',"
+                                + "{detail:{state:'" + safe + "'}}));"
+                                + "}catch(e){}})();",
                         null);
             } catch (Exception ignored) {}
         });

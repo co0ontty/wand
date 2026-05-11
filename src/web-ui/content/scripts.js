@@ -1077,6 +1077,25 @@
           ensureTerminalFitWithRetry("android-resume");
         });
 
+        // Bridge from Android IME animation. State values: "start" / "shown" / "hidden".
+        // 原生层用 setPadding 在 WebView 父容器上 resize WebView, 视觉上键盘
+        // 动画跟系统同步, 但带来一个副作用: window.innerHeight === visualViewport.height,
+        // 导致 setupVisualViewportHandlers 里的 isKeyboardOpen 检测 (基于
+        // offsetBottom) 永远是 false, 不会进 keyboard-open / keyboard-close 分支,
+        // 终端 forceReplay 路径也就不跑了。
+        //
+        // 这里直接听原生层的"键盘动画收尾"事件, 触发 ensureTerminalFit
+        // (forceReplay=true), 把 wterm 的网格按真实视口重排一遍。
+        window.addEventListener("wand-ime-state", function(e) {
+          var which = e && e.detail && e.detail.state;
+          if (which === "shown" || which === "hidden") {
+            try {
+              ensureTerminalFit("native-ime-" + which, { forceReplay: true });
+              maybeScrollTerminalToBottom("native-ime");
+            } catch (_e) {}
+          }
+        });
+
         // Bridge from Android ConnectivityManager.NetworkCallback. State values:
         //   "available"  — 默认网络刚刚可用 (启动期没网 → 接上)
         //   "changed"    — 已有网络切到另一个 (Wi-Fi ↔ 4G), socket 必死
@@ -12892,20 +12911,31 @@
             // 这里在 visualViewport 检测到键盘收起的瞬间直接强制复位一次，
             // 并把 --app-viewport-height 兜底清掉，确保 .app-container 回到
             // 100dvh、input-panel 重新贴屏幕底部。
+            //
+            // Android APK (window.__wandImeNative=true) 跳过这段 iOS hack —
+            // MainActivity 已经在 IME 动画 callback 里逐帧把 root setPadding,
+            // WebView 直接被原生层 resize 推回到了正确位置, 这里再调
+            // scrollTo(0,0) 反而会跟原生 padding 打架, 偶尔产生一帧抖。
+            // 只保留 refit / 滚底两个纯展示动作。
             var rootEl = document.documentElement;
-            rootEl.style.removeProperty('--app-viewport-height');
-            window.scrollTo(0, 0);
-            if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
-            rootEl.scrollTop = 0;
-            if (document.body) document.body.scrollTop = 0;
-            setTimeout(function() {
-              // 二次复位：等键盘收起动画 + iOS 自身的回滚跑完后再清一次，
-              // 防止 iOS 在动画过程中又把 scrollTop 推上去。
+            var imeIsNative = !!window.__wandImeNative;
+            if (!imeIsNative) {
+              rootEl.style.removeProperty('--app-viewport-height');
               window.scrollTo(0, 0);
               if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
               rootEl.scrollTop = 0;
               if (document.body) document.body.scrollTop = 0;
-              syncAppViewportHeight();
+            }
+            setTimeout(function() {
+              if (!imeIsNative) {
+                // 二次复位：等键盘收起动画 + iOS 自身的回滚跑完后再清一次，
+                // 防止 iOS 在动画过程中又把 scrollTop 推上去。
+                window.scrollTo(0, 0);
+                if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+                rootEl.scrollTop = 0;
+                if (document.body) document.body.scrollTop = 0;
+                syncAppViewportHeight();
+              }
               ensureTerminalFit("keyboard-close", { forceReplay: true });
               maybeScrollTerminalToBottom("force");
             }, 200);
