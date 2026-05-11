@@ -5345,10 +5345,12 @@
     .input-label { font-size: 0.6875rem; color: var(--text-muted); font-weight: 500; }
     .input-textarea-wrap { position: relative; width: 100%; }
 
-    /* Composer top row: holds todo collapse bar (left) + reply status bar (right) on one line */
+    /* Composer top row: holds todo collapse bar (left) + reply status bar (right) on one line.
+       position: relative anchors the upward-floating .todo-progress-body to the full row width. */
     .composer-top-row {
+      position: relative;
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 8px;
       min-width: 0;
     }
@@ -5391,31 +5393,52 @@
       min-width: 0;
       flex: 1;
     }
-    .todo-progress-spinner {
-      width: 14px;
-      height: 14px;
-      min-width: 14px;
-      border: 2px solid var(--accent-muted);
-      border-top-color: var(--accent);
+    /* Circular progress ring (replaces the old plain spinner) */
+    .todo-progress-ring {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      min-width: 16px;
+      flex-shrink: 0;
+    }
+    .todo-progress-ring svg {
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+    }
+    .todo-ring-track {
+      stroke: rgba(197, 101, 61, 0.18);
+    }
+    .todo-ring-fill {
+      stroke: var(--accent);
+      /* circumference = 2 * π * 15.5 ≈ 97.39 */
+      stroke-dasharray: 97.39;
+      stroke-dashoffset: calc(97.39 * (1 - var(--progress, 0)));
+      transition: stroke-dashoffset 0.35s ease;
+    }
+    .todo-progress-ring::after {
+      content: "";
+      position: absolute;
+      width: 4px;
+      height: 4px;
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      background: var(--accent);
+      opacity: 0.6;
+      animation: ringPulse 1.4s ease-in-out infinite;
     }
-    .todo-progress.all-done .todo-progress-spinner {
-      display: none;
-    }
-    .todo-progress.all-done .todo-progress-left::before {
-      content: "✓";
-      font-size: 0.8125rem;
-      font-weight: 700;
-      color: #4a7a4f;
-      width: 14px;
-      text-align: center;
+    @keyframes ringPulse {
+      0%, 100% { opacity: 0.35; transform: scale(0.85); }
+      50%      { opacity: 0.95; transform: scale(1.05); }
     }
     .todo-progress-counter {
       font-size: 0.75rem;
       font-weight: 600;
       color: var(--text-primary);
       white-space: nowrap;
+      font-variant-numeric: tabular-nums;
     }
     .todo-progress-task {
       font-size: 0.75rem;
@@ -5432,44 +5455,84 @@
     .todo-progress.expanded .todo-progress-chevron {
       transform: rotate(180deg);
     }
+
+    /* Expanded body floats UPWARD above the composer, spans the full row width,
+       and is decoupled from the flex row so the status bar on the right does not
+       animate together with the expansion. */
     .todo-progress-body {
-      border-top: 1px solid var(--border-subtle);
-      padding: 6px 10px 8px;
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: calc(100% + 6px);
+      background: rgba(255, 251, 246, 0.98);
+      border: 1px solid var(--border-default);
+      border-radius: 12px;
+      padding: 8px 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      max-height: 320px;
+      overflow-y: auto;
+      z-index: 30;
+      opacity: 0;
+      transform: translateY(6px);
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease;
     }
     .todo-progress-body.hidden { display: none; }
+    .todo-progress-body.expanded {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
     .todo-progress-list {
       list-style: none;
       margin: 0;
       padding: 0;
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 1px;
     }
     .todo-progress-item {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 3px 4px;
-      border-radius: 6px;
-      font-size: 0.75rem;
+      gap: 10px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      font-size: 0.8125rem;
       color: var(--text-secondary);
+      line-height: 1.35;
       transition: background var(--transition-fast);
     }
+    .todo-progress-item + .todo-progress-item {
+      border-top: 1px solid var(--border-subtle);
+      border-radius: 0;
+    }
+    .todo-progress-item:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+    .todo-progress-item:last-child  { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
     .todo-progress-item.active {
       color: var(--text-primary);
       font-weight: 500;
-      background: rgba(197, 101, 61, 0.06);
+      background: rgba(197, 101, 61, 0.07);
     }
     .todo-progress-item.done {
       color: var(--text-muted);
       text-decoration: line-through;
       text-decoration-color: var(--text-muted);
     }
+    .todo-progress-item > span:last-child {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .todo-item-icon {
       width: 16px;
       min-width: 16px;
       text-align: center;
-      font-size: 0.6875rem;
+      font-size: 0.75rem;
+      flex-shrink: 0;
     }
     .todo-item-icon.pending { color: var(--text-muted); }
     .todo-item-icon.active { color: var(--accent); }
@@ -12015,7 +12078,9 @@
       100% { background-position: 100% center; }
     }
 
-    /* ── 结构化会话状态条（与 todo 折叠栏共处一行，靠右） ── */
+    /* ── 结构化会话状态条（与 todo 折叠栏共处一行，靠右） ──
+       Only opacity/color transition — `transition: all` would cause this bar to
+       animate together with the todo bar's expansion, which looks broken. */
     .structured-status-bar {
       display: flex;
       align-items: center;
@@ -12028,7 +12093,7 @@
       border: none;
       font-size: 0.6875rem;
       color: var(--text-muted);
-      transition: all 0.3s ease;
+      transition: opacity 0.3s ease, color 0.3s ease;
       overflow: hidden;
       flex-shrink: 0;
     }

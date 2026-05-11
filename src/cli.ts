@@ -9,6 +9,14 @@ import {
   saveConfig,
   writePreferenceToStorage,
 } from "./config.js";
+import {
+  PidInfo,
+  readLiveInstance,
+  removePidfile,
+  removeSocketFile,
+  socketPath,
+  writePidfile,
+} from "./pidfile.js";
 import { WandConfig } from "./types.js";
 
 async function main(): Promise<void> {
@@ -24,12 +32,30 @@ async function main(): Promise<void> {
     case "web": {
       const useTui = shouldUseTui();
       // web 命令下"已存在"的 ready 信息由统一的启动 banner / TUI 展示，避免重复。
-      // "Created..." 这种首次创建事件仍会输出（ensureRequiredFiles 内部判断）。
       const config = await ensureRequiredFiles(configPath, { silentReady: true });
+
+      // —— 单实例检测：如果已有 wand 主进程在跑，直接 attach 而不重启服务 ——
+      const live = readLiveInstance(configPath);
+      if (live) {
+        await runAttach(live, configPath, useTui);
+        break;
+      }
+
       const { ensureNodePtyHelperExecutable } = await import("./ensure-node-pty-helper.js");
       ensureNodePtyHelperExecutable();
       const { startServer } = await import("./server.js");
       const handle = await startServer(config, configPath);
+
+      // —— 注册实例：写 pidfile + 启动 IPC 服务端（TUI / banner 模式都需要） ——
+      const startedAtMs = Date.now();
+      const ipcCtx = await registerInstance(handle, configPath, startedAtMs);
+
+      const cleanup = async (): Promise<void> => {
+        try { await ipcCtx.close(); } catch { /* noop */ }
+        removePidfile(configPath);
+        removeSocketFile(configPath);
+      };
+
       if (useTui) {
         const { startTui } = await import("./tui/index.js");
         const tui = startTui({
@@ -43,6 +69,7 @@ async function main(): Promise<void> {
           urls: handle.urls,
           orphanRecoveredCount: handle.orphanRecoveredCount,
           onExit: async () => {
+            await cleanup();
             await handle.close();
             process.exit(0);
           },
@@ -52,6 +79,13 @@ async function main(): Promise<void> {
         process.on("SIGTERM", onSignal);
       } else {
         printStartupBanner(handle);
+        const onSignal = async () => {
+          await cleanup();
+          try { await handle.close(); } catch { /* noop */ }
+          process.exit(0);
+        };
+        process.on("SIGINT", () => { void onSignal(); });
+        process.on("SIGTERM", () => { void onSignal(); });
       }
       break;
     }
@@ -121,7 +155,7 @@ function printHelp(): void {
 
 Commands:
   wand init                 Create default files in ~/.wand/
-  wand web                  Start web console server
+  wand web                  Start web console server (or attach to running one)
   wand config:path          Print resolved config path
   wand config:show          Print current config
   wand config:set           Update a simple config value
@@ -173,7 +207,7 @@ function shouldUseTui(): boolean {
   return true;
 }
 
-interface StartupBannerData {
+interface ServerHandleForBanner {
   version: string;
   configPath: string;
   dbPath: string;
@@ -185,7 +219,7 @@ interface StartupBannerData {
   structuredSessions: { listSlim(): Array<{ status: string; archived: boolean }> };
 }
 
-function printStartupBanner(handle: StartupBannerData): void {
+function printStartupBanner(handle: ServerHandleForBanner): void {
   const all = [...handle.processManager.listSlim(), ...handle.structuredSessions.listSlim()];
   let active = 0, archived = 0;
   for (const s of all) {
@@ -208,6 +242,106 @@ function printStartupBanner(handle: StartupBannerData): void {
     lines.splice(1, 0, `       URL      ${extra.url} (${extra.scheme})`);
   }
   process.stdout.write(lines.join("\n") + "\n");
+}
+
+interface RegisteredInstance {
+  close: () => Promise<void>;
+}
+
+interface FullServerHandle extends ServerHandleForBanner {
+  processManager: any;
+  structuredSessions: any;
+  close: () => Promise<void>;
+}
+
+/** 写 pidfile + 启动 IPC 服务端。返回 cleanup 用的 close()。 */
+async function registerInstance(
+  handle: FullServerHandle,
+  configPath: string,
+  startedAtMs: number,
+): Promise<RegisteredInstance> {
+  const sockPath = socketPath(configPath);
+  const primary = handle.urls[0];
+  const pidInfo: PidInfo = {
+    pid: process.pid,
+    version: handle.version,
+    startedAt: startedAtMs,
+    url: primary ? primary.url : `${handle.httpsEnabled ? "https" : "http"}://${handle.bindAddr}`,
+    scheme: primary ? primary.scheme : (handle.httpsEnabled ? "HTTPS" : "HTTP"),
+    bindAddr: handle.bindAddr,
+    configPath: handle.configPath,
+    dbPath: handle.dbPath,
+    socket: sockPath,
+  };
+
+  // Windows 不开 IPC，仍然写 pidfile（attach 模式会跳过，但能给运维查 PID）
+  if (!sockPath) {
+    writePidfile(configPath, pidInfo);
+    return { close: async () => { /* noop */ } };
+  }
+
+  const { startIpcServer } = await import("./tui/ipc-server.js");
+  const { buildSnapshotData } = await import("./tui/snapshot.js");
+
+  const ipc = startIpcServer({
+    socketPath: sockPath,
+    snapshotProvider: () => buildSnapshotData({
+      version: handle.version,
+      url: pidInfo.url,
+      scheme: pidInfo.scheme,
+      bindAddr: handle.bindAddr,
+      configPath: handle.configPath,
+      dbPath: handle.dbPath,
+      orphanRecoveredCount: handle.orphanRecoveredCount,
+      startedAtMs,
+      pid: process.pid,
+      processManager: handle.processManager,
+      structuredSessions: handle.structuredSessions,
+    }),
+    onShutdown: async () => {
+      try { await handle.close(); } catch { /* noop */ }
+      removePidfile(configPath);
+      removeSocketFile(configPath);
+      process.exit(0);
+    },
+  });
+
+  writePidfile(configPath, pidInfo);
+
+  return {
+    close: async () => {
+      try { await ipc?.close(); } catch { /* noop */ }
+    },
+  };
+}
+
+/** 进入 attach 模式。 */
+async function runAttach(live: PidInfo, configPath: string, useTui: boolean): Promise<void> {
+  if (!live.socket) {
+    // Windows 没 socket：直接打印信息后退出
+    process.stdout.write(
+      `[wand] detected running instance pid=${live.pid} at ${live.url}\n` +
+      `       attach mode requires unix socket which is unavailable on this platform\n`,
+    );
+    process.exit(0);
+  }
+  if (!useTui) {
+    process.stdout.write(
+      `[wand] running instance detected (pid=${live.pid}) at ${live.url}\n` +
+      `       socket=${live.socket}\n` +
+      `       use 'wand web' from a TTY to open the attach TUI\n`,
+    );
+    process.exit(0);
+  }
+  const { startAttachTui } = await import("./tui/attach.js");
+  const tui = startAttachTui({
+    pidInfo: live,
+    configPath,
+    onExit: async () => { process.exit(0); },
+  });
+  const onSignal = () => { void tui.stop(); };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
 }
 
 function setConfigValue(

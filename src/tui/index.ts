@@ -1,9 +1,20 @@
 import { ProcessManager } from "../process-manager.js";
 import { StructuredSessionManager } from "../structured-session-manager.js";
 import { ProcessEvent, SessionSnapshot } from "../types.js";
+import {
+  checkUpdate,
+  copyToClipboard,
+  installService,
+  installUpdate,
+  isServiceInstalled,
+  openInBrowser,
+  restartSelf,
+  uninstallService,
+} from "./commands.js";
 import { buildLayout, HeaderInfo, LayoutHandle } from "./layout.js";
 import { installLogBus, restoreLogBus } from "./log-bus.js";
 import { formatSession, sortRows } from "./session-formatter.js";
+import { openServicePanel } from "./service-panel.js";
 
 /** 触发 sessions 列表重渲的事件类型。output 太频繁，不订阅。 */
 const SESSIONS_REFRESH_EVENTS = new Set(["status", "started", "ended", "task"]);
@@ -35,6 +46,7 @@ export function startTui(deps: TuiDeps): TuiHandle {
   const layout: LayoutHandle = buildLayout();
   let active = true;
   let stopping = false;
+  const startedAtMs = Date.now();
 
   const handle: TuiHandle = {
     get isActive() { return active; },
@@ -62,6 +74,9 @@ export function startTui(deps: TuiDeps): TuiHandle {
       dbPath: deps.dbPath,
       orphanRecoveredCount: deps.orphanRecoveredCount,
       sessionCounts: counts,
+      startedAtMs,
+      rssBytes: safeRss(),
+      serviceInstalled: safeServiceInstalled(),
     };
   };
 
@@ -119,13 +134,135 @@ export function startTui(deps: TuiDeps): TuiHandle {
   }, RELATIVE_TIME_TICK_MS);
   tickTimer.unref?.();
 
-  // —— 键位 ——
-  layout.screen.key(["q", "Q"], () => { void stop("user"); });
+  // 服务面板打开时，屏幕级快捷键全部让位给面板自身按键。
+  const idle = () => !layout.isServicePanelOpen();
+
+  // —— 基本键位 ——
+  layout.screen.key(["q", "Q"], () => { if (idle()) void stop("user"); });
   layout.screen.key(["C-c"], () => { void stop("user"); });
-  layout.screen.key(["r", "R"], () => { refreshAll(); });
+  layout.screen.key(["r"], () => {
+    if (!idle()) return;
+    refreshAll();
+    layout.showToast("已刷新", "info", 1500);
+  });
+  layout.screen.key(["l", "L"], () => {
+    if (!idle()) return;
+    layout.clearLogs();
+    layout.showToast("日志已清空", "info", 1500);
+  });
+  layout.screen.key(["?", "h", "H"], () => {
+    if (!idle()) return;
+    const visible = layout.toggleHelp();
+    if (!visible) refreshAll();
+  });
+
+  // —— 运维快捷键 ——
+  layout.screen.key(["g", "G"], () => { if (idle()) openServicePanel({ layout, configPath: deps.configPath }); });
+  layout.screen.key(["S-r"], () => { if (idle()) void handleRestart(); });
+  layout.screen.key(["u", "U"], () => { if (idle()) void handleUpdate(); });
+  layout.screen.key(["o", "O"], () => { if (idle()) handleOpenBrowser(); });
+  layout.screen.key(["c", "C"], () => { if (idle()) handleCopyUrl(); });
+  layout.screen.key(["s"], () => { if (idle()) void handleInstallService(); });
+  layout.screen.key(["S-s"], () => { if (idle()) void handleUninstallService(); });
 
   // 首次渲染
   refreshAll();
+
+  // —— 操作处理函数 ——
+  async function handleRestart(): Promise<void> {
+    const ok = await layout.confirm({
+      title: "重启 wand",
+      body: "将派生新进程并退出当前进程，活跃会话会因 PTY 中断而中止，是否继续？",
+    });
+    if (!ok) return;
+    layout.showToast("正在重启…", "info", 5000);
+    // 让 toast 有时间渲染，再触发 restart
+    setTimeout(() => {
+      const r = restartSelf();
+      if (!r.ok) layout.showToast(r.message, "error", 4000);
+    }, 200);
+  }
+
+  async function handleUpdate(): Promise<void> {
+    layout.showToast("正在检查更新…", "info", 2000);
+    const info = await runOffMicrotask(() => checkUpdate(deps.version));
+    if (!info.latest) {
+      layout.showToast("无法连接到 npm registry", "error", 3500);
+      return;
+    }
+    if (!info.hasUpdate) {
+      layout.showToast(`已是最新版本 (v${info.current})`, "success", 3000);
+      return;
+    }
+    const go = await layout.confirm({
+      title: "发现新版本",
+      body: `当前 v${info.current} → 最新 v${info.latest}，是否立即升级？`,
+      yes: "回车 / y 安装",
+      no: "Esc / n 取消",
+    });
+    if (!go) return;
+    layout.showToast("正在执行 npm install -g …", "info", 5000);
+    const r = await runOffMicrotask(() => installUpdate());
+    layout.showToast(r.message, r.ok ? "success" : "error", 5000);
+    if (r.detail) layout.showDetail(r.ok ? "更新输出" : "更新失败", r.detail);
+  }
+
+  function handleOpenBrowser(): void {
+    const url = deps.urls[0]?.url;
+    if (!url) {
+      layout.showToast("没有可用 URL", "warn", 2000);
+      return;
+    }
+    const r = openInBrowser(url);
+    layout.showToast(r.message, r.ok ? "success" : "error", 2500);
+  }
+
+  function handleCopyUrl(): void {
+    const url = deps.urls[0]?.url;
+    if (!url) {
+      layout.showToast("没有可用 URL", "warn", 2000);
+      return;
+    }
+    const r = copyToClipboard(url);
+    layout.showToast(r.message, r.ok ? "success" : "error", 2500);
+  }
+
+  async function handleInstallService(): Promise<void> {
+    if (isServiceInstalled()) {
+      layout.showToast("服务已安装，按 Shift+S 卸载", "warn", 2500);
+      return;
+    }
+    const ok = await layout.confirm({
+      title: "注册为系统服务",
+      body:
+        process.platform === "linux"
+          ? "将写入 ~/.config/systemd/user/wand.service 并 systemctl --user enable --now。"
+          : process.platform === "darwin"
+            ? "将写入 ~/Library/LaunchAgents/com.wand.web.plist 并 launchctl load。"
+            : "当前平台暂不支持。",
+    });
+    if (!ok) return;
+    const r = await runOffMicrotask(() => installService({ configPath: deps.configPath }));
+    layout.showToast(r.message, r.ok ? "success" : "error", 5000);
+    if (r.detail) layout.showDetail(r.ok ? "服务安装详情" : "服务安装失败", r.detail);
+    refreshAll();
+  }
+
+  async function handleUninstallService(): Promise<void> {
+    if (!isServiceInstalled()) {
+      layout.showToast("当前未安装系统服务", "warn", 2500);
+      return;
+    }
+    const ok = await layout.confirm({
+      title: "卸载系统服务",
+      body: "将禁用并删除 wand 的 systemd / launchd 配置，确认继续？",
+    });
+    if (!ok) return;
+    const r = await runOffMicrotask(() => uninstallService());
+    layout.showToast(r.message, r.ok ? "success" : "error", 4000);
+    if (r.detail) layout.showDetail(r.ok ? "服务卸载详情" : "服务卸载失败", r.detail);
+    refreshAll();
+  }
 
   async function stop(reason: ExitReason): Promise<void> {
     if (stopping || !active) return;
@@ -155,4 +292,29 @@ function safeStructuredList(mgr: StructuredSessionManager): SessionSnapshot[] {
   } catch {
     return [];
   }
+}
+
+function safeRss(): number {
+  try {
+    return process.memoryUsage().rss;
+  } catch {
+    return 0;
+  }
+}
+
+function safeServiceInstalled(): boolean {
+  try {
+    return isServiceInstalled();
+  } catch {
+    return false;
+  }
+}
+
+/** 把同步阻塞操作放到下一 microtask，给 TUI 留出一帧把 toast 画出来。 */
+function runOffMicrotask<T>(fn: () => T): Promise<T> {
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try { resolve(fn()); } catch (err) { reject(err); }
+    });
+  });
 }

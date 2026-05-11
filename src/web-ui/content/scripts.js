@@ -1423,14 +1423,21 @@
                 '<div class="composer-top-row">' +
                   '<div id="todo-progress" class="todo-progress hidden">' +
                     '<div class="todo-progress-header" id="todo-progress-toggle">' +
-                      '<span class="todo-progress-spinner" aria-hidden="true"></span>' +
-                      '<span class="todo-progress-message" id="todo-progress-message"></span>' +
-                      '<span class="todo-progress-status" id="todo-progress-status">执行中</span>' +
-                      '<svg class="todo-progress-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>' +
+                      '<div class="todo-progress-left">' +
+                        '<span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0">' +
+                          '<svg width="16" height="16" viewBox="0 0 36 36">' +
+                            '<circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/>' +
+                            '<circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/>' +
+                          '</svg>' +
+                        '</span>' +
+                        '<span class="todo-progress-counter" id="todo-progress-counter"></span>' +
+                        '<span class="todo-progress-task" id="todo-progress-task"></span>' +
+                      '</div>' +
+                      '<svg class="todo-progress-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>' +
                     '</div>' +
-                    '<div class="todo-progress-body hidden" id="todo-progress-body">' +
-                      '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
-                    '</div>' +
+                  '</div>' +
+                  '<div class="todo-progress-body hidden" id="todo-progress-body">' +
+                    '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
                   '</div>' +
                 '</div>' +
                 '<div class="input-composer">' +
@@ -7588,6 +7595,14 @@
         // Reset todo progress bar
         var todoEl = document.getElementById("todo-progress");
         if (todoEl) todoEl.classList.add("hidden");
+        // 同时清掉上一会话残留的 "回复中 N.Ns" 状态条以及它的计时器/glow。
+        // 不清就会出现：切到新建的空会话，底部仍显示前一会话的 todolist + 回复中。
+        var staleStatusBar = document.querySelector(".structured-status-bar");
+        if (staleStatusBar) staleStatusBar.remove();
+        if (_statusBarTimerId) { clearInterval(_statusBarTimerId); _statusBarTimerId = null; }
+        _statusBarStartTime = 0;
+        var staleComposer = document.querySelector(".input-composer");
+        if (staleComposer) staleComposer.classList.remove("in-flight");
         var session = foundSession;
         state.preferredCommand = getPreferredTool();
         state.chatMode = getSafeModeForTool("claude", session && session.mode ? session.mode : state.chatMode);
@@ -13795,6 +13810,10 @@
             state.lastRenderedEmpty = "empty";
             state.lastRenderedMsgCount = 0;
           }
+          // 空会话进入空状态前，把上一会话残留的状态条 / todo 进度条清掉。
+          // 这里是 selectSession 之外的兜底：WS init 等异步路径也会落到这条空分支。
+          renderStructuredStatusBar(null, selectedSession);
+          updateTodoProgress([]);
           return;
         }
 
@@ -14132,10 +14151,10 @@
         if (prog && body) {
           if (todoExpanded) {
             prog.classList.add("expanded");
-            body.classList.remove("hidden");
+            body.classList.add("expanded");
           } else {
             prog.classList.remove("expanded");
-            body.classList.add("hidden");
+            body.classList.remove("expanded");
           }
         }
       });
@@ -14157,14 +14176,17 @@
         }
 
         var container = document.getElementById("todo-progress");
+        var bodyEl = document.getElementById("todo-progress-body");
         if (!container) return;
 
         if (!todos || todos.length === 0) {
           container.classList.add("hidden");
+          if (bodyEl) bodyEl.classList.add("hidden");
           return;
         }
 
         container.classList.remove("hidden");
+        if (bodyEl) bodyEl.classList.remove("hidden");
 
         var completed = 0;
         var inProgress = 0;
@@ -14186,6 +14208,7 @@
         if (allDone) {
           // Hide todo when all tasks are completed
           container.classList.add("hidden");
+          if (bodyEl) bodyEl.classList.add("hidden");
           return;
         } else {
           container.classList.remove("all-done");
@@ -14196,6 +14219,14 @@
 
         var task = document.getElementById("todo-progress-task");
         if (task) task.textContent = activeTask;
+
+        // Drive the circular progress ring with the honest "completed / total" fraction
+        // (counter text shows the 1-indexed current step, ring shows actual done ratio).
+        var ring = document.getElementById("todo-progress-ring");
+        if (ring) {
+          var ratio = todos.length > 0 ? completed / todos.length : 0;
+          ring.style.setProperty("--progress", ratio.toFixed(3));
+        }
 
         // Render expanded list
         var list = document.getElementById("todo-progress-list");
