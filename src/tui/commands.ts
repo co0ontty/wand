@@ -11,6 +11,8 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
+import { installPackageGloballySync } from "../npm-update-utils.js";
+
 export interface CommandResult {
   ok: boolean;
   /** 给用户看的简短状态行（一行）。 */
@@ -73,26 +75,30 @@ export function checkUpdate(currentVersion: string): UpdateInfo {
 
 /**
  * 执行 `npm install -g @co0ontty/wand@latest`。
+ *
  * 此调用同步阻塞（TUI 上层应在另一线程的 setImmediate 调度，或直接 await）。
+ * 通过 npm-update-utils 自动处理 `.wand-XXXXXX` 残留目录和 ENOTEMPTY 回退，
+ * 行为与 server.ts 的 /api/update / performAutoUpdate 保持一致。
+ *
  * 返回 npm 输出供调试。
  */
 export function installUpdate(): CommandResult {
-  const res = spawnSync("npm", ["install", "-g", `${PACKAGE_NAME}@latest`], {
-    encoding: "utf8",
-    timeout: 180_000,
-  });
+  const res = installPackageGloballySync(`${PACKAGE_NAME}@latest`, 180_000);
   const out = (res.stdout || "") + (res.stderr ? "\n" + res.stderr : "");
+  const trail = res.attempts.length > 1
+    ? `\n\n尝试过的命令：\n  ${res.attempts.join("\n  ")}`
+    : "";
   if (res.status === 0) {
     return {
       ok: true,
       message: "更新已安装。按 [R] 重启以生效。",
-      detail: out.trim(),
+      detail: (out.trim() + trail).trim(),
     };
   }
   return {
     ok: false,
     message: `npm install 失败 (exit ${res.status})`,
-    detail: out.trim(),
+    detail: (out.trim() + trail).trim(),
   };
 }
 
@@ -408,6 +414,10 @@ function installSystemdUserService(ctx: ServiceContext): CommandResult {
   const unitPath = servicePath();
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
+  // Restart=always 是关键：自动更新 / /api/restart 走的是 "spawn detached + exit 0"，
+  // 在 systemd 用户服务的 cgroup 下，detached 子进程会随父进程一起被清理（默认
+  // KillMode=control-group），只有 Restart=always 能让 systemd 在 exit 0 后拉起
+  // 新进程，把更新真正生效。
   const unit = [
     "[Unit]",
     "Description=wand web console",
@@ -417,7 +427,7 @@ function installSystemdUserService(ctx: ServiceContext): CommandResult {
     "Type=simple",
     `ExecStart=${nodeBin} ${wandBin} web -c ${ctx.configPath}`,
     `Environment=WAND_NO_TUI=1`,
-    "Restart=on-failure",
+    "Restart=always",
     "RestartSec=3",
     "",
     "[Install]",

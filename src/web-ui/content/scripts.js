@@ -9199,16 +9199,27 @@
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
+          if (data.error) {
+            if (msgEl) {
+              msgEl.textContent = data.error;
+              msgEl.style.color = "var(--error)";
+              msgEl.classList.remove("hidden");
+            }
+            updateBtn.disabled = false;
+            return;
+          }
+          // \u5b89\u88c5\u6210\u529f\uff1a\u81ea\u52a8\u8c03\u7528 /api/restart\uff0c\u8ba9\u670d\u52a1\u91cd\u542f\u751f\u6548\uff0c
+          // \u9875\u9762\u4f1a\u88ab restart overlay \u63a5\u624b\uff0c\u7b49\u540e\u7aef\u56de\u6765\u540e\u81ea\u52a8\u5237\u65b0\u3002
           if (msgEl) {
-            msgEl.textContent = data.message || data.error || "\u66f4\u65b0\u5b8c\u6210\u3002";
-            msgEl.style.color = data.error ? "var(--error)" : "var(--success)";
+            msgEl.textContent = (data.message || "\u66f4\u65b0\u5b8c\u6210") + "\uff0c\u6b63\u5728\u91cd\u542f\u670d\u52a1\u2026";
+            msgEl.style.color = "var(--success)";
             msgEl.classList.remove("hidden");
           }
-          if (data.error) {
-            updateBtn.disabled = false;
+          updateBtn.classList.add("hidden");
+          if (data.restartRequired !== false) {
+            performRestart(null, msgEl);
           } else {
-            updateBtn.classList.add("hidden");
-            // Show restart button
+            // \u670d\u52a1\u7aef\u660e\u786e\u8868\u793a\u4e0d\u9700\u8981\u91cd\u542f\uff0c\u4fdd\u7559\u624b\u52a8\u91cd\u542f\u6309\u94ae
             var restartBtn = document.getElementById("do-restart-button");
             if (restartBtn) restartBtn.classList.remove("hidden");
           }
@@ -17703,29 +17714,29 @@
           })
           .then(function(res) { return res.json(); })
           .then(function(data) {
-            setProgress(false);
-            card.classList.remove("is-busy");
             if (data.error) {
               // Update failed
+              setProgress(false);
+              card.classList.remove("is-busy");
               setSubtitle("\u66f4\u65b0\u672a\u5b8c\u6210");
               setStatus(data.error, "error");
               actionBtn.disabled = false;
               if (actionLabel) actionLabel.textContent = "\u91cd\u8bd5";
               return;
             }
-            // Phase 2: Update succeeded, show restart button
-            setSubtitle(data.message || "\u66f4\u65b0\u5b8c\u6210\uff0c\u91cd\u542f\u540e\u751f\u6548");
-            setStatus("");
+            // Phase 2: \u5b89\u88c5\u6210\u529f\uff0c\u81ea\u52a8\u8c03\u7528 /api/restart\uff0c\u7531 restart overlay \u63a5\u7ba1 UX\u3002
             card.classList.add("is-success");
-            if (actionLabel) actionLabel.textContent = "\u91cd\u542f\u751f\u6548";
-            actionBtn.disabled = false;
-            actionBtn.onclick = function() {
-              actionBtn.disabled = true;
-              if (actionLabel) actionLabel.textContent = "\u6b63\u5728\u91cd\u542f\u2026";
-              setSubtitle("\u670d\u52a1\u6b63\u5728\u91cd\u542f\u2026");
-              setProgress(true);
-              performRestartCard(actionBtn, actionLabel, subtitleEl, statusEl, progressEl);
-            };
+            setSubtitle((data.message || "\u66f4\u65b0\u5b8c\u6210") + "\uff0c\u6b63\u5728\u91cd\u542f\u670d\u52a1\u2026");
+            setStatus("");
+            if (actionLabel) actionLabel.textContent = "\u6b63\u5728\u91cd\u542f\u2026";
+            if (data.restartRequired === false) {
+              setProgress(false);
+              card.classList.remove("is-busy");
+              actionBtn.disabled = false;
+              if (actionLabel) actionLabel.textContent = "\u5df2\u5b8c\u6210";
+              return;
+            }
+            performRestartCard(actionBtn, actionLabel, subtitleEl, statusEl, progressEl);
           })
           .catch(function() {
             setProgress(false);

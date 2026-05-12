@@ -31,6 +31,18 @@ wand web
 
 安装完成后打开浏览器访问终端中提示的地址即可。
 
+### 升级
+
+推荐用同一条一键脚本升级（脚本会自动停掉正在运行的 wand 进程、清理 npm 改名残留再装最新版）：
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.sh)
+```
+
+> 也可以直接在网页设置里点「更新」按钮，或在 TUI 模式按 `u`，wand 自己会调用同样的清理逻辑。Web 端点击更新后会自动重启服务，无需手动操作。
+
+如果以前装过 systemd 自启服务但还是 `Restart=on-failure`（v1.25.x 前的版本），重新进入 TUI 按一次 `i` 重装服务即可换成 `Restart=always`，自动更新后才能正确拉起新进程。
+
 ## 功能
 
 <p align="center">

@@ -27,6 +27,7 @@ import { SessionLogger } from "./session-logger.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
 import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { installPackageGloballyAsync } from "./npm-update-utils.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
@@ -1200,22 +1201,14 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
-  // ── Global npm install with ENOTEMPTY fallback ──
+  // ── Global npm install (with leftover cleanup + ENOTEMPTY fallback) ──
+  // 把所有恢复逻辑下沉到 ./npm-update-utils，TUI 和 server 共用，确保自动更新、
+  // /api/update、tui installUpdate 三处行为一致。
 
   async function npmInstallGlobal(pkg: string, timeoutMs: number): Promise<void> {
-    try {
-      await execAsync(`npm install -g ${pkg}`, { timeout: timeoutMs });
-    } catch (error) {
-      const msg = getErrorMessage(error, "");
-      if (msg.includes("ENOTEMPTY")) {
-        // Running process holds files in the install dir; uninstall first, then reinstall with --force.
-        process.stdout.write(`[wand] npm install 遇到 ENOTEMPTY，尝试先卸载再安装...\n`);
-        await execAsync(`npm uninstall -g ${pkg}`, { timeout: timeoutMs });
-        await execAsync(`npm install -g --force ${pkg}`, { timeout: timeoutMs });
-      } else {
-        throw error;
-      }
-    }
+    await installPackageGloballyAsync(pkg, timeoutMs, (line) => {
+      process.stdout.write(`${line}\n`);
+    });
   }
 
   app.get("/api/check-update", async (_req, res) => {
@@ -1241,7 +1234,13 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         return;
       }
       await npmInstallGlobal(`${PKG_NAME}@latest`, 120000);
-      res.json({ ok: true, message: `已更新到 ${latest}，请重启 wand 服务以生效。` });
+      // 装包成功后告知前端可以发起重启；前端会随即调用 /api/restart 完成自动重启。
+      res.json({
+        ok: true,
+        message: `已更新到 ${latest}`,
+        restartRequired: true,
+        version: latest,
+      });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "更新失败。") });
     } finally {
