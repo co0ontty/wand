@@ -10921,6 +10921,48 @@
         }
       }
 
+      // 计算一条 ConversationTurn 里所有 content block 的"信息体积"——文字 / 思考 /
+      // tool_result 内容长度之和。用于在 lastMessage 增量更新里判断 incoming 是否
+      // 至少和 localLast 一样完整，防止服务端偶发吐出更短的同 message.id 导致
+      // 已显示的文字段被回退覆盖（"显示了又消失"的根因之一）。
+      function turnContentVolume(turn) {
+        if (!turn || !Array.isArray(turn.content)) return 0;
+        var total = 0;
+        for (var i = 0; i < turn.content.length; i++) {
+          var b = turn.content[i];
+          if (!b) continue;
+          if (typeof b.text === "string") total += b.text.length;
+          if (typeof b.thinking === "string") total += b.thinking.length;
+          if (typeof b.content === "string") total += b.content.length;
+          else if (Array.isArray(b.content)) {
+            for (var k = 0; k < b.content.length; k++) {
+              var sub = b.content[k];
+              if (sub && typeof sub.text === "string") total += sub.text.length;
+            }
+          }
+          if (b.input) {
+            try { total += JSON.stringify(b.input).length; } catch (_e) {}
+          }
+        }
+        return total;
+      }
+
+      // 合并同 role 的 last assistant turn：incoming 通常是权威更新（包含完整 usage、
+      // 完整 block 序列），但偶发的服务端回退会让 incoming 比 local 更短。此时
+      // 保留本地内容——下一次正常 emit 会校正。usage 字段以 incoming 优先（因为
+      // 那是 result event 给的最终值）。
+      function mergeAssistantTurn(localLast, incoming) {
+        if (!localLast) return incoming;
+        if (!incoming) return localLast;
+        var localVol = turnContentVolume(localLast);
+        var incVol = turnContentVolume(incoming);
+        if (incVol >= localVol) return incoming;
+        // incoming 更短：保留 local 的 content，但允许 incoming 更新 usage / 元字段。
+        return Object.assign({}, localLast, {
+          usage: incoming.usage || localLast.usage,
+        });
+      }
+
       // Append queued user message placeholders to currentMessages so they
       // remain visible across WS updates and re-renders.
       function buildMessagesForRender(session, messages) {
@@ -13565,23 +13607,30 @@
                 snapshot.sessionKind = msg.data.sessionKind;
               }
 
-              if (isIncremental && msg.data.lastMessage) {
+              // 优先级修正：若同一事件里同时带 messages（全量）和 lastMessage（增量），
+              // 让全量赢。WS 端的 debounce 已经会在跨形状时 flush，但保留这层
+              // 客户端兜底，避免任何上游再合并出双载体事件时再次丢消息。
+              if (msg.data.messages) {
+                // Full mode (authoritative)
+                snapshot.messages = msg.data.messages;
+              } else if (isIncremental && msg.data.lastMessage) {
                 // Incremental mode: merge lastMessage into existing session messages
                 var existingSession = state.sessions.find(function(s) { return s.id === msg.sessionId; });
                 if (existingSession) {
                   var msgs = Array.isArray(existingSession.messages) ? existingSession.messages.slice() : [];
                   var expectedCount = msg.data.messageCount || 0;
-                  // Replace last turn if same role, or append if new turn
-                  if (msgs.length > 0 && msg.data.lastMessage.role && msgs[msgs.length - 1].role === msg.data.lastMessage.role) {
-                    msgs[msgs.length - 1] = msg.data.lastMessage;
+                  // 防御性合并：lastMessage 应当至少和本地最后一条一样长。如果服务端
+                  // 因为上游 bug（如 upsertBlocks 整段覆盖）回退发来一条更短的同 role
+                  // 消息，保留本地版本——文字会被刷新或下一次 emit 修正。
+                  var localLast = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+                  var incoming = msg.data.lastMessage;
+                  if (localLast && incoming.role && localLast.role === incoming.role) {
+                    msgs[msgs.length - 1] = mergeAssistantTurn(localLast, incoming);
                   } else if (msgs.length < expectedCount) {
-                    msgs.push(msg.data.lastMessage);
+                    msgs.push(incoming);
                   }
                   snapshot.messages = msgs;
                 }
-              } else if (!isIncremental && msg.data.messages) {
-                // Full mode (backward compatible)
-                snapshot.messages = msg.data.messages;
               }
 
               // Fast path: chunk-only incremental events skip expensive chat update
@@ -14364,7 +14413,11 @@
         var renderWasAtBottom = isChatNearBottom(chatMessages);
         if (renderWasAtBottom) state.chatStickToBottom = true;
 
-        var existingCount = chatMessages.querySelectorAll(".chat-message").length;
+        // 把 .system-info 卡片从计数里剔除——它由 extractPtySystemInfo 在
+        // fullRenderChat 里穿插注入，不存在于 messages 数组中，混进 existingCount
+        // 会让 msgCount !== existingCount 永远为真，每帧都走 fullRenderChat，从而
+        // 不断 wipe innerHTML，触发"莫名其妙跳到最上面"的视觉错位。
+        var existingCount = chatMessages.querySelectorAll(".chat-message:not(.system-info)").length;
         // Full render when: forced, no existing messages, or message count decreased/changed
         var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
 
@@ -14412,6 +14465,29 @@
             '</div>';
           }
 
+          // 在 innerHTML 整段重写前，先记下当前视口里"最靠近顶部边缘"的那条消息
+          // 的 data-msg-index 和它到容器顶部的偏移。重写完成后找到同一 data-msg-index
+          // 的新节点，把它放回原来的偏移——这是 column-reverse 下保住用户视线的
+          // 标准锚点法。没有锚点时（首次渲染、空 → 非空）才走 scrollTop=0 兜底。
+          var anchorMsgIndex = -1;
+          var anchorOffset = 0;
+          if (prevMsgCount > 0 && !renderWasAtBottom) {
+            var containerTop = chatMessages.getBoundingClientRect().top;
+            var preEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
+            for (var pi = 0; pi < preEls.length; pi++) {
+              var rect = preEls[pi].getBoundingClientRect();
+              // 第一条 top >= containerTop 的就是视口内最靠上的可见消息
+              if (rect.bottom >= containerTop) {
+                var idxAttr = preEls[pi].getAttribute("data-msg-index");
+                if (idxAttr != null) {
+                  anchorMsgIndex = parseInt(idxAttr, 10);
+                  anchorOffset = rect.top - containerTop;
+                }
+                break;
+              }
+            }
+          }
+
           chatMessages.innerHTML = html;
           // 给每条消息打 data-msg-index（用 state.currentMessages 的全局索引），
           // 后面 refreshChatUnreadDivider 用它找未读分割线的位置。
@@ -14436,6 +14512,21 @@
             // 同一会话内的全量重渲染：用户原本贴底就保持贴底，浏览器在 innerHTML
             // 重置后可能把 scrollTop 钳到一个奇怪的值，这里显式拉回 0。
             chatMessages.scrollTop = 0;
+          } else if (anchorMsgIndex >= 0) {
+            // 用户当前不在底部——根据保存的锚点恢复视图位置，避免被"踢到最上面"。
+            var newAnchor = chatMessages.querySelector(
+              '.chat-message[data-msg-index="' + anchorMsgIndex + '"]'
+            );
+            if (newAnchor) {
+              var newContainerTop = chatMessages.getBoundingClientRect().top;
+              var newRect = newAnchor.getBoundingClientRect();
+              var delta = (newRect.top - newContainerTop) - anchorOffset;
+              if (Math.abs(delta) > 0.5) {
+                state.chatIsProgrammaticScroll = true;
+                chatMessages.scrollTop += delta;
+                requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
+              }
+            }
           }
           attachAllCopyHandlers(chatMessages);
           bindChatScrollListener();
@@ -14595,7 +14686,10 @@
           // Optimization: only re-render the newest N messages (column-reverse: first children)
           // that actually differ, starting from the top (newest). Most streaming updates only
           // touch the latest assistant turn, so we can skip scanning all older messages.
-          var existingEls = Array.from(chatMessages.querySelectorAll(".chat-message"));
+          // 同样剔除 system-info 卡片，否则 existingEls 长度对不上 reversedMessages，
+          // top-N 对照会拿 system-info 卡片去比真消息的 HTML，永远 replacedAny=false，
+          // 触发 fullRenderChat 兜底分支——这是滚动跳顶的另一条触发路径。
+          var existingEls = Array.from(chatMessages.querySelectorAll(".chat-message:not(.system-info)"));
           var reversedMessages = messages.slice().reverse();
           var replacedAny = false;
           // Scan from newest (index 0 in reversed) up to MAX_STREAMING_SCAN messages

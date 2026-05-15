@@ -1252,9 +1252,52 @@ export class StructuredSessionManager {
       const blocksByKey = new Map<string, ContentBlock[]>();
       const keyOrder: string[] = [];
       let toolResultSeq = 0;
+      // 估算单个 ContentBlock 的"信息体积"——文字 / thinking / tool input 长度之和。
+      // 用于 upsertBlocks 的防御性合并：同一 message.id 重发时，按位置取信息量更大的
+      // 那个版本，保证已经吐出的文字 / tool_use input 不会被一条更短的同 id 事件
+      // 整段覆盖。
+      const blockVolume = (b: ContentBlock | undefined): number => {
+        if (!b) return 0;
+        const anyB = b as any;
+        let total = 0;
+        if (typeof anyB.text === "string") total += anyB.text.length;
+        if (typeof anyB.thinking === "string") total += anyB.thinking.length;
+        if (typeof anyB.content === "string") total += anyB.content.length;
+        if (anyB.input) {
+          try { total += JSON.stringify(anyB.input).length; } catch (_e) { /* ignore */ }
+        }
+        return total;
+      };
       const upsertBlocks = (key: string, blocks: ContentBlock[]): void => {
-        if (!blocksByKey.has(key)) keyOrder.push(key);
-        blocksByKey.set(key, blocks);
+        const prev = blocksByKey.get(key);
+        if (!prev) {
+          keyOrder.push(key);
+          blocksByKey.set(key, blocks);
+          return;
+        }
+        // claude -p 在同一 message.id 的多次 assistant 事件里**应当**每次发出累加内容。
+        // 但偶发会观察到某次重发只带其中一部分 block（典型场景：text 后又开始一段
+        // tool_use，下一帧 text 字段意外为空字符串），导致先前已渲染的文本被覆盖
+        // 为空——刷新页面后从持久化又恢复出来，就是用户反馈的"显示了又消失"。
+        // 这里按 index 逐块取较"重"的版本，类型一致则取信息量大者，否则信任 incoming
+        // 但**绝不**让 incoming 比 prev 的总块数少（短数组拼接 prev 的尾部）。
+        const merged: ContentBlock[] = [];
+        const maxLen = Math.max(prev.length, blocks.length);
+        for (let i = 0; i < maxLen; i++) {
+          const a = prev[i];
+          const b = blocks[i];
+          if (a && !b) { merged.push(a); continue; }
+          if (!a && b) { merged.push(b); continue; }
+          if (a && b) {
+            if (a.type === b.type) {
+              merged.push(blockVolume(b) >= blockVolume(a) ? b : a);
+            } else {
+              // 类型变了（极少见，多半是上游 bug）——保留信息量大者，不丢字。
+              merged.push(blockVolume(b) >= blockVolume(a) ? b : a);
+            }
+          }
+        }
+        blocksByKey.set(key, merged);
       };
       const rebuildTurnBlocks = (): void => {
         const flat: ContentBlock[] = [];

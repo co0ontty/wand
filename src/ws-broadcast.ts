@@ -105,22 +105,47 @@ export class WsBroadcastManager {
     if (event.type === "output") {
       const existing = this.outputDebounceCache.get(event.sessionId);
       if (existing) {
-        clearTimeout(existing.timer);
-        // Merge prev + cur. Cur takes precedence for identically-named fields,
-        // but fields only present on prev (e.g. chunk while cur carries
-        // messages, or messages while cur carries chunk) survive — the old
-        // implementation silently dropped them.
         const prevData = (existing.event.data as Record<string, unknown> | undefined) ?? {};
         const curData = (event.data as Record<string, unknown> | undefined) ?? {};
-        const merged: Record<string, unknown> = { ...prevData, ...curData };
-        const prevChunk = prevData.chunk as string | undefined;
-        const curChunk = curData.chunk as string | undefined;
-        if (prevChunk && curChunk) {
-          merged.chunk = prevChunk + curChunk;
-        } else if (prevChunk && !curChunk) {
-          merged.chunk = prevChunk;
+
+        // 跨"事件形状"不能简单 shallow-merge：
+        //   - 全量事件（带 messages）+ 增量事件（带 lastMessage，不带 messages）
+        //     合并后变成 { messages, incremental: true, lastMessage }。客户端
+        //     reducer 看到 incremental 就只读 lastMessage，把权威的 messages 丢掉，
+        //     表现是"刷新页面才出来的消失文字"。
+        //   - 反过来：增量在前，全量在后，cur 覆盖 prev 后 incremental 仍为 true
+        //     而 messages 来自 cur——这种顺序原本是安全的，但风险一致就一起处理。
+        // 形状不一致时 flush 上一条立即广播，新事件单独开窗口。这样客户端永远
+        // 不会在一条 WS 消息里同时看到 messages 和 lastMessage 两种语义。
+        const prevHasMessages = "messages" in prevData && prevData.messages !== undefined;
+        const prevHasLastMsg = "lastMessage" in prevData && prevData.lastMessage !== undefined;
+        const curHasMessages = "messages" in curData && curData.messages !== undefined;
+        const curHasLastMsg = "lastMessage" in curData && curData.lastMessage !== undefined;
+        const shapeMismatch =
+          (prevHasMessages && curHasLastMsg && !curHasMessages) ||
+          (prevHasLastMsg && curHasMessages && !curHasLastMsg);
+
+        if (shapeMismatch) {
+          clearTimeout(existing.timer);
+          this.outputDebounceCache.delete(event.sessionId);
+          this.broadcast(existing.event);
+          // Fall through to schedule cur on a fresh debounce window
+        } else {
+          clearTimeout(existing.timer);
+          // Merge prev + cur. Cur takes precedence for identically-named fields,
+          // but fields only present on prev (e.g. chunk while cur carries
+          // messages, or messages while cur carries chunk) survive — the old
+          // implementation silently dropped them.
+          const merged: Record<string, unknown> = { ...prevData, ...curData };
+          const prevChunk = prevData.chunk as string | undefined;
+          const curChunk = curData.chunk as string | undefined;
+          if (prevChunk && curChunk) {
+            merged.chunk = prevChunk + curChunk;
+          } else if (prevChunk && !curChunk) {
+            merged.chunk = prevChunk;
+          }
+          event = { ...event, data: merged };
         }
-        event = { ...event, data: merged };
       }
       const timer = setTimeout(() => {
         this.outputDebounceCache.delete(event.sessionId);
