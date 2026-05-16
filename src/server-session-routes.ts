@@ -5,7 +5,14 @@ import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
-import { getGitStatus, QuickCommitError, runQuickCommit, generateCommitMessageOnly } from "./git-quick-commit.js";
+import {
+  getGitStatus,
+  QuickCommitError,
+  runQuickCommit,
+  runTagHead,
+  runPush,
+  generateCommitMessageOnly,
+} from "./git-quick-commit.js";
 
 export function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -427,6 +434,63 @@ export function registerSessionRoutes(
         return;
       }
       res.status(400).json({ error: getErrorMessage(error, "生成 commit message 失败。") });
+    }
+  });
+
+  app.post("/api/sessions/:id/git/tag-head", express.json(), async (req, res) => {
+    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    if (!snapshot.cwd) {
+      res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
+      return;
+    }
+    const body = (req.body ?? {}) as { tag?: string; autoTag?: boolean; push?: boolean };
+    try {
+      const result = await runTagHead({
+        cwd: snapshot.cwd,
+        language: config.language ?? "",
+        tag: typeof body.tag === "string" ? body.tag : undefined,
+        autoTag: !!body.autoTag,
+        push: !!body.push,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof QuickCommitError) {
+        const status = error.code === "TAG_EXISTS" ? 409 : 400;
+        res.status(status).json({ error: error.message, errorCode: error.code });
+        return;
+      }
+      res.status(400).json({ error: getErrorMessage(error, "打 tag 失败。") });
+    }
+  });
+
+  app.post("/api/sessions/:id/git/push", express.json(), async (req, res) => {
+    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    if (!snapshot.cwd) {
+      res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
+      return;
+    }
+    const body = (req.body ?? {}) as { pushCommits?: boolean; pushTags?: boolean };
+    try {
+      const result = await runPush({
+        cwd: snapshot.cwd,
+        pushCommits: body.pushCommits !== false,
+        pushTags: !!body.pushTags,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof QuickCommitError) {
+        res.status(400).json({ error: error.message, errorCode: error.code });
+        return;
+      }
+      res.status(400).json({ error: getErrorMessage(error, "推送失败。") });
     }
   });
 

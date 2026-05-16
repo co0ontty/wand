@@ -189,6 +189,18 @@ export interface GitStatusResult {
   repoRoot?: string;
   /** Truthy when the repo has no commits yet (initial state). */
   initialCommit?: boolean;
+  /** Whether current branch has an upstream tracking branch. */
+  hasUpstream?: boolean;
+  /** Upstream branch identifier (e.g. `origin/main`). Only set when `hasUpstream` is true. */
+  upstream?: string;
+  /** Number of local commits not yet on upstream. Only meaningful when `hasUpstream` is true. */
+  ahead?: number;
+  /** Number of upstream commits not yet locally. Only meaningful when `hasUpstream` is true. */
+  behind?: number;
+  /** HEAD commit subject + short hash (handy for "tag the current commit" UX). */
+  lastCommit?: { hash: string; shortHash: string; subject: string };
+  /** Number of local tags that don't exist on the remote (best-effort, may be undefined if not reachable). */
+  unpushedTagCount?: number;
   error?: string;
 }
 
@@ -199,6 +211,21 @@ export interface QuickCommitResult {
   pushed?: boolean;
   /** commit 已成功但 push 失败时填入；前端用它显示"已提交但 push 失败"。 */
   pushError?: string;
+}
+
+export interface TagHeadResult {
+  ok: boolean;
+  tag: { name: string; commit: string };
+  pushed?: boolean;
+  pushError?: string;
+}
+
+export interface PushResult {
+  ok: boolean;
+  pushedCommits: boolean;
+  pushedTags: boolean;
+  /** Either operation failed — the other may still have succeeded. */
+  error?: string;
 }
 
 export interface CommandRequest {
