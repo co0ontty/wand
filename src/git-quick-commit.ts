@@ -22,6 +22,26 @@ interface GitCommandError extends Error {
   code?: string;
 }
 
+export type QuickCommitErrorCode =
+  | "CWD_MISSING"
+  | "NO_CWD"
+  | "NOT_A_GIT_REPO"
+  | "NO_COMMIT"
+  | "NOTHING_TO_COMMIT"
+  | "NOTHING_TO_PUSH"
+  | "EMPTY_MESSAGE"
+  | "EMPTY_TAG"
+  | "EMPTY_AI_MESSAGE"
+  | "INVALID_AI_TAG"
+  | "TAG_EXISTS"
+  | "GIT_ADD_FAILED"
+  | "GIT_DIFF_FAILED"
+  | "GIT_COMMIT_FAILED"
+  | "GIT_TAG_FAILED"
+  | "CLAUDE_CLI_MISSING"
+  | "CLAUDE_CLI_FAILED"
+  | "CLAUDE_TIMEOUT";
+
 function runGit(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS): string {
   return execFileSync("git", args, {
     cwd,
@@ -47,6 +67,38 @@ function getGitErrorMessage(error: unknown): string {
   if (e?.stderr && typeof e.stderr === "string") return e.stderr.trim() || e.message || "git 命令失败";
   if (e?.message) return e.message;
   return String(error);
+}
+
+/** Throws `QuickCommitError` if `cwd` isn't an existing path inside a git work tree. */
+function assertGitWorkTree(cwd: string): void {
+  if (!cwd || !existsSync(cwd)) {
+    throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
+  }
+  let isInside: string;
+  try {
+    isInside = runGit(["rev-parse", "--is-inside-work-tree"], cwd);
+  } catch (error) {
+    throw new QuickCommitError(getGitErrorMessage(error), "NOT_A_GIT_REPO");
+  }
+  if (isInside !== "true") {
+    throw new QuickCommitError("当前目录不在 git 仓库内。", "NOT_A_GIT_REPO");
+  }
+}
+
+/**
+ * Resolve the remote to push to. Prefers `branch.<name>.remote` config for the
+ * current branch, falls back to `origin`. Never throws.
+ */
+function resolvePushRemote(cwd: string): string {
+  try {
+    const branch = runGit(["branch", "--show-current"], cwd);
+    if (branch) {
+      return runGit(["config", "--get", `branch.${branch}.remote`], cwd) || "origin";
+    }
+  } catch {
+    // ignore — fall through to default
+  }
+  return "origin";
 }
 
 function unquotePath(raw: string): string {
@@ -157,19 +209,17 @@ export function getGitStatus(cwd: string): GitStatusResult {
   const allEntries = parsePorcelainV2(porcelain);
   const files = allEntries.slice(0, MAX_FILE_ENTRIES);
 
-  // Upstream / ahead / behind ──────────────────────────────────────────
-  let hasUpstream = false;
   let upstream: string | undefined;
   let ahead: number | undefined;
   let behind: number | undefined;
+  let lastCommit: GitStatusResult["lastCommit"];
   if (!initialCommit) {
     try {
       upstream = runGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd) || undefined;
-      hasUpstream = !!upstream;
     } catch {
-      hasUpstream = false;
+      upstream = undefined;
     }
-    if (hasUpstream) {
+    if (upstream) {
       try {
         const counts = runGit(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], cwd);
         const parts = counts.split(/\s+/).filter(Boolean);
@@ -180,14 +230,9 @@ export function getGitStatus(cwd: string): GitStatusResult {
           if (!Number.isNaN(b)) behind = b;
         }
       } catch {
-        // ignore — keep counts undefined
+        // ignore — counts stay undefined
       }
     }
-  }
-
-  // HEAD commit info ───────────────────────────────────────────────────
-  let lastCommit: GitStatusResult["lastCommit"];
-  if (!initialCommit) {
     try {
       const raw = runGit(["log", "-1", "--pretty=format:%H%x09%h%x09%s"], cwd);
       const parts = raw.split("\t");
@@ -199,35 +244,10 @@ export function getGitStatus(cwd: string): GitStatusResult {
     }
   }
 
-  // Unpushed tag count (best-effort; remote refs may not be fresh) ─────
-  let unpushedTagCount: number | undefined;
-  if (hasUpstream && upstream) {
-    const slashIdx = upstream.indexOf("/");
-    const remoteName = slashIdx > 0 ? upstream.slice(0, slashIdx) : "origin";
-    try {
-      const localTagsRaw = runGit(["for-each-ref", "--format=%(refname:short)", "refs/tags"], cwd);
-      const localTags = localTagsRaw.split(/\r?\n/).filter((t) => t.trim().length > 0);
-      if (localTags.length === 0) {
-        unpushedTagCount = 0;
-      } else {
-        const remoteTagsRaw = runGit(["ls-remote", "--tags", remoteName], cwd, 3000);
-        const remoteTags = new Set<string>();
-        for (const line of remoteTagsRaw.split(/\r?\n/)) {
-          // format: <sha>\trefs/tags/<name>{^}? — strip annotated suffix
-          const tabIdx = line.indexOf("\t");
-          if (tabIdx === -1) continue;
-          const ref = line.slice(tabIdx + 1).trim();
-          if (!ref.startsWith("refs/tags/")) continue;
-          let name = ref.slice("refs/tags/".length);
-          if (name.endsWith("^{}")) name = name.slice(0, -3);
-          if (name) remoteTags.add(name);
-        }
-        unpushedTagCount = localTags.filter((t) => !remoteTags.has(t)).length;
-      }
-    } catch {
-      // remote unreachable — leave undefined so UI can hide the chip
-    }
-  }
+  // NOTE: we intentionally do NOT probe the remote for unpushed tags here.
+  // `ls-remote` is a synchronous network call that can block the event loop
+  // for seconds. The "unpushed tag" UI chip is best-effort and a separate
+  // async endpoint should compute it on demand if reintroduced.
 
   return {
     isGit: true,
@@ -237,12 +257,10 @@ export function getGitStatus(cwd: string): GitStatusResult {
     head,
     repoRoot,
     initialCommit,
-    hasUpstream,
     upstream,
     ahead,
     behind,
     lastCommit,
-    unpushedTagCount,
   };
 }
 
@@ -258,7 +276,7 @@ interface QuickCommitOptions {
 }
 
 export class QuickCommitError extends Error {
-  constructor(message: string, public readonly code: string) {
+  constructor(message: string, public readonly code: QuickCommitErrorCode) {
     super(message);
     this.name = "QuickCommitError";
   }
@@ -489,29 +507,34 @@ interface PushOutcome {
   error?: string;
 }
 
+interface DoPushOptions {
+  cwd: string;
+  pushCommits: boolean;
+  /**
+   * Tag push mode:
+   *   - false / undefined: don't push tags
+   *   - true: push all local tags (`git push <remote> --tags`)
+   *   - string[]: push only these specific tag names (`git push <remote> refs/tags/<name>` per ref)
+   */
+  pushTags?: boolean | string[];
+}
+
 /**
  * Push current branch (with upstream auto-setup) and/or tags.
  * Errors are returned via `error` so callers can present partial-success states.
  */
-function doPush(cwd: string, pushCommits: boolean, pushTags: boolean): PushOutcome {
+function doPush(opts: DoPushOptions): PushOutcome {
+  const { cwd, pushCommits, pushTags } = opts;
   let pushedCommits = false;
   let pushedTags = false;
   let hasUpstream = false;
-  let pushRemote = "origin";
   try {
     runGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
     hasUpstream = true;
-    try {
-      const currentBranch = runGit(["branch", "--show-current"], cwd);
-      if (currentBranch) {
-        pushRemote = runGit(["config", "--get", `branch.${currentBranch}.remote`], cwd) || "origin";
-      }
-    } catch {
-      pushRemote = "origin";
-    }
   } catch {
     hasUpstream = false;
   }
+  const pushRemote = resolvePushRemote(cwd);
 
   try {
     if (pushCommits) {
@@ -523,7 +546,13 @@ function doPush(cwd: string, pushCommits: boolean, pushTags: boolean): PushOutco
       pushedCommits = true;
     }
     if (pushTags) {
-      runGit(["push", pushRemote, "--tags"], cwd, GIT_PUSH_TIMEOUT_MS);
+      if (Array.isArray(pushTags)) {
+        for (const name of pushTags) {
+          runGit(["push", pushRemote, `refs/tags/${name}`], cwd, GIT_PUSH_TIMEOUT_MS);
+        }
+      } else {
+        runGit(["push", pushRemote, "--tags"], cwd, GIT_PUSH_TIMEOUT_MS);
+      }
       pushedTags = true;
     }
     return { pushedCommits, pushedTags };
@@ -545,21 +574,8 @@ interface TagHeadOptions {
 export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
   const { cwd, language, tag, autoTag, push } = opts;
 
-  if (!cwd || !existsSync(cwd)) {
-    throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
-  }
+  assertGitWorkTree(cwd);
 
-  let isInside: string;
-  try {
-    isInside = runGit(["rev-parse", "--is-inside-work-tree"], cwd);
-  } catch (error) {
-    throw new QuickCommitError(getGitErrorMessage(error), "NOT_A_GIT_REPO");
-  }
-  if (isInside !== "true") {
-    throw new QuickCommitError("当前目录不在 git 仓库内。", "NOT_A_GIT_REPO");
-  }
-
-  // Need an existing commit to tag
   let headHash: string;
   try {
     headHash = runGit(["rev-parse", "HEAD"], cwd);
@@ -569,7 +585,6 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
 
   let tagName = (tag || "").trim();
   if (!tagName && autoTag) {
-    // Reuse the post-commit generator — it inspects `git show HEAD` directly.
     let headSubject = "";
     try {
       headSubject = runGit(["log", "-1", "--pretty=format:%s"], cwd);
@@ -600,26 +615,9 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
   let pushed = false;
   let pushError: string | undefined;
   if (push) {
-    let pushRemote = "origin";
-    try {
-      const currentBranch = runGit(["branch", "--show-current"], cwd);
-      if (currentBranch) {
-        try {
-          pushRemote = runGit(["config", "--get", `branch.${currentBranch}.remote`], cwd) || "origin";
-        } catch {
-          pushRemote = "origin";
-        }
-      }
-    } catch {
-      pushRemote = "origin";
-    }
-    try {
-      // Push just this one tag — cheaper and more targeted than `--tags`.
-      runGit(["push", pushRemote, `refs/tags/${tagName}`], cwd, GIT_PUSH_TIMEOUT_MS);
-      pushed = true;
-    } catch (error) {
-      pushError = getGitErrorMessage(error);
-    }
+    const outcome = doPush({ cwd, pushCommits: false, pushTags: [tagName] });
+    pushed = outcome.pushedTags;
+    pushError = outcome.error;
   }
 
   return {
@@ -638,24 +636,12 @@ interface PushOptions {
 
 export async function runPush(opts: PushOptions): Promise<PushResult> {
   const { cwd, pushCommits = true, pushTags = false } = opts;
-  if (!cwd || !existsSync(cwd)) {
-    throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
-  }
+  assertGitWorkTree(cwd);
   if (!pushCommits && !pushTags) {
     throw new QuickCommitError("没有要推送的内容。", "NOTHING_TO_PUSH");
   }
 
-  let isInside: string;
-  try {
-    isInside = runGit(["rev-parse", "--is-inside-work-tree"], cwd);
-  } catch (error) {
-    throw new QuickCommitError(getGitErrorMessage(error), "NOT_A_GIT_REPO");
-  }
-  if (isInside !== "true") {
-    throw new QuickCommitError("当前目录不在 git 仓库内。", "NOT_A_GIT_REPO");
-  }
-
-  const outcome = doPush(cwd, pushCommits, pushTags);
+  const outcome = doPush({ cwd, pushCommits, pushTags });
   return {
     ok: !outcome.error,
     pushedCommits: outcome.pushedCommits,
@@ -667,28 +653,14 @@ export async function runPush(opts: PushOptions): Promise<PushResult> {
 export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCommitResult> {
   const { cwd, language, autoMessage, customMessage, tag, autoTag, push } = opts;
 
-  if (!cwd || !existsSync(cwd)) {
-    throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
-  }
+  assertGitWorkTree(cwd);
 
-  let isInside: string;
-  try {
-    isInside = runGit(["rev-parse", "--is-inside-work-tree"], cwd);
-  } catch (error) {
-    throw new QuickCommitError(getGitErrorMessage(error), "NOT_A_GIT_REPO");
-  }
-  if (isInside !== "true") {
-    throw new QuickCommitError("当前目录不在 git 仓库内。", "NOT_A_GIT_REPO");
-  }
-
-  // Step 1: stage all
   try {
     runGit(["add", "-A"], cwd, 5000);
   } catch (error) {
     throw new QuickCommitError(`git add 失败：${getGitErrorMessage(error)}`, "GIT_ADD_FAILED");
   }
 
-  // Step 2: check if anything to commit
   let stagedFiles: string;
   try {
     stagedFiles = runGitAllowEmpty(["diff", "--cached", "--name-only"], cwd).trim();
@@ -699,7 +671,6 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     throw new QuickCommitError("没有任何改动可以提交。", "NOTHING_TO_COMMIT");
   }
 
-  // Step 3: get commit message
   let message: string;
   if (autoMessage) {
     message = await generateCommitMessage(cwd, language);
@@ -710,7 +681,6 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     }
   }
 
-  // Step 4: commit
   try {
     runGit(["commit", "-m", message], cwd, 10_000);
   } catch (error) {
@@ -724,10 +694,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     commitHash = "";
   }
 
-  // Step 5: tag
-  // - explicit `tag` wins
-  // - if `tag` is empty and `autoTag` is on, ask Claude to generate one
-  // - otherwise no tag
+  // Tag: explicit `tag` wins; if empty + autoTag, ask Claude; otherwise skip.
   let tagName = (tag || "").trim();
   if (!tagName && autoTag) {
     tagName = await generateTagAfterCommit(cwd, language, message);
@@ -740,11 +707,15 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     }
   }
 
-  // Step 6: push
   let pushed = false;
   let pushError: string | undefined;
   if (push) {
-    const outcome = doPush(cwd, true, !!tagName);
+    const outcome = doPush({
+      cwd,
+      pushCommits: true,
+      // Push only the freshly-created tag — avoids surprising users by pushing stale local tags.
+      pushTags: tagName ? [tagName] : false,
+    });
     pushed = outcome.pushedCommits && (tagName ? outcome.pushedTags : true);
     pushError = outcome.error;
   }

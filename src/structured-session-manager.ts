@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { spawn, ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { query as sdkQuery, type Options as SdkOptions, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { prepareSessionWorktree } from "./git-worktree.js";
@@ -172,29 +174,106 @@ type WandPermissionMode = "default" | "acceptEdits" | "bypassPermissions";
 
 interface PermissionPolicy {
   permissionMode: WandPermissionMode;
-  /** Root + (bypass|accept) 才有值；其它情况 undefined。 */
+  /** Root + (bypass|accept)、或非 bypass 模式下需要放行 MCP 工具时才有值。 */
   allowedTools: string[] | undefined;
+}
+
+/**
+ * 收集当前会话可见的 MCP server 名字。
+ * claude -p / SDK runner 没有交互式权限弹窗，碰到 mcp__* 工具会直接 fail with
+ * "haven't granted"。用户已经在 claude 这边配过的 MCP server 视为可信，
+ * 在 --allowedTools 里加 `mcp__<server>` 放行整台 server 的所有工具。
+ *
+ * 来源（取并集）：
+ *   - ~/.claude.json 顶层 mcpServers
+ *   - ~/.claude.json projects[<cwd>].mcpServers（仅当前 cwd 精确匹配）
+ *   - <cwd>/.mcp.json mcpServers
+ *
+ * 结果按 (cwd, 各文件 mtime) 缓存，避免每次 spawn 都重读。
+ */
+const mcpServerCache = new Map<string, { mtimeFingerprint: string; names: string[] }>();
+
+function readJsonSafe(filePath: string): Record<string, unknown> | null {
+  try {
+    const raw = readFileSync(filePath, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+  } catch { /* missing/invalid — return null */ }
+  return null;
+}
+
+function mtimeOf(filePath: string): number {
+  try { return statSync(filePath).mtimeMs; } catch { return 0; }
+}
+
+function extractMcpServerKeys(node: unknown): string[] {
+  if (!node || typeof node !== "object") return [];
+  const mcpServers = (node as Record<string, unknown>).mcpServers;
+  if (!mcpServers || typeof mcpServers !== "object") return [];
+  return Object.keys(mcpServers as Record<string, unknown>);
+}
+
+function collectMcpServerNames(cwd: string): string[] {
+  const userConfigPath = path.join(homedir(), ".claude.json");
+  const projectMcpPath = path.join(cwd, ".mcp.json");
+  const fingerprint = `${mtimeOf(userConfigPath)}:${mtimeOf(projectMcpPath)}`;
+  const cached = mcpServerCache.get(cwd);
+  if (cached && cached.mtimeFingerprint === fingerprint) return cached.names;
+
+  const names = new Set<string>();
+  const userConfig = readJsonSafe(userConfigPath);
+  if (userConfig) {
+    for (const k of extractMcpServerKeys(userConfig)) names.add(k);
+    const projects = userConfig.projects;
+    if (projects && typeof projects === "object") {
+      const entry = (projects as Record<string, unknown>)[cwd];
+      for (const k of extractMcpServerKeys(entry)) names.add(k);
+    }
+  }
+  const projectMcp = readJsonSafe(projectMcpPath);
+  for (const k of extractMcpServerKeys(projectMcp)) names.add(k);
+
+  const result = Array.from(names);
+  mcpServerCache.set(cwd, { mtimeFingerprint: fingerprint, names: result });
+  return result;
+}
+
+function mcpAllowEntries(cwd: string): string[] {
+  // `mcp__<server>` 形式放行该 server 的所有工具，等价于 `mcp__<server>__*`。
+  return collectMcpServerNames(cwd).map((name) => `mcp__${name}`);
 }
 
 /**
  * 把 (执行模式, 自动批准开关) 映射成 Claude CLI / SDK 的权限决策。
  * CLI runner 把它转成 --permission-mode / --allowedTools flag，
  * SDK runner 直接塞进 Options。两边的决策规则保持一字不差。
+ *
+ * cwd 用来枚举该会话能看到的 MCP server，把 `mcp__<server>` 加进 allowedTools；
+ * bypassPermissions 模式下整个白名单都没意义，不附加。
  */
-function derivePermissionPolicy(mode: ExecutionMode, autoApprove: boolean): PermissionPolicy {
+function derivePermissionPolicy(
+  mode: ExecutionMode,
+  autoApprove: boolean,
+  cwd: string,
+): PermissionPolicy {
   const shouldBypass = autoApprove || mode === "full-access" || mode === "managed";
   const shouldAcceptEdits = mode === "auto-edit";
+  const mcpAllow = shouldBypass ? [] : mcpAllowEntries(cwd);
+  const withMcp = (base: string[] | undefined): string[] | undefined => {
+    if (!mcpAllow.length) return base;
+    return base ? [...base, ...mcpAllow] : [...mcpAllow];
+  };
 
   if (!isRunningAsRoot()) {
     if (shouldBypass) return { permissionMode: "bypassPermissions", allowedTools: undefined };
-    if (shouldAcceptEdits) return { permissionMode: "acceptEdits", allowedTools: undefined };
-    return { permissionMode: "default", allowedTools: undefined };
+    if (shouldAcceptEdits) return { permissionMode: "acceptEdits", allowedTools: withMcp(undefined) };
+    return { permissionMode: "default", allowedTools: withMcp(undefined) };
   }
 
   if (shouldBypass || shouldAcceptEdits) {
-    return { permissionMode: "acceptEdits", allowedTools: ROOT_FALLBACK_ALLOWED_TOOLS };
+    return { permissionMode: "acceptEdits", allowedTools: withMcp(ROOT_FALLBACK_ALLOWED_TOOLS) };
   }
-  return { permissionMode: "default", allowedTools: undefined };
+  return { permissionMode: "default", allowedTools: withMcp(undefined) };
 }
 
 /**
@@ -1181,7 +1260,7 @@ export class StructuredSessionManager {
       // 紧跟其后的所有非 flag 形 token 都会被吞进工具列表，因此后面任何位置参数
       // 都得是 -- 开头的 flag——下面追加 --append-system-prompt / --model / --resume
       // 都满足这个条件。
-      const permPolicy = derivePermissionPolicy(session.mode, session.autoApprovePermissions ?? false);
+      const permPolicy = derivePermissionPolicy(session.mode, session.autoApprovePermissions ?? false, session.cwd);
       if (permPolicy.permissionMode !== "default") {
         args.push("--permission-mode", permPolicy.permissionMode);
       }
@@ -1691,7 +1770,7 @@ export class StructuredSessionManager {
     let killedForAskUserQuestion = false;
 
     // 权限策略 + 系统提示词都通过共享 helper 派生，与 CLI runner 一字不差。
-    const permPolicy = derivePermissionPolicy(session.mode, session.autoApprovePermissions ?? false);
+    const permPolicy = derivePermissionPolicy(session.mode, session.autoApprovePermissions ?? false, session.cwd);
     const systemPromptParts = buildAppendSystemPromptParts(this.config.language, session.mode);
 
     const sdkClaudeBinary = resolveSdkClaudeBinary();

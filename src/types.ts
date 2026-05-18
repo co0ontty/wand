@@ -189,18 +189,14 @@ export interface GitStatusResult {
   repoRoot?: string;
   /** Truthy when the repo has no commits yet (initial state). */
   initialCommit?: boolean;
-  /** Whether current branch has an upstream tracking branch. */
-  hasUpstream?: boolean;
-  /** Upstream branch identifier (e.g. `origin/main`). Only set when `hasUpstream` is true. */
+  /** Upstream tracking branch (e.g. `origin/main`). Absent when none is configured. */
   upstream?: string;
-  /** Number of local commits not yet on upstream. Only meaningful when `hasUpstream` is true. */
+  /** Number of local commits not yet on upstream. Only meaningful when `upstream` is set. */
   ahead?: number;
-  /** Number of upstream commits not yet locally. Only meaningful when `hasUpstream` is true. */
+  /** Number of upstream commits not yet locally. Only meaningful when `upstream` is set. */
   behind?: number;
   /** HEAD commit subject + short hash (handy for "tag the current commit" UX). */
   lastCommit?: { hash: string; shortHash: string; subject: string };
-  /** Number of local tags that don't exist on the remote (best-effort, may be undefined if not reachable). */
-  unpushedTagCount?: number;
   error?: string;
 }
 

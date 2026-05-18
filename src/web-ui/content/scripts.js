@@ -199,15 +199,14 @@
         // Whether the commit is also tagged is controlled by `makeTag` independently —
         // that keeps "commit + tag, push later" possible.
         quickCommitForm: { customMessage: "", makeTag: false, tag: "", primaryAction: "commit" },
-        quickCommitActionMenuOpen: false,
-        // Secondary "tag the existing HEAD" panel (inline drawer).
-        quickCommitTagHeadOpen: false,
+        // Which inline panel/dropdown is open. Only one can be open at a time, so a
+        // single field beats juggling three sibling booleans with mutual-exclusion code.
+        // Values: null | "action" | "push" | "tag-head".
+        quickCommitOpenMenu: null,
         quickCommitTagHeadForm: { tag: "", push: false },
         quickCommitTagHeadSubmitting: false,
         quickCommitTagHeadGenerating: false,
         quickCommitTagHeadError: "",
-        // Secondary "push only" controls.
-        quickCommitPushMenuOpen: false,
         quickCommitPushing: false,
         quickCommitPushError: "",
         // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
@@ -1816,13 +1815,11 @@
           tag: "",
           primaryAction: readSavedPrimaryAction(),
         };
-        state.quickCommitActionMenuOpen = false;
-        state.quickCommitTagHeadOpen = false;
+        state.quickCommitOpenMenu = null;
         state.quickCommitTagHeadForm = { tag: "", push: false };
         state.quickCommitTagHeadSubmitting = false;
         state.quickCommitTagHeadGenerating = false;
         state.quickCommitTagHeadError = "";
-        state.quickCommitPushMenuOpen = false;
         state.quickCommitPushing = false;
         state.quickCommitPushError = "";
         closeWorktreeMergeModal();
@@ -1839,10 +1836,8 @@
         quickCommitEscHandler = function(e) {
           if (e.key === "Escape" && state.quickCommitOpen && !state.quickCommitSubmitting && !state.quickCommitTagHeadSubmitting && !state.quickCommitPushing) {
             // First Esc closes any open dropdown; second closes the modal.
-            if (state.quickCommitActionMenuOpen || state.quickCommitPushMenuOpen || state.quickCommitTagHeadOpen) {
-              state.quickCommitActionMenuOpen = false;
-              state.quickCommitPushMenuOpen = false;
-              state.quickCommitTagHeadOpen = false;
+            if (state.quickCommitOpenMenu) {
+              state.quickCommitOpenMenu = null;
               rerenderQuickCommitModal();
               return;
             }
@@ -1853,18 +1848,16 @@
         if (quickCommitDocClickHandler) document.removeEventListener("click", quickCommitDocClickHandler, true);
         quickCommitDocClickHandler = function(e) {
           if (!state.quickCommitOpen) return;
+          // tag-head is an inline drawer, not a dropdown — clicking outside shouldn't close it.
+          if (state.quickCommitOpenMenu !== "action" && state.quickCommitOpenMenu !== "push") return;
           var modalEl = document.getElementById("quick-commit-modal");
           if (!modalEl) return;
-          var anyMenuOpen = state.quickCommitActionMenuOpen || state.quickCommitPushMenuOpen;
-          if (!anyMenuOpen) return;
-          // Click on the toggle itself? leave it to the toggle handler.
           var t = e.target;
           while (t && t !== modalEl) {
             if (t.dataset && (t.dataset.qcDropdownToggle || t.dataset.qcDropdownMenu)) return;
             t = t.parentNode;
           }
-          state.quickCommitActionMenuOpen = false;
-          state.quickCommitPushMenuOpen = false;
+          state.quickCommitOpenMenu = null;
           rerenderQuickCommitModal();
         };
         document.addEventListener("click", quickCommitDocClickHandler, true);
@@ -1878,9 +1871,7 @@
         state.quickCommitOpen = false;
         state.quickCommitSubmitting = false;
         state.quickCommitError = "";
-        state.quickCommitActionMenuOpen = false;
-        state.quickCommitPushMenuOpen = false;
-        state.quickCommitTagHeadOpen = false;
+        state.quickCommitOpenMenu = null;
         var modal = document.getElementById("quick-commit-modal");
         if (modal) modal.classList.add("hidden");
         if (focusTrapHandler) {
@@ -1918,7 +1909,6 @@
         var cancelBtn = document.getElementById("quick-commit-cancel-btn");
         if (cancelBtn) cancelBtn.addEventListener("click", closeQuickCommitModal);
 
-        // ── Section 1: commit form ──
         var submitBtn = document.getElementById("quick-commit-submit-btn");
         if (submitBtn) submitBtn.addEventListener("click", submitQuickCommit);
         var aiBtn = document.getElementById("quick-commit-ai-btn");
@@ -1938,12 +1928,10 @@
           state.quickCommitForm.tag = tagInput.value;
         });
 
-        // ── Primary action split-button (caret + dropdown) ──
         var actionCaret = document.getElementById("quick-commit-action-caret");
         if (actionCaret) actionCaret.addEventListener("click", function(e) {
           e.stopPropagation();
-          state.quickCommitActionMenuOpen = !state.quickCommitActionMenuOpen;
-          state.quickCommitPushMenuOpen = false;
+          state.quickCommitOpenMenu = state.quickCommitOpenMenu === "action" ? null : "action";
           rerenderQuickCommitModal();
         });
         var actionMenu = document.getElementById("quick-commit-action-menu");
@@ -1957,29 +1945,27 @@
                   state.quickCommitForm.primaryAction = value;
                   savePrimaryAction(value);
                 }
-                state.quickCommitActionMenuOpen = false;
+                state.quickCommitOpenMenu = null;
                 rerenderQuickCommitModal();
               });
             })(actionItems[i]);
           }
         }
 
-        // ── Section 2: Tag HEAD inline panel ──
         var tagHeadToggle = document.getElementById("quick-commit-tag-head-toggle");
         if (tagHeadToggle) tagHeadToggle.addEventListener("click", function() {
-          state.quickCommitTagHeadOpen = !state.quickCommitTagHeadOpen;
-          if (state.quickCommitTagHeadOpen) {
-            state.quickCommitTagHeadError = "";
-          }
+          var willOpen = state.quickCommitOpenMenu !== "tag-head";
+          state.quickCommitOpenMenu = willOpen ? "tag-head" : null;
+          if (willOpen) state.quickCommitTagHeadError = "";
           rerenderQuickCommitModal();
-          if (state.quickCommitTagHeadOpen) {
+          if (willOpen) {
             var inp = document.getElementById("quick-commit-tag-head-input");
             if (inp) inp.focus();
           }
         });
         var tagHeadCancel = document.getElementById("quick-commit-tag-head-cancel");
         if (tagHeadCancel) tagHeadCancel.addEventListener("click", function() {
-          state.quickCommitTagHeadOpen = false;
+          if (state.quickCommitOpenMenu === "tag-head") state.quickCommitOpenMenu = null;
           state.quickCommitTagHeadError = "";
           rerenderQuickCommitModal();
         });
@@ -2006,7 +1992,6 @@
           submitTagHead(false);
         });
 
-        // ── Section 2: Push split-button ──
         var pushBtn = document.getElementById("quick-commit-push-btn");
         if (pushBtn) pushBtn.addEventListener("click", function() {
           submitPushOnly({ pushCommits: true, pushTags: false });
@@ -2014,8 +1999,7 @@
         var pushCaret = document.getElementById("quick-commit-push-caret");
         if (pushCaret) pushCaret.addEventListener("click", function(e) {
           e.stopPropagation();
-          state.quickCommitPushMenuOpen = !state.quickCommitPushMenuOpen;
-          state.quickCommitActionMenuOpen = false;
+          state.quickCommitOpenMenu = state.quickCommitOpenMenu === "push" ? null : "push";
           rerenderQuickCommitModal();
         });
         var pushMenu = document.getElementById("quick-commit-push-menu");
@@ -2025,7 +2009,7 @@
             (function(btn) {
               btn.addEventListener("click", function() {
                 var value = btn.getAttribute("data-qc-push");
-                state.quickCommitPushMenuOpen = false;
+                state.quickCommitOpenMenu = null;
                 if (value === "commits") submitPushOnly({ pushCommits: true, pushTags: false });
                 else if (value === "tags") submitPushOnly({ pushCommits: false, pushTags: true });
                 else if (value === "both") submitPushOnly({ pushCommits: true, pushTags: true });
@@ -2208,7 +2192,7 @@
             } else {
               if (typeof showToast === "function") showToast(base + (pushed ? "，已 push" : ""), "success");
             }
-            state.quickCommitTagHeadOpen = false;
+            if (state.quickCommitOpenMenu === "tag-head") state.quickCommitOpenMenu = null;
             state.quickCommitTagHeadForm = { tag: "", push: false };
             if (state.selectedId) loadGitStatus(state.selectedId, { force: true }).then(function() {
               if (state.quickCommitOpen) rerenderQuickCommitModal();
@@ -2223,7 +2207,6 @@
           });
       }
 
-      // Push without committing.
       function submitPushOnly(opts) {
         if (!state.selectedId || state.quickCommitPushing) return;
         var pushCommits = !!(opts && opts.pushCommits);
@@ -2267,7 +2250,6 @@
           });
       }
 
-      // Build the file list portion of the modal.
       function renderQuickCommitFileRows(files) {
         var rows = files.map(function(item) {
           var status = (item.status || "  ").substring(0, 2);
@@ -2293,15 +2275,19 @@
         return rows || '<div class="qc-empty">没有可提交的改动。</div>';
       }
 
-      // Primary action button label / icon.
+      function isQuickCommitOpInFlight() {
+        return state.quickCommitSubmitting || state.quickCommitTagHeadSubmitting || state.quickCommitPushing;
+      }
+
       function renderQuickCommitPrimary(hasChanges) {
         var f = state.quickCommitForm;
         var label;
         if (state.quickCommitSubmitting) label = "提交中…";
         else if (f.primaryAction === "commit-push") label = "提交并 push";
         else label = "仅提交";
-        var disabled = !hasChanges || state.quickCommitSubmitting || state.quickCommitTagHeadSubmitting || state.quickCommitPushing;
-        var caretActive = state.quickCommitActionMenuOpen ? " is-active" : "";
+        var disabled = !hasChanges || isQuickCommitOpInFlight();
+        var menuOpen = state.quickCommitOpenMenu === "action";
+        var caretActive = menuOpen ? " is-active" : "";
         var menuItems = [
           { value: "commit", label: "仅提交", desc: "只 commit，不 push" },
           { value: "commit-push", label: "提交并 push", desc: "commit 后立即 push 到远端" }
@@ -2317,36 +2303,32 @@
           '<button id="quick-commit-submit-btn" class="btn btn-primary qc-split-main" type="button"' + (disabled ? ' disabled' : '') + '>' +
             escapeHtml(label) +
           '</button>' +
-          '<button id="quick-commit-action-caret" class="btn btn-primary qc-split-caret' + caretActive + '" type="button" data-qc-dropdown-toggle="action"' + (disabled ? ' disabled' : '') + ' aria-haspopup="menu" aria-expanded="' + (state.quickCommitActionMenuOpen ? 'true' : 'false') + '" aria-label="更多提交方式">' +
+          '<button id="quick-commit-action-caret" class="btn btn-primary qc-split-caret' + caretActive + '" type="button" data-qc-dropdown-toggle="action"' + (disabled ? ' disabled' : '') + ' aria-haspopup="menu" aria-expanded="' + (menuOpen ? 'true' : 'false') + '" aria-label="更多提交方式">' +
             '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
           '</button>' +
-          (state.quickCommitActionMenuOpen ?
+          (menuOpen ?
             '<div id="quick-commit-action-menu" class="qc-dropdown-menu" data-qc-dropdown-menu="action" role="menu">' + menuHtml + '</div>' : '') +
           '</div>';
       }
 
-      // Status chips (ahead/behind/unpushed tags) under the HEAD card.
       function renderQuickCommitStatusChips(s) {
         var chips = [];
+        var hasUpstream = !!s.upstream;
         if (typeof s.ahead === "number" && s.ahead > 0) {
           chips.push('<span class="qc-chip qc-chip--ahead" title="本地领先 ' + s.ahead + ' 个 commit">↑ ' + s.ahead + ' 待推送</span>');
         }
         if (typeof s.behind === "number" && s.behind > 0) {
           chips.push('<span class="qc-chip qc-chip--behind" title="远端领先 ' + s.behind + ' 个 commit">↓ ' + s.behind + ' 待拉取</span>');
         }
-        if (typeof s.unpushedTagCount === "number" && s.unpushedTagCount > 0) {
-          chips.push('<span class="qc-chip qc-chip--tag" title="' + s.unpushedTagCount + ' 个本地 tag 未推送">🏷 ' + s.unpushedTagCount + ' 待推送</span>');
-        }
-        if (s.hasUpstream === false) {
+        if (!hasUpstream) {
           chips.push('<span class="qc-chip qc-chip--warn" title="当前分支没有 upstream，将首次推送时自动设置">无 upstream</span>');
-        }
-        if (!chips.length && s.hasUpstream !== false) {
+        } else if (!chips.length) {
           chips.push('<span class="qc-chip qc-chip--clean">与远端同步</span>');
         }
         return '<div class="qc-status-chips">' + chips.join("") + '</div>';
       }
 
-      // Inline "tag HEAD" drawer rendering.
+      // Inline drawer used by the "为 HEAD 打 tag" toggle.
       function renderQuickCommitTagHeadPanel() {
         var thf = state.quickCommitTagHeadForm || { tag: "", push: false };
         var submitting = state.quickCommitTagHeadSubmitting;
@@ -2368,22 +2350,23 @@
         '</div>';
       }
 
-      // Push split-button on the secondary row.
       function renderQuickCommitPushButton(s) {
         var ahead = typeof s.ahead === "number" ? s.ahead : 0;
-        var unpushedTags = typeof s.unpushedTagCount === "number" ? s.unpushedTagCount : 0;
-        var canPushCommits = ahead > 0 || s.hasUpstream === false; // first-push lets you set upstream
-        var canPushTags = unpushedTags > 0;
-        // Allow pushing commits even without ahead info (e.g. ls-remote unreachable) — backend will report.
-        if (typeof s.ahead !== "number" && s.hasUpstream !== false) canPushCommits = true;
-        if (typeof s.unpushedTagCount !== "number") canPushTags = true; // unknown — let user try
-        var disabled = state.quickCommitPushing || state.quickCommitSubmitting || state.quickCommitTagHeadSubmitting || (!canPushCommits && !canPushTags);
+        var hasUpstream = !!s.upstream;
+        // Allow pushing commits if we're ahead, if upstream is missing (first push will set it up),
+        // or if ahead is simply unknown — backend will surface real errors.
+        var canPushCommits = ahead > 0 || !hasUpstream || typeof s.ahead !== "number";
+        // Tag count isn't computed locally (would require a network probe). Let the user try.
+        var canPushTags = true;
+        var disabled = isQuickCommitOpInFlight() || (!canPushCommits && !canPushTags);
         var mainLabel = state.quickCommitPushing ? "推送中…" : "推送";
-        var caretActive = state.quickCommitPushMenuOpen ? " is-active" : "";
-        var items = [];
-        items.push({ value: "commits", label: "推送 commits", desc: ahead ? "推送 " + ahead + " 个 commit" : "推送当前分支", disabled: !canPushCommits });
-        items.push({ value: "tags", label: "推送 tags", desc: unpushedTags ? "推送 " + unpushedTags + " 个本地 tag" : "推送所有本地 tag", disabled: !canPushTags });
-        items.push({ value: "both", label: "推送 commits 和 tags", desc: "二合一", disabled: !(canPushCommits || canPushTags) });
+        var menuOpen = state.quickCommitOpenMenu === "push";
+        var caretActive = menuOpen ? " is-active" : "";
+        var items = [
+          { value: "commits", label: "推送 commits", desc: ahead ? "推送 " + ahead + " 个 commit" : "推送当前分支", disabled: !canPushCommits },
+          { value: "tags", label: "推送 tags", desc: "推送所有本地 tag", disabled: !canPushTags },
+          { value: "both", label: "推送 commits 和 tags", desc: "二合一", disabled: !(canPushCommits || canPushTags) }
+        ];
         var menuHtml = items.map(function(it) {
           var dis = it.disabled ? " is-disabled" : "";
           return '<button type="button" class="qc-dropdown-item' + dis + '" data-qc-push="' + it.value + '"' + (it.disabled ? ' disabled' : '') + '>' +
@@ -2395,10 +2378,10 @@
           '<button id="quick-commit-push-btn" class="btn btn-secondary qc-split-main" type="button"' + (disabled ? ' disabled' : '') + '>' +
             escapeHtml(mainLabel) +
           '</button>' +
-          '<button id="quick-commit-push-caret" class="btn btn-secondary qc-split-caret' + caretActive + '" type="button" data-qc-dropdown-toggle="push"' + (disabled ? ' disabled' : '') + ' aria-haspopup="menu" aria-expanded="' + (state.quickCommitPushMenuOpen ? 'true' : 'false') + '" aria-label="更多推送方式">' +
+          '<button id="quick-commit-push-caret" class="btn btn-secondary qc-split-caret' + caretActive + '" type="button" data-qc-dropdown-toggle="push"' + (disabled ? ' disabled' : '') + ' aria-haspopup="menu" aria-expanded="' + (menuOpen ? 'true' : 'false') + '" aria-label="更多推送方式">' +
             '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
           '</button>' +
-          (state.quickCommitPushMenuOpen ?
+          (menuOpen ?
             '<div id="quick-commit-push-menu" class="qc-dropdown-menu qc-dropdown-menu--right" data-qc-dropdown-menu="push" role="menu">' + menuHtml + '</div>' : '') +
           '</div>';
       }
@@ -2467,11 +2450,11 @@
               '<code class="qc-head-text">' + escapeHtml(headLine) + '</code>' +
             '</div>' +
             renderQuickCommitStatusChips(s) +
-            (state.quickCommitTagHeadOpen ? renderQuickCommitTagHeadPanel() : '') +
+            (state.quickCommitOpenMenu === "tag-head" ? renderQuickCommitTagHeadPanel() : '') +
             '<div class="qc-section-actions qc-section-actions--secondary">' +
               '<button id="quick-commit-tag-head-toggle" class="btn btn-ghost btn-sm" type="button"' + (state.quickCommitPushing ? ' disabled' : '') + '>' +
                 '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="vertical-align:-2px;margin-right:4px;"><path d="M2 2h6.5l5 5-5.5 5.5L2 7.5V2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="5" cy="5" r="1" fill="currentColor"/></svg>' +
-                (state.quickCommitTagHeadOpen ? '收起' : '为 HEAD 打 tag') +
+                (state.quickCommitOpenMenu === "tag-head" ? '收起' : '为 HEAD 打 tag') +
               '</button>' +
               renderQuickCommitPushButton(s) +
             '</div>' +
