@@ -43,6 +43,68 @@ function defaultStructuredState(provider: SessionProvider, runner = defaultStruc
   };
 }
 
+/**
+ * 把任意外部输入收敛到合法的 thinkingEffort 枚举值。`null` / 非法值都视为
+ * "未设置"——上层调用方再根据 provider 决定是否填默认值。
+ */
+export function normalizeThinkingEffort(
+  value: unknown,
+): SessionSnapshot["thinkingEffort"] {
+  if (typeof value !== "string") return null;
+  const v = value.trim().toLowerCase();
+  if (v === "off" || v === "standard" || v === "deep" || v === "max") return v;
+  return null;
+}
+
+/** Claude SDK 用：把 thinkingEffort 映射成 `thinking.budget_tokens`。off / 空 → 0（不启用）。 */
+export function thinkingEffortToSdkBudget(effort: SessionSnapshot["thinkingEffort"]): number {
+  switch (effort) {
+    case "standard": return 4096;
+    case "deep": return 16000;
+    case "max": return 31999;
+    case "off":
+    default: return 0;
+  }
+}
+
+/**
+ * Claude CLI 用：在 prompt 前注入魔法词，让 claude code 自动识别为思考请求。
+ * off → 原 prompt 不变。
+ */
+export function applyThinkingEffortToPrompt(
+  prompt: string,
+  effort: SessionSnapshot["thinkingEffort"],
+): string {
+  const trimmed = prompt.trimStart();
+  if (!trimmed) return prompt;
+  let prefix = "";
+  switch (effort) {
+    case "standard": prefix = "think. "; break;
+    case "deep": prefix = "think hard. "; break;
+    case "max": prefix = "ultrathink. "; break;
+    case "off":
+    default: return prompt;
+  }
+  // 用户已经手写了相同强度的指令时不重复加，避免把 "ultrathink. ultrathink." 喂给模型。
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("ultrathink") || lower.startsWith("think hard") || lower.startsWith("think very") || lower.startsWith("think harder")) {
+    return prompt;
+  }
+  if (effort === "standard" && lower.startsWith("think")) return prompt;
+  return prefix + trimmed;
+}
+
+/** Codex CLI 用：把 thinkingEffort 映射到 --reasoning-effort 参数。off → minimal（不显式思考）。 */
+export function thinkingEffortToCodexFlag(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  switch (effort) {
+    case "standard": return "low";
+    case "deep": return "medium";
+    case "max": return "high";
+    case "off": return "minimal";
+    default: return null;
+  }
+}
+
 /** Accumulated state while streaming a single claude -p response. */
 interface StreamingTurnState {
   blocks: ContentBlock[];
@@ -703,6 +765,31 @@ export class StructuredSessionManager {
       type: "status",
       sessionId,
       data: { sessionKind: "structured", selectedModel: normalized, structuredState: updated.structuredState },
+    });
+    return updated;
+  }
+
+  /**
+   * Update the thinking-effort level for a structured session. Takes effect on
+   * the next spawn / next message (SDK runner injects `thinking`, CLI runner
+   * prepends magic words, codex runner adds --reasoning-effort).
+   */
+  setSessionThinkingEffort(
+    sessionId: string,
+    effort: SessionSnapshot["thinkingEffort"],
+  ): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const normalized = normalizeThinkingEffort(effort);
+    const updated: SessionSnapshot = {
+      ...session,
+      thinkingEffort: normalized,
+    };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    this.emit({
+      type: "status",
+      sessionId,
+      data: { sessionKind: "structured", thinkingEffort: normalized },
     });
     return updated;
   }

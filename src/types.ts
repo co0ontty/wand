@@ -207,6 +207,11 @@ export interface QuickCommitResult {
   pushed?: boolean;
   /** commit 已成功但 push 失败时填入；前端用它显示"已提交但 push 失败"。 */
   pushError?: string;
+  /**
+   * 父仓库 commit 之前，先在 submodule 内单独提交的记录。仅包含 internal dirty
+   * 或 untracked 触发的 submodule 提交；纯指针变化（commitChanged）不会进来。
+   */
+  submoduleCommits?: { path: string; hash: string }[];
 }
 
 export interface TagHeadResult {
@@ -417,6 +422,14 @@ export interface SessionSnapshot {
   currentTaskTitle?: string;
   /** 用户为此会话选定的 Claude 模型（别名或完整 ID）。结构化会话下次 spawn 时使用；PTY 会话仅用于展示。 */
   selectedModel?: string | null;
+  /**
+   * 用户选定的思考深度。
+   *   - off:      不启用思考（SDK: 不传 thinking；CLI: 不插魔法词；Codex: --reasoning-effort minimal）
+   *   - standard: 标准（SDK: budget 4096；CLI: think；Codex: low）
+   *   - deep:    深度（SDK: budget 16000；CLI: think hard；Codex: medium）
+   *   - max:     最深（SDK: budget 31999；CLI: ultrathink；Codex: high）
+   */
+  thinkingEffort?: "off" | "standard" | "deep" | "max" | null;
   /** 当前 PTY 列宽，由最近一次 resize 决定。前端用它来判断本端 fit 是否需要校准。 */
   ptyCols?: number;
   /** 当前 PTY 行数，由最近一次 resize 决定。 */

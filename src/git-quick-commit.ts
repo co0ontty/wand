@@ -650,11 +650,73 @@ export async function runPush(opts: PushOptions): Promise<PushResult> {
   };
 }
 
+/**
+ * 在 commit 父仓库之前，先在每个内部 dirty / untracked 的 submodule 里
+ * 执行一次 `git add -A` + `git commit -m <msg>`，让父仓库的 add -A
+ * 能正确捕捉到新的 submodule 指针。纯指针变化（仅 commitChanged）的
+ * submodule 不会进入这条路径——那种情况父仓库 add 已经够了。
+ *
+ * 任一 submodule 提交失败都会被收集为非致命错误，不阻塞父仓库继续 commit；
+ * 调用方可以在结果里读到具体哪几个 submodule 失败。
+ */
+function commitDirtySubmodules(parentCwd: string, message: string): { commits: { path: string; hash: string }[]; errors: string[] } {
+  const commits: { path: string; hash: string }[] = [];
+  const errors: string[] = [];
+
+  let porcelain: string;
+  try {
+    porcelain = runGitAllowEmpty(["status", "--porcelain=v2", "--untracked-files=all"], parentCwd);
+  } catch {
+    return { commits, errors };
+  }
+  const entries = parsePorcelainV2(porcelain);
+  for (const entry of entries) {
+    if (!entry.isSubmodule) continue;
+    const state = entry.submoduleState;
+    if (!state) continue;
+    // 只有内部脏 / 未跟踪才需要进入子目录提交；纯指针变化父仓库自己就能 add。
+    if (!state.hasTrackedChanges && !state.hasUntracked) continue;
+
+    const subCwd = `${parentCwd}/${entry.path}`;
+    if (!existsSync(subCwd)) {
+      errors.push(`submodule ${entry.path} 路径不存在`);
+      continue;
+    }
+    try {
+      runGit(["add", "-A"], subCwd, 5000);
+    } catch (error) {
+      errors.push(`submodule ${entry.path} add 失败：${getGitErrorMessage(error)}`);
+      continue;
+    }
+    // 子仓 add 之后再判断是否真的有 staged 内容：极端情况下 .gitignore 把所有 dirty
+    // 文件都过滤掉了，会得到一个空 diff，此时跳过避免空 commit。
+    let staged: string;
+    try {
+      staged = runGitAllowEmpty(["diff", "--cached", "--name-only"], subCwd).trim();
+    } catch {
+      staged = "";
+    }
+    if (!staged) continue;
+    try {
+      runGit(["commit", "-m", message], subCwd, 10_000);
+    } catch (error) {
+      errors.push(`submodule ${entry.path} commit 失败：${getGitErrorMessage(error)}`);
+      continue;
+    }
+    let hash = "";
+    try { hash = runGit(["rev-parse", "--short", "HEAD"], subCwd); } catch { /* ignore */ }
+    commits.push({ path: entry.path, hash });
+  }
+  return { commits, errors };
+}
+
 export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCommitResult> {
   const { cwd, language, autoMessage, customMessage, tag, autoTag, push } = opts;
 
   assertGitWorkTree(cwd);
 
+  // 先 add 一次让我们能在 collectStagedDiff 看到完整改动（包含 submodule 指针），
+  // AI 生成 message 时也基于这个 staged diff。
   try {
     runGit(["add", "-A"], cwd, 5000);
   } catch (error) {
@@ -667,7 +729,17 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   } catch (error) {
     throw new QuickCommitError(getGitErrorMessage(error), "GIT_DIFF_FAILED");
   }
-  if (!stagedFiles) {
+  // 父仓库本身可能没有 staged 文件，但 submodule 内部有 dirty / untracked——
+  // 此时也应该允许走 submodule 提交流程。
+  let parentHasStaged = stagedFiles.length > 0;
+  let submoduleHasDirty = false;
+  try {
+    const porcelain = runGitAllowEmpty(["status", "--porcelain=v2", "--untracked-files=all"], cwd);
+    submoduleHasDirty = parsePorcelainV2(porcelain).some(
+      (e) => e.isSubmodule && (e.submoduleState?.hasTrackedChanges || e.submoduleState?.hasUntracked),
+    );
+  } catch { /* keep submoduleHasDirty=false */ }
+  if (!parentHasStaged && !submoduleHasDirty) {
     throw new QuickCommitError("没有任何改动可以提交。", "NOTHING_TO_COMMIT");
   }
 
@@ -679,6 +751,35 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     if (!message) {
       throw new QuickCommitError("commit message 不能为空。", "EMPTY_MESSAGE");
     }
+  }
+
+  // 先提交 submodule 内部改动；父仓库随后再 add 一次，picks up 新的 submodule 指针。
+  const submoduleOutcome = commitDirtySubmodules(cwd, message);
+  if (submoduleOutcome.commits.length > 0) {
+    try {
+      runGit(["add", "-A"], cwd, 5000);
+    } catch (error) {
+      throw new QuickCommitError(`父仓库 add submodule 指针失败：${getGitErrorMessage(error)}`, "GIT_ADD_FAILED");
+    }
+    // 重新评估父仓库是否有 staged 内容：如果 submodule 是新引入的或指针变了，
+    // 这里应当为真；如果完全没变就走 commit --allow-empty 路径不合适，直接报错。
+    try {
+      stagedFiles = runGitAllowEmpty(["diff", "--cached", "--name-only"], cwd).trim();
+      parentHasStaged = stagedFiles.length > 0;
+    } catch { /* keep stale value */ }
+  }
+
+  if (!parentHasStaged) {
+    // submodule 都提交了但父仓库还是没有 staged —— 通常意味着 .gitmodules 没动
+    // 而 submodule 指针被 ignore（罕见配置）。这种情况返回成功，但用 SUBMODULE_ONLY
+    // 的语义；上层 UI 可以决定是否继续 push。这里保持向后兼容，沿用 commit 路径
+    // 但用 --allow-empty 会有副作用，干脆抛 NOTHING_TO_COMMIT。
+    throw new QuickCommitError(
+      submoduleOutcome.commits.length > 0
+        ? `已提交 ${submoduleOutcome.commits.length} 个 submodule，但父仓库没有改动可提交。`
+        : "没有任何改动可以提交。",
+      "NOTHING_TO_COMMIT",
+    );
   }
 
   try {
@@ -726,5 +827,6 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     tag: tagName ? { name: tagName } : undefined,
     pushed,
     pushError,
+    submoduleCommits: submoduleOutcome.commits.length > 0 ? submoduleOutcome.commits : undefined,
   };
 }

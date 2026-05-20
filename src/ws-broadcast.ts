@@ -15,6 +15,17 @@ export type { ProcessEvent } from "./types.js";
 
 const MAX_QUEUE_SIZE = 500;
 const OUTPUT_DEBOUNCE_MS = 16;
+/**
+ * 服务端心跳节奏。20s 一次，比常见 NAT/代理空闲超时（30~60s）更短，可以保活；
+ * 也不至于让 idle 连接每秒都在跑 timer。前后端在心跳间窗内任何方向消息都会
+ * 重置"上次见到"计时。
+ */
+const HEARTBEAT_INTERVAL_MS = 20_000;
+/**
+ * 超过这个时长没收到对端任何消息（应用层 / 协议层 pong / 任意 frame），就视为
+ * 半开连接并 terminate。45s = 两个心跳周期再加 5s 容忍，可以避开偶发抖动。
+ */
+const HEARTBEAT_STALE_MS = 45_000;
 
 // ── Types ──
 
@@ -28,6 +39,11 @@ interface WsClient {
   outputSeqBySession: Map<string, number>;
   /** Sessions for which we owe the client a resync notice. */
   pendingResyncSessions: Set<string>;
+  /**
+   * 上次收到该客户端任意消息（应用层 message / protocol pong / 任何 frame）的
+   * 时间戳。心跳 tick 用它来判断半开连接。
+   */
+  lastSeenAt: number;
 }
 
 // ── Manager ──
@@ -37,6 +53,7 @@ export class WsBroadcastManager {
   private clients = new Set<WsClient>();
   private outputDebounceCache = new Map<string, { event: ProcessEvent; timer: NodeJS.Timeout }>();
   private eventEmitter = new EventEmitter();
+  private heartbeatTimer?: NodeJS.Timeout;
 
   private getCardDefaults: () => CardExpandDefaults;
 
@@ -63,6 +80,7 @@ export class WsBroadcastManager {
         lastOutputBySession: new Map(),
         outputSeqBySession: new Map(),
         pendingResyncSessions: new Set(),
+        lastSeenAt: Date.now(),
       };
       this.clients.add(client);
 
@@ -74,7 +92,15 @@ export class WsBroadcastManager {
         // Already closed, ignore
       });
 
+      // 协议层 pong（浏览器对服务端 ws.ping() 的自动响应，不经过 JS）。
+      // 也算"对端还活着"的信号，刷新 lastSeenAt。
+      ws.on("pong", () => {
+        client.lastSeenAt = Date.now();
+      });
+
       ws.on("message", (data) => {
+        // 任意应用层消息都说明对端还在，先刷新心跳计时。
+        client.lastSeenAt = Date.now();
         try {
           const msg = JSON.parse(data.toString());
           if (msg.type === "subscribe" && msg.sessionId) {
@@ -91,12 +117,64 @@ export class WsBroadcastManager {
           } else if (msg.type === "resync" && msg.sessionId) {
             const snapshot = getSession(msg.sessionId);
             if (snapshot) this.sendInit(client, msg.sessionId, snapshot, true);
+          } else if (msg.type === "pong") {
+            // 应用层 pong（对我们下发的 {type:"ping"} 的响应）。lastSeenAt
+            // 已经在函数顶部刷新过了，这里不需要再做事；分支留着是为了
+            // 把 pong 显式排除在"未知消息"之外。
           }
         } catch {
           // Ignore malformed messages
         }
       });
     });
+
+    // 启动心跳轮询。每个 tick 检查所有 client：sleep 太久就 terminate，否则
+    // 发应用层 ping 让前端有机会做 stale 检测。
+    this.heartbeatTimer = setInterval(() => {
+      this.runHeartbeatTick();
+    }, HEARTBEAT_INTERVAL_MS);
+    // 不要让心跳 timer 阻止 Node 进程退出（restart / 测试场景）。
+    this.heartbeatTimer.unref?.();
+
+    // 在 wss 关闭时停心跳。restart 路由会先 close 所有 client、再 server.close()，
+    // wss 会跟着关，这里清掉 interval 防止泄漏。
+    this.wss.on("close", () => {
+      if (this.heartbeatTimer) {
+        clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = undefined;
+      }
+    });
+  }
+
+  /**
+   * 心跳 tick：对每个 client 执行 stale 判定 + 主动 ping。
+   *   - 超过 HEARTBEAT_STALE_MS 没消息 → 视为半开 / 死连接，直接 terminate()。
+   *     terminate() 不发 Close 帧，立刻断开 socket；前端 onclose 触发后会按
+   *     重连退避梯度自动重连。
+   *   - 否则：应用层 send `{type:"ping", t}`（给前端拿来更新 lastWsMessageAt
+   *     和测 RTT），同时 ws.ping() 发协议层 ping（浏览器/CDN 友好，保 NAT）。
+   */
+  private runHeartbeatTick(): void {
+    const now = Date.now();
+    for (const client of this.clients) {
+      if (client.ws.readyState !== WebSocket.OPEN) {
+        // 已经不是 OPEN 了，close handler 通常会清理；这里兜底防止集合里
+        // 留下僵尸 entry。
+        this.clients.delete(client);
+        continue;
+      }
+      if (now - client.lastSeenAt > HEARTBEAT_STALE_MS) {
+        try { client.ws.terminate(); } catch { /* ignore */ }
+        this.clients.delete(client);
+        continue;
+      }
+      try {
+        client.ws.send(JSON.stringify({ type: "ping", t: now }));
+      } catch { /* ignore */ }
+      try {
+        client.ws.ping();
+      } catch { /* ignore */ }
+    }
   }
 
   /** Emit a process event to all subscribed WebSocket clients. */

@@ -150,6 +150,11 @@
         showInstallPrompt: false,
         ws: null,
         wsConnected: false,
+        // 上一次从服务器收到任意 WS 消息（包括 ping）的时间戳。心跳 stale 检测
+        // 用它来判断半开连接：长时间没消息 → forceReconnect。0 表示尚未连接过。
+        lastWsMessageAt: 0,
+        // 心跳检查 timer 句柄。每 10s 跑一次 evaluateWsHeartbeatStale()。
+        wsHeartbeatCheckTimer: null,
         _updateBubbleShown: false,
         notificationHistory: {},
         delayedNotificationTimer: null,
@@ -1026,6 +1031,11 @@
       function syncOnForeground(reason, force) {
         if (!state.config) return Promise.resolve();
         if (document.hidden) return Promise.resolve();
+        // 切回前台时立刻评估一次心跳 stale。setInterval 在 background 会被
+        // 浏览器节流（最低 1Hz，部分浏览器更慢），所以如果挂了 1 分钟回来，
+        // 不主动跑这一次的话要等到下一个 10s tick 才会发现，前 10s 会继续
+        // 往一条死 socket 上推消息。
+        evaluateWsHeartbeatStale();
         // On Android resume the previous WS may still report OPEN/CONNECTING
         // for a few seconds because the close frame hasn't been delivered
         // yet (TCP keepalive / Doze suspended the network stack). Force a
@@ -2103,7 +2113,11 @@
             var data = result.data || {};
             var hash = data.commit && data.commit.hash ? data.commit.hash.substring(0, 7) : "";
             var tagName = data.tag && data.tag.name ? data.tag.name : "";
-            var base = "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 tag " + tagName : "");
+            var subCommits = Array.isArray(data.submoduleCommits) ? data.submoduleCommits : [];
+            var subPrefix = subCommits.length > 0
+              ? "已先提交 " + subCommits.length + " 个 submodule（" + subCommits.map(function(c) { return c.path; }).join("、") + "），"
+              : "";
+            var base = subPrefix + "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 tag " + tagName : "");
             if (willPush && data.pushError) {
               var msg = base + "；push 失败：" + data.pushError;
               if (typeof showToast === "function") showToast(msg, "error");
@@ -13853,6 +13867,35 @@
 
       // Drop any in-flight socket and start a new one *now* — used by the
       // Android resume bridge to recover from zombie connections (socket
+      // 客户端 WS 心跳检测：每 10s 跑一次，看 lastWsMessageAt 距今多久。
+      // 服务端每 20s 主动下推 {type:"ping"}，所以 40s 没消息就明确是半开。
+      // 浏览器在 background 时 setInterval 会被节流到 ~1Hz 或更慢，但
+      // 我们也在 visibilitychange→visible 里做了一次主动评估，所以
+      // 切回前台时不会拖很久才发现 stale。
+      var WS_HEARTBEAT_CHECK_MS = 10_000;
+      var WS_HEARTBEAT_STALE_MS = 40_000;
+      function startWsHeartbeatCheck() {
+        stopWsHeartbeatCheck();
+        state.wsHeartbeatCheckTimer = setInterval(evaluateWsHeartbeatStale, WS_HEARTBEAT_CHECK_MS);
+      }
+      function stopWsHeartbeatCheck() {
+        if (state.wsHeartbeatCheckTimer) {
+          clearInterval(state.wsHeartbeatCheckTimer);
+          state.wsHeartbeatCheckTimer = null;
+        }
+      }
+      function evaluateWsHeartbeatStale() {
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        // 第一帧（包括 onopen）会刷新 lastWsMessageAt；如果还是 0 说明刚连上
+        // 但服务端没下发任何东西（连 init 都没发出来）——交给下一轮检查。
+        if (!state.lastWsMessageAt) return;
+        var idle = Date.now() - state.lastWsMessageAt;
+        if (idle > WS_HEARTBEAT_STALE_MS) {
+          forceReconnectWebSocket("heartbeat-stale-" + Math.round(idle / 1000) + "s");
+        }
+      }
+
+      // Force a fresh WebSocket connection even if the existing one
       // still says OPEN, but the TCP path was torn down by Doze). Skips
       // the backoff timer; the caller has already decided this is urgent.
       function forceReconnectWebSocket(reason) {
@@ -13909,6 +13952,7 @@
           ws.onopen = function() {
             state.ws = ws;
             state.wsConnected = true;
+            state.lastWsMessageAt = Date.now();
             // Reset backoff on a successful connect so the next disconnect
             // starts the ladder from 500ms again.
             state.wsReconnectAttempts = 0;
@@ -13916,6 +13960,9 @@
             // Server's per-client output sequence counter restarts on every
             // new socket; clear ours so the first init isn't treated as a gap.
             state.lastSeqBySession = {};
+            // 启动客户端心跳检测：每 10s 检查一次 lastWsMessageAt，超过 40s
+            // 没收到任何消息（包括服务端 20s 一次的 ping）就视为半开连接。
+            startWsHeartbeatCheck();
             // Subscribe to current session if any
             subscribeToSession(state.selectedId);
             // Flush pending messages after reconnection
@@ -13930,8 +13977,20 @@
           };
 
           ws.onmessage = function(event) {
+            // 任意服务端消息都说明连接活着，先刷新心跳计时。
+            state.lastWsMessageAt = Date.now();
             try {
               var msg = JSON.parse(event.data);
+              // 应用层 ping：立刻回 pong。同时也让服务端能算 RTT。
+              // 这条消息处理完就 return，不进入下面的 sessionId 分发流程。
+              if (msg && msg.type === "ping") {
+                if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+                  try {
+                    state.ws.send(JSON.stringify({ type: "pong", t: msg.t }));
+                  } catch (sendErr) { /* ignore */ }
+                }
+                return;
+              }
               if (msg && msg.type === "resync_required" && msg.sessionId) {
                 // Server dropped some output events under backpressure and
                 // is asking us for a fresh snapshot. Send a resync so the
@@ -13978,6 +14037,7 @@
           ws.onclose = function() {
             state.ws = null;
             state.wsConnected = false;
+            stopWsHeartbeatCheck();
             scheduleWsReconnect();
           };
 
