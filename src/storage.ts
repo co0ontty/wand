@@ -371,6 +371,20 @@ export class WandStorage {
     return this.getPassword() !== null;
   }
 
+  /** Get appSecret from database (used to mint Android appTokens) */
+  getAppSecret(): string | null {
+    return this.getConfigValue("appSecret");
+  }
+
+  /** Persist appSecret in database (DB is the authoritative source after first migration) */
+  setAppSecret(value: string): void {
+    this.setConfigValue("appSecret", value);
+  }
+
+  hasAppSecret(): boolean {
+    return this.getAppSecret() !== null;
+  }
+
   // ============ Auth Session Methods ============
 
   saveAuthSession(token: string, expiresAt: number): void {

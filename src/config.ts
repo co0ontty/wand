@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, StructuredChatPersonaConfig, WandConfig } from "./types.js";
@@ -102,6 +102,24 @@ export function hasConfigFile(configPath: string): boolean {
   return existsSync(configPath);
 }
 
+/**
+ * 原子写入：先写 `<dir>/.<file>.tmp-<rand>`，再 rename 覆盖目标。
+ * 防止 kill -9 / 断电 / 磁盘满导致 config.json 半截损坏 → 下次启动 catch 路径
+ * 把 defaults 写回去 → appSecret 重生成 → 已分发的 APK appToken 全部作废。
+ */
+async function atomicWriteFile(filePath: string, content: string): Promise<void> {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const tmpPath = path.join(dir, `.${base}.tmp-${crypto.randomBytes(6).toString("hex")}`);
+  await writeFile(tmpPath, content, "utf8");
+  try {
+    await rename(tmpPath, filePath);
+  } catch (err) {
+    try { await unlink(tmpPath); } catch { /* noop */ }
+    throw err;
+  }
+}
+
 export async function ensureConfig(configPath: string): Promise<WandConfig> {
   const dir = path.dirname(configPath);
   await mkdir(dir, { recursive: true });
@@ -112,12 +130,12 @@ export async function ensureConfig(configPath: string): Promise<WandConfig> {
     const normalized = `${JSON.stringify(merged, null, 2)}\n`;
     // Only write if the file content actually changed
     if (raw.trimEnd() !== normalized.trimEnd()) {
-      await writeFile(configPath, normalized, "utf8");
+      await atomicWriteFile(configPath, normalized);
     }
     return merged;
   } catch {
     const config = defaultConfig();
-    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    await atomicWriteFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
     return config;
   }
 }
@@ -125,7 +143,7 @@ export async function ensureConfig(configPath: string): Promise<WandConfig> {
 /** saveConfig 写出时去掉偏好字段——这些已经移到 SQLite。 */
 export async function saveConfig(configPath: string, config: WandConfig): Promise<void> {
   await mkdir(path.dirname(configPath), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(stripPreferenceFields(config), null, 2)}\n`, "utf8");
+  await atomicWriteFile(configPath, `${JSON.stringify(stripPreferenceFields(config), null, 2)}\n`);
 }
 
 /**
@@ -147,13 +165,25 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
     rawInput = JSON.parse(raw) as Partial<WandConfig>;
     hadFile = true;
   } catch {
+    // 文件缺失 或 JSON 损坏：保留空 rawInput；reconcileAppSecret 会优先用 DB 里那份，
+    // 避免已分发 APK 被踢下线。
     rawInput = {};
   }
 
   migrateLegacyPreferencesToDb(rawInput, storage);
+  migrateLegacyPasswordToDb(rawInput, storage);
 
   const config = mergeWithDefaults(rawInput);
   applyStoragePreferences(config, storage);
+
+  // appSecret: DB 是权威源。
+  // - DB 有 → 直接覆盖 runtime config（即使 mergeWithDefaults 临时生成了新的，也以 DB 为准）
+  // - DB 无、config 有 → 老用户首次升级，把 config.json 里的 appSecret 落到 DB
+  // - 都没 → 用 config 当前那个（mergeWithDefaults 已经生成），落到 DB
+  reconcileAppSecret(config, storage);
+
+  // password: DB 优先映射到 runtime config，让 config:show 与 server.ts 都看到真值
+  applyStoragePassword(config, storage);
 
   // 如果 JSON 里有偏好字段（说明是老版本配置或刚迁移），重写一次干净版本
   const hasLegacyPrefs = PREFERENCE_KEYS.some((key) => key in rawInput);
@@ -161,6 +191,48 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
     await saveConfig(configPath, config);
   }
   return config;
+}
+
+/**
+ * 把 DB 里的 appSecret 同步到 runtime config，缺失时反向回填，保证 DB 永远有备份。
+ * 这条路径修掉了之前的 bug：mergeWithDefaults 在缺失 appSecret 时会随机生成一个新的，
+ * 一旦 config.json 因为任何原因丢字段（损坏/手动编辑/catch fallback），所有 APK appToken 立刻作废。
+ */
+function reconcileAppSecret(config: WandConfig, storage: WandStorage): void {
+  const dbSecret = storage.getAppSecret();
+  if (dbSecret && dbSecret.length >= 32) {
+    config.appSecret = dbSecret;
+    return;
+  }
+  if (config.appSecret && config.appSecret.length >= 32) {
+    storage.setAppSecret(config.appSecret);
+    return;
+  }
+  const fresh = crypto.randomBytes(32).toString("hex");
+  config.appSecret = fresh;
+  storage.setAppSecret(fresh);
+}
+
+/** 把 DB 里设置过的 password 映射到 runtime config 字段，让 config:show 不再展示 "change-me" 假象。 */
+function applyStoragePassword(config: WandConfig, storage: WandStorage): void {
+  const dbPassword = storage.getPassword();
+  if (dbPassword !== null) {
+    config.password = dbPassword;
+  }
+}
+
+/**
+ * 老用户如果曾经手动编辑 config.json 设过非默认密码，但从没用 Web UI 改过密码
+ * （DB 里没有 password 行），那个 JSON 字段就是当前生效密码。升级到 DB 权威源之前
+ * 必须把它搬到 DB，否则后续如果 saveConfig 路径剥离 password 字段或 JSON 被截断，
+ * 用户会被锁在门外。DB 已经有 password 行的情况下不覆盖。
+ */
+function migrateLegacyPasswordToDb(rawInput: Partial<WandConfig>, storage: WandStorage): void {
+  if (storage.hasCustomPassword()) return;
+  const legacy = rawInput.password;
+  if (typeof legacy === "string" && legacy.length >= 6 && legacy !== "change-me") {
+    storage.setPassword(legacy);
+  }
 }
 
 /** Build a JSON-safe view of WandConfig that excludes preference fields (which live in DB). */

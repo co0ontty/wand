@@ -94,14 +94,20 @@ async function main(): Promise<void> {
       break;
     }
     case "config:show": {
-      // 展示合并后的视图（JSON 部署字段 + DB 偏好字段）。
+      // 展示合并后的视图（JSON 部署字段 + DB 偏好字段）。password 脱敏：
+      // 显示是否已自定义（"<set>" / "change-me"），避免误把真密码截图分享出去；
+      // 想看真值就直接读 DB（sqlite3 wand.db "SELECT * FROM app_config WHERE key='password'"）。
       const { ensureDatabaseFile, resolveDatabasePath, WandStorage } = await import("./storage.js");
       const dbPath = resolveDatabasePath(configPath);
       ensureDatabaseFile(dbPath);
       const storage = new WandStorage(dbPath);
       try {
         const config = await loadConfigWithStorage(configPath, storage);
-        process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
+        const display: WandConfig = {
+          ...config,
+          password: config.password === "change-me" ? "change-me" : "<set>",
+        };
+        process.stdout.write(`${JSON.stringify(display, null, 2)}\n`);
       } finally {
         storage.close();
       }
@@ -124,6 +130,15 @@ async function main(): Promise<void> {
           // 偏好字段写 DB，无需重启
           writePreferenceToStorage(config, storage, key, value);
           process.stdout.write(`[wand] Updated preference ${key} in ${dbPath}\n`);
+        } else if (key === "password") {
+          // password 走 SQLite，和 Web UI 设置面板保持同一个源。
+          // 历史上 setConfigValue("password") 只写 config.json，但登录用 dbPassword ?? config.password，
+          // 一旦 DB 里有值，写 JSON 完全不生效，命令静默返回成功 → 用户以为改了密码其实没改。
+          if (typeof value !== "string" || value.length < 6) {
+            throw new Error("password 长度至少为 6 个字符");
+          }
+          storage.setPassword(value);
+          process.stdout.write(`[wand] Updated password in ${dbPath}\n`);
         } else {
           const nextConfig = setConfigValue(config, key, value);
           await saveConfig(configPath, nextConfig);
@@ -349,10 +364,10 @@ function setConfigValue(
   key: string,
   value: string
 ): WandConfig {
-  // 偏好字段（defaultMode/defaultCwd/...）由调用方分流到 storage，这里只处理 JSON 字段。
+  // 偏好字段（defaultMode/defaultCwd/...）由调用方分流到 storage，password 也走 DB
+  // （由 case "config:set" 直接处理），这里只剩纯 JSON 字段。
   switch (key) {
     case "host":
-    case "password":
     case "shell":
       return {
         ...config,
