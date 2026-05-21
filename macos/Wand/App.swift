@@ -10,7 +10,6 @@ struct WandApp: App {
                 .environmentObject(store)
                 .frame(minWidth: 1100, minHeight: 700)
         }
-        .windowResizability(.contentSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .appInfo) {

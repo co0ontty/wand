@@ -1399,10 +1399,14 @@
         var preferredTool = getComposerTool();
         var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
+        var isDesktopPinned = state.sidebarPinned && !isMobileLayout();
+        var isCollapsed = isDesktopPinned && state.sidebarCollapsed;
+        var collapsedCls = isCollapsed ? ' sidebar-collapsed' : '';
+        var sidebarCollapsedCls = isCollapsed ? ' collapsed' : '';
         return '<div class="app-container">' +
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
-          '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + (state.sidebarPinned && !isMobileLayout() ? ' sidebar-pinned' : '') + '">' +
-            '<aside id="sessions-drawer" class="sidebar' + drawerClass + (state.sidebarPinned && !isMobileLayout() ? ' pinned' : '') + '">' +
+          '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + (isDesktopPinned ? ' sidebar-pinned' : '') + collapsedCls + '">' +
+            '<aside id="sessions-drawer" class="sidebar' + drawerClass + (isDesktopPinned ? ' pinned' : '') + sidebarCollapsedCls + '">' +
               '<div class="sidebar-header">' +
                 '<div class="sidebar-header-main">' +
                   '<div class="topbar-logo-icon">W</div>' +
@@ -1428,8 +1432,10 @@
                   '<button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? ' pinned' : '') + '" type="button" title="' + (state.sidebarPinned ? '取消固定侧栏' : '固定侧栏') + '">' +
                     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg>' +
                   '</button>' +
-                  '<button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle" type="button" title="收起为窄条" aria-label="收起为窄条">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>' +
+                  '<button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? ' collapsed' : '') + '" type="button" title="' + (isCollapsed ? '展开侧栏' : '收起为窄条') + '" aria-label="' + (isCollapsed ? '展开侧栏' : '收起为窄条') + '">' +
+                    (isCollapsed
+                      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>'
+                      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') +
                   '</button>' +
                   '<button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="关闭菜单"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                 '</div>' +
@@ -5511,6 +5517,8 @@
         if (closeDrawerBtn) closeDrawerBtn.addEventListener("click", closeSessionsDrawer);
         var pinBtn = document.getElementById("sidebar-pin-btn");
         if (pinBtn) pinBtn.addEventListener("click", toggleSidebarPin);
+        var collapseBtn = document.getElementById("sidebar-collapse-btn");
+        if (collapseBtn) collapseBtn.addEventListener("click", toggleSidebarCollapsed);
         var sidebarMoreBtn = document.getElementById("sidebar-more-btn");
         var sidebarOverflow = document.getElementById("sidebar-overflow-menu");
         if (sidebarMoreBtn && sidebarOverflow) {
@@ -8571,11 +8579,15 @@
         var drawer = document.getElementById("sessions-drawer");
         var mainLayout = document.querySelector(".main-layout");
         var pinBtn = document.getElementById("sidebar-pin-btn");
+        var isDesktopPinned = state.sidebarPinned && !isMobileLayout();
+        var isCollapsed = isDesktopPinned && state.sidebarCollapsed;
         if (drawer) {
-          drawer.classList.toggle("pinned", state.sidebarPinned && !isMobileLayout());
+          drawer.classList.toggle("pinned", isDesktopPinned);
+          drawer.classList.toggle("collapsed", isCollapsed);
         }
         if (mainLayout) {
-          mainLayout.classList.toggle("sidebar-pinned", state.sidebarPinned && !isMobileLayout());
+          mainLayout.classList.toggle("sidebar-pinned", isDesktopPinned);
+          mainLayout.classList.toggle("sidebar-collapsed", isCollapsed);
         }
         if (pinBtn) {
           pinBtn.classList.toggle("pinned", state.sidebarPinned);
@@ -8621,6 +8633,27 @@
         closeSwipedItem();
         state.sessionsDrawerOpen = false;
         updateLayoutState();
+      }
+
+      function toggleSidebarCollapsed() {
+        if (isMobileLayout()) return;
+        if (!state.sidebarPinned) return;
+        state.sidebarCollapsed = !state.sidebarCollapsed;
+        try {
+          localStorage.setItem("wand-sidebar-collapsed", String(state.sidebarCollapsed));
+        } catch (e) {}
+        render();
+        var mainLayout = document.querySelector(".main-layout");
+        if (mainLayout) {
+          var onEnd = function(e) {
+            if (e.propertyName === "padding-left") {
+              mainLayout.removeEventListener("transitionend", onEnd);
+              scheduleTerminalResize(true);
+            }
+          };
+          mainLayout.addEventListener("transitionend", onEnd);
+        }
+        setTimeout(function() { scheduleTerminalResize(true); }, 350);
       }
 
       function toggleSidebarPin() {

@@ -99,6 +99,7 @@
 
       /* ===== 布局尺寸 ===== */
       --sidebar-width: 300px;
+      --sidebar-collapsed-width: 56px;
       --file-panel-width: 320px;
       --safe-bottom: 0px;
 
@@ -447,9 +448,13 @@
     /* ===== 侧边栏常驻 ===== */
     .main-layout.sidebar-pinned {
       padding-left: var(--sidebar-width);
+      transition: padding-left 0.3s var(--ease-out-expo);
     }
     .main-layout.sidebar-pinned .floating-sidebar-toggle {
       display: none;
+    }
+    .main-layout.sidebar-pinned.sidebar-collapsed {
+      padding-left: var(--sidebar-collapsed-width);
     }
 
     /* ===== 抽屉背景遮罩 ===== */
@@ -507,9 +512,62 @@
       pointer-events: auto;
       opacity: 1;
       box-shadow: none;
+      transition: width 0.3s var(--ease-out-expo), transform 0.35s var(--ease-out-expo), box-shadow 0.35s ease, opacity 0.25s ease;
     }
 
     .sidebar.pinned .sidebar-close {
+      display: none;
+    }
+
+    /* ===== 侧栏窄条模式（仅 desktop pin 模式生效）===== */
+    .sidebar.pinned.collapsed {
+      width: var(--sidebar-collapsed-width);
+    }
+    .sidebar.pinned.collapsed .sidebar-header {
+      padding: 14px 8px;
+      justify-content: center;
+      gap: 0;
+    }
+    .sidebar.pinned.collapsed .sidebar-header-main,
+    .sidebar.pinned.collapsed .sidebar-header-more,
+    .sidebar.pinned.collapsed .sidebar-pin-toggle,
+    .sidebar.pinned.collapsed .sidebar-body {
+      display: none;
+    }
+    .sidebar.pinned.collapsed .sidebar-header-actions {
+      gap: 0;
+      width: 100%;
+      justify-content: center;
+    }
+    .sidebar.pinned.collapsed .sidebar-footer {
+      padding: 10px 6px;
+    }
+    .sidebar.pinned.collapsed #drawer-new-session-button {
+      display: none;
+    }
+    .sidebar.pinned.collapsed .sidebar-footer-actions {
+      flex-direction: column;
+      gap: 6px;
+      align-items: stretch;
+    }
+    .sidebar.pinned.collapsed .sidebar-footer-actions .btn {
+      width: 100%;
+      min-width: 0;
+      padding: 8px 0;
+      justify-content: center;
+    }
+    .sidebar.pinned.collapsed .sidebar-footer-actions .btn span,
+    .sidebar.pinned.collapsed .sidebar-meta {
+      display: none;
+    }
+    .sidebar-collapse-toggle {
+      flex-shrink: 0;
+      transition: color var(--transition-fast);
+    }
+    .sidebar-collapse-toggle.collapsed {
+      color: var(--primary);
+    }
+    .sidebar:not(.pinned) .sidebar-collapse-toggle {
       display: none;
     }
 
@@ -8338,6 +8396,7 @@
     /* 平板适配 */
     @media (max-width: 768px) {
       .sidebar-pin-toggle { display: none; }
+      .sidebar-collapse-toggle { display: none; }
       .sidebar.pinned:not(.open) {
         transform: translateX(-100%);
         pointer-events: none;

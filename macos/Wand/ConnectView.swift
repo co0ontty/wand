@@ -16,7 +16,7 @@ struct ConnectView: View {
             VStack(spacing: 8) {
                 Image(systemName: "terminal.fill")
                     .font(.system(size: 56))
-                    .foregroundStyle(.accent)
+                    .foregroundColor(.accentColor)
                 Text("连接到 Wand")
                     .font(.title2.bold())
                 Text("粘贴 Wand 设置页的连接码，或直接输入服务器地址")
