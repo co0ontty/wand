@@ -13,6 +13,12 @@ android/**/build/
 android/.gradle/
 android/local.properties
 android/.idea/
+macos/build/
+macos/dist/
+macos/**/*.dmg
+macos/Wand.xcodeproj/xcuserdata/
+macos/Wand.xcodeproj/project.xcworkspace/
+macos/Wand/Assets.xcassets/AppIcon.appiconset/*.png
 avatar-seed.txt
 .wand-uploads/
 .wand-worktrees/

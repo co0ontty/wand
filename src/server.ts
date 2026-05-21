@@ -198,6 +198,83 @@ async function resolveLatestApkVersion(configDir: string, config: WandConfig): P
   return null;
 }
 
+// ── macOS DMG update check cache ──
+
+interface GitHubDmgInfo {
+  version: string;
+  downloadUrl: string;
+  fileName: string;
+  size: number;
+}
+
+let cachedGitHubDmg: GitHubDmgInfo | null = null;
+let gitHubDmgCacheTs = 0;
+const GITHUB_DMG_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+async function fetchGitHubLatestDmg(forceRefresh = false): Promise<GitHubDmgInfo | null> {
+  const now = Date.now();
+  if (!forceRefresh && cachedGitHubDmg && (now - gitHubDmgCacheTs < GITHUB_DMG_CACHE_TTL)) {
+    return cachedGitHubDmg;
+  }
+  try {
+    const apiUrl = PKG_REPO_URL.replace("github.com", "api.github.com/repos") + "/releases/latest";
+    const resp = await fetch(apiUrl, {
+      headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "wand-server" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) return cachedGitHubDmg ?? null;
+    const release = await resp.json() as {
+      tag_name: string;
+      assets: Array<{ name: string; browser_download_url: string; size: number }>;
+    };
+    const dmgAsset = release.assets.find(a => a.name.toLowerCase().endsWith(".dmg"));
+    if (!dmgAsset) return cachedGitHubDmg ?? null;
+    const version = extractMacosDmgVersion(release.tag_name) ?? release.tag_name.replace(/^v/, "");
+    cachedGitHubDmg = {
+      version,
+      downloadUrl: dmgAsset.browser_download_url,
+      fileName: dmgAsset.name,
+      size: dmgAsset.size,
+    };
+    gitHubDmgCacheTs = now;
+    return cachedGitHubDmg;
+  } catch {
+    return cachedGitHubDmg ?? null;
+  }
+}
+
+interface ResolvedDmgVersion {
+  version: string;
+  downloadUrl: string;
+  fileName: string;
+  size: number;
+  source: "local" | "github";
+}
+
+async function resolveLatestDmgVersion(configDir: string, config: WandConfig): Promise<ResolvedDmgVersion | null> {
+  const localDmg = await resolveMacosDmgAsset(configDir, config);
+  if (localDmg && localDmg.version) {
+    return {
+      version: localDmg.version,
+      downloadUrl: localDmg.downloadUrl,
+      fileName: localDmg.fileName,
+      size: localDmg.size,
+      source: "local",
+    };
+  }
+  const ghDmg = await fetchGitHubLatestDmg();
+  if (ghDmg) {
+    return {
+      version: ghDmg.version,
+      downloadUrl: ghDmg.downloadUrl,
+      fileName: ghDmg.fileName,
+      size: ghDmg.size,
+      source: "github",
+    };
+  }
+  return null;
+}
+
 function isExternalAvatarSource(value: string): boolean {
   return /^(https?:|data:)/i.test(value);
 }
@@ -426,6 +503,22 @@ interface AndroidApkAsset {
   source: "local";
 }
 
+interface MacosDmgAsset {
+  fileName: string;
+  filePath: string;
+  size: number;
+  updatedAt: string;
+  version: string | null;
+  downloadUrl: string;
+  source: "local";
+}
+
+/** Match a semver-looking token in a file name (with optional pre-release / build metadata). */
+function extractSemverFromName(name: string): string | null {
+  const match = name.match(/(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)/);
+  return match ? match[1] : null;
+}
+
 function resolveAndroidApkDir(configDir: string, config: WandConfig): string {
   const configuredDir = config.android?.apkDir?.trim();
   if (!configuredDir) {
@@ -435,9 +528,7 @@ function resolveAndroidApkDir(configDir: string, config: WandConfig): string {
 }
 
 function extractAndroidApkVersion(fileName: string): string | null {
-  const nameWithoutExt = fileName.replace(/\.apk$/i, "");
-  const match = nameWithoutExt.match(/(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)/);
-  return match ? match[1] : null;
+  return extractSemverFromName(fileName.replace(/\.apk$/i, ""));
 }
 
 async function resolveAndroidApkAsset(configDir: string, config: WandConfig): Promise<AndroidApkAsset | null> {
@@ -487,6 +578,69 @@ async function resolveAndroidApkAsset(configDir: string, config: WandConfig): Pr
     updatedAt: selected.fileStat.mtime.toISOString(),
     version: extractAndroidApkVersion(selected.entry.name),
     downloadUrl: "/android/download",
+    source: "local",
+  };
+}
+
+function resolveMacosDmgDir(configDir: string, config: WandConfig): string {
+  const configuredDir = config.macos?.dmgDir?.trim();
+  if (!configuredDir) {
+    return path.join(configDir, "macos");
+  }
+  return path.isAbsolute(configuredDir) ? configuredDir : path.resolve(configDir, configuredDir);
+}
+
+function extractMacosDmgVersion(fileName: string): string | null {
+  return extractSemverFromName(fileName.replace(/\.dmg$/i, ""));
+}
+
+async function resolveMacosDmgAsset(configDir: string, config: WandConfig): Promise<MacosDmgAsset | null> {
+  if (config.macos?.enabled !== true) return null;
+  const dmgDir = resolveMacosDmgDir(configDir, config);
+  await mkdir(dmgDir, { recursive: true });
+
+  const configuredFile = config.macos?.currentDmgFile?.trim();
+  if (configuredFile) {
+    const filePath = path.join(dmgDir, path.basename(configuredFile));
+    try {
+      const fileStat = await stat(filePath);
+      if (!fileStat.isFile()) return null;
+      return {
+        fileName: path.basename(filePath),
+        filePath,
+        size: fileStat.size,
+        updatedAt: fileStat.mtime.toISOString(),
+        version: extractMacosDmgVersion(path.basename(filePath)),
+        downloadUrl: "/macos/download",
+        source: "local",
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const entries = await readdir(dmgDir, { withFileTypes: true });
+  const dmgFiles = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".dmg"));
+  if (dmgFiles.length === 0) return null;
+
+  const candidates = await Promise.all(dmgFiles.map(async (entry) => {
+    const filePath = path.join(dmgDir, entry.name);
+    const fileStat = await stat(filePath);
+    return {
+      entry,
+      filePath,
+      fileStat,
+    };
+  }));
+  candidates.sort((a, b) => b.fileStat.mtimeMs - a.fileStat.mtimeMs);
+  const selected = candidates[0];
+  return {
+    fileName: selected.entry.name,
+    filePath: selected.filePath,
+    size: selected.fileStat.size,
+    updatedAt: selected.fileStat.mtime.toISOString(),
+    version: extractMacosDmgVersion(selected.entry.name),
+    downloadUrl: "/macos/download",
     source: "local",
   };
 }
@@ -945,6 +1099,47 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     createReadStream(androidApk.filePath).pipe(res);
   });
 
+  // ── macOS DMG update & download (no auth required) ──
+
+  app.get("/api/macos-dmg-update", async (req, res) => {
+    const currentVersion = (req.query.currentVersion as string)?.trim();
+    if (!currentVersion) {
+      res.status(400).json({ error: "Missing currentVersion query parameter." });
+      return;
+    }
+    const latest = await resolveLatestDmgVersion(configDir, config);
+    if (!latest) {
+      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null });
+      return;
+    }
+    const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
+    res.json({
+      updateAvailable,
+      currentVersion,
+      latestVersion: latest.version,
+      downloadUrl: updateAvailable ? latest.downloadUrl : null,
+      fileName: updateAvailable ? latest.fileName : null,
+      size: updateAvailable ? latest.size : null,
+      source: latest.source,
+    });
+  });
+
+  app.get("/macos/download", async (_req, res) => {
+    if (config.macos?.enabled !== true) {
+      res.status(404).json({ error: "macOS DMG 下载未启用。" });
+      return;
+    }
+    const macosDmg = await resolveMacosDmgAsset(configDir, config);
+    if (!macosDmg) {
+      res.status(404).json({ error: "当前没有可下载的 DMG 文件。" });
+      return;
+    }
+    res.setHeader("Content-Type", "application/x-apple-diskimage");
+    res.setHeader("Content-Length", String(macosDmg.size));
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(macosDmg.fileName)}"`);
+    createReadStream(macosDmg.filePath).pipe(res);
+  });
+
   app.use("/api", requireAuth);
 
   // ── Config & Session info ──
@@ -987,6 +1182,14 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       : ghApk
         ? { hasApk: true, fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, updatedAt: null, downloadUrl: ghApk.downloadUrl, source: "github" as const }
         : null;
+    const localDmg = await resolveMacosDmgAsset(configDir, config);
+    const ghDmg = await fetchGitHubLatestDmg();
+    const dmgDir = resolveMacosDmgDir(configDir, config);
+    const resolvedDmg = localDmg
+      ? { hasDmg: true, fileName: localDmg.fileName, version: localDmg.version, size: localDmg.size, updatedAt: localDmg.updatedAt, downloadUrl: localDmg.downloadUrl, source: "local" as const }
+      : ghDmg
+        ? { hasDmg: true, fileName: ghDmg.fileName, version: ghDmg.version, size: ghDmg.size, updatedAt: null, downloadUrl: ghDmg.downloadUrl, source: "github" as const }
+        : null;
     res.json({
       version: PKG_VERSION,
       packageName: PKG_NAME,
@@ -999,6 +1202,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       autoUpdate: {
         web: storage.getConfigValue("autoUpdateWeb") === "true",
         apk: storage.getConfigValue("autoUpdateApk") === "true",
+        dmg: storage.getConfigValue("autoUpdateDmg") === "true",
       },
       androidApk: {
         enabled: config.android?.enabled === true,
@@ -1012,6 +1216,19 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         source: resolvedApk?.source ?? null,
         local: localApk ? { fileName: localApk.fileName, version: localApk.version, size: localApk.size, updatedAt: localApk.updatedAt, downloadUrl: localApk.downloadUrl } : null,
         github: ghApk ? { fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, downloadUrl: ghApk.downloadUrl } : null,
+      },
+      macosDmg: {
+        enabled: config.macos?.enabled === true,
+        dmgDir,
+        hasDmg: resolvedDmg?.hasDmg ?? false,
+        fileName: resolvedDmg?.fileName ?? null,
+        version: resolvedDmg?.version ?? null,
+        size: resolvedDmg?.size ?? null,
+        updatedAt: resolvedDmg?.updatedAt ?? null,
+        downloadUrl: resolvedDmg?.downloadUrl ?? null,
+        source: resolvedDmg?.source ?? null,
+        local: localDmg ? { fileName: localDmg.fileName, version: localDmg.version, size: localDmg.size, updatedAt: localDmg.updatedAt, downloadUrl: localDmg.downloadUrl } : null,
+        github: ghDmg ? { fileName: ghDmg.fileName, version: ghDmg.version, size: ghDmg.size, downloadUrl: ghDmg.downloadUrl } : null,
       },
     });
   });
@@ -1037,6 +1254,30 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       source: resolvedApk?.source ?? null,
       local: localApk ? { fileName: localApk.fileName, version: localApk.version, size: localApk.size, updatedAt: localApk.updatedAt, downloadUrl: localApk.downloadUrl } : null,
       github: ghApk ? { fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, downloadUrl: ghApk.downloadUrl } : null,
+    });
+  });
+
+  app.get("/api/macos-dmg", async (_req, res) => {
+    const localDmg = await resolveMacosDmgAsset(configDir, config);
+    const ghDmg = await fetchGitHubLatestDmg();
+    const dmgDir = resolveMacosDmgDir(configDir, config);
+    const resolvedDmg = localDmg
+      ? { hasDmg: true, fileName: localDmg.fileName, version: localDmg.version, size: localDmg.size, updatedAt: localDmg.updatedAt, downloadUrl: localDmg.downloadUrl, source: "local" as const }
+      : ghDmg
+        ? { hasDmg: true, fileName: ghDmg.fileName, version: ghDmg.version, size: ghDmg.size, updatedAt: null, downloadUrl: ghDmg.downloadUrl, source: "github" as const }
+        : null;
+    res.json({
+      enabled: config.macos?.enabled === true,
+      dmgDir,
+      hasDmg: resolvedDmg?.hasDmg ?? false,
+      fileName: resolvedDmg?.fileName ?? null,
+      version: resolvedDmg?.version ?? null,
+      size: resolvedDmg?.size ?? null,
+      updatedAt: resolvedDmg?.updatedAt ?? null,
+      downloadUrl: resolvedDmg?.downloadUrl ?? null,
+      source: resolvedDmg?.source ?? null,
+      local: localDmg ? { fileName: localDmg.fileName, version: localDmg.version, size: localDmg.size, updatedAt: localDmg.updatedAt, downloadUrl: localDmg.downloadUrl } : null,
+      github: ghDmg ? { fileName: ghDmg.fileName, version: ghDmg.version, size: ghDmg.size, downloadUrl: ghDmg.downloadUrl } : null,
     });
   });
 
@@ -1886,20 +2127,25 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   app.get("/api/auto-update", (_req, res) => {
     const web = storage.getConfigValue("autoUpdateWeb") === "true";
     const apk = storage.getConfigValue("autoUpdateApk") === "true";
-    res.json({ web, apk });
+    const dmg = storage.getConfigValue("autoUpdateDmg") === "true";
+    res.json({ web, apk, dmg });
   });
 
   app.post("/api/auto-update", express.json(), (req, res) => {
-    const { web, apk } = req.body as { web?: boolean; apk?: boolean };
+    const { web, apk, dmg } = req.body as { web?: boolean; apk?: boolean; dmg?: boolean };
     if (typeof web === "boolean") {
       storage.setConfigValue("autoUpdateWeb", String(web));
     }
     if (typeof apk === "boolean") {
       storage.setConfigValue("autoUpdateApk", String(apk));
     }
+    if (typeof dmg === "boolean") {
+      storage.setConfigValue("autoUpdateDmg", String(dmg));
+    }
     res.json({
       web: storage.getConfigValue("autoUpdateWeb") === "true",
       apk: storage.getConfigValue("autoUpdateApk") === "true",
+      dmg: storage.getConfigValue("autoUpdateDmg") === "true",
     });
   });
 

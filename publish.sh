@@ -34,6 +34,18 @@ echo "==> 编译 Android APK (v$VERSION)..."
 cp android/app/build/outputs/apk/debug/app-debug.apk "$APK_DIR/wand-v${VERSION}.apk"
 echo "==> APK 已部署到 $APK_DIR/wand-v${VERSION}.apk"
 
+# 编译 macOS DMG（仅在 macOS 上能跑；非 macOS 跳过，由 GitHub Actions 在 push tag 时构建）
+if [[ "$(uname)" == "Darwin" ]]; then
+  DMG_DIR="$HOME/.wand/macos"
+  mkdir -p "$DMG_DIR"
+  echo "==> 编译 macOS DMG (v$VERSION)..."
+  (cd macos && ./build.sh "$VERSION")
+  cp "macos/dist/wand-v${VERSION}.dmg" "$DMG_DIR/wand-v${VERSION}.dmg"
+  echo "==> DMG 已部署到 $DMG_DIR/wand-v${VERSION}.dmg"
+else
+  echo "==> 当前系统非 macOS，跳过 DMG 构建（push tag 后 GitHub Actions 会自动构建并发布到 Release）"
+fi
+
 # 发布
 echo "==> 发布 @co0ontty/wand@$VERSION 到 NPM..."
 npm publish --access public

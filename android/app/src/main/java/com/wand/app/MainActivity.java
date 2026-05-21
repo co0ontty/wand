@@ -251,7 +251,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             versionName = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception ignored) {}
-        settings.setUserAgentString(settings.getUserAgentString() + " WandApp/" + versionName);
+        settings.setUserAgentString(settings.getUserAgentString() + " WandApp/" + versionName + " WandPlatform/Android");
 
         // Enable cookies
         CookieManager cookieManager = CookieManager.getInstance();

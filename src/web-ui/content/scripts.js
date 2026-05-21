@@ -123,6 +123,9 @@
         sidebarPinned: (function() {
           try { return localStorage.getItem("wand-sidebar-pinned") === "true"; } catch (e) { return false; }
         })(),
+        sidebarCollapsed: (function() {
+          try { return localStorage.getItem("wand-sidebar-collapsed") === "true"; } catch (e) { return false; }
+        })(),
         modalOpen: false,
         presetValue: "",
         cwdValue: "",
@@ -1177,6 +1180,10 @@
               if (_apkVersion) {
                 checkApkAutoUpdate();
               }
+              // macOS DMG auto-update check on startup
+              if (_macAppVersion) {
+                checkDmgAutoUpdate();
+              }
               if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
                 loadClaudeHistory();
               }
@@ -1420,6 +1427,9 @@
                   '</div>' +
                   '<button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? ' pinned' : '') + '" type="button" title="' + (state.sidebarPinned ? '取消固定侧栏' : '固定侧栏') + '">' +
                     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg>' +
+                  '</button>' +
+                  '<button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle" type="button" title="收起为窄条" aria-label="收起为窄条">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>' +
                   '</button>' +
                   '<button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="关闭菜单"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                 '</div>' +
@@ -2636,6 +2646,40 @@
                     '</label>' +
                   '</div>' +
                   '<p id="android-apk-message" class="hint hidden"></p>' +
+                '</div>' +
+                '<div class="settings-update-section hidden" id="macos-dmg-section">' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">🖥️</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">macOS App</h4>' +
+                      '<p class="settings-section-sub">原生客户端版本与 DMG 下载</p>' +
+                    '</div>' +
+                  '</div>' +
+                  '<div id="macos-dmg-current-row" class="settings-about-row hidden">' +
+                    '<span class="settings-label">当前版本</span>' +
+                    '<span class="settings-value" id="settings-macos-dmg-current">-</span>' +
+                  '</div>' +
+                  '<div id="macos-dmg-github-row" class="settings-about-row settings-about-row-action hidden">' +
+                    '<span class="settings-label">线上版本</span>' +
+                    '<span class="settings-value settings-value-flex" id="settings-macos-dmg-github">-</span>' +
+                    '<button id="download-github-dmg-btn" class="btn btn-secondary btn-sm hidden" type="button">下载</button>' +
+                  '</div>' +
+                  '<div id="macos-dmg-local-row" class="settings-about-row settings-about-row-action hidden">' +
+                    '<span class="settings-label">本地版本</span>' +
+                    '<span class="settings-value settings-value-flex" id="settings-macos-dmg-local">-</span>' +
+                    '<button id="download-local-dmg-btn" class="btn btn-secondary btn-sm hidden" type="button">下载</button>' +
+                  '</div>' +
+                  '<div id="macos-auto-update-row" class="settings-toggle-row hidden">' +
+                    '<div class="settings-toggle-text">' +
+                      '<span class="settings-toggle-title">自动更新</span>' +
+                      '<span class="settings-toggle-desc" id="macos-auto-update-hint">检测到新版 DMG 将自动下载并挂载。</span>' +
+                    '</div>' +
+                    '<label class="settings-switch">' +
+                      '<input type="checkbox" id="auto-update-dmg-toggle" class="switch-toggle">' +
+                      '<span class="switch-slider"></span>' +
+                    '</label>' +
+                  '</div>' +
+                  '<p id="macos-dmg-message" class="hint hidden"></p>' +
                 '</div>' +
                 '<div class="settings-update-section" id="android-connect-section">' +
                   '<div class="settings-section-head">' +
@@ -5577,6 +5621,10 @@
         if (autoUpdateApkToggle) autoUpdateApkToggle.addEventListener("change", function() {
           toggleAutoUpdate("apk", autoUpdateApkToggle.checked);
         });
+        var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle");
+        if (autoUpdateDmgToggle) autoUpdateDmgToggle.addEventListener("change", function() {
+          toggleAutoUpdate("dmg", autoUpdateDmgToggle.checked);
+        });
         var copyConnectCodeBtn = document.getElementById("copy-connect-code-button");
         if (copyConnectCodeBtn) copyConnectCodeBtn.addEventListener("click", function() {
           var text = document.getElementById("android-connect-code");
@@ -7276,7 +7324,13 @@
           var delta = normalizedOutput.slice(currentOutput.length);
           if (delta) {
             wandTerminalWrite(state.terminal, delta);
-            maybeScheduleResyncForChunk(delta);
+            // 不在流式 chunk 路径触发 softResyncTerminal —— resync 会
+            // resetTerminal() + 完整重放整段 buffer，重放期间所有 cursor-home
+            // + 重画序列把"被覆盖的中间帧"反复塞进 main-screen scrollback，
+            // 表现为 PTY 视图里同一段回答被画 N 遍（PC 端列宽大、Claude TUI
+            // 重画序列密集时最严重）。响应结束的 thinking→idle 边界已经做了
+            // 一次 softResync 兜底，足以清掉流式残留的错位光标 DOM；流式
+            // 过程中持续重放只是纯粹的重复制造器。
             wrote = true;
           }
         } else if (currentOutput && currentOutput.startsWith(normalizedOutput)) {
@@ -9219,6 +9273,8 @@
             if (autoUpdateWebToggle) autoUpdateWebToggle.checked = !!autoUpdate.web;
             var autoUpdateApkToggle = document.getElementById("auto-update-apk-toggle");
             if (autoUpdateApkToggle) autoUpdateApkToggle.checked = !!autoUpdate.apk;
+            var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle");
+            if (autoUpdateDmgToggle) autoUpdateDmgToggle.checked = !!autoUpdate.dmg;
 
             // ── Android APK version display ──
             var apkSection = document.getElementById("android-apk-section");
@@ -9335,6 +9391,119 @@
               if (!androidApk.github && !androidApk.local && apkMessageEl) {
                 apkMessageEl.textContent = "暂未提供";
                 apkMessageEl.classList.remove("hidden");
+              }
+            }
+
+            // ── macOS DMG version display ──
+            var dmgSection = document.getElementById("macos-dmg-section");
+            var dmgCurrentRow = document.getElementById("macos-dmg-current-row");
+            var dmgCurrentEl = document.getElementById("settings-macos-dmg-current");
+            var dmgGithubRow = document.getElementById("macos-dmg-github-row");
+            var dmgGithubEl = document.getElementById("settings-macos-dmg-github");
+            var dmgGithubBtn = document.getElementById("download-github-dmg-btn");
+            var dmgLocalRow = document.getElementById("macos-dmg-local-row");
+            var dmgLocalEl = document.getElementById("settings-macos-dmg-local");
+            var dmgLocalBtn = document.getElementById("download-local-dmg-btn");
+            var dmgMessageEl = document.getElementById("macos-dmg-message");
+            var macosDmg = data.macosDmg || {};
+            var isInMacApp = !!_macAppVersion;
+            var hasDmgInfo = isInMacApp || !!macosDmg.github || !!macosDmg.local;
+            if (dmgSection) {
+              if (hasDmgInfo) dmgSection.classList.remove("hidden");
+              else dmgSection.classList.add("hidden");
+            }
+
+            if (isInMacApp) {
+              // ── macOS 壳内：显示当前版本 + 线上 + 本地 + 下载安装按钮 ──
+              if (dmgCurrentRow && dmgCurrentEl) {
+                dmgCurrentEl.textContent = "v" + _macAppVersion;
+                dmgCurrentRow.classList.remove("hidden");
+              }
+              if (macosDmg.github && dmgGithubRow && dmgGithubEl) {
+                var dghLabel = macosDmg.github.version ? ("v" + macosDmg.github.version) : macosDmg.github.fileName;
+                if (typeof macosDmg.github.size === "number") dghLabel += " · " + formatBytes(macosDmg.github.size);
+                dmgGithubEl.textContent = dghLabel;
+                dmgGithubRow.classList.remove("hidden");
+                if (dmgGithubBtn) {
+                  dmgGithubBtn.textContent = "下载安装";
+                  dmgGithubBtn.classList.remove("hidden");
+                  dmgGithubBtn.onclick = function() {
+                    try {
+                      WandNative.downloadUpdate(macosDmg.github.downloadUrl, macosDmg.github.fileName || "wand-update.dmg", "github");
+                    } catch (e) {
+                      if (typeof window.wandAlert === "function") {
+                        window.wandAlert("调用下载失败: " + e.message, { type: "danger", title: "下载失败" });
+                      } else if (typeof showToast === "function") {
+                        showToast("调用下载失败: " + e.message, "error");
+                      } else {
+                        alert("调用下载失败: " + e.message);
+                      }
+                    }
+                  };
+                }
+              }
+              if (macosDmg.local && dmgLocalRow && dmgLocalEl) {
+                var dlcLabel = macosDmg.local.version ? ("v" + macosDmg.local.version) : macosDmg.local.fileName;
+                if (typeof macosDmg.local.size === "number") dlcLabel += " · " + formatBytes(macosDmg.local.size);
+                dmgLocalEl.textContent = dlcLabel;
+                dmgLocalRow.classList.remove("hidden");
+                if (dmgLocalBtn) {
+                  dmgLocalBtn.textContent = "下载安装";
+                  dmgLocalBtn.classList.remove("hidden");
+                  dmgLocalBtn.onclick = function() {
+                    try {
+                      WandNative.downloadUpdate(macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", "local");
+                    } catch (e) {
+                      if (typeof window.wandAlert === "function") {
+                        window.wandAlert("调用下载失败: " + e.message, { type: "danger", title: "下载失败" });
+                      } else if (typeof showToast === "function") {
+                        showToast("调用下载失败: " + e.message, "error");
+                      } else {
+                        alert("调用下载失败: " + e.message);
+                      }
+                    }
+                  };
+                }
+              }
+              if (!macosDmg.github && !macosDmg.local && dmgMessageEl) {
+                dmgMessageEl.textContent = "暂无可用更新";
+                dmgMessageEl.classList.remove("hidden");
+              }
+              var dmgAutoRow = document.getElementById("macos-auto-update-row");
+              var dmgAutoHint = document.getElementById("macos-auto-update-hint");
+              if (dmgAutoRow) dmgAutoRow.classList.remove("hidden");
+              if (dmgAutoHint) dmgAutoHint.classList.remove("hidden");
+            } else {
+              // ── 浏览器模式：仅展示下载入口 ──
+              if (macosDmg.github && dmgGithubRow && dmgGithubEl) {
+                var dghLabel2 = macosDmg.github.version ? ("v" + macosDmg.github.version) : macosDmg.github.fileName;
+                if (typeof macosDmg.github.size === "number") dghLabel2 += " · " + formatBytes(macosDmg.github.size);
+                dmgGithubEl.textContent = dghLabel2;
+                dmgGithubRow.classList.remove("hidden");
+                if (dmgGithubBtn) {
+                  dmgGithubBtn.textContent = "下载";
+                  dmgGithubBtn.classList.remove("hidden");
+                  dmgGithubBtn.onclick = function() {
+                    window.open(macosDmg.github.downloadUrl, "_blank");
+                  };
+                }
+              }
+              if (macosDmg.local && dmgLocalRow && dmgLocalEl) {
+                var dlcLabel2 = macosDmg.local.version ? ("v" + macosDmg.local.version) : macosDmg.local.fileName;
+                if (typeof macosDmg.local.size === "number") dlcLabel2 += " · " + formatBytes(macosDmg.local.size);
+                dmgLocalEl.textContent = dlcLabel2;
+                dmgLocalRow.classList.remove("hidden");
+                if (dmgLocalBtn) {
+                  dmgLocalBtn.textContent = "下载";
+                  dmgLocalBtn.classList.remove("hidden");
+                  dmgLocalBtn.onclick = function() {
+                    window.open(macosDmg.local.downloadUrl, "_self");
+                  };
+                }
+              }
+              if (!macosDmg.github && !macosDmg.local && dmgMessageEl) {
+                dmgMessageEl.textContent = "暂未提供";
+                dmgMessageEl.classList.remove("hidden");
               }
             }
 
@@ -9707,6 +9876,24 @@
           .catch(function() {});
       }
 
+      function checkDmgAutoUpdate() {
+        if (!_macAppVersion) return;
+        fetch("/api/auto-update", { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(autoData) {
+            if (!autoData.dmg) return;
+            return fetch("/api/macos-dmg-update?currentVersion=" + encodeURIComponent(_macAppVersion), { credentials: "same-origin" })
+              .then(function(res) { return res.json(); })
+              .then(function(data) {
+                if (!data.updateAvailable || !data.downloadUrl) return;
+                try {
+                  WandNative.downloadUpdate(data.downloadUrl, data.fileName || "wand-update.dmg", data.source || "local");
+                } catch (_e) {}
+              });
+          })
+          .catch(function() {});
+      }
+
       function toggleAutoUpdate(type, enabled) {
         var body = {};
         body[type] = enabled;
@@ -9721,8 +9908,10 @@
           // Sync toggle state with server response
           var webToggle = document.getElementById("auto-update-web-toggle");
           var apkToggle = document.getElementById("auto-update-apk-toggle");
+          var dmgToggle = document.getElementById("auto-update-dmg-toggle");
           if (webToggle) webToggle.checked = !!data.web;
           if (apkToggle) apkToggle.checked = !!data.apk;
+          if (dmgToggle) dmgToggle.checked = !!data.dmg;
         })
         .catch(function() {
           // Revert toggle on failure
@@ -13906,6 +14095,13 @@
           // reconnect path while we're already starting a fresh one.
           try { stale.onclose = null; } catch (e) { /* ignore */ }
           try { stale.onerror = null; } catch (e) { /* ignore */ }
+          // 也清掉 onmessage：close() 是异步的，TCP RST/Close 帧到达之前，浏览器
+          // socket 缓冲区里可能还有几条 in-flight 帧没派发。一旦它们在新 ws 已
+          // open + init 之后再触发，老 ws 的 output 会被 handleWebSocketMessage
+          // 当成"新增量"写进 wterm，造成"刚才那段又被画了一遍"。stale 心跳触发
+          // 的 force reconnect 比 onclose 触发更早，老 ws 仍处于 OPEN，这个窗口
+          // 更宽，必须显式 detach。
+          try { stale.onmessage = null; } catch (e) { /* ignore */ }
           try { stale.close(); } catch (e) { /* ignore */ }
           state.ws = null;
         }
@@ -14171,7 +14367,9 @@
                 // 变化的视觉错位无法被自愈，直到用户手动改窗口才修。现在让
                 // wterm 内部 ResizeObserver 独占 cols 跟踪职责。
                 wandTerminalWrite(state.terminal, msg.data.chunk);
-                maybeScheduleResyncForChunk(msg.data.chunk);
+                // 同 syncTerminalBuffer 的 delta 分支：流式 chunk 不再触发
+                // softResyncTerminal，避免完整重放把 cursor-home + 重画的
+                // "被覆盖中间帧"反复塞进 scrollback。thinking→idle 兜底就够了。
                 state.terminalSessionId = msg.sessionId;
                 if (msg.data.output) {
                   state.terminalOutput = clampClientTerminalOutput(normalizeTerminalOutput(msg.data.output));
@@ -14307,10 +14505,24 @@
               renderChat(true);
               updateTaskDisplay();
               updateApprovalStats();
-              // 订阅返回的是服务端 ring buffer 最新窗口，与客户端 terminalOutput
-              // 可能不连续。强制 replace（reset + 按当前 cols 重写）是订阅时唯一
-              // 可信的全量基线，避免 append 的 prefix 检查走错分支。
-              updateTerminalOutput(msg.data.output || "", msg.sessionId, "replace");
+              // 服务端 ring buffer 在多数场景下是当前已渲染输出的严格 superset
+              // （同一 PTY，buffer 只增不减）。这种情况下走 append delta 就够了，
+              // 不应该强制 replace。replace 会触发 resetTerminal + 全量重放整段
+              // output，wterm 把 ANSI cursor-home 重画的"中间帧"全部塞进
+              // scrollback，造成"同一段回答在 PTY 视图里被画 N 遍"——尤其是
+              // 锁屏 / 切回前台 / 心跳 stale 触发 reconnect 时，每次 init 都重放
+              // 一次，累积重复非常显著。
+              //
+              // 只有真的不连续（会话切换、ring buffer 截断了头部、output 不是
+              // currentOutput 的严格前缀延伸）才回退到 replace 的全量基线。
+              var initOutput = msg.data.output || "";
+              var sameTerminalSession = state.terminalSessionId === msg.sessionId;
+              var currTerminalOutput = state.terminalOutput || "";
+              var canAppendDelta = sameTerminalSession
+                && currTerminalOutput.length > 0
+                && initOutput.length >= currTerminalOutput.length
+                && initOutput.startsWith(currTerminalOutput);
+              updateTerminalOutput(initOutput, msg.sessionId, canAppendDelta ? "append" : "replace");
               // wterm 启动 cols=120，replace 写入可能落在错的列宽上；ResizeObserver
               // 回调异步，用 fit-with-retry 兜一次确保按真实宽度重排。
               ensureTerminalFitWithRetry("init");
@@ -17805,11 +18017,43 @@
 
       // ── Browser Notification API ──
 
+      // macOS WKWebView shim: Android shell injects a global WandNative via
+      // addJavascriptInterface, but WKWebView only exposes
+      // webkit.messageHandlers.<name>.postMessage(...). To keep call-sites
+      // identical across platforms, we synthesize a WandNative-shaped object
+      // when running inside the macOS shell.
+      try {
+        var _macUaMatch = navigator.userAgent.match(/WandPlatform\/macOS/);
+        var _macHandler = (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.wandNative) || null;
+        if (_macUaMatch && _macHandler && typeof window.WandNative === "undefined") {
+          window.WandNative = {
+            // Only downloadUpdate is wired for now; other Android-specific
+            // methods (notifications, haptics, screen wake) intentionally
+            // omitted so feature detection falls back to web APIs on macOS.
+            downloadUpdate: function(url, fileName, source) {
+              try {
+                _macHandler.postMessage({
+                  type: "downloadUpdate",
+                  url: String(url || ""),
+                  fileName: String(fileName || "wand-update.dmg"),
+                  source: String(source || "local"),
+                });
+              } catch (_e) {}
+            },
+          };
+        }
+      } catch (_e) {}
+
       // Detect Android APK native bridge
       var _hasNativeBridge = typeof WandNative !== "undefined" && typeof WandNative.sendNotification === "function";
-      // Detect if running inside APK and extract installed version from User-Agent
-      var _apkVersionMatch = navigator.userAgent.match(/WandApp\/([^\s]+)/);
-      var _apkVersion = _apkVersionMatch ? _apkVersionMatch[1] : null;
+      // Extract WandApp/<version> from User-Agent (set by both Android and macOS shells).
+      // We distinguish platforms by the additional WandPlatform/<name> token —
+      // macOS UA ends with "WandApp/X WandPlatform/macOS".
+      var _wandAppMatch = navigator.userAgent.match(/WandApp\/([^\s]+)/);
+      var _isMacApp = /WandPlatform\/macOS/.test(navigator.userAgent);
+      var _isAndroidApp = !!_wandAppMatch && !_isMacApp;
+      var _apkVersion = (_wandAppMatch && _isAndroidApp) ? _wandAppMatch[1] : null;
+      var _macAppVersion = (_wandAppMatch && _isMacApp) ? _wandAppMatch[1] : null;
 
       function _vibrate(pattern) {
         if (!_hasNativeBridge || typeof WandNative.vibrate !== "function") return;

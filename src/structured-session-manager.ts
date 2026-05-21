@@ -1441,25 +1441,33 @@ export class StructuredSessionManager {
           blocksByKey.set(key, blocks);
           return;
         }
-        // claude -p 在同一 message.id 的多次 assistant 事件里**应当**每次发出累加内容。
-        // 但偶发会观察到某次重发只带其中一部分 block（典型场景：text 后又开始一段
-        // tool_use，下一帧 text 字段意外为空字符串），导致先前已渲染的文本被覆盖
-        // 为空——刷新页面后从持久化又恢复出来，就是用户反馈的"显示了又消失"。
-        // 这里按 index 逐块取较"重"的版本，类型一致则取信息量大者，否则信任 incoming
-        // 但**绝不**让 incoming 比 prev 的总块数少（短数组拼接 prev 的尾部）。
+        // claude -p 在同一 message.id 的多次 assistant 事件里是**累积**协议：
+        // 每次 event 的 content 总是包含之前所有 blocks + 可能的新 block，
+        // 长度只增不减、同位置类型不变。两条额外的防御性规则：
+        //
+        // 1) blocks.length < prev.length —— 短数组覆盖。上游异常 frame，直接拒绝
+        //    本次更新，下一帧正常累积 emit 会自然修正。
+        //
+        // 2) 同 index 类型不一致 —— 比如 prev[0]=text 而 incoming[0]=tool_use。
+        //    正常累积下不会发生；一旦发生，**保留 prev[i]**。早期版本走"取
+        //    volume 大者"，会让 tool_use（input JSON 通常更长）抢占 text 位，
+        //    导致流式过程中已经渲染的文字突然消失，只剩工具卡片——直到 result
+        //    event 给出最终 turnState.result，compactContentBlocks 的 fallback
+        //    才补回 text。用户反馈"文字消失，回复完成后又出现"就是这条路径。
+        if (blocks.length < prev.length) return;
         const merged: ContentBlock[] = [];
-        const maxLen = Math.max(prev.length, blocks.length);
-        for (let i = 0; i < maxLen; i++) {
+        for (let i = 0; i < blocks.length; i++) {
           const a = prev[i];
           const b = blocks[i];
           if (a && !b) { merged.push(a); continue; }
           if (!a && b) { merged.push(b); continue; }
           if (a && b) {
             if (a.type === b.type) {
+              // 同类型：取信息量大者，避免短回退覆盖已经累积的内容。
               merged.push(blockVolume(b) >= blockVolume(a) ? b : a);
             } else {
-              // 类型变了（极少见，多半是上游 bug）——保留信息量大者，不丢字。
-              merged.push(blockVolume(b) >= blockVolume(a) ? b : a);
+              // 类型变了：保留 prev，不让 tool_use 等抢占 text 位。
+              merged.push(a);
             }
           }
         }

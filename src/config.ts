@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, StructuredChatPersonaConfig, WandConfig } from "./types.js";
+import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 type StructuredRunnerOption = WandConfig["structuredRunner"];
 
@@ -52,6 +52,7 @@ export const defaultConfig = (): WandConfig => ({
   shortcutLogMaxBytes: 10 * 1024 * 1024,
   language: "",
   android: defaultAndroidApkConfig(),
+  macos: defaultMacosDmgConfig(),
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
   structuredRunner: "cli" as StructuredRunnerOption,
@@ -325,6 +326,29 @@ function normalizeAndroidApkConfig(input: unknown): AndroidApkConfig | undefined
   };
 }
 
+function defaultMacosDmgConfig(): MacosDmgConfig {
+  return {
+    enabled: false,
+    dmgDir: "macos",
+    currentDmgFile: "",
+  };
+}
+
+function normalizeMacosDmgConfig(input: unknown): MacosDmgConfig | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const defaults = defaultMacosDmgConfig();
+  const macosInput = input as Record<string, unknown>;
+  return {
+    enabled: typeof macosInput.enabled === "boolean" ? macosInput.enabled : defaults.enabled,
+    dmgDir: typeof macosInput.dmgDir === "string" && macosInput.dmgDir.trim()
+      ? macosInput.dmgDir.trim()
+      : defaults.dmgDir,
+    currentDmgFile: typeof macosInput.currentDmgFile === "string"
+      ? macosInput.currentDmgFile.trim()
+      : defaults.currentDmgFile,
+  };
+}
+
 function normalizeStructuredChatPersona(input: unknown): StructuredChatPersonaConfig | undefined {
   if (!input || typeof input !== "object") return undefined;
 
@@ -387,6 +411,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
       ? input.appSecret
       : crypto.randomBytes(32).toString("hex"),
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
+    macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
     structuredRunner: (input.structuredRunner === "sdk" || input.structuredRunner === "cli") ? input.structuredRunner : defaults.structuredRunner,
