@@ -1377,6 +1377,7 @@
               '<div class="login-subtitle">在浏览器中运行本机终端</div>' +
             '</div>' +
             '<form id="login-form" class="login-body" autocomplete="on">' +
+              '<input type="text" name="username" autocomplete="username" value="wand" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" readonly />' +
               '<p class="login-hint">输入 Wand 访问密码以进入控制台。</p>' +
               '<div class="field">' +
                 '<label class="field-label" for="password">密码</label>' +
@@ -2954,19 +2955,22 @@
                       '<p class="settings-card-desc">至少 6 个字符；保存后下次登录生效。</p>' +
                     '</div>' +
                   '</div>' +
-                  '<div class="field">' +
-                    '<label class="field-label" for="new-password">新密码</label>' +
-                    '<input id="new-password" type="password" class="field-input" placeholder="输入新密码（至少 6 个字符）" autocomplete="new-password" />' +
-                  '</div>' +
-                  '<div class="field">' +
-                    '<label class="field-label" for="confirm-password">确认密码</label>' +
-                    '<input id="confirm-password" type="password" class="field-input" placeholder="再次输入新密码" autocomplete="new-password" />' +
-                  '</div>' +
-                  '<div class="settings-card-actions">' +
-                    '<button id="save-password-button" class="btn btn-primary">保存密码</button>' +
-                  '</div>' +
-                  '<p id="settings-error" class="error-message hidden"></p>' +
-                  '<p id="settings-success" class="hint settings-success-message hidden"></p>' +
+                  '<form id="change-password-form" autocomplete="on" onsubmit="return false;">' +
+                    '<input type="text" name="username" autocomplete="username" value="wand" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" readonly />' +
+                    '<div class="field">' +
+                      '<label class="field-label" for="new-password">新密码</label>' +
+                      '<input id="new-password" type="password" class="field-input" placeholder="输入新密码（至少 6 个字符）" autocomplete="new-password" />' +
+                    '</div>' +
+                    '<div class="field">' +
+                      '<label class="field-label" for="confirm-password">确认密码</label>' +
+                      '<input id="confirm-password" type="password" class="field-input" placeholder="再次输入新密码" autocomplete="new-password" />' +
+                    '</div>' +
+                    '<div class="settings-card-actions">' +
+                      '<button id="save-password-button" class="btn btn-primary" type="submit">保存密码</button>' +
+                    '</div>' +
+                    '<p id="settings-error" class="error-message hidden"></p>' +
+                    '<p id="settings-success" class="hint settings-success-message hidden"></p>' +
+                  '</form>' +
                 '</div>' +
                 '<div class="settings-card">' +
                   '<div class="settings-card-head">' +
@@ -13994,6 +13998,9 @@
       function sendTerminalResize(cols, rows) {
         if (!state.selectedId) return;
         var selectedSess = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        // 会话已被清除（如服务重启后 localStorage 还残留旧 id），后端 resize 会
+        // 直接 400/404，console 留一条红色错误；这里提前剪掉，避免噪音。
+        if (!selectedSess || selectedSess.status !== "running") return;
         if (isStructuredSession(selectedSess)) return;
         var nextSize = { cols: cols, rows: rows };
         if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
