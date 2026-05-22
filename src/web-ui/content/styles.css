@@ -627,9 +627,6 @@
     .sidebar-collapse-toggle.collapsed {
       color: var(--primary);
     }
-    .sidebar:not(.pinned) .sidebar-collapse-toggle {
-      display: none;
-    }
 
     /* ===== 图钉按钮 ===== */
     .sidebar-pin-toggle {
@@ -8020,6 +8017,7 @@
     .sidebar-pin-toggle.pinned {
       background: rgba(197, 101, 61, 0.12);
       color: var(--accent);
+      transform: rotate(45deg);
     }
 
     /* Drawer close — same pattern as modal-close (rotate + danger tint) */

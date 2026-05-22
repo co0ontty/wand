@@ -8694,7 +8694,15 @@
 
       function toggleSidebarCollapsed() {
         if (isMobileLayout()) return;
-        if (!state.sidebarPinned) return;
+        // 在 drawer 模式（未 pin）下点 collapse 视为「先固定、再收起为窄条」——
+        // 用户直觉是「点了就该看到窄条」，过去这里 early return 让按钮看上去没反应。
+        if (!state.sidebarPinned) {
+          state.sidebarPinned = true;
+          state.sessionsDrawerOpen = true;
+          try {
+            localStorage.setItem("wand-sidebar-pinned", "true");
+          } catch (e) {}
+        }
         state.sidebarCollapsed = !state.sidebarCollapsed;
         try {
           localStorage.setItem("wand-sidebar-collapsed", String(state.sidebarCollapsed));
