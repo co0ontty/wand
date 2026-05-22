@@ -530,20 +530,13 @@
     }
     .sidebar.pinned.collapsed .sidebar-header-main,
     .sidebar.pinned.collapsed .sidebar-header-more,
+    .sidebar.pinned.collapsed .sidebar-pin-toggle,
     .sidebar.pinned.collapsed .sidebar-footer {
       display: none;
     }
     .sidebar.pinned.collapsed .sidebar-header-actions {
-      gap: 4px;
+      gap: 0;
       width: 100%;
-      flex-direction: column;
-      justify-content: flex-start;
-      align-items: center;
-    }
-    .sidebar.pinned.collapsed .sidebar-pin-toggle {
-      width: 36px;
-      height: 32px;
-      padding: 0;
       justify-content: center;
     }
     .sidebar.pinned.collapsed .sidebar-body {
