@@ -30,17 +30,32 @@ struct WebContainerView: NSViewRepresentable {
 
         context.coordinator.attach(webView: webView, serverURL: serverURL)
 
-        // 直接同步触发 load。token 仅作为 query string 附加（wand 服务端识别 ?token=），
-        // 不再依赖异步 cookie 注入流程。
-        var loadURL = serverURL
-        if let token, !token.isEmpty, var comps = URLComponents(url: serverURL, resolvingAgainstBaseURL: false) {
-            var items = comps.queryItems ?? []
-            items.append(URLQueryItem(name: "token", value: token))
-            comps.queryItems = items
-            loadURL = comps.url ?? serverURL
+        // 有 token：先调 /api/login 拿 wand_session cookie 注入 WKHTTPCookieStore，再加载主页。
+        // 对称 Android ConnectActivity.testConnectionWithToken → CookieManager.setCookie。
+        // 没有 token：当成裸 URL，直接加载，由用户在 SPA 内部登录。
+        let cookieStore = cfg.websiteDataStore.httpCookieStore
+        if let token, !token.isEmpty {
+            NSLog("[Wand] token-login before load: %@", serverURL.absoluteString)
+            WandAuth.loginWithToken(serverURL: serverURL, appToken: token) { result in
+                switch result {
+                case .success(let cookie):
+                    DispatchQueue.main.async {
+                        cookieStore.setCookie(cookie) {
+                            NSLog("[Wand] cookie injected, loading %@", serverURL.absoluteString)
+                            webView.load(URLRequest(url: serverURL))
+                        }
+                    }
+                case .failure(let err):
+                    NSLog("[Wand] token-login FAILED: %@", err.userMessage)
+                    DispatchQueue.main.async {
+                        context.coordinator.presentAuthFailure(message: err.userMessage)
+                    }
+                }
+            }
+        } else {
+            NSLog("[Wand] no token; loading %@ directly", serverURL.absoluteString)
+            webView.load(URLRequest(url: serverURL))
         }
-        NSLog("[Wand] loading initial URL: %@", loadURL.absoluteString)
-        webView.load(URLRequest(url: loadURL))
         return webView
     }
 

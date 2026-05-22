@@ -92,6 +92,29 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
         }
     }
 
+    /// /api/login 失败（token 失效 / 网络问题）时调用，提示用户重新连接。
+    /// makeNSView 阶段 webView 可能还没挂到 window 上，所以做了无 window 的兜底。
+    func presentAuthFailure(message: String) {
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = "无法登录 wand 服务器"
+            alert.informativeText = message
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "重新连接")
+            alert.addButton(withTitle: "稍后")
+            let handle: (NSApplication.ModalResponse) -> Void = { resp in
+                if resp == .alertFirstButtonReturn {
+                    ServerStore.shared.disconnect()
+                }
+            }
+            if let win = self?.webView?.window {
+                alert.beginSheetModal(for: win, completionHandler: handle)
+            } else {
+                handle(alert.runModal())
+            }
+        }
+    }
+
     // MARK: - Lifecycle: 启动后做一次自动更新检测
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

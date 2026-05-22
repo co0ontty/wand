@@ -72,17 +72,28 @@ struct ConnectView: View {
         error = nil
 
         // 连接码格式：base64(url#token)
+        // 先调 /api/login 验证 token，避免存了无效 token 后到 WebView 才发现密码已改。
+        // 对称 Android ConnectActivity.testConnectionWithToken。
         if let decoded = decodeConnectCode(trimmed) {
-            store.connect(serverURL: decoded.url, token: decoded.token)
-            onDismiss?()
-            isConnecting = false
+            WandAuth.loginWithToken(serverURL: decoded.url, appToken: decoded.token) { result in
+                DispatchQueue.main.async {
+                    isConnecting = false
+                    switch result {
+                    case .success:
+                        store.connect(serverURL: decoded.url, token: decoded.token)
+                        onDismiss?()
+                    case .failure(let err):
+                        error = err.userMessage
+                    }
+                }
+            }
             return
         }
 
-        // 否则当成裸 URL 处理
+        // 裸 URL：默认补 https://（wand 默认开启 HTTPS）。无 token 时由 SPA 自行登录。
         var raw = trimmed
         if !raw.lowercased().hasPrefix("http://") && !raw.lowercased().hasPrefix("https://") {
-            raw = "http://" + raw
+            raw = "https://" + raw
         }
         guard let url = URL(string: raw), url.host != nil else {
             error = "无法识别的连接码或地址"
