@@ -5,6 +5,7 @@ dist
 .codex
 output
 .playwright-cli
+.playwright-mcp
 debug-*.mjs
 *.png
 !docs/screenshots/*.png
