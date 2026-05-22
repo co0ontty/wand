@@ -1140,6 +1140,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     createReadStream(macosDmg.filePath).pipe(res);
   });
 
+  // Public probe so the unauthenticated browser does not log a 401 on /api/config
+  app.get("/api/session-check", (req, res) => {
+    res.json({ authed: validateSession(readSessionCookie(req)) });
+  });
+
   app.use("/api", requireAuth);
 
   // ── Config & Session info ──

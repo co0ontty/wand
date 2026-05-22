@@ -1148,14 +1148,24 @@
       }
 
       function restoreLoginSession() {
-        fetch("/api/config", { credentials: "same-origin" })
-          .then(function(res) {
-            if (!res.ok) {
+        // Probe an unauthenticated endpoint first so an anonymous visit
+        // does not leave a noisy 401 on /api/config in DevTools.
+        fetch("/api/session-check", { credentials: "same-origin" })
+          .then(function(res) { return res.ok ? res.json() : { authed: false }; })
+          .then(function(info) {
+            if (!info || !info.authed) {
               state.loginChecked = true;
               render();
               return null;
             }
-            return res.json();
+            return fetch("/api/config", { credentials: "same-origin" }).then(function(res) {
+              if (!res.ok) {
+                state.loginChecked = true;
+                render();
+                return null;
+              }
+              return res.json();
+            });
           })
           .then(function(config) {
             if (!config) return;
@@ -1366,7 +1376,7 @@
               '</div>' +
               '<div class="login-subtitle">在浏览器中运行本机终端</div>' +
             '</div>' +
-            '<div class="login-body">' +
+            '<form id="login-form" class="login-body" autocomplete="on">' +
               '<p class="login-hint">输入 Wand 访问密码以进入控制台。</p>' +
               '<div class="field">' +
                 '<label class="field-label" for="password">密码</label>' +
@@ -1377,7 +1387,7 @@
                 '<p id="password-hint" class="hint">使用你在 Wand 中设置的访问密码。</p>' +
                 '<p id="login-error" class="error-message hidden" role="alert"></p>' +
               '</div>' +
-              '<button id="login-button" class="btn btn-primary btn-block">进入控制台</button>' +
+              '<button id="login-button" type="submit" class="btn btn-primary btn-block">进入控制台</button>' +
               (hasNativeSwitchServer() ?
                 '<button id="login-switch-server-button" class="btn btn-ghost btn-block login-switch-server" type="button">' +
                   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>' +
@@ -1385,7 +1395,7 @@
                 '</button>'
                 : ''
               ) +
-            '</div>' +
+            '</form>' +
           '</div>' +
         '</div>';
       }
@@ -1443,7 +1453,7 @@
               '</div>' +
               '<div class="sidebar-body">' +
                 '<div id="sessions-panel">' +
-                  '<div class="sessions-list" id="sessions-list">' + renderSessions() + '</div>' +
+                  '<div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div>' +
                 '</div>' +
               '</div>' +
               '<div class="sidebar-footer">' +
@@ -3090,6 +3100,35 @@
           return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>' + renderClaudeHistorySection();
         }
         return groups.join("");
+      }
+
+      function isSidebarNarrow() {
+        return !!state.sidebarPinned && !isMobileLayout() && !!state.sidebarCollapsed;
+      }
+
+      function renderCollapsedSessionTiles() {
+        var running = state.sessions.filter(function(s) {
+          return !s.archived && s.status === "running";
+        });
+        running.sort(function(a, b) {
+          var ta = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+          var tb = b.startedAt ? new Date(b.startedAt).getTime() : 0;
+          return ta - tb;
+        });
+        if (running.length === 0) {
+          return '<div class="sidebar-collapsed-empty" title="无运行中的会话">—</div>';
+        }
+        return '<div class="sidebar-collapsed-tiles">' +
+          running.map(function(s, i) {
+            var activeCls = s.id === state.selectedId ? " active" : "";
+            var title = s.summary || s.command || ("会话 " + (i + 1));
+            return '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + (i + 1) + '</button>';
+          }).join("") +
+        '</div>';
+      }
+
+      function renderSessionsListContent() {
+        return isSidebarNarrow() ? renderCollapsedSessionTiles() : renderSessions();
       }
 
       function renderSessionManageBar() {
@@ -5379,6 +5418,11 @@
         var loginButton = document.getElementById("login-button");
         if (loginButton) {
           loginButton.addEventListener("click", login);
+          var loginForm = document.getElementById("login-form");
+          if (loginForm) loginForm.addEventListener("submit", function(e) {
+            e.preventDefault();
+            login();
+          });
           var loginSwitchServerBtn = document.getElementById("login-switch-server-button");
           if (loginSwitchServerBtn) loginSwitchServerBtn.addEventListener("click", switchServer);
           var passwordEl = document.getElementById("password");
@@ -6540,6 +6584,14 @@
       function handleSessionItemClick(event) {
         var target = event.target;
         if (!target || !(target instanceof Element)) return;
+
+        var collapsedTile = target.closest(".sidebar-collapsed-tile");
+        if (collapsedTile && collapsedTile instanceof HTMLElement && collapsedTile.dataset.collapsedSessionId) {
+          event.preventDefault();
+          event.stopPropagation();
+          activateSessionItem(collapsedTile.dataset.collapsedSessionId);
+          return;
+        }
 
         var historyToggle = target.closest("#claude-history-toggle");
         if (historyToggle) {
@@ -8310,7 +8362,7 @@
               updateSessionsList();
             } else {
               var listEl = document.getElementById("sessions-list");
-              var rendered = renderSessions();
+              var rendered = renderSessionsListContent();
               if (listEl && listEl.innerHTML === rendered) {
                 var countEl = document.getElementById("session-count");
                 if (countEl) countEl.textContent = String(state.sessions.length);
@@ -8369,7 +8421,7 @@
       function updateSessionsList() {
         var listEl = document.getElementById("sessions-list");
         var countEl = document.getElementById("session-count");
-        if (listEl) listEl.innerHTML = renderSessions();
+        if (listEl) listEl.innerHTML = renderSessionsListContent();
         if (countEl) countEl.textContent = String(state.sessions.length);
         updateShellChrome();
         // Re-render cross-session queue (container may have been destroyed by DOM rebuild)
