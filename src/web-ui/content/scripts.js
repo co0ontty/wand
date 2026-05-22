@@ -1286,6 +1286,7 @@
           '<span class="shortcut-sep">·</span>' +
           '<button class="shortcut-key" data-key="enter" type="button">↵</button>' +
           '<button class="shortcut-key" data-key="ctrl_enter" type="button">C-↵</button>' +
+          '<button class="shortcut-key" data-key="shift_tab" type="button" title="Shift+Tab（切换 plan / 自动接受 模式）">⇧⇥</button>' +
           '<button class="shortcut-key" data-key="escape" type="button">Esc</button>';
       }
 
@@ -11969,6 +11970,7 @@
       var ptySpecialKeyMap = {
         space: " ",
         tab: String.fromCharCode(9),
+        shift_tab: String.fromCharCode(27) + "[Z",
         backspace: String.fromCharCode(127),
         home: String.fromCharCode(27) + "[H",
         end: String.fromCharCode(27) + "[F",
@@ -12026,7 +12028,9 @@
         return {
           ctrl: event.ctrlKey,
           alt: event.altKey,
-          shift: event.shiftKey && key.length === 1,
+          // 仅对单字符键保留 shift（控制 toUpperCase 路径），
+          // 但 Tab 特例：物理 Shift+Tab 要走 buildPtySequence 的 back-tab 分支。
+          shift: event.shiftKey && (key.length === 1 || key === "tab"),
           meta: event.metaKey
         };
       }
@@ -12249,6 +12253,8 @@
       function buildPtySequence(key, modifiers) {
         var mods = modifiers || { ctrl: false, alt: false, shift: false };
         if (isModifierKey(key)) return "";
+        // Shift+Tab → CSI Z (back-tab)。Claude Code 用它在 plan / 自动接受 模式间切换。
+        if (key === "tab" && mods.shift) return String.fromCharCode(27) + "[Z";
         var specialSequence = getPtySpecialSequence(key);
         if (specialSequence) return specialSequence;
         if (key.indexOf("ctrl_") === 0) {
