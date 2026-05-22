@@ -14,7 +14,6 @@ struct WebContainerView: NSViewRepresentable {
         let userController = WKUserContentController()
         userController.add(context.coordinator, name: "wandNative")
         cfg.userContentController = userController
-        cfg.preferences.javaScriptCanOpenWindowsAutomatically = true
         cfg.websiteDataStore = .default()
         cfg.defaultWebpagePreferences.allowsContentJavaScript = true
 
@@ -23,36 +22,25 @@ struct WebContainerView: NSViewRepresentable {
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
+        webView.setValue(false, forKey: "drawsBackground") // 避免首帧背景透出
 
         // UA 标记：让前端识别这是 macOS 原生壳
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
-        if let existing = webView.value(forKey: "userAgent") as? String, !existing.isEmpty {
-            webView.customUserAgent = existing + " WandApp/\(version) WandPlatform/macOS"
-        } else {
-            webView.customUserAgent = "Wand/\(version) WandApp/\(version) WandPlatform/macOS"
-        }
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15 WandApp/\(version) WandPlatform/macOS"
 
         context.coordinator.attach(webView: webView, serverURL: serverURL)
 
-        // 注入连接码 token 作为 cookie（如果有），并加载首页
-        if let token, !token.isEmpty {
-            let cookie = HTTPCookie(properties: [
-                .domain: serverURL.host ?? "",
-                .path: "/",
-                .name: "wand_app_token",
-                .value: token,
-                .expires: Date(timeIntervalSinceNow: 365 * 24 * 3600),
-            ])
-            if let cookie {
-                webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) {
-                    webView.load(URLRequest(url: serverURL))
-                }
-            } else {
-                webView.load(URLRequest(url: serverURL))
-            }
-        } else {
-            webView.load(URLRequest(url: serverURL))
+        // 直接同步触发 load。token 仅作为 query string 附加（wand 服务端识别 ?token=），
+        // 不再依赖异步 cookie 注入流程。
+        var loadURL = serverURL
+        if let token, !token.isEmpty, var comps = URLComponents(url: serverURL, resolvingAgainstBaseURL: false) {
+            var items = comps.queryItems ?? []
+            items.append(URLQueryItem(name: "token", value: token))
+            comps.queryItems = items
+            loadURL = comps.url ?? serverURL
         }
+        NSLog("[Wand] loading initial URL: %@", loadURL.absoluteString)
+        webView.load(URLRequest(url: loadURL))
         return webView
     }
 

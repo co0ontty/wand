@@ -42,9 +42,60 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
         completionHandler(.performDefaultHandling, nil)
     }
 
+    // MARK: - Navigation lifecycle / diagnostics
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        NSLog("[Wand] navigation start: %@", webView.url?.absoluteString ?? "?")
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let ns = error as NSError
+        let url = webView.url?.absoluteString ?? "?"
+        NSLog("[Wand] provisional navigation FAILED url=%@ domain=%@ code=%ld reason=%@",
+              url, ns.domain, ns.code, ns.localizedDescription)
+        showLoadError(error: ns, url: url)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        let ns = error as NSError
+        NSLog("[Wand] navigation FAILED domain=%@ code=%ld reason=%@",
+              ns.domain, ns.code, ns.localizedDescription)
+        showLoadError(error: ns, url: webView.url?.absoluteString ?? "?")
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        NSLog("[Wand] navigation committed: %@", webView.url?.absoluteString ?? "?")
+    }
+
+    private func showLoadError(error: NSError, url: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let win = self?.webView?.window else { return }
+            let alert = NSAlert()
+            alert.messageText = "无法加载 wand 服务器"
+            alert.informativeText = """
+            URL: \(url)
+            错误: \(error.localizedDescription)
+            (\(error.domain) #\(error.code))
+
+            请确认 wand 服务正在运行，并检查地址是否正确。
+            """
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "重新连接")
+            alert.addButton(withTitle: "重试")
+            alert.beginSheetModal(for: win) { resp in
+                if resp == .alertFirstButtonReturn {
+                    ServerStore.shared.disconnect()
+                } else {
+                    self?.webView?.reload()
+                }
+            }
+        }
+    }
+
     // MARK: - Lifecycle: 启动后做一次自动更新检测
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        NSLog("[Wand] navigation finished: %@", webView.url?.absoluteString ?? "?")
         guard !didKickOffAutoUpdate, let serverURL else { return }
         didKickOffAutoUpdate = true
         DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
