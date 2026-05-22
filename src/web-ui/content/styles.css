@@ -563,8 +563,8 @@
     .sidebar-collapsed-tile {
       width: 36px;
       height: 36px;
-      border-radius: 10px;
-      border: none;
+      border-radius: 11px;
+      border: 0.5px solid rgba(255, 255, 255, 0.32);
       background: linear-gradient(145deg, #d4785a 0%, #b8573a 50%, #a04a2e 100%);
       color: #fff;
       font-size: 14px;
@@ -576,19 +576,42 @@
       align-items: center;
       justify-content: center;
       padding: 0;
-      box-shadow: 0 1px 4px rgba(184, 92, 55, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.22);
-      transition: filter var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+      box-shadow:
+        0 1px 3px rgba(184, 92, 55, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+      transition:
+        filter var(--transition-fast),
+        box-shadow 0.22s ease,
+        transform 0.22s var(--ease-out-expo);
     }
     .sidebar-collapsed-tile:hover {
       filter: brightness(1.06);
-      box-shadow: 0 2px 8px rgba(184, 92, 55, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+      transform: translateY(-1px);
+      box-shadow:
+        0 4px 12px -2px rgba(184, 92, 55, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.08);
     }
+    /* Active — liquid glass crown: outer ring + warm halo + crisp top sheen */
     .sidebar-collapsed-tile.active {
-      background: linear-gradient(145deg, #c66647 0%, #a04528 50%, #843a22 100%);
-      box-shadow: 0 0 0 2px rgba(212, 120, 90, 0.35), 0 3px 12px rgba(160, 74, 46, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+      background: linear-gradient(145deg, #d27358 0%, #b35434 50%, #934128 100%);
+      transform: translateY(-1px);
+      box-shadow:
+        /* outer glow halo */
+        0 0 0 1px rgba(255, 255, 255, 0.7),
+        0 0 0 3px rgba(197, 101, 61, 0.32),
+        0 8px 22px -4px rgba(160, 74, 46, 0.55),
+        0 3px 8px -2px rgba(160, 74, 46, 0.32),
+        /* top sheen */
+        inset 0 1px 0 rgba(255, 255, 255, 0.45),
+        inset 1px 0 0 rgba(255, 255, 255, 0.18),
+        /* bottom depth */
+        inset 0 -1px 0 rgba(0, 0, 0, 0.16);
     }
     .sidebar-collapsed-tile:active {
-      transform: scale(0.94);
+      transform: translateY(0) scale(0.94);
+      transition-duration: 0.08s;
     }
     .sidebar-collapsed-empty {
       color: var(--text-muted, rgba(89, 58, 32, 0.45));
@@ -781,8 +804,19 @@
       text-overflow: ellipsis;
     }
 
-    .tree-item:hover { background: var(--bg-tertiary); }
-    .tree-item.active { background: var(--accent-muted); color: var(--accent); }
+    .tree-item:hover {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 252, 247, 0.4) 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    }
+    .tree-item.active {
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.92) 0%, rgba(255, 244, 232, 0.75) 100%);
+      color: var(--accent);
+      box-shadow:
+        0 0 0 1px rgba(197, 101, 61, 0.22),
+        0 3px 10px -3px rgba(197, 101, 61, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    }
 
     .tree-toggle {
       flex-shrink: 0;
@@ -7416,11 +7450,17 @@
       box-shadow: 0 4px 12px rgba(125, 91, 57, 0.08);
     }
     .session-modal .mode-card.active {
-      background: linear-gradient(180deg, #fff7ef 0%, #ffeed8 100%);
-      border-color: var(--accent);
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.95) 0%, rgba(255, 240, 224, 0.82) 100%);
+      border: 0.5px solid rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
       box-shadow:
-        0 0 0 3px var(--accent-muted),
-        0 4px 12px rgba(197, 101, 61, 0.12);
+        0 0 0 1px rgba(197, 101, 61, 0.32),
+        0 0 0 4px rgba(197, 101, 61, 0.14),
+        0 8px 22px -4px rgba(197, 101, 61, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95),
+        inset 0 -1px 0 rgba(197, 101, 61, 0.08);
       transform: none;
     }
     .session-modal .mode-card.active .mode-card-label {
@@ -7445,11 +7485,17 @@
       box-shadow: 0 8px 20px rgba(125, 91, 57, 0.1);
     }
     .session-modal .tool-card.active {
-      background: linear-gradient(180deg, #fff8f1 0%, #fff1de 100%);
-      border-color: var(--accent);
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.95) 0%, rgba(255, 240, 224, 0.82) 100%);
+      border: 0.5px solid rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
       box-shadow:
-        0 0 0 3px var(--accent-muted),
-        0 6px 16px rgba(197, 101, 61, 0.12);
+        0 0 0 1px rgba(197, 101, 61, 0.3),
+        0 0 0 4px rgba(197, 101, 61, 0.14),
+        0 10px 28px -6px rgba(197, 101, 61, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95),
+        inset 0 -1px 0 rgba(197, 101, 61, 0.08);
       transform: none;
     }
 
@@ -7689,12 +7735,19 @@
       transform: none;
       border-color: transparent;
     }
+    /* Settings tab active — liquid glass row with warm halo */
     .settings-modal .settings-tab.active {
-      background: linear-gradient(180deg, #fff7ef 0%, #ffeed8 100%);
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.95) 0%, rgba(255, 244, 232, 0.78) 100%);
       color: var(--accent);
+      backdrop-filter: blur(14px) saturate(180%);
+      -webkit-backdrop-filter: blur(14px) saturate(180%);
       box-shadow:
-        inset 0 0 0 1px rgba(197, 101, 61, 0.22),
-        0 1px 3px rgba(197, 101, 61, 0.08);
+        inset 0 0 0 1px rgba(197, 101, 61, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9),
+        inset 0 -1px 0 rgba(197, 101, 61, 0.08),
+        0 4px 14px -4px rgba(197, 101, 61, 0.22),
+        0 1px 3px rgba(125, 91, 57, 0.06);
     }
     .settings-modal .settings-tab.active .settings-tab-meta {
       color: var(--text-secondary);
@@ -8002,17 +8055,27 @@
       padding: 6px;
     }
     .sidebar-header-overflow .overflow-item {
-      border-radius: 8px;
+      border-radius: 9px;
       padding: 9px 10px;
       font-size: 0.8125rem;
       font-weight: 500;
+      transition:
+        background 0.16s ease,
+        color 0.16s ease,
+        box-shadow 0.18s ease,
+        transform 0.18s var(--ease-out-expo);
     }
     .sidebar-header-overflow .overflow-item:hover {
-      background: rgba(125, 91, 57, 0.08);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 252, 247, 0.6) 100%);
       color: var(--text-primary);
+      box-shadow:
+        0 0 0 0.5px rgba(125, 91, 57, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.85);
     }
     .sidebar-header-overflow .overflow-item:active {
-      background: rgba(125, 91, 57, 0.14);
+      background: rgba(197, 101, 61, 0.12);
+      color: var(--accent);
       transform: scale(0.98);
     }
 
@@ -8119,17 +8182,20 @@
 
     /* ── Session item — clean card on glass ── */
     .session-item {
-      background: rgba(255, 255, 255, 0.55);
-      border: 1px solid rgba(125, 91, 57, 0.08);
-      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(255, 252, 247, 0.42) 100%);
+      border: 0.5px solid rgba(255, 255, 255, 0.55);
+      border-radius: 13px;
       padding: 11px 14px;
       margin-bottom: 6px;
-      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+      box-shadow:
+        0 0 0 0.5px rgba(125, 91, 57, 0.05),
+        0 1px 2px rgba(125, 91, 57, 0.03),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6);
       transition:
-        background 0.18s ease,
-        border-color 0.18s ease,
-        box-shadow 0.18s ease,
-        transform 0.18s ease;
+        background 0.2s ease,
+        border-color 0.2s ease,
+        box-shadow 0.22s ease,
+        transform 0.22s var(--ease-out-expo);
     }
     .session-item::before {
       left: 4px;
@@ -8137,32 +8203,57 @@
       bottom: 10px;
       width: 3px;
       border-radius: 2px;
-      background: var(--accent);
+      background: linear-gradient(180deg, var(--accent), rgba(197, 101, 61, 0.5));
     }
     .session-item:hover {
-      background: rgba(255, 255, 255, 0.85);
-      border-color: rgba(125, 91, 57, 0.16);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 253, 248, 0.62) 100%);
+      border-color: rgba(255, 255, 255, 0.7);
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(125, 91, 57, 0.08);
+      box-shadow:
+        0 0 0 0.5px rgba(125, 91, 57, 0.08),
+        0 6px 16px -6px rgba(125, 91, 57, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
     }
     .session-item:hover::before {
-      opacity: 0.45;
+      opacity: 0.5;
       transform: scaleY(1);
     }
+    /* Selected (active) — true liquid glass pill with depth + accent glow */
     .session-item.active {
-      background: linear-gradient(180deg, #fff7ef 0%, #fff1de 100%);
-      border-color: var(--accent);
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.92) 0%, rgba(255, 244, 232, 0.78) 100%);
+      border: 0.5px solid rgba(255, 255, 255, 0.85);
+      transform: translateY(-1px);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
       box-shadow:
-        0 0 0 1px var(--accent-muted),
-        0 4px 14px rgba(197, 101, 61, 0.14);
+        /* outer accent ring (soft) */
+        0 0 0 1px rgba(197, 101, 61, 0.28),
+        /* warm glow halo */
+        0 8px 28px -6px rgba(197, 101, 61, 0.32),
+        /* base elevation */
+        0 2px 6px -1px rgba(125, 91, 57, 0.1),
+        /* top inner highlight — light from above */
+        inset 0 1px 0 rgba(255, 255, 255, 0.95),
+        /* bottom inner shadow — depth at base */
+        inset 0 -1px 0 rgba(197, 101, 61, 0.08),
+        /* left inner glint */
+        inset 1px 0 0 rgba(255, 255, 255, 0.4);
     }
     .session-item.active::before {
       opacity: 1;
       transform: scaleY(1);
+      box-shadow: 0 0 8px rgba(197, 101, 61, 0.5);
     }
+    /* Multi-select state — quieter glass tint, no accent halo */
     .session-item.selected {
-      background: linear-gradient(180deg, #fff7ef 0%, #fff3e3 100%);
-      border-color: rgba(197, 101, 61, 0.4);
+      background:
+        linear-gradient(180deg, rgba(255, 250, 244, 0.85) 0%, rgba(255, 246, 236, 0.65) 100%);
+      border: 0.5px solid rgba(255, 255, 255, 0.7);
+      box-shadow:
+        0 0 0 1px rgba(197, 101, 61, 0.18),
+        0 4px 14px -4px rgba(125, 91, 57, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.85);
     }
     .session-item.selected::before {
       opacity: 0.7;
@@ -8307,11 +8398,21 @@
       transform: scale(0.96);
       transition-duration: 0.06s;
     }
+    /* Footer tab active — same liquid glass language as .session-item.active */
     .sidebar-footer-actions .btn.active {
-      background: linear-gradient(180deg, #fff7ef 0%, #fff1de 100%);
-      border-color: rgba(197, 101, 61, 0.32);
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.95) 0%, rgba(255, 242, 228, 0.78) 100%);
+      border: 0.5px solid rgba(255, 255, 255, 0.85);
       color: var(--accent);
-      box-shadow: 0 0 0 1px var(--accent-muted);
+      transform: translateY(-1px);
+      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      box-shadow:
+        0 0 0 1px rgba(197, 101, 61, 0.28),
+        0 6px 18px -4px rgba(197, 101, 61, 0.32),
+        0 2px 4px -1px rgba(125, 91, 57, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95),
+        inset 0 -1px 0 rgba(197, 101, 61, 0.08);
     }
     .sidebar-footer-actions .btn.sidebar-logout:hover {
       background: rgba(178, 79, 69, 0.08);
@@ -10314,9 +10415,17 @@
 
     .settings-tab.active {
       color: var(--accent);
-      border-color: rgba(197, 101, 61, 0.16);
-      background: linear-gradient(135deg, rgba(197, 101, 61, 0.12), rgba(197, 101, 61, 0.05));
-      box-shadow: inset 0 0 0 1px rgba(197, 101, 61, 0.08), var(--shadow-xs);
+      border-color: rgba(255, 255, 255, 0.7);
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.92) 0%, rgba(255, 244, 232, 0.72) 100%);
+      backdrop-filter: blur(14px) saturate(180%);
+      -webkit-backdrop-filter: blur(14px) saturate(180%);
+      box-shadow:
+        inset 0 0 0 1px rgba(197, 101, 61, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9),
+        inset 0 -1px 0 rgba(197, 101, 61, 0.06),
+        0 4px 14px -4px rgba(197, 101, 61, 0.22),
+        0 1px 3px rgba(125, 91, 57, 0.04);
     }
 
     .settings-tab.active::before {
