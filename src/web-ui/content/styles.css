@@ -515,7 +515,10 @@
       transition: width 0.3s var(--ease-out-expo), transform 0.35s var(--ease-out-expo), box-shadow 0.35s ease, opacity 0.25s ease;
     }
 
-    .sidebar.pinned .sidebar-close {
+    /* 多塞一层 .sidebar-header-actions 把 specificity 抬到 0,4,0，
+       压过文件后段 .sidebar-header-actions .btn-ghost.btn-sm
+       与 .drawer-close-btn 的 display: inline-flex 重置规则。 */
+    .sidebar.pinned .sidebar-header-actions .sidebar-close {
       display: none;
     }
 
@@ -524,15 +527,18 @@
        上一条 .sidebar.pinned 规则已经能把它藏住，但单独写一条更直观，
        也防止以后允许 drawer 模式下 collapse 时漏掉。
        展开（drawer 模式）下才显示关闭按钮供用户收起侧栏。 */
-    .sidebar.collapsed .sidebar-close {
+    .sidebar.collapsed .sidebar-header-actions .sidebar-close {
       display: none;
     }
 
     /* 与上方对称：drawer 模式（未 pin）下，X 关闭按钮已能把侧栏关掉，
        再放一个「收起为窄条」按钮会和 X 视觉上重复，且它的行为
        （自动 pin + collapse）也容易让人误以为是关闭。
-       只在 pinned 模式保留这颗，drawer 模式下隐藏。 */
-    .sidebar:not(.pinned) .sidebar-collapse-toggle {
+       只在 pinned 模式保留这颗，drawer 模式下隐藏。
+       注意：必须用 .sidebar-header-actions 多嵌一层把 specificity 提到 0,4,0，
+       否则会和文件后段 .sidebar-header-actions .btn-ghost.btn-sm (0,3,0) 打平
+       而因后定义胜出，导致 drawer 模式下窄条按钮和 X 同时显示。 */
+    .sidebar:not(.pinned) .sidebar-header-actions .sidebar-collapse-toggle {
       display: none;
     }
 
@@ -4125,12 +4131,19 @@
       gap: 6px;
       max-width: 95%;
     }
+    /* user turn 默认 align-self: flex-end（右对齐）；多段渲染时强制
+       容器内左对齐，否则 subagent 段会被推到右边，border-left 色条断裂。 */
+    .chat-message.user.multi-agent {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
     .chat-message.multi-agent .chat-message-segment {
       display: flex;
       flex-direction: column;
+      align-self: flex-start;
     }
     .chat-message.multi-agent .chat-message-segment.subagent {
-      padding-left: 14px;
+      padding-left: 10px;
       margin-left: 6px;
       border-left: 2px solid var(--agent-color, var(--border-subtle));
       border-radius: 0 4px 4px 0;
@@ -4171,6 +4184,56 @@
     .chat-handoff-desc {
       color: var(--text-secondary);
       font-style: italic;
+    }
+
+    /* subagent 回复气泡（群聊角色完成任务后的发言） */
+    .subagent-reply {
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 6%, var(--bg-surface));
+      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 20%, transparent);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin: 4px 0;
+      line-height: 1.55;
+      font-size: 0.875rem;
+      color: var(--text-primary);
+      word-break: break-word;
+    }
+
+    .subagent-reply > :first-child { margin-top: 0; }
+    .subagent-reply > :last-child { margin-bottom: 0; }
+
+    .subagent-reply.error {
+      background: color-mix(in srgb, var(--danger, #e2574c) 8%, var(--bg-surface));
+      border-color: color-mix(in srgb, var(--danger, #e2574c) 35%, transparent);
+    }
+
+    .subagent-reply.pending {
+      opacity: 0.7;
+      padding: 14px 16px;
+    }
+
+    .subagent-reply-icon {
+      display: inline-block;
+      color: var(--danger, #e2574c);
+      margin-right: 6px;
+      font-weight: 700;
+    }
+
+    .subagent-reply-body {
+      display: inline;
+    }
+
+    .subagent-reply pre,
+    .subagent-reply code {
+      font-size: 0.82rem;
+    }
+
+    .subagent-reply pre {
+      background: rgba(0, 0, 0, 0.04);
+      padding: 10px 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 8px 0;
     }
 
     /* ===== 消息使用量信息 ===== */

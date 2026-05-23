@@ -238,10 +238,19 @@
         chatUnreadCount: 0,
         // state.currentMessages 中第一条未读消息的 index，-1 表示没有未读。
         chatUnreadStartIndex: -1,
-        chatScrollThreshold: 120,
+        // 业界共识 150-180px：120px 在触控板/移动端惯性下边界来回弹。
+        chatScrollThreshold: 160,
         chatIsProgrammaticScroll: false,
         chatScrollElement: null,
         chatScrollHandler: null,
+        chatScrollWheelHandler: null,
+        chatScrollTouchStartHandler: null,
+        chatScrollTouchMoveHandler: null,
+        chatTouchStartY: 0,
+        // 仅在"首次渲染当前会话视图"时才允许 fullRenderChat 强制贴底。
+        // resetChatRenderCache 会把它设回 false；fullRenderChat 第一次跑完就置 true。
+        // page-refresh / ws 重连不重置此标记，避免把用户拽到底部。
+        chatInitialRenderDone: false,
         lastForegroundSyncAt: 0,
         foregroundSyncTimer: null,
         wsReconnectAttempts: 0,
@@ -597,8 +606,19 @@
           updateChatUnreadBubble();
           return;
         }
-        if (state.chatScrollElement && state.chatScrollHandler) {
-          state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);
+        if (state.chatScrollElement) {
+          if (state.chatScrollHandler) {
+            state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);
+          }
+          if (state.chatScrollWheelHandler) {
+            state.chatScrollElement.removeEventListener("wheel", state.chatScrollWheelHandler);
+          }
+          if (state.chatScrollTouchStartHandler) {
+            state.chatScrollElement.removeEventListener("touchstart", state.chatScrollTouchStartHandler);
+          }
+          if (state.chatScrollTouchMoveHandler) {
+            state.chatScrollElement.removeEventListener("touchmove", state.chatScrollTouchMoveHandler);
+          }
         }
         state.chatScrollElement = chatMsgs;
         state.chatScrollHandler = function() {
@@ -619,7 +639,35 @@
           }
           updateChatUnreadBubble();
         };
+        // wheel/touch 提前下台：浏览器要等惯性产生位移才触发 scroll 事件，
+        // 这一帧空窗里如果有 streaming chunk 进来，会在 sticky=true 状态下
+        // 被强制贴底。监听用户开始上滚的瞬间立刻把 sticky 翻成 false，
+        // 避免那一帧的拽回。column-reverse 下 deltaY<0（滚轮上推）= 看历史。
+        state.chatScrollWheelHandler = function(e) {
+          if (state.chatIsProgrammaticScroll) return;
+          if (e.deltaY < 0) {
+            state.chatStickToBottom = false;
+            updateChatUnreadBubble();
+          }
+        };
+        state.chatScrollTouchStartHandler = function(e) {
+          if (!e.touches || e.touches.length === 0) return;
+          state.chatTouchStartY = e.touches[0].clientY;
+        };
+        state.chatScrollTouchMoveHandler = function(e) {
+          if (state.chatIsProgrammaticScroll) return;
+          if (!e.touches || e.touches.length === 0) return;
+          // column-reverse 下：手指向下拖（clientY 变大）= 内容向下走 = 看历史。
+          var deltaY = e.touches[0].clientY - state.chatTouchStartY;
+          if (deltaY > 4) {
+            state.chatStickToBottom = false;
+            updateChatUnreadBubble();
+          }
+        };
         chatMsgs.addEventListener("scroll", state.chatScrollHandler, { passive: true });
+        chatMsgs.addEventListener("wheel", state.chatScrollWheelHandler, { passive: true });
+        chatMsgs.addEventListener("touchstart", state.chatScrollTouchStartHandler, { passive: true });
+        chatMsgs.addEventListener("touchmove", state.chatScrollTouchMoveHandler, { passive: true });
         updateChatUnreadBubble();
       }
 
@@ -951,23 +999,46 @@
         });
       }
 
-      function resetChatRenderCache() {
+      // options.preserveStickState=true：仅清渲染缓存，不动 sticky/未读
+      // 状态。用于 page-refresh、ws 重连等"用户停留在当前会话，只是想刷新
+      // DOM"的场景——不能把用户从历史位置拽回底部。
+      // 默认（false）：切会话 / 新建 / home 等真正"换上下文"路径用，全清。
+      function resetChatRenderCache(options) {
+        var opts = options || {};
         state.lastRenderedHash = 0;
         state.lastRenderedMsgCount = 0;
         state.lastRenderedEmpty = null;
         state.renderPending = false;
         state.chatRenderedCount = state.chatPageSize;
         state.askUserSelections = {};
-        if (state.chatScrollElement && state.chatScrollHandler) {
-          state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);
+        if (state.chatScrollElement) {
+          if (state.chatScrollHandler) {
+            state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);
+          }
+          if (state.chatScrollWheelHandler) {
+            state.chatScrollElement.removeEventListener("wheel", state.chatScrollWheelHandler);
+          }
+          if (state.chatScrollTouchStartHandler) {
+            state.chatScrollElement.removeEventListener("touchstart", state.chatScrollTouchStartHandler);
+          }
+          if (state.chatScrollTouchMoveHandler) {
+            state.chatScrollElement.removeEventListener("touchmove", state.chatScrollTouchMoveHandler);
+          }
         }
         state.chatScrollElement = null;
         state.chatScrollHandler = null;
+        state.chatScrollWheelHandler = null;
+        state.chatScrollTouchStartHandler = null;
+        state.chatScrollTouchMoveHandler = null;
         state.chatIsProgrammaticScroll = false;
-        // 切会话时未读状态归零、贴底重置——避免上一个会话残留的"未读气泡"。
-        state.chatStickToBottom = true;
-        state.chatUnreadCount = 0;
-        state.chatUnreadStartIndex = -1;
+        if (!opts.preserveStickState) {
+          // 切会话时未读状态归零、贴底重置——避免上一个会话残留的"未读气泡"。
+          state.chatStickToBottom = true;
+          state.chatUnreadCount = 0;
+          state.chatUnreadStartIndex = -1;
+          // 真正换会话时才允许首帧贴底；preserve 路径下保留旧 initial 状态。
+          state.chatInitialRenderDone = false;
+        }
       }
 
       function getEffectiveCwd() {
@@ -3098,29 +3169,44 @@
         '</section>';
       }
 
+      // 「最近」分组的统一数据源：未归档 active sessions + 24h 内 Claude 历史，
+      // 一起按"创建时间"倒序排（session 用 startedAt，history 用 timestamp）。
+      // 展开侧栏的「最近」和折叠侧栏的窄条都基于这份列表渲染，序号严格对应。
+      function getRecentEntries() {
+        var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        var entries = [];
+        state.sessions.forEach(function(s) {
+          if (s.archived) return;
+          var t = s.startedAt ? new Date(s.startedAt).getTime() : 0;
+          entries.push({ kind: "session", ref: s, t: isFinite(t) ? t : 0 });
+        });
+        if (state.claudeHistoryLoaded) {
+          getVisibleClaudeHistorySessions().forEach(function(h) {
+            if (!h.timestamp) return;
+            var t = new Date(h.timestamp).getTime();
+            if (!isFinite(t) || t <= cutoff) return;
+            entries.push({ kind: "history", ref: h, t: t });
+          });
+        }
+        entries.sort(function(a, b) { return b.t - a.t; });
+        return entries;
+      }
+
       function renderSessions() {
-        var activeSessions = state.sessions.filter(function(session) { return !session.archived; });
         var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
         var groups = [];
         groups.push(renderSessionManageBar());
 
-        // Split claude history into recent (24h) and older
-        var recentHistorySessions = [];
-        if (state.claudeHistoryLoaded) {
-          var cutoff = Date.now() - 24 * 60 * 60 * 1000;
-          recentHistorySessions = getVisibleClaudeHistorySessions().filter(function(s) {
-            return s.timestamp && new Date(s.timestamp).getTime() > cutoff;
-          });
-        }
+        var recentEntries = getRecentEntries();
 
-        if (activeSessions.length > 0 || recentHistorySessions.length > 0) {
-          groups.push(renderRecentGroup(activeSessions, recentHistorySessions));
+        if (recentEntries.length > 0) {
+          groups.push(renderRecentGroup(recentEntries));
         }
         if (archivedSessions.length > 0) {
           groups.push(renderArchivedGroup(archivedSessions));
         }
         groups.push(renderClaudeHistorySection());
-        if (activeSessions.length === 0 && archivedSessions.length === 0 && recentHistorySessions.length === 0) {
+        if (recentEntries.length === 0 && archivedSessions.length === 0) {
           return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>' + renderClaudeHistorySection();
         }
         return groups.join("");
@@ -3131,35 +3217,23 @@
       }
 
       function renderCollapsedSessionTiles() {
-        // 排序口径必须与展开后的「最近」列表（renderRecentGroup）一致：
-        // 先按 state.sessions 自然顺序（服务器返回时已按 startedAt DESC 排好，最新在前）
-        // 列 active sessions，再追加 recentHistorySessions。窄条里第 N 个方块对应
-        // 展开后「最近」里第 N 项，避免两种视图序号错乱。
-        var activeSessions = state.sessions.filter(function(s) { return !s.archived; });
-        var recentHistorySessions = [];
-        if (state.claudeHistoryLoaded) {
-          var cutoff = Date.now() - 24 * 60 * 60 * 1000;
-          recentHistorySessions = getVisibleClaudeHistorySessions().filter(function(s) {
-            return s.timestamp && new Date(s.timestamp).getTime() > cutoff;
-          });
-        }
-        if (activeSessions.length === 0 && recentHistorySessions.length === 0) {
+        var entries = getRecentEntries();
+        if (entries.length === 0) {
           return '<div class="sidebar-collapsed-empty" title="无会话">—</div>';
         }
-        var tiles = "";
-        var idx = 0;
-        activeSessions.forEach(function(s) {
-          idx += 1;
-          var activeCls = s.id === state.selectedId ? " active" : "";
-          var title = s.summary || s.command || ("会话 " + idx);
-          tiles += '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + idx + '</button>';
-        });
-        recentHistorySessions.forEach(function(s) {
-          idx += 1;
-          var preview = s.firstUserMessage || "(空会话)";
-          var title = preview + " · " + formatHistoryTime(s.timestamp);
-          tiles += '<button class="sidebar-collapsed-tile history" type="button" data-collapsed-history-id="' + escapeHtml(s.claudeSessionId) + '" data-cwd="' + escapeHtml(s.cwd || "") + '" title="' + escapeHtml(title) + '">' + idx + '</button>';
-        });
+        var tiles = entries.map(function(e, i) {
+          var idx = i + 1;
+          if (e.kind === "session") {
+            var s = e.ref;
+            var activeCls = s.id === state.selectedId ? " active" : "";
+            var title = s.summary || s.command || ("会话 " + idx);
+            return '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + idx + '</button>';
+          }
+          var h = e.ref;
+          var preview = h.firstUserMessage || "(空会话)";
+          var hTitle = preview + " · " + formatHistoryTime(h.timestamp);
+          return '<button class="sidebar-collapsed-tile history" type="button" data-collapsed-history-id="' + escapeHtml(h.claudeSessionId) + '" data-cwd="' + escapeHtml(h.cwd || "") + '" title="' + escapeHtml(hTitle) + '">' + idx + '</button>';
+        }).join("");
         return '<div class="sidebar-collapsed-tiles">' + tiles + '</div>';
       }
 
@@ -3226,11 +3300,14 @@
         return '<section class="session-group">' + header + items + '</section>';
       }
 
-      function renderRecentGroup(activeSessions, recentHistorySessions) {
+      function renderRecentGroup(entries) {
         var html = '<section class="session-group">' +
           '<div class="session-group-title">最近</div>';
-        html += activeSessions.map(function(session) { return renderSessionItem(session, "sessions"); }).join("");
-        html += recentHistorySessions.map(function(session) { return renderClaudeHistoryItem(session, "history"); }).join("");
+        html += entries.map(function(e) {
+          return e.kind === "session"
+            ? renderSessionItem(e.ref, "sessions")
+            : renderClaudeHistoryItem(e.ref, "history");
+        }).join("");
         html += '</section>';
         return html;
       }
@@ -6148,7 +6225,8 @@
             return;
           }
           softResyncTerminal();
-          resetChatRenderCache();
+          // 用户停留在当前会话，只是想刷一下 DOM——保留其阅读位置和 sticky 状态。
+          resetChatRenderCache({ preserveStickState: true });
           scheduleChatRender(true);
         });
         var jumpBottomBtn = document.getElementById("terminal-jump-bottom");
@@ -8624,7 +8702,8 @@
             } else if (state.selectedId) {
               var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
               if (isStructuredSession(sel)) {
-                resetChatRenderCache();
+                // ws 重连后的同会话刷新——保留用户阅读位置。
+                resetChatRenderCache({ preserveStickState: true });
                 scheduleChatRender(true);
               }
             }
@@ -13346,7 +13425,10 @@
           // fill the expanded space, and the scroll position needs resetting.
           if (isTouchDevice()) {
             ensureTerminalFit("keyboard-blur", { forceReplay: true });
-            maybeScrollTerminalToBottom("force");
+            // "keyboard" 而非 "force"：用户原本在终端历史里翻看时，键盘
+            // 收起不该把视图拽走。maybeScrollTerminalToBottom 会按
+            // terminalAutoFollow 决定——贴底者继续贴底，离底者保位。
+            maybeScrollTerminalToBottom("keyboard");
           }
         }, 100);
       }
@@ -14140,7 +14222,9 @@
                 syncAppViewportHeight();
               }
               ensureTerminalFit("keyboard-close", { forceReplay: true });
-              maybeScrollTerminalToBottom("force");
+              // 同 handleInputBoxBlur：尊重 terminalAutoFollow，避免把上滚
+              // 阅读历史的用户在键盘关闭瞬间拽回底部。
+              maybeScrollTerminalToBottom("keyboard");
             }, 200);
           }
 
@@ -15556,6 +15640,9 @@
         }
 
         var allMessages = state.currentMessages;
+        // 预扫一遍全量 messages，构建 task id → subagent meta 的 map，
+        // 供老消息 tool_result（没有 __subagent 盖章）按 tool_use_id 反查兜底。
+        var legacyTaskMap = collectLegacyTaskIdMap(allMessages);
 
         if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
@@ -15632,10 +15719,11 @@
 
         // 在动 DOM 之前先看用户是不是贴在底部——这决定后面我们要不要让视图
         // "继续粘在底部"。column-reverse 下 scrollTop 接近 0 = 视觉底部。
-        // 同时把 state.chatStickToBottom 同步到当前真实状态，避免长时间不滚动后
-        // 的状态漂移（比如新会话 init 的瞬间）。
+        // 注意：state.chatStickToBottom 的维护**完全交给 scroll handler**
+        // （bindChatScrollListener + wheel/touch 提前下台），这里不再做
+        // "近底即锁回 true"的自愈，避免 resize / 键盘动画 / 锚点回填瞬间
+        // 把已经上滚阅读的用户误判回贴底状态。
         var renderWasAtBottom = isChatNearBottom(chatMessages);
-        if (renderWasAtBottom) state.chatStickToBottom = true;
 
         // 把 .system-info 卡片从计数里剔除——它由 extractPtySystemInfo 在
         // fullRenderChat 里穿插注入，不存在于 messages 数组中，混进 existingCount
@@ -15679,7 +15767,7 @@
             }
 
             // Render message
-            html += renderChatMessage(msg, roundUsageByIndex[originalIndex] || null, originalIndex);
+            html += renderChatMessage(msg, roundUsageByIndex[originalIndex] || null, originalIndex, legacyTaskMap);
           }
 
           // Add sentinel for loading older messages (DOM end = visual top in column-reverse)
@@ -15693,9 +15781,12 @@
           // 的 data-msg-index 和它到容器顶部的偏移。重写完成后找到同一 data-msg-index
           // 的新节点，把它放回原来的偏移——这是 column-reverse 下保住用户视线的
           // 标准锚点法。没有锚点时（首次渲染、空 → 非空）才走 scrollTop=0 兜底。
+          // 改用 existingCount 而非 prevMsgCount：page-refresh 等 preserveStickState
+          // 路径下 prevMsgCount 被重置为 0，但 DOM 里仍有节点可作锚点，必须保住
+          // 用户的阅读位置。
           var anchorMsgIndex = -1;
           var anchorOffset = 0;
-          if (prevMsgCount > 0 && !renderWasAtBottom) {
+          if (existingCount > 0 && !renderWasAtBottom) {
             var containerTop = chatMessages.getBoundingClientRect().top;
             var preEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
             for (var pi = 0; pi < preEls.length; pi++) {
@@ -15725,13 +15816,19 @@
           })();
           // 会话切换 / 首次渲染后，浏览器会把旧的 scrollTop 钳制到新内容
           // 的最大值——column-reverse 下这意味着视觉上跳到最上面（最旧消息），
-          // 也就是用户反馈的"退出再回来时被重定向到最上面"。这里在
-          // prevMsgCount === 0（resetChatRenderCache 后或刚从空状态进入）
-          // 强制 scrollTop=0（视觉底部 = 最新消息），避免错位。
-          if (prevMsgCount === 0) {
+          // 也就是用户反馈的"退出再回来时被重定向到最上面"。
+          // 关键：只在该会话视图的**首次**渲染（chatInitialRenderDone=false）
+          // 才执行这个强制贴底；之后即便 prevMsgCount===0（page-refresh /
+          // ws 重连等保留 sticky 的 reset 路径），也尊重 chatStickToBottom，
+          // 不再把上滚的用户拽回去。
+          if (prevMsgCount === 0 && !state.chatInitialRenderDone) {
             chatMessages.scrollTop = 0;
             state.chatStickToBottom = true;
             clearChatUnread({ removeDivider: true });
+            state.chatInitialRenderDone = true;
+          } else if (prevMsgCount === 0 && state.chatStickToBottom) {
+            // 非首次但缓存重置后的 re-render——仅在用户原本贴底时回贴。
+            chatMessages.scrollTop = 0;
           } else if (renderWasAtBottom) {
             // 同一会话内的全量重渲染：用户原本贴底就保持贴底，浏览器在 innerHTML
             // 重置后可能把 scrollTop 钳到一个奇怪的值，这里显式拉回 0。
@@ -15864,7 +15961,7 @@
           for (var i = 0; i < newMessages.length; i++) {
             var div = document.createElement("div");
             var nmOrigIdx = visibleOffset + existingCount + (newMessages.length - 1 - i);
-            div.innerHTML = renderChatMessage(newMessages[i], roundUsageByIndex[nmOrigIdx] || null, nmOrigIdx);
+            div.innerHTML = renderChatMessage(newMessages[i], roundUsageByIndex[nmOrigIdx] || null, nmOrigIdx, legacyTaskMap);
             var el = div.firstElementChild;
             if (el) {
               el.classList.add("animate-in");
@@ -15922,7 +16019,7 @@
             var currentEl = existingEls[mi];
             var tmpWrap = document.createElement("div");
             var srOrigIdx = visibleOffset + reversedMessages.length - 1 - mi;
-            tmpWrap.innerHTML = renderChatMessage(reversedMessages[mi], roundUsageByIndex[srOrigIdx] || null, srOrigIdx);
+            tmpWrap.innerHTML = renderChatMessage(reversedMessages[mi], roundUsageByIndex[srOrigIdx] || null, srOrigIdx, legacyTaskMap);
             var replacementEl = tmpWrap.firstElementChild;
             if (!replacementEl) continue;
             if (currentEl.innerHTML !== replacementEl.innerHTML || currentEl.className !== replacementEl.className) {
@@ -16903,6 +17000,27 @@
           '<span class="avatar-name">' + escapeHtml(name) + '</span>' +
         '</div>';
       }
+
+      // subagent tool_result → 独立 reply 气泡（markdown 渲染）。出错时显示红色错误体，
+      // 没文本时显示打字指示器（subagent 还在跑）。
+      function renderSubagentReplyBubble(block, role) {
+        if (!block || block.type !== "tool_result") return "";
+        var text = extractToolResultText(block.content);
+        var isError = block.is_error === true;
+
+        if (isError) {
+          return '<div class="subagent-reply error">' +
+            '<span class="subagent-reply-icon">✗</span>' +
+            '<div class="subagent-reply-body">' + (text ? renderMarkdown(text) : escapeHtml("（无输出）")) + '</div>' +
+          '</div>';
+        }
+
+        if (!text || !String(text).trim()) {
+          return '<div class="subagent-reply pending"><span class="typing-indicator"><span></span><span></span><span></span></span></div>';
+        }
+
+        return '<div class="subagent-reply">' + renderMarkdown(text) + '</div>';
+      }
       var PIXEL_AVATAR = {
         assistant: buildPixelSvg(buildCatGrid(GARFIELD_PALETTE)),
         user: buildPixelSvg(buildCatGrid(SHORTHAIR_PALETTE)),
@@ -16956,7 +17074,7 @@
         '</div>';
       }
 
-      function renderChatMessage(msg, roundUsage, messageIndex) {
+      function renderChatMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
           // 空 / 全空白的 thinking 没有任何信息量，渲染出来只是一条带"展开"的紫色窄条，
@@ -16987,7 +17105,7 @@
 
         // Structured content blocks (from JSON chat mode)
         if (Array.isArray(msg.content)) {
-          return renderStructuredMessage(msg, roundUsage, messageIndex);
+          return renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap);
         }
 
         // Legacy string content (from PTY parsing)
@@ -17043,6 +17161,8 @@
       }
 
       // ── 连续同类工具调用分组 ──
+      // 注意：禁止把 Task/Agent 加入 GROUPABLE_TOOLS——它们由 renderContentBlock 入口屏蔽返空，
+      // 加入分组会导致空 group 包裹一堆空字符串，留下视觉空盒子。
       var GROUPABLE_TOOLS = { Read: 1, Glob: 1, Grep: 1, WebFetch: 1, WebSearch: 1, TodoRead: 1 };
 
       function groupConsecutiveTools(content) {
@@ -17139,16 +17259,61 @@
         persistElementExpandState(el, "tool-group");
       };
 
+      // 老消息（SQLite 历史 turn）后端还没盖章。前端给 name === "Task"/"Agent"
+      // 或 input.subagent_type 非空的 tool_use 虚拟盖章，让现有 multi-agent 渲染路径吃到。
+      function deriveLegacySubagent(block) {
+        if (!block || block.type !== "tool_use") return null;
+        var input = block.input || {};
+        var agentType = typeof input.subagent_type === "string" ? input.subagent_type : null;
+        if (!agentType && block.name !== "Task" && block.name !== "Agent") return null;
+        return {
+          taskId: block.id,
+          agentType: agentType || undefined,
+          taskDescription: typeof input.description === "string" ? input.description : undefined,
+        };
+      }
+
+      // tool_result 老消息靠 tool_use_id 关联 task。由外层预扫一遍 messages，构建 task id → meta 的 map。
+      function collectLegacyTaskIdMap(allMessages) {
+        var map = new Map();
+        if (!Array.isArray(allMessages)) return map;
+        for (var i = 0; i < allMessages.length; i++) {
+          var m = allMessages[i];
+          if (!m || m.role !== "assistant" || !Array.isArray(m.content)) continue;
+          for (var j = 0; j < m.content.length; j++) {
+            var b = m.content[j];
+            if (!b || b.type !== "tool_use") continue;
+            var derived = b.__subagent || deriveLegacySubagent(b);
+            if (derived) map.set(b.id, derived);
+          }
+        }
+        return map;
+      }
+
       // 把一条 assistant turn 按相邻 block 的 __subagent.taskId 切成段。
       // 输出每段附带原数组中的 firstIndex，方便渲染时 expand key 用全局 index
       // 避免不同段冲突。
-      function splitTurnBySubagent(blocks) {
+      // legacyTaskMap：老消息没有 __subagent 盖章时，按 tool_use_id 反查兜底。
+      function splitTurnBySubagent(blocks, legacyTaskMap) {
         var segs = [];
         if (!Array.isArray(blocks) || !blocks.length) return segs;
         var current = null;
         for (var i = 0; i < blocks.length; i++) {
           var b = blocks[i];
+          // __processing 占位 block（流式中的 typing indicator）没有 __subagent 盖章，
+          // 强制延续上一段（若已有），避免"父-Task-占位-子内容"反复切段导致 DOM 抖动。
+          // 边界：若占位是第一个 block（current 仍为 null），走正常路径开 parent 段。
+          var isPlaceholder = b && b.type === "text" && b.__processing === true;
+          if (isPlaceholder && current) {
+            current.blocks.push(b);
+            continue;
+          }
           var sub = b && b.__subagent ? b.__subagent : null;
+          if (!sub) sub = deriveLegacySubagent(b);
+          // 老消息 tool_result 兜底：用 tool_use_id 反查 map
+          if (!sub && b && b.type === "tool_result" && legacyTaskMap && legacyTaskMap.has(b.tool_use_id)) {
+            sub = legacyTaskMap.get(b.tool_use_id);
+          }
           var key = sub ? sub.taskId : null;
           if (!current || current.key !== key) {
             current = { key: key, subagent: sub, blocks: [], firstIndex: i };
@@ -17187,11 +17352,55 @@
         return html;
       }
 
-      function renderStructuredMessage(msg, roundUsage, messageIndex) {
+      // 抽出 multi-agent 渲染共用块。assistant turn 与 user turn 都可能含 subagent 段
+      // （user turn 的 Task tool_result 由后端反查盖章），但 user turn 不再输出 handoff
+      // 行，避免与 assistant turn 的 handoff 重复。
+      // TODO：嵌套 subagent（子 subagent 在外层 subagent 段内再切）时，
+      // parentPersonaName 应是外层 subagent.name 而不是固定父 persona；目前先不处理。
+      function buildMultiAgentHtml(segments, role, parentPersonaName, toolResults, messageKey, options) {
+        var opts = options || {};
+        var showHandoff = opts.showHandoff !== false; // 默认 true；user turn 传 false
+        var html = "";
+        var lastSubId = null;
+        for (var si = 0; si < segments.length; si++) {
+          var seg = segments[si];
+          var segHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey);
+          // 段内所有 block 都被短路返空（典型场景：父段只剩一个空 thinking）时，
+          // 跳过整段。否则会渲染出"只有头像没内容"的空气泡。
+          if (!segHtml || !segHtml.trim()) continue;
+          if (seg.subagent) {
+            var subPalette = getSubagentPalette(seg.subagent);
+            if (showHandoff && lastSubId !== seg.subagent.taskId) {
+              var subName = getSubagentDisplayName(seg.subagent);
+              var desc = seg.subagent.taskDescription
+                ? '：<span class="chat-handoff-desc">' + escapeHtml(seg.subagent.taskDescription) + '</span>'
+                : '';
+              html += '<div class="chat-handoff" style="--agent-color:' + subPalette.primary + '">' +
+                '<span class="chat-handoff-arrow">↳</span> ' +
+                escapeHtml(parentPersonaName) + ' 让 <strong>' + escapeHtml(subName) + '</strong> 帮忙' + desc +
+              '</div>';
+            }
+            html += '<div class="chat-message-segment subagent" data-agent-id="' + escapeHtml(seg.subagent.taskId) + '" style="--agent-color:' + subPalette.primary + '">' +
+              subagentAvatarHtml(seg.subagent) +
+              '<div class="chat-message-content">' + segHtml + '</div>' +
+            '</div>';
+            lastSubId = seg.subagent.taskId;
+          } else {
+            html += '<div class="chat-message-segment parent">' +
+              chatAvatar(role) +
+              '<div class="chat-message-content">' + segHtml + '</div>' +
+            '</div>';
+            lastSubId = null;
+          }
+        }
+        return html;
+      }
+
+      function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
         var role = msg.role;
         var messageKey = getMessageKey(msg, messageIndex);
 
-        // 排队中的用户消息标记（subagent 不会出现在 user role）
+        // 排队中的用户消息标记（subagent 不会出现在 user role 的 user input 中）
         var isQueued = role === "user" && msg.content && msg.content.some(function(b) { return b.__queued; });
 
         if (!msg.content || msg.content.length === 0) {
@@ -17210,12 +17419,22 @@
         }
 
         var toolResults = buildToolResultMap(msg.content);
+        var parentPersona = getStructuredChatPersona("assistant");
 
-        // user role 不会有 subagent，保持旧路径
+        // user role：可能含 Task tool_result（subagent 反查盖章过的）。检测一下，
+        // 有 subagent 段就走 multi-agent 渲染（不输出 handoff，避免重复）。
         if (role !== "assistant") {
-          var userHtml = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
+          var userSegments = splitTurnBySubagent(msg.content, legacyTaskMap);
+          var userHasSub = userSegments.some(function(s) { return s.subagent; });
           var queuedClass = isQueued ? " queued" : "";
           var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
+          if (userHasSub) {
+            var userMultiHtml = buildMultiAgentHtml(userSegments, role, parentPersona.name, toolResults, messageKey, { showHandoff: false });
+            return '<div class="chat-message ' + role + queuedClass + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">' +
+              userMultiHtml + queuedBadge +
+            '</div>';
+          }
+          var userHtml = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
           return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
             chatAvatar(role) +
             '<div class="chat-message-content">' + userHtml + queuedBadge + '</div>' +
@@ -17223,7 +17442,7 @@
         }
 
         // assistant：检测是否有 subagent 段，没有就走单段渲染（兼容老消息 / 无 subagent 的 turn）
-        var segments = splitTurnBySubagent(msg.content);
+        var segments = splitTurnBySubagent(msg.content, legacyTaskMap);
         var hasSubagent = segments.some(function(s) { return s.subagent; });
 
         if (!hasSubagent) {
@@ -17237,42 +17456,25 @@
         // 多段：父 assistant 段 + 各 subagent 段。同一根 .chat-message 容器，
         // 内部多个 .chat-message-segment 子段，每段自带头像；切到新 subagent 时
         // 插入一行 handoff 提示（"勤劳初二 ↳ 让 侦探猫 帮忙"）。
-        var parentPersona = getStructuredChatPersona("assistant");
         var multiHtml = '<div class="chat-message ' + role + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">';
-        var lastSubId = null;
-        for (var si = 0; si < segments.length; si++) {
-          var seg = segments[si];
-          var segHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey);
-          if (seg.subagent) {
-            var subPalette = getSubagentPalette(seg.subagent);
-            if (lastSubId !== seg.subagent.taskId) {
-              var subName = getSubagentDisplayName(seg.subagent);
-              var desc = seg.subagent.taskDescription
-                ? '：<span class="chat-handoff-desc">' + escapeHtml(seg.subagent.taskDescription) + '</span>'
-                : '';
-              multiHtml += '<div class="chat-handoff" style="--agent-color:' + subPalette.primary + '">' +
-                '<span class="chat-handoff-arrow">↳</span> ' +
-                escapeHtml(parentPersona.name) + ' 让 <strong>' + escapeHtml(subName) + '</strong> 帮忙' + desc +
-              '</div>';
-            }
-            multiHtml += '<div class="chat-message-segment subagent" data-agent-id="' + escapeHtml(seg.subagent.taskId) + '" style="--agent-color:' + subPalette.primary + '">' +
-              subagentAvatarHtml(seg.subagent) +
-              '<div class="chat-message-content">' + segHtml + '</div>' +
-            '</div>';
-            lastSubId = seg.subagent.taskId;
-          } else {
-            multiHtml += '<div class="chat-message-segment parent">' +
-              chatAvatar("assistant") +
-              '<div class="chat-message-content">' + segHtml + '</div>' +
-            '</div>';
-            lastSubId = null;
-          }
-        }
+        multiHtml += buildMultiAgentHtml(segments, role, parentPersona.name, toolResults, messageKey, { showHandoff: true });
         multiHtml += '</div>';
         return multiHtml;
       }
       function renderContentBlock(block, role, toolResults, index, messageKey) {
         if (!block || !block.type) return "";
+
+        // Task/Agent tool_use 自带 __subagent.taskId === block.id（后端自盖章）：
+        // 不画工具卡片，由 handoff 行表达"派遣"语义。
+        if (block.type === "tool_use" && block.__subagent && block.__subagent.taskId === block.id) {
+          return "";
+        }
+        // 只有父 Task 的 tool_result（taskId === tool_use_id）走 reply bubble；
+        // 子 agent 内部工具的 tool_result（taskId === parent_tool_use_id ≠ tool_use_id）
+        // 走普通工具卡片，不能误判为 reply bubble。
+        if (block.type === "tool_result" && block.__subagent && block.__subagent.taskId === block.tool_use_id) {
+          return renderSubagentReplyBubble(block, role);
+        }
 
         switch (block.type) {
           case "text":

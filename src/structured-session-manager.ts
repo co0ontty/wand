@@ -158,6 +158,46 @@ function tagSubagentBlocks(
   return blocks.map((block) => ({ ...block, __subagent: stamp } as ContentBlock));
 }
 
+/**
+ * 给已被 captureTaskMeta 识别为 Task/Agent 的 tool_use block 本身也盖 __subagent 章。
+ * taskId 用自己的 block.id —— 与子消息的 parent_tool_use_id（也等于这个 id）保持一致，
+ * 前端 splitTurnBySubagent 按 taskId 分组时父 Task tool_use 和 SDK 转发的子消息能合并到同一段。
+ */
+function stampSelfTask(blocks: ContentBlock[], registry: TaskMetaMap): ContentBlock[] {
+  return blocks.map((b) => {
+    if (b.type !== "tool_use") return b;
+    if (b.__subagent) return b; // 已盖章不重复（防止幂等问题）
+    const meta = registry.get(b.id);
+    if (!meta && b.name !== "Task" && b.name !== "Agent") return b;
+    const stamp: SubagentMeta = {
+      taskId: b.id,
+      ...(meta?.agentType ? { agentType: meta.agentType } : {}),
+      ...(meta?.description ? { taskDescription: meta.description } : {}),
+    };
+    return { ...b, __subagent: stamp } as ContentBlock;
+  });
+}
+
+/**
+ * 当父 assistant 在 parentToolUseId === null 的 user turn 里收到 Task 工具的 tool_result 时，
+ * tagSubagentBlocks 不会被调用（它只在 parentToolUseId 非空时盖章）。这里按 tool_use_id
+ * 反查 registry，给这条 tool_result 单独盖章，让前端能把它归到同一个 subagent 段。
+ */
+function stampParentTaskResults(blocks: ContentBlock[], registry: TaskMetaMap): ContentBlock[] {
+  return blocks.map((b) => {
+    if (b.type !== "tool_result") return b;
+    if (b.__subagent) return b;
+    const meta = registry.get(b.tool_use_id);
+    if (!meta) return b;
+    const stamp: SubagentMeta = {
+      taskId: b.tool_use_id,
+      ...(meta.agentType ? { agentType: meta.agentType } : {}),
+      ...(meta.description ? { taskDescription: meta.description } : {}),
+    };
+    return { ...b, __subagent: stamp } as ContentBlock;
+  });
+}
+
 const STREAM_EMIT_DEBOUNCE_MS = 16;
 /** Min interval between full saveSession() calls for an in-progress streaming turn.
  *  saveSession serializes the entire messages array, so doing it on every NDJSON
@@ -1628,7 +1668,7 @@ export class StructuredSessionManager {
             captureTaskMeta(extracted.content, taskMetaRegistry);
           }
           const stamped = parentToolUseId === null
-            ? extracted.content
+            ? stampSelfTask(extracted.content, taskMetaRegistry)
             : tagSubagentBlocks(extracted.content, parentToolUseId, taskMetaRegistry);
           if (stamped.length > 0) {
             upsertBlocks(msgId, stamped);
@@ -1674,7 +1714,7 @@ export class StructuredSessionManager {
             ? parsed.parent_tool_use_id
             : null;
           const stamped = parentToolUseId === null
-            ? collected
+            ? stampParentTaskResults(collected, taskMetaRegistry)
             : tagSubagentBlocks(collected, parentToolUseId, taskMetaRegistry);
           if (stamped.length > 0) {
             upsertBlocks(`tool_result:${toolResultSeq++}`, stamped);
@@ -2086,7 +2126,13 @@ export class StructuredSessionManager {
           streaming.push(block);
         }
       }
-      return [...finalizedBlocks, ...streaming];
+      // 流式阶段就给 Task/Agent tool_use 本身盖章，防止"先显示工具卡片几秒再跳为
+      // handoff 行"的闪烁。content_block_start 阶段就有 name=Task/Agent，
+      // stampSelfTask 据此即可命中；agentType 字段藏在 input 里，delta 累计后再由
+      // 后续 captureTaskMeta 回填 registry，下次 rebuild 自动补上更完整的 stamp。
+      captureTaskMeta(streaming, taskMetaRegistry);
+      const stampedStreaming = stampSelfTask(streaming, taskMetaRegistry);
+      return [...finalizedBlocks, ...stampedStreaming];
     };
 
     const syncSnapshot = (): void => {
@@ -2205,7 +2251,7 @@ export class StructuredSessionManager {
           const parentToolUseId = assistantMsg.parent_tool_use_id ?? null;
           if (parentToolUseId === null) {
             captureTaskMeta(extracted.content, taskMetaRegistry);
-            finalizedBlocks.push(...extracted.content);
+            finalizedBlocks.push(...stampSelfTask(extracted.content, taskMetaRegistry));
           } else {
             finalizedBlocks.push(...tagSubagentBlocks(extracted.content, parentToolUseId, taskMetaRegistry));
           }
@@ -2265,7 +2311,7 @@ export class StructuredSessionManager {
             }
           }
           if (parentToolUseId === null) {
-            finalizedBlocks.push(...collected);
+            finalizedBlocks.push(...stampParentTaskResults(collected, taskMetaRegistry));
           } else {
             finalizedBlocks.push(...tagSubagentBlocks(collected, parentToolUseId, taskMetaRegistry));
           }
