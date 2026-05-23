@@ -23,3 +23,4 @@ macos/Wand/Assets.xcassets/AppIcon.appiconset/*.png
 avatar-seed.txt
 .wand-uploads/
 .wand-worktrees/
+.claude-*-plan.md

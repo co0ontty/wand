@@ -13,7 +13,7 @@ import { WandStorage } from "./storage.js";
 import {
   CardExpandDefaults, ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
   ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState,
-  WandConfig,
+  SubagentMeta, WandConfig,
 } from "./types.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { buildChildEnv } from "./env-utils.js";
@@ -112,6 +112,50 @@ interface StreamingTurnState {
   sessionId: string | null;
   model?: string;
   usage?: ConversationTurn["usage"];
+}
+
+/**
+ * Per-turn registry of Task tool_use_id → subagent meta. Populated when the
+ * parent assistant emits Task tool_use blocks; consulted when subagent
+ * messages arrive so we can stamp them with agentType / description and
+ * the UI can render them as a separate persona.
+ */
+type TaskMetaMap = Map<string, { agentType?: string; description?: string }>;
+
+function captureTaskMeta(blocks: ContentBlock[], registry: TaskMetaMap): void {
+  for (const b of blocks) {
+    if (b.type !== "tool_use") continue;
+    if (registry.has(b.id)) continue;
+    const input = b.input ?? {};
+    // Claude SDK 把这类"派 subagent 干活"的内置工具叫做 "Agent"，CLI/旧版本里
+    // 也叫过 "Task"。判定不靠工具名（容易随版本变），而是看 input 是否含有
+    // `subagent_type` 字段——这是 Agent/Task 系列的唯一标志。
+    const agentType = typeof input.subagent_type === "string" ? input.subagent_type : undefined;
+    if (!agentType && b.name !== "Task" && b.name !== "Agent") continue;
+    const description = typeof input.description === "string" ? input.description : undefined;
+    registry.set(b.id, { agentType, description });
+  }
+}
+
+/**
+ * Stamp every block with `__subagent` meta keyed to `parentToolUseId`. When
+ * the id has no entry yet (rare race: subagent emits before we see the parent
+ * Task tool_use), we still stamp the bare taskId so the UI can group blocks;
+ * agentType / description backfill on later updates.
+ */
+function tagSubagentBlocks(
+  blocks: ContentBlock[],
+  parentToolUseId: string | null | undefined,
+  registry: TaskMetaMap,
+): ContentBlock[] {
+  if (!parentToolUseId) return blocks;
+  const meta = registry.get(parentToolUseId);
+  const stamp: SubagentMeta = {
+    taskId: parentToolUseId,
+    ...(meta?.agentType ? { agentType: meta.agentType } : {}),
+    ...(meta?.description ? { taskDescription: meta.description } : {}),
+  };
+  return blocks.map((block) => ({ ...block, __subagent: stamp } as ContentBlock));
 }
 
 const STREAM_EMIT_DEBOUNCE_MS = 16;
@@ -1418,6 +1462,9 @@ export class StructuredSessionManager {
       const blocksByKey = new Map<string, ContentBlock[]>();
       const keyOrder: string[] = [];
       let toolResultSeq = 0;
+      // 本轮 Task tool_use_id → meta map，由父 assistant 消息里的 Task tool_use
+      // 填充；子 agent message（parent_tool_use_id 非空）来时用它给每个 block 盖章。
+      const taskMetaRegistry: TaskMetaMap = new Map();
       // 估算单个 ContentBlock 的"信息体积"——文字 / thinking / tool input 长度之和。
       // 用于 upsertBlocks 的防御性合并：同一 message.id 重发时，按位置取信息量更大的
       // 那个版本，保证已经吐出的文字 / tool_use input 不会被一条更短的同 id 事件
@@ -1441,21 +1488,24 @@ export class StructuredSessionManager {
           blocksByKey.set(key, blocks);
           return;
         }
-        // claude -p 在同一 message.id 的多次 assistant 事件里是**累积**协议：
-        // 每次 event 的 content 总是包含之前所有 blocks + 可能的新 block，
-        // 长度只增不减、同位置类型不变。两条额外的防御性规则：
+        // claude -p 在同一 message.id 的多次 assistant 事件有两种观察到的协议：
+        //   a) **累积模式**：每次 event 的 content = 之前所有 blocks + 0~N 新 block，
+        //      同位置类型一致。流式 text/thinking 的逐字增量属于这种。
+        //   b) **拼接模式**：SDK 把 thinking 和后续的 tool_use 拆成两条 event 给同
+        //      一 msg.id 发出，第二条只带 tool_use，**不包含**之前的 thinking。
+        //      Opus 4.7 + claude-agent-sdk 实际跑下来就是这种。
         //
-        // 1) blocks.length < prev.length —— 短数组覆盖。上游异常 frame，直接拒绝
-        //    本次更新，下一帧正常累积 emit 会自然修正。
+        // 老逻辑（"同 index 类型不一致 → 保留 prev"）只对 a) 友好，碰上 b) 会让第
+        // 二条事件里的 tool_use 直接被丢掉——表现是 Agent / Read 等 tool_use 永远
+        // 不出现在 messages 里，subagent 多角色无法关联 agentType 到父 Task。
         //
-        // 2) 同 index 类型不一致 —— 比如 prev[0]=text 而 incoming[0]=tool_use。
-        //    正常累积下不会发生；一旦发生，**保留 prev[i]**。早期版本走"取
-        //    volume 大者"，会让 tool_use（input JSON 通常更长）抢占 text 位，
-        //    导致流式过程中已经渲染的文字突然消失，只剩工具卡片——直到 result
-        //    event 给出最终 turnState.result，compactContentBlocks 的 fallback
-        //    才补回 text。用户反馈"文字消失，回复完成后又出现"就是这条路径。
+        // 新规则：当类型不一致时，把新 block **追加**到 merged 末尾而非覆盖 prev。
+        // 既兼容 a)（同位置同类型仍按累积取大），又兼容 b)（拼接的新类型 block
+        // 进入末尾），还能挡住 b 早期版本里"短回退"的异常 frame（blocks.length
+        // < prev.length 时直接拒绝）。
         if (blocks.length < prev.length) return;
         const merged: ContentBlock[] = [];
+        const appendix: ContentBlock[] = [];
         for (let i = 0; i < blocks.length; i++) {
           const a = prev[i];
           const b = blocks[i];
@@ -1466,11 +1516,13 @@ export class StructuredSessionManager {
               // 同类型：取信息量大者，避免短回退覆盖已经累积的内容。
               merged.push(blockVolume(b) >= blockVolume(a) ? b : a);
             } else {
-              // 类型变了：保留 prev，不让 tool_use 等抢占 text 位。
+              // 类型变了：保留 prev[i]，把 incoming block 追加到末尾。
               merged.push(a);
+              appendix.push(b);
             }
           }
         }
+        for (const b of appendix) merged.push(b);
         blocksByKey.set(key, merged);
       };
       const rebuildTurnBlocks = (): void => {
@@ -1567,8 +1619,19 @@ export class StructuredSessionManager {
           const msgId = typeof parsed.message.id === "string" && parsed.message.id
             ? `assistant:${parsed.message.id}`
             : `assistant:anon:${keyOrder.length}`;
-          if (extracted.content.length > 0) {
-            upsertBlocks(msgId, extracted.content);
+          // parent_tool_use_id 决定父/子 agent。父 message 里的 Task tool_use 登记
+          // 到 taskMetaRegistry；子 message 的每个 block 用 __subagent 盖章。
+          const parentToolUseId = typeof parsed.parent_tool_use_id === "string" && parsed.parent_tool_use_id
+            ? parsed.parent_tool_use_id
+            : null;
+          if (parentToolUseId === null) {
+            captureTaskMeta(extracted.content, taskMetaRegistry);
+          }
+          const stamped = parentToolUseId === null
+            ? extracted.content
+            : tagSubagentBlocks(extracted.content, parentToolUseId, taskMetaRegistry);
+          if (stamped.length > 0) {
+            upsertBlocks(msgId, stamped);
             rebuildTurnBlocks();
           }
           // NOTE: usage from streaming "assistant" events contains partial/incremental
@@ -1607,8 +1670,14 @@ export class StructuredSessionManager {
               });
             }
           }
-          if (collected.length > 0) {
-            upsertBlocks(`tool_result:${toolResultSeq++}`, collected);
+          const parentToolUseId = typeof parsed.parent_tool_use_id === "string" && parsed.parent_tool_use_id
+            ? parsed.parent_tool_use_id
+            : null;
+          const stamped = parentToolUseId === null
+            ? collected
+            : tagSubagentBlocks(collected, parentToolUseId, taskMetaRegistry);
+          if (stamped.length > 0) {
+            upsertBlocks(`tool_result:${toolResultSeq++}`, stamped);
             rebuildTurnBlocks();
           }
           syncSnapshot();
@@ -1881,6 +1950,10 @@ export class StructuredSessionManager {
       ...(permPolicy.allowedTools ? { allowedTools: permPolicy.allowedTools } : {}),
       ...(isManaged ? { disallowedTools: ["AskUserQuestion"] } : {}),
       includePartialMessages: true,
+      // 把子 agent 的 text/thinking 也转发回来，UI 才能把"被 Task 召唤来的协作者"
+      // 渲染成独立角色的群聊消息。关掉这个开关时只会收到子 agent 的 tool_use/tool_result，
+      // text/thinking 被 SDK 吞掉。
+      forwardSubagentText: true,
       ...(systemPromptParts.length > 0 ? { appendSystemPrompt: systemPromptParts.join("\n\n") } : {}),
       ...(sdkClaudeBinary ? { pathToClaudeCodeExecutable: sdkClaudeBinary } : {}),
     };
@@ -1946,6 +2019,11 @@ export class StructuredSessionManager {
     // Tracks in-progress streaming blocks keyed by content_block index from stream_event.
     // The map is cleared whenever a complete `assistant` message arrives — its blocks
     // are then promoted into `finalizedBlocks` below.
+    //
+    // `parentToolUseId` carries through from SDKPartialAssistantMessage so we can
+    // stamp streaming blocks with subagent persona *during* streaming, not only
+    // after the completion event. Without it, subagent text shows up under the
+    // parent's avatar for tens of ms then snaps to the subagent — visible flicker.
     const streamingBlockByIndex = new Map<number, {
       type: "text" | "thinking" | "tool_use";
       id?: string;
@@ -1954,6 +2032,7 @@ export class StructuredSessionManager {
       thinking: string;
       partialInput: string;
       finalized: boolean;
+      parentToolUseId: string | null;
     }>();
 
     // Blocks from messages that have already completed within this turn — including
@@ -1962,6 +2041,10 @@ export class StructuredSessionManager {
     // back-to-back; without this list, each new streaming message would visually
     // erase everything that came before it in the same turn.
     const finalizedBlocks: ContentBlock[] = [];
+
+    // Per-turn Task tool_use_id → meta map; populated from the parent assistant's
+    // Task tool_use blocks and consulted when subagent messages arrive.
+    const taskMetaRegistry: TaskMetaMap = new Map();
 
     let emitTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1983,16 +2066,24 @@ export class StructuredSessionManager {
       const sorted = [...streamingBlockByIndex.entries()].sort((a, b) => a[0] - b[0]);
       const streaming: ContentBlock[] = [];
       for (const [, sb] of sorted) {
+        let block: ContentBlock | null = null;
         if (sb.type === "text") {
-          streaming.push({ type: "text", text: sb.text });
+          block = { type: "text", text: sb.text };
         } else if (sb.type === "thinking") {
-          streaming.push({ type: "thinking", thinking: sb.thinking });
+          block = { type: "thinking", thinking: sb.thinking };
         } else if (sb.type === "tool_use" && sb.id && sb.name) {
           let input: Record<string, unknown> = {};
           if (sb.finalized && sb.partialInput) {
             try { input = JSON.parse(sb.partialInput) as Record<string, unknown>; } catch { /* partial json */ }
           }
-          streaming.push({ type: "tool_use", id: sb.id, name: sb.name, input });
+          block = { type: "tool_use", id: sb.id, name: sb.name, input };
+        }
+        if (!block) continue;
+        if (sb.parentToolUseId) {
+          const [stamped] = tagSubagentBlocks([block], sb.parentToolUseId, taskMetaRegistry);
+          streaming.push(stamped);
+        } else {
+          streaming.push(block);
         }
       }
       return [...finalizedBlocks, ...streaming];
@@ -2045,7 +2136,13 @@ export class StructuredSessionManager {
 
         // Incremental streaming events (opt-in via includePartialMessages: true)
         if (msg.type === "stream_event") {
-          const ev = (msg as unknown as { type: "stream_event"; event: Record<string, unknown> }).event;
+          const partial = msg as unknown as {
+            type: "stream_event";
+            event: Record<string, unknown>;
+            parent_tool_use_id?: string | null;
+          };
+          const ev = partial.event;
+          const partialParentId = partial.parent_tool_use_id ?? null;
           if (ev.type === "content_block_start") {
             const cb = ev.content_block as Record<string, unknown>;
             const blockType = cb.type as string;
@@ -2058,6 +2155,7 @@ export class StructuredSessionManager {
                 thinking: typeof cb.thinking === "string" ? cb.thinking : "",
                 partialInput: "",
                 finalized: false,
+                parentToolUseId: partialParentId,
               });
               turnState.blocks = rebuildStreamingBlocks();
               syncSnapshot();
@@ -2095,9 +2193,22 @@ export class StructuredSessionManager {
         // history so subsequent messages (subagents, follow-up parent messages)
         // append to it instead of erasing it.
         if (msg.type === "assistant") {
-          const assistantMsg = msg as unknown as { type: "assistant"; message: Record<string, unknown>; session_id: string };
+          const assistantMsg = msg as unknown as {
+            type: "assistant";
+            message: Record<string, unknown>;
+            session_id: string;
+            parent_tool_use_id?: string | null;
+          };
           const extracted = this.extractAssistantMessage(assistantMsg.message);
-          finalizedBlocks.push(...extracted.content);
+          // 父 assistant 的 Task tool_use → 注册到本轮 taskMeta map；
+          // 子 agent 的 message（parent_tool_use_id 非空）→ 给每个 block 盖章。
+          const parentToolUseId = assistantMsg.parent_tool_use_id ?? null;
+          if (parentToolUseId === null) {
+            captureTaskMeta(extracted.content, taskMetaRegistry);
+            finalizedBlocks.push(...extracted.content);
+          } else {
+            finalizedBlocks.push(...tagSubagentBlocks(extracted.content, parentToolUseId, taskMetaRegistry));
+          }
           streamingBlockByIndex.clear();
           turnState.blocks = rebuildStreamingBlocks();
           if (assistantMsg.session_id) turnState.sessionId = assistantMsg.session_id;
@@ -2134,18 +2245,29 @@ export class StructuredSessionManager {
         // Tool results fed back from the claude subprocess (parent's view of a
         // tool call, or a subagent's tool_result during Task execution).
         if (msg.type === "user") {
-          const userMsg = msg as unknown as { type: "user"; message: Record<string, unknown> };
+          const userMsg = msg as unknown as {
+            type: "user";
+            message: Record<string, unknown>;
+            parent_tool_use_id?: string | null;
+          };
+          const parentToolUseId = userMsg.parent_tool_use_id ?? null;
           const content = Array.isArray(userMsg.message?.content) ? userMsg.message.content as unknown[] : [];
+          const collected: ContentBlock[] = [];
           for (const block of content) {
             const b = block as Record<string, unknown>;
             if (b?.type === "tool_result") {
-              finalizedBlocks.push({
+              collected.push({
                 type: "tool_result",
                 tool_use_id: typeof b.tool_use_id === "string" ? b.tool_use_id : "",
                 content: this.normalizeToolResultContent(b.content),
                 is_error: b.is_error === true,
               });
             }
+          }
+          if (parentToolUseId === null) {
+            finalizedBlocks.push(...collected);
+          } else {
+            finalizedBlocks.push(...tagSubagentBlocks(collected, parentToolUseId, taskMetaRegistry));
           }
           turnState.blocks = rebuildStreamingBlocks();
           syncSnapshot();
@@ -2331,11 +2453,16 @@ export class StructuredSessionManager {
         previous
         && previous.type === "text"
         && block.type === "text"
+        // 子 agent 边界不合并：父 assistant 的 text 与子 agent 的 text 必须保持独立，
+        // 渲染层才能切段并给子 agent 单独发头像。同一 subagent 内部允许合并。
+        && (previous.__subagent?.taskId ?? null) === (block.__subagent?.taskId ?? null)
       ) {
         // 用新对象替换 compacted 末尾，**不要**就地改 previous.text —— previous
         // 通常和调用方持有的 turnState.blocks 共享引用，原地 mutate 会让下次
         // syncSnapshot 把已合并的内容再合并一次，呈指数级复制。
-        compacted[compacted.length - 1] = { type: "text", text: `${previous.text}${block.text}` };
+        const merged: ContentBlock = { type: "text", text: `${previous.text}${block.text}` };
+        if (previous.__subagent) merged.__subagent = previous.__subagent;
+        compacted[compacted.length - 1] = merged;
         continue;
       }
       compacted.push(block);

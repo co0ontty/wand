@@ -1464,7 +1464,7 @@
                       ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>'
                       : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') +
                   '</button>' +
-                  '<button id="sidebar-narrow-close-btn" class="btn btn-ghost btn-sm sidebar-narrow-close" type="button" title="完全关闭侧栏" aria-label="完全关闭侧栏"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
+                  '<button id="sidebar-close-fully-btn" class="btn btn-ghost btn-sm sidebar-close-fully" type="button" title="完全关闭侧栏" aria-label="完全关闭侧栏"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                   '<button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="关闭菜单"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                 '</div>' +
               '</div>' +
@@ -5627,8 +5627,8 @@
         if (pinBtn) pinBtn.addEventListener("click", toggleSidebarPin);
         var collapseBtn = document.getElementById("sidebar-collapse-btn");
         if (collapseBtn) collapseBtn.addEventListener("click", toggleSidebarCollapsed);
-        var narrowCloseBtn = document.getElementById("sidebar-narrow-close-btn");
-        if (narrowCloseBtn) narrowCloseBtn.addEventListener("click", closeSidebarFromNarrow);
+        var closeFullyBtn = document.getElementById("sidebar-close-fully-btn");
+        if (closeFullyBtn) closeFullyBtn.addEventListener("click", closeSidebarCompletely);
         var sidebarMoreBtn = document.getElementById("sidebar-more-btn");
         var sidebarOverflow = document.getElementById("sidebar-overflow-menu");
         if (sidebarMoreBtn && sidebarOverflow) {
@@ -8974,7 +8974,7 @@
         hideCollapsedTileBubble();
       }
 
-      function closeSidebarFromNarrow() {
+      function closeSidebarCompletely() {
         if (isMobileLayout()) return;
         state.sidebarPinned = false;
         state.sidebarCollapsed = false;
@@ -17076,57 +17076,137 @@
         persistElementExpandState(el, "tool-group");
       };
 
+      // 把一条 assistant turn 按相邻 block 的 __subagent.taskId 切成段。
+      // 输出每段附带原数组中的 firstIndex，方便渲染时 expand key 用全局 index
+      // 避免不同段冲突。
+      function splitTurnBySubagent(blocks) {
+        var segs = [];
+        if (!Array.isArray(blocks) || !blocks.length) return segs;
+        var current = null;
+        for (var i = 0; i < blocks.length; i++) {
+          var b = blocks[i];
+          var sub = b && b.__subagent ? b.__subagent : null;
+          var key = sub ? sub.taskId : null;
+          if (!current || current.key !== key) {
+            current = { key: key, subagent: sub, blocks: [], firstIndex: i };
+            segs.push(current);
+          }
+          current.blocks.push(b);
+        }
+        return segs;
+      }
+
+      // 渲染一段内的 blocks。独立 group consecutive tools，避免父/子 agent 的工具
+      // 调用跨边界被合并；grp.index 偏移到原数组全局位置，保持 expand key 唯一。
+      function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey) {
+        var html = "";
+        try {
+          var groups = groupConsecutiveTools(segmentBlocks);
+          for (var g = 0; g < groups.length; g++) {
+            var grp = groups[g];
+            try {
+              if (grp.type === "group") {
+                var shifted = [];
+                for (var k = 0; k < grp.items.length; k++) {
+                  shifted.push({ block: grp.items[k].block, index: grp.items[k].index + segmentFirstIndex });
+                }
+                html += renderToolGroup(shifted, role, toolResults, messageKey);
+              } else {
+                html += renderContentBlock(grp.block, role, toolResults, grp.index + segmentFirstIndex, messageKey);
+              }
+            } catch (e) {
+              html += '<div class="render-error">消息块渲染失败</div>';
+            }
+          }
+        } catch (e) {
+          html += '<div class="render-error">消息渲染失败</div>';
+        }
+        return html;
+      }
+
       function renderStructuredMessage(msg, roundUsage, messageIndex) {
         var role = msg.role;
-        var avatar = chatAvatar(role);
         var messageKey = getMessageKey(msg, messageIndex);
 
-        // Check if this is a queued user message
+        // 排队中的用户消息标记（subagent 不会出现在 user role）
         var isQueued = role === "user" && msg.content && msg.content.some(function(b) { return b.__queued; });
 
         if (!msg.content || msg.content.length === 0) {
           if (role === "assistant") {
             return '<div class="chat-message ' + role + '">' +
-              avatar +
+              chatAvatar(role) +
               '<div class="chat-message-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>' +
             '</div>';
           }
-          return "";
-        }
-
-        var toolResults = buildToolResultMap(msg.content);
-        var blocksHtml = "";
-
-        try {
-          var groups = groupConsecutiveTools(msg.content);
-          for (var g = 0; g < groups.length; g++) {
-            var grp = groups[g];
-            try {
-              if (grp.type === "group") {
-                blocksHtml += renderToolGroup(grp.items, role, toolResults, messageKey);
-              } else {
-                blocksHtml += renderContentBlock(grp.block, role, toolResults, grp.index, messageKey);
-              }
-            } catch (e) {
-              blocksHtml += '<div class="render-error">消息块渲染失败</div>';
-            }
-          }
-        } catch (e) {
-          return '<div class="chat-message ' + role + '">' +
-            avatar +
-            '<div class="chat-message-content"><div class="render-error">消息渲染失败</div></div>' +
+          // 空 user 消息（极少出现，但快速发送的边界场景会让消息"消失"）。
+          // 给个明确占位避免视觉断层。
+          return '<div class="chat-message ' + role + ' empty-message" data-message-key="' + escapeHtml(messageKey) + '">' +
+            chatAvatar(role) +
+            '<div class="chat-message-content"><span class="empty-message-hint">（空消息）</span></div>' +
           '</div>';
         }
 
-        var usageHtml = "";
-        var queuedClass = isQueued ? " queued" : "";
-        var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
+        var toolResults = buildToolResultMap(msg.content);
 
-        return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
-          avatar +
-          '<div class="chat-message-content">' + blocksHtml + queuedBadge + '</div>' +
-          usageHtml +
-        '</div>';
+        // user role 不会有 subagent，保持旧路径
+        if (role !== "assistant") {
+          var userHtml = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
+          var queuedClass = isQueued ? " queued" : "";
+          var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
+          return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
+            chatAvatar(role) +
+            '<div class="chat-message-content">' + userHtml + queuedBadge + '</div>' +
+          '</div>';
+        }
+
+        // assistant：检测是否有 subagent 段，没有就走单段渲染（兼容老消息 / 无 subagent 的 turn）
+        var segments = splitTurnBySubagent(msg.content);
+        var hasSubagent = segments.some(function(s) { return s.subagent; });
+
+        if (!hasSubagent) {
+          var html = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
+          return '<div class="chat-message ' + role + '" data-message-key="' + escapeHtml(messageKey) + '">' +
+            chatAvatar(role) +
+            '<div class="chat-message-content">' + html + '</div>' +
+          '</div>';
+        }
+
+        // 多段：父 assistant 段 + 各 subagent 段。同一根 .chat-message 容器，
+        // 内部多个 .chat-message-segment 子段，每段自带头像；切到新 subagent 时
+        // 插入一行 handoff 提示（"勤劳初二 ↳ 让 侦探猫 帮忙"）。
+        var parentPersona = getStructuredChatPersona("assistant");
+        var multiHtml = '<div class="chat-message ' + role + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">';
+        var lastSubId = null;
+        for (var si = 0; si < segments.length; si++) {
+          var seg = segments[si];
+          var segHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey);
+          if (seg.subagent) {
+            var subPalette = getSubagentPalette(seg.subagent);
+            if (lastSubId !== seg.subagent.taskId) {
+              var subName = getSubagentDisplayName(seg.subagent);
+              var desc = seg.subagent.taskDescription
+                ? '：<span class="chat-handoff-desc">' + escapeHtml(seg.subagent.taskDescription) + '</span>'
+                : '';
+              multiHtml += '<div class="chat-handoff" style="--agent-color:' + subPalette.primary + '">' +
+                '<span class="chat-handoff-arrow">↳</span> ' +
+                escapeHtml(parentPersona.name) + ' 让 <strong>' + escapeHtml(subName) + '</strong> 帮忙' + desc +
+              '</div>';
+            }
+            multiHtml += '<div class="chat-message-segment subagent" data-agent-id="' + escapeHtml(seg.subagent.taskId) + '" style="--agent-color:' + subPalette.primary + '">' +
+              subagentAvatarHtml(seg.subagent) +
+              '<div class="chat-message-content">' + segHtml + '</div>' +
+            '</div>';
+            lastSubId = seg.subagent.taskId;
+          } else {
+            multiHtml += '<div class="chat-message-segment parent">' +
+              chatAvatar("assistant") +
+              '<div class="chat-message-content">' + segHtml + '</div>' +
+            '</div>';
+            lastSubId = null;
+          }
+        }
+        multiHtml += '</div>';
+        return multiHtml;
       }
       function renderContentBlock(block, role, toolResults, index, messageKey) {
         if (!block || !block.type) return "";
@@ -17168,10 +17248,26 @@
             return rendered;
 
           case "tool_result":
+            // tool_result 通常被对应的 tool_use 卡片以"结果"区域消化掉，不在主流渲染。
+            // 但如果父 tool_use 在另一条 turn 或被裁剪掉了，结果会变成孤儿——返回空字符串
+            // 会让这条消息看起来"消失"。下面 renderStructuredMessage 在切段前会再做一次
+            // orphan 兜底，这里保持空返回以维持旧行为不变。
             return "";
 
           default:
-            return '<div class="unknown-block">' + escapeHtml(JSON.stringify(block)) + '</div>';
+            // 兜底：未来后端新增 block 类型时（image / chart / 文件等）不让 JSON 裸露在
+            // 用户面前。给一个折叠卡片，默认收起，展开后是原始 JSON。
+            var unknownType = block && block.type ? String(block.type) : "未知";
+            var unknownJson = "";
+            try { unknownJson = JSON.stringify(block, null, 2); } catch (_e) { unknownJson = "{}"; }
+            return '<div class="unknown-block collapsed" onclick="this.classList.toggle(\'collapsed\')">' +
+              '<div class="unknown-block-header">' +
+                '<span class="unknown-block-icon">?</span>' +
+                '<span class="unknown-block-label">未识别的内容块：' + escapeHtml(unknownType) + '</span>' +
+                '<span class="unknown-block-toggle">▼</span>' +
+              '</div>' +
+              '<pre class="unknown-block-body">' + escapeHtml(unknownJson) + '</pre>' +
+            '</div>';
         }
       }
 

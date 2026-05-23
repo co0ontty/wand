@@ -677,12 +677,12 @@
     .sidebar-collapse-toggle.collapsed {
       color: var(--primary);
     }
-    /* 完全关闭侧栏按钮 — 仅在窄条模式下可见 */
-    .sidebar-narrow-close {
+    /* 完全关闭侧栏 — 仅在 pinned 展开态可见（drawer 自带 X；窄条态保持极简） */
+    .sidebar .sidebar-header-actions .btn.sidebar-close-fully {
       display: none;
       flex-shrink: 0;
     }
-    .sidebar.pinned.collapsed .sidebar-narrow-close {
+    .sidebar.pinned:not(.collapsed) .sidebar-header-actions .btn.sidebar-close-fully {
       display: inline-flex;
     }
 
@@ -4103,8 +4103,66 @@
     .chat-message-content > .inline-tool,
     .chat-message-content > .terminal-tool,
     .chat-message-content > .diff-tool,
-    .chat-message-content > .tool-use-card {
-      margin: 1px 0;
+    .chat-message-content > .tool-use-card,
+    .chat-message-content > .tool-group {
+      margin: 3px 0;
+    }
+
+    /* ===== 多角色群聊（subagent 加入对话） ===== */
+    /* 一个 assistant turn 内有 subagent 时，根容器切到 multi-agent 模式，
+       内部多个 .chat-message-segment 子段堆叠，每段自带头像与气泡。 */
+    .chat-message.multi-agent {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 95%;
+    }
+    .chat-message.multi-agent .chat-message-segment {
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-message.multi-agent .chat-message-segment.subagent {
+      padding-left: 14px;
+      margin-left: 6px;
+      border-left: 2px solid var(--agent-color, var(--border-subtle));
+      border-radius: 0 4px 4px 0;
+    }
+    .chat-message.multi-agent .chat-message-segment.subagent .chat-message-content {
+      /* 子 agent 段内的气泡稍微弱化背景，区分主线 */
+      opacity: 0.96;
+    }
+    .chat-message.multi-agent .chat-message-segment .chat-message-avatar {
+      padding-bottom: 4px;
+    }
+    /* 子 agent 头像 name 跟随 agent 主色 */
+    .chat-message-avatar.subagent .avatar-name {
+      color: var(--agent-color, var(--accent));
+    }
+
+    /* "勤劳初二 ↳ 让 侦探猫 帮忙" 分隔提示 */
+    .chat-handoff {
+      align-self: flex-start;
+      margin: 4px 0 2px 4px;
+      padding: 2px 10px;
+      font-size: 0.7rem;
+      color: var(--text-tertiary);
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 8%, transparent);
+      border-left: 2px solid var(--agent-color, var(--accent));
+      border-radius: 0 8px 8px 0;
+      line-height: 1.5;
+    }
+    .chat-handoff strong {
+      color: var(--agent-color, var(--accent));
+      font-weight: 600;
+    }
+    .chat-handoff-arrow {
+      color: var(--agent-color, var(--accent));
+      font-weight: 600;
+      margin-right: 2px;
+    }
+    .chat-handoff-desc {
+      color: var(--text-secondary);
+      font-style: italic;
     }
 
     /* ===== 消息使用量信息 ===== */
@@ -4113,13 +4171,98 @@
       padding-top: 6px;
       border-top: 1px solid var(--border-subtle);
       font-family: var(--font-mono);
-      font-size: 0.625rem;
+      font-size: 0.65rem;
       color: var(--text-muted);
       display: flex;
       gap: 10px;
       align-items: center;
       flex-wrap: wrap;
-      opacity: 0.5;
+      opacity: 0.75;
+    }
+
+    /* ===== 空消息占位 / 未识别 block / 截断提示 ===== */
+    .empty-message .empty-message-hint {
+      color: var(--text-tertiary);
+      font-style: italic;
+      font-size: 0.8125rem;
+      opacity: 0.7;
+    }
+
+    .unknown-block {
+      margin: 4px 0;
+      border: 1px dashed var(--border-subtle);
+      border-radius: var(--radius-md);
+      background: color-mix(in srgb, var(--text-muted) 6%, transparent);
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: background var(--transition-fast);
+    }
+    .unknown-block:hover {
+      background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+    }
+    .unknown-block-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      color: var(--text-secondary);
+    }
+    .unknown-block-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      color: var(--bg-surface);
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+    .unknown-block-label {
+      flex: 1;
+      font-weight: 500;
+    }
+    .unknown-block-toggle {
+      color: var(--text-tertiary);
+      font-size: 0.7rem;
+      transition: transform var(--transition-fast);
+    }
+    .unknown-block.collapsed .unknown-block-toggle {
+      transform: rotate(-90deg);
+    }
+    .unknown-block-body {
+      margin: 0;
+      padding: 8px 10px 10px;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 240px;
+      overflow-y: auto;
+      border-top: 1px dashed var(--border-subtle);
+    }
+    .unknown-block.collapsed .unknown-block-body {
+      display: none;
+    }
+
+    /* tool-use 卡片 / inline-tool / terminal 内容被截断时的提示标签 */
+    .tool-use-card[data-truncated="true"] .tool-use-name::after,
+    .inline-tool[data-truncated="true"] .inline-tool-title::after,
+    .inline-terminal[data-truncated="true"] .inline-terminal-title::after {
+      content: '已截断';
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      font-size: 0.6rem;
+      font-weight: 500;
+      color: var(--text-inverse, #fff);
+      background: var(--text-tertiary);
+      border-radius: 999px;
+      letter-spacing: 0.02em;
+      vertical-align: 1px;
+      opacity: 0.85;
     }
 
     .message-usage::before {
@@ -4523,7 +4666,17 @@
     }
     .ask-user-option.selected {
       border-color: var(--accent);
-      background: rgba(197, 101, 61, 0.08);
+      background: rgba(197, 101, 61, 0.18);
+      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.35) inset;
+    }
+    /* 已应答状态的卡片用顶部彩色边条标识，避免只靠 opacity 让"已答"和"未答"区分模糊 */
+    .tool-use-card.ask-user.ask-user-answered {
+      border-top: 2px solid var(--success, #4caf50);
+    }
+    /* 已应答的选项中"用户选过的那个"高亮 */
+    .ask-user-option.ask-user-option-chosen {
+      background: rgba(197, 101, 61, 0.16);
+      border-color: var(--accent);
     }
     /* Radio / Checkbox indicator */
     .ask-user-indicator {
@@ -4853,9 +5006,17 @@
     }
     .tool-group-body {
       display: none;
-      padding: 4px 8px 8px;
+      padding: 4px 8px 8px 18px;
       border-top: 1px solid rgba(125, 91, 57, 0.06);
+      border-left: 2px solid rgba(125, 91, 57, 0.08);
       background: rgba(255, 253, 248, 0.55);
+    }
+    /* 同一 tool-group 内多条 inline-tool 视觉收紧 + 左缩进，强化"嵌套" */
+    .tool-group-body > .inline-tool {
+      margin: 0;
+    }
+    .tool-group-body > .inline-tool + .inline-tool {
+      border-top: 1px dashed rgba(125, 91, 57, 0.06);
     }
     .tool-group[data-expanded="true"] .tool-group-body {
       display: block;
@@ -5865,17 +6026,33 @@
 
     /* Queued message in chat view */
     .chat-message.user.queued {
-      opacity: 0.6;
+      opacity: 0.7;
+    }
+    .chat-message.user.queued .chat-message-bubble,
+    .chat-message.user.queued .chat-message-content {
+      /* 排队气泡用虚线边框 + 浅浅的阴影，让"未发送"状态有触感 */
+      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.25) inset;
     }
     .queued-badge {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
       font-size: 0.625rem;
       color: var(--accent);
       background: var(--accent-muted);
-      padding: 1px 6px;
-      border-radius: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
       font-weight: 600;
-      margin-top: 4px;
+      margin-top: 6px;
+      letter-spacing: 0.04em;
+      animation: queuePulse 1.5s ease-in-out infinite;
+    }
+    .queued-badge::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
       animation: queuePulse 1.5s ease-in-out infinite;
     }
 

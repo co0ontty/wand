@@ -327,14 +327,32 @@ export interface ChatMessage {
 
 // ── Structured chat message types derived from PTY output ──
 
+/**
+ * Meta marker attached to blocks emitted by a Task-spawned subagent. Present
+ * on every block (text / thinking / tool_use / tool_result) whose origin is a
+ * subagent's stream rather than the main assistant. Drives the multi-persona
+ * chat rendering ("third cat joining the conversation").
+ *
+ * `taskId` is the parent Task tool_use id (= SDK's `parent_tool_use_id`).
+ * The parent Task tool_use block itself is NOT marked — it lives in the
+ * main assistant's stream.
+ */
+export interface SubagentMeta {
+  taskId: string;
+  agentType?: string;
+  taskDescription?: string;
+}
+
 export interface TextBlock {
   type: "text";
   text: string;
+  __subagent?: SubagentMeta;
 }
 
 export interface ThinkingBlock {
   type: "thinking";
   thinking: string;
+  __subagent?: SubagentMeta;
 }
 
 export interface ToolUseBlock {
@@ -343,6 +361,7 @@ export interface ToolUseBlock {
   name: string;
   description?: string;
   input: Record<string, unknown>;
+  __subagent?: SubagentMeta;
 }
 
 export interface ToolResultBlock {
@@ -352,6 +371,7 @@ export interface ToolResultBlock {
   is_error?: boolean;
   /** When true, content has been truncated for transport. Client should fetch full content via API. */
   _truncated?: boolean;
+  __subagent?: SubagentMeta;
 }
 
 export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;
