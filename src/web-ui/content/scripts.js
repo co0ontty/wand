@@ -8319,6 +8319,7 @@
         var hasSession = !!state.selectedId;
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
+        var blankChat = document.getElementById("blank-chat");
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var structured = isStructuredSession(selectedSession);
         var showTerminal = hasSession && !structured && state.currentView === "terminal";
@@ -8336,6 +8337,14 @@
         if (chatContainer) {
           chatContainer.classList.toggle("active", showChat);
           chatContainer.classList.toggle("hidden", !showChat);
+        }
+        // blank-chat 的可见性由 applyCurrentView 收口：updateShellChrome 在
+        // selectedSession 缺失（启动期 selectedId 已恢复但 /api/sessions 未回 /
+        // activateSession 在 updateSessionSnapshot 之前调 switchToSessionView 等
+        // 瞬态）时会走 else 分支把 blank-chat 显示出来，但紧接着调到这里，应
+        // 以 hasSession 为准重新隐藏，避免与 terminal/chat 同屏并存。
+        if (blankChat) {
+          blankChat.classList.toggle("hidden", hasSession);
         }
         if (chatContainer && showChat) {
           ensureChatMessagesContainer(chatContainer);
