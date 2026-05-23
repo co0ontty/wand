@@ -11,6 +11,40 @@ const SGR_RE = /\x1b\[([0-9;]*)m/g;
 // 这里在每条可写 this.cols 的路径都 clamp 到 WASM_MAX_COLS。
 const WASM_MAX_COLS = 256;
 
+// R9: 在 SGR 字节流层剥下划线属性（"4"/"24"）。
+// 这是 stripUnderlinePlugin 之外的运行时第二道防线，针对动态 SGR 流。
+// 旧实现 `params.split(";").filter(p => p !== "4" && p !== "24")` 简单粗暴地
+// 把所有 "4" 子段过滤，破坏 256 色 / 真彩 SGR 序列：
+//   \x1b[38;5;4m  (256 色调色板 index=4 蓝色) → \x1b[38;5m  ❌ 残缺序列
+//   \x1b[48;5;24m (256 色背景 index=24)        → \x1b[48;5m  ❌ 残缺序列
+//   \x1b[38;2;4;0;0m (真彩 RGB(4,0,0))         → \x1b[38;2;0;0m ❌ 错切
+// 残缺 SGR 会被 wterm 忽略，导致前景/背景色失效。正确做法：进入
+// 38;5 / 48;5（256 色）或 38;2 / 48;2（真彩）子序列后，把后续 N 个参数
+// 整体保留，不当 SGR 主参数过滤。
+function filterUnderlineSGR(params) {
+  if (!params) return null;
+  const parts = params.split(";");
+  const kept = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if ((p === "38" || p === "48") && parts[i + 1] === "5") {
+      // 256-color: 38;5;N or 48;5;N — 把 N 整段透传
+      kept.push(parts[i], parts[i + 1], parts[i + 2] ?? "");
+      i += 2;
+      continue;
+    }
+    if ((p === "38" || p === "48") && parts[i + 1] === "2") {
+      // 24-bit color: 38;2;R;G;B or 48;2;R;G;B — 把 R/G/B 整段透传
+      kept.push(parts[i], parts[i + 1], parts[i + 2] ?? "", parts[i + 3] ?? "", parts[i + 4] ?? "");
+      i += 4;
+      continue;
+    }
+    if (p === "4" || p === "24") continue; // underline on / off
+    kept.push(p);
+  }
+  return kept.length ? "\x1b[" + kept.join(";") + "m" : "";
+}
+
 export class WTerm extends BaseWTerm {
   // 单一汇聚点：所有路径最终都走 super.resize()，在这里 clamp 一次双保险，
   // 兜住未来新增的 cols 写入路径。
@@ -21,9 +55,8 @@ export class WTerm extends BaseWTerm {
   write(data) {
     if (typeof data === "string") {
       data = data.replace(SGR_RE, (_m, params) => {
-        if (!params) return _m;
-        const kept = params.split(";").filter(p => p !== "4" && p !== "24");
-        return kept.length ? "\x1b[" + kept.join(";") + "m" : "";
+        const filtered = filterUnderlineSGR(params);
+        return filtered === null ? _m : filtered;
       });
     }
     super.write(data);

@@ -86,6 +86,13 @@
         terminalFitInProgress: false,
         terminalSessionId: null,
         terminalOutput: "",
+        // R8: /clear marker。Claude 的 /clear 不发任何 ANSI 清屏序列，它只
+        // 就地把对话框重画成空、把旧对话推进 scrollback。但 wand 的
+        // state.terminalOutput 是 append-only buffer，softResync 一触发就
+        // 把 /clear 之前的历史全部重放回 wterm（用户看到"/clear 后短暂闪
+        // 回旧内容"）。marker 表示 buffer 里"用户上次 /clear 时刻的位置"，
+        // softResync 只重放 slice(marker)，从根上避免历史被重放。
+        terminalOutputMarker: 0,
         terminalLiveStreamSessions: {},
         // CSI ?2026h..l 同步输出缓冲：begin 时拿到 "\x1b[?2026h" 后开始缓冲，
         // end 时拿到 "\x1b[?2026l" 一次性 flush 给 wterm。null 表示当前不在
@@ -1457,6 +1464,7 @@
                       ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>'
                       : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') +
                   '</button>' +
+                  '<button id="sidebar-narrow-close-btn" class="btn btn-ghost btn-sm sidebar-narrow-close" type="button" title="完全关闭侧栏" aria-label="完全关闭侧栏"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                   '<button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="关闭菜单"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                 '</div>' +
               '</div>' +
@@ -3119,24 +3127,37 @@
       }
 
       function renderCollapsedSessionTiles() {
-        var running = state.sessions.filter(function(s) {
-          return !s.archived && s.status === "running";
-        });
-        running.sort(function(a, b) {
+        var activeSessions = state.sessions.filter(function(s) { return !s.archived; });
+        activeSessions.sort(function(a, b) {
           var ta = a.startedAt ? new Date(a.startedAt).getTime() : 0;
           var tb = b.startedAt ? new Date(b.startedAt).getTime() : 0;
           return ta - tb;
         });
-        if (running.length === 0) {
-          return '<div class="sidebar-collapsed-empty" title="无运行中的会话">—</div>';
+        var recentHistorySessions = [];
+        if (state.claudeHistoryLoaded) {
+          var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+          recentHistorySessions = getVisibleClaudeHistorySessions().filter(function(s) {
+            return s.timestamp && new Date(s.timestamp).getTime() > cutoff;
+          });
         }
-        return '<div class="sidebar-collapsed-tiles">' +
-          running.map(function(s, i) {
-            var activeCls = s.id === state.selectedId ? " active" : "";
-            var title = s.summary || s.command || ("会话 " + (i + 1));
-            return '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + (i + 1) + '</button>';
-          }).join("") +
-        '</div>';
+        if (activeSessions.length === 0 && recentHistorySessions.length === 0) {
+          return '<div class="sidebar-collapsed-empty" title="无会话">—</div>';
+        }
+        var tiles = "";
+        var idx = 0;
+        activeSessions.forEach(function(s) {
+          idx += 1;
+          var activeCls = s.id === state.selectedId ? " active" : "";
+          var title = s.summary || s.command || ("会话 " + idx);
+          tiles += '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + idx + '</button>';
+        });
+        recentHistorySessions.forEach(function(s) {
+          idx += 1;
+          var preview = s.firstUserMessage || "(空会话)";
+          var title = preview + " · " + formatHistoryTime(s.timestamp);
+          tiles += '<button class="sidebar-collapsed-tile history" type="button" data-collapsed-history-id="' + escapeHtml(s.claudeSessionId) + '" data-cwd="' + escapeHtml(s.cwd || "") + '" title="' + escapeHtml(title) + '">' + idx + '</button>';
+        });
+        return '<div class="sidebar-collapsed-tiles">' + tiles + '</div>';
       }
 
       function renderSessionsListContent() {
@@ -4926,6 +4947,32 @@
         return "";
       }
 
+      /** Get the most recent user-sent text from messages (for narrow-strip hover bubble). */
+      function getSessionLatestUserText(session) {
+        var msgs = session && session.messages;
+        if (!msgs || msgs.length === 0) return "";
+        for (var i = msgs.length - 1; i >= 0; i--) {
+          var msg = msgs[i];
+          if (!msg || msg.role !== "user") continue;
+          var content = msg.content;
+          if (typeof content === "string") {
+            var t = content.trim();
+            if (t) return t;
+            continue;
+          }
+          if (Array.isArray(content)) {
+            for (var j = 0; j < content.length; j++) {
+              var block = content[j];
+              if (!block || block.type !== "text" || !block.text) continue;
+              if (block.__queued) continue;
+              var bt = String(block.text).trim();
+              if (bt) return bt;
+            }
+          }
+        }
+        return "";
+      }
+
       /** Get the last meaningful assistant text from messages for notification/display */
       function getLastAssistantSummary(session) {
         var msgs = session && session.messages;
@@ -5512,8 +5559,12 @@
         if (sessionsList) {
           sessionsList.addEventListener("click", handleSessionItemClick);
           sessionsList.addEventListener("keydown", handleSessionItemKeydown);
+          sessionsList.addEventListener("mouseover", handleCollapsedTileHover);
+          sessionsList.addEventListener("mouseout", handleCollapsedTileLeave);
           initSwipeToDelete(sessionsList);
         }
+        window.addEventListener("scroll", hideCollapsedTileBubble, true);
+        window.addEventListener("resize", hideCollapsedTileBubble);
 
         // Claude session ID badge click-to-copy (event delegation on document)
         document.addEventListener("click", handleClaudeIdCopy);
@@ -5576,6 +5627,8 @@
         if (pinBtn) pinBtn.addEventListener("click", toggleSidebarPin);
         var collapseBtn = document.getElementById("sidebar-collapse-btn");
         if (collapseBtn) collapseBtn.addEventListener("click", toggleSidebarCollapsed);
+        var narrowCloseBtn = document.getElementById("sidebar-narrow-close-btn");
+        if (narrowCloseBtn) narrowCloseBtn.addEventListener("click", closeSidebarFromNarrow);
         var sidebarMoreBtn = document.getElementById("sidebar-more-btn");
         var sidebarOverflow = document.getElementById("sidebar-overflow-menu");
         if (sidebarMoreBtn && sidebarOverflow) {
@@ -6598,11 +6651,31 @@
         if (!target || !(target instanceof Element)) return;
 
         var collapsedTile = target.closest(".sidebar-collapsed-tile");
-        if (collapsedTile && collapsedTile instanceof HTMLElement && collapsedTile.dataset.collapsedSessionId) {
-          event.preventDefault();
-          event.stopPropagation();
-          activateSessionItem(collapsedTile.dataset.collapsedSessionId);
-          return;
+        if (collapsedTile && collapsedTile instanceof HTMLElement) {
+          if (collapsedTile.dataset.collapsedSessionId) {
+            event.preventDefault();
+            event.stopPropagation();
+            activateSessionItem(collapsedTile.dataset.collapsedSessionId);
+            return;
+          }
+          if (collapsedTile.dataset.collapsedHistoryId) {
+            event.preventDefault();
+            event.stopPropagation();
+            var historyCid = collapsedTile.dataset.collapsedHistoryId;
+            var historyCwd = collapsedTile.dataset.cwd || "";
+            resumeClaudeHistorySession(historyCid, historyCwd)
+              .then(function(data) {
+                if (data && data.id) {
+                  state.selectedId = data.id;
+                  persistSelectedId();
+                  state.drafts[data.id] = "";
+                  loadSessions().then(function() {
+                    selectSession(data.id);
+                  });
+                }
+              });
+            return;
+          }
         }
 
         var historyToggle = target.closest("#claude-history-toggle");
@@ -7233,6 +7306,13 @@
         var padded = widePadAnsi(data, state.wideParserState);
         var framed = processSyncOutputFraming(padded);
         if (framed) terminal.write(framed);
+        // R6: 在 chunk 热路径上识别原地重绘序列（CSI nA/B/C/D/f/H/J/K），
+        // 节流安排一次 softResync 兜底。Claude 用相对光标位移重画菜单时，
+        // 如果 NEW-A 的 sync output buffer 因某种原因没拦截到完整帧（比如
+        // ?2026 begin 之后跨 200ms 超时强制 flush），CSI 序列残留会让 wterm
+        // 错位。此 fallback 仅在真出现错位序列时触发，正常输出零开销。
+        // 与 R2 策略 A 配合：移除被动 5 处触发后，这是唯一的主动救场路径。
+        maybeScheduleResyncForChunk(data);
         // wterm.write 内部用 5px 阈值判定"在底部"，下一帧 _doRender 据此强制
         // scrollTop = scrollHeight。这与 wand 的 autoFollow（"真正到底"才为
         // true，2px 阈值）独立，会把用户主动向上滚的几像素吞掉。覆写为 wand
@@ -7279,10 +7359,27 @@
       // scrollback），所以必须限长，否则长跑会话每次 resync 都喂几 MB 给 wterm。
       // 裁切优先在行边界（ANSI 状态机此时一定 idle，重放等价），找不到再按字节切
       // 并避开 UTF-16 半截 / ANSI 半截。
-      var CLIENT_OUTPUT_MAX = 256 * 1024;
-      var CLIENT_OUTPUT_TRIM_AT = 320 * 1024;
+      //
+      // R10: 客户端 buffer 必须 < 服务端 PTY_OUTPUT_MAX_SIZE=200KB，否则长跑会话
+      // 服务端先于客户端裁头，发 init 时携带的 output 是字节 ~56KB 起的尾段，
+      // 与客户端本地 0..256KB 的完整 buffer 做 prefix 检查必然失败 → fall back
+      // 到 replace 全量重写 → 每次 ws-reconnect / 切 tab 都踩一次 softResync 灾难。
+      // 让 client < server 保证客户端永远是服务端的子集，prefix 永远成立。
+      var CLIENT_OUTPUT_MAX = 160 * 1024;
+      var CLIENT_OUTPUT_TRIM_AT = 192 * 1024;
       function clampClientTerminalOutput(buf) {
         if (!buf || buf.length <= CLIENT_OUTPUT_TRIM_AT) return buf;
+        var preTrimLen = buf.length;
+        // 内部 helper：根据裁掉的字节数同步缩减 marker，保证 marker 始终指向
+        // "/clear 之后的字节"。如果 marker 落到了被裁掉的区间里，clamp 到 0
+        // （/clear 之前的历史本来就要丢，marker=0 等于 fall back 重放全部）。
+        var _adjustMarker = function(trimmedLen) {
+          if (typeof state === "undefined" || !state) return;
+          var mk = state.terminalOutputMarker | 0;
+          if (mk <= 0) return;
+          var dropped = preTrimLen - trimmedLen;
+          state.terminalOutputMarker = mk > dropped ? mk - dropped : 0;
+        };
         var start = buf.length - CLIENT_OUTPUT_MAX;
         // UTF-16 low surrogate
         if (start > 0 && start < buf.length) {
@@ -7293,7 +7390,11 @@
         var LOOKAHEAD = 4096;
         var upper = Math.min(start + LOOKAHEAD, buf.length);
         for (var i = start; i < upper; i++) {
-          if (buf.charCodeAt(i) === 0x0a) return buf.slice(i + 1);
+          if (buf.charCodeAt(i) === 0x0a) {
+            var trimmed1 = buf.slice(i + 1);
+            _adjustMarker(trimmed1.length);
+            return trimmed1;
+          }
         }
         // 没换行 → 检查 start 是否落在未结束的 ESC 序列里
         var lookback = Math.max(0, start - 256);
@@ -7316,12 +7417,16 @@
             for (var m = start; m < ahead; m++) {
               var cm = buf.charCodeAt(m);
               if (cm === 0x07 || (cm >= 0x40 && cm <= 0x7e)) {
-                return buf.slice(m + 1);
+                var trimmed2 = buf.slice(m + 1);
+                _adjustMarker(trimmed2.length);
+                return trimmed2;
               }
             }
           }
         }
-        return buf.slice(start);
+        var trimmed3 = buf.slice(start);
+        _adjustMarker(trimmed3.length);
+        return trimmed3;
       }
 
       function resetTerminal() {
@@ -7362,10 +7467,17 @@
       function softResyncTerminal(options) {
         if (!state.terminal || !state.terminalOutput) return false;
         var opts = options || {};
-        var bufLen = state.terminalOutput.length;
+        // R8: 只重放 marker 之后的字节。marker = 0 时等同于"重放整段"（与旧
+        // 行为一致）；用户输入过 /clear 后 marker 标到当时 buffer 长度，重放
+        // 跳过 /clear 之前的历史，杜绝"/clear 后短暂闪回旧内容"。
+        var marker = state.terminalOutputMarker | 0;
+        if (marker < 0) marker = 0;
+        if (marker > state.terminalOutput.length) marker = state.terminalOutput.length;
+        var replaySource = marker > 0 ? state.terminalOutput.slice(marker) : state.terminalOutput;
+        var bufLen = replaySource.length;
         var startedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
         resetTerminal();
-        wandTerminalWrite(state.terminal, state.terminalOutput);
+        wandTerminalWrite(state.terminal, replaySource);
         state.lastTerminalResyncAt = Date.now();
         maybeScrollTerminalToBottom("output");
         if (!opts.skipFit) ensureTerminalFit("refresh");
@@ -7405,9 +7517,14 @@
       // 触发用 leading + tail 节流而非 debounce：用户持续按键时每次 chunk 都会
       // reset debounce timer，永远等不到静默期。leading 立即 resync、窗口内
       // 用尾巴 timer 收尾，不依赖按键停顿。
+      // R6 chunk 热路径救场 throttle：原值 400/350 让 Claude thinking 期间
+      // 大量 CSI A/B/K 重绘（spinner、状态行）每秒触发 ~2.5 次 softResync，
+      // 13 次/5s 直接撞警戒线。NEW-A 已经把 askuserquestion 这种 ?2026 包帧
+      // 重绘原子化，R6 退化为"NEW-A 失手时的弱兜底"，频率拉到 1.5s/0.8s
+      // 即可。代价：错位状态最长滞留 1.5s 才修，可接受。
       var IN_PLACE_REDRAW_RE = /\x1b\[\d*(?:;\d*)?[ABCDfHJK]/;
-      var RESYNC_THROTTLE_MS = 400;
-      var RESYNC_TAIL_MS = 350;
+      var RESYNC_THROTTLE_MS = 1500;
+      var RESYNC_TAIL_MS = 800;
       var _resyncChunkLastAt = 0;
       var _resyncChunkTailTimer = null;
       function maybeScheduleResyncForChunk(chunk) {
@@ -7456,6 +7573,7 @@
           resetTerminal();
           currentOutput = "";
           state.terminalOutput = "";
+          state.terminalOutputMarker = 0; // R8: 切会话重置 /clear marker
           state.terminalAutoFollow = true;
           clearTerminalScrollIdleTimer();
           updateTerminalJumpToBottomButton();
@@ -7498,6 +7616,11 @@
 
         state.terminalSessionId = nextSessionId;
         state.terminalOutput = normalizedOutput;
+        // R8: syncTerminalBuffer 是整段 replace / sessionChanged 路径，旧
+        // marker 已不属于新 buffer，重置为 0。append-delta 子路径（startsWith
+        // 命中那条）虽然在 buffer 末尾延伸，但 normalizedOutput 也是延续值，
+        // 把 marker 截到不超过新长度即可；为简单起见统一 reset 0。
+        state.terminalOutputMarker = 0;
         if (shouldScroll && (wrote || sessionChanged || mode === "replace")) {
           maybeScrollTerminalToBottom(sessionChanged || mode === "replace" ? "force" : "output");
         } else {
@@ -8292,13 +8415,19 @@
           // redraw sequences from Claude CLI. When they appear or dismiss, schedule a
           // debounced terminal resync so residual DOM rows get cleaned up automatically
           // — same fix the user used to have to reach for via the refresh button.
-          var prevEsc = prevSession && prevSession.pendingEscalation ? 1 : 0;
-          var nextEsc = updatedSession && updatedSession.pendingEscalation ? 1 : 0;
-          var prevBlocked = prevSession && prevSession.permissionBlocked ? 1 : 0;
-          var nextBlocked = updatedSession && updatedSession.permissionBlocked ? 1 : 0;
-          if (prevEsc !== nextEsc || prevBlocked !== nextBlocked) {
-            scheduleSoftResyncTerminal(200);
-          }
+          // R2 策略 A：移除 permissionBlocked / pendingEscalation 翻转触发的
+          // softResync。原本是为了"权限菜单消失后清掉残留 DOM 行"，但 softResync
+          // 全量重放在 fresh buffer 上会把 Claude 用相对位移画的菜单帧顺序堆叠
+          // （截图 2 的根因之一）。NEW-A（CSI ?2026 同步输出缓冲）已经把菜单帧
+          // 渲染原子化，R6（wandTerminalWrite 内的 maybeScheduleResyncForChunk）
+          // 在出现原地重绘序列时兜底。这条翻转触发现在是多余且有害的。
+          // var prevEsc = prevSession && prevSession.pendingEscalation ? 1 : 0;
+          // var nextEsc = updatedSession && updatedSession.pendingEscalation ? 1 : 0;
+          // var prevBlocked = prevSession && prevSession.permissionBlocked ? 1 : 0;
+          // var nextBlocked = updatedSession && updatedSession.permissionBlocked ? 1 : 0;
+          // if (prevEsc !== nextEsc || prevBlocked !== nextBlocked) {
+          //   scheduleSoftResyncTerminal(200);
+          // }
         }
         // When a session transitions to a non-running state, try flushing cross-session queue
         if (normalizedSnapshot.status && normalizedSnapshot.status !== "running" && state.crossSessionQueue.length > 0) {
@@ -8515,6 +8644,7 @@
         var countEl = document.getElementById("session-count");
         if (listEl) listEl.innerHTML = renderSessionsListContent();
         if (countEl) countEl.textContent = String(state.sessions.length);
+        if (typeof hideCollapsedTileBubble === "function") hideCollapsedTileBubble();
         updateShellChrome();
         // Re-render cross-session queue (container may have been destroyed by DOM rebuild)
         if (state.crossSessionQueue.length > 0) renderCrossSessionQueue();
@@ -8569,6 +8699,7 @@
         if (!selectedSession) {
           state.terminalSessionId = null;
           state.terminalOutput = "";
+          state.terminalOutputMarker = 0; // R8: 取消选中会话时重置 /clear marker
         }
         // 之前这里会用 selectedSession.output 再 syncTerminalBuffer 一次。
         // 但 updateShellChrome 在 updateSessionsList、status 推送、init
@@ -8778,6 +8909,92 @@
         closeSwipedItem();
         state.sessionsDrawerOpen = false;
         updateLayoutState();
+      }
+
+      var collapsedTileBubbleEl = null;
+      function ensureCollapsedTileBubble() {
+        if (collapsedTileBubbleEl && document.body.contains(collapsedTileBubbleEl)) {
+          return collapsedTileBubbleEl;
+        }
+        collapsedTileBubbleEl = document.createElement("div");
+        collapsedTileBubbleEl.className = "sidebar-tile-bubble";
+        collapsedTileBubbleEl.setAttribute("role", "tooltip");
+        document.body.appendChild(collapsedTileBubbleEl);
+        return collapsedTileBubbleEl;
+      }
+      function hideCollapsedTileBubble() {
+        if (collapsedTileBubbleEl) collapsedTileBubbleEl.classList.remove("visible");
+      }
+      function showCollapsedTileBubble(tile, text) {
+        if (!text) { hideCollapsedTileBubble(); return; }
+        var bubble = ensureCollapsedTileBubble();
+        bubble.textContent = text.length > 400 ? text.slice(0, 400) + "…" : text;
+        var rect = tile.getBoundingClientRect();
+        bubble.classList.add("visible");
+        // Measure after content set; clamp vertically to viewport.
+        var bubbleRect = bubble.getBoundingClientRect();
+        var centerY = rect.top + rect.height / 2;
+        var top = centerY - bubbleRect.height / 2;
+        var minTop = 8;
+        var maxTop = window.innerHeight - bubbleRect.height - 8;
+        if (top < minTop) top = minTop;
+        if (top > maxTop) top = Math.max(minTop, maxTop);
+        bubble.style.left = (rect.right + 12) + "px";
+        bubble.style.top = top + "px";
+        bubble.style.setProperty("--bubble-tail-y", (centerY - top) + "px");
+      }
+      function getCollapsedTileBubbleText(tile) {
+        if (tile.dataset.collapsedSessionId) {
+          var session = state.sessions.find(function(s) { return s.id === tile.dataset.collapsedSessionId; });
+          if (!session) return "";
+          var latest = getSessionLatestUserText(session);
+          if (latest) return latest;
+          return session.summary || session.command || "";
+        }
+        if (tile.dataset.collapsedHistoryId) {
+          var hist = state.claudeHistory.find(function(s) { return s.claudeSessionId === tile.dataset.collapsedHistoryId; });
+          if (hist && hist.firstUserMessage) return hist.firstUserMessage;
+        }
+        return "";
+      }
+      function handleCollapsedTileHover(event) {
+        var target = event.target;
+        if (!target || !(target instanceof Element)) return;
+        var tile = target.closest(".sidebar-collapsed-tile");
+        if (!tile) { hideCollapsedTileBubble(); return; }
+        var text = getCollapsedTileBubbleText(tile);
+        if (!text) { hideCollapsedTileBubble(); return; }
+        showCollapsedTileBubble(tile, text);
+      }
+      function handleCollapsedTileLeave(event) {
+        var related = event.relatedTarget;
+        if (related && related instanceof Element && related.closest(".sidebar-collapsed-tile")) {
+          return;
+        }
+        hideCollapsedTileBubble();
+      }
+
+      function closeSidebarFromNarrow() {
+        if (isMobileLayout()) return;
+        state.sidebarPinned = false;
+        state.sidebarCollapsed = false;
+        state.sessionsDrawerOpen = false;
+        try {
+          localStorage.setItem("wand-sidebar-pinned", "false");
+          localStorage.setItem("wand-sidebar-collapsed", "false");
+        } catch (e) {}
+        render();
+        var mainLayout = document.querySelector(".main-layout");
+        if (mainLayout) {
+          var onEnd = function(e) {
+            if (e.propertyName === "padding-left") {
+              mainLayout.removeEventListener("transitionend", onEnd);
+              scheduleTerminalResize(true);
+            }
+          };
+          mainLayout.addEventListener("transitionend", onEnd);
+        }
+        setTimeout(function() { scheduleTerminalResize(true); }, 350);
       }
 
       function toggleSidebarCollapsed() {
@@ -11993,8 +12210,26 @@
         });
       }
 
+      // R8: 检测用户输入是否包含 /clear 命令，命中时把 marker 标到当前 buffer
+      // 长度，下次 softResync 时就不会重放 /clear 之前的历史。
+      // 检测点放在 queueDirectInput 是因为：所有用户 input（chat 框发送、终端
+      // interactive 直写、shortcut 按键、bracketed paste 等）最终都汇到这条
+      // 路径。先 strip bracketed-paste 包络（\x1b[200~ ... \x1b[201~）再做行首
+      // 匹配，覆盖多种粘贴形式。
+      function _detectAndMarkClear(input) {
+        if (typeof input !== "string" || !input) return;
+        var stripped = input.replace(/\x1b\[200~/g, "").replace(/\x1b\[201~/g, "");
+        // 必须 /clear 在某一行起始位置，且后接 \r 或 \n 或行尾
+        if (/(?:^|\n)\s*\/clear\s*(?:\r|\n|$)/.test(stripped)) {
+          if (typeof state !== "undefined" && state) {
+            state.terminalOutputMarker = (state.terminalOutput && state.terminalOutput.length) | 0;
+          }
+        }
+      }
+
       function queueDirectInput(input, shortcutKey, viewOverride) {
         if (!input || !state.selectedId) return Promise.resolve();
+        _detectAndMarkClear(input);
         state.messageQueue.push(input);
         state.inputQueue = state.inputQueue.then(function() {
           return postInput(input, shortcutKey, viewOverride).finally(function() {
@@ -14101,6 +14336,7 @@
         state.syncOutputDeadline = 0;
         state.terminalSessionId = null;
         state.terminalOutput = "";
+        state.terminalOutputMarker = 0; // R8: teardown 时重置 /clear marker
         state.terminalAutoFollow = true;
         state.showTerminalJumpToBottom = false;
         updateTerminalJumpToBottomButton();
@@ -14488,21 +14724,11 @@
             if (msg.data && msg.sessionId
                 && Object.prototype.hasOwnProperty.call(msg.data, 'isResponding')) {
               if (!state._lastIsResponding) state._lastIsResponding = {};
-              var _prevResp = !!state._lastIsResponding[msg.sessionId];
-              var _nextResp = !!msg.data.isResponding;
-              state._lastIsResponding[msg.sessionId] = _nextResp;
-              if (_prevResp && !_nextResp
-                  && msg.sessionId === state.selectedId
-                  && state.terminal
-                  && state.terminalOutput) {
-                if (state._idleResyncTimer) clearTimeout(state._idleResyncTimer);
-                var _idleResyncSid = msg.sessionId;
-                state._idleResyncTimer = setTimeout(function() {
-                  state._idleResyncTimer = null;
-                  if (state.selectedId !== _idleResyncSid) return;
-                  try { softResyncTerminal({ skipFit: true }); } catch (e) {}
-                }, 120);
-              }
+              state._lastIsResponding[msg.sessionId] = !!msg.data.isResponding;
+              // R2 策略 A：移除 isResponding true→false 翻转触发的 softResync。
+              // 原本是想在"流式回答结束"瞬间洗掉错位的 cursor 定位残留，但
+              // softResync 全量重放在 fresh buffer 上会把 askuserquestion 的多
+              // 帧字节顺序堆叠（截图 2 的根因之一）。NEW-A + R6 兜底后不再需要。
             }
             if (msg.data && msg.sessionId) {
               var isIncremental = !!msg.data.incremental;
@@ -14600,8 +14826,12 @@
                 // "被覆盖中间帧"反复塞进 scrollback。thinking→idle 兜底就够了。
                 state.terminalSessionId = msg.sessionId;
                 if (msg.data.output) {
+                  // R8: full output replace → marker 失效，重置为 0
                   state.terminalOutput = clampClientTerminalOutput(normalizeTerminalOutput(msg.data.output));
+                  state.terminalOutputMarker = 0;
                 } else {
+                  // append-delta：buffer 延续，marker 保持（clampClientTerminalOutput
+                  // 内部已经按裁掉字节数同步缩减 marker）
                   state.terminalOutput = clampClientTerminalOutput((state.terminalOutput || "") + normalizeTerminalOutput(msg.data.chunk));
                 }
                 maybeScrollTerminalToBottom("output");
@@ -16508,55 +16738,116 @@
       }
 
       // ── 像素风猫咪头像 ──
-      var PIXEL_AVATAR = (function() {
-        var _ = "transparent";
-        function buildSvg(grid, size) {
-          var s = size || 3;
-          var w = grid[0].length * s;
-          var h = grid.length * s;
-          var rects = "";
-          for (var y = 0; y < grid.length; y++) {
-            for (var x = 0; x < grid[y].length; x++) {
-              if (grid[y][x] !== _) {
-                rects += '<rect x="' + (x * s) + '" y="' + (y * s) + '" width="' + s + '" height="' + s + '" fill="' + grid[y][x] + '"/>';
-              }
+      // 统一的 10×10 猫咪 grid 模板：父 assistant = 加菲（橙），user = 美短（灰），
+      // subagent = 一组按 taskId/agentType 哈希选色的备选 palette。同一模板让多个
+      // 角色看起来是"同种生物的不同毛色"，群聊感更自然。
+      var _AVATAR_T = "transparent";
+      function buildPixelSvg(grid, size) {
+        var s = size || 3;
+        var w = grid[0].length * s;
+        var h = grid.length * s;
+        var rects = "";
+        for (var y = 0; y < grid.length; y++) {
+          for (var x = 0; x < grid[y].length; x++) {
+            if (grid[y][x] !== _AVATAR_T) {
+              rects += '<rect x="' + (x * s) + '" y="' + (y * s) + '" width="' + s + '" height="' + s + '" fill="' + grid[y][x] + '"/>';
             }
           }
-          return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '" class="pixel-avatar-svg">' + rects + '</svg>';
         }
-        // 加菲猫 (勤劳初二 / AI) — 橙色系
-        var o = "#F0923A", d = "#C46A1A", w = "#FFFFFF", k = "#2D2D2D", p = "#F28B9A", n = "#E87D5A";
-        var garfield = [
-          [_,d,_,_,_,_,_,_,d,_],
-          [d,o,d,_,_,_,_,d,o,d],
-          [d,o,o,o,o,o,o,o,o,d],
-          [o,o,w,k,o,o,w,k,o,o],
-          [o,o,w,w,o,o,w,w,o,o],
-          [o,o,o,o,p,p,o,o,o,o],
-          [o,d,o,n,o,o,n,o,d,o],
-          [_,o,o,o,o,o,o,o,o,_],
-          [_,_,o,d,o,o,d,o,_,_],
-          [_,_,_,o,_,_,o,_,_,_],
+        return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '" class="pixel-avatar-svg">' + rects + '</svg>';
+      }
+      function buildCatGrid(palette) {
+        // palette: { base, dark, light, accent, eye, mouth, nose }
+        var T = _AVATAR_T;
+        var b = palette.base;
+        var d = palette.dark;
+        var l = palette.light || palette.base;
+        var w = palette.accent || "#FFFFFF";
+        var k = palette.eye || "#2D2D2D";
+        var p = palette.mouth || "#F28B9A";
+        var n = palette.nose || palette.dark;
+        return [
+          [T,d,T,T,T,T,T,T,d,T],
+          [d,b,d,T,T,T,T,d,b,d],
+          [d,b,b,b,b,b,b,b,b,d],
+          [b,b,w,k,b,b,w,k,b,b],
+          [b,b,w,w,b,b,w,w,b,b],
+          [b,b,b,b,p,p,b,b,b,b],
+          [b,n,b,l,b,b,l,b,n,b],
+          [T,b,b,b,b,b,b,b,b,T],
+          [T,T,b,d,b,b,d,b,T,T],
+          [T,T,T,b,T,T,b,T,T,T],
         ];
-        // 美短 (赛博虎妞 / 用户) — 灰色系
-        var g = "#9EAAB8", dg = "#6B7B8D", lg = "#C5CED8", gn = "#7EC88B";
-        var shorthair = [
-          [_,dg,_,_,_,_,_,_,dg,_],
-          [dg,g,dg,_,_,_,_,dg,g,dg],
-          [dg,g,g,g,g,g,g,g,g,dg],
-          [g,g,w,gn,g,g,w,gn,g,g],
-          [g,g,w,w,g,g,w,w,g,g],
-          [g,g,g,g,p,p,g,g,g,g],
-          [g,dg,g,lg,g,g,lg,g,dg,g],
-          [_,g,g,g,g,g,g,g,g,_],
-          [_,_,g,dg,g,g,dg,g,_,_],
-          [_,_,_,g,_,_,g,_,_,_],
-        ];
-        return {
-          assistant: buildSvg(garfield),
-          user: buildSvg(shorthair)
-        };
-      })();
+      }
+      var GARFIELD_PALETTE = {
+        base: "#F0923A", dark: "#C46A1A", light: "#F0923A",
+        accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#F28B9A", nose: "#E87D5A",
+      };
+      var SHORTHAIR_PALETTE = {
+        base: "#9EAAB8", dark: "#6B7B8D", light: "#C5CED8",
+        accent: "#FFFFFF", eye: "#7EC88B", mouth: "#F28B9A",
+      };
+      // 子 agent palette 池。色相与父/用户都拉开距离，避免群聊里多只猫颜色相近难辨认。
+      // primary 用来暴露成 CSS 变量 --agent-color，给气泡左边框 / handoff 文字着色。
+      var SUBAGENT_PALETTES = [
+        { base: "#5A8FE0", dark: "#2E5BB3", light: "#9CC0F2", accent: "#FFFFFF", eye: "#FFD66E", mouth: "#F28B9A", primary: "#5A8FE0" }, // 蓝猫
+        { base: "#A06FE0", dark: "#6B45A8", light: "#C8A4F2", accent: "#FFFFFF", eye: "#FFE36E", mouth: "#F28B9A", primary: "#A06FE0" }, // 紫猫
+        { base: "#7BB76B", dark: "#4F8A40", light: "#A9D49C", accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#F28B9A", primary: "#7BB76B" }, // 抹茶猫
+        { base: "#D86A88", dark: "#9C3A57", light: "#E8A4B5", accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#FFFFFF", primary: "#D86A88" }, // 樱花猫
+        { base: "#5BB7B0", dark: "#2E7873", light: "#9CD6D2", accent: "#FFFFFF", eye: "#FFD66E", mouth: "#F28B9A", primary: "#5BB7B0" }, // 青苔猫
+        { base: "#4A4A60", dark: "#1F1F2E", light: "#6E6E84", accent: "#F5F5F5", eye: "#FFD66E", mouth: "#F28B9A", primary: "#4A4A60" }, // 黑猫
+        { base: "#D8A85A", dark: "#9C7028", light: "#EBC78A", accent: "#FFFFFF", eye: "#2D2D2D", mouth: "#F28B9A", primary: "#D8A85A" }, // 焦糖猫
+      ];
+      function hashStringToIndex(str, mod) {
+        var s = String(str || "");
+        var h = 0;
+        for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+        return Math.abs(h) % mod;
+      }
+      // agentType → 中文名映射。命中映射就用映射名，否则用 agentType 原文；
+      // 都没有则退化为 "协作猫·<taskId 后 4 位>"。
+      var SUBAGENT_NAME_MAP = {
+        "general-purpose": "万能猫",
+        "Explore": "侦探猫",
+        "code-explorer": "侦探猫",
+        "code-reviewer": "审查猫",
+        "code-architect": "架构猫",
+        "code-simplifier": "简化猫",
+        "code-guide": "向导猫",
+        "Plan": "策划猫",
+        "feature-dev": "开发猫",
+        "pr-test-analyzer": "测试猫",
+        "silent-failure-hunter": "护卫猫",
+        "type-design-analyzer": "类型猫",
+        "comment-analyzer": "注释猫",
+      };
+      function getSubagentDisplayName(sub) {
+        if (!sub) return "";
+        var agentType = sub.agentType || "";
+        if (agentType && SUBAGENT_NAME_MAP[agentType]) return SUBAGENT_NAME_MAP[agentType];
+        if (agentType) return agentType;
+        var tail = (sub.taskId || "").slice(-4) || "未知";
+        return "协作猫·" + tail;
+      }
+      function getSubagentPalette(sub) {
+        // 哈希优先用 agentType，让同类型 agent 跨 turn 颜色稳定；没有 agentType 时
+        // 退化用 taskId，至少同 turn 内同一只猫颜色稳定。
+        var seed = (sub && (sub.agentType || sub.taskId)) || "subagent";
+        return SUBAGENT_PALETTES[hashStringToIndex(seed, SUBAGENT_PALETTES.length)];
+      }
+      function subagentAvatarHtml(sub) {
+        var palette = getSubagentPalette(sub);
+        var name = getSubagentDisplayName(sub);
+        var svg = buildPixelSvg(buildCatGrid(palette));
+        return '<div class="chat-message-avatar assistant subagent" style="--agent-color:' + palette.primary + '">' +
+          '<div class="pixel-avatar">' + svg + '</div>' +
+          '<span class="avatar-name">' + escapeHtml(name) + '</span>' +
+        '</div>';
+      }
+      var PIXEL_AVATAR = {
+        assistant: buildPixelSvg(buildCatGrid(GARFIELD_PALETTE)),
+        user: buildPixelSvg(buildCatGrid(SHORTHAIR_PALETTE)),
+      };
 
       var DEFAULT_CHAT_PERSONA = {
         user: {
