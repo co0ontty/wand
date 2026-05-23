@@ -1675,6 +1675,11 @@
                       '<button id="stop-button" class="btn-circle btn-circle-stop' + (state.selectedId ? "" : " hidden") + '" title="停止">' +
                         '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
                       '</button>' +
+                      // 结构化模式且正在出 token 时显示：中断当前回复、立刻发送新输入。
+                      // 默认走 #send-input-button → 排队；想插队的人显式按这颗。
+                      '<button id="interrupt-send-button" class="btn-circle btn-circle-interrupt hidden" type="button" title="中断当前回复并立即发送" aria-label="立即发送">' +
+                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>' +
+                      '</button>' +
                       '<button id="send-input-button" class="btn-circle btn-circle-send" title="发送">' +
                         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
                       '</button>' +
@@ -3126,12 +3131,11 @@
       }
 
       function renderCollapsedSessionTiles() {
+        // 排序口径必须与展开后的「最近」列表（renderRecentGroup）一致：
+        // 先按 state.sessions 自然顺序（服务器返回时已按 startedAt DESC 排好，最新在前）
+        // 列 active sessions，再追加 recentHistorySessions。窄条里第 N 个方块对应
+        // 展开后「最近」里第 N 项，避免两种视图序号错乱。
         var activeSessions = state.sessions.filter(function(s) { return !s.archived; });
-        activeSessions.sort(function(a, b) {
-          var ta = a.startedAt ? new Date(a.startedAt).getTime() : 0;
-          var tb = b.startedAt ? new Date(b.startedAt).getTime() : 0;
-          return ta - tb;
-        });
         var recentHistorySessions = [];
         if (state.claudeHistoryLoaded) {
           var cutoff = Date.now() - 24 * 60 * 60 * 1000;
@@ -5891,6 +5895,11 @@
           closeSessionsDrawer();
           sendOrStart();
         });
+        var interruptSendBtn = document.getElementById("interrupt-send-button");
+        if (interruptSendBtn) interruptSendBtn.addEventListener("click", function() {
+          closeSessionsDrawer();
+          sendOrStart({ interrupt: true });
+        });
         var stopBtn = document.getElementById("stop-button");
         if (stopBtn) stopBtn.addEventListener("click", stopSession);
         var modeSelect = document.getElementById("chat-mode-select");
@@ -7905,6 +7914,11 @@
         if (session && session.status !== "running") {
           if (canAutoResumeSession(session)) return "";
           return "会话已结束";
+        }
+        // 结构化会话在出 token 时，输入框仍然可用——告诉用户默认行为是排队，
+        // 想插队请按右侧的 » 按钮。短语保持单行不换行。
+        if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) {
+          return "回复中…继续输入将排队（» 立即发送）";
         }
         return "";
       }
@@ -10914,7 +10928,10 @@
             return;
           }
           event.preventDefault();
-          sendInputFromBox();
+          // Cmd/Ctrl+Enter → 立即发送（中断当前回复）。仅对正在 inFlight 的
+          // 结构化会话生效；其它情况下退化为普通发送，避免无谓的中断信号。
+          var interruptShortcut = !!(event.metaKey || event.ctrlKey);
+          sendInputFromBox(interruptShortcut ? { interrupt: true } : undefined);
           return;
         }
 
@@ -11623,7 +11640,8 @@
         });
       }
 
-      function sendOrStart() {
+      function sendOrStart(opts) {
+        opts = opts || {};
         // Support welcome input as well as the main input box
         var welcomeInput = document.getElementById("welcome-input");
         var inputBox = document.getElementById("input-box");
@@ -11634,7 +11652,7 @@
         // If we have a selected ID, try to send input to it
         if (state.selectedId) {
           if (value) {
-            sendInputFromBox();
+            sendInputFromBox(opts);
           }
           return;
         }
@@ -11733,7 +11751,9 @@
       }
 
 
-      function sendInputFromBox() {
+      function sendInputFromBox(opts) {
+        opts = opts || {};
+        var interruptFlag = !!opts.interrupt;
         if (state.terminalInteractive) {
           showToast("终端交互模式开启时，请直接在终端中输入。", "info");
           return Promise.resolve();
@@ -11772,7 +11792,7 @@
             if (todoEl) todoEl.classList.add("hidden");
 
             if (isStructuredSession(selectedSession)) {
-              return postStructuredInput(finalValue, inputBox, selectedSession);
+              return postStructuredInput(finalValue, inputBox, selectedSession, { interrupt: interruptFlag });
             }
 
             var submitChunks = getTerminalSubmitChunks(selectedSession, finalValue);
@@ -11820,8 +11840,13 @@
       // 防止同一会话并发提交（快速双击 / 重复触发）
       var _structuredSubmittingSessions = {};
 
-      function postStructuredInput(input, inputBox, session) {
-        console.log("[WAND] postStructuredInput selectedId:", state.selectedId, "input:", input && input.substring(0, 50), "session:", session && { id: session.id, sessionKind: session.sessionKind, runner: session.runner, status: session.status, inFlight: session.structuredState && session.structuredState.inFlight });
+      function postStructuredInput(input, inputBox, session, opts) {
+        opts = opts || {};
+        // 用户显式点击"立即发送"才会传 interrupt:true。普通 Enter / 点发送
+        // 在上一条还在流式时默认走 queue —— 后端 sendMessage(...) 会把它
+        // 追加到 queuedMessages，等当前 turn 结束自动 flush。
+        var requestedInterrupt = !!opts.interrupt;
+        console.log("[WAND] postStructuredInput selectedId:", state.selectedId, "input:", input && input.substring(0, 50), "requestedInterrupt:", requestedInterrupt, "session:", session && { id: session.id, sessionKind: session.sessionKind, runner: session.runner, status: session.status, inFlight: session.structuredState && session.structuredState.inFlight });
         if (!state.selectedId || !input) return Promise.resolve();
         if (!session) {
           showToast("会话不存在，请重新选择或新建会话。", "error");
@@ -11833,25 +11858,48 @@
           return Promise.resolve();
         }
 
-        var isInterrupting = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
-        // Immediately render user message with thinking indicator
-        var userTurn = { role: "user", content: [{ type: "text", text: input }] };
+        var sessionInFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
+        var isInterrupting = sessionInFlight && requestedInterrupt;
+        var isQueueing = sessionInFlight && !requestedInterrupt;
+
         var userMsgs = stripRenderOnlyStructuredMessages(Array.isArray(session.messages) ? session.messages.slice() : []);
-        userMsgs.push(userTurn);
-        var optimisticStructuredState = Object.assign({}, session.structuredState || {}, { inFlight: true });
-        updateSessionSnapshot({
-          id: session.id,
-          status: "running",
-          messages: userMsgs,
-          structuredState: optimisticStructuredState,
-        });
-        state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
-          status: "running",
-          messages: userMsgs,
-          structuredState: optimisticStructuredState,
-        }), userMsgs);
-        updateInputHint("思考中…");
-        renderChat(true);
+        var optimisticPatch;
+
+        if (isQueueing) {
+          // Queue 模式：不要乐观 push user turn —— buildMessagesForRender 会把
+          // queuedMessages 渲成 __queued 占位（带"排队中"徽章），再 push 一份
+          // 真 user turn 会被去重逻辑遮蔽掉，徽章就丢了。inFlight / status 维持。
+          var nextQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+          nextQueue.push(input);
+          optimisticPatch = {
+            id: session.id,
+            queuedMessages: nextQueue,
+          };
+          updateSessionSnapshot(optimisticPatch);
+          var queueRefreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
+          state.currentMessages = buildMessagesForRender(queueRefreshed, getPreferredMessages(queueRefreshed, queueRefreshed.output, false));
+          updateInputHint("已加入排队，等待当前回复完成…");
+          renderChat(true);
+          updateStructuredQueueCounter();
+        } else {
+          // 普通发送 / interrupt 发送：照旧乐观推 user turn + inFlight=true
+          var userTurn = { role: "user", content: [{ type: "text", text: input }] };
+          userMsgs.push(userTurn);
+          var optimisticStructuredState = Object.assign({}, session.structuredState || {}, { inFlight: true });
+          updateSessionSnapshot({
+            id: session.id,
+            status: "running",
+            messages: userMsgs,
+            structuredState: optimisticStructuredState,
+          });
+          state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
+            status: "running",
+            messages: userMsgs,
+            structuredState: optimisticStructuredState,
+          }), userMsgs);
+          updateInputHint(isInterrupting ? "已中断，正在处理新消息…" : "思考中…");
+          renderChat(true);
+        }
 
         if (inputBox) {
           inputBox.value = "";
@@ -11907,8 +11955,12 @@
               var refreshedSession = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
               state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot.output, false));
               renderChat(true);
+              updateStructuredQueueCounter();
               if (isInterrupting) {
                 showToast("已中断上一条回复，正在处理新消息…", "info");
+              } else if (isQueueing) {
+                var qLen = Array.isArray(refreshedSession.queuedMessages) ? refreshedSession.queuedMessages.length : 0;
+                showToast(qLen > 1 ? ("已加入排队（共 " + qLen + " 条等待）") : "已加入排队，等待当前回复完成。", "info");
               }
             }
           }
@@ -11926,20 +11978,36 @@
             return;
           }
 
-          // 回滚乐观更新：恢复发送前的 messages（去掉刚加的 userTurn）和 inFlight 状态
-          var rollbackMsgs = userMsgs.slice(0, -1);
-          updateSessionSnapshot({
-            id: session.id,
-            status: session.status,
-            messages: rollbackMsgs,
-            structuredState: Object.assign({}, session.structuredState || {}, { inFlight: false }),
-          });
-          if (session.id === state.selectedId) {
-            state.currentMessages = buildMessagesForRender(
-              Object.assign({}, session, { messages: rollbackMsgs, structuredState: Object.assign({}, session.structuredState || {}, { inFlight: false }) }),
-              rollbackMsgs
-            );
-            renderChat(true);
+          if (isQueueing) {
+            // Queue 模式回滚：把刚 push 的那条 queuedMessages 撤掉。inFlight / messages
+            // 都没动过，不必复位，否则会把后端真实的 inFlight=true 误改成 false。
+            var prevQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+            updateSessionSnapshot({
+              id: session.id,
+              queuedMessages: prevQueue,
+            });
+            if (session.id === state.selectedId) {
+              var rolledQueueSession = state.sessions.find(function(s) { return s.id === session.id; }) || session;
+              state.currentMessages = buildMessagesForRender(rolledQueueSession, getPreferredMessages(rolledQueueSession, rolledQueueSession.output, false));
+              renderChat(true);
+              updateStructuredQueueCounter();
+            }
+          } else {
+            // 回滚乐观更新：恢复发送前的 messages（去掉刚加的 userTurn）和 inFlight 状态
+            var rollbackMsgs = userMsgs.slice(0, -1);
+            updateSessionSnapshot({
+              id: session.id,
+              status: session.status,
+              messages: rollbackMsgs,
+              structuredState: Object.assign({}, session.structuredState || {}, { inFlight: false }),
+            });
+            if (session.id === state.selectedId) {
+              state.currentMessages = buildMessagesForRender(
+                Object.assign({}, session, { messages: rollbackMsgs, structuredState: Object.assign({}, session.structuredState || {}, { inFlight: false }) }),
+                rollbackMsgs
+              );
+              renderChat(true);
+            }
           }
           var message = (error && error.message) || "";
           var isTransientAbort =
@@ -12547,11 +12615,19 @@
           composer.classList.toggle("is-terminal-passthrough", !!state.terminalInteractive);
         }
         var sendBtn = document.getElementById("send-input-button");
+        var structuredInFlight = structured && isRunning;
         if (sendBtn) {
           sendBtn.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
           sendBtn.setAttribute("title", structured
-            ? "发送"
+            ? (structuredInFlight ? "排队发送（当前回复结束后处理）" : "发送")
             : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
+          sendBtn.classList.toggle("queue-mode", structuredInFlight);
+        }
+        var interruptBtn = document.getElementById("interrupt-send-button");
+        if (interruptBtn) {
+          // 仅结构化 + inFlight 时显示。pty 会话有自己的 Ctrl+C / stop 按钮，
+          // 用不上这套语义。
+          interruptBtn.classList.toggle("hidden", !structuredInFlight);
         }
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
@@ -16883,13 +16959,17 @@
       function renderChatMessage(msg, roundUsage, messageIndex) {
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
+          // 空 / 全空白的 thinking 没有任何信息量，渲染出来只是一条带"展开"的紫色窄条，
+          // 展开了也看不到内容——直接跳过。
+          var ptyThinkingText = typeof msg.content === "string" ? msg.content : "";
+          if (!ptyThinkingText.trim()) return "";
           var thinkingKey = buildExpandKey("thinking", [getMessageKey(msg, messageIndex), "pty"]);
           var thinkingPersisted = getPersistedExpandState(thinkingKey);
           var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
           return '<div class="chat-message thinking">' +
-            '<div class="thinking-inline thinking-pty ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="" onclick="__thinkingToggle(this)">' +
+            '<div class="thinking-inline thinking-pty ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(ptyThinkingText) + '" onclick="__thinkingToggle(this)">' +
               '<span class="thinking-inline-icon">⦿</span>' +
-              '<span class="thinking-inline-preview">' + escapeHtml(msg.content) + '</span>' +
+              '<span class="thinking-inline-preview">' + escapeHtml(ptyThinkingText) + '</span>' +
               '<span class="thinking-inline-action">' + (thinkingExpanded ? '收起' : '展开') + '</span>' +
             '</div>' +
           '</div>';
@@ -17203,7 +17283,6 @@
 
           case "thinking":
             var thinkingText = block.thinking || "";
-            var preview = thinkingText.length > 60 ? thinkingText.slice(0, 57) + "…" : thinkingText;
             var isStreaming = block.thinking === undefined && block.type === "thinking";
             if (isStreaming) {
               return '<div class="thinking-inline thinking-streaming" data-thinking="">' +
@@ -17213,6 +17292,10 @@
                 '</div>' +
               '</div>';
             }
+            // 非流式分支：thinking 字段是空字符串时，UI 上只会出现一条带"展开"
+            // 的紫色窄条，展开了也是空——直接不渲染，避免视觉噪音。
+            if (!thinkingText.trim()) return "";
+            var preview = thinkingText.length > 60 ? thinkingText.slice(0, 57) + "…" : thinkingText;
             var thinkingKey = buildExpandKey("thinking", [messageKey, index]);
             var thinkingPersisted = getPersistedExpandState(thinkingKey);
           var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;

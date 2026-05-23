@@ -519,6 +519,23 @@
       display: none;
     }
 
+    /* 窄条（collapsed）状态：明确不显示 X 关闭按钮。
+       虽然 collapsed 当前必然蕴含 pinned（见 isSidebarNarrow），
+       上一条 .sidebar.pinned 规则已经能把它藏住，但单独写一条更直观，
+       也防止以后允许 drawer 模式下 collapse 时漏掉。
+       展开（drawer 模式）下才显示关闭按钮供用户收起侧栏。 */
+    .sidebar.collapsed .sidebar-close {
+      display: none;
+    }
+
+    /* 与上方对称：drawer 模式（未 pin）下，X 关闭按钮已能把侧栏关掉，
+       再放一个「收起为窄条」按钮会和 X 视觉上重复，且它的行为
+       （自动 pin + collapse）也容易让人误以为是关闭。
+       只在 pinned 模式保留这颗，drawer 模式下隐藏。 */
+    .sidebar:not(.pinned) .sidebar-collapse-toggle {
+      display: none;
+    }
+
     /* ===== 侧栏窄条模式（仅 desktop pin 模式生效）===== */
     .sidebar.pinned.collapsed {
       width: var(--sidebar-collapsed-width);
@@ -6834,6 +6851,38 @@
     }
     .btn-circle-attach:active {
       transform: scale(0.95);
+    }
+
+    /* "立即发送"：结构化会话流式输出时显示，按下会中断当前回复立即处理新输入。
+       视觉上比 send 弱、比 stop 弱，避免被误点；和 send 之间留一点空气。 */
+    .btn-circle-interrupt {
+      background: rgba(160, 110, 60, 0.10);
+      color: var(--accent);
+      margin-right: 2px;
+      border: 1px dashed rgba(197, 101, 61, 0.35);
+    }
+    .btn-circle-interrupt:hover {
+      background: var(--accent);
+      color: white;
+      border-style: solid;
+      transform: scale(1.08);
+    }
+    .btn-circle-interrupt:active {
+      transform: scale(0.95);
+    }
+    .btn-circle-interrupt.hidden {
+      display: none;
+    }
+
+    /* send 按钮在「排队模式」下退到次要色，让相邻的"立即发送"成为视觉重点。
+       不动尺寸 / 圆形，避免 layout shift。 */
+    .btn-circle-send.queue-mode {
+      background: linear-gradient(180deg, rgba(197, 101, 61, 0.55) 0%, rgba(168, 82, 47, 0.55) 100%);
+      box-shadow: 0 1px 4px rgba(197, 101, 61, 0.15);
+    }
+    .btn-circle-send.queue-mode:hover {
+      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
+      box-shadow: 0 3px 10px rgba(197, 101, 61, 0.35);
     }
 
     /* Prompt optimize button — top-right of the input composer */
