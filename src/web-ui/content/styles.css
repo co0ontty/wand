@@ -677,15 +677,6 @@
     .sidebar-collapse-toggle.collapsed {
       color: var(--primary);
     }
-    /* 完全关闭侧栏 — 仅在 pinned 展开态可见（drawer 自带 X；窄条态保持极简） */
-    .sidebar .sidebar-header-actions .btn.sidebar-close-fully {
-      display: none;
-      flex-shrink: 0;
-    }
-    .sidebar.pinned:not(.collapsed) .sidebar-header-actions .btn.sidebar-close-fully {
-      display: inline-flex;
-    }
-
     /* ===== 图钉按钮 ===== */
     .sidebar-pin-toggle {
       flex-shrink: 0;

@@ -1464,7 +1464,6 @@
                       ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>'
                       : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') +
                   '</button>' +
-                  '<button id="sidebar-close-fully-btn" class="btn btn-ghost btn-sm sidebar-close-fully" type="button" title="完全关闭侧栏" aria-label="完全关闭侧栏"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                   '<button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="关闭菜单"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
                 '</div>' +
               '</div>' +
@@ -5627,8 +5626,6 @@
         if (pinBtn) pinBtn.addEventListener("click", toggleSidebarPin);
         var collapseBtn = document.getElementById("sidebar-collapse-btn");
         if (collapseBtn) collapseBtn.addEventListener("click", toggleSidebarCollapsed);
-        var closeFullyBtn = document.getElementById("sidebar-close-fully-btn");
-        if (closeFullyBtn) closeFullyBtn.addEventListener("click", closeSidebarCompletely);
         var sidebarMoreBtn = document.getElementById("sidebar-more-btn");
         var sidebarOverflow = document.getElementById("sidebar-overflow-menu");
         if (sidebarMoreBtn && sidebarOverflow) {
@@ -8972,29 +8969,6 @@
           return;
         }
         hideCollapsedTileBubble();
-      }
-
-      function closeSidebarCompletely() {
-        if (isMobileLayout()) return;
-        state.sidebarPinned = false;
-        state.sidebarCollapsed = false;
-        state.sessionsDrawerOpen = false;
-        try {
-          localStorage.setItem("wand-sidebar-pinned", "false");
-          localStorage.setItem("wand-sidebar-collapsed", "false");
-        } catch (e) {}
-        render();
-        var mainLayout = document.querySelector(".main-layout");
-        if (mainLayout) {
-          var onEnd = function(e) {
-            if (e.propertyName === "padding-left") {
-              mainLayout.removeEventListener("transitionend", onEnd);
-              scheduleTerminalResize(true);
-            }
-          };
-          mainLayout.addEventListener("transitionend", onEnd);
-        }
-        setTimeout(function() { scheduleTerminalResize(true); }, 350);
       }
 
       function toggleSidebarCollapsed() {
