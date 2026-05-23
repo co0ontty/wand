@@ -87,6 +87,14 @@
         terminalSessionId: null,
         terminalOutput: "",
         terminalLiveStreamSessions: {},
+        // CSI ?2026h..l 同步输出缓冲：begin 时拿到 "\x1b[?2026h" 后开始缓冲，
+        // end 时拿到 "\x1b[?2026l" 一次性 flush 给 wterm。null 表示当前不在
+        // sync 包帧内。@wterm/core 0.1.8 不实现 sync output，begin/end 之间
+        // 每个 write 立即落到 grid + mark dirty —— 跨 server-debounce 窗口
+        // 时浏览器看到中间帧 + 触发 softResync 时状态机被打断，正是
+        // askuserquestion 菜单多份叠加的最强候选根因。
+        syncOutputBuffer: null,
+        syncOutputDeadline: 0,
         lastChunkAt: 0,
         terminalHealthTimer: null,
         lastTerminalResyncAt: 0,
@@ -7145,10 +7153,86 @@
         return out;
       }
 
+      // CSI ?2026 同步输出（DEC mode 2026）的 wand 软实现。Claude Code 用
+      //   \x1b[?2026h ... 重画 ... \x1b[?2026l
+      // 包裹每一帧 askuserquestion / model / 任意菜单的原地重绘，期望终端
+      // 在 end 之前不渲染中间态。@wterm/core 0.1.8 未实现 sync output，于是
+      // 我们在 JS 层先 buffer，遇到 end 时一次性下发。这条修复直接解决
+      // 菜单逐帧叠加（image 2 的主因）。
+      //
+      // 安全护栏：
+      //   - 单帧字节 > SYNC_OUTPUT_MAX_BYTES → 强制 flush（防 buffer 爆）
+      //   - 单帧滞留 > SYNC_OUTPUT_MAX_BUFFER_MS → 强制 flush（防 begin 没 end）
+      //   - 没有 ?2026 字节流时透传，零开销
+      var SYNC_OUTPUT_BEGIN = "\x1b[?2026h";
+      var SYNC_OUTPUT_END = "\x1b[?2026l";
+      var SYNC_OUTPUT_MAX_BUFFER_MS = 200;
+      var SYNC_OUTPUT_MAX_BYTES = 256 * 1024;
+
+      function processSyncOutputFraming(data) {
+        if (!data) return data;
+        // 快路径：当前不在 sync 内、本批数据也不含 begin → 直接透传
+        if (state.syncOutputBuffer === null && data.indexOf(SYNC_OUTPUT_BEGIN) === -1) {
+          return data;
+        }
+        var out = "";
+        var i = 0;
+        while (i < data.length) {
+          if (state.syncOutputBuffer !== null) {
+            // 在 sync 内：扫到 end 才 flush
+            var endIdx = data.indexOf(SYNC_OUTPUT_END, i);
+            if (endIdx === -1) {
+              state.syncOutputBuffer += data.slice(i);
+              if (state.syncOutputBuffer.length > SYNC_OUTPUT_MAX_BYTES
+                  || Date.now() > state.syncOutputDeadline) {
+                // 护栏：超长/超时强制 flush，避免永久卡死
+                out += state.syncOutputBuffer;
+                state.syncOutputBuffer = null;
+              }
+              return out;
+            }
+            state.syncOutputBuffer += data.slice(i, endIdx + SYNC_OUTPUT_END.length);
+            out += state.syncOutputBuffer;
+            state.syncOutputBuffer = null;
+            i = endIdx + SYNC_OUTPUT_END.length;
+          } else {
+            // 不在 sync 内：扫 begin
+            var beginIdx = data.indexOf(SYNC_OUTPUT_BEGIN, i);
+            if (beginIdx === -1) {
+              out += data.slice(i);
+              return out;
+            }
+            // begin 之前的字节立即透传给 wterm
+            out += data.slice(i, beginIdx);
+            state.syncOutputBuffer = SYNC_OUTPUT_BEGIN;
+            state.syncOutputDeadline = Date.now() + SYNC_OUTPUT_MAX_BUFFER_MS;
+            i = beginIdx + SYNC_OUTPUT_BEGIN.length;
+          }
+        }
+        return out;
+      }
+
+      function flushSyncOutputBuffer() {
+        if (state.syncOutputBuffer !== null) {
+          var buffered = state.syncOutputBuffer;
+          state.syncOutputBuffer = null;
+          return buffered;
+        }
+        return "";
+      }
+
+      // NEW-B (DA1/XTVERSION 应答) 已暂缓：实测在 PTY ECHO 阶段（claude
+      // 启动早期 / claude 不在 raw mode 的窗口）回灌的字节会被 PTY 自动
+      // echo 到 stdout 并显示成 ^[[?6c^[P>|wterm-wand^[\ 字面字符，污染
+      // 终端。需要先在服务端 ProcessManager 写到 PTY master 时识别 ECHO
+      // 状态再决定是否回包，挪到 Phase 2 重新设计。
+
       function wandTerminalWrite(terminal, data) {
         if (!terminal || data == null) return;
         if (!state.wideParserState) state.wideParserState = createWideParserState();
-        terminal.write(widePadAnsi(data, state.wideParserState));
+        var padded = widePadAnsi(data, state.wideParserState);
+        var framed = processSyncOutputFraming(padded);
+        if (framed) terminal.write(framed);
         // wterm.write 内部用 5px 阈值判定"在底部"，下一帧 _doRender 据此强制
         // scrollTop = scrollHeight。这与 wand 的 autoFollow（"真正到底"才为
         // true，2px 阈值）独立，会把用户主动向上滚的几像素吞掉。覆写为 wand
@@ -7250,12 +7334,16 @@
         if (typeof state.terminal.reset === "function") {
           state.terminal.reset();
           resetWideParserState();
+          state.syncOutputBuffer = null;
+          state.syncOutputDeadline = 0;
           return;
         }
         if (typeof state.terminal.write === "function") {
           state.terminal.write("\x1bc");
         }
         resetWideParserState();
+        state.syncOutputBuffer = null;
+        state.syncOutputDeadline = 0;
       }
 
       // Reset wterm WASM grid and replay the full output buffer to clear stale
@@ -10287,17 +10375,42 @@
         return body;
       }
 
+      // 会话创建路径：保证 wterm 已经按真实容器尺寸校准，再向服务端 POST
+      // 新会话——否则 withTerminalDimensions 拿不到 cols/rows，body 不带尺寸
+      // → 服务端兜底 120/36 → Claude 按 120 列画 banner/box → wterm 实际渲
+      // 染宽 ≠ 120 → 横线断行（图 1 现象）。带 2s 兜底超时，避免
+      // initTerminal 失败时 UI 永久卡在"创建会话"按钮。
+      function ensureTerminalReady() {
+        if (state.terminal && state.terminal.cols) return Promise.resolve();
+        return new Promise(function(resolve) {
+          var done = false;
+          var settle = function() { if (!done) { done = true; resolve(); } };
+          var hardTimeout = setTimeout(settle, 2000);
+          try { initTerminal(); } catch (e) {}
+          requestAnimationFrame(function() {
+            requestAnimationFrame(function() {
+              if (state.terminal && state.terminal.cols) {
+                clearTimeout(hardTimeout);
+                settle();
+              }
+            });
+          });
+        });
+      }
+
       function quickStartSession() {
         var command = getPreferredTool();
         var defaultCwd = getEffectiveCwd();
         var defaultMode = getSafeModeForTool(command, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
         state.preferredCommand = command;
         state.chatMode = getSafeModeForTool(command, state.chatMode);
-        fetch("/api/commands", {
+        ensureTerminalReady().then(function() {
+          return fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify(withTerminalDimensions({ command: command, provider: command, cwd: defaultCwd, mode: defaultMode }))
+        });
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -10374,7 +10487,8 @@
         state.preferredCommand = command;
         syncComposerModeSelect();
 
-        fetch("/api/commands", {
+        ensureTerminalReady().then(function() {
+          return fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -10385,6 +10499,7 @@
             mode: mode,
             worktreeEnabled: worktreeEnabled
           }))
+        });
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
@@ -13980,6 +14095,10 @@
         // 中间态，下一个 wterm 实例的首批字节会被错误归类（首字符被吃成
         // ANSI 序列尾巴）。重建终端前显式复位，避免状态泄漏到新实例。
         resetWideParserState();
+        // sync output 缓冲跨会话也要清，否则旧会话最后没收完的 ?2026h 帧
+        // 会让新会话的首批 PTY 字节全部被吞进 buffer 等永远不会来的 end。
+        state.syncOutputBuffer = null;
+        state.syncOutputDeadline = 0;
         state.terminalSessionId = null;
         state.terminalOutput = "";
         state.terminalAutoFollow = true;
@@ -14010,6 +14129,9 @@
         // 直接 400/404，console 留一条红色错误；这里提前剪掉，避免噪音。
         if (!selectedSess || selectedSess.status !== "running") return;
         if (isStructuredSession(selectedSess)) return;
+        // wterm WASM grid 的 maxCols 硬编码 256。POST 给服务端的 cols 也同步
+        // clamp，避免服务端 pty.resize 给 Claude 一个 wterm 实际渲不下的列宽。
+        if (cols > 256) cols = 256;
         var nextSize = { cols: cols, rows: rows };
         if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
           state.lastResize = nextSize;

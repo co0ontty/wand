@@ -2911,11 +2911,12 @@
       --term-cursor: #d67b52;
       --term-font-family: "Geist Mono", "SF Mono", monospace;
       --term-font-size: 13px;
-      /* 行高直接给整数像素，避免 13×1.5=19.5 的亚像素行：PC 端 1× DPR 时
-       * 浏览器把 19.5 四舍五入成 19 或 20，相邻行的吸附方向不一致就会
-       * 出现错位。20px 是 wterm 既定的 cell 高度基线，移动端高 DPR 也
-       * 完全不变。 */
-      --term-line-height: 1.54;
+      /* 行高直接锁到 --term-row-height（px 值），杜绝 unitless × fontPx 的
+       * 亚像素重算。否则 fontPx 与 rowPx 不成整数比时，浏览器把行内文字算
+       * 出比 row 容器更高（如 13×1.54=20.02px 装进 20px row），相邻行视觉
+       * 互相覆盖几像素；applyTerminalScale 后的非默认字号下尤其明显。
+       * px 路径让 line-height 与 row 高保持单一真相源。 */
+      --term-line-height: var(--term-row-height);
       --term-row-height: 20px;
       --term-color-0: #1f1b17;
       --term-color-1: #d27766;

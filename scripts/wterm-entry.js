@@ -3,7 +3,21 @@ export * from "@wterm/dom";
 
 const SGR_RE = /\x1b\[([0-9;]*)m/g;
 
+// @wterm/core 的 WASM grid 把 maxCols 硬编码为 256（cellSize=12B 寻址按
+// `gridPtr + (row*maxCols + col)*cellSize` 算）。任何高于 256 的 cols 写入
+// 会让 renderer 在迭代到 col >= 256 时读到下一行 cell 0 甚至越界内存，表现
+// 为"行内容神奇复制到下一行"。wand 在 ResizeObserver/手动 remeasure 路径
+// 上无脑按 floor(innerW/charW) 算 cols，4K 全屏 13px 字号下能算出 280+ cols。
+// 这里在每条可写 this.cols 的路径都 clamp 到 WASM_MAX_COLS。
+const WASM_MAX_COLS = 256;
+
 export class WTerm extends BaseWTerm {
+  // 单一汇聚点：所有路径最终都走 super.resize()，在这里 clamp 一次双保险，
+  // 兜住未来新增的 cols 写入路径。
+  resize(cols, rows) {
+    super.resize(Math.min(cols, WASM_MAX_COLS), rows);
+  }
+
   write(data) {
     if (typeof data === "string") {
       data = data.replace(SGR_RE, (_m, params) => {
@@ -70,7 +84,7 @@ export class WTerm extends BaseWTerm {
     const innerW = this.element.clientWidth - padX;
     const innerH = this.element.clientHeight - padY;
     if (innerW <= 0 || innerH <= 0) return;
-    const cols = Math.max(1, Math.floor(innerW / charW));
+    const cols = Math.min(Math.max(1, Math.floor(innerW / charW)), WASM_MAX_COLS);
     const rows = Math.max(1, Math.floor(innerH / charH));
     this.cols = cols;
     this.rows = rows;
@@ -125,7 +139,7 @@ export class WTerm extends BaseWTerm {
     const height = this.element.clientHeight
       - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
     if (width <= 0 || height <= 0) return;
-    const newCols = Math.max(1, Math.floor(width / measured.width));
+    const newCols = Math.min(Math.max(1, Math.floor(width / measured.width)), WASM_MAX_COLS);
     const newRows = Math.max(1, Math.floor(height / measured.height));
     if (newCols !== this.cols || newRows !== this.rows) {
       this.resize(newCols, newRows);

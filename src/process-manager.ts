@@ -767,7 +767,10 @@ export class ProcessManager extends EventEmitter {
       knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
-      ptyCols: opts?.cols !== undefined ? clampDimension(opts.cols, 20, 400) : 120,
+      // cols 上限 256：与 @wterm/dom WASM grid 的 maxCols 硬编码一致，
+      // 防止服务端按 >256 cols 让 Claude 用 CSI 绝对列定位写到 wterm 实际
+      // 渲染不到的列上（表现为"内容神奇复制下行"）。
+      ptyCols: opts?.cols !== undefined ? clampDimension(opts.cols, 20, 256) : 120,
       ptyRows: opts?.rows !== undefined ? clampDimension(opts.rows, 10, 160) : 36,
     };
 
@@ -1161,7 +1164,7 @@ export class ProcessManager extends EventEmitter {
       return this.snapshot(record);
     }
 
-    const safeCols = clampDimension(cols, 20, 400);
+    const safeCols = clampDimension(cols, 20, 256);
     const safeRows = clampDimension(rows, 10, 160);
     const changed = safeCols !== record.ptyCols || safeRows !== record.ptyRows;
     record.ptyProcess.resize(safeCols, safeRows);
