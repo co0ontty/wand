@@ -446,8 +446,8 @@ function buildAppendSystemPromptParts(language: string | undefined, mode: Execut
   if (trimmedLanguage) {
     parts.push(
       isChinese
-        ? "请使用中文回复。所有解释、注释和对话文本都使用中文。"
-        : `Please respond in ${trimmedLanguage}. Use ${trimmedLanguage} for all your explanations, comments, and conversational text.`,
+        ? "请使用中文回复。所有解释、注释和对话文本都使用中文。当你通过 Task 工具派发子代理（subagent）时，必须在传给子代理的 prompt 里明确要求它也使用中文回复，确保所有子代理的输出同样遵循该语言偏好。"
+        : `Please respond in ${trimmedLanguage}. Use ${trimmedLanguage} for all your explanations, comments, and conversational text. When you dispatch a subagent via the Task tool, you MUST explicitly instruct the subagent in its prompt to also respond in ${trimmedLanguage}, so every subagent's output follows the same language preference.`,
     );
   }
 

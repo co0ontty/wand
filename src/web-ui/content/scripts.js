@@ -1510,14 +1510,17 @@
         var preferredTool = getComposerTool();
         var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
-        var isDesktopPinned = state.sidebarPinned && !isMobileLayout();
-        var isCollapsed = isDesktopPinned && state.sidebarCollapsed;
+        // 手机端不允许「pin 但不窄条」（300px 固定边栏太占地），只允许窄条形态。
+        // isAnchored = 边栏占据布局空间（推开主内容）。桌面 pin 或 任意端窄条都算 anchored。
+        var isMobile = isMobileLayout();
+        var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
+        var isAnchored = isCollapsed || (!!state.sidebarPinned && !isMobile);
         var collapsedCls = isCollapsed ? ' sidebar-collapsed' : '';
         var sidebarCollapsedCls = isCollapsed ? ' collapsed' : '';
         return '<div class="app-container">' +
           '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
-          '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + (isDesktopPinned ? ' sidebar-pinned' : '') + collapsedCls + '">' +
-            '<aside id="sessions-drawer" class="sidebar' + drawerClass + (isDesktopPinned ? ' pinned' : '') + sidebarCollapsedCls + '">' +
+          '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + (isAnchored ? ' sidebar-pinned' : '') + collapsedCls + '">' +
+            '<aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? ' pinned' : '') + sidebarCollapsedCls + '">' +
               '<div class="sidebar-header">' +
                 '<div class="sidebar-header-main">' +
                   '<div class="topbar-logo-icon">W</div>' +
@@ -3259,7 +3262,9 @@
       }
 
       function isSidebarNarrow() {
-        return !!state.sidebarPinned && !isMobileLayout() && !!state.sidebarCollapsed;
+        // 桌面: pinned + collapsed = 56px 窄条。
+        // 手机: pinned + collapsed 同样允许窄条（pin 单独不在手机生效，但 collapsed 是窄条形态的标志）。
+        return !!state.sidebarPinned && !!state.sidebarCollapsed;
       }
 
       function renderCollapsedSessionTiles() {
@@ -9190,14 +9195,16 @@
         var drawer = document.getElementById("sessions-drawer");
         var mainLayout = document.querySelector(".main-layout");
         var pinBtn = document.getElementById("sidebar-pin-btn");
-        var isDesktopPinned = state.sidebarPinned && !isMobileLayout();
-        var isCollapsed = isDesktopPinned && state.sidebarCollapsed;
+        // 与 renderAppShell 保持一致：手机端只允许窄条形态 anchored。
+        var isMobile = isMobileLayout();
+        var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
+        var isAnchored = isCollapsed || (!!state.sidebarPinned && !isMobile);
         if (drawer) {
-          drawer.classList.toggle("pinned", isDesktopPinned);
+          drawer.classList.toggle("pinned", isAnchored);
           drawer.classList.toggle("collapsed", isCollapsed);
         }
         if (mainLayout) {
-          mainLayout.classList.toggle("sidebar-pinned", isDesktopPinned);
+          mainLayout.classList.toggle("sidebar-pinned", isAnchored);
           mainLayout.classList.toggle("sidebar-collapsed", isCollapsed);
         }
         if (pinBtn) {
@@ -9310,12 +9317,11 @@
       }
 
       function toggleSidebarCollapsed() {
-        if (isMobileLayout()) return;
+        var isMobile = isMobileLayout();
         // 在 drawer 模式（未 pin）下点 collapse 视为「先固定、再收起为窄条」——
         // 用户直觉是「点了就该看到窄条」，过去这里 early return 让按钮看上去没反应。
         if (!state.sidebarPinned) {
           state.sidebarPinned = true;
-          state.sessionsDrawerOpen = true;
           try {
             localStorage.setItem("wand-sidebar-pinned", "true");
           } catch (e) {}
@@ -9324,6 +9330,22 @@
         try {
           localStorage.setItem("wand-sidebar-collapsed", String(state.sidebarCollapsed));
         } catch (e) {}
+        if (state.sidebarCollapsed) {
+          // 进入窄条形态：sessionsDrawerOpen 设 false，避免手机上 .drawer-backdrop
+          // 仍带 .open 类导致背景遮罩误显示（窄条已经常驻显示，不需要遮罩）。
+          state.sessionsDrawerOpen = false;
+        } else if (isMobile) {
+          // 手机端展开窄条：不允许「pin 但不窄条」的 300px 全栏（太占地），
+          // 改为回到 drawer 模式并自动打开抽屉，让用户看到完整会话列表。
+          state.sidebarPinned = false;
+          state.sessionsDrawerOpen = true;
+          try {
+            localStorage.setItem("wand-sidebar-pinned", "false");
+          } catch (e) {}
+        } else {
+          // 桌面端展开窄条 → 300px 全栏固定，自动打开。
+          state.sessionsDrawerOpen = true;
+        }
         render();
         var mainLayout = document.querySelector(".main-layout");
         if (mainLayout) {

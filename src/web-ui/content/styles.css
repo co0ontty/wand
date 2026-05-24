@@ -4273,14 +4273,13 @@
       background: rgba(0, 0, 0, 0.04);
       padding: 10px 12px;
       border-radius: 6px;
-      overflow-x: auto;
-      white-space: pre;
-      word-break: normal;
-      overflow-wrap: normal;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       margin: 8px 0;
       max-width: 100%;
       min-width: 0;
-      -webkit-overflow-scrolling: touch;
     }
 
     /* ===== subagent 回复三态折叠 =====
@@ -5841,17 +5840,15 @@
       overflow-wrap: anywhere;
       word-break: break-word;
     }
-    /* 代码块：保留原始行不强制 wrap，长行在 pre 内部横滚（逃生舱）。
-       外层 .markdown-content 有 overflow-x: hidden + max-width: 100%，
-       所以这里的内部横滚不会冒到聊天容器。 */
+    /* 代码块：长行强制 wrap，不出现横向滚动条。代码块在窄屏下也保持在
+       可视范围内，用户不需要拖横滚条才能看到右侧内容。 */
     .markdown-content .code-block pre {
-      overflow-x: auto;
-      white-space: pre;
-      word-break: normal;
-      overflow-wrap: normal;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       max-width: 100%;
       min-width: 0;
-      -webkit-overflow-scrolling: touch;
     }
     .markdown-content p { margin: 0 0 8px 0; overflow-wrap: anywhere; word-break: break-word; }
     .markdown-content p:last-child { margin-bottom: 0; }
@@ -5986,13 +5983,12 @@
     .markdown-content pre {
       margin: 0;
       padding: 12px;
-      overflow-x: auto;
-      white-space: pre;
-      word-break: normal;
-      overflow-wrap: normal;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       max-width: 100%;
       min-width: 0;
-      -webkit-overflow-scrolling: touch;
     }
     .markdown-content pre code {
       font-family: var(--font-mono);
@@ -9868,19 +9864,26 @@
 
     /* 平板适配 */
     @media (max-width: 768px) {
+      /* 手机隐藏「固定侧栏」按钮：手机上完整 300px 常驻太占地，
+         只保留「收起为窄条」按钮，让用户能切到 56px 窄条形态。 */
       .sidebar-pin-toggle { display: none; }
-      .sidebar-collapse-toggle { display: none; }
-      .sidebar.pinned:not(.open) {
+      /* drawer 模式（pinned 但非窄条）下若未打开，则隐藏到屏幕左侧。
+         窄条模式（pinned + collapsed）由 .sidebar.pinned.collapsed 的 width:56px
+         规则常驻显示，不进入这条隐藏分支。 */
+      .sidebar.pinned:not(.collapsed):not(.open) {
         transform: translateX(-100%);
         pointer-events: none;
         opacity: 0;
       }
-      .main-layout.sidebar-pinned {
+      /* 与上方对称：drawer 模式下取消 anchored padding；
+         窄条模式（.sidebar-pinned.sidebar-collapsed）继承全局 56px padding。 */
+      .main-layout.sidebar-pinned:not(.sidebar-collapsed) {
         padding-left: 0;
       }
-      .main-layout.sidebar-pinned .floating-sidebar-toggle {
-        display: inline-flex;
-      }
+      /* drawer 模式（未 anchored）默认就显示 hamburger（继承全局 inline-flex）。
+         窄条模式（.sidebar-pinned.sidebar-collapsed）由全局
+         `.main-layout.sidebar-pinned .floating-sidebar-toggle{display:none}`
+         隐藏 hamburger，窄条自身就是入口。 */
       .app-container {
         --layout-main-file-panel-width: 0px;
       }
