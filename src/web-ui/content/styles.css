@@ -15644,4 +15644,150 @@
       .wand-dialog-footer .btn { flex: 1 1 auto; }
     }
 
+    /* =====================================================================
+       线性 SVG 图标适配层 —— 把散落各处的 emoji 换成 currentColor SVG 之后，
+       这里集中处理"原本给文本字号 / line-height 的容器现在塞了一个 svg"
+       的对齐问题。命名上沿用旧 class，只补尺寸与 flex 居中。
+       ===================================================================== */
+
+    /* 通用：任何 svg 在带 .btn-with-icon 的按钮里都做 inline-flex 8px gap */
+    .btn-with-icon {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-with-icon > svg { flex-shrink: 0; }
+
+    /* composer pill 内的 svg 图标（自动批准 / 终端交互）—— 让 svg 沿基线对齐 */
+    .composer-pill-icon {
+      display: inline-block;
+      vertical-align: -2px;
+    }
+    .composer-pill-label {
+      display: inline-block;
+      letter-spacing: 0.02em;
+    }
+    /* 终端交互按钮里只放 svg —— 撤销原来的字号微调（emoji 时代留下的） */
+    .composer-interactive-toggle {
+      font-size: 0.625rem;
+      padding: 0 8px;
+      min-height: 22px;
+    }
+
+    /* settings section-head 圆角小徽章 —— 现在装 SVG，移除原 font-size */
+    .settings-section-icon {
+      font-size: 0;
+      line-height: 0;
+    }
+    .settings-section-icon > svg { display: block; }
+
+    /* 空白首页 tool button 里的 svg */
+    .blank-chat-tool-btn .tool-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      font-size: 1.125rem; /* 保留给 tool-icon-text 变体（Codex ⌘ 等） */
+    }
+    .blank-chat-tool-btn .tool-icon > svg { display: block; }
+    .blank-chat-tool-btn .tool-icon-text {
+      width: auto;
+      height: auto;
+      font-family: var(--font-mono);
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    /* 空白首页 CWD 行的文件夹图标 + 下拉箭头 */
+    .blank-chat-cwd-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0;
+      line-height: 0;
+    }
+    .blank-chat-cwd-icon > svg { display: block; }
+    .blank-chat-cwd-arrow {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0;
+      line-height: 0;
+      transition: transform var(--transition-fast);
+    }
+    .blank-chat-cwd-arrow > svg { display: block; }
+
+    /* 文件夹选择器：模态框里 input 前的文件夹图标 + 快捷按钮 */
+    .folder-picker-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0;
+      line-height: 0;
+    }
+    .folder-picker-icon > svg { display: block; }
+    .folder-picker-quick-btn.btn-with-icon { gap: 5px; }
+
+    /* Claude session id 徽章：icon + text */
+    .claude-session-id-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .claude-session-id-icon { flex-shrink: 0; }
+    .claude-session-id-text { font-family: var(--font-mono); }
+
+    /* 批准统计弹窗的行图标 —— 现在是 svg */
+    .approval-stats-row-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      font-size: 0;
+      line-height: 0;
+    }
+    .approval-stats-row-icon > svg { display: block; }
+
+    /* 附件 pill 缩略图 svg */
+    .attachment-pill .att-icon > svg { display: block; }
+
+    /* 排队面板标题 (排队中) —— 现在 icon + text 用 inline-flex 排 */
+    .queue-bar-panel-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .queue-bar-panel-title-icon { flex-shrink: 0; }
+
+    /* 紧凑目录选择器（新建会话时显示的小条）的图标 + 折叠箭头 */
+    .folder-picker-compact-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0;
+      line-height: 0;
+    }
+    .folder-picker-compact-icon > svg { display: block; }
+    .folder-picker-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0;
+      line-height: 0;
+    }
+    .folder-picker-toggle > svg { display: block; }
+    .folder-picker-toggle.open { transform: rotate(180deg); }
+
+    /* 顶部工作目录指示器的小图标 */
+    .working-dir-indicator-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0;
+      line-height: 0;
+    }
+    .working-dir-indicator-icon > svg { display: block; }
+
     /* 结束标记 */

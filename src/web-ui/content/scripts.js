@@ -318,6 +318,59 @@
         })()
       };
 
+      // ── 统一线性图标库 ──
+      // 替代页面里散落的 emoji（🛡 / ⌨ / 📁 / 🔔 …）。这些 emoji 在系统字体里渲染成
+      // 彩色卡通形态，与项目温暖米色 + 棕橙的复古主题视觉冲突明显。这里集中维护
+      // currentColor 线性 SVG，让图标跟随父级文字颜色变化，hover / active 状态自然继承。
+      var ICON_PATHS = {
+        // shape sets — 24x24 viewbox, currentColor stroke
+        shield:    '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+        shieldCheck: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
+        keyboard:  '<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="6" y1="14" x2="6" y2="14"/><line x1="18" y1="14" x2="18" y2="14"/><line x1="9" y1="14" x2="15" y2="14"/>',
+        cloud:     '<path d="M17.5 19a4.5 4.5 0 1 0-1-8.9 6 6 0 0 0-11.5 1.7A4 4 0 0 0 6 19h11.5z"/>',
+        terminal:  '<polyline points="4 7 9 12 4 17"/><line x1="12" y1="17" x2="20" y2="17"/>',
+        chat:      '<path d="M21 12a8 8 0 0 1-12.9 6.3L3 20l1.7-5.1A8 8 0 1 1 21 12z"/>',
+        folder:    '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+        folderOpen:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2"/><path d="M3 9h18l-2 8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+        trash:     '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
+        slash:     '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+        chevronDown: '<polyline points="6 9 12 15 18 9"/>',
+        chevronUp:   '<polyline points="6 15 12 9 18 15"/>',
+        chevronRight:'<polyline points="9 6 15 12 9 18"/>',
+        bell:      '<path d="M18 16v-5a6 6 0 1 0-12 0v5l-2 2h16z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
+        music:     '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+        vibrate:   '<rect x="9" y="4" width="6" height="16" rx="1"/><path d="M5 8v8"/><path d="M3 10v4"/><path d="M19 8v8"/><path d="M21 10v4"/>',
+        globe:     '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/>',
+        smartphone:'<rect x="6" y="2" width="12" height="20" rx="2.5"/><line x1="11" y1="18" x2="13" y2="18"/>',
+        desktop:   '<rect x="3" y="4" width="18" height="12" rx="2"/><line x1="8" y1="20" x2="16" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/>',
+        link:      '<path d="M10 14a4.5 4.5 0 0 0 6.36 0l3-3a4.5 4.5 0 1 0-6.36-6.36l-1.42 1.41"/><path d="M14 10a4.5 4.5 0 0 0-6.36 0l-3 3a4.5 4.5 0 1 0 6.36 6.36l1.42-1.41"/>',
+        palette:   '<circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 3a9 9 0 1 0 0 18 1.5 1.5 0 0 0 1.1-2.5 1.5 1.5 0 0 1 1.1-2.5h2.3A4.5 4.5 0 0 0 21 11.5C21 6.8 16.97 3 12 3z"/>',
+        play:      '<polygon points="6 4 20 12 6 20 6 4"/>',
+        inbox:     '<polyline points="22 13 16 13 14 16 10 16 8 13 2 13"/><path d="M5 5h14l3 8v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
+        zap:       '<polygon points="13 2 4 14 11 14 10 22 20 9 13 9 13 2"/>',
+        wrench:    '<path d="M14.7 6.3a4 4 0 1 1 4 4l-9 9-3.5 1 1-3.5 7.5-7.5z"/>',
+        edit:      '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+        check:     '<polyline points="5 12 10 17 19 7"/>',
+        signal:    '<path d="M2 12a15 15 0 0 1 20 0"/><path d="M5 16a10 10 0 0 1 14 0"/><path d="M9 20a4 4 0 0 1 6 0"/><circle cx="12" cy="20" r="0.5" fill="currentColor"/>',
+        file:      '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="14 3 14 9 20 9"/>',
+        image:     '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><polyline points="3 18 9 12 14 17 21 12"/>',
+        sigma:     '<polyline points="18 4 6 4 13 12 6 20 18 20"/>'
+      };
+      // 渲染 SVG 字符串。size 默认 14，strokeWidth 默认 1.8（与现有 send/stop 按钮线宽接近）。
+      // cls 用于添加额外 class（如 .composer-pill-icon），便于 CSS 微调。
+      function iconSvg(name, opts) {
+        var path = ICON_PATHS[name];
+        if (!path) return "";
+        opts = opts || {};
+        var size = opts.size || 14;
+        var stroke = opts.strokeWidth || 1.8;
+        var cls = opts.cls ? ' class="' + opts.cls + '"' : "";
+        var fill = opts.fill || "none";
+        return '<svg' + cls + ' width="' + size + '" height="' + size + '" viewBox="0 0 24 24"' +
+          ' fill="' + fill + '" stroke="currentColor" stroke-width="' + stroke + '"' +
+          ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
+      }
+
       // ── Structured session status bar (in-flight timer) ──
       var _statusBarTimerId = null;
       var _statusBarStartTime = 0;
@@ -1313,7 +1366,7 @@
                 app.innerHTML =
                   '<div class="boot-loading">' +
                     '<div class="boot-loading-card">' +
-                      '<div class="boot-loading-text" style="font-size:1.3em;margin-bottom:12px">📡 无法连接到服务器</div>' +
+                      '<div class="boot-loading-text" style="font-size:1.3em;margin-bottom:12px;display:flex;align-items:center;justify-content:center;gap:8px">' + iconSvg("signal", { size: 20, strokeWidth: 1.8 }) + '<span>无法连接到服务器</span></div>' +
                       '<div class="boot-loading-text" style="opacity:0.7;font-size:0.95em">请检查网络连接或确认 Wand 服务正在运行。</div>' +
                       '<button onclick="location.reload()" style="margin-top:18px;padding:8px 24px;border-radius:8px;border:1px solid rgba(150,118,85,0.3);background:rgba(255,255,255,0.8);cursor:pointer;font-size:0.95em">重试</button>' +
                     '</div>' +
@@ -1418,10 +1471,10 @@
           '</span>' +
           '<span class="approval-stats-popup" id="approval-stats-popup">' +
             '<span class="approval-stats-popup-title">自动批准统计</span>' +
-            (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">⚡</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
-            (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">📝</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
-            (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">🔧</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
-            '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">∑</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
+            (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("terminal", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
+            (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("edit", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
+            (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("wrench", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
+            '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">' + iconSvg("sigma", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
           '</span>' +
         '</span>';
       }
@@ -1687,20 +1740,20 @@
                   '<p class="blank-chat-subtitle">支持终端 PTY 会话与结构化 chat 会话，两种模式可并存。</p>' +
                   '<div class="blank-chat-tools">' +
                     '<button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button">' +
-                      '<span class="tool-icon">🤖</span>新建终端会话' +
+                      '<span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>新建终端会话' +
                     '</button>' +
                     '<button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button">' +
-                      '<span class="tool-icon">⌘</span>新建 Codex 会话' +
+                      '<span class="tool-icon tool-icon-text">⌘</span>新建 Codex 会话' +
                     '</button>' +
                     '<button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button">' +
-                      '<span class="tool-icon">💬</span>新建结构化会话' +
+                      '<span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>新建结构化会话' +
                     '</button>' +
                   '</div>' +
                   '<div class="blank-chat-cwd-wrap">' +
                     '<div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" title="点击切换工作目录">' +
-                      '<span class="blank-chat-cwd-icon">📁</span>' +
+                      '<span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + '</span>' +
                       '<span class="blank-chat-cwd-path" id="blank-chat-cwd-path">' + escapeHtml(getEffectiveCwd()) + '</span>' +
-                      '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">▼</span>' +
+                      '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span>' +
                     '</div>' +
                     '<div class="blank-chat-cwd-dropdown hidden" id="blank-chat-cwd-dropdown"></div>' +
                   '</div>' +
@@ -1778,7 +1831,7 @@
                         '</span>' +
                       '</span>' +
                       renderAutoApproveChip(selectedSession) +
-                      '<button id="terminal-interactive-toggle-top" class="composer-pill composer-pill-chip composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨</button>' +
+                      '<button id="terminal-interactive-toggle-top" class="composer-pill composer-pill-chip composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式" aria-label="切换终端交互模式">' + iconSvg("keyboard", { size: 13, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '</button>' +
                       '<span class="permission-actions hidden" id="permission-actions">' +
                         '<span class="permission-actions-divider"></span>' +
                         '<span class="permission-actions-label" id="permission-actions-label">等待授权</span>' +
@@ -1813,7 +1866,7 @@
                     ? (function() {
                         var bits = "";
                         if (selectedSession.provider === "claude" && selectedSession.claudeSessionId) {
-                          bits += '<span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>';
+                          bits += '<span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">' + iconSvg("cloud", { size: 11, strokeWidth: 1.7, cls: "claude-session-id-icon" }) + '<span class="claude-session-id-text">' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span></span>';
                         }
                         if (!isStructuredSession(selectedSession) && selectedSession.exitCode !== undefined && selectedSession.exitCode !== null) {
                           if (bits) bits += '<span class="session-info-separator">|</span>';
@@ -1834,12 +1887,12 @@
                   '</div>' +
                   '<div class="modal-body">' +
                     '<div class="folder-picker-quick-row">' +
-                      '<button class="folder-picker-quick-btn" data-path="/tmp">🗑️ 临时目录</button>' +
-                      '<button class="folder-picker-quick-btn" data-path="/">📁 根目录</button>' +
+                      '<button class="folder-picker-quick-btn btn-with-icon" data-path="/tmp">' + iconSvg("trash", { size: 13, strokeWidth: 1.7 }) + '<span>临时目录</span></button>' +
+                      '<button class="folder-picker-quick-btn btn-with-icon" data-path="/">' + iconSvg("folder", { size: 13, strokeWidth: 1.7 }) + '<span>根目录</span></button>' +
                     '</div>' +
                     '<div id="folder-breadcrumb" class="folder-breadcrumb"></div>' +
                     '<div class="folder-picker">' +
-                      '<span class="folder-picker-icon">📁</span>' +
+                      '<span class="folder-picker-icon">' + iconSvg("folder", { size: 15, strokeWidth: 1.7 }) + '</span>' +
                       '<input type="text" id="folder-picker-input" class="folder-picker-input" value="" placeholder="输入或选择工作目录..." autocomplete="off" />' +
                     '</div>' +
                     '<div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div>' +
@@ -2751,7 +2804,7 @@
                 '</div>' +
                 '<div class="settings-update-section" id="web-update-section">' +
                   '<div class="settings-section-head">' +
-                    '<span class="settings-section-icon">🌐</span>' +
+                    '<span class="settings-section-icon">' + iconSvg("globe", { size: 18, strokeWidth: 1.7 }) + '</span>' +
                     '<div class="settings-section-head-text">' +
                       '<h4 class="settings-section-heading">Web 端</h4>' +
                       '<p class="settings-section-sub">浏览器访问的服务版本</p>' +
@@ -2780,7 +2833,7 @@
                 '</div>' +
                 '<div class="settings-update-section hidden" id="android-apk-section">' +
                   '<div class="settings-section-head">' +
-                    '<span class="settings-section-icon">📱</span>' +
+                    '<span class="settings-section-icon">' + iconSvg("smartphone", { size: 18, strokeWidth: 1.7 }) + '</span>' +
                     '<div class="settings-section-head-text">' +
                       '<h4 class="settings-section-heading">Android App</h4>' +
                       '<p class="settings-section-sub">原生客户端版本与 APK 下载</p>' +
@@ -2814,7 +2867,7 @@
                 '</div>' +
                 '<div class="settings-update-section hidden" id="macos-dmg-section">' +
                   '<div class="settings-section-head">' +
-                    '<span class="settings-section-icon">🖥️</span>' +
+                    '<span class="settings-section-icon">' + iconSvg("desktop", { size: 18, strokeWidth: 1.7 }) + '</span>' +
                     '<div class="settings-section-head-text">' +
                       '<h4 class="settings-section-heading">macOS App</h4>' +
                       '<p class="settings-section-sub">原生客户端版本与 DMG 下载</p>' +
@@ -2848,7 +2901,7 @@
                 '</div>' +
                 '<div class="settings-update-section" id="android-connect-section">' +
                   '<div class="settings-section-head">' +
-                    '<span class="settings-section-icon">🔗</span>' +
+                    '<span class="settings-section-icon">' + iconSvg("link", { size: 18, strokeWidth: 1.7 }) + '</span>' +
                     '<div class="settings-section-head-text">' +
                       '<h4 class="settings-section-heading">App 连接码</h4>' +
                       '<p class="settings-section-sub">粘贴到 Android App 即可自动连接，无需密码；改密码后失效。</p>' +
@@ -2876,7 +2929,7 @@
                 '</div>' +
                 '<div class="settings-notification-section">' +
                   '<div class="settings-section-head">' +
-                    '<span class="settings-section-icon">🔔</span>' +
+                    '<span class="settings-section-icon">' + iconSvg("bell", { size: 18, strokeWidth: 1.7 }) + '</span>' +
                     '<div class="settings-section-head-text">' +
                       '<h4 class="settings-section-heading">通知偏好</h4>' +
                       '<p class="settings-section-sub">提示音与应用内通知气泡</p>' +
@@ -2910,7 +2963,7 @@
                 '</div>' +
                 '<div id="native-sound-section" class="settings-notification-section hidden">' +
                   '<div class="settings-section-head">' +
-                    '<span class="settings-section-icon">🎵</span>' +
+                    '<span class="settings-section-icon">' + iconSvg("music", { size: 18, strokeWidth: 1.7 }) + '</span>' +
                     '<div class="settings-section-head-text">' +
                       '<h4 class="settings-section-heading">系统通知铃声</h4>' +
                       '<p class="settings-section-sub">选择 Android 系统通知使用的铃声</p>' +
@@ -2918,12 +2971,12 @@
                   '</div>' +
                   '<div class="settings-row-with-action">' +
                     '<select id="native-sound-select" class="field-input field-select"></select>' +
-                    '<button id="native-sound-preview" class="btn btn-secondary btn-sm" type="button">▶ 试听</button>' +
+                    '<button id="native-sound-preview" class="btn btn-secondary btn-sm btn-with-icon" type="button">' + iconSvg("play", { size: 11, strokeWidth: 1.8, fill: "currentColor" }) + '<span>试听</span></button>' +
                   '</div>' +
                 '</div>' +
                 '<div id="native-haptic-section" class="settings-notification-section hidden">' +
                   '<div class="settings-section-head">' +
-                    '<span class="settings-section-icon">📳</span>' +
+                    '<span class="settings-section-icon">' + iconSvg("vibrate", { size: 18, strokeWidth: 1.7 }) + '</span>' +
                     '<div class="settings-section-head-text">' +
                       '<h4 class="settings-section-heading">触感反馈</h4>' +
                       '<p class="settings-section-sub">按钮操作和任务完成时提供振动反馈</p>' +
@@ -2941,7 +2994,7 @@
                 '</div>' +
                 '<div class="settings-notification-section">' +
                   '<div class="settings-section-head">' +
-                    '<span class="settings-section-icon">🌐</span>' +
+                    '<span class="settings-section-icon">' + iconSvg("globe", { size: 18, strokeWidth: 1.7 }) + '</span>' +
                     '<div class="settings-section-head-text">' +
                       '<h4 class="settings-section-heading">浏览器通知</h4>' +
                       '<p class="settings-section-sub">来自系统通知中心的弹窗</p>' +
@@ -3059,7 +3112,7 @@
                 (typeof WandNative !== "undefined" && typeof WandNative.getAppIcon === "function" ?
                 '<div class="settings-app-icon-block">' +
                   '<div class="settings-section-head">' +
-                    '<span class="settings-section-icon">🎨</span>' +
+                    '<span class="settings-section-icon">' + iconSvg("palette", { size: 18, strokeWidth: 1.7 }) + '</span>' +
                     '<div class="settings-section-head-text">' +
                       '<h4 class="settings-section-heading">应用图标</h4>' +
                       '<p class="settings-section-sub">选择 App 启动器图标，返回桌面后生效</p>' +
@@ -4982,9 +5035,9 @@
         // 新建会话时显示简化的目录选择器（单行紧凑设计）
         return '<div class="folder-picker-compact" id="folder-picker-container">' +
           '<div class="folder-picker-compact-row">' +
-            '<span class="folder-picker-compact-icon">📁</span>' +
+            '<span class="folder-picker-compact-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.7 }) + '</span>' +
             '<input type="text" id="folder-picker-input" class="folder-picker-compact-input" value="' + escapeHtml(currentDir) + '" placeholder="工作目录" autocomplete="off" />' +
-            '<button type="button" id="folder-picker-toggle" class="folder-picker-toggle" title="选择目录">▼</button>' +
+            '<button type="button" id="folder-picker-toggle" class="folder-picker-toggle" title="选择目录" aria-label="选择目录">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</button>' +
           '</div>' +
           '<div id="folder-picker-dropdown" class="folder-picker-dropdown hidden">' +
             '<div class="folder-picker-quick-row">' +
@@ -5014,7 +5067,7 @@
         }
 
         return '<div class="working-dir-indicator" id="working-dir-indicator" title="' + escapeHtml(displayDir) + '" data-path="' + escapeHtml(displayDir) + '">' +
-          '<span class="working-dir-indicator-icon">📁</span>' +
+          '<span class="working-dir-indicator-icon">' + iconSvg("folder", { size: 12, strokeWidth: 1.7 }) + '</span>' +
           '<span class="working-dir-indicator-path">' + escapeHtml(displayPath) + '</span>' +
         '</div>';
       }
@@ -8417,8 +8470,8 @@
         if (isAutoApproveImpliedByMode(session)) return "";
         var enabled = !!session.autoApprovePermissions;
         return enabled
-          ? '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator active" title="自动批准已启用 — 点击关闭">🛡 自动</span>'
-          : '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator" title="自动批准已关闭 — 点击开启">🛡 手动</span>';
+          ? '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator active" title="自动批准已启用 — 点击关闭">' + iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">自动</span></span>'
+          : '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator" title="自动批准已关闭 — 点击开启">' + iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">手动</span></span>';
       }
 
       function fetchAvailableModels() {
@@ -11478,7 +11531,7 @@
           var a = items[i];
           var thumb = a.previewUrl
             ? '<img src="' + escapeHtml(a.previewUrl) + '" alt="">'
-            : '<span class="att-icon">📄</span>';
+            : '<span class="att-icon">' + iconSvg("file", { size: 13, strokeWidth: 1.7 }) + '</span>';
           html += '<span class="attachment-pill" data-index="' + i + '">' +
             thumb +
             '<span class="att-name" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span>' +
@@ -12477,7 +12530,7 @@
             '</button>' +
             '<div class="queue-bar-panel" data-queue-panel="1" role="region" aria-label="排队消息列表">' +
               '<div class="queue-bar-panel-header">' +
-                '<span class="queue-bar-panel-title">📥 排队中 (' + count + ')</span>' +
+                '<span class="queue-bar-panel-title">' + iconSvg("inbox", { size: 13, strokeWidth: 1.7, cls: "queue-bar-panel-title-icon" }) + '<span>排队中 (' + count + ')</span></span>' +
                 '<button type="button" class="queue-bar-clear" data-action="clear"' +
                        (count === 0 ? " disabled" : "") + '>清空</button>' +
                 '<button type="button" class="queue-bar-collapse" data-action="collapse" aria-label="收起">' +
@@ -16173,10 +16226,10 @@
           '</span>' +
           '<span class="approval-stats-popup" id="approval-stats-popup">' +
             '<span class="approval-stats-popup-title">自动批准统计</span>' +
-            (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">⚡</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
-            (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">📝</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
-            (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">🔧</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
-            '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">∑</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
+            (stats.command > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("terminal", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">命令执行</span><span class="approval-stats-row-count">' + stats.command + '</span></span>' : '') +
+            (stats.file > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("edit", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">文件写入</span><span class="approval-stats-row-count">' + stats.file + '</span></span>' : '') +
+            (stats.tool > 0 ? '<span class="approval-stats-row"><span class="approval-stats-row-icon">' + iconSvg("wrench", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">其他工具</span><span class="approval-stats-row-count">' + stats.tool + '</span></span>' : '') +
+            '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">' + iconSvg("sigma", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
           '</span>';
         // Pulse animation on the badge
         var badge = container.querySelector(".approval-stats-badge");
@@ -16292,11 +16345,11 @@
         if (enabled) {
           toggle.className = base + " active";
           toggle.title = "自动批准已启用 — 点击关闭";
-          toggle.textContent = "🛡 自动";
+          toggle.innerHTML = iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">自动</span>';
         } else {
           toggle.className = base;
           toggle.title = "自动批准已关闭 — 点击开启";
-          toggle.textContent = "🛡 手动";
+          toggle.innerHTML = iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">手动</span>';
         }
       }
 
