@@ -280,10 +280,13 @@ export function registerSessionRoutes(
   app.post("/api/structured-sessions/:id/messages", express.json(), async (req, res) => {
     const input = String(req.body?.input ?? "");
     const interrupt = !!req.body?.interrupt;
+    // preserveQueue: 仅在 interrupt 路径有意义。排队条「立即」会带这个 flag，
+    // 让退出 handler 不要把剩余 queuedMessages 清空（默认行为是清空）。
+    const preserveQueue = !!req.body?.preserveQueue;
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
-    console.log("[WAND] POST /api/structured-sessions/:id/messages id:", req.params.id, "input:", input.substring(0, 50), "interrupt:", interrupt, "idempotencyKey:", idempotencyKey);
+    console.log("[WAND] POST /api/structured-sessions/:id/messages id:", req.params.id, "input:", input.substring(0, 50), "interrupt:", interrupt, "preserveQueue:", preserveQueue, "idempotencyKey:", idempotencyKey);
     try {
-      const snapshot = await structured.sendMessage(req.params.id, input, { interrupt, idempotencyKey });
+      const snapshot = await structured.sendMessage(req.params.id, input, { interrupt, preserveQueue, idempotencyKey });
       res.json(snapshot);
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;
@@ -292,6 +295,46 @@ export function registerSessionRoutes(
         error: getErrorMessage(error, "无法发送结构化消息。"),
         errorCode,
       });
+    }
+  });
+
+  // ── Structured queued-messages management ──
+  // 三个端点构成"排队消息条"的后端操作面：reorder（拖拽换序）、单条删除、全部清空。
+  // 全部走乐观更新模型，失败时前端会回滚到上一次 WS 推送的 queuedMessages。
+  app.patch("/api/structured-sessions/:id/queued", express.json(), (req, res) => {
+    const rawOrder = req.body?.order;
+    if (!Array.isArray(rawOrder)) {
+      res.status(400).json({ error: "缺少 order 数组。" });
+      return;
+    }
+    try {
+      const snapshot = structured.reorderQueuedMessages(req.params.id, rawOrder.map((v: unknown) => Number(v)));
+      res.json(snapshot);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法调整排队顺序。") });
+    }
+  });
+
+  app.delete("/api/structured-sessions/:id/queued/:index", (req, res) => {
+    const index = Number(req.params.index);
+    if (!Number.isFinite(index)) {
+      res.status(400).json({ error: "下标无效。" });
+      return;
+    }
+    try {
+      const snapshot = structured.deleteQueuedMessage(req.params.id, index);
+      res.json(snapshot);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法删除排队消息。") });
+    }
+  });
+
+  app.delete("/api/structured-sessions/:id/queued", (req, res) => {
+    try {
+      const snapshot = structured.clearQueuedMessages(req.params.id);
+      res.json(snapshot);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法清空排队消息。") });
     }
   });
 

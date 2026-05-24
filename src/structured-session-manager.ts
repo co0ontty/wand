@@ -495,6 +495,14 @@ export class StructuredSessionManager {
    */
   private readonly pendingSdkQueries = new Map<string, { interrupt(): Promise<void> }>();
   private readonly interruptedWith = new Map<string, string>();
+  /**
+   * Sessions where the current interrupt is a "queue promote" (用户从排队条点了「立即」
+   * 把队首插队到 now)。退出处理三个分支默认会把 queuedMessages 清空——因为常规的
+   * interrupt 语义是"算了，做这个"，把队列也作废。但 queue-promote 的语义是
+   * "先做这条，剩下的队列还要继续"，所以这里打个标记，让退出 handler 保留 queue。
+   * 收到后必须 delete 掉，避免下一次普通 interrupt 误带 flag。
+   */
+  private readonly preserveQueueOnInterrupt = new Set<string>();
   /** Last wall-clock time (ms) we did a full saveSession for a streaming session. */
   private readonly lastStreamSaveAt = new Map<string, number>();
   /**
@@ -663,7 +671,7 @@ export class StructuredSessionManager {
   async sendMessage(
     id: string,
     input: string,
-    opts?: { interrupt?: boolean; idempotencyKey?: string },
+    opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean },
   ): Promise<SessionSnapshot> {
     let session = this.requireSession(id);
     const prompt = input.trim();
@@ -705,6 +713,11 @@ export class StructuredSessionManager {
         session = recovered;
       } else if (opts?.interrupt) {
         this.interruptedWith.set(id, prompt);
+        if (opts.preserveQueue) {
+          this.preserveQueueOnInterrupt.add(id);
+        } else {
+          this.preserveQueueOnInterrupt.delete(id);
+        }
         try { child.kill("SIGTERM"); } catch (_err) { /* ignore */ }
         const sdkQueryHandle = this.pendingSdkQueries.get(id);
         if (sdkQueryHandle) {
@@ -835,6 +848,63 @@ export class StructuredSessionManager {
     return this.resolvePermission(sessionId, false);
   }
 
+  /**
+   * Reorder the pending queued messages. `order` is a permutation of the current
+   * indices, e.g. `[2, 0, 1]` means "move the third queued message to the front,
+   * push the original first to position #2". Throws if the permutation is
+   * malformed (length mismatch / duplicate / out-of-range). 不允许在 inFlight
+   * 期间改"已经被 flushNextQueuedMessage 拿走的队首"，但本方法只动 queue 数组
+   * 本身，flushNext 在另一段时序里读 sessions.get(...) 当前快照，已经天然安全。
+   */
+  reorderQueuedMessages(sessionId: string, order: number[]): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const queue = session.queuedMessages ?? [];
+    if (!Array.isArray(order) || order.length !== queue.length) {
+      throw new Error("排序长度与当前队列不一致，请刷新后重试。");
+    }
+    const seen = new Set<number>();
+    for (const idx of order) {
+      if (!Number.isInteger(idx) || idx < 0 || idx >= queue.length || seen.has(idx)) {
+        throw new Error("排序参数无效。");
+      }
+      seen.add(idx);
+    }
+    const reordered = order.map((idx) => queue[idx]);
+    const updated: SessionSnapshot = { ...session, queuedMessages: reordered };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    this.emitStructuredSnapshot(updated);
+    return updated;
+  }
+
+  /** Remove a single queued message by index. */
+  deleteQueuedMessage(sessionId: string, index: number): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const queue = session.queuedMessages ?? [];
+    if (!Number.isInteger(index) || index < 0 || index >= queue.length) {
+      throw new Error("队列中没有该条消息（可能已被处理）。");
+    }
+    const next = queue.slice(0, index).concat(queue.slice(index + 1));
+    const updated: SessionSnapshot = { ...session, queuedMessages: next };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    this.emitStructuredSnapshot(updated);
+    return updated;
+  }
+
+  /** Clear all queued messages. No-op when queue is already empty. */
+  clearQueuedMessages(sessionId: string): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    if (!session.queuedMessages || session.queuedMessages.length === 0) {
+      return session;
+    }
+    const updated: SessionSnapshot = { ...session, queuedMessages: [] };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    this.emitStructuredSnapshot(updated);
+    return updated;
+  }
+
   /** Update the selected model for a structured session. Takes effect on the next spawn. */
   setSessionModel(sessionId: string, model: string | null): SessionSnapshot {
     const session = this.requireSession(sessionId);
@@ -923,6 +993,7 @@ export class StructuredSessionManager {
   stop(id: string): SessionSnapshot {
     const session = this.requireSession(id);
     this.interruptedWith.delete(id);
+    this.preserveQueueOnInterrupt.delete(id);
     const child = this.pendingChildren.get(id);
     if (child) {
       child.kill();
@@ -976,6 +1047,8 @@ export class StructuredSessionManager {
     }
     this.sessions.delete(id);
     this.lastStreamSaveAt.delete(id);
+    this.interruptedWith.delete(id);
+    this.preserveQueueOnInterrupt.delete(id);
     this.storage.deleteSession(id);
     this.logger?.deleteSession(id);
   }
@@ -1366,7 +1439,7 @@ export class StructuredSessionManager {
           output: turnState.result,
           claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
           messages: msgs,
-          queuedMessages: interruptPrompt ? [] : current.queuedMessages,
+          queuedMessages: interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId) ? [] : current.queuedMessages,
           pendingEscalation: null,
           permissionBlocked: false,
           structuredState: {
@@ -1385,6 +1458,11 @@ export class StructuredSessionManager {
         }
         if (interruptPrompt) {
           this.interruptedWith.delete(sessionId);
+          // 把"保留队列"标记一并清掉——不属于本次 interrupt 的后续轮次会按
+          // 默认（清空 queue）行为走，避免 stale flag 影响下一次普通 interrupt。
+          // 注意：被保留的 queuedMessages 不需要在这里主动 flush，重发的
+          // interruptPrompt 跑完会自然触发 flushNextQueuedMessage。
+          this.preserveQueueOnInterrupt.delete(sessionId);
           resolve();
           setImmediate(() => {
             this.sendMessage(sessionId, interruptPrompt).catch((err) => {
@@ -1886,7 +1964,7 @@ export class StructuredSessionManager {
           output: turnState.result,
           claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
           messages: msgs,
-          queuedMessages: interruptPrompt ? [] : current.queuedMessages,
+          queuedMessages: interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId) ? [] : current.queuedMessages,
           pendingEscalation: null,
           permissionBlocked: false,
           structuredState: {
@@ -1914,6 +1992,11 @@ export class StructuredSessionManager {
         // 用户中断当前回复：保存部分回复后立即发送新消息。
         if (interruptPrompt) {
           this.interruptedWith.delete(sessionId);
+          // 把"保留队列"标记一并清掉——不属于本次 interrupt 的后续轮次会按
+          // 默认（清空 queue）行为走，避免 stale flag 影响下一次普通 interrupt。
+          // 注意：被保留的 queuedMessages 不需要在这里主动 flush，重发的
+          // interruptPrompt 跑完会自然触发 flushNextQueuedMessage。
+          this.preserveQueueOnInterrupt.delete(sessionId);
           resolve();
           setImmediate(() => {
             this.sendMessage(sessionId, interruptPrompt).catch((err) => {

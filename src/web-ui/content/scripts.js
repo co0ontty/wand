@@ -129,6 +129,13 @@
           }
         })(), // 跨会话排队消息 [{ id, text, cwd, mode, tool }]
         structuredInputQueue: [], // 结构化会话同会话排队消息
+        // 排队条 UI 局部状态 ——
+        //   queueBarExpanded: 折叠条点击展开成下拉面板
+        //   queueBarItemExpanded: 展开面板里被点开看完整内容的 item 下标集合
+        //   queueBarDrag: 拖拽排序进行中时的临时状态（pointer 捕获、起始坐标、参考 rect）
+        queueBarExpanded: false,
+        queueBarItemExpanded: {},
+        queueBarDrag: null,
         drafts: {},
         isSyncingInputBox: false,
         loginPending: false,
@@ -1710,6 +1717,11 @@
                     '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
                   '</div>' +
                 '</div>' +
+                // 排队条宿主：默认 display:none，updateQueueBar() 在 queuedMessages 非空时
+                // 显形。结构上夹在 composer-top-row（todo 进度）和 input-composer（输入框 +
+                // 工具栏）之间，位置正好"在输入框上方、对话框右下角"。所有内容由 updater
+                // 注入；这里只保留稳定的外层骨架，便于 renderAppShell 全量重建后无缝复位。
+                '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
                 '<div class="input-composer">' +
                   '<button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="提示词优化（AI）" aria-label="提示词优化">' +
                     '<svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -1730,21 +1742,28 @@
                       // tabindex="-1": 把这些控件移出 iOS Safari 的表单导航链，
                       // 这样 textarea 聚焦时键盘上方就不会出现 ⌃ ⌄ ✓ 表单辅助栏。
                       '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
-                      // 三件套 (Mode / Model / Thinking) 同属"会话设置"层：视觉上统一为同一种 pill 风格，
-                      // 由 CSS .composer-pill-group 内的轻量分隔感传达"归类"。
-                      '<span class="composer-pill-group" role="group" aria-label="会话设置">' +
-                        '<select id="chat-mode-select" class="composer-pill composer-pill-select chat-mode-select" tabindex="-1" title="新会话模式 · 托管 / 全权限 自动启用批准">' +
-                          renderModeOptions(preferredTool, composerMode) +
-                        '</select>' +
-                        '<select id="chat-model-select" class="composer-pill composer-pill-select chat-mode-select chat-model-select" tabindex="-1" title="切换模型（对运行中会话发送 /model，对新会话作为 --model 启动）">' +
-                          renderChatModelOptions(getEffectiveModel(selectedSession), selectedSession) +
-                        '</select>' +
-                        // 思考深度 trigger：与 mode / model 同形（border + chevron），保证视觉一致。
-                        // 可见层只有「档位文字」，原生 <select> 透明叠在上面，依然能调起 iOS 滚轮选择。
-                        '<span class="composer-pill composer-pill-select chat-thinking-trigger" title="思考深度（structured 立即生效；PTY 仅作用于通过 chat 视图发送的消息）">' +
-                          '<span class="chat-thinking-label" id="chat-thinking-label">' + escapeHtml(getThinkingLabel(getEffectiveThinking(selectedSession))) + '</span>' +
-                          '<select id="chat-thinking-select" class="chat-thinking-hidden-select" tabindex="-1" aria-label="思考深度">' +
-                            renderChatThinkingOptions(getEffectiveThinking(selectedSession)) +
+                      // 三件套 (Mode / Model / Thinking) 同属"会话设置"层：扁平文字 + · 分隔。
+                      // 文字下叠一个透明 <select> 承载交互，桌面端弹原生下拉、移动端弹滚轮选择。
+                      // 显示文本用 raw id（如 default / claude-sonnet-4-5 / standard），不做翻译。
+                      '<span class="composer-text-group" role="group" aria-label="会话设置">' +
+                        '<span class="composer-text-pill" title="模式">' +
+                          '<span class="composer-text-label" id="chat-mode-label">' + escapeHtml(composerMode) + '</span>' +
+                          '<select id="chat-mode-select" class="composer-text-hidden-select" tabindex="-1" aria-label="模式">' +
+                            renderChatModeOptionsRaw(preferredTool, composerMode) +
+                          '</select>' +
+                        '</span>' +
+                        '<span class="composer-text-sep" aria-hidden="true">·</span>' +
+                        '<span class="composer-text-pill chat-model-text-pill" title="模型">' +
+                          '<span class="composer-text-label" id="chat-model-label">' + escapeHtml(getEffectiveModel(selectedSession) || "default") + '</span>' +
+                          '<select id="chat-model-select" class="composer-text-hidden-select" tabindex="-1" aria-label="模型">' +
+                            renderChatModelOptionsRaw(getEffectiveModel(selectedSession), selectedSession) +
+                          '</select>' +
+                        '</span>' +
+                        '<span class="composer-text-sep" aria-hidden="true">·</span>' +
+                        '<span class="composer-text-pill chat-thinking-text-pill" title="思考深度">' +
+                          '<span class="composer-text-label" id="chat-thinking-label">' + escapeHtml(getEffectiveThinking(selectedSession)) + '</span>' +
+                          '<select id="chat-thinking-select" class="composer-text-hidden-select" tabindex="-1" aria-label="思考深度">' +
+                            renderChatThinkingOptionsRaw(getEffectiveThinking(selectedSession)) +
                           '</select>' +
                         '</span>' +
                       '</span>' +
@@ -1759,9 +1778,7 @@
                       renderApprovalStatsBadge() +
                     '</div>' +
                     '<div class="input-composer-right">' +
-                      // queue-counter：当 queuedMessages 不为空时显示，提示用户后面还堆了几条。
-                      // 比小角标更显眼一点——加图标 + 强对比色，避免 v1.30.3 那一版用户没看见。
-                      '<span id="queue-counter" class="queue-counter hidden" title="正在排队的输入条数"><span class="queue-counter-dot"></span><span class="queue-counter-text">队列 0</span></span>' +
+                      // 排队提示从这里搬到 .queue-bar（输入框上方独立浮条），原 #queue-counter 已移除。
                       '<span class="input-hint' + (state.terminalInteractive ? ' terminal-interactive-hint' : state.currentView === "terminal" ? " hidden" : "") + '">' + (state.terminalInteractive ? '终端交互中 · Ctrl+C 中断 · Ctrl+L 清屏' : 'Enter 发送 · Shift+Enter 换行') + '</span>' +
                       renderInlineKeyboard() +
                       '<button id="stop-button" class="btn-circle btn-circle-stop' + (state.selectedId ? "" : " hidden") + '" title="停止">' +
@@ -5320,7 +5337,8 @@
                 '</div>' +
                 '<div class="field-hint session-kind-hint-row">' +
                   '<span id="session-kind-description">' + escapeHtml(getSessionKindHint(sessionKind)) + '</span>' +
-                  renderWorktreeToggle(worktreeEnabled) +
+                  // Worktree 模式入口暂时隐藏，保留 renderWorktreeToggle/state.sessionCreateWorktree 以便后续恢复
+                  // renderWorktreeToggle(worktreeEnabled) +
                 '</div>' +
               '</div>' +
               '<div class="field">' +
@@ -5434,6 +5452,36 @@
           if (action) action.textContent = "展开";
         }
         persistElementExpandState(el, "thinking");
+      };
+      // Toggle function for subagent reply bubbles — cycles preview → expanded → collapsed.
+      // 三态循环（preview 默认 ~5 行可滚 / expanded 大区可滚 / collapsed 完全收起）。
+      window.__subagentReplyCycle = function(e, btn) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        var bubble = btn.closest(".subagent-reply");
+        if (!bubble) return;
+        var modes = ["preview", "expanded", "collapsed"];
+        var current = bubble.getAttribute("data-collapse-mode") || "preview";
+        var idx = modes.indexOf(current);
+        if (idx < 0) idx = 0;
+        var next = modes[(idx + 1) % modes.length];
+        bubble.setAttribute("data-collapse-mode", next);
+        var label = btn.querySelector(".subagent-reply-cycle-label");
+        var icon = btn.querySelector(".subagent-reply-cycle-icon");
+        if (label) {
+          label.textContent = next === "preview" ? "展开"
+            : next === "expanded" ? "收起"
+            : "预览";
+        }
+        if (icon) {
+          icon.textContent = next === "collapsed" ? "▸"
+            : next === "expanded" ? "▴"
+            : "▾";
+        }
+        btn.setAttribute("aria-label",
+          next === "preview" ? "点击展开全部" :
+          next === "expanded" ? "点击完全收起" :
+          "点击切回预览"
+        );
       };
       // Toggle function for inline tool rows (Read, Glob, Grep, etc.)
       window.__inlineToolToggle = function(el) {
@@ -6011,7 +6059,9 @@
         var modeSelect = document.getElementById("chat-mode-select");
         if (modeSelect) modeSelect.addEventListener("change", function() {
           state.chatMode = this.value;
-          showToast("新会话模式已切换为：" + getModeLabel(this.value), "info");
+          var label = document.getElementById("chat-mode-label");
+          if (label) label.textContent = this.value;
+          showToast("新会话模式：" + this.value, "info");
         });
         var modelSelect = document.getElementById("chat-model-select");
         if (modelSelect) modelSelect.addEventListener("change", function() {
@@ -6723,6 +6773,16 @@
         initTerminal();
         setupMobileKeyboardHandlers();
         setupVisualViewportHandlers();
+
+        // 排队条：每次 shell 重渲后，重新挂事件代理 + 刷新内容。
+        // document-level 的 ESC / 外点击 handler 只挂一次（state.__queueBarGlobalAttached 守门）。
+        attachQueueBarDelegates();
+        updateQueueBar();
+        if (!state.__queueBarGlobalAttached) {
+          state.__queueBarGlobalAttached = true;
+          document.addEventListener("pointerdown", handleQueueBarOutsideClick, true);
+          document.addEventListener("keydown", handleQueueBarKeydown, true);
+        }
       }
 
       function saveWorkingDir(path) {
@@ -8125,12 +8185,24 @@
 
       function syncComposerModeSelect() {
         var select = document.getElementById("chat-mode-select");
-        if (!select) return;
         state.chatMode = getSafeModeForTool("claude", state.chatMode);
-        select.innerHTML = renderModeOptions("claude", state.chatMode);
-        select.value = state.chatMode;
+        if (select) {
+          select.innerHTML = renderChatModeOptionsRaw("claude", state.chatMode);
+          select.value = state.chatMode;
+        }
+        var labelEl = document.getElementById("chat-mode-label");
+        if (labelEl) labelEl.textContent = state.chatMode;
         var modeHint = document.getElementById("mode-hint");
         if (modeHint) modeHint.textContent = getModeHint(state.chatMode);
+      }
+
+      // 三件套 raw 选项渲染：option 文本直接是 id（不带括号注释 / 不本地化）。
+      function renderChatModeOptionsRaw(tool, selectedMode) {
+        return getSupportedModes(tool).map(function(mode) {
+          return '<option value="' + escapeHtml(mode) + '"' + (mode === selectedMode ? " selected" : "") + '>' +
+            escapeHtml(mode) +
+          '</option>';
+        }).join("");
       }
 
       function getEffectiveModel(session) {
@@ -8160,13 +8232,29 @@
         return html;
       }
 
+      // model 选项 raw 版：空值显示 "default"，其它直接用 raw id（不带"（自定义）"等后缀）。
+      function renderChatModelOptionsRaw(selected, session) {
+        var models = getModelsForCurrentProvider(session);
+        var html = '<option value="">default</option>';
+        for (var i = 0; i < models.length; i++) {
+          var m = models[i];
+          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === selected ? " selected" : "") + '>' + escapeHtml(m.id) + '</option>';
+        }
+        if (selected && !models.some(function(m) { return m.id === selected; })) {
+          html += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(selected) + '</option>';
+        }
+        return html;
+      }
+
       function syncComposerModelSelect(session) {
         var select = document.getElementById("chat-model-select");
+        var effective = getEffectiveModel(session);
         if (select) {
-          var effective = getEffectiveModel(session);
-          select.innerHTML = renderChatModelOptions(effective, session);
+          select.innerHTML = renderChatModelOptionsRaw(effective, session);
           select.value = effective;
         }
+        var labelEl = document.getElementById("chat-model-label");
+        if (labelEl) labelEl.textContent = effective || "default";
         // thinking 选择器与 model 选择器属于同一组"会话级设置"，
         // 任何刷新 model 的时机也应该同步刷新 thinking，避免漂移。
         syncComposerThinkingSelect(session);
@@ -8206,14 +8294,26 @@
         return html;
       }
 
+      // thinking 选项 raw 版：option 文本直接是 id（off / standard / deep / max）。
+      function renderChatThinkingOptionsRaw(selected) {
+        var v = selected || "off";
+        var html = "";
+        for (var i = 0; i < THINKING_LEVELS.length; i++) {
+          var lvl = THINKING_LEVELS[i];
+          html += '<option value="' + escapeHtml(lvl.id) + '"' + (lvl.id === v ? ' selected' : '') + '>' + escapeHtml(lvl.id) + '</option>';
+        }
+        return html;
+      }
+
       function syncComposerThinkingSelect(session) {
         var select = document.getElementById("chat-thinking-select");
-        if (!select) return;
         var effective = getEffectiveThinking(session);
-        select.innerHTML = renderChatThinkingOptions(effective);
-        select.value = effective;
+        if (select) {
+          select.innerHTML = renderChatThinkingOptionsRaw(effective);
+          select.value = effective;
+        }
         var labelEl = document.getElementById("chat-thinking-label");
-        if (labelEl) labelEl.textContent = getThinkingLabel(effective);
+        if (labelEl) labelEl.textContent = effective;
       }
 
       function onChatThinkingChange(value) {
@@ -8224,7 +8324,7 @@
         state.chatThinking = normalized;
         try { localStorage.setItem("wand-thinking-effort", normalized); } catch (e) {}
         var labelEl = document.getElementById("chat-thinking-label");
-        if (labelEl) labelEl.textContent = getThinkingLabel(normalized);
+        if (labelEl) labelEl.textContent = normalized;
         var session = getSelectedSession();
         if (!session) return;
         fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
@@ -8473,6 +8573,8 @@
         var normalized = (value || "").trim();
         state.chatModel = normalized;
         try { localStorage.setItem("wand-chat-model", normalized); } catch (e) {}
+        var labelEl = document.getElementById("chat-model-label");
+        if (labelEl) labelEl.textContent = normalized || "default";
         var session = getSelectedSession();
         if (!session) return;
         fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
@@ -12251,24 +12353,507 @@
       }
 
       function updateStructuredQueueCounter() {
-        var counter = document.getElementById("queue-counter");
-        var count = getSelectedStructuredQueuedInputs().length;
-        if (counter) {
-          // counter 现在是 dot + text 双节点结构，只更新文字节点；如果用 textContent
-          // 直接覆盖会把内嵌的 .queue-counter-dot 也一并干掉，CSS 上做的脉动小红点就没了。
-          var textNode = counter.querySelector(".queue-counter-text");
-          var label = count > 0 ? ("排队 " + count + " 条") : "队列 0";
-          if (textNode) {
-            textNode.textContent = label;
-          } else {
-            counter.textContent = label;
-          }
-          if (count > 0) {
-            counter.classList.remove("hidden");
-          } else {
-            counter.classList.add("hidden");
-          }
+        // 旧 #queue-counter 已下线，所有"排队"提示由 .queue-bar（输入框上方独立浮条）承担。
+        // 函数名先保留 —— 老的调用点（postStructuredInput / WS 事件等）都还在指向它。
+        updateQueueBar();
+      }
+
+      // ──────────────────────────────────────────────────────────────────────────
+      // 排队条（.queue-bar）—— 输入框上方独立浮条，承担三个事情：
+      //   1) 折叠态：● 排队 N + 队尾预览 + ⌃ chevron + ⚡ 立即 按钮
+      //   2) 展开面板：列出所有排队消息，支持拖拽换序 / 单条删除 / 一键清空
+      //   3) 立即按钮：中断当前回复，把队首作为新消息插队发出去（剩余队列保留）
+      // 数据源：session.queuedMessages（由后端 WS 推送 + postStructuredInput 乐观更新）。
+      // ──────────────────────────────────────────────────────────────────────────
+
+      var QUEUE_BAR_MAX = 10; // 后端硬上限
+
+      function queueBarTruncatePreview(text) {
+        if (typeof text !== "string") return "";
+        var s = text.replace(/\s+/g, " ").trim();
+        if (s.length <= 48) return s;
+        return s.slice(0, 46) + "…";
+      }
+
+      function renderQueueBarSkeleton(count, latestPreview, inFlight, atCapacity, immediateLabel) {
+        // 折叠条 + 展开面板的 HTML 一次性渲染好，靠 .queue-bar.expanded class 切换可见性。
+        // 这样展开/收起不需要拼字符串，纯 class toggle，动画也好做。
+        var dotClass = inFlight ? "queue-bar-dot queue-bar-dot-pulse" : "queue-bar-dot";
+        var barClass = "queue-bar";
+        if (state.queueBarExpanded) barClass += " expanded";
+        if (atCapacity) barClass += " queue-bar-capacity";
+        if (inFlight) barClass += " queue-bar-inflight";
+        var html =
+          '<div class="' + barClass + '" data-queue-bar="1">' +
+            '<button type="button" class="queue-bar-toggle" data-action="toggle"' +
+                   ' aria-expanded="' + (state.queueBarExpanded ? "true" : "false") + '"' +
+                   ' title="点击查看 / 收起排队消息">' +
+              '<span class="' + dotClass + '" aria-hidden="true"></span>' +
+              '<span class="queue-bar-count">' + (atCapacity ? "队列已满 " : "排队 ") + count + '</span>' +
+              '<span class="queue-bar-sep" aria-hidden="true">·</span>' +
+              '<span class="queue-bar-preview">' + escapeHtml(latestPreview) + '</span>' +
+              '<svg class="queue-bar-chevron" width="11" height="11" viewBox="0 0 24 24"' +
+                  ' fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"' +
+                  ' stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>' +
+            '</button>' +
+            '<span class="queue-bar-divider" aria-hidden="true"></span>' +
+            '<button type="button" class="queue-bar-promote" data-action="promote"' +
+                   ' title="中断当前回复，立刻发送队首这条" aria-label="立即发送队首">' +
+              '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+                '<path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/>' +
+              '</svg>' +
+              '<span class="queue-bar-promote-label">' + escapeHtml(immediateLabel) + '</span>' +
+            '</button>' +
+            '<div class="queue-bar-panel" data-queue-panel="1" role="region" aria-label="排队消息列表">' +
+              '<div class="queue-bar-panel-header">' +
+                '<span class="queue-bar-panel-title">📥 排队中 (' + count + ')</span>' +
+                '<button type="button" class="queue-bar-clear" data-action="clear"' +
+                       (count === 0 ? " disabled" : "") + '>清空</button>' +
+                '<button type="button" class="queue-bar-collapse" data-action="collapse" aria-label="收起">' +
+                  '收起' +
+                  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+                      ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                      '<polyline points="6 9 12 15 18 9"/></svg>' +
+                '</button>' +
+              '</div>' +
+              '<ol class="queue-bar-list" data-queue-list="1"></ol>' +
+            '</div>' +
+          '</div>';
+        return html;
+      }
+
+      function renderQueueBarItems(listEl, items) {
+        // ol 内容单独 render —— 拖拽 / 删除 / 展开会频繁动它，外层骨架不重建避免抖动。
+        var single = items.length <= 1;
+        var html = "";
+        for (var i = 0; i < items.length; i++) {
+          var raw = items[i] == null ? "" : String(items[i]);
+          var expanded = !!state.queueBarItemExpanded[i];
+          var itemClass = "queue-bar-item";
+          if (expanded) itemClass += " expanded";
+          if (single) itemClass += " queue-bar-item-single";
+          html +=
+            '<li class="' + itemClass + '" data-index="' + i + '">' +
+              '<button type="button" class="queue-bar-item-drag" data-action="drag" aria-label="拖动调整顺序"' +
+                     ' title="按住拖动调整顺序"' + (single ? " disabled" : "") + '>' +
+                '<svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden="true">' +
+                  '<circle cx="2.2" cy="2.2" r="1.2"/><circle cx="7.8" cy="2.2" r="1.2"/>' +
+                  '<circle cx="2.2" cy="7"   r="1.2"/><circle cx="7.8" cy="7"   r="1.2"/>' +
+                  '<circle cx="2.2" cy="11.8" r="1.2"/><circle cx="7.8" cy="11.8" r="1.2"/>' +
+                '</svg>' +
+              '</button>' +
+              '<span class="queue-bar-item-index">#' + (i + 1) + '</span>' +
+              '<button type="button" class="queue-bar-item-text" data-action="expand-text"' +
+                     ' aria-expanded="' + (expanded ? "true" : "false") + '"' +
+                     ' title="点击展开 / 收起完整内容">' +
+                escapeHtml(raw) +
+              '</button>' +
+              '<button type="button" class="queue-bar-item-delete" data-action="delete"' +
+                     ' aria-label="删除这条排队消息" title="删除">' +
+                '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+                    ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                    '<line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>' +
+              '</button>' +
+            '</li>';
         }
+        listEl.innerHTML = html;
+      }
+
+      function updateQueueBar() {
+        var host = document.getElementById("queue-bar-host");
+        if (!host) return;
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var isStructured = session && session.sessionKind === "structured";
+        var queue = isStructured ? getStructuredQueuedInputs(session) : [];
+        queue = Array.isArray(queue) ? queue : [];
+
+        if (!isStructured || queue.length === 0) {
+          // 队列空 / 非结构化会话：整条隐藏，并清掉展开/逐条展开的本地态。
+          host.hidden = true;
+          host.innerHTML = "";
+          state.queueBarExpanded = false;
+          state.queueBarItemExpanded = {};
+          return;
+        }
+
+        host.hidden = false;
+        var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
+        var atCapacity = queue.length >= QUEUE_BAR_MAX;
+        var latest = queueBarTruncatePreview(queue[queue.length - 1]);
+        // inFlight=false 时按钮语义从"插队"退化为"立刻发"；文案一并切换让用户不疑惑。
+        var immediateLabel = inFlight ? "立即" : "发送";
+
+        // 拖拽进行中绝不重建骨架，否则 pointer capture 丢失、items 闪屏。
+        // 只更新列表内容（且如果数量不变也跳过整段重排）。
+        var existing = host.querySelector(".queue-bar");
+        if (state.queueBarDrag && existing) {
+          var listInDrag = existing.querySelector('[data-queue-list="1"]');
+          if (listInDrag && listInDrag.children.length !== queue.length) {
+            renderQueueBarItems(listInDrag, queue);
+          }
+          return;
+        }
+
+        host.innerHTML = renderQueueBarSkeleton(queue.length, latest, inFlight, atCapacity, immediateLabel);
+        var listEl = host.querySelector('[data-queue-list="1"]');
+        if (listEl) renderQueueBarItems(listEl, queue);
+      }
+
+      // ── 折叠 / 展开 ──
+      function setQueueBarExpanded(expanded) {
+        var next = !!expanded;
+        if (state.queueBarExpanded === next) return;
+        state.queueBarExpanded = next;
+        if (!next) state.queueBarItemExpanded = {};
+        updateQueueBar();
+      }
+      function toggleQueueBar() { setQueueBarExpanded(!state.queueBarExpanded); }
+
+      function handleQueueBarOutsideClick(ev) {
+        if (!state.queueBarExpanded) return;
+        var host = document.getElementById("queue-bar-host");
+        if (!host) return;
+        if (host.contains(ev.target)) return;
+        setQueueBarExpanded(false);
+      }
+      function handleQueueBarKeydown(ev) {
+        if (!state.queueBarExpanded) return;
+        if (ev.key === "Escape" || ev.key === "Esc") {
+          setQueueBarExpanded(false);
+          // 焦点回到 toggle 按钮，方便键盘党
+          var toggle = document.querySelector(".queue-bar-toggle");
+          if (toggle) toggle.focus();
+        }
+      }
+
+      // ── 单条删除 / 全部清空 / 队首插队 ──
+      function rollbackQueueOptimistic(session, prevQueue) {
+        updateSessionSnapshot({ id: session.id, queuedMessages: prevQueue });
+        var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
+        state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
+        renderChat(true);
+        updateQueueBar();
+      }
+
+      function queueBarDeleteItem(index) {
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!session) return;
+        var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+        if (index < 0 || index >= queue.length) return;
+        var prev = queue.slice();
+        var next = queue.slice(0, index).concat(queue.slice(index + 1));
+        // 调整 queueBarItemExpanded 的下标偏移
+        var nextExpanded = {};
+        Object.keys(state.queueBarItemExpanded).forEach(function(k) {
+          var i = Number(k);
+          if (i === index) return;
+          if (i > index) nextExpanded[i - 1] = state.queueBarItemExpanded[k];
+          else nextExpanded[i] = state.queueBarItemExpanded[k];
+        });
+        state.queueBarItemExpanded = nextExpanded;
+        updateSessionSnapshot({ id: session.id, queuedMessages: next });
+        var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
+        state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
+        renderChat(true);
+        updateQueueBar();
+        fetch("/api/structured-sessions/" + session.id + "/queued/" + index, {
+          method: "DELETE",
+          credentials: "same-origin",
+        })
+        .then(function(res) {
+          if (!res.ok) {
+            return res.json().catch(function() { return {}; }).then(function(p) {
+              throw new Error((p && p.error) || "删除失败");
+            });
+          }
+        })
+        .catch(function(err) {
+          rollbackQueueOptimistic(session, prev);
+          showToast((err && err.message) || "删除排队消息失败。", "error");
+        });
+      }
+
+      function queueBarClearAll() {
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!session) return;
+        var prev = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+        if (prev.length === 0) return;
+        state.queueBarItemExpanded = {};
+        updateSessionSnapshot({ id: session.id, queuedMessages: [] });
+        var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
+        state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
+        renderChat(true);
+        updateQueueBar();
+        fetch("/api/structured-sessions/" + session.id + "/queued", {
+          method: "DELETE",
+          credentials: "same-origin",
+        })
+        .then(function(res) {
+          if (!res.ok) {
+            return res.json().catch(function() { return {}; }).then(function(p) {
+              throw new Error((p && p.error) || "清空失败");
+            });
+          }
+          showToast("已清空 " + prev.length + " 条排队消息。", "info");
+        })
+        .catch(function(err) {
+          rollbackQueueOptimistic(session, prev);
+          showToast((err && err.message) || "清空排队消息失败。", "error");
+        });
+      }
+
+      function queueBarPromoteHead() {
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!session) return;
+        var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+        if (queue.length === 0) return;
+        var head = queue[0];
+        var rest = queue.slice(1);
+        var prev = queue.slice();
+        var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
+
+        // 乐观：剥掉队首
+        state.queueBarItemExpanded = (function() {
+          var out = {};
+          Object.keys(state.queueBarItemExpanded).forEach(function(k) {
+            var i = Number(k);
+            if (i === 0) return;
+            out[i - 1] = state.queueBarItemExpanded[k];
+          });
+          return out;
+        })();
+        updateSessionSnapshot({ id: session.id, queuedMessages: rest });
+
+        // 收起面板，让用户视线回到 chat（新消息马上要进 user turn）
+        setQueueBarExpanded(false);
+
+        var idempotencyKey = (typeof crypto !== "undefined" && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
+
+        var body = { input: head, idempotencyKey: idempotencyKey };
+        if (inFlight) {
+          // 中断 + 保留剩余队列
+          body.interrupt = true;
+          body.preserveQueue = true;
+        }
+        // 给一个乐观 toast，让用户瞬间知道点击生效了
+        showToast(inFlight ? "已请求中断当前回复，立即发送队首。" : "已立即发送队首消息。", "info");
+
+        fetch("/api/structured-sessions/" + session.id + "/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(body),
+        })
+        .then(function(res) {
+          if (!res.ok) {
+            return res.json().catch(function() { return {}; }).then(function(p) {
+              throw new Error((p && p.error) || "立即发送失败");
+            });
+          }
+          return res.json();
+        })
+        .then(function(snapshot) {
+          if (snapshot && snapshot.id) {
+            updateSessionSnapshot(snapshot);
+            if (snapshot.id === state.selectedId) {
+              var refreshed = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
+              state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot.output, false));
+              renderChat(true);
+              updateQueueBar();
+            }
+          }
+        })
+        .catch(function(err) {
+          rollbackQueueOptimistic(session, prev);
+          showToast((err && err.message) || "立即发送失败。", "error");
+        });
+      }
+
+      // ── 拖拽排序（Pointer Events + 简化版 sort/animate）──
+      function queueBarDragStart(ev, handleEl) {
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!session) return;
+        var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+        if (queue.length <= 1) return;
+        var itemEl = handleEl.closest(".queue-bar-item");
+        if (!itemEl) return;
+        var listEl = itemEl.parentElement;
+        if (!listEl) return;
+        var origIndex = Number(itemEl.getAttribute("data-index"));
+        var siblings = Array.prototype.slice.call(listEl.children);
+        var rects = siblings.map(function(el) { return el.getBoundingClientRect(); });
+        var rect0 = rects[origIndex];
+        var itemHeight = rect0.height;
+        var gap = 6; // 与 CSS .queue-bar-list 的 gap 保持一致
+
+        ev.preventDefault();
+        try { handleEl.setPointerCapture(ev.pointerId); } catch (_e) {}
+        if (navigator && navigator.vibrate) { try { navigator.vibrate(8); } catch (_e2) {} }
+
+        state.queueBarDrag = {
+          pointerId: ev.pointerId,
+          handleEl: handleEl,
+          itemEl: itemEl,
+          listEl: listEl,
+          siblings: siblings,
+          rects: rects,
+          origIndex: origIndex,
+          targetIndex: origIndex,
+          startY: ev.clientY,
+          itemHeight: itemHeight,
+          gap: gap,
+          queueSnapshot: queue,
+        };
+
+        itemEl.classList.add("dragging");
+        // 把所有兄弟先标记为"参与平滑动画"
+        siblings.forEach(function(el) { if (el !== itemEl) el.classList.add("queue-bar-item-sliding"); });
+
+        var move = function(e) { queueBarDragMove(e); };
+        var up = function(e) { queueBarDragEnd(e); };
+        state.queueBarDrag.moveHandler = move;
+        state.queueBarDrag.upHandler = up;
+        handleEl.addEventListener("pointermove", move);
+        handleEl.addEventListener("pointerup", up);
+        handleEl.addEventListener("pointercancel", up);
+      }
+
+      function queueBarDragMove(ev) {
+        var d = state.queueBarDrag;
+        if (!d || ev.pointerId !== d.pointerId) return;
+        ev.preventDefault();
+        var deltaY = ev.clientY - d.startY;
+        d.itemEl.style.transform = "translateY(" + deltaY + "px)";
+
+        // 拖动中心 Y 决定目标插入位置
+        var centerY = d.rects[d.origIndex].top + d.rects[d.origIndex].height / 2 + deltaY;
+        var target = d.origIndex;
+        for (var i = 0; i < d.rects.length; i++) {
+          if (i === d.origIndex) continue;
+          var midY = d.rects[i].top + d.rects[i].height / 2;
+          if (i < d.origIndex && centerY < midY) { target = Math.min(target, i); }
+          else if (i > d.origIndex && centerY > midY) { target = Math.max(target, i); }
+        }
+        if (target !== d.targetIndex) {
+          d.targetIndex = target;
+          // 重排兄弟元素的 translateY
+          var shift = d.itemHeight + d.gap;
+          d.siblings.forEach(function(el, idx) {
+            if (idx === d.origIndex) return;
+            var move = 0;
+            if (d.origIndex < target && idx > d.origIndex && idx <= target) move = -shift;
+            else if (d.origIndex > target && idx < d.origIndex && idx >= target) move = shift;
+            el.style.transform = move ? "translateY(" + move + "px)" : "";
+          });
+        }
+      }
+
+      function queueBarDragEnd(ev) {
+        var d = state.queueBarDrag;
+        if (!d || (ev && ev.pointerId !== d.pointerId)) return;
+        try { d.handleEl.releasePointerCapture(d.pointerId); } catch (_e) {}
+        d.handleEl.removeEventListener("pointermove", d.moveHandler);
+        d.handleEl.removeEventListener("pointerup", d.upHandler);
+        d.handleEl.removeEventListener("pointercancel", d.upHandler);
+
+        var origIndex = d.origIndex;
+        var targetIndex = d.targetIndex;
+        var queueSnapshot = d.queueSnapshot;
+
+        // 清掉 inline transform 让 CSS 自然回位
+        d.siblings.forEach(function(el) {
+          el.style.transform = "";
+          el.classList.remove("queue-bar-item-sliding");
+        });
+        d.itemEl.classList.remove("dragging");
+
+        state.queueBarDrag = null;
+
+        if (origIndex === targetIndex) {
+          // 没动，光擦一下重渲就行
+          updateQueueBar();
+          return;
+        }
+
+        // 计算 order: 原下标的新排列
+        var order = [];
+        for (var i = 0; i < queueSnapshot.length; i++) order.push(i);
+        order.splice(origIndex, 1);
+        order.splice(targetIndex, 0, origIndex);
+        var nextQueue = order.map(function(i) { return queueSnapshot[i]; });
+
+        // 同步迁移 queueBarItemExpanded 下标
+        var nextExpanded = {};
+        Object.keys(state.queueBarItemExpanded).forEach(function(k) {
+          var oldI = Number(k);
+          var newI = order.indexOf(oldI);
+          if (newI >= 0) nextExpanded[newI] = state.queueBarItemExpanded[k];
+        });
+        state.queueBarItemExpanded = nextExpanded;
+
+        var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (!session) { updateQueueBar(); return; }
+        updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
+        updateQueueBar();
+
+        fetch("/api/structured-sessions/" + session.id + "/queued", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ order: order }),
+        })
+        .then(function(res) {
+          if (!res.ok) {
+            return res.json().catch(function() { return {}; }).then(function(p) {
+              throw new Error((p && p.error) || "排序失败");
+            });
+          }
+        })
+        .catch(function(err) {
+          rollbackQueueOptimistic(session, queueSnapshot);
+          showToast((err && err.message) || "调整排队顺序失败。", "error");
+        });
+      }
+
+      // ── 事件代理：所有交互入口都从 #queue-bar-host 起手 ──
+      function attachQueueBarDelegates() {
+        var host = document.getElementById("queue-bar-host");
+        if (!host || host.__queueDelegated) return;
+        host.__queueDelegated = true;
+        host.addEventListener("click", function(ev) {
+          var actionEl = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
+          if (!actionEl || !host.contains(actionEl)) return;
+          var action = actionEl.getAttribute("data-action");
+          if (action === "drag") return; // 拖拽由 pointerdown 处理，吞掉点击避免误触发
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (action === "toggle") { toggleQueueBar(); return; }
+          if (action === "collapse") { setQueueBarExpanded(false); return; }
+          if (action === "promote") { queueBarPromoteHead(); return; }
+          if (action === "clear") { queueBarClearAll(); return; }
+          if (action === "delete") {
+            var itemEl = actionEl.closest(".queue-bar-item");
+            if (itemEl) queueBarDeleteItem(Number(itemEl.getAttribute("data-index")));
+            return;
+          }
+          if (action === "expand-text") {
+            var item = actionEl.closest(".queue-bar-item");
+            if (!item) return;
+            var idx = Number(item.getAttribute("data-index"));
+            state.queueBarItemExpanded[idx] = !state.queueBarItemExpanded[idx];
+            item.classList.toggle("expanded", !!state.queueBarItemExpanded[idx]);
+            actionEl.setAttribute("aria-expanded", state.queueBarItemExpanded[idx] ? "true" : "false");
+            return;
+          }
+        });
+        host.addEventListener("pointerdown", function(ev) {
+          if (ev.button !== undefined && ev.button !== 0) return;
+          var handle = ev.target && ev.target.closest ? ev.target.closest('[data-action="drag"]') : null;
+          if (!handle || handle.disabled) return;
+          queueBarDragStart(ev, handle);
+        });
       }
 
       // 计算一条 ConversationTurn 里所有 content block 的"信息体积"——文字 / 思考 /
@@ -15904,6 +16489,9 @@
           // (inFlight state may have changed without new message content)
           var chatMessages = chatOutput.querySelector(".chat-messages");
           if (chatMessages) renderStructuredStatusBar(chatMessages, selectedSession);
+          // 同步刷一次进度条：inFlight 从 true→false 时（turn 结束）没有新消息，
+          // updateTodoProgress 不被调到就会让"5/6"卡在底部一直不消失。
+          updateTodoProgress(allMessages);
           return;
         }
         var prevHash = state.lastRenderedHash;
@@ -16307,9 +16895,19 @@
       });
 
       function updateTodoProgress(messages) {
+        // 只看"当前 turn"里的 TodoWrite——即最后一条 user 消息之后的那段。
+        // 不限制范围的话，上一轮留下的进度条会在新一轮（哪怕新一轮根本没用
+        // TodoWrite）里阴魂不散地重现。
+        var startIdx = 0;
+        for (var ui = messages.length - 1; ui >= 0; ui--) {
+          if (messages[ui] && messages[ui].role === "user") {
+            startIdx = ui + 1;
+            break;
+          }
+        }
+
         var todos = null;
-        // Scan all messages for latest TodoWrite tool_use
-        for (var i = messages.length - 1; i >= 0; i--) {
+        for (var i = messages.length - 1; i >= startIdx; i--) {
           var msg = messages[i];
           if (!msg.content || !Array.isArray(msg.content)) continue;
           for (var j = msg.content.length - 1; j >= 0; j--) {
@@ -16327,6 +16925,24 @@
         if (!container) return;
 
         if (!todos || todos.length === 0) {
+          container.classList.add("hidden");
+          if (bodyEl) bodyEl.classList.add("hidden");
+          return;
+        }
+
+        // 当前 turn 已结束（结构化 inFlight=false 或 PTY 非 running）就把进度条
+        // 收起来——模型经常忘了发最后一条"全 completed"的 TodoWrite，让用户
+        // 对着 "5/6" 干瞪眼很别扭。allDone 那条分支保留，提前命中更快返回。
+        var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var turnDone = false;
+        if (sel) {
+          if (isStructuredSession(sel)) {
+            turnDone = !(sel.structuredState && sel.structuredState.inFlight);
+          } else {
+            turnDone = sel.status !== "running";
+          }
+        }
+        if (turnDone) {
           container.classList.add("hidden");
           if (bodyEl) bodyEl.classList.add("hidden");
           return;
@@ -17216,7 +17832,16 @@
           return '<div class="subagent-reply pending"><span class="typing-indicator"><span></span><span></span><span></span></span></div>';
         }
 
-        return '<div class="subagent-reply">' + renderMarkdown(text) + '</div>';
+        // 三态折叠：preview（默认 ~5 行预览，内部可滚）→ expanded（高一些上限，可滚）→
+        // collapsed（完全收起，只剩工具条）→ preview。按钮一直可见在右下，状态写在
+        // data-collapse-mode 上，配套 CSS 控制 max-height。
+        return '<div class="subagent-reply collapsible" data-collapse-mode="preview">' +
+          '<div class="subagent-reply-scroll">' + renderMarkdown(text) + '</div>' +
+          '<button type="button" class="subagent-reply-cycle" onclick="__subagentReplyCycle(event, this)" title="展开 / 收起">' +
+            '<span class="subagent-reply-cycle-label">展开</span>' +
+            '<span class="subagent-reply-cycle-icon" aria-hidden="true">▾</span>' +
+          '</button>' +
+        '</div>';
       }
       var PIXEL_AVATAR = {
         assistant: buildPixelSvg(buildCatGrid(GARFIELD_PALETTE)),
@@ -17574,7 +18199,9 @@
                 : '';
               html += '<div class="chat-handoff" style="--agent-color:' + subPalette.primary + '">' +
                 '<span class="chat-handoff-arrow">↳</span> ' +
-                escapeHtml(parentPersonaName) + ' 让 <strong>' + escapeHtml(subName) + '</strong> 帮忙' + desc +
+                escapeHtml(parentPersonaName) + ' 让 <strong>' + escapeHtml(subName) + '</strong>' +
+                '<span class="chat-handoff-tag" title="子代理 / subagent">subagent</span>' +
+                '帮忙' + desc +
               '</div>';
             }
             html += '<div class="chat-message-segment subagent" data-agent-id="' + escapeHtml(seg.subagent.taskId) + '" style="--agent-color:' + subPalette.primary + '">' +

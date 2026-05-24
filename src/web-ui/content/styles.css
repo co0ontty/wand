@@ -3842,14 +3842,18 @@
     }
 
     /* ===== 聊天消息列表 ===== */
+    /* overflow-x: hidden 是兜底——任何子级（pre、table、tool-card）的
+       横向溢出都不应该冒到聊天容器，由它们各自的内部滚动负责。 */
     .chat-messages {
       flex: 1;
       overflow-y: auto;
+      overflow-x: hidden;
       display: flex;
       flex-direction: column-reverse;
       gap: 16px;
       padding: 20px 4px 12px;
       min-height: 0;
+      min-width: 0;
       scrollbar-gutter: stable;
     }
 
@@ -3913,6 +3917,7 @@
       display: flex;
       flex-direction: column;
       max-width: 100%;
+      min-width: 0;
       margin: 4px 0;
       transition: opacity 0.2s ease, transform 0.2s var(--ease-out-expo);
       --chat-card-max-width: 720px;
@@ -4080,7 +4085,8 @@
       font-family: var(--font-mono);
       font-size: 0.8125rem;
       max-width: 100%;
-      overflow-wrap: break-word;
+      min-width: 0;
+      overflow-wrap: anywhere;
       word-break: break-word;
       box-shadow: 0 4px 16px rgba(197, 101, 61, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
     }
@@ -4097,8 +4103,11 @@
       color: var(--text-primary);
       padding: 14px 18px;
       max-width: 100%;
+      min-width: 0;
       white-space: pre-wrap;
       word-wrap: break-word;
+      overflow-wrap: anywhere;
+      word-break: break-word;
       border: 1px solid var(--border-subtle);
       box-shadow: var(--shadow-sm);
     }
@@ -4114,9 +4123,11 @@
       flex-direction: column;
       gap: 2px;
       max-width: 100%;
+      min-width: 0;
       font-size: 0.875rem;
       line-height: var(--line-height-relaxed);
       word-wrap: break-word;
+      overflow-wrap: anywhere;
       color: var(--text-primary);
     }
 
@@ -4193,6 +4204,25 @@
       font-style: italic;
     }
 
+    /* subagent 身份小 tag（"勤劳初二 让 侦探猫 [subagent] 帮忙"），让用户一眼知道
+       这是子代理在说话，不是同一个 AI 突然换了个名字。色调跟 --agent-color 走。 */
+    .chat-handoff-tag {
+      display: inline-block;
+      margin: 0 6px;
+      padding: 1px 6px;
+      font-size: 0.62rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--agent-color, var(--accent));
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 14%, transparent);
+      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 32%, transparent);
+      border-radius: 4px;
+      vertical-align: 1px;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
+
     /* subagent 回复气泡（群聊角色完成任务后的发言） */
     .subagent-reply {
       background: color-mix(in srgb, var(--agent-color, var(--accent)) 6%, var(--bg-surface));
@@ -4204,6 +4234,10 @@
       font-size: 0.875rem;
       color: var(--text-primary);
       word-break: break-word;
+      overflow-wrap: anywhere;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
     }
 
     .subagent-reply > :first-child { margin-top: 0; }
@@ -4239,11 +4273,100 @@
       background: rgba(0, 0, 0, 0.04);
       padding: 10px 12px;
       border-radius: 6px;
-      overflow-x: hidden;
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-wrap: anywhere;
+      overflow-x: auto;
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
       margin: 8px 0;
+      max-width: 100%;
+      min-width: 0;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* ===== subagent 回复三态折叠 =====
+       preview（默认）→ 限高 ~5 行 + 渐隐 mask + 内部可滚
+       expanded       → 拉到一个比较大的上限，内部可滚
+       collapsed      → 完全收起，只剩底部一条工具栏，按钮还能再点回来 */
+    .subagent-reply.collapsible {
+      position: relative;
+      padding-right: 14px;
+      padding-bottom: 28px;
+    }
+
+    .subagent-reply-scroll {
+      overflow: hidden;
+      transition: max-height 0.32s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+      min-width: 0;
+      max-width: 100%;
+    }
+    .subagent-reply-scroll > :first-child { margin-top: 0; }
+    .subagent-reply-scroll > :last-child { margin-bottom: 0; }
+
+    .subagent-reply.collapsible[data-collapse-mode="preview"] .subagent-reply-scroll {
+      max-height: 7.5em; /* ~5 行 */
+      overflow-y: auto;
+      -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+              mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+    }
+
+    .subagent-reply.collapsible[data-collapse-mode="expanded"] .subagent-reply-scroll {
+      max-height: 360px;
+      overflow-y: auto;
+    }
+
+    .subagent-reply.collapsible[data-collapse-mode="collapsed"] {
+      padding-top: 6px;
+      padding-bottom: 26px;
+    }
+    .subagent-reply.collapsible[data-collapse-mode="collapsed"] .subagent-reply-scroll {
+      max-height: 0;
+      overflow: hidden;
+      margin: 0;
+    }
+
+    /* 三态循环按钮：固定在气泡右下角，三种模式下都可见 */
+    .subagent-reply-cycle {
+      position: absolute;
+      right: 8px;
+      bottom: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 8px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      line-height: 1.4;
+      color: var(--agent-color, var(--accent));
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 8%, var(--bg-surface, #fff));
+      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 28%, transparent);
+      border-radius: 999px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+    }
+    .subagent-reply-cycle:hover {
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 16%, var(--bg-surface, #fff));
+      border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, transparent);
+    }
+    .subagent-reply-cycle:active {
+      transform: translateY(1px);
+    }
+    .subagent-reply-cycle-icon {
+      font-size: 0.7rem;
+      line-height: 1;
+    }
+
+    /* 内部滚动条做小一点，别抢戏 */
+    .subagent-reply-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .subagent-reply-scroll::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 35%, transparent);
+      border-radius: 3px;
+    }
+    .subagent-reply-scroll::-webkit-scrollbar-track {
+      background: transparent;
     }
 
     /* ===== 消息使用量信息 ===== */
@@ -5707,20 +5830,41 @@
     }
 
     /* Markdown Content */
-    .markdown-content { color: inherit; white-space: normal; overflow-x: hidden; }
-    .markdown-content .code-block pre {
+    /* min-width:0 让该 flex 子项可以在窄屏下收缩到比内容更窄；
+       overflow-wrap: anywhere + word-break: break-word 兜底超长不可断词（长 URL / 长 ID / 长 token）。 */
+    .markdown-content {
+      color: inherit;
+      white-space: normal;
       overflow-x: hidden;
-      white-space: pre-wrap;
-      word-break: break-word;
+      max-width: 100%;
+      min-width: 0;
       overflow-wrap: anywhere;
+      word-break: break-word;
     }
-    .markdown-content p { margin: 0 0 8px 0; }
+    /* 代码块：保留原始行不强制 wrap，长行在 pre 内部横滚（逃生舱）。
+       外层 .markdown-content 有 overflow-x: hidden + max-width: 100%，
+       所以这里的内部横滚不会冒到聊天容器。 */
+    .markdown-content .code-block pre {
+      overflow-x: auto;
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+      max-width: 100%;
+      min-width: 0;
+      -webkit-overflow-scrolling: touch;
+    }
+    .markdown-content p { margin: 0 0 8px 0; overflow-wrap: anywhere; word-break: break-word; }
     .markdown-content p:last-child { margin-bottom: 0; }
     .markdown-content strong { font-weight: 600; }
     .markdown-content em { font-style: italic; }
     .markdown-content ul, .markdown-content ol { margin: 8px 0; padding-left: 20px; }
-    .markdown-content li { margin: 4px 0; }
-    .markdown-content h1, .markdown-content h2, .markdown-content h3 { margin: 16px 0 8px 0; font-weight: 600; }
+    .markdown-content li { margin: 4px 0; overflow-wrap: anywhere; word-break: break-word; }
+    .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+      margin: 16px 0 8px 0;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
     .markdown-content h1 { font-size: 1.25rem; }
     .markdown-content h2 { font-size: 1.1rem; }
     .markdown-content h3 { font-size: 1rem; }
@@ -5730,6 +5874,16 @@
       border-left: 3px solid var(--accent);
       background: rgba(197, 101, 61, 0.06);
       border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .markdown-content a {
+      overflow-wrap: anywhere;
+      word-break: break-all;
+    }
+    .markdown-content img {
+      max-width: 100%;
+      height: auto;
     }
     .markdown-content code:not(.code-block):not(.code-inline) {
       font-family: var(--font-mono);
@@ -5737,6 +5891,8 @@
       background: rgba(150, 118, 85, 0.12);
       padding: 2px 5px;
       border-radius: 4px;
+      overflow-wrap: anywhere;
+      word-break: break-all;
     }
 
     .markdown-content code.code-inline {
@@ -5745,6 +5901,8 @@
       background: rgba(150, 118, 85, 0.12);
       padding: 2px 5px;
       border-radius: 4px;
+      overflow-wrap: anywhere;
+      word-break: break-all;
     }
     .markdown-content .md-table-wrap {
       margin: 12px 0;
@@ -5756,6 +5914,7 @@
     .markdown-content .md-table {
       border-collapse: collapse;
       width: 100%;
+      table-layout: fixed;
       font-size: 0.8125rem;
       white-space: normal;
     }
@@ -5765,6 +5924,8 @@
       padding: 6px 10px;
       text-align: left;
       vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .markdown-content .md-table th {
       background: rgba(150, 118, 85, 0.1);
@@ -5825,10 +5986,13 @@
     .markdown-content pre {
       margin: 0;
       padding: 12px;
-      overflow-x: hidden;
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-wrap: anywhere;
+      overflow-x: auto;
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+      max-width: 100%;
+      min-width: 0;
+      -webkit-overflow-scrolling: touch;
     }
     .markdown-content pre code {
       font-family: var(--font-mono);
@@ -5837,6 +6001,8 @@
       color: #f5eadc;
       background: transparent;
       padding: 0;
+      max-width: 100%;
+      display: block;
     }
 
     /* Syntax Highlighting */
@@ -5917,6 +6083,73 @@
       border-color: var(--accent);
       background-color: rgba(255, 255, 255, 0.9);
     }
+
+    /* 三件套（Mode / Model / Thinking）扁平文字版：
+       去掉边框 / 背景 / chevron，只留纯文字 + · 分隔。点击文字区域弹出原生
+       <select>（桌面端下拉、移动端滚轮选择），由透明的 .composer-text-hidden-select
+       叠层承载交互。显示文本统一用 raw id（default / claude-sonnet-4-5 / standard…）。 */
+    .composer-text-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+      flex-wrap: nowrap;
+    }
+    .composer-text-pill {
+      position: relative;
+      font-family: var(--font-sans);
+      font-size: 0.7rem;
+      font-weight: 500;
+      line-height: 1;
+      padding: 2px 2px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: color var(--transition-fast);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      white-space: nowrap;
+      box-sizing: border-box;
+      user-select: none;
+      max-width: 110px;
+      letter-spacing: 0.01em;
+    }
+    .composer-text-pill:hover,
+    .composer-text-pill:focus-within {
+      color: var(--accent);
+    }
+    .composer-text-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    .composer-text-hidden-select {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: transparent;
+      font: inherit;
+      opacity: 0;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .composer-text-hidden-select:focus { outline: none; }
+    .composer-text-sep {
+      color: var(--text-tertiary, #b5a89a);
+      font-size: 0.7rem;
+      line-height: 1;
+      user-select: none;
+      pointer-events: none;
+      opacity: 0.65;
+    }
+    .chat-model-text-pill { max-width: 110px; }
+    .chat-thinking-text-pill { max-width: 90px; }
 
     /* Permission actions inline in composer bar */
     .permission-actions {
@@ -6116,33 +6349,9 @@
       flex: 1;
       justify-content: flex-end;
     }
-    /* 队列计数器：v1.30.3 是个 0.625rem 的小角标，挤在 input-hint 旁边没人看见。
-       升级成 dot + label 的 pill，配色和"立即发送"按钮同源，让用户能联想到这套语义。 */
-    .queue-counter {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 0.6875rem;
-      color: var(--accent);
-      background: linear-gradient(180deg, rgba(197, 101, 61, 0.18) 0%, rgba(197, 101, 61, 0.10) 100%);
-      padding: 3px 9px;
-      border-radius: 999px;
-      white-space: nowrap;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.25) inset;
-      animation: queuePulse 1.5s ease-in-out infinite;
-    }
-    .queue-counter.hidden { display: none; }
-    .queue-counter-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--accent);
-      flex-shrink: 0;
-      animation: queueDotPulse 1.0s ease-in-out infinite;
-    }
-    .queue-counter-text { line-height: 1; }
+    /* 旧 #queue-counter pill（v1.30.3 那颗藏在 input-hint 旁的小角标）已下线，
+       由 .queue-bar（输入框上方独立浮条）接管。queuePulse / queueDotPulse 关键帧
+       新组件继续复用，保留在下方。 */
     @keyframes queuePulse {
       0%, 100% { opacity: 1; }
       50%      { opacity: 0.78; }
@@ -6150,6 +6359,383 @@
     @keyframes queueDotPulse {
       0%, 100% { transform: scale(1); opacity: 1; }
       50%      { transform: scale(0.7); opacity: 0.55; }
+    }
+
+    /* ─────────────────────────────────────────────────────────────────────
+       排队消息条（.queue-bar）—— 浮在 .input-composer 上方，靠 .queue-bar-host
+       右对齐到对话框右下角。结构：
+         .queue-bar (折叠条 row)
+           ├ .queue-bar-toggle  (● 排队 N · 预览 ⌃)
+           ├ .queue-bar-divider
+           ├ .queue-bar-promote (⚡ 立即)
+           └ .queue-bar-panel   (展开后下拉的消息列表，默认隐)
+       展开时给 .queue-bar 加 .expanded class，CSS 控制 panel 显形 + chevron 翻转。
+       ───────────────────────────────────────────────────────────────────── */
+    .queue-bar-host {
+      display: flex;
+      justify-content: flex-end;
+      padding: 0 6px 6px;
+      position: relative;
+      z-index: 2;
+      pointer-events: none; /* host 自身不挡点击，bar 内子节点 auto */
+    }
+    .queue-bar-host[hidden] { display: none; }
+
+    .queue-bar {
+      pointer-events: auto;
+      position: relative;
+      display: inline-flex;
+      align-items: stretch;
+      gap: 0;
+      width: 340px;
+      max-width: calc(100% - 4px);
+      height: 38px;
+      padding: 0;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #fffaf2 0%, #f6ead8 100%);
+      box-shadow:
+        0 0 0 1.2px rgba(197, 101, 61, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.85),
+        var(--shadow-sm);
+      transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+      animation: queueBarEnter 220ms ease-out both;
+    }
+    .queue-bar:hover {
+      transform: translateY(-1px);
+      box-shadow:
+        0 0 0 1.2px rgba(197, 101, 61, 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9),
+        var(--shadow-md);
+    }
+    .queue-bar.queue-bar-capacity {
+      box-shadow:
+        0 0 0 1.4px rgba(169, 106, 47, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.85),
+        var(--shadow-sm);
+    }
+    .queue-bar.queue-bar-inflight {
+      animation: queueBarEnter 220ms ease-out both, queuePulse 1.6s ease-in-out 220ms infinite;
+    }
+    @keyframes queueBarEnter {
+      from { opacity: 0; transform: translateY(4px) scale(0.98); }
+      to   { opacity: 1; transform: translateY(0)   scale(1); }
+    }
+
+    .queue-bar-toggle {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px 0 14px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      color: var(--text-primary);
+      border-radius: 999px 0 0 999px;
+      text-align: left;
+    }
+    .queue-bar-toggle:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: -2px;
+    }
+    .queue-bar-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+      box-shadow: 0 0 0 2px rgba(197, 101, 61, 0.18);
+    }
+    .queue-bar-dot.queue-bar-dot-pulse {
+      animation: queueDotPulse 1.0s ease-in-out infinite;
+    }
+    .queue-bar-count {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .queue-bar-sep {
+      color: var(--text-muted);
+      opacity: 0.55;
+      font-size: 0.7rem;
+      flex-shrink: 0;
+    }
+    .queue-bar-preview {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      line-height: 1;
+    }
+    .queue-bar-chevron {
+      color: var(--text-tertiary);
+      flex-shrink: 0;
+      transition: transform 180ms ease-out;
+    }
+    .queue-bar.expanded .queue-bar-chevron {
+      transform: rotate(180deg);
+      color: var(--accent);
+    }
+
+    .queue-bar-divider {
+      width: 1px;
+      background: rgba(197, 101, 61, 0.28);
+      margin: 7px 0;
+      flex-shrink: 0;
+    }
+
+    .queue-bar-promote {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 14px 0 12px;
+      border: none;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #fff;
+      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-active) 100%);
+      border-radius: 0 999px 999px 0;
+      letter-spacing: 0.04em;
+      transition: filter var(--transition-fast), transform var(--transition-fast);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    }
+    .queue-bar-promote:hover { filter: brightness(1.06); }
+    .queue-bar-promote:active { transform: scale(0.97); }
+    .queue-bar-promote:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+    .queue-bar-promote svg { flex-shrink: 0; }
+    .queue-bar-promote-label { line-height: 1; }
+
+    /* 展开面板：默认折叠（不可见 + 不占空间），加 .expanded 时滑出 */
+    .queue-bar-panel {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 8px);
+      width: min(380px, calc(100vw - 24px));
+      max-height: 280px;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-elevated);
+      border-radius: 14px;
+      box-shadow:
+        0 0 0 1px var(--border-default),
+        var(--shadow-lg);
+      overflow: hidden;
+      opacity: 0;
+      transform: scale(0.96) translateY(4px);
+      transform-origin: bottom right;
+      pointer-events: none;
+      transition: opacity 180ms ease-out, transform 180ms ease-out;
+    }
+    .queue-bar.expanded .queue-bar-panel {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+      pointer-events: auto;
+    }
+
+    .queue-bar-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: linear-gradient(180deg, rgba(246, 234, 216, 0.55) 0%, transparent 100%);
+    }
+    .queue-bar-panel-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .queue-bar-clear,
+    .queue-bar-collapse {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px 9px;
+      border: 1px solid transparent;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.7rem;
+      color: var(--text-tertiary);
+      border-radius: 8px;
+      transition: all var(--transition-fast);
+      line-height: 1;
+    }
+    .queue-bar-clear:hover:not([disabled]) {
+      color: var(--danger);
+      background: var(--danger-muted);
+      border-color: rgba(178, 79, 69, 0.25);
+    }
+    .queue-bar-clear[disabled] {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .queue-bar-collapse:hover {
+      color: var(--accent);
+      background: var(--accent-muted);
+    }
+    .queue-bar-collapse svg { flex-shrink: 0; }
+
+    .queue-bar-list {
+      list-style: none;
+      margin: 0;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    .queue-bar-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 8px 8px 8px 4px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      position: relative;
+      transition: transform 140ms ease-out, box-shadow var(--transition-fast),
+                  background var(--transition-fast), border-color var(--transition-fast);
+      will-change: transform;
+    }
+    .queue-bar-item:hover {
+      background: rgba(255, 251, 245, 0.92);
+      border-color: var(--border-default);
+    }
+    .queue-bar-item.dragging {
+      z-index: 5;
+      box-shadow: var(--shadow-lg), 0 0 0 1.5px var(--accent);
+      background: var(--bg-elevated);
+      transition: box-shadow var(--transition-fast); /* dragging 期间禁用 transform 过渡 */
+      cursor: grabbing;
+    }
+    .queue-bar-item-sliding {
+      transition: transform 140ms ease-out;
+    }
+
+    .queue-bar-item-drag {
+      flex-shrink: 0;
+      width: 18px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      cursor: grab;
+      color: var(--text-muted);
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      touch-action: none; /* 不让浏览器抢走拖拽手势用作滚动 */
+      transition: color var(--transition-fast), background var(--transition-fast);
+    }
+    .queue-bar-item-drag:hover { color: var(--accent); background: var(--accent-muted); }
+    .queue-bar-item-drag:active { cursor: grabbing; }
+    .queue-bar-item-drag[disabled] {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .queue-bar-item-drag[disabled]:hover {
+      color: var(--text-muted);
+      background: transparent;
+    }
+
+    .queue-bar-item-index {
+      flex-shrink: 0;
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-muted);
+      padding: 3px 6px;
+      border-radius: 6px;
+      line-height: 1;
+      margin-top: 1px;
+      min-width: 26px;
+      text-align: center;
+    }
+
+    .queue-bar-item-text {
+      flex: 1 1 auto;
+      min-width: 0;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.78rem;
+      color: var(--text-primary);
+      text-align: left;
+      padding: 1px 0;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+      transition: color var(--transition-fast);
+    }
+    .queue-bar-item.expanded .queue-bar-item-text {
+      display: block;
+      -webkit-line-clamp: unset;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .queue-bar-item-text:hover { color: var(--accent); }
+
+    .queue-bar-item-delete {
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      color: var(--text-muted);
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity var(--transition-fast), color var(--transition-fast),
+                  background var(--transition-fast);
+    }
+    .queue-bar-item:hover .queue-bar-item-delete,
+    .queue-bar-item:focus-within .queue-bar-item-delete {
+      opacity: 1;
+    }
+    .queue-bar-item-delete:hover {
+      color: var(--danger);
+      background: var(--danger-muted);
+    }
+
+    /* 窄屏：bar 撑满，preview 隐藏，操作按钮始终显形 */
+    @media (max-width: 560px) {
+      .queue-bar-host { padding: 0 4px 6px; }
+      .queue-bar { width: 100%; }
+      .queue-bar-preview { display: none; }
+      .queue-bar-sep { display: none; }
+      .queue-bar-item-delete { opacity: 1; }
+      .queue-bar-panel { width: calc(100vw - 16px); right: -2px; }
     }
 
     /* Queued message in chat view：用户最容易"觉得排队没生效"是因为旧版徽章太小。
@@ -10047,6 +10633,26 @@
         bottom: 70px;
         width: min(180px, calc(100vw - 24px));
       }
+    }
+
+    /* ===== 手机竖屏（≤480px）—— 进一步收紧 chat 视图 padding，
+       并允许 tool-use 卡片头部 wrap，避免在极窄宽度下被裁切。 ===== */
+    @media (max-width: 480px) {
+      .chat-container { padding: 0 6px 8px; }
+      .chat-messages { padding-left: 2px; padding-right: 2px; gap: 12px; }
+      .chat-message { --chat-card-max-width: 100%; }
+      .tool-use-header {
+        flex-wrap: wrap;
+        row-gap: 4px;
+        padding: 8px 12px;
+      }
+      .tool-use-file { max-width: 100%; }
+      .tool-use-body { padding: 10px 12px; }
+      .subagent-reply { padding: 9px 12px; }
+      .markdown-content .code-block { margin: 8px 0; }
+      .markdown-content pre,
+      .markdown-content .code-block pre,
+      .subagent-reply pre { padding: 10px; }
     }
 
     /* Blank chat mobile optimization */
