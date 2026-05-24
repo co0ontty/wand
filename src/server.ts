@@ -2021,6 +2021,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           model: effectiveModel,
           cols: reqCols,
           rows: reqRows,
+          thinkingEffort: body.thinkingEffort ?? undefined,
         }
       );
       recordRecentPath(storage, body.cwd ?? snapshot.cwd);

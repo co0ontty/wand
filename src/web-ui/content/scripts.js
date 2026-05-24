@@ -149,6 +149,12 @@
         chatModel: (function() {
           try { return localStorage.getItem("wand-chat-model") || ""; } catch (e) { return ""; }
         })(),
+        chatThinking: (function() {
+          try {
+            var v = localStorage.getItem("wand-thinking-effort") || "off";
+            return (v === "off" || v === "standard" || v === "deep" || v === "max") ? v : "off";
+          } catch (e) { return "off"; }
+        })(),
         availableModels: [],
         availableCodexModels: [],
         modelsRefreshing: false,
@@ -1724,13 +1730,26 @@
                       // tabindex="-1": 把这些控件移出 iOS Safari 的表单导航链，
                       // 这样 textarea 聚焦时键盘上方就不会出现 ⌃ ⌄ ✓ 表单辅助栏。
                       '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
-                      '<select id="chat-mode-select" class="chat-mode-select" tabindex="-1" title="仅对新建会话生效">' +
-                        renderModeOptions(preferredTool, composerMode) +
-                      '</select>' +
-                      '<select id="chat-model-select" class="chat-mode-select chat-model-select" tabindex="-1" title="切换模型（对运行中会话发送 /model，对新会话作为 --model 启动）">' +
-                        renderChatModelOptions(getEffectiveModel(selectedSession), selectedSession) +
-                      '</select>' +
-                      '<button id="terminal-interactive-toggle-top" class="composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨</button>' +
+                      // 三件套 (Mode / Model / Thinking) 同属"会话设置"层：视觉上统一为同一种 pill 风格，
+                      // 由 CSS .composer-pill-group 内的轻量分隔感传达"归类"。
+                      '<span class="composer-pill-group" role="group" aria-label="会话设置">' +
+                        '<select id="chat-mode-select" class="composer-pill composer-pill-select chat-mode-select" tabindex="-1" title="新会话模式 · 托管 / 全权限 自动启用批准">' +
+                          renderModeOptions(preferredTool, composerMode) +
+                        '</select>' +
+                        '<select id="chat-model-select" class="composer-pill composer-pill-select chat-mode-select chat-model-select" tabindex="-1" title="切换模型（对运行中会话发送 /model，对新会话作为 --model 启动）">' +
+                          renderChatModelOptions(getEffectiveModel(selectedSession), selectedSession) +
+                        '</select>' +
+                        // 思考深度 trigger：与 mode / model 同形（border + chevron），保证视觉一致。
+                        // 可见层只有「档位文字」，原生 <select> 透明叠在上面，依然能调起 iOS 滚轮选择。
+                        '<span class="composer-pill composer-pill-select chat-thinking-trigger" title="思考深度（structured 立即生效；PTY 仅作用于通过 chat 视图发送的消息）">' +
+                          '<span class="chat-thinking-label" id="chat-thinking-label">' + escapeHtml(getThinkingLabel(getEffectiveThinking(selectedSession))) + '</span>' +
+                          '<select id="chat-thinking-select" class="chat-thinking-hidden-select" tabindex="-1" aria-label="思考深度">' +
+                            renderChatThinkingOptions(getEffectiveThinking(selectedSession)) +
+                          '</select>' +
+                        '</span>' +
+                      '</span>' +
+                      renderAutoApproveChip(selectedSession) +
+                      '<button id="terminal-interactive-toggle-top" class="composer-pill composer-pill-chip composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式">⌨</button>' +
                       '<span class="permission-actions hidden" id="permission-actions">' +
                         '<span class="permission-actions-divider"></span>' +
                         '<span class="permission-actions-label" id="permission-actions-label">等待授权</span>' +
@@ -1740,7 +1759,9 @@
                       renderApprovalStatsBadge() +
                     '</div>' +
                     '<div class="input-composer-right">' +
-                      '<span id="queue-counter" class="queue-counter hidden">队列: 0</span>' +
+                      // queue-counter：当 queuedMessages 不为空时显示，提示用户后面还堆了几条。
+                      // 比小角标更显眼一点——加图标 + 强对比色，避免 v1.30.3 那一版用户没看见。
+                      '<span id="queue-counter" class="queue-counter hidden" title="正在排队的输入条数"><span class="queue-counter-dot"></span><span class="queue-counter-text">队列 0</span></span>' +
                       '<span class="input-hint' + (state.terminalInteractive ? ' terminal-interactive-hint' : state.currentView === "terminal" ? " hidden" : "") + '">' + (state.terminalInteractive ? '终端交互中 · Ctrl+C 中断 · Ctrl+L 清屏' : 'Enter 发送 · Shift+Enter 换行') + '</span>' +
                       renderInlineKeyboard() +
                       '<button id="stop-button" class="btn-circle btn-circle-stop' + (state.selectedId ? "" : " hidden") + '" title="停止">' +
@@ -1748,8 +1769,10 @@
                       '</button>' +
                       // 结构化模式且正在出 token 时显示：中断当前回复、立刻发送新输入。
                       // 默认走 #send-input-button → 排队；想插队的人显式按这颗。
-                      '<button id="interrupt-send-button" class="btn-circle btn-circle-interrupt hidden" type="button" title="中断当前回复并立即发送" aria-label="立即发送">' +
-                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>' +
+                      // 用 pill 形态 + 文字 + 脉动，让用户一眼就看到「立即发送」这条快捷路径。
+                      '<button id="interrupt-send-button" class="btn-pill btn-pill-interrupt hidden" type="button" title="中断当前回复并立即发送新输入（Cmd/Ctrl+Enter）" aria-label="立即发送">' +
+                        '<svg class="btn-pill-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>' +
+                        '<span class="btn-pill-label">立即</span>' +
                       '</button>' +
                       '<button id="send-input-button" class="btn-circle btn-circle-send" title="发送">' +
                         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
@@ -1757,14 +1780,20 @@
                     '</div>' +
                   '</div>' +
                   renderExpandedShortcutsRow() +
-                  // Session info bar at bottom — only keeps unique controls/info
-                  // (cwd / mode / status / kind are already shown in topbar or composer dropdown)
+                  // Session info bar at bottom — 仅保留信息类徽章（Claude session id / exit code）。
+                  // 自动批准已从这里移到主 pill 行（renderAutoApproveChip）。
                   (selectedSession
-                    ? '<div class="input-session-info-bar">' +
-                        (selectedSession.autoApprovePermissions ? '<span id="auto-approve-toggle" class="auto-approve-indicator active" title="自动批准已启用 — 点击关闭">🛡 自动批准</span>' : '<span id="auto-approve-toggle" class="auto-approve-indicator" title="自动批准已关闭 — 点击开启">🛡 手动</span>') +
-                        (selectedSession.provider === "claude" && selectedSession.claudeSessionId ? '<span class="session-info-separator">|</span><span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>' : '') +
-                        (!isStructuredSession(selectedSession) && selectedSession.exitCode !== undefined && selectedSession.exitCode !== null ? '<span class="session-info-separator">|</span><span id="session-exit-display" class="session-exit-display">退出码=' + selectedSession.exitCode + '</span>' : '') +
-                      '</div>'
+                    ? (function() {
+                        var bits = "";
+                        if (selectedSession.provider === "claude" && selectedSession.claudeSessionId) {
+                          bits += '<span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">☁ ' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span>';
+                        }
+                        if (!isStructuredSession(selectedSession) && selectedSession.exitCode !== undefined && selectedSession.exitCode !== null) {
+                          if (bits) bits += '<span class="session-info-separator">|</span>';
+                          bits += '<span id="session-exit-display" class="session-exit-display">退出码=' + selectedSession.exitCode + '</span>';
+                        }
+                        return bits ? '<div class="input-session-info-bar">' + bits + '</div>' : '';
+                      })()
                     : '') +
                 '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
@@ -5988,6 +6017,10 @@
         if (modelSelect) modelSelect.addEventListener("change", function() {
           onChatModelChange(this.value);
         });
+        var thinkingSelect = document.getElementById("chat-thinking-select");
+        if (thinkingSelect) thinkingSelect.addEventListener("change", function() {
+          onChatThinkingChange(this.value);
+        });
 
         var sessionModal = document.getElementById("session-modal");
         if (sessionModal) sessionModal.addEventListener("click", function(e) {
@@ -7996,7 +8029,7 @@
         // 结构化会话在出 token 时，输入框仍然可用——告诉用户默认行为是排队，
         // 想插队请按右侧的 » 按钮。短语保持单行不换行。
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) {
-          return "回复中…继续输入将排队（» 立即发送）";
+          return "回复中…Enter 排队 · 旁边的「» 立即」按钮中断并立即发送";
         }
         return "";
       }
@@ -8129,10 +8162,109 @@
 
       function syncComposerModelSelect(session) {
         var select = document.getElementById("chat-model-select");
+        if (select) {
+          var effective = getEffectiveModel(session);
+          select.innerHTML = renderChatModelOptions(effective, session);
+          select.value = effective;
+        }
+        // thinking 选择器与 model 选择器属于同一组"会话级设置"，
+        // 任何刷新 model 的时机也应该同步刷新 thinking，避免漂移。
+        syncComposerThinkingSelect(session);
+      }
+
+      // ── 思考深度 (thinkingEffort) —— 与 model 选择三件套对称 ──
+
+      // 标签直接用 Claude CLI 原生 magic word：think / think hard / ultrathink。
+      // 这样用户一眼能对上官方文档里的思考强度档位，PTY 模式下也是这几个词被注入到 prompt 前缀。
+      var THINKING_LEVELS = [
+        { id: "off",      label: "off",        hint: "不启用思考（CLI 无前缀；SDK 关闭 thinking；Codex --reasoning-effort minimal）" },
+        { id: "standard", label: "think",      hint: "Claude CLI: think · SDK budget 4096 · Codex low" },
+        { id: "deep",     label: "think hard", hint: "Claude CLI: think hard · SDK budget 16000 · Codex medium" },
+        { id: "max",      label: "ultrathink", hint: "Claude CLI: ultrathink · SDK budget 31999 · Codex high" }
+      ];
+
+      function getThinkingLabel(id) {
+        for (var i = 0; i < THINKING_LEVELS.length; i++) {
+          if (THINKING_LEVELS[i].id === id) return THINKING_LEVELS[i].label;
+        }
+        return THINKING_LEVELS[0].label;
+      }
+
+      function getEffectiveThinking(session) {
+        if (session && session.thinkingEffort) return session.thinkingEffort;
+        if (state.chatThinking) return state.chatThinking;
+        return "off";
+      }
+
+      function renderChatThinkingOptions(selected) {
+        var v = selected || "off";
+        var html = "";
+        for (var i = 0; i < THINKING_LEVELS.length; i++) {
+          var lvl = THINKING_LEVELS[i];
+          html += '<option value="' + escapeHtml(lvl.id) + '"' + (lvl.id === v ? ' selected' : '') + ' title="' + escapeHtml(lvl.hint) + '">' + escapeHtml(lvl.label) + '</option>';
+        }
+        return html;
+      }
+
+      function syncComposerThinkingSelect(session) {
+        var select = document.getElementById("chat-thinking-select");
         if (!select) return;
-        var effective = getEffectiveModel(session);
-        select.innerHTML = renderChatModelOptions(effective, session);
+        var effective = getEffectiveThinking(session);
+        select.innerHTML = renderChatThinkingOptions(effective);
         select.value = effective;
+        var labelEl = document.getElementById("chat-thinking-label");
+        if (labelEl) labelEl.textContent = getThinkingLabel(effective);
+      }
+
+      function onChatThinkingChange(value) {
+        var normalized = (value || "off").trim();
+        if (normalized !== "off" && normalized !== "standard" && normalized !== "deep" && normalized !== "max") {
+          normalized = "off";
+        }
+        state.chatThinking = normalized;
+        try { localStorage.setItem("wand-thinking-effort", normalized); } catch (e) {}
+        var labelEl = document.getElementById("chat-thinking-label");
+        if (labelEl) labelEl.textContent = getThinkingLabel(normalized);
+        var session = getSelectedSession();
+        if (!session) return;
+        fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ thinkingEffort: normalized })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data && data.error) {
+            showToast(data.error, "error");
+            return;
+          }
+          if (data && data.id) {
+            updateSessionSnapshot(data);
+            if (typeof showToast === "function") {
+              showToast("已切换思考深度 → " + getThinkingLabel(normalized), "success");
+            }
+          }
+        })
+        .catch(function() { showToast("切换思考深度失败", "error"); });
+      }
+
+      // 自动批准 chip：与原 .auto-approve-indicator 等价，但用统一的 .composer-pill 风格放主行。
+      // Codex 会话固定全权限不可切；结构化 Claude 会话后端 toggle-auto-approve 路由会拒绝。
+      // 当会话已经处于 managed / full-access 模式时，"自动批准"语义已经由模式表达，
+      // 重复显示一个独立 chip 只会占用空间又制造歧义 —— 此时直接折叠掉。
+      function isAutoApproveImpliedByMode(session) {
+        if (!session) return false;
+        var m = session.mode;
+        return m === "managed" || m === "full-access";
+      }
+      function renderAutoApproveChip(session) {
+        if (!session) return "";
+        if (isAutoApproveImpliedByMode(session)) return "";
+        var enabled = !!session.autoApprovePermissions;
+        return enabled
+          ? '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator active" title="自动批准已启用 — 点击关闭">🛡 自动</span>'
+          : '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator" title="自动批准已关闭 — 点击开启">🛡 手动</span>';
       }
 
       function fetchAvailableModels() {
@@ -8370,6 +8502,7 @@
       function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled) {
         var provider = state.sessionTool === "codex" ? "codex" : "claude";
         var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
+        var thinkingPref = state.chatThinking || "off";
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
@@ -8377,7 +8510,8 @@
           runner: provider === "codex" ? "codex-cli-exec" : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print")),
           prompt: prompt || undefined,
           worktreeEnabled: worktreeEnabled === true,
-          model: modelPref || undefined
+          model: modelPref || undefined,
+          thinkingEffort: thinkingPref
         };
         console.log("[WAND] createStructuredSession payload:", JSON.stringify(payload));
         return fetch("/api/structured-sessions", {
@@ -11916,8 +12050,14 @@
         return Promise.resolve();
       }
 
-      // 防止同一会话并发提交（快速双击 / 重复触发）
-      var _structuredSubmittingSessions = {};
+      // 防止同一会话「快速双击 / 重复触发」。原来这是个布尔 flag，绑在 fetch 的
+      // promise 上 —— 但 structured-sessions/:id/messages 的 POST 对首条消息会 await
+      // 整段流式 streaming，flag 会被卡到回复完才释放。结果：用户点发送 → 服务端
+      // 流式 30s 不响应 → 这 30s 里再点发送全被这里静默 drop，看起来"排队 / 立即发送
+      // 都没效果"。改成时间戳 + 短窗口（350ms）只挡真正的连击。idempotencyKey 已经
+      // 在后端兜底防 webview 网络层重发，这里的 hot-path 守门只需要应付 UI 双触发。
+      var _structuredLastSubmitAt = {};
+      var DUPLICATE_SUBMIT_WINDOW_MS = 350;
 
       function postStructuredInput(input, inputBox, session, opts) {
         opts = opts || {};
@@ -11931,11 +12071,15 @@
           showToast("会话不存在，请重新选择或新建会话。", "error");
           return Promise.resolve();
         }
-        // 同一会话的上一次提交尚未落地，直接忽略防止重复发送
-        if (_structuredSubmittingSessions[session.id]) {
-          console.log("[wand] postStructuredInput: duplicate submit ignored for session", session.id);
+        // 短窗口内的连击当作重复点击丢掉；正常间隔的两次提交（哪怕第一次还在流式）
+        // 都放行，让 queue / interrupt 真正生效。
+        var nowTs = Date.now();
+        var lastTs = _structuredLastSubmitAt[session.id] || 0;
+        if (nowTs - lastTs < DUPLICATE_SUBMIT_WINDOW_MS) {
+          console.log("[wand] postStructuredInput: duplicate submit (within " + DUPLICATE_SUBMIT_WINDOW_MS + "ms) ignored for session", session.id);
           return Promise.resolve();
         }
+        _structuredLastSubmitAt[session.id] = nowTs;
 
         var sessionInFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
         var isInterrupting = sessionInFlight && requestedInterrupt;
@@ -11960,6 +12104,9 @@
           updateInputHint("已加入排队，等待当前回复完成…");
           renderChat(true);
           updateStructuredQueueCounter();
+          // 乐观 toast：原本只在 POST 完成后才提示，Claude 流式拖太久时用户根本
+          // 看不到反馈，会误判"点了没反应"。点击瞬间就给一条短提示。
+          showToast(nextQueue.length > 1 ? ("已加入排队（共 " + nextQueue.length + " 条等待）") : "已加入排队，等当前回复完成会自动发送。", "info");
         } else {
           // 普通发送 / interrupt 发送：照旧乐观推 user turn + inFlight=true
           var userTurn = { role: "user", content: [{ type: "text", text: input }] };
@@ -11978,6 +12125,11 @@
           }), userMsgs);
           updateInputHint(isInterrupting ? "已中断，正在处理新消息…" : "思考中…");
           renderChat(true);
+          // 中断模式：乐观给一条提示，让用户立刻知道"中断成功了"，否则跟 queue 一样会
+          // 觉得"点了没反应"。原 toast 在 then() 里，等 SIGTERM/HTTP roundtrip 完才出。
+          if (isInterrupting) {
+            showToast("已中断上一条回复，正在处理新消息…", "info");
+          }
         }
 
         if (inputBox) {
@@ -12001,7 +12153,6 @@
 
         // 用 session.id（参数绑定，in-flight 期间不变）而不是 state.selectedId
         // 拼 URL，避免用户切到别的会话后 fetch 落到错误 sessionId。
-        _structuredSubmittingSessions[session.id] = true;
         return fetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -12020,7 +12171,6 @@
           return res.json();
         })
         .then(function(snapshot) {
-          _structuredSubmittingSessions[session.id] = false;
           if (snapshot && snapshot.error) {
             throw new Error(snapshot.error);
           }
@@ -12035,18 +12185,12 @@
               state.currentMessages = buildMessagesForRender(refreshedSession, getPreferredMessages(refreshedSession, snapshot.output, false));
               renderChat(true);
               updateStructuredQueueCounter();
-              if (isInterrupting) {
-                showToast("已中断上一条回复，正在处理新消息…", "info");
-              } else if (isQueueing) {
-                var qLen = Array.isArray(refreshedSession.queuedMessages) ? refreshedSession.queuedMessages.length : 0;
-                showToast(qLen > 1 ? ("已加入排队（共 " + qLen + " 条等待）") : "已加入排队，等待当前回复完成。", "info");
-              }
+              // toast 已在 click 时乐观 fire（见 isQueueing / isInterrupting 分支），
+              // 这里不再重复推送，避免同一动作出两条一样的 toast。
             }
           }
         })
         .catch(function(error) {
-          _structuredSubmittingSessions[session.id] = false;
-
           // duplicate_idempotency_key：服务端识别出 WebView 底层重发的副本，
           // 直接拦截不处理。这里**不**回滚乐观更新——第一次的请求实际上已经
           // 被服务端接收并处理（或正在处理），ws 推送会带回真实状态；如果在
@@ -12110,7 +12254,15 @@
         var counter = document.getElementById("queue-counter");
         var count = getSelectedStructuredQueuedInputs().length;
         if (counter) {
-          counter.textContent = "队列: " + count;
+          // counter 现在是 dot + text 双节点结构，只更新文字节点；如果用 textContent
+          // 直接覆盖会把内嵌的 .queue-counter-dot 也一并干掉，CSS 上做的脉动小红点就没了。
+          var textNode = counter.querySelector(".queue-counter-text");
+          var label = count > 0 ? ("排队 " + count + " 条") : "队列 0";
+          if (textNode) {
+            textNode.textContent = label;
+          } else {
+            counter.textContent = label;
+          }
           if (count > 0) {
             counter.classList.remove("hidden");
           } else {
@@ -13087,7 +13239,8 @@
             command: command,
             cwd: cwd || "",
             mode: state.chatMode || state.config.defaultMode || "default",
-            model: modelPref || undefined
+            model: modelPref || undefined,
+            thinkingEffort: state.chatThinking || undefined
           }))
         })
         .then(function(res) { return res.json(); })
@@ -13229,7 +13382,8 @@
             cwd: defaultCwd,
             mode: mode,
             initialInput: value,
-            model: modelPref || undefined
+            model: modelPref || undefined,
+            thinkingEffort: state.chatThinking || undefined
           }))
         })
         .then(function(res) { return res.json(); })
@@ -13267,7 +13421,8 @@
             cwd: defaultCwd,
             mode: mode,
             initialInput: value || undefined,
-            model: modelPref || undefined
+            model: modelPref || undefined,
+            thinkingEffort: state.chatThinking || undefined
           }))
         })
         .then(function(res) { return res.json(); })
@@ -14183,7 +14338,27 @@
           // Without an immediate refit, any chunk arriving while the keyboard
           // animates in renders against the old grid and tears the screen.
           if (!keyboardOpen && isKeyboardOpen) {
+            // Snapshot bottom-pinned intent BEFORE the layout starts shifting.
+            // visualViewport.resize fires while the keyboard is still mid-
+            // animation on iOS; if we wait until ensureTerminalFit's rAF
+            // body executes, clientHeight has already shrunk and the user
+            // who was visibly at the bottom registers as "scrolled up".
+            // We pass the snapshot through to a delayed catch-up so the
+            // final scroll lands AFTER the animation settles.
+            var wasStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
             ensureTerminalFit("keyboard-open", { forceReplay: true });
+            // Mirror the keyboard-close 200ms delay: by then the iOS / Android
+            // keyboard slide-in animation is done, vv.height is final, and
+            // scrollHeight reflects the post-replay grid. One more force
+            // scroll closes the gap between "we scrolled during animation
+            // when scrollHeight was still in flux" and "user expects to see
+            // the bottom now that the keyboard has fully settled".
+            if (wasStickToBottom) {
+              setTimeout(function() {
+                if (!state.terminal) return;
+                maybeScrollTerminalToBottom("force");
+              }, 220);
+            }
           }
 
           // Keyboard just closed — force terminal refit and scroll to bottom
@@ -14552,6 +14727,21 @@
           ensureTerminalFitWithRetry(reason || "fit-retry", { forceReplay: forceReplay });
           return false;
         }
+        // Snapshot stick-to-bottom intent NOW, before any layout work.
+        // Two concrete bugs this guards against:
+        //   1. Mobile keyboard opens → visualViewport shrinks → terminal
+        //      clientHeight drops while scrollTop stays put → by the time
+        //      the rAF body runs, isTerminalNearBottom() reads false even
+        //      though the user was visibly pinned to the bottom a frame ago.
+        //   2. Any softResyncTerminal triggered below does resetTerminal()
+        //      (scrollTop snaps to 0) then re-writes; the wterm element
+        //      can fire intermediate scroll events that flip
+        //      terminalAutoFollow to false before we get a chance to
+        //      scroll back.
+        // Both failure modes left users mid-buffer after a resize. We
+        // capture the intent up front and use "force" below to bypass
+        // the (now-poisoned) flag check inside maybeScrollTerminalToBottom.
+        var shouldStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
         var prevCols = state.terminal.cols;
         var prevRows = state.terminal.rows;
         requestAnimationFrame(function() {
@@ -14571,8 +14761,8 @@
             if (!didResize && forceReplay && state.terminalOutput) {
               softResyncTerminal({ skipFit: true });
             }
-            if (state.terminalAutoFollow || isTerminalNearBottom()) {
-              maybeScrollTerminalToBottom("resize");
+            if (shouldStickToBottom) {
+              maybeScrollTerminalToBottom("force");
             }
           });
         });
@@ -14629,9 +14819,15 @@
 
       function syncTerminalSize() {
         if (!state.terminal) return;
-        var shouldFollow = state.terminalAutoFollow || isTerminalNearBottom();
-        if (shouldFollow) {
-          maybeScrollTerminalToBottom("resize");
+        // Force-scroll (vs the weaker maybeScrollTerminalToBottom("resize"))
+        // for the same reason ensureTerminalFit does: between this entry
+        // and the actual scroll, the wterm DOM may fire scroll events that
+        // poison terminalAutoFollow. Capturing intent now + force-scrolling
+        // keeps a user who was visibly at the bottom pinned there across
+        // window/orientation/viewport resizes.
+        var shouldStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
+        if (shouldStickToBottom) {
+          maybeScrollTerminalToBottom("force");
         }
         sendTerminalResize(state.terminal.cols, state.terminal.rows);
       }
@@ -15427,21 +15623,22 @@
 
       function updateAutoApproveIndicator() {
         var toggle = document.getElementById("auto-approve-toggle");
-        if (!toggle) return;
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (selectedSession && selectedSession.provider === "codex") {
-          toggle.className = "auto-approve-indicator active";
-          toggle.title = "Codex 固定以 full-access PTY 启动，不支持切换自动批准";
-          toggle.textContent = "🛡 Codex 固定全权限";
+        // 当模式（managed / full-access）已隐含自动批准，chip 应该不存在；如果上一次渲染留下来了，
+        // 在这里清理掉，避免视觉上还有冗余 chip。
+        if (isAutoApproveImpliedByMode(selectedSession)) {
+          if (toggle && toggle.parentNode) toggle.parentNode.removeChild(toggle);
           return;
         }
+        if (!toggle) return;
+        var base = "composer-pill composer-pill-chip auto-approve-indicator";
         var enabled = selectedSession && selectedSession.autoApprovePermissions;
         if (enabled) {
-          toggle.className = "auto-approve-indicator active";
+          toggle.className = base + " active";
           toggle.title = "自动批准已启用 — 点击关闭";
-          toggle.textContent = "🛡 自动批准";
+          toggle.textContent = "🛡 自动";
         } else {
-          toggle.className = "auto-approve-indicator";
+          toggle.className = base;
           toggle.title = "自动批准已关闭 — 点击开启";
           toggle.textContent = "🛡 手动";
         }

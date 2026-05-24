@@ -232,15 +232,18 @@ export function startTui(deps: TuiDeps): TuiHandle {
       layout.showToast("服务已安装，按 Shift+S 卸载", "warn", 2500);
       return;
     }
-    const ok = await layout.confirm({
-      title: "注册为系统服务",
-      body:
-        process.platform === "linux"
-          ? "将写入 ~/.config/systemd/user/wand.service 并 systemctl --user enable --now。"
-          : process.platform === "darwin"
-            ? "将写入 ~/Library/LaunchAgents/com.wand.web.plist 并 launchctl load。"
-            : "当前平台暂不支持。",
-    });
+    // 默认装 system-wide。非 root 时 installService 会返回明确错误,toast 自然展示。
+    const isRoot = typeof process.getuid === "function" ? process.getuid() === 0 : false;
+    const body = process.platform === "linux"
+      ? `将写入 /etc/systemd/system/wand.service，systemctl enable --now，开机自启。\n${
+          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,建议先 Ctrl+C 退出 TUI 再 sudo wand web 重新进。"
+        }\n不想要 root？退出 TUI 跑 wand service:install --user (登出会被回收)。`
+      : process.platform === "darwin"
+        ? `将写入 /Library/LaunchDaemons/com.wand.web.plist，launchctl load，开机自启。\n${
+            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,建议先 Ctrl+C 退出 TUI 再 sudo wand web 重新进。"
+          }`
+        : "当前平台暂不支持。";
+    const ok = await layout.confirm({ title: "注册为系统服务", body });
     if (!ok) return;
     const r = await runOffMicrotask(() => installService({ configPath: deps.configPath }));
     layout.showToast(r.message, r.ok ? "success" : "error", 5000);

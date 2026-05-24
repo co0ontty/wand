@@ -249,6 +249,8 @@ export interface CommandRequest {
   cols?: number;
   /** 创建会话时由前端测得的真实行数。 */
   rows?: number;
+  /** 思考深度。null/缺省 视为 off（不启用思考）。 */
+  thinkingEffort?: "off" | "standard" | "deep" | "max" | null;
 }
 
 export interface InputRequest {

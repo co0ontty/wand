@@ -1,6 +1,7 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
+import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
 import {
   GitStatusFileEntry,
   GitStatusResult,
@@ -284,37 +285,25 @@ export class QuickCommitError extends Error {
 
 // ── AI commit message generation ──
 
-function callClaudeText(prompt: string, cwd: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      "claude",
-      ["-p", "--output-format", "text"],
-      {
-        cwd,
-        encoding: "utf8",
-        maxBuffer: 4 * 1024 * 1024,
-        timeout: CLAUDE_MESSAGE_TIMEOUT_MS,
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          const e = error as GitCommandError;
-          if (e.code === "ENOENT") {
-            reject(new QuickCommitError("未找到 claude CLI。", "CLAUDE_CLI_MISSING"));
-            return;
-          }
-          if (e.code === "ETIMEDOUT") {
-            reject(new QuickCommitError("Claude 生成超时，请手动填写 commit message。", "CLAUDE_TIMEOUT"));
-            return;
-          }
-          const msg = (stderr || "").trim() || e.message || "claude 调用失败";
-          reject(new QuickCommitError(`Claude CLI 失败：${msg}`, "CLAUDE_CLI_FAILED"));
-          return;
-        }
-        resolve((stdout || "").trim());
-      },
-    );
-    child.stdin?.end(prompt);
-  });
+async function callClaudeText(prompt: string, cwd: string): Promise<string> {
+  try {
+    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS });
+  } catch (error) {
+    if (error instanceof ClaudeRunError) {
+      // 把通用 ClaudeRunError 翻译成 quick-commit 自己的错误码 + 中文话术。
+      if (error.code === "CLAUDE_TIMEOUT") {
+        throw new QuickCommitError(
+          "Claude 生成超时，请手动填写 commit message。",
+          "CLAUDE_TIMEOUT",
+        );
+      }
+      if (error.code === "CLAUDE_EMPTY_RESULT") {
+        throw new QuickCommitError("Claude 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+      }
+      throw new QuickCommitError(error.message, error.code);
+    }
+    throw error;
+  }
 }
 
 function collectStagedDiff(cwd: string): string {

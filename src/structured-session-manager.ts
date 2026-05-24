@@ -27,6 +27,8 @@ interface CreateStructuredSessionOptions {
   worktreeEnabled?: boolean;
   /** 用户指定的 Claude 模型（别名或完整 ID）。留空则 spawn 时不加 --model。 */
   model?: string;
+  /** 用户预设的思考深度。留空 / null 视为 off。 */
+  thinkingEffort?: SessionSnapshot["thinkingEffort"];
 }
 
 function defaultStructuredRunner(provider: SessionProvider): SessionRunner {
@@ -610,6 +612,7 @@ export class StructuredSessionManager {
       ? prepareSessionWorktree({ cwd: options.cwd, sessionId: id })
       : null;
     const selectedModel = options.model?.trim() || null;
+    const initialThinkingEffort = normalizeThinkingEffort(options.thinkingEffort);
     const snapshot: SessionSnapshot = {
       id,
       sessionKind: "structured",
@@ -647,6 +650,7 @@ export class StructuredSessionManager {
       autoApprovePermissions: shouldAutoApproveForMode(options.mode),
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel,
+      thinkingEffort: initialThinkingEffort,
     };
 
     this.sessions.set(id, snapshot);
@@ -1121,6 +1125,11 @@ export class StructuredSessionManager {
     if (modelChoice && modelChoice !== "default") {
       args.push("--model", modelChoice);
     }
+    // 思考深度 → --reasoning-effort（off → minimal，standard → low，deep → medium，max → high）
+    const reasoningFlag = thinkingEffortToCodexFlag(session.thinkingEffort);
+    if (reasoningFlag) {
+      args.push("--reasoning-effort", reasoningFlag);
+    }
     if (session.claudeSessionId) {
       args.push("resume", session.claudeSessionId, "-");
     } else {
@@ -1464,6 +1473,10 @@ export class StructuredSessionManager {
       // variadic 参数贪婪吞掉（commander 的 <tools...> 会一直吃 positional 直到
       // 下一个 flag）。表现为 claude 报 "Input must be provided either through
       // stdin or as a prompt argument when using --print"。
+      //
+      // 思考深度通过给 prompt 前置魔法词触发（think / think hard / ultrathink）。
+      // applyThinkingEffortToPrompt 自身已经做了"用户已写过就不重复加"的保护。
+      const effectivePrompt = applyThinkingEffortToPrompt(prompt, session.thinkingEffort);
       const spawnedAt = new Date().toISOString();
       const child = spawn("claude", args, {
         cwd: session.cwd,
@@ -1476,13 +1489,13 @@ export class StructuredSessionManager {
         pid: child.pid ?? null,
         cwd: session.cwd,
         args,
-        prompt: prompt.slice(0, 2048),
-        promptLength: prompt.length,
+        prompt: effectivePrompt.slice(0, 2048),
+        promptLength: effectivePrompt.length,
         claudeSessionId: session.claudeSessionId,
         spawnedAt,
       });
       this.pendingChildren.set(sessionId, child);
-      child.stdin?.end(prompt);
+      child.stdin?.end(effectivePrompt);
 
       const turnState: StreamingTurnState = {
         blocks: [],
@@ -1981,6 +1994,14 @@ export class StructuredSessionManager {
     // SDK 默认会把整个 process.env 透传给 claude 子进程；这里显式按 inheritEnv 配置组装，
     // 否则关闭"继承环境变量"开关时 SDK 路径会被静默忽略。
     const sdkEnv = buildChildEnv(this.config.inheritEnv !== false);
+    // 思考深度：off → 显式禁用 thinking，其他 → 给一个固定 budget。
+    // SDK 类型用驼峰 budgetTokens（API 层是 budget_tokens，SDK 内部已做转换）。
+    const sdkThinkingBudget = thinkingEffortToSdkBudget(session.thinkingEffort);
+    const sdkThinking: { type: "enabled"; budgetTokens: number } | { type: "disabled" } =
+      sdkThinkingBudget > 0
+        ? { type: "enabled", budgetTokens: sdkThinkingBudget }
+        : { type: "disabled" };
+
     const sdkOptions: SdkOptions = {
       cwd: session.cwd,
       abortController,
@@ -1989,6 +2010,7 @@ export class StructuredSessionManager {
       ...(permPolicy.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
       ...(permPolicy.allowedTools ? { allowedTools: permPolicy.allowedTools } : {}),
       ...(isManaged ? { disallowedTools: ["AskUserQuestion"] } : {}),
+      thinking: sdkThinking,
       includePartialMessages: true,
       // 把子 agent 的 text/thinking 也转发回来，UI 才能把"被 Task 召唤来的协作者"
       // 渲染成独立角色的群聊消息。关掉这个开关时只会收到子 agent 的 tool_use/tool_result，

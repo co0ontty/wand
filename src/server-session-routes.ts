@@ -189,8 +189,8 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", express.json(), async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string };
-    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, provider: body.provider, worktreeEnabled: body.worktreeEnabled === true, hasPrompt: !!body.prompt, model: body.model }));
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string };
+    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, provider: body.provider, worktreeEnabled: body.worktreeEnabled === true, hasPrompt: !!body.prompt, model: body.model, thinkingEffort: body.thinkingEffort }));
     try {
       if (body.provider && body.provider !== "claude" && body.provider !== "codex") {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude 或 Codex provider。" });
@@ -204,6 +204,9 @@ export function registerSessionRoutes(
         runner: body.runner ?? (provider === "codex" ? "codex-cli-exec" : "claude-cli-print"),
         worktreeEnabled: body.worktreeEnabled === true,
         model: typeof body.model === "string" ? body.model.trim() : undefined,
+        thinkingEffort: typeof body.thinkingEffort === "string"
+          ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
+          : undefined,
       });
       console.log("[WAND] structured session created:", JSON.stringify({ id: snapshot.id, sessionKind: snapshot.sessionKind, runner: snapshot.runner, status: snapshot.status }));
       onSessionCreated?.(body.cwd ?? snapshot.cwd);
@@ -239,6 +242,29 @@ export function registerSessionRoutes(
       res.json(updated);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "切换模型失败。") });
+    }
+  });
+
+  // 思考深度切换：与 /model 路由对称。结构化会话立即影响下一条 prompt（CLI/SDK 各自接入
+  // applyThinkingEffortToPrompt / thinking budget），PTY 会话仅影响通过 chat 视图发送的输入。
+  app.post("/api/sessions/:id/thinking-effort", express.json(), (req, res) => {
+    const body = req.body as { thinkingEffort?: string | null };
+    const raw = typeof body?.thinkingEffort === "string" ? body.thinkingEffort : null;
+    const id = req.params.id;
+    try {
+      if (structured.get(id)) {
+        const updated = structured.setSessionThinkingEffort(id, raw as SessionSnapshot["thinkingEffort"]);
+        res.json(updated);
+        return;
+      }
+      if (!processes.get(id)) {
+        res.status(404).json({ error: "未找到该会话。" });
+        return;
+      }
+      const updated = processes.setSessionThinkingEffort(id, raw as SessionSnapshot["thinkingEffort"]);
+      res.json(updated);
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "切换思考深度失败。") });
     }
   });
 

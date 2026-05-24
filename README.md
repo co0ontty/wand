@@ -21,12 +21,23 @@
 bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.sh)
 ```
 
+装完后脚本会询问：
+
+- **1) 装为系统服务（推荐，默认）** — 写入 system-wide systemd（`/etc/systemd/system/wand.service`）或 launchd LaunchDaemon（`/Library/LaunchDaemons/com.wand.web.plist`），后台运行、开机自启、崩了自重启。**需要 sudo**（脚本会自动加）。
+- **2) 单次启动** — 不装服务，之后手动跑 `wand web`。
+
+> 通过管道运行（`bash <(curl ...)`）时 stdin 不是终端，默认走 **1（系统服务）**。想强制单次启动可以 `WAND_INSTALL_MODE=oneshot bash install.sh`。
+>
+> 不想用 sudo？可以装 user-level 版本：`wand service:install --user`（写入 `~/.config/systemd/user/wand.service`，登出会被回收，除非 `loginctl enable-linger $USER`）。
+
 ### 手动安装
 
 ```bash
 npm install -g @co0ontty/wand
 wand init
-wand web
+sudo wand service:install   # 装为系统服务（system-wide, 默认）
+# 或者：wand service:install --user   # 不要 sudo，但登出会被回收
+wand web                    # 没服务时启动新实例；有服务时 attach TUI
 ```
 
 安装完成后打开浏览器访问终端中提示的地址即可。
@@ -41,7 +52,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.s
 
 > 也可以直接在网页设置里点「更新」按钮，或在 TUI 模式按 `u`，wand 自己会调用同样的清理逻辑。Web 端点击更新后会自动重启服务，无需手动操作。
 
-如果以前装过 systemd 自启服务但还是 `Restart=on-failure`（v1.25.x 前的版本），重新进入 TUI 按一次 `i` 重装服务即可换成 `Restart=always`，自动更新后才能正确拉起新进程。
+如果以前装过 systemd 自启服务但还是 `Restart=on-failure`（v1.25.x 前的版本），重新跑 `sudo wand service:install` 重装服务即可换成 `Restart=always`，自动更新后才能正确拉起新进程。
 
 ## 功能
 
@@ -100,6 +111,32 @@ wand config:set port 9443
 | `https` | `false` | 启用 HTTPS（自签证书自动生成） |
 | `password` | (随机生成) | 登录密码 |
 | `language` | `""` | Claude 回复语言偏好 |
+
+## 系统服务
+
+默认走 **system-wide**：Linux 写 `/etc/systemd/system/wand.service`，macOS 写 `/Library/LaunchDaemons/com.wand.web.plist`。开机自启、不依赖 login session、`service wand` / `systemctl status wand` 这些老命令都能用。装/卸需要 sudo。
+
+```bash
+sudo wand service:install   # 注册并启动（首次安装走这里）
+wand service:status         # 查状态（active / inactive / failed） — 读取不要 sudo
+sudo wand service:start     # 启动
+sudo wand service:stop      # 停止
+sudo wand service:restart   # 重启
+wand service:logs           # 看最近日志（--lines N 调整行数）
+sudo wand service:uninstall # 卸载（停服 + 删 unit）
+```
+
+不想用 sudo？传 `--user` 切到 user-level（写 `~/.config/systemd/user/wand.service` 或 `~/Library/LaunchAgents/`）：
+
+```bash
+wand service:install --user
+wand service:status --user
+# ...其他子命令同理
+```
+
+> User-level 版本登出后会被回收，除非跑 `loginctl enable-linger $USER`。
+
+服务装好后，`wand web` 会自动检测正在运行的实例（同一份 `config.json` 下）并以 TUI 模式 **attach 到现有 service**，不会重复启动第二个进程。多份配置（`-c` 指向不同路径）之间彼此隔离，互不影响。
 
 ## 开发
 

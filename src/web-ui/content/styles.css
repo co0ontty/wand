@@ -3906,12 +3906,16 @@
     }
 
     /* ===== 聊天消息基础样式 ===== */
+    /* 消息整体宽度跟随屏幕（容器）宽度——长文本自然换行；
+       内部卡片（tool-use-card / inline-tool / terminal-tool / diff-tool / tool-group）
+       通过 --chat-card-max-width 单独约束，避免在宽屏下被拉成横向大条。 */
     .chat-message {
       display: flex;
       flex-direction: column;
-      max-width: 85%;
+      max-width: 100%;
       margin: 4px 0;
       transition: opacity 0.2s ease, transform 0.2s var(--ease-out-expo);
+      --chat-card-max-width: 720px;
     }
 
     .chat-message:hover {
@@ -3936,12 +3940,13 @@
 
     .chat-message.assistant {
       align-self: flex-start;
-      max-width: 95%;
+      max-width: 100%;
+      width: 100%;
     }
 
     .chat-message.system-info {
       align-self: center;
-      max-width: 95%;
+      max-width: 100%;
       width: 100%;
       margin: 10px 0;
       animation: messageFloat 3s ease-in-out infinite;
@@ -4080,8 +4085,10 @@
       box-shadow: 0 4px 16px rgba(197, 101, 61, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
     }
 
+    /* 用户消息默认更紧凑（贴右气泡），上限放宽到 100% 让长 prompt 不再水平
+       挤压；实际宽度由气泡内容 + word-break 决定。 */
     .chat-message.user {
-      max-width: 85%;
+      max-width: 100%;
     }
 
     /* 助手消息气泡 */
@@ -4129,7 +4136,7 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
-      max-width: 95%;
+      max-width: 100%;
     }
     /* user turn 默认 align-self: flex-end（右对齐）；多段渲染时强制
        容器内左对齐，否则 subagent 段会被推到右边，border-left 色条断裂。 */
@@ -4232,7 +4239,10 @@
       background: rgba(0, 0, 0, 0.04);
       padding: 10px 12px;
       border-radius: 6px;
-      overflow-x: auto;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       margin: 8px 0;
     }
 
@@ -4345,7 +4355,7 @@
     /* Thinking Card (Deep Thought) */
     .chat-message.thinking {
       align-self: flex-start;
-      max-width: 85%;
+      max-width: 100%;
       margin: 4px 0;
     }
 
@@ -4384,7 +4394,7 @@
     /* Prompt Suggestion Card (Pulsing) */
     .chat-message.prompt {
       align-self: center;
-      max-width: 85%;
+      max-width: 100%;
       margin: 4px 0;
     }
 
@@ -4467,6 +4477,7 @@
       border-radius: var(--radius-sm);
       overflow: hidden;
       width: 100%;
+      max-width: var(--chat-card-max-width, 720px);
       box-sizing: border-box;
       background: linear-gradient(180deg, rgba(255, 251, 245, 0.88) 0%, rgba(255, 246, 234, 0.72) 100%);
       box-shadow: 0 1px 2px rgba(89, 58, 32, 0.04);
@@ -4874,6 +4885,9 @@
       align-items: baseline;
       gap: 5px;
       margin: 2px 0;
+      width: 100%;
+      max-width: var(--chat-card-max-width, 720px);
+      box-sizing: border-box;
       padding: 3px 8px;
       border-radius: 6px;
       background: rgba(138, 108, 178, 0.04);
@@ -4981,6 +4995,9 @@
        ────────────────────────────────────────────────────────────── */
     .tool-group {
       margin: 4px 0;
+      width: 100%;
+      max-width: var(--chat-card-max-width, 720px);
+      box-sizing: border-box;
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-subtle);
       background: linear-gradient(180deg, rgba(255, 251, 245, 0.85) 0%, rgba(255, 248, 238, 0.7) 100%);
@@ -5106,9 +5123,16 @@
       display: flex;
       flex-direction: column;
       margin: 1px 0;
+      width: 100%;
+      max-width: var(--chat-card-max-width, 720px);
+      box-sizing: border-box;
       border-radius: var(--radius-xs);
       cursor: pointer;
       transition: background 0.16s ease;
+    }
+    /* 嵌套在 tool-group-body 里的 inline-tool 撑满父容器即可（父已经限宽） */
+    .tool-group-body > .inline-tool {
+      max-width: 100%;
     }
     .inline-tool-row {
       display: flex;
@@ -5293,6 +5317,9 @@
        ────────────────────────────────────────────────────────────── */
     .inline-terminal {
       margin: 4px 0;
+      width: 100%;
+      max-width: var(--chat-card-max-width, 720px);
+      box-sizing: border-box;
       border: 1px solid rgba(15, 12, 9, 0.6);
       border-radius: var(--radius-sm);
       background: #1f1b17;
@@ -5453,6 +5480,9 @@
        ────────────────────────────────────────────────────────────── */
     .inline-diff {
       margin: 4px 0;
+      width: 100%;
+      max-width: var(--chat-card-max-width, 720px);
+      box-sizing: border-box;
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-sm);
       overflow: hidden;
@@ -5678,7 +5708,12 @@
 
     /* Markdown Content */
     .markdown-content { color: inherit; white-space: normal; overflow-x: hidden; }
-    .markdown-content .code-block pre { overflow-x: auto; }
+    .markdown-content .code-block pre {
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
     .markdown-content p { margin: 0 0 8px 0; }
     .markdown-content p:last-child { margin-bottom: 0; }
     .markdown-content strong { font-weight: 600; }
@@ -5790,7 +5825,10 @@
     .markdown-content pre {
       margin: 0;
       padding: 12px;
-      overflow-x: auto;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
     }
     .markdown-content pre code {
       font-family: var(--font-mono);
@@ -5842,14 +5880,42 @@
       align-items: center;
       justify-content: space-between;
       padding: 2px 4px 3px 6px;
-      gap: 4px;
+      gap: 3px;
     }
     .input-composer-left {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 3px;
       flex-wrap: nowrap;
       flex-shrink: 0;
+      min-width: 0;
+    }
+    /* 会话设置三件套 (mode / model / thinking) 的容器 —— 用极轻的内描边视觉地
+       把三颗"新会话/会话级配置 pill"框成一个 segmented control，与右侧
+       开关型 chip (自动批准 / 终端交互) 在认知上分层。 */
+    .composer-pill-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 1px;
+      border-radius: 11px;
+      background: rgba(197, 101, 61, 0.05);
+      box-shadow: inset 0 0 0 1px rgba(197, 101, 61, 0.08);
+      min-width: 0;
+    }
+    .composer-pill-group .composer-pill {
+      border-color: transparent;
+      background: transparent;
+    }
+    .composer-pill-group .composer-pill:hover {
+      border-color: var(--accent);
+      background-color: rgba(255, 255, 255, 0.75);
+    }
+    .composer-pill-group .composer-pill:focus,
+    .composer-pill-group .composer-pill:focus-visible,
+    .composer-pill-group .composer-pill:focus-within {
+      border-color: var(--accent);
+      background-color: rgba(255, 255, 255, 0.9);
     }
 
     /* Permission actions inline in composer bar */
@@ -5913,28 +5979,16 @@
       to { opacity: 1; transform: translateX(0); }
     }
 
-    /* Auto-approve indicator */
-    .auto-approve-indicator {
-      display: inline-flex;
-      align-items: center;
-      gap: 2px;
-      font-size: 0.65rem;
-      color: var(--muted);
-      cursor: pointer;
-      padding: 1px 4px;
-      border-radius: 4px;
-      transition: color 0.15s, background 0.15s;
-      user-select: none;
-      white-space: nowrap;
-    }
-    .auto-approve-indicator:hover {
-      background: rgba(255, 255, 255, 0.06);
-    }
+    /* 自动批准 chip —— 套用 .composer-pill .composer-pill-chip 的基础外观，
+       这里只覆盖 active 态的绿色（语义色）。 */
     .auto-approve-indicator.active {
       color: #22c55e;
+      border-color: rgba(34, 197, 94, 0.5);
+      background: rgba(34, 197, 94, 0.12);
     }
     .auto-approve-indicator.active:hover {
-      background: rgba(34, 197, 94, 0.1);
+      background: rgba(34, 197, 94, 0.2);
+      border-color: #22c55e;
     }
 
     /* Approval stats badge */
@@ -5947,24 +6001,27 @@
       display: none;
     }
     .approval-stats-divider {
-      width: 1px;
+      /* 同行已经全部用 .composer-pill 的统一 gap (3px) 分隔，再加一条 1px 实线分隔
+         反而显得拥挤。仅保留极细的 spacer 让 stats badge 与左侧 chip 不黏连。 */
+      width: 0;
       height: 16px;
-      background: var(--border);
-      margin: 0 4px 0 2px;
+      margin: 0 1px;
     }
     .approval-stats-badge {
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      padding: 1px 7px 1px 5px;
+      min-height: 22px;
+      padding: 1px 8px;
       border-radius: 10px;
       background: rgba(34, 197, 94, 0.1);
       color: #22c55e;
-      font-size: 0.68rem;
+      font-size: 0.625rem;
       font-weight: 600;
       cursor: default;
       transition: background 0.15s;
-      line-height: 1.5;
+      line-height: 1;
+      box-sizing: border-box;
     }
     .approval-stats-badge:hover {
       background: rgba(34, 197, 94, 0.18);
@@ -6045,31 +6102,11 @@
       color: #22c55e;
     }
 
+    /* 终端交互切换按钮 —— 现在套用 .composer-pill .composer-pill-chip 的统一外观，
+       这里仅保留图标专属的微调（字体大小 / 收紧 padding 让 ⌨ 居中）。 */
     .composer-interactive-toggle {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 22px;
-      height: 22px;
-      border: 1px solid var(--border-subtle);
-      border-radius: 4px;
-      background: transparent;
-      color: var(--text-muted);
       font-size: 0.75rem;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-      flex-shrink: 0;
-      padding: 0;
-    }
-    .composer-interactive-toggle:hover {
-      background: rgba(197, 101, 61, 0.08);
-      color: var(--text-secondary);
-      border-color: var(--accent);
-    }
-    .composer-interactive-toggle.active {
-      background: rgba(197, 101, 61, 0.12);
-      color: var(--accent);
-      border-color: var(--accent);
+      padding: 1px 8px;
     }
     .input-composer-right {
       display: flex;
@@ -6079,52 +6116,79 @@
       flex: 1;
       justify-content: flex-end;
     }
+    /* 队列计数器：v1.30.3 是个 0.625rem 的小角标，挤在 input-hint 旁边没人看见。
+       升级成 dot + label 的 pill，配色和"立即发送"按钮同源，让用户能联想到这套语义。 */
     .queue-counter {
-      font-size: 0.625rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.6875rem;
       color: var(--accent);
-      background: var(--accent-muted);
-      padding: 1px 6px;
-      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(197, 101, 61, 0.18) 0%, rgba(197, 101, 61, 0.10) 100%);
+      padding: 3px 9px;
+      border-radius: 999px;
       white-space: nowrap;
       font-weight: 600;
+      letter-spacing: 0.02em;
+      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.25) inset;
       animation: queuePulse 1.5s ease-in-out infinite;
     }
     .queue-counter.hidden { display: none; }
-    @keyframes queuePulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
-    }
-
-    /* Queued message in chat view */
-    .chat-message.user.queued {
-      opacity: 0.7;
-    }
-    .chat-message.user.queued .chat-message-bubble,
-    .chat-message.user.queued .chat-message-content {
-      /* 排队气泡用虚线边框 + 浅浅的阴影，让"未发送"状态有触感 */
-      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.25) inset;
-    }
-    .queued-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 0.625rem;
-      color: var(--accent);
-      background: var(--accent-muted);
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-weight: 600;
-      margin-top: 6px;
-      letter-spacing: 0.04em;
-      animation: queuePulse 1.5s ease-in-out infinite;
-    }
-    .queued-badge::before {
-      content: '';
+    .queue-counter-dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
       background: var(--accent);
+      flex-shrink: 0;
+      animation: queueDotPulse 1.0s ease-in-out infinite;
+    }
+    .queue-counter-text { line-height: 1; }
+    @keyframes queuePulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.78; }
+    }
+    @keyframes queueDotPulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50%      { transform: scale(0.7); opacity: 0.55; }
+    }
+
+    /* Queued message in chat view：用户最容易"觉得排队没生效"是因为旧版徽章太小。
+       把气泡本身做出明显的"半成稿"质感（虚线边框 + 错位阴影），徽章放大到正常字号，
+       让排队这件事在视觉上和"已发出"清楚拉开。 */
+    .chat-message.user.queued {
+      opacity: 0.92;
+    }
+    .chat-message.user.queued .chat-message-bubble,
+    .chat-message.user.queued .chat-message-content {
+      box-shadow: 0 0 0 1.5px rgba(197, 101, 61, 0.55) inset,
+                  0 1px 0 rgba(197, 101, 61, 0.10);
+      background: linear-gradient(180deg, rgba(255, 245, 235, 0.85) 0%, rgba(255, 235, 220, 0.65) 100%);
+      border-radius: 14px;
+      position: relative;
+    }
+    .queued-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.75rem;
+      color: #fff;
+      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
+      padding: 3px 10px 3px 9px;
+      border-radius: 999px;
+      font-weight: 600;
+      margin-top: 6px;
+      letter-spacing: 0.04em;
+      box-shadow: 0 2px 6px rgba(197, 101, 61, 0.30);
       animation: queuePulse 1.5s ease-in-out infinite;
+    }
+    .queued-badge::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
+      animation: queueDotPulse 1.0s ease-in-out infinite;
     }
 
     .input-hint {
@@ -6831,36 +6895,125 @@
     .input-inline-controls {
     }
 
-    /* Chat mode select pill */
-    .chat-mode-select {
+    /* ========================================================================
+       输入框统一 pill 系统 —— 模式 / 模型 / 思考 / 自动批准 / 终端交互
+       全部用同一套尺寸 / 字号 / 边框 / hover / focus 表现，避免视觉混乱。
+       变体：
+         .composer-pill-select  → 原生 <select> 形态（右侧 chevron）
+         .composer-pill-chip    → 按钮 / 切换状态的 chip（支持 .active 亮态）
+       现有 .chat-mode-select / .auto-approve-indicator / .composer-interactive-toggle
+       仍保留作为特定色彩或最大宽度等微调入口。
+       ====================================================================== */
+    .composer-pill {
       font-family: var(--font-sans);
       font-size: 0.625rem;
       font-weight: 500;
-      padding: 1px 16px 1px 6px;
+      line-height: 1;
+      min-height: 22px;
+      padding: 1px 8px;
       border-radius: 10px;
       border: 1px solid var(--border-subtle);
       background: rgba(246, 241, 232, 0.7);
       color: var(--text-secondary);
       cursor: pointer;
       transition: all var(--transition-fast);
-      min-height: 22px;
-      max-width: 90px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      white-space: nowrap;
+      box-sizing: border-box;
+      user-select: none;
+    }
+    .composer-pill:hover {
+      border-color: var(--accent);
+      background-color: rgba(246, 241, 232, 1);
+    }
+    .composer-pill:focus,
+    .composer-pill:focus-visible {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-muted);
+      outline: none;
+    }
+    .composer-pill.disabled,
+    .composer-pill[disabled] {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    /* select 变体：保留 chevron 背景图与文本截断 */
+    .composer-pill-select {
+      padding: 1px 16px 1px 6px;
+      max-width: 110px;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
       appearance: none;
       -webkit-appearance: none;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' fill='none'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%239a8e82' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
       background-repeat: no-repeat;
       background-position: right 4px center;
+      /* 让 native <select> 在 inline-flex 下表现稳定 */
+      display: inline-block;
+      text-align: left;
     }
-    .chat-mode-select:hover {
-      border-color: var(--accent);
-      background-color: rgba(246, 241, 232, 1);
+
+    /* chip 变体：开关型按钮 / span，无 chevron，可亮态。
+       字号与 select pill 对齐 (0.625rem)，避免同行字号微差。 */
+    .composer-pill-chip {
+      padding: 1px 8px;
+      font-size: 0.625rem;
     }
-    .chat-mode-select:focus {
+    .composer-pill-chip.active {
+      background: var(--accent-muted, rgba(197, 101, 61, 0.12));
+      color: var(--accent);
       border-color: var(--accent);
-      box-shadow: 0 0 0 2px var(--accent-muted);
+    }
+    .composer-pill-chip.active:hover {
+      background: rgba(197, 101, 61, 0.18);
+    }
+
+    /* 兼容旧类：保留为 alias，仅用于细节微调（如最大宽度） */
+    .chat-mode-select {
+      /* 旧标识，沿用 .composer-pill / .composer-pill-select 的基础风格 */
+      max-width: 78px;
+    }
+    .chat-model-select {
+      max-width: 96px;
+    }
+    .chat-thinking-select {
+      max-width: 86px;
+    }
+
+    /* 思考深度 trigger —— 与 mode / model 同形 pill：相同 border / chevron / 字号。
+       内部 .chat-thinking-label 显示当前档位，原生 <select> 透明叠层负责交互，
+       移动端能调起系统滚轮选择，桌面端点击则展开原生菜单。 */
+    .chat-thinking-trigger {
+      position: relative;
+      max-width: 86px;
+      padding-left: 6px;
+    }
+    .chat-thinking-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      letter-spacing: 0.01em;
+    }
+    .chat-thinking-hidden-select {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: transparent;
+      font: inherit;
+      opacity: 0;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .chat-thinking-hidden-select:focus {
       outline: none;
     }
 
@@ -6917,24 +7070,65 @@
     }
 
     /* "立即发送"：结构化会话流式输出时显示，按下会中断当前回复立即处理新输入。
-       视觉上比 send 弱、比 stop 弱，避免被误点；和 send 之间留一点空气。 */
-    .btn-circle-interrupt {
-      background: rgba(160, 110, 60, 0.10);
+       v1.30.3 把它做成 28px 圆形 + dashed 边框，结果用户根本注意不到这颗按钮、
+       误以为"立即发送没效果"。现在升级成 pill（图标 + "立即"文字 + 实色高对比 + 脉动），
+       和 send 按钮形成"加急/默认"的视觉对位。 */
+    .btn-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      height: 28px;
+      padding: 0 10px 0 8px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      flex-shrink: 0;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .btn-pill-icon {
+      display: block;
+      flex-shrink: 0;
+    }
+    .btn-pill-label {
+      display: inline;
+    }
+    .btn-pill-interrupt {
+      background: linear-gradient(180deg, rgba(197, 101, 61, 0.18) 0%, rgba(197, 101, 61, 0.10) 100%);
       color: var(--accent);
-      margin-right: 2px;
-      border: 1px dashed rgba(197, 101, 61, 0.35);
+      margin-right: 4px;
+      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.30) inset;
+      animation: interruptPulse 1.8s ease-in-out infinite;
     }
-    .btn-circle-interrupt:hover {
-      background: var(--accent);
-      color: white;
-      border-style: solid;
-      transform: scale(1.08);
+    .btn-pill-interrupt:hover {
+      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
+      color: #fff;
+      box-shadow: 0 3px 10px rgba(197, 101, 61, 0.35);
+      transform: translateY(-1px);
+      animation: none;
     }
-    .btn-circle-interrupt:active {
-      transform: scale(0.95);
+    .btn-pill-interrupt:active {
+      transform: translateY(0) scale(0.97);
     }
-    .btn-circle-interrupt.hidden {
+    .btn-pill-interrupt.hidden {
       display: none;
+    }
+    @keyframes interruptPulse {
+      0%, 100% { box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.30) inset, 0 0 0 0 rgba(197, 101, 61, 0.0); }
+      50%      { box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.45) inset, 0 0 0 4px rgba(197, 101, 61, 0.12); }
+    }
+    /* 屏宽 < 480 时把"立即"文字藏掉，只剩 » 图标，避免和 send 一起把行挤爆。
+       hover/focus 期间临时回显，让长按移动端用户也能确认按钮含义。 */
+    @media (max-width: 480px) {
+      .btn-pill-interrupt {
+        padding: 0 8px;
+      }
+      .btn-pill-interrupt .btn-pill-label {
+        display: none;
+      }
     }
 
     /* send 按钮在「排队模式」下退到次要色，让相邻的"立即发送"成为视觉重点。
@@ -9116,7 +9310,7 @@
       .view-toggle { height: 36px; }
       .view-toggle-btn { padding: 0 12px; font-size: 0.75rem; height: 30px; min-height: 30px; }
       .chat-container { padding: 0 12px 12px; }
-      .chat-message { max-width: 90%; }
+      .chat-message { max-width: 100%; }
       .thinking-card { padding: 10px 14px; }
       .thinking-content { font-size: 0.8125rem; }
       .tool-picker { grid-template-columns: 1fr; }
@@ -9176,9 +9370,34 @@
       .floating-sidebar-toggle .hamburger-icon { width: 13px; height: 9px; }
 
       .sidebar { top: 0; }
-      .sidebar-header { padding: 10px 12px; min-height: 48px; }
-      .sidebar-footer-actions { grid-template-columns: repeat(2, 1fr); }
-      .sidebar-footer-actions .btn { min-height: 40px; }
+      .sidebar-header { padding: 10px 12px; min-height: 48px; gap: 8px; }
+      /* 收紧 actions 内按钮间距，给主区（logo/标题/计数）腾空间 */
+      .sidebar-header-actions { gap: 4px; }
+      /* 5 个底栏按钮在 2 列布局下最后一颗会单独占满第三行，看着很挤。
+         手机端统一切到 4 列、隐藏文字、保留图标，更紧凑也对齐统一。 */
+      .sidebar-footer-actions {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px;
+      }
+      .sidebar-footer-actions .btn {
+        min-height: 40px;
+        padding: 6px 4px;
+      }
+      .sidebar-footer-actions .btn span { display: none; }
+      .sidebar-footer-actions .btn svg { width: 18px; height: 18px; }
+
+      /* "更多操作"下拉：默认锚在更多按钮右沿向左展开 150px。手机端：
+         · 加大 min-width 让中文项不会两行；
+         · max-width 限制在可见区，防止极窄手机被裁；
+         · 按钮在侧栏靠右，下拉自然贴侧栏右沿；用 right: 0 原值即可。 */
+      .sidebar-header-overflow {
+        min-width: 180px;
+        max-width: calc(100vw - 24px);
+      }
+      .sidebar-header-overflow .overflow-item {
+        padding: 11px 14px;
+        font-size: 0.875rem;
+      }
 
       /* 移动端终端顶栏 - 紧凑 */
       .terminal-header { padding: 5px 8px; min-height: 32px; }
@@ -9328,11 +9547,27 @@
 
       .input-composer-bar {
         padding: 1px 3px 2px 5px;
-        gap: 3px;
+        gap: 2px;
       }
 
-      .input-composer-left { gap: 3px; }
+      .input-composer-left { gap: 2px; }
       .input-composer-right { gap: 3px; }
+      /* 移动端窄屏：进一步收紧 group 内边距，让 mode/model/thinking 三件套不占额外 padding */
+      .input-composer-left .composer-pill-group {
+        padding: 0;
+        gap: 1px;
+        background: transparent;
+        box-shadow: none;
+      }
+      /* 移动端 chip 字号微缩，与新 desktop chip 0.625rem 对齐基础上再小一点 */
+      .input-composer-left .composer-pill-chip {
+        font-size: 0.6rem;
+        padding: 1px 6px;
+      }
+      /* 移动端三件套 select 最大宽度同步收紧 */
+      .input-composer-left .chat-mode-select { max-width: 64px; }
+      .input-composer-left .chat-model-select { max-width: 78px; }
+      .input-composer-left .chat-thinking-trigger { max-width: 72px; }
 
       /* 移动端会话信息栏 */
       .input-session-info-bar {
@@ -10116,12 +10351,13 @@
       align-items: center;
       gap: 6px;
     }
+    /* 此处历史遗留的 .chat-mode-select 全局规则会覆盖上面 .composer-pill 的统一字号 / 边框，
+       已上移到 .composer-pill / .composer-pill-select 体系；这里只保留 outline / cursor 的兜底，
+       不再设置 font-size / max-width，避免和 6938 行的统一样式打架。 */
     .chat-mode-select {
-      font-size: 0.6875rem;
       font-family: inherit;
       cursor: pointer;
       outline: none;
-      max-width: 96px;
     }
     .chat-mode-select:focus {
       border-color: var(--accent);

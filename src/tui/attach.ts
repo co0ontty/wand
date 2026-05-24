@@ -253,15 +253,17 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
       layout.showToast("服务已安装，按 Shift+S 卸载", "warn", 2500);
       return;
     }
-    const ok = await layout.confirm({
-      title: "注册为系统服务",
-      body:
-        process.platform === "linux"
-          ? "将写入 ~/.config/systemd/user/wand.service。"
-          : process.platform === "darwin"
-            ? "将写入 ~/Library/LaunchAgents/com.wand.web.plist。"
-            : "当前平台暂不支持。",
-    });
+    const isRoot = typeof process.getuid === "function" ? process.getuid() === 0 : false;
+    const body = process.platform === "linux"
+      ? `将写入 /etc/systemd/system/wand.service，systemctl enable --now，开机自启。\n${
+          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,可以 Ctrl+C 退出 TUI 后跑 sudo wand service:install。"
+        }`
+      : process.platform === "darwin"
+        ? `将写入 /Library/LaunchDaemons/com.wand.web.plist，launchctl load，开机自启。\n${
+            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,退出 TUI 跑 sudo wand service:install。"
+          }`
+        : "当前平台暂不支持。";
+    const ok = await layout.confirm({ title: "注册为系统服务", body });
     if (!ok) return;
     const r = await runOffMicrotask(() => installService({ configPath: deps.configPath }));
     layout.showToast(r.message, r.ok ? "success" : "error", 5000);

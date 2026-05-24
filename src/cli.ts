@@ -149,6 +149,17 @@ async function main(): Promise<void> {
       }
       break;
     }
+    case "service:install":
+    case "service:uninstall":
+    case "service:start":
+    case "service:stop":
+    case "service:restart":
+    case "service:status":
+    case "service:logs": {
+      const exitCode = await runServiceCommand(command, args, configPath);
+      process.exitCode = exitCode;
+      break;
+    }
     case "help":
     default: {
       printHelp();
@@ -175,8 +186,21 @@ Commands:
   wand config:show          Print current config
   wand config:set           Update a simple config value
 
+System service (default = system-wide; pass --user for user-level):
+  wand service:install      Register and start the background service (needs sudo for system)
+  wand service:uninstall    Stop and remove the service
+  wand service:start        Start the service
+  wand service:stop         Stop the service
+  wand service:restart      Restart the service
+  wand service:status       Show service status
+  wand service:logs         Tail recent service logs
+
 Options:
   -c, --config <path>       Use a custom config file (default: ~/.wand/config.json)
+  --user                    (service:*) Operate on the user-level service (no root needed)
+  --system                  (service:*) Operate on the system-wide service (default; needs root)
+  --verbose                 (service:*) Print full detail output
+  --lines <N>               (service:logs) Number of log lines (default 80)
 `);
 }
 
@@ -391,6 +415,108 @@ function setConfigValue(
       };
     default:
       throw new Error(`Unsupported config key: ${key}`);
+  }
+}
+
+/**
+ * 把 `wand service:*` 子命令路由到 src/tui/commands.ts 里已有的服务管理实现。
+ *
+ * 这里只做：把 CLI args → ServiceContext，调对应函数，把 CommandResult 打印出来，
+ * 按 ok 决定 exit code。所有平台分支（Linux user-systemd / macOS launchd / 其他不支持）
+ * 都在 tui/commands.ts 内部处理。
+ */
+async function runServiceCommand(
+  command: string,
+  args: string[],
+  configPath: string,
+): Promise<number> {
+  const {
+    installService,
+    uninstallService,
+    serviceStart,
+    serviceStop,
+    serviceRestart,
+    serviceStatus,
+    serviceLogs,
+  } = await import("./tui/commands.js");
+
+  const verbose = args.includes("--verbose");
+  // --user / --system 决定 scope；不传走库里 default（= system）。
+  // 同时传 --user 和 --system 时 --user 胜（更"友好"那一个不需要 root）。
+  const wantUser = args.includes("--user");
+  const wantSystem = args.includes("--system");
+  const scope = wantUser ? "user" : (wantSystem ? "system" : undefined);
+
+  switch (command) {
+    case "service:install": {
+      const result = installService({ configPath, scope });
+      printServiceResult(result, verbose);
+      if (result.ok && process.platform === "linux") {
+        // 仅 user scope 才需要 linger 提示
+        const installedScope = scope ?? "system";
+        if (installedScope === "user") {
+          process.stdout.write(
+            "[wand] 想保持登出后也运行：loginctl enable-linger $USER\n",
+          );
+        }
+      }
+      return result.ok ? 0 : 1;
+    }
+    case "service:uninstall": {
+      const result = uninstallService(scope ? { scope } : undefined);
+      printServiceResult(result, verbose);
+      return result.ok ? 0 : 1;
+    }
+    case "service:start": {
+      const result = serviceStart(scope ? { scope } : undefined);
+      printServiceResult(result, verbose);
+      return result.ok ? 0 : 1;
+    }
+    case "service:stop": {
+      const result = serviceStop(scope ? { scope } : undefined);
+      printServiceResult(result, verbose);
+      return result.ok ? 0 : 1;
+    }
+    case "service:restart": {
+      const result = serviceRestart(scope ? { scope } : undefined);
+      printServiceResult(result, verbose);
+      return result.ok ? 0 : 1;
+    }
+    case "service:status": {
+      const status = serviceStatus(scope ? { scope } : undefined);
+      process.stdout.write(
+        `[wand] ${status.installed ? "installed" : "not installed"} · ${status.state} · ${status.description}\n`,
+      );
+      if (verbose && status.raw) {
+        process.stdout.write(status.raw + "\n");
+      }
+      return status.installed && status.state === "active" ? 0 : 1;
+    }
+    case "service:logs": {
+      const linesArg = readFlagValue(args, "--lines");
+      const lines = linesArg ? Math.max(1, Math.min(2000, Number(linesArg) || 80)) : 80;
+      const result = serviceLogs(lines, scope ? { scope } : undefined);
+      if (result.detail) {
+        process.stdout.write(result.detail + "\n");
+      } else {
+        process.stdout.write(`[wand] ${result.message}\n`);
+      }
+      return result.ok ? 0 : 1;
+    }
+    default:
+      process.stderr.write(`[wand] unknown service command: ${command}\n`);
+      return 1;
+  }
+}
+
+function printServiceResult(
+  result: { ok: boolean; message: string; detail?: string },
+  verbose: boolean,
+): void {
+  const prefix = result.ok ? "[wand]" : "[wand] ✗";
+  process.stdout.write(`${prefix} ${result.message}\n`);
+  if (verbose && result.detail) {
+    process.stdout.write(result.detail + "\n");
   }
 }
 

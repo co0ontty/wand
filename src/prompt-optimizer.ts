@@ -1,12 +1,7 @@
-import { execFile } from "node:child_process";
+import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
 
 const CLAUDE_TIMEOUT_MS = 60_000;
 const MAX_INPUT_LENGTH = 8000;
-
-interface ClaudeError extends Error {
-  code?: string;
-  stderr?: string;
-}
 
 export class PromptOptimizeError extends Error {
   constructor(message: string, public readonly code: string) {
@@ -15,37 +10,22 @@ export class PromptOptimizeError extends Error {
   }
 }
 
-function callClaudeText(prompt: string, cwd?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      "claude",
-      ["-p", "--output-format", "text"],
-      {
-        cwd: cwd && cwd.length > 0 ? cwd : undefined,
-        encoding: "utf8",
-        maxBuffer: 4 * 1024 * 1024,
-        timeout: CLAUDE_TIMEOUT_MS,
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          const e = error as ClaudeError;
-          if (e.code === "ENOENT") {
-            reject(new PromptOptimizeError("未找到 claude CLI。", "CLAUDE_CLI_MISSING"));
-            return;
-          }
-          if (e.code === "ETIMEDOUT") {
-            reject(new PromptOptimizeError("Claude 优化超时，请稍后重试。", "CLAUDE_TIMEOUT"));
-            return;
-          }
-          const msg = (stderr || "").trim() || e.message || "claude 调用失败";
-          reject(new PromptOptimizeError(`Claude CLI 失败：${msg}`, "CLAUDE_CLI_FAILED"));
-          return;
-        }
-        resolve((stdout || "").trim());
-      },
-    );
-    child.stdin?.end(prompt);
-  });
+async function callClaudeText(prompt: string, cwd?: string): Promise<string> {
+  try {
+    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_TIMEOUT_MS });
+  } catch (error) {
+    if (error instanceof ClaudeRunError) {
+      // 翻译成 prompt-optimizer 自己的话术 + 错误码（与原文案保持一致）。
+      if (error.code === "CLAUDE_TIMEOUT") {
+        throw new PromptOptimizeError("Claude 优化超时，请稍后重试。", "CLAUDE_TIMEOUT");
+      }
+      if (error.code === "CLAUDE_EMPTY_RESULT") {
+        throw new PromptOptimizeError("Claude 返回了空结果。", "EMPTY_RESULT");
+      }
+      throw new PromptOptimizeError(error.message, error.code);
+    }
+    throw error;
+  }
 }
 
 function buildOptimizePrompt(userInput: string, language: string): string {

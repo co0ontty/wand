@@ -84,10 +84,11 @@ export function openServicePanel(deps: ServicePanelDeps): void {
           layout.showToast("服务已安装，按 u 先卸载再重装", "warn", 2500);
           return;
         }
-        const ok = await layout.confirm({
-          title: "注册服务",
-          body: "将写入 unit / plist 并启用（无需 sudo，使用用户级服务）。",
-        });
+        const isRoot = typeof process.getuid === "function" ? process.getuid() === 0 : false;
+        const body = `默认装 system-wide(/etc/systemd/system/ 或 /Library/LaunchDaemons/),开机自启、登出不停。${
+          isRoot ? "" : "\n⚠ 需要 root,如果失败请退出 TUI 跑 sudo wand service:install。"
+        }`;
+        const ok = await layout.confirm({ title: "注册服务", body });
         if (!ok) return;
         handleResult("install", installService({ configPath }));
       },

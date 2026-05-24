@@ -16,6 +16,7 @@ import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, nor
 import { buildChildEnv } from "./env-utils.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getResumeCommandSessionId } from "./resume-policy.js";
+import { applyThinkingEffortToPrompt, normalizeThinkingEffort } from "./structured-session-manager.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {
   return /^codex\b/.test(command.trim()) ? "codex" : "claude";
@@ -681,7 +682,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number }): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"] }): SessionSnapshot {
     this.assertCommandAllowed(command);
 
     const baseCwd = cwd
@@ -767,6 +768,7 @@ export class ProcessManager extends EventEmitter {
       knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
+      thinkingEffort: normalizeThinkingEffort(opts?.thinkingEffort),
       // cols 上限 256：与 @wterm/dom WASM grid 的 maxCols 硬编码一致，
       // 防止服务端按 >256 cols 让 Claude 用 CSI 绝对列定位写到 wterm 实际
       // 渲染不到的列上（表现为"内容神奇复制下行"）。
@@ -1090,6 +1092,20 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
+  /**
+   * Set the thinking-effort level for a PTY session. For interactive Claude PTY
+   * we don't intercept raw key input; the effort is applied only when wand UI
+   * sends a chat-view message (see sendInput → applyThinkingEffortToPrompt).
+   */
+  setSessionThinkingEffort(id: string, effort: SessionSnapshot["thinkingEffort"]): SessionSnapshot {
+    const record = this.mustGet(id);
+    const normalized = normalizeThinkingEffort(effort);
+    record.thinkingEffort = normalized;
+    this.persist(record);
+    this.emitEvent({ type: "status", sessionId: id, data: { thinkingEffort: normalized } });
+    return this.snapshot(record);
+  }
+
   sendInput(id: string, input: string, view?: "chat" | "terminal", shortcutKey?: string): SessionSnapshot {
     const record = this.mustGet(id);
 
@@ -1118,12 +1134,21 @@ export class ProcessManager extends EventEmitter {
       this.logger.appendShortcutLog(id, shortcutKey, tailLines, ctx);
     }
 
-    // Track user input via bridge for Chat mode
-    if (record.ptyBridge) {
-      record.ptyBridge.onUserInput(input);
+    // Thinking-depth magic-word injection. Only applied to chat-view submits
+    // (terminal direct keystrokes are pass-through). applyThinkingEffortToPrompt
+    // is safe on empty / lone-\r chunks (returns input unchanged) and won't
+    // double-prefix if the user already wrote the magic word themselves.
+    let effectiveInput = input;
+    if (view === "chat" && record.thinkingEffort && record.thinkingEffort !== "off") {
+      effectiveInput = applyThinkingEffortToPrompt(input, record.thinkingEffort);
     }
 
-    record.ptyProcess.write(input);
+    // Track user input via bridge for Chat mode
+    if (record.ptyBridge) {
+      record.ptyBridge.onUserInput(effectiveInput);
+    }
+
+    record.ptyProcess.write(effectiveInput);
     this.persist(record);
     return this.snapshot(record);
   }
@@ -1390,6 +1415,7 @@ export class ProcessManager extends EventEmitter {
       summary: deriveSessionSummary(messages, record.currentTask?.title ?? null),
       currentTaskTitle: record.status === "running" ? record.currentTask?.title ?? undefined : undefined,
       selectedModel: record.selectedModel ?? null,
+      thinkingEffort: record.thinkingEffort ?? null,
       ptyCols: record.ptyCols,
       ptyRows: record.ptyRows,
     };

@@ -35,13 +35,11 @@ npm run dev -- -c /tmp/wand-test/config.json
 ```
 This keeps config, database, and session artifacts under `/tmp/wand-test/`. The same `-c` flag also works with the compiled binary (`wand web -c /tmp/wand-test/config.json`).
 
-**IMPORTANT: Do NOT touch port 8443.** That is the live production instance. Never kill, restart, or bind to port 8443 during development or testing.
-
 **Testing server (use this for all QA / smoke tests):**
 ```bash
 npm run build && node dist/cli.js web -c /tmp/wand-dev/config.json
 ```
-The test config at `/tmp/wand-dev/config.json` should use port **9443** (edit the `port` field after first `init`). Working directory for test tasks: `/tmp/wand-dev/workspace/`. This keeps everything isolated from the production instance on 8443.
+The test config at `/tmp/wand-dev/config.json` should use its own port (edit the `port` field after first `init`). Working directory for test tasks: `/tmp/wand-dev/workspace/`. This keeps QA isolated from any other wand instance you happen to be running.
 
 **Manual browser QA / release verification:** Open the test server in a browser and verify login, session creation, chat/terminal views, permission prompts, and resume.
 
@@ -78,17 +76,17 @@ cd android
 
 服务端通过 `config.android.apkDir`（相对于 config 目录）查找 APK 文件，按修改时间取最新的。
 
-| 环境 | Config 目录 | APK 目录 | 端口 |
-|------|------------|---------|------|
-| 生产 | `~/.wand/` | `~/.wand/android/` | 8443 |
-| 开发 | `/tmp/wand-dev/` | `/tmp/wand-dev/android/` | 9443 |
+| 环境 | Config 目录 | APK 目录 |
+|------|------------|---------|
+| 默认 | `~/.wand/` | `~/.wand/android/` |
+| 隔离测试 | `/tmp/wand-dev/` | `/tmp/wand-dev/android/` |
 
-**两个目录都要放！** 用户连的是生产服务器（8443），所以 APK 必须放到 `~/.wand/android/`。开发目录只是隔离测试用。
+如果同时在跑默认实例和隔离测试实例，APK 两个目录都要放，否则切到哪个实例就只能下到那边的版本。
 
 ```bash
-# 编译后同时部署到两个目录
+# 编译后同时部署到两个目录（按需）
 cp android/app/build/outputs/apk/debug/app-debug.apk ~/.wand/android/wand-v<VERSION>.apk
-cp android/app/build/outputs/apk/debug/app-debug.apk /tmp/wand-dev/android/wand-<VERSION>.apk
+cp android/app/build/outputs/apk/debug/app-debug.apk /tmp/wand-dev/android/wand-v<VERSION>.apk
 ```
 
 **版本号规则：**
@@ -129,10 +127,10 @@ cd macos
 
 服务端通过 `config.macos.dmgDir`（相对于 config 目录）查找 DMG 文件，按修改时间取最新的。
 
-| 环境 | Config 目录 | DMG 目录 | 端口 |
-|------|------------|---------|------|
-| 生产 | `~/.wand/` | `~/.wand/macos/` | 8443 |
-| 开发 | `/tmp/wand-dev/` | `/tmp/wand-dev/macos/` | 9443 |
+| 环境 | Config 目录 | DMG 目录 |
+|------|------------|---------|
+| 默认 | `~/.wand/` | `~/.wand/macos/` |
+| 隔离测试 | `/tmp/wand-dev/` | `/tmp/wand-dev/macos/` |
 
 ```bash
 cp macos/dist/wand-v<VERSION>.dmg ~/.wand/macos/wand-v<VERSION>.dmg

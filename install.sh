@@ -88,5 +88,111 @@ fi
 info "Initializing wand..."
 wand init
 
+# --- Choose run mode ---
+# 装完后让用户选启动方式。Root 看到 2 项,非 root 看到 3 项:
+#   service  → 系统级 systemd / launchd（root 装；非 root 会 sudo 提权要密码）
+#   user     → 用户级 systemd / launchd（只对非 root 显示;不需要密码;登出会被回收）
+#   oneshot  → 不装服务,以后手动跑 `wand web`
+#
+# 默认 = service（用户敲回车直接走推荐路径）
+# 覆盖两类调用方式都给合理结果:
+#   1) `bash install.sh`     ← 交互终端,read 从 /dev/tty 拿键盘输入
+#   2) `bash <(curl ...)`    ← 一键脚本,stdin 是管道,read 拿不到 → 走默认 service
+# 想完全静默指定:  WAND_INSTALL_MODE=oneshot bash install.sh
 echo ""
-info "Installation complete! Run ${GREEN}wand web${NC} to start."
+IS_ROOT=0
+[ "$(id -u)" -eq 0 ] && IS_ROOT=1
+
+choose_install_mode() {
+  local mode="${WAND_INSTALL_MODE:-}"
+  if [ -n "$mode" ]; then
+    echo "$mode"
+    return
+  fi
+  if [ ! -t 0 ] && [ ! -r /dev/tty ]; then
+    # 非交互且没法读 tty:默认装系统服务（非 root 时会 sudo 提权）
+    echo "service"
+    return
+  fi
+  echo "如何启动 wand？" >&2
+  if [ "$IS_ROOT" -eq 1 ]; then
+    echo "  1) 安装为系统服务（推荐）— 系统级 systemd / launchd,开机自启、崩了自重启" >&2
+    echo "  2) 单次启动 — 之后手动跑 'wand web'" >&2
+  else
+    echo "  1) 安装为系统服务（推荐）— 系统级,开机自启,${YELLOW}要 sudo 密码${NC}" >&2
+    echo "  2) 注册为用户服务 — 用户级 systemd / launchd,${YELLOW}不要 sudo${NC},但登出会被回收" >&2
+    echo "  3) 单次启动 — 不注册服务,之后手动跑 'wand web'" >&2
+  fi
+  local choice
+  read -r -p "选择 [1]: " choice </dev/tty 2>/dev/null || choice=""
+  choice="${choice:-1}"
+  if [ "$IS_ROOT" -eq 1 ]; then
+    case "$choice" in
+      2|oneshot|once) echo "oneshot" ;;
+      *) echo "service" ;;
+    esac
+  else
+    case "$choice" in
+      2|user)            echo "user" ;;
+      3|oneshot|once)    echo "oneshot" ;;
+      *)                 echo "service" ;;
+    esac
+  fi
+}
+
+MODE=$(choose_install_mode)
+
+case "$MODE" in
+  service)
+    # 系统级。Root 直接装;非 root 走 sudo（首次会让用户输密码）
+    info "Installing wand as a system-wide systemd / launchd service..."
+    if [ -n "$SUDO" ]; then
+      info "需要 sudo 密码以写入 /etc/systemd/system/:"
+    fi
+    if $SUDO wand service:install; then
+      info "服务已注册并在后台运行（开机自启）。"
+      echo ""
+      info "查看状态：${GREEN}wand service:status${NC}    ${SUDO:+(读取不要 sudo)}"
+      info "看 日 志：${GREEN}wand service:logs${NC}"
+      info "停止服务：${GREEN}${SUDO:+sudo }wand service:stop${NC}"
+      info "卸载服务：${GREEN}${SUDO:+sudo }wand service:uninstall${NC}"
+      echo ""
+      info "随时打开 TUI 接入运行中的服务：${GREEN}wand web${NC}"
+    else
+      warn "服务安装失败。常见原因：sudo 密码错、systemd 不可用。"
+      warn "想跳过 root 走用户级安装：${GREEN}wand service:install --user${NC}"
+      warn "或先用 ${GREEN}wand web${NC} 启动一次试试。"
+    fi
+    ;;
+  user)
+    # 用户级 systemd / launchd,不要 sudo
+    info "Installing wand as a user-level service (no sudo)..."
+    if wand service:install --user; then
+      info "用户级服务已注册并在后台运行。"
+      if [ "$(uname)" = "Linux" ]; then
+        warn "⚠ 用户登出后服务会被回收。想保持登出后也运行:"
+        info "  ${GREEN}loginctl enable-linger \$USER${NC}"
+      fi
+      echo ""
+      info "查看状态：${GREEN}wand service:status --user${NC}"
+      info "看 日 志：${GREEN}wand service:logs --user${NC}"
+      info "停止服务：${GREEN}wand service:stop --user${NC}"
+      info "卸载服务：${GREEN}wand service:uninstall --user${NC}"
+      echo ""
+      info "随时打开 TUI 接入运行中的服务：${GREEN}wand web${NC}"
+    else
+      warn "用户级服务安装失败（可能 user-systemd 没起来，或 XDG_RUNTIME_DIR 没设）。"
+      warn "可以先用 ${GREEN}wand web${NC} 启动试试。"
+    fi
+    ;;
+  oneshot|*)
+    echo ""
+    info "Installation complete! Run ${GREEN}wand web${NC} to start."
+    if [ "$IS_ROOT" -eq 1 ]; then
+      info "想以后改成后台服务：${GREEN}wand service:install${NC}"
+    else
+      info "想以后改成系统级服务：${GREEN}sudo wand service:install${NC}"
+      info "或不想用 sudo：       ${GREEN}wand service:install --user${NC}（登出会被回收）"
+    fi
+    ;;
+esac

@@ -148,16 +148,60 @@ function clipboardCandidates(): Array<{ cmd: string; args: string[] }> {
   ];
 }
 
-// ─── 系统服务（systemd user / launchd） ──────────────────────────────────
+// ─── 系统服务（systemd system / user / launchd） ─────────────────────────
+
+/**
+ * 服务安装的作用域：
+ *   - "system" = Linux 写 /etc/systemd/system/wand.service；macOS 写 /Library/LaunchDaemons/
+ *                需要 root，开机自启，所有用户可用，不依赖 login session。
+ *   - "user"   = Linux 写 ~/.config/systemd/user/wand.service；macOS 写 ~/Library/LaunchAgents/
+ *                不要 root，登出会被回收（除非 loginctl enable-linger）。
+ *
+ * 默认 system。
+ */
+export type ServiceScope = "system" | "user";
+export const DEFAULT_SERVICE_SCOPE: ServiceScope = "system";
 
 export interface ServiceContext {
   configPath: string;
   /** wand 可执行文件路径。优先使用 process.argv[1]，回退到 which wand。 */
   wandBin?: string;
+  /** 显式指定作用域。不传走 DEFAULT_SERVICE_SCOPE。 */
+  scope?: ServiceScope;
 }
 
-export function isServiceInstalled(): boolean {
-  return existsSync(servicePath());
+export interface ServiceOpts {
+  /** 不传 = 自动检测已装的那个；都没装就用 default。 */
+  scope?: ServiceScope;
+}
+
+/** 当前 process 是不是 root（POSIX）。Windows 永远返回 false。 */
+function isRoot(): boolean {
+  const fn = (process as unknown as { getuid?: () => number }).getuid;
+  if (typeof fn !== "function") return false;
+  try {
+    return fn.call(process) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** 自动检测哪个 scope 已经装了 unit；优先 system，找不到就 user。两个都没装返回 null。 */
+function detectInstalledScope(): ServiceScope | null {
+  if (existsSync(servicePathFor("system"))) return "system";
+  if (existsSync(servicePathFor("user"))) return "user";
+  return null;
+}
+
+/** 给定一个 opts.scope，如果没传就按 detect → default 顺序回退。 */
+function resolveScope(opts?: ServiceOpts): ServiceScope {
+  if (opts?.scope) return opts.scope;
+  return detectInstalledScope() ?? DEFAULT_SERVICE_SCOPE;
+}
+
+export function isServiceInstalled(scope?: ServiceScope): boolean {
+  if (scope) return existsSync(servicePathFor(scope));
+  return detectInstalledScope() !== null;
 }
 
 // ─── 服务状态 / 启停 / 日志 ──────────────────────────────────────────────
@@ -175,9 +219,10 @@ export interface ServiceStatus {
   platform: NodeJS.Platform;
 }
 
-export function serviceStatus(): ServiceStatus {
-  if (process.platform === "linux") return systemdStatus();
-  if (process.platform === "darwin") return launchdStatus();
+export function serviceStatus(opts?: ServiceOpts): ServiceStatus {
+  const scope = resolveScope(opts);
+  if (process.platform === "linux") return systemdStatus(scope);
+  if (process.platform === "darwin") return launchdStatus(scope);
   return {
     installed: false,
     state: "unsupported",
@@ -187,32 +232,35 @@ export function serviceStatus(): ServiceStatus {
   };
 }
 
-export function serviceStart(): CommandResult {
-  if (process.platform === "linux") return runSystemctl(["start", "wand.service"], "已启动");
-  if (process.platform === "darwin") return launchctlLoad();
+export function serviceStart(opts?: ServiceOpts): CommandResult {
+  const scope = resolveScope(opts);
+  if (process.platform === "linux") return runSystemctl(scope, ["start", "wand.service"], "已启动");
+  if (process.platform === "darwin") return launchctlLoad(scope);
   return unsupported();
 }
 
-export function serviceStop(): CommandResult {
-  if (process.platform === "linux") return runSystemctl(["stop", "wand.service"], "已停止");
-  if (process.platform === "darwin") return launchctlUnload();
+export function serviceStop(opts?: ServiceOpts): CommandResult {
+  const scope = resolveScope(opts);
+  if (process.platform === "linux") return runSystemctl(scope, ["stop", "wand.service"], "已停止");
+  if (process.platform === "darwin") return launchctlUnload(scope);
   return unsupported();
 }
 
-export function serviceRestart(): CommandResult {
-  if (process.platform === "linux") return runSystemctl(["restart", "wand.service"], "已重启");
-  if (process.platform === "darwin") return launchdRestart();
+export function serviceRestart(opts?: ServiceOpts): CommandResult {
+  const scope = resolveScope(opts);
+  if (process.platform === "linux") return runSystemctl(scope, ["restart", "wand.service"], "已重启");
+  if (process.platform === "darwin") return launchdRestart(scope);
   return unsupported();
 }
 
 /** 取最近 N 行服务日志。 */
-export function serviceLogs(lines: number = 80): CommandResult {
+export function serviceLogs(lines: number = 80, opts?: ServiceOpts): CommandResult {
+  const scope = resolveScope(opts);
   if (process.platform === "linux") {
-    const r = spawnSync(
-      "journalctl",
-      ["--user", "-u", "wand.service", "-n", String(lines), "--no-pager"],
-      { encoding: "utf8", timeout: 10_000 },
-    );
+    const args = scope === "user"
+      ? ["--user", "-u", "wand.service", "-n", String(lines), "--no-pager"]
+      : ["-u", "wand.service", "-n", String(lines), "--no-pager"];
+    const r = spawnSync("journalctl", args, { encoding: "utf8", timeout: 10_000 });
     if (r.status === 0) return { ok: true, message: `journalctl 输出 ${lines} 行`, detail: r.stdout.trim() };
     return { ok: false, message: "journalctl 调用失败", detail: r.stderr.trim() || `exit ${r.status}` };
   }
@@ -225,24 +273,30 @@ export function serviceLogs(lines: number = 80): CommandResult {
   return unsupported();
 }
 
-function systemdStatus(): ServiceStatus {
-  const installed = isServiceInstalled();
+/** systemctl 调用根据 scope 决定要不要 --user。system scope 也意味着调用方需要 root。 */
+function systemctlBaseArgs(scope: ServiceScope): string[] {
+  return scope === "user" ? ["--user"] : [];
+}
+
+function systemdStatus(scope: ServiceScope): ServiceStatus {
+  const installed = isServiceInstalled(scope);
   if (!installed) {
     return {
       installed: false,
       state: "unknown",
-      description: "未安装 (按 i 注册)",
+      description: `未安装 (${scope} scope)`,
       raw: "",
       platform: "linux",
     };
   }
-  // 用 `systemctl --user is-active` + `show -p ActiveState,SubState,ActiveEnterTimestamp` 拿结构化数据
-  const active = spawnSync("systemctl", ["--user", "is-active", "wand.service"], { encoding: "utf8" });
+  const base = systemctlBaseArgs(scope);
+  // 用 `is-active` + `show -p ...` 拿结构化数据
+  const active = spawnSync("systemctl", [...base, "is-active", "wand.service"], { encoding: "utf8" });
   const stateRaw = (active.stdout || "").trim();
   const show = spawnSync(
     "systemctl",
     [
-      "--user",
+      ...base,
       "show",
       "wand.service",
       "-p",
@@ -257,13 +311,13 @@ function systemdStatus(): ServiceStatus {
     { encoding: "utf8" },
   );
   const props = parseSystemctlShow(show.stdout || "");
-  const status = spawnSync("systemctl", ["--user", "status", "wand.service", "--no-pager", "-n", "5"], {
+  const status = spawnSync("systemctl", [...base, "status", "wand.service", "--no-pager", "-n", "5"], {
     encoding: "utf8",
   });
   const sub = props.SubState || stateRaw;
   const since = props.ActiveEnterTimestamp ? ` since ${props.ActiveEnterTimestamp}` : "";
   const pid = props.MainPID && props.MainPID !== "0" ? ` · PID ${props.MainPID}` : "";
-  const desc = `${stateRaw}${sub ? ` (${sub})` : ""}${since}${pid}`;
+  const desc = `[${scope}] ${stateRaw}${sub ? ` (${sub})` : ""}${since}${pid}`;
 
   let normalized: ServiceStatus["state"] = "unknown";
   if (stateRaw === "active") normalized = "active";
@@ -280,13 +334,13 @@ function systemdStatus(): ServiceStatus {
   };
 }
 
-function launchdStatus(): ServiceStatus {
-  const installed = isServiceInstalled();
+function launchdStatus(scope: ServiceScope): ServiceStatus {
+  const installed = isServiceInstalled(scope);
   if (!installed) {
     return {
       installed: false,
       state: "unknown",
-      description: "未安装 (按 i 注册)",
+      description: `未安装 (${scope} scope)`,
       raw: "",
       platform: "darwin",
     };
@@ -297,18 +351,17 @@ function launchdStatus(): ServiceStatus {
     return {
       installed: true,
       state: "inactive",
-      description: "loaded 但未在运行（launchctl list 找不到）",
+      description: `[${scope}] loaded 但未在运行（launchctl list 找不到）`,
       raw: list.stderr || "",
       platform: "darwin",
     };
   }
-  // launchctl list <label> 给出多行 plist 格式：包含 PID / LastExitStatus
   const text = list.stdout;
   const pidMatch = text.match(/"PID"\s*=\s*(\d+);/);
   const exitMatch = text.match(/"LastExitStatus"\s*=\s*(-?\d+);/);
   const pid = pidMatch ? Number(pidMatch[1]) : 0;
   const lastExit = exitMatch ? Number(exitMatch[1]) : 0;
-  const desc = pid > 0 ? `running · PID ${pid}` : `stopped (last exit=${lastExit})`;
+  const desc = pid > 0 ? `[${scope}] running · PID ${pid}` : `[${scope}] stopped (last exit=${lastExit})`;
   return {
     installed: true,
     state: pid > 0 ? "active" : "inactive",
@@ -318,23 +371,30 @@ function launchdStatus(): ServiceStatus {
   };
 }
 
-function runSystemctl(args: string[], successWord: string): CommandResult {
-  const r = spawnSync("systemctl", ["--user", ...args], { encoding: "utf8", timeout: 15_000 });
+function runSystemctl(scope: ServiceScope, args: string[], successWord: string): CommandResult {
+  const base = systemctlBaseArgs(scope);
+  const r = spawnSync("systemctl", [...base, ...args], { encoding: "utf8", timeout: 15_000 });
+  const scopeLabel = scope === "user" ? "--user " : "";
   if (r.status === 0) {
-    return { ok: true, message: `systemctl --user ${args.join(" ")} ${successWord}` };
+    return { ok: true, message: `systemctl ${scopeLabel}${args.join(" ")} ${successWord}` };
   }
+  // system scope 没拿到 root 是最常见错误，给一个明确提示
+  const stderr = (r.stderr || "").trim();
+  const hint = scope === "system" && !isRoot()
+    ? "\n提示: 系统级服务操作需要 root，请用 sudo 重试。"
+    : "";
   return {
     ok: false,
-    message: `systemctl 失败 (exit ${r.status})`,
-    detail: ((r.stdout || "") + "\n" + (r.stderr || "")).trim(),
+    message: `systemctl ${scopeLabel}${args.join(" ")} 失败 (exit ${r.status})`,
+    detail: ((r.stdout || "") + "\n" + stderr + hint).trim(),
   };
 }
 
-function launchctlLoad(): CommandResult {
-  const plist = servicePath();
-  if (!existsSync(plist)) return { ok: false, message: "未安装 (plist 不存在)" };
+function launchctlLoad(scope: ServiceScope): CommandResult {
+  const plist = servicePathFor(scope);
+  if (!existsSync(plist)) return { ok: false, message: `未安装 (${plist} 不存在)` };
   const r = spawnSync("launchctl", ["load", "-w", plist], { encoding: "utf8", timeout: 10_000 });
-  if (r.status === 0) return { ok: true, message: "已 launchctl load" };
+  if (r.status === 0) return { ok: true, message: `已 launchctl load (${scope})` };
   return {
     ok: false,
     message: `launchctl load 失败 (exit ${r.status})`,
@@ -342,11 +402,11 @@ function launchctlLoad(): CommandResult {
   };
 }
 
-function launchctlUnload(): CommandResult {
-  const plist = servicePath();
-  if (!existsSync(plist)) return { ok: false, message: "未安装 (plist 不存在)" };
+function launchctlUnload(scope: ServiceScope): CommandResult {
+  const plist = servicePathFor(scope);
+  if (!existsSync(plist)) return { ok: false, message: `未安装 (${plist} 不存在)` };
   const r = spawnSync("launchctl", ["unload", plist], { encoding: "utf8", timeout: 10_000 });
-  if (r.status === 0) return { ok: true, message: "已 launchctl unload" };
+  if (r.status === 0) return { ok: true, message: `已 launchctl unload (${scope})` };
   return {
     ok: false,
     message: `launchctl unload 失败 (exit ${r.status})`,
@@ -354,10 +414,10 @@ function launchctlUnload(): CommandResult {
   };
 }
 
-function launchdRestart(): CommandResult {
-  const stop = launchctlUnload();
-  const start = launchctlLoad();
-  if (stop.ok && start.ok) return { ok: true, message: "已 launchd 重启" };
+function launchdRestart(scope: ServiceScope): CommandResult {
+  const stop = launchctlUnload(scope);
+  const start = launchctlLoad(scope);
+  if (stop.ok && start.ok) return { ok: true, message: `已 launchd 重启 (${scope})` };
   return {
     ok: false,
     message: "launchd 重启失败",
@@ -380,23 +440,44 @@ function parseSystemctlShow(text: string): Record<string, string> {
 }
 
 export function installService(ctx: ServiceContext): CommandResult {
-  if (process.platform === "linux") return installSystemdUserService(ctx);
-  if (process.platform === "darwin") return installLaunchdAgent(ctx);
+  const scope = ctx.scope ?? DEFAULT_SERVICE_SCOPE;
+  // system scope 需要 root（除了 Windows，那里两个都不支持）
+  if (scope === "system" && !isRoot() && process.platform !== "win32") {
+    return {
+      ok: false,
+      message: "系统级服务安装需要 root 权限",
+      detail: "请用 sudo 重跑，或传 --user 走用户级安装（不需要 root）。",
+    };
+  }
+  if (process.platform === "linux") return installSystemdService(ctx, scope);
+  if (process.platform === "darwin") return installLaunchdService(ctx, scope);
   return { ok: false, message: `当前平台 ${process.platform} 暂不支持服务注册` };
 }
 
-export function uninstallService(): CommandResult {
-  if (process.platform === "linux") return uninstallSystemdUserService();
-  if (process.platform === "darwin") return uninstallLaunchdAgent();
+export function uninstallService(opts?: ServiceOpts): CommandResult {
+  const scope = resolveScope(opts);
+  if (scope === "system" && !isRoot() && process.platform !== "win32") {
+    return {
+      ok: false,
+      message: "系统级服务卸载需要 root 权限",
+      detail: "请用 sudo 重跑。",
+    };
+  }
+  if (process.platform === "linux") return uninstallSystemdService(scope);
+  if (process.platform === "darwin") return uninstallLaunchdService(scope);
   return { ok: false, message: `当前平台 ${process.platform} 暂不支持服务注册` };
 }
 
-function servicePath(): string {
+function servicePathFor(scope: ServiceScope): string {
   if (process.platform === "linux") {
-    return path.join(os.homedir(), ".config/systemd/user/wand.service");
+    return scope === "user"
+      ? path.join(os.homedir(), ".config/systemd/user/wand.service")
+      : "/etc/systemd/system/wand.service";
   }
   if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library/LaunchAgents/com.wand.web.plist");
+    return scope === "user"
+      ? path.join(os.homedir(), "Library/LaunchAgents/com.wand.web.plist")
+      : "/Library/LaunchDaemons/com.wand.web.plist";
   }
   return "";
 }
@@ -410,18 +491,27 @@ function resolveWandBin(ctx: ServiceContext): string {
   return "wand";
 }
 
-function installSystemdUserService(ctx: ServiceContext): CommandResult {
-  const unitPath = servicePath();
+/** 当前 process 的真实用户名（system unit 里要写 User=）。 */
+function currentUserName(): string {
+  try {
+    return os.userInfo().username || "root";
+  } catch {
+    return process.env.USER || process.env.LOGNAME || "root";
+  }
+}
+
+function installSystemdService(ctx: ServiceContext, scope: ServiceScope): CommandResult {
+  const unitPath = servicePathFor(scope);
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
-  // Restart=always 是关键：自动更新 / /api/restart 走的是 "spawn detached + exit 0"，
-  // 在 systemd 用户服务的 cgroup 下，detached 子进程会随父进程一起被清理（默认
-  // KillMode=control-group），只有 Restart=always 能让 systemd 在 exit 0 后拉起
-  // 新进程，把更新真正生效。
-  const unit = [
+  const nodeBinDir = path.dirname(nodeBin);
+
+  // 共同字段
+  const commonExec = [
     "[Unit]",
     "Description=wand web console",
-    "After=network.target",
+    "After=network-online.target",
+    "Wants=network-online.target",
     "",
     "[Service]",
     "Type=simple",
@@ -429,11 +519,40 @@ function installSystemdUserService(ctx: ServiceContext): CommandResult {
     `Environment=WAND_NO_TUI=1`,
     "Restart=always",
     "RestartSec=3",
-    "",
-    "[Install]",
-    "WantedBy=default.target",
-    "",
-  ].join("\n");
+    "StandardOutput=journal",
+    "StandardError=journal",
+    "SyslogIdentifier=wand",
+  ];
+
+  // system scope 额外要：User= / HOME= / PATH=（systemd 系统级 service 默认 HOME=/root 是不行的，
+  // 而且 PATH 极简，nvm 装的 node spawn 出来的 npm 子进程找不到）
+  let unitLines: string[];
+  if (scope === "system") {
+    const runUser = currentUserName();
+    const runHome = process.env.HOME || os.homedir();
+    unitLines = [
+      ...commonExec,
+      `User=${runUser}`,
+      `WorkingDirectory=${runHome}`,
+      `Environment=HOME=${runHome}`,
+      `Environment=PATH=${nodeBinDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+      "OOMScoreAdjust=-500",
+      "",
+      "[Install]",
+      "WantedBy=multi-user.target",
+      "",
+    ];
+  } else {
+    // user scope: 跑在 user@<uid>.service cgroup 内，HOME/PATH 自带
+    unitLines = [
+      ...commonExec,
+      "",
+      "[Install]",
+      "WantedBy=default.target",
+      "",
+    ];
+  }
+  const unit = unitLines.join("\n");
 
   try {
     mkdirSync(path.dirname(unitPath), { recursive: true });
@@ -442,52 +561,60 @@ function installSystemdUserService(ctx: ServiceContext): CommandResult {
     return { ok: false, message: `写入 unit 失败: ${errMsg(err)}` };
   }
 
-  const reload = spawnSync("systemctl", ["--user", "daemon-reload"], { encoding: "utf8" });
-  const enable = spawnSync("systemctl", ["--user", "enable", "--now", "wand.service"], { encoding: "utf8" });
+  const base = systemctlBaseArgs(scope);
+  const reload = spawnSync("systemctl", [...base, "daemon-reload"], { encoding: "utf8" });
+  const enable = spawnSync("systemctl", [...base, "enable", "--now", "wand.service"], { encoding: "utf8" });
+  const hints = scope === "user"
+    ? "提示: 若需登出后保持运行，请运行 `loginctl enable-linger $USER`"
+    : "提示: 已写入系统级 unit；开机自启已 enable。";
   const detail = [
+    `scope: ${scope}`,
     `unit: ${unitPath}`,
     `daemon-reload: ${reload.status === 0 ? "ok" : `failed (${reload.stderr.trim()})`}`,
     `enable --now: ${enable.status === 0 ? "ok" : `failed (${enable.stderr.trim()})`}`,
     "",
-    "提示: 若需开机自启请运行 `loginctl enable-linger $USER`",
+    hints,
   ].join("\n");
   if (enable.status !== 0) {
     return {
       ok: false,
-      message: "已写入 unit，但 systemctl 启用失败",
+      message: `已写入 unit，但 systemctl ${scope === "user" ? "--user " : ""}启用失败`,
       detail,
     };
   }
   return {
     ok: true,
-    message: `已注册 systemd 用户服务: ${unitPath}`,
+    message: `已注册 systemd ${scope === "user" ? "用户" : "系统"}服务: ${unitPath}`,
     detail,
   };
 }
 
-function uninstallSystemdUserService(): CommandResult {
-  const unitPath = servicePath();
+function uninstallSystemdService(scope: ServiceScope): CommandResult {
+  const unitPath = servicePathFor(scope);
   if (!existsSync(unitPath)) {
-    return { ok: false, message: "未检测到已安装的 systemd 用户服务" };
+    return { ok: false, message: `未检测到已安装的 systemd ${scope} 服务` };
   }
-  const stop = spawnSync("systemctl", ["--user", "disable", "--now", "wand.service"], { encoding: "utf8" });
+  const base = systemctlBaseArgs(scope);
+  const stop = spawnSync("systemctl", [...base, "disable", "--now", "wand.service"], { encoding: "utf8" });
   try {
     unlinkSync(unitPath);
   } catch (err) {
     return { ok: false, message: `删除 unit 失败: ${errMsg(err)}` };
   }
-  spawnSync("systemctl", ["--user", "daemon-reload"], { encoding: "utf8" });
+  spawnSync("systemctl", [...base, "daemon-reload"], { encoding: "utf8" });
   return {
     ok: true,
-    message: "已卸载 systemd 用户服务",
+    message: `已卸载 systemd ${scope === "user" ? "用户" : "系统"}服务`,
     detail: stop.status === 0 ? "disable --now: ok" : `disable --now: ${stop.stderr.trim()}`,
   };
 }
 
-function installLaunchdAgent(ctx: ServiceContext): CommandResult {
-  const plistPath = servicePath();
+function installLaunchdService(ctx: ServiceContext, scope: ServiceScope): CommandResult {
+  const plistPath = servicePathFor(scope);
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
+  // LaunchDaemon (system) 跑在 root，但 wand 数据应该归 ctx.configPath 的 owner；
+  // 简化处理：system 模式下不强制改 owner，让用户自己提前 chown。
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -526,14 +653,14 @@ function installLaunchdAgent(ctx: ServiceContext): CommandResult {
   }
   return {
     ok: true,
-    message: `已注册 launchd 用户代理: ${plistPath}`,
+    message: `已注册 launchd ${scope === "user" ? "用户代理" : "系统守护"}: ${plistPath}`,
   };
 }
 
-function uninstallLaunchdAgent(): CommandResult {
-  const plistPath = servicePath();
+function uninstallLaunchdService(scope: ServiceScope): CommandResult {
+  const plistPath = servicePathFor(scope);
   if (!existsSync(plistPath)) {
-    return { ok: false, message: "未检测到已安装的 launchd 用户代理" };
+    return { ok: false, message: `未检测到已安装的 launchd ${scope} 服务` };
   }
   const unload = spawnSync("launchctl", ["unload", "-w", plistPath], { encoding: "utf8" });
   try {
@@ -543,7 +670,7 @@ function uninstallLaunchdAgent(): CommandResult {
   }
   return {
     ok: true,
-    message: "已卸载 launchd 用户代理",
+    message: `已卸载 launchd ${scope === "user" ? "用户代理" : "系统守护"}`,
     detail: unload.status === 0 ? "unload: ok" : `unload: ${unload.stderr.trim()}`,
   };
 }
