@@ -106,6 +106,13 @@
         terminalHealthTimer: null,
         lastTerminalResyncAt: 0,
         terminalAutoFollow: true,
+        // 程序触发的滚动（wand 主动 scrollTo / wterm 内部因 _shouldScrollToBottom=true
+        // 拽 scrollTop=scrollHeight）落到 scroll handler 时会被误判为"用户滚回严格
+        // 底部"，把 autoFollow 反转回 true，把用户刚 wheel 上滚的意图吞掉。
+        // 存"窗口截止时间戳"而非"开始时间戳"：不同调用方按各自动画长度延长窗口
+        // （瞬时 120ms 覆盖一次 rAF + 事件分发；smooth 500ms 覆盖 Chromium smooth
+        // scroll 动画），多次调用用 Math.max 合并、不会被短窗口缩短。
+        terminalProgrammaticScrollUntil: 0,
         terminalScrollIdleTimer: null,
         terminalScrollIdleMs: 1800,
         terminalScrollThreshold: 12,
@@ -7081,6 +7088,16 @@
         if (!state.terminal) return;
         var viewport = getTerminalViewport();
         if (!viewport) return;
+        // 打"程序触发滚动"窗口：紧跟着的 scroll 事件是 wand 自己拽出来的，
+        // scroll handler 在窗口内跳过 autoFollow 修改，避免"程序拽底 →
+        // scroll 事件 → handler 看到在底 → autoFollow=true"的反馈环把
+        // 用户刚 wheel 上滚的意图覆盖掉。smooth 模式 Chromium 滚动动画约
+        // 300-500ms，瞬时滚动只需覆盖一次 rAF + 事件分发延迟。
+        var windowMs = smooth ? 500 : 120;
+        state.terminalProgrammaticScrollUntil = Math.max(
+          state.terminalProgrammaticScrollUntil,
+          Date.now() + windowMs
+        );
         if (smooth) {
           viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
         } else {
@@ -7487,7 +7504,36 @@
         if (!state.wideParserState) state.wideParserState = createWideParserState();
         var padded = widePadAnsi(data, state.wideParserState);
         var framed = processSyncOutputFraming(padded);
+        // wterm.write 内部用 5px 阈值判定"在底部"，下一帧 _doRender 据此强制
+        // scrollTop = scrollHeight。这与 wand 的 autoFollow（"真正到底"才为
+        // true，2px 阈值）独立，会把用户主动向上滚的几像素吞掉。覆写为 wand
+        // 的 autoFollow 状态，让 autoFollow 成为唯一真相。
+        //
+        // 时序关键：必须在 terminal.write() 之前先覆写一次，否则 wterm 在 write
+        // 内部解析 chunk 时可能同步触发 _doRender → 提前完成 scrollTop=scrollHeight，
+        // write 之后再覆写就晚了一帧，用户上滚位置已被吞。write 之后再覆写一次
+        // 兜底：wterm 在解析 newline / cursor move / scroll region 时可能把
+        // _shouldScrollToBottom 改回 true。
+        var follow = state.terminalAutoFollow !== false;
+        if ("_shouldScrollToBottom" in terminal) {
+          terminal._shouldScrollToBottom = follow;
+        }
         if (framed) terminal.write(framed);
+        if ("_shouldScrollToBottom" in terminal) {
+          terminal._shouldScrollToBottom = follow;
+        }
+        // wterm 按 follow=true 真的 scrollTop=scrollHeight 时会触发一次程序性的
+        // scroll 事件 — 打窗口，让 scroll handler 不要误判为"用户滚回底部"。
+        // **只在 follow=true 时打**：follow=false 时 wterm 不会拽底，没有程序事件
+        // 要过滤；如果这里也打标，Claude 流式输出 chunk <120ms 一个会让窗口永
+        // 不过期，scroll handler 永远 early return，用户哪怕滚回严格底部 autoFollow
+        // 也回不到 true，再也走不出"上滚阅读"模式。
+        if (follow) {
+          state.terminalProgrammaticScrollUntil = Math.max(
+            state.terminalProgrammaticScrollUntil,
+            Date.now() + 120
+          );
+        }
         // R6: 在 chunk 热路径上识别原地重绘序列（CSI nA/B/C/D/f/H/J/K），
         // 节流安排一次 softResync 兜底。Claude 用相对光标位移重画菜单时，
         // 如果 NEW-A 的 sync output buffer 因某种原因没拦截到完整帧（比如
@@ -7495,13 +7541,6 @@
         // 错位。此 fallback 仅在真出现错位序列时触发，正常输出零开销。
         // 与 R2 策略 A 配合：移除被动 5 处触发后，这是唯一的主动救场路径。
         maybeScheduleResyncForChunk(data);
-        // wterm.write 内部用 5px 阈值判定"在底部"，下一帧 _doRender 据此强制
-        // scrollTop = scrollHeight。这与 wand 的 autoFollow（"真正到底"才为
-        // true，2px 阈值）独立，会把用户主动向上滚的几像素吞掉。覆写为 wand
-        // 的 autoFollow 状态，让 autoFollow 成为唯一真相。
-        if ("_shouldScrollToBottom" in terminal) {
-          terminal._shouldScrollToBottom = state.terminalAutoFollow !== false;
-        }
       }
 
       function resetWideParserState() {
@@ -7919,6 +7958,16 @@
           var viewport = getTerminalViewport();
           if (viewport) {
             state.terminalViewportScrollHandler = function() {
+              // 程序触发的 scroll（wand 主动 scrollTo / wterm 内部
+              // _doRender 因 _shouldScrollToBottom=true 拽 scrollTop=scrollHeight）
+              // 也会进这里。如果不过滤，handler 会看到 isTerminalAtBottom()=true
+              // 把 autoFollow 反转回 true，把用户刚上滚的意图吞掉，下一帧 chunk
+              // 到达又被拽底，形成"上滚→拽底"反馈环。窗口长度由调用方按
+              // 各自动画长度决定（瞬时 120ms / smooth 500ms）。
+              if (Date.now() < state.terminalProgrammaticScrollUntil) {
+                updateTerminalJumpToBottomButton();
+                return;
+              }
               // 严格"真正到底"才恢复 autoFollow：避免 wheel 设 false 后被
               // 紧接着的 scroll 事件因"接近底部 12px"而反转回 true。
               if (isTerminalAtBottom()) {
