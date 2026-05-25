@@ -1,22 +1,28 @@
     // Register Service Worker for PWA
-    // For self-signed certificates, we need to handle certificate errors gracefully
+    // 自签证书场景下 SW 注册会被浏览器强拒（规范要求 secure context + 证书可信，
+    // 即便用户已"高级 → 继续访问"也不行）。这里只能优雅降级，并把解决路径打到 console。
     if ('serviceWorker' in navigator) {
-      // First, try to fetch the service worker script with a custom handler for certificate errors
       fetch('/sw.js', { cache: 'no-cache' })
         .then(function(response) {
           if (response.ok) {
             return navigator.serviceWorker.register('/sw.js');
           }
-          // If fetch fails (e.g., certificate error), skip service worker registration
           console.log('SW fetch failed, skipping service worker registration');
           return Promise.reject('Service worker script not available');
         })
         .catch(function(e) {
-          // Distinguish between certificate errors and other failures
-          if (e.name === 'TypeError' || e.message.includes('certificate')) {
-            console.log('SW registration skipped: likely self-signed certificate issue');
+          var msg = (e && e.message) || String(e || '');
+          var isCertIssue = (e && e.name === 'TypeError') || /certificate|SSL|ERR_CERT/i.test(msg);
+          if (isCertIssue && location.protocol === 'https:') {
+            console.warn(
+              '[wand] PWA / Service Worker 因 TLS 证书不可信而跳过。\n' +
+              '解决办法（任选一种）：\n' +
+              '  1) 从 ' + location.origin + '/cert/server.crt 下载本机自签证书，导入到系统/浏览器"受信任根证书颁发机构"\n' +
+              '  2) 在本机用 mkcert 签发受信任证书，并在 ~/.wand/config.json 配置 tls.certPath / tls.keyPath\n' +
+              '  3) 用内网 CA 或 Let\'s Encrypt 给域名签真证书（同上配置 tls）'
+            );
           } else {
-            console.log('SW registration failed:', e.message || e);
+            console.log('SW registration failed:', msg);
           }
         });
 
@@ -137,11 +143,9 @@
         })(), // 跨会话排队消息 [{ id, text, cwd, mode, tool }]
         structuredInputQueue: [], // 结构化会话同会话排队消息
         // 排队条 UI 局部状态 ——
-        //   queueBarExpanded: 折叠条点击展开成下拉面板
-        //   queueBarItemExpanded: 展开面板里被点开看完整内容的 item 下标集合
+        //   queueBarHoverIndex: 当前被鼠标悬停的气泡下标（null 时默认展开队首）
         //   queueBarDrag: 拖拽排序进行中时的临时状态（pointer 捕获、起始坐标、参考 rect）
-        queueBarExpanded: false,
-        queueBarItemExpanded: {},
+        queueBarHoverIndex: null,
         queueBarDrag: null,
         drafts: {},
         isSyncingInputBox: false,
@@ -293,9 +297,6 @@
         fileExplorerCwd: "",
         fileExplorerTruncated: false,
         fileExplorerTotal: 0,
-        fileExplorerShowHidden: (function() {
-          try { return localStorage.getItem("wand-file-show-hidden") === "1"; } catch (e) { return false; }
-        })(),
         claudeHistory: [],
         claudeHistoryLoaded: false,
         claudeHistoryExpanded: true,
@@ -1686,12 +1687,6 @@
                     '<span class="file-side-panel-title">文件</span>' +
                   '</div>' +
                   '<div class="file-side-panel-header-actions">' +
-                    '<button class="file-side-panel-iconbtn file-explorer-toggle-hidden' +
-                      (state.fileExplorerShowHidden ? ' active' : '') + '" id="file-explorer-toggle-hidden" type="button" title="' +
-                      (state.fileExplorerShowHidden ? "隐藏点开头文件" : "显示隐藏文件") + '" aria-pressed="' +
-                      (state.fileExplorerShowHidden ? "true" : "false") + '" aria-label="切换显示隐藏文件">' +
-                      wandFileIcon(state.fileExplorerShowHidden ? "eye" : "eye-off", { size: 15 }) +
-                    '</button>' +
                     '<button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="刷新" aria-label="刷新文件列表">' +
                       wandFileIcon("refresh", { size: 15 }) +
                     '</button>' +
@@ -1760,6 +1755,10 @@
                 '</div>' +
               '</div>' +
               '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
+                // 排队气泡宿主：默认 display:none，updateQueueBar() 在 queuedMessages 非空时
+                // 显形。位置在 composer-top-row（含 "回复中" 状态条）之上，对话框右下角，
+                // 不进入输入框内部。所有内容由 updater 注入；这里只保留稳定的外层骨架。
+                '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
                 '<div class="composer-top-row">' +
                   '<div id="todo-progress" class="todo-progress hidden">' +
                     '<div class="todo-progress-header" id="todo-progress-toggle">' +
@@ -1780,11 +1779,6 @@
                     '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
                   '</div>' +
                 '</div>' +
-                // 排队条宿主：默认 display:none，updateQueueBar() 在 queuedMessages 非空时
-                // 显形。结构上夹在 composer-top-row（todo 进度）和 input-composer（输入框 +
-                // 工具栏）之间，位置正好"在输入框上方、对话框右下角"。所有内容由 updater
-                // 注入；这里只保留稳定的外层骨架，便于 renderAppShell 全量重建后无缝复位。
-                '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
                 '<div class="input-composer">' +
                   '<button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="提示词优化（AI）" aria-label="提示词优化">' +
                     '<svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -3990,8 +3984,7 @@
           cwdEl.title = cwd;
         }
         var url = "/api/directory?q=" + encodeURIComponent(cwd) +
-          "&gitStatus=true" +
-          (state.fileExplorerShowHidden ? "&showHidden=true" : "");
+          "&gitStatus=true";
         fetch(url, { credentials: "same-origin" })
           .then(function(res) {
             if (!res.ok) throw new Error("Failed to load directory.");
@@ -4154,8 +4147,7 @@
         var iconEl2 = item.querySelector(".tree-icon");
         if (iconEl2) iconEl2.textContent = "📂";
         var url = "/api/directory?q=" + encodeURIComponent(p) +
-          "&gitStatus=true" +
-          (state.fileExplorerShowHidden ? "&showHidden=true" : "");
+          "&gitStatus=true";
         fetch(url, { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(payload) {
@@ -4185,20 +4177,6 @@
         if (!parent) parent = "/";
         if (parent === cwd) return;
         refreshFileExplorer({ cwd: parent });
-      }
-
-      // Toggle the show-hidden flag and persist it.
-      function toggleExplorerHidden() {
-        state.fileExplorerShowHidden = !state.fileExplorerShowHidden;
-        try { localStorage.setItem("wand-file-show-hidden", state.fileExplorerShowHidden ? "1" : "0"); } catch (e) {}
-        var btn = document.getElementById("file-explorer-toggle-hidden");
-        if (btn) {
-          btn.classList.toggle("active", state.fileExplorerShowHidden);
-          btn.setAttribute("aria-pressed", state.fileExplorerShowHidden ? "true" : "false");
-          btn.innerHTML = wandFileIcon(state.fileExplorerShowHidden ? "eye" : "eye-off", { size: 15 });
-          btn.title = state.fileExplorerShowHidden ? "隐藏点开头文件" : "显示隐藏文件";
-        }
-        refreshFileExplorer();
       }
 
       function appendToComposer(text) {
@@ -6390,8 +6368,6 @@
         if (fileRefresh) fileRefresh.addEventListener("click", function() { refreshFileExplorer(); });
         var fileUp = document.getElementById("file-explorer-up");
         if (fileUp) fileUp.addEventListener("click", navigateExplorerUp);
-        var fileToggleHidden = document.getElementById("file-explorer-toggle-hidden");
-        if (fileToggleHidden) fileToggleHidden.addEventListener("click", toggleExplorerHidden);
 
         // 路径输入框：支持点击修改路径，回车跳转，Esc 撤销。
         var fileCwdInput = document.getElementById("file-explorer-cwd");
@@ -6840,14 +6816,8 @@
         setupVisualViewportHandlers();
 
         // 排队条：每次 shell 重渲后，重新挂事件代理 + 刷新内容。
-        // document-level 的 ESC / 外点击 handler 只挂一次（state.__queueBarGlobalAttached 守门）。
         attachQueueBarDelegates();
         updateQueueBar();
-        if (!state.__queueBarGlobalAttached) {
-          state.__queueBarGlobalAttached = true;
-          document.addEventListener("pointerdown", handleQueueBarOutsideClick, true);
-          document.addEventListener("keydown", handleQueueBarKeydown, true);
-        }
       }
 
       function saveWorkingDir(path) {
@@ -12483,104 +12453,79 @@
       }
 
       // ──────────────────────────────────────────────────────────────────────────
-      // 排队条（.queue-bar）—— 输入框上方独立浮条，承担三个事情：
-      //   1) 折叠态：● 排队 N + 队尾预览 + ⌃ chevron + ⚡ 立即 按钮
-      //   2) 展开面板：列出所有排队消息，支持拖拽换序 / 单条删除 / 一键清空
-      //   3) 立即按钮：中断当前回复，把队首作为新消息插队发出去（剩余队列保留）
-      // 数据源：session.queuedMessages（由后端 WS 推送 + postStructuredInput 乐观更新）。
+      // 排队气泡条（.queue-bar）—— 垂直堆叠，浮在 "回复中" 状态条上方。
+      // 交互参考 iOS 通讯录右侧的字母选择条：
+      //   · 默认只展开队首（即下一个要发的那条），显示编号 + 文本 + × 删除
+      //   · 其他消息收起成一根小横杠（指示存在但不占空间）
+      //   · 鼠标悬到任意小横杠 → 该条展开、原本展开的那条收回小横杠
+      //   · 悬停期间可以按住展开的那条向上 / 向下拖拽 → 换序
+      // 末尾跟一个 ⚡ "立即" 按钮：中断当前回复、把队首作为新输入插队发出去。
+      // 数据源：session.queuedMessages（后端 WS + postStructuredInput 乐观更新）。
       // ──────────────────────────────────────────────────────────────────────────
 
-      var QUEUE_BAR_MAX = 10; // 后端硬上限
+      var QUEUE_BAR_MAX = 10;            // 后端硬上限
+      var QUEUE_CHIP_MAX_TEXT = 24;      // 单个气泡展开时显示的字数上限
 
-      function queueBarTruncatePreview(text) {
+      function queueChipTruncate(text) {
         if (typeof text !== "string") return "";
         var s = text.replace(/\s+/g, " ").trim();
-        if (s.length <= 48) return s;
-        return s.slice(0, 46) + "…";
+        if (s.length <= QUEUE_CHIP_MAX_TEXT) return s;
+        return s.slice(0, QUEUE_CHIP_MAX_TEXT) + "…";
       }
 
-      function renderQueueBarSkeleton(count, latestPreview, inFlight, atCapacity, immediateLabel) {
-        // 折叠条 + 展开面板的 HTML 一次性渲染好，靠 .queue-bar.expanded class 切换可见性。
-        // 这样展开/收起不需要拼字符串，纯 class toggle，动画也好做。
-        var dotClass = inFlight ? "queue-bar-dot queue-bar-dot-pulse" : "queue-bar-dot";
+      // 当前应该展开的下标：拖拽中 → 被拖的那条（data-index 不变）；hover → 被 hover 的；否则 → 第 0 项
+      function queueBarExpandedIndex(itemsLength) {
+        if (state.queueBarDrag && typeof state.queueBarDrag.origIndex === "number") {
+          return state.queueBarDrag.origIndex;
+        }
+        if (typeof state.queueBarHoverIndex === "number"
+            && state.queueBarHoverIndex >= 0
+            && state.queueBarHoverIndex < itemsLength) {
+          return state.queueBarHoverIndex;
+        }
+        return 0;
+      }
+
+      function renderQueueBarHtml(items, inFlight, atCapacity, immediateLabel) {
+        var single = items.length <= 1;
         var barClass = "queue-bar";
-        if (state.queueBarExpanded) barClass += " expanded";
         if (atCapacity) barClass += " queue-bar-capacity";
         if (inFlight) barClass += " queue-bar-inflight";
-        var html =
-          '<div class="' + barClass + '" data-queue-bar="1">' +
-            '<button type="button" class="queue-bar-toggle" data-action="toggle"' +
-                   ' aria-expanded="' + (state.queueBarExpanded ? "true" : "false") + '"' +
-                   ' title="点击查看 / 收起排队消息">' +
-              '<span class="' + dotClass + '" aria-hidden="true"></span>' +
-              '<span class="queue-bar-count">' + (atCapacity ? "队列已满 " : "排队 ") + count + '</span>' +
-              '<span class="queue-bar-sep" aria-hidden="true">·</span>' +
-              '<span class="queue-bar-preview">' + escapeHtml(latestPreview) + '</span>' +
-              '<svg class="queue-bar-chevron" width="11" height="11" viewBox="0 0 24 24"' +
-                  ' fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"' +
-                  ' stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>' +
-            '</button>' +
-            '<span class="queue-bar-divider" aria-hidden="true"></span>' +
-            '<button type="button" class="queue-bar-promote" data-action="promote"' +
-                   ' title="中断当前回复，立刻发送队首这条" aria-label="立即发送队首">' +
-              '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-                '<path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/>' +
-              '</svg>' +
-              '<span class="queue-bar-promote-label">' + escapeHtml(immediateLabel) + '</span>' +
-            '</button>' +
-            '<div class="queue-bar-panel" data-queue-panel="1" role="region" aria-label="排队消息列表">' +
-              '<div class="queue-bar-panel-header">' +
-                '<span class="queue-bar-panel-title">' + iconSvg("inbox", { size: 13, strokeWidth: 1.7, cls: "queue-bar-panel-title-icon" }) + '<span>排队中 (' + count + ')</span></span>' +
-                '<button type="button" class="queue-bar-clear" data-action="clear"' +
-                       (count === 0 ? " disabled" : "") + '>清空</button>' +
-                '<button type="button" class="queue-bar-collapse" data-action="collapse" aria-label="收起">' +
-                  '收起' +
-                  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
-                      ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-                      '<polyline points="6 9 12 15 18 9"/></svg>' +
-                '</button>' +
-              '</div>' +
-              '<ol class="queue-bar-list" data-queue-list="1"></ol>' +
-            '</div>' +
-          '</div>';
-        return html;
-      }
-
-      function renderQueueBarItems(listEl, items) {
-        // ol 内容单独 render —— 拖拽 / 删除 / 展开会频繁动它，外层骨架不重建避免抖动。
-        var single = items.length <= 1;
-        var html = "";
+        var expandedIdx = queueBarExpandedIndex(items.length);
+        var chips = "";
         for (var i = 0; i < items.length; i++) {
           var raw = items[i] == null ? "" : String(items[i]);
-          var expanded = !!state.queueBarItemExpanded[i];
+          var isExpanded = i === expandedIdx;
           var itemClass = "queue-bar-item";
-          if (expanded) itemClass += " expanded";
+          if (isExpanded) itemClass += " expanded";
           if (single) itemClass += " queue-bar-item-single";
-          html +=
-            '<li class="' + itemClass + '" data-index="' + i + '">' +
-              '<button type="button" class="queue-bar-item-drag" data-action="drag" aria-label="拖动调整顺序"' +
-                     ' title="按住拖动调整顺序"' + (single ? " disabled" : "") + '>' +
-                '<svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden="true">' +
-                  '<circle cx="2.2" cy="2.2" r="1.2"/><circle cx="7.8" cy="2.2" r="1.2"/>' +
-                  '<circle cx="2.2" cy="7"   r="1.2"/><circle cx="7.8" cy="7"   r="1.2"/>' +
-                  '<circle cx="2.2" cy="11.8" r="1.2"/><circle cx="7.8" cy="11.8" r="1.2"/>' +
-                '</svg>' +
-              '</button>' +
-              '<span class="queue-bar-item-index">#' + (i + 1) + '</span>' +
-              '<button type="button" class="queue-bar-item-text" data-action="expand-text"' +
-                     ' aria-expanded="' + (expanded ? "true" : "false") + '"' +
-                     ' title="点击展开 / 收起完整内容">' +
-                escapeHtml(raw) +
-              '</button>' +
+          // 拖拽起手区是整个 chip，但 delete 按钮要独占点击。
+          var titleAttr = isExpanded ? raw + "（按住可拖动调整顺序）" : raw;
+          chips +=
+            '<li class="' + itemClass + '" data-index="' + i + '" data-action="drag"' +
+                ' title="' + escapeHtml(titleAttr) + '">' +
+              '<span class="queue-bar-item-index" aria-hidden="true">' + (i + 1) + '</span>' +
+              '<span class="queue-bar-item-text">' + escapeHtml(queueChipTruncate(raw)) + '</span>' +
               '<button type="button" class="queue-bar-item-delete" data-action="delete"' +
-                     ' aria-label="删除这条排队消息" title="删除">' +
-                '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
-                    ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                    ' aria-label="删除这条排队消息" title="删除" tabindex="' + (isExpanded ? "0" : "-1") + '">' +
+                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+                    ' stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
                     '<line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>' +
               '</button>' +
             '</li>';
         }
-        listEl.innerHTML = html;
+        return (
+          '<div class="' + barClass + '" data-queue-bar="1">' +
+            '<ol class="queue-bar-list" data-queue-list="1">' + chips + '</ol>' +
+            '<button type="button" class="queue-bar-promote" data-action="promote"' +
+                  ' title="中断当前回复，立刻发送队首这条"' +
+                  ' aria-label="' + escapeHtml(immediateLabel) + '队首">' +
+              '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+                '<path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/>' +
+              '</svg>' +
+            '</button>' +
+          '</div>'
+        );
       }
 
       function updateQueueBar() {
@@ -12592,62 +12537,48 @@
         queue = Array.isArray(queue) ? queue : [];
 
         if (!isStructured || queue.length === 0) {
-          // 队列空 / 非结构化会话：整条隐藏，并清掉展开/逐条展开的本地态。
           host.hidden = true;
           host.innerHTML = "";
-          state.queueBarExpanded = false;
-          state.queueBarItemExpanded = {};
+          state.queueBarHoverIndex = null;
           return;
         }
+
+        // 拖拽进行中绝不重建 DOM，否则 pointer capture 丢失、气泡闪屏。
+        if (state.queueBarDrag) return;
 
         host.hidden = false;
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
         var atCapacity = queue.length >= QUEUE_BAR_MAX;
-        var latest = queueBarTruncatePreview(queue[queue.length - 1]);
-        // inFlight=false 时按钮语义从"插队"退化为"立刻发"；文案一并切换让用户不疑惑。
         var immediateLabel = inFlight ? "立即" : "发送";
 
-        // 拖拽进行中绝不重建骨架，否则 pointer capture 丢失、items 闪屏。
-        // 只更新列表内容（且如果数量不变也跳过整段重排）。
-        var existing = host.querySelector(".queue-bar");
-        if (state.queueBarDrag && existing) {
-          var listInDrag = existing.querySelector('[data-queue-list="1"]');
-          if (listInDrag && listInDrag.children.length !== queue.length) {
-            renderQueueBarItems(listInDrag, queue);
-          }
-          return;
-        }
-
-        host.innerHTML = renderQueueBarSkeleton(queue.length, latest, inFlight, atCapacity, immediateLabel);
-        var listEl = host.querySelector('[data-queue-list="1"]');
-        if (listEl) renderQueueBarItems(listEl, queue);
+        host.innerHTML = renderQueueBarHtml(queue, inFlight, atCapacity, immediateLabel);
       }
 
-      // ── 折叠 / 展开 ──
-      function setQueueBarExpanded(expanded) {
-        var next = !!expanded;
-        if (state.queueBarExpanded === next) return;
-        state.queueBarExpanded = next;
-        if (!next) state.queueBarItemExpanded = {};
-        updateQueueBar();
-      }
-      function toggleQueueBar() { setQueueBarExpanded(!state.queueBarExpanded); }
-
-      function handleQueueBarOutsideClick(ev) {
-        if (!state.queueBarExpanded) return;
+      // 只切换 .expanded class，不重建 DOM —— 避免鼠标移过去触发的重建
+      // 让拖拽/输入框焦点等丢失。所有同步状态（hoverIndex / drag）的改变都通过这里反映到 DOM。
+      function reflectQueueBarExpansion() {
         var host = document.getElementById("queue-bar-host");
-        if (!host) return;
-        if (host.contains(ev.target)) return;
-        setQueueBarExpanded(false);
-      }
-      function handleQueueBarKeydown(ev) {
-        if (!state.queueBarExpanded) return;
-        if (ev.key === "Escape" || ev.key === "Esc") {
-          setQueueBarExpanded(false);
-          // 焦点回到 toggle 按钮，方便键盘党
-          var toggle = document.querySelector(".queue-bar-toggle");
-          if (toggle) toggle.focus();
+        if (!host || host.hidden) return;
+        var list = host.querySelector('[data-queue-list="1"]');
+        if (!list) return;
+        var children = list.children;
+        var expandedIdx = queueBarExpandedIndex(children.length);
+        for (var i = 0; i < children.length; i++) {
+          var el = children[i];
+          var should = i === expandedIdx;
+          if (el.classList.contains("expanded") !== should) {
+            el.classList.toggle("expanded", should);
+            var del = el.querySelector('.queue-bar-item-delete');
+            if (del) del.tabIndex = should ? 0 : -1;
+          }
         }
+      }
+
+      function setQueueBarHoverIndex(idx) {
+        var next = (idx == null ? null : Number(idx));
+        if (state.queueBarHoverIndex === next) return;
+        state.queueBarHoverIndex = next;
+        reflectQueueBarExpansion();
       }
 
       // ── 单条删除 / 全部清空 / 队首插队 ──
@@ -12666,15 +12597,11 @@
         if (index < 0 || index >= queue.length) return;
         var prev = queue.slice();
         var next = queue.slice(0, index).concat(queue.slice(index + 1));
-        // 调整 queueBarItemExpanded 的下标偏移
-        var nextExpanded = {};
-        Object.keys(state.queueBarItemExpanded).forEach(function(k) {
-          var i = Number(k);
-          if (i === index) return;
-          if (i > index) nextExpanded[i - 1] = state.queueBarItemExpanded[k];
-          else nextExpanded[i] = state.queueBarItemExpanded[k];
-        });
-        state.queueBarItemExpanded = nextExpanded;
+        // hover 下标也要随之收缩，否则删完后展开的是错位的那条
+        if (typeof state.queueBarHoverIndex === "number") {
+          if (state.queueBarHoverIndex === index) state.queueBarHoverIndex = null;
+          else if (state.queueBarHoverIndex > index) state.queueBarHoverIndex -= 1;
+        }
         updateSessionSnapshot({ id: session.id, queuedMessages: next });
         var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
@@ -12702,7 +12629,7 @@
         if (!session) return;
         var prev = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
         if (prev.length === 0) return;
-        state.queueBarItemExpanded = {};
+        state.queueBarHoverIndex = null;
         updateSessionSnapshot({ id: session.id, queuedMessages: [] });
         var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
@@ -12736,20 +12663,12 @@
         var prev = queue.slice();
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
 
-        // 乐观：剥掉队首
-        state.queueBarItemExpanded = (function() {
-          var out = {};
-          Object.keys(state.queueBarItemExpanded).forEach(function(k) {
-            var i = Number(k);
-            if (i === 0) return;
-            out[i - 1] = state.queueBarItemExpanded[k];
-          });
-          return out;
-        })();
+        // 乐观：剥掉队首；hover 下标随之收缩
+        if (typeof state.queueBarHoverIndex === "number") {
+          if (state.queueBarHoverIndex === 0) state.queueBarHoverIndex = null;
+          else state.queueBarHoverIndex -= 1;
+        }
         updateSessionSnapshot({ id: session.id, queuedMessages: rest });
-
-        // 收起面板，让用户视线回到 chat（新消息马上要进 user turn）
-        setQueueBarExpanded(false);
 
         var idempotencyKey = (typeof crypto !== "undefined" && crypto.randomUUID)
           ? crypto.randomUUID()
@@ -12795,53 +12714,78 @@
         });
       }
 
-      // ── 拖拽排序（Pointer Events + 简化版 sort/animate）──
-      function queueBarDragStart(ev, handleEl) {
+      // ── 拖拽排序（Pointer Events + 真实高度的 sort/animate）──
+      function queueBarDragStart(ev, chipEl) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return;
         var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
         if (queue.length <= 1) return;
-        var itemEl = handleEl.closest(".queue-bar-item");
-        if (!itemEl) return;
-        var listEl = itemEl.parentElement;
+        if (!chipEl) return;
+        var listEl = chipEl.parentElement;
         if (!listEl) return;
-        var origIndex = Number(itemEl.getAttribute("data-index"));
+        var origIndex = Number(chipEl.getAttribute("data-index"));
         var siblings = Array.prototype.slice.call(listEl.children);
         var rects = siblings.map(function(el) { return el.getBoundingClientRect(); });
-        var rect0 = rects[origIndex];
-        var itemHeight = rect0.height;
-        var gap = 6; // 与 CSS .queue-bar-list 的 gap 保持一致
+        // 真实间距：相邻两个 chip 的 top 差减去前一个高度（容错 hover 状态变化后的高度切换）
+        var gap = 3;
+        if (rects.length >= 2) gap = Math.max(0, rects[1].top - rects[0].top - rects[0].height);
 
         ev.preventDefault();
-        try { handleEl.setPointerCapture(ev.pointerId); } catch (_e) {}
+        try { chipEl.setPointerCapture(ev.pointerId); } catch (_e) {}
         if (navigator && navigator.vibrate) { try { navigator.vibrate(8); } catch (_e2) {} }
 
         state.queueBarDrag = {
           pointerId: ev.pointerId,
-          handleEl: handleEl,
-          itemEl: itemEl,
+          handleEl: chipEl,
+          itemEl: chipEl,
           listEl: listEl,
           siblings: siblings,
           rects: rects,
           origIndex: origIndex,
           targetIndex: origIndex,
           startY: ev.clientY,
-          itemHeight: itemHeight,
           gap: gap,
           queueSnapshot: queue,
         };
 
-        itemEl.classList.add("dragging");
+        chipEl.classList.add("dragging");
+        // 让被拖元素保持 expanded（即便鼠标已经离开它）
+        reflectQueueBarExpansion();
         // 把所有兄弟先标记为"参与平滑动画"
-        siblings.forEach(function(el) { if (el !== itemEl) el.classList.add("queue-bar-item-sliding"); });
+        siblings.forEach(function(el) { if (el !== chipEl) el.classList.add("queue-bar-item-sliding"); });
 
         var move = function(e) { queueBarDragMove(e); };
         var up = function(e) { queueBarDragEnd(e); };
         state.queueBarDrag.moveHandler = move;
         state.queueBarDrag.upHandler = up;
-        handleEl.addEventListener("pointermove", move);
-        handleEl.addEventListener("pointerup", up);
-        handleEl.addEventListener("pointercancel", up);
+        chipEl.addEventListener("pointermove", move);
+        chipEl.addEventListener("pointerup", up);
+        chipEl.addEventListener("pointercancel", up);
+      }
+
+      // 给定 origIndex / target / 真实 rects，算出新排列下每个 sibling 的目标 top。
+      // 用真实高度而不是固定 shift，因为 expanded chip 比 collapsed 高很多。
+      function queueBarComputeNewTops(origIndex, target, rects, gap) {
+        var n = rects.length;
+        var order = [];
+        for (var i = 0; i < n; i++) order.push(i);
+        order.splice(origIndex, 1);
+        order.splice(target, 0, origIndex);
+        var top = rects[0].top;
+        // list 是右对齐 column flex，所有元素相对 list 左边对齐 — 我们只关心 top
+        // 用第一个 rect 的 top 作为锚点累加。
+        // 但 list 起始位置不一定是 rects[0].top（rects[0] 现在变到 order[0] 的位置）
+        // 这里需要找原本的 list top —— 取 rects 里最小 top 即可。
+        var listTop = rects[0].top;
+        for (var k = 1; k < n; k++) if (rects[k].top < listTop) listTop = rects[k].top;
+        var newTops = {};
+        var cursor = listTop;
+        for (var newPos = 0; newPos < n; newPos++) {
+          var oldIdx = order[newPos];
+          newTops[oldIdx] = cursor;
+          cursor += rects[oldIdx].height + gap;
+        }
+        return newTops;
       }
 
       function queueBarDragMove(ev) {
@@ -12862,13 +12806,11 @@
         }
         if (target !== d.targetIndex) {
           d.targetIndex = target;
-          // 重排兄弟元素的 translateY
-          var shift = d.itemHeight + d.gap;
+          // 按真实高度精确算每个 sibling 的新 top
+          var newTops = queueBarComputeNewTops(d.origIndex, target, d.rects, d.gap);
           d.siblings.forEach(function(el, idx) {
             if (idx === d.origIndex) return;
-            var move = 0;
-            if (d.origIndex < target && idx > d.origIndex && idx <= target) move = -shift;
-            else if (d.origIndex > target && idx < d.origIndex && idx >= target) move = shift;
+            var move = newTops[idx] - d.rects[idx].top;
             el.style.transform = move ? "translateY(" + move + "px)" : "";
           });
         }
@@ -12908,14 +12850,8 @@
         order.splice(targetIndex, 0, origIndex);
         var nextQueue = order.map(function(i) { return queueSnapshot[i]; });
 
-        // 同步迁移 queueBarItemExpanded 下标
-        var nextExpanded = {};
-        Object.keys(state.queueBarItemExpanded).forEach(function(k) {
-          var oldI = Number(k);
-          var newI = order.indexOf(oldI);
-          if (newI >= 0) nextExpanded[newI] = state.queueBarItemExpanded[k];
-        });
-        state.queueBarItemExpanded = nextExpanded;
+        // hover 下标迁移到新位置（拖拽放手时鼠标停在 targetIndex 上）
+        state.queueBarHoverIndex = targetIndex;
 
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) { updateQueueBar(); return; }
@@ -12950,33 +12886,36 @@
           var actionEl = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
           if (!actionEl || !host.contains(actionEl)) return;
           var action = actionEl.getAttribute("data-action");
-          if (action === "drag") return; // 拖拽由 pointerdown 处理，吞掉点击避免误触发
+          if (action === "drag") return; // 拖拽由 pointerdown 处理，吞掉 click
           ev.preventDefault();
           ev.stopPropagation();
-          if (action === "toggle") { toggleQueueBar(); return; }
-          if (action === "collapse") { setQueueBarExpanded(false); return; }
           if (action === "promote") { queueBarPromoteHead(); return; }
-          if (action === "clear") { queueBarClearAll(); return; }
           if (action === "delete") {
             var itemEl = actionEl.closest(".queue-bar-item");
             if (itemEl) queueBarDeleteItem(Number(itemEl.getAttribute("data-index")));
             return;
           }
-          if (action === "expand-text") {
-            var item = actionEl.closest(".queue-bar-item");
-            if (!item) return;
-            var idx = Number(item.getAttribute("data-index"));
-            state.queueBarItemExpanded[idx] = !state.queueBarItemExpanded[idx];
-            item.classList.toggle("expanded", !!state.queueBarItemExpanded[idx]);
-            actionEl.setAttribute("aria-expanded", state.queueBarItemExpanded[idx] ? "true" : "false");
-            return;
-          }
         });
+        // hover 跟随：鼠标移到哪一条，哪一条就展开（拖拽进行中不响应，免得抢拖拽）
+        host.addEventListener("mouseover", function(ev) {
+          if (state.queueBarDrag) return;
+          var chip = ev.target && ev.target.closest ? ev.target.closest(".queue-bar-item") : null;
+          if (!chip || !host.contains(chip)) return;
+          setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
+        });
+        host.addEventListener("mouseleave", function() {
+          if (state.queueBarDrag) return;
+          setQueueBarHoverIndex(null);
+        });
+        // 整个气泡都是拖拽起手区。delete / promote 按钮通过 closest 检查跳过
         host.addEventListener("pointerdown", function(ev) {
           if (ev.button !== undefined && ev.button !== 0) return;
-          var handle = ev.target && ev.target.closest ? ev.target.closest('[data-action="drag"]') : null;
-          if (!handle || handle.disabled) return;
-          queueBarDragStart(ev, handle);
+          if (ev.target && ev.target.closest && ev.target.closest('[data-action="delete"], [data-action="promote"]')) return;
+          var chip = ev.target && ev.target.closest ? ev.target.closest('.queue-bar-item') : null;
+          if (!chip) return;
+          // 拖拽前先把这条切到 expanded（鼠标按下时通常已经 hovered，但触屏没 hover）
+          setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
+          queueBarDragStart(ev, chip);
         });
       }
 

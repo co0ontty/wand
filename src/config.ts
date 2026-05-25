@@ -450,6 +450,16 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     ...input,
     // Ensure https is boolean
     https: typeof input.https === "boolean" ? input.https : defaults.https,
+    tls: (() => {
+      if (!input.tls || typeof input.tls !== "object") return undefined;
+      const certPath = typeof input.tls.certPath === "string" ? input.tls.certPath.trim() : "";
+      const keyPath = typeof input.tls.keyPath === "string" ? input.tls.keyPath.trim() : "";
+      if (!certPath && !keyPath) return undefined;
+      return {
+        ...(certPath ? { certPath } : {}),
+        ...(keyPath ? { keyPath } : {}),
+      };
+    })(),
     defaultCwd:
       typeof input.defaultCwd === "string" && input.defaultCwd.trim()
         ? input.defaultCwd

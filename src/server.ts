@@ -11,7 +11,16 @@ import path from "node:path";
 import process from "node:process";
 import { WebSocketServer } from "ws";
 import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
-import { createSession, revokeSession, setAuthStorage, validateSession } from "./auth.js";
+import {
+  createSession,
+  readSessionCookie,
+  revokeSession,
+  SESSION_COOKIE_HTTP,
+  SESSION_COOKIE_HTTPS,
+  SESSION_COOKIE_LEGACY,
+  setAuthStorage,
+  validateSession,
+} from "./auth.js";
 import { ensureCertificates } from "./cert.js";
 import { buildChildEnv } from "./env-utils.js";
 import {
@@ -445,19 +454,14 @@ async function enrichWithGitStatus(items: FileEntry[], dirPath: string): Promise
 
 // ── Auth helpers ──
 
-function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (!validateSession(readSessionCookie(req))) {
-    res.status(401).json({ error: "未授权，请先登录。" });
-    return;
-  }
-  next();
-}
-
-function readSessionCookie(req: { headers: { cookie?: string } }): string | undefined {
-  const cookie = req.headers.cookie;
-  if (!cookie) return undefined;
-  const match = cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("wand_session="));
-  return match?.slice("wand_session=".length);
+function buildRequireAuth(useHttps: boolean) {
+  return function requireAuth(req: Request, res: Response, next: NextFunction): void {
+    if (!validateSession(readSessionCookie(req, useHttps))) {
+      res.status(401).json({ error: "未授权，请先登录。" });
+      return;
+    }
+    next();
+  };
 }
 
 // ── App connection token helpers ──
@@ -854,25 +858,6 @@ function mimeForExt(ext: string): string {
   return MIME_BY_EXT[ext.toLowerCase()] || "application/octet-stream";
 }
 
-/** Hidden files that should still surface even when "show hidden" is off. */
-const HIDDEN_ALLOWLIST = new Set<string>([
-  ".gitignore", ".gitattributes", ".gitmodules",
-  ".env", ".env.local", ".env.example",
-  ".editorconfig", ".prettierrc", ".eslintrc",
-  ".dockerignore", ".npmrc", ".nvmrc",
-  ".browserslistrc", ".babelrc",
-]);
-
-function isHiddenEntry(name: string): boolean {
-  if (!name.startsWith(".")) return false;
-  if (HIDDEN_ALLOWLIST.has(name)) return false;
-  // Common patterns like `.env.production` are also kept visible
-  for (const allowed of HIDDEN_ALLOWLIST) {
-    if (name.startsWith(allowed + ".")) return false;
-  }
-  return true;
-}
-
 // ── Main server ──
 
 export interface ServerUrl {
@@ -904,6 +889,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger);
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
+  const requireAuth = buildRequireAuth(useHttps);
   const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
 
   app.use(express.json({ limit: "1mb" }));
@@ -1033,18 +1019,34 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
     resetRateLimit(clientIp);
     const token = createSession();
-    res.cookie("wand_session", token, {
+    const cookieOpts = {
       httpOnly: true,
-      sameSite: "strict",
-      secure: useHttps,
+      sameSite: "strict" as const,
+      path: "/",
       maxAge: 1000 * 60 * 60 * 12,
-    });
+    };
+    // 主 cookie：按 scheme 分名字，避免被旧的同名 Secure cookie 阻挡覆盖。
+    // 兼容 cookie `wand_session`：老 macOS APP（WandAuth.swift 写死了找 `wand_session`）需要这份才能登录。
+    //   - HTTPS 模式：legacy 也带 Secure，浏览器与 APP 都能用
+    //   - HTTP 模式：legacy 不带 Secure。浏览器场景下若之前留有同名 Secure cookie 会被 Strict Secure
+    //     Cookies 拦截（无害噪音，主 cookie `wand_session_local` 兜得住）；APP 走 native cookie API
+    //     不受这条策略约束，能正确拿到
+    if (useHttps) {
+      res.cookie(SESSION_COOKIE_HTTPS, token, { ...cookieOpts, secure: true });
+      res.cookie(SESSION_COOKIE_LEGACY, token, { ...cookieOpts, secure: true });
+    } else {
+      res.cookie(SESSION_COOKIE_HTTP, token, { ...cookieOpts, secure: false });
+      res.cookie(SESSION_COOKIE_LEGACY, token, { ...cookieOpts, secure: false });
+    }
     res.json({ ok: true });
   });
 
   app.post("/api/logout", (req, res) => {
-    revokeSession(readSessionCookie(req));
-    res.clearCookie("wand_session");
+    revokeSession(readSessionCookie(req, useHttps));
+    // 全部名字都清一遍，避免遗留 cookie 在下次同源访问时被回放。
+    for (const name of [SESSION_COOKIE_HTTPS, SESSION_COOKIE_HTTP, SESSION_COOKIE_LEGACY]) {
+      res.clearCookie(name, { path: "/" });
+    }
     res.json({ ok: true });
   });
 
@@ -1142,7 +1144,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   // Public probe so the unauthenticated browser does not log a 401 on /api/config
   app.get("/api/session-check", (req, res) => {
-    res.json({ authed: validateSession(readSessionCookie(req)) });
+    res.json({ authed: validateSession(readSessionCookie(req, useHttps)) });
   });
 
   app.use("/api", requireAuth);
@@ -1539,17 +1541,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   app.get("/api/directory", async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q : "";
     const includeGitStatus = req.query.gitStatus === "true";
-    const showHidden = req.query.showHidden === "true";
     const targetPath = path.resolve(q || config.defaultCwd);
-    if (isBlockedFolderPath(targetPath)) {
-      res.status(403).json({ error: "访问被拒绝：无法访问系统敏感目录。" });
-      return;
-    }
 
     try {
       const entries = await readdir(targetPath, { withFileTypes: true });
-      const visible = showHidden ? entries : entries.filter((e) => !isHiddenEntry(e.name));
-      const sorted = visible.sort((a, b) => {
+      const sorted = entries.sort((a, b) => {
         if (a.isDirectory() && !b.isDirectory()) return -1;
         if (!a.isDirectory() && b.isDirectory()) return 1;
         return a.name.localeCompare(b.name);
@@ -1967,7 +1963,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         const entries = await readdir(dirPath, { withFileTypes: true });
         for (const entry of entries) {
           if (results.length >= maxResults) break;
-          if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
           const entryPath = path.join(dirPath, entry.name);
           const nameLower = entry.name.toLowerCase();
           const matchIndex = nameLower.indexOf(queryLower);
@@ -2033,12 +2028,36 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   // ── WebSocket broadcast layer ──
 
+  let activeSslCertPath: string | null = null;
   const server = useHttps
     ? (() => {
-        const ssl = ensureCertificates(resolveConfigDir(configPath));
+        const ssl = ensureCertificates(resolveConfigDir(configPath), {
+          userCertPath: config.tls?.certPath,
+          userKeyPath: config.tls?.keyPath,
+        });
+        activeSslCertPath = ssl.certPath;
         return createHttpsServer({ key: ssl.key, cert: ssl.cert }, app);
       })()
     : createHttpServer(app);
+
+  // 公开下载当前证书 —— 方便从手机/其他终端拉证书并导入信任链。
+  // 不鉴权：证书本身是公开材料（不含私钥），泄露不影响安全。
+  if (useHttps && activeSslCertPath) {
+    const certPath = activeSslCertPath;
+    app.get("/cert/server.crt", (_req, res) => {
+      try {
+        if (!existsSync(certPath)) {
+          res.status(404).type("text/plain").send("证书文件不存在");
+          return;
+        }
+        res.setHeader("Content-Type", "application/x-x509-ca-cert");
+        res.setHeader("Content-Disposition", 'attachment; filename="wand-server.crt"');
+        res.send(readFileSync(certPath));
+      } catch (err) {
+        res.status(500).type("text/plain").send(`读取证书失败: ${getErrorMessage(err, "未知错误")}`);
+      }
+    });
+  }
 
   const wss = new WebSocketServer({
     server,
@@ -2049,7 +2068,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       concurrencyLimit: 10,
     },
   });
-  const wsManager = new WsBroadcastManager(wss, () => config.cardDefaults ?? {});
+  const wsManager = new WsBroadcastManager(wss, () => config.cardDefaults ?? {}, useHttps);
   wsManager.setup((id) => structuredSessions.get(id) ?? processes.get(id));
 
   // Wire process events to WebSocket broadcast

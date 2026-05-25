@@ -2,10 +2,23 @@ import Foundation
 
 /// Token-based login against wand 服务端 `/api/login`，对称 Android `ConnectActivity.testConnectionWithToken`。
 ///
-/// 服务端不接受 `?token=` query 参数（`requireAuth` 只读 `wand_session` cookie），所以原生壳必须
-/// 用 appToken 走一次 `/api/login`，拿到 `Set-Cookie: wand_session=...` 注入 `WKHTTPCookieStore`，
+/// 服务端不接受 `?token=` query 参数（`requireAuth` 只读 cookie），所以原生壳必须
+/// 用 appToken 走一次 `/api/login`，拿到 `Set-Cookie` 头里的 session cookie 注入 `WKHTTPCookieStore`，
 /// 然后 WebView 加载 SPA 时才会带着已认证的 cookie。
+///
+/// 服务端按 scheme 发不同名字的 cookie（详见 src/auth.ts SESSION_COOKIE_*）：
+///   - HTTPS：`__Host-wand_session` + 兼容 `wand_session`
+///   - HTTP：`wand_session_local`
+/// 这里按"任一即可"的策略匹配，以兼容服务端版本演进。
 enum WandAuth {
+
+    /// 服务端可能发送的所有 session cookie 名字。任一存在即视为登录成功。
+    /// 顺序无关——`WKHTTPCookieStore` 会把所有 cookie 注入，浏览器请求时按 scheme 选合适的发送。
+    static let sessionCookieNames: Set<String> = [
+        "__Host-wand_session",
+        "wand_session_local",
+        "wand_session",
+    ]
 
     enum Failure: Error {
         case invalidURL
@@ -32,7 +45,7 @@ enum WandAuth {
     static func loginWithToken(serverURL: URL,
                                appToken: String,
                                timeout: TimeInterval = 15,
-                               completion: @escaping (Result<HTTPCookie, Failure>) -> Void) {
+                               completion: @escaping (Result<[HTTPCookie], Failure>) -> Void) {
         guard let loginURL = URL(string: "/api/login", relativeTo: serverURL)?.absoluteURL else {
             completion(.failure(.invalidURL))
             return
@@ -65,8 +78,9 @@ enum WandAuth {
                     if let k = key as? String, let v = value as? String { headers[k] = v }
                 }
                 let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: loginURL)
-                if let cookie = cookies.first(where: { $0.name == "wand_session" }) {
-                    completion(.success(cookie))
+                let sessionCookies = cookies.filter { sessionCookieNames.contains($0.name) }
+                if !sessionCookies.isEmpty {
+                    completion(.success(sessionCookies))
                 } else {
                     completion(.failure(.noCookie))
                 }

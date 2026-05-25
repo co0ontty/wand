@@ -30,18 +30,25 @@ struct WebContainerView: NSViewRepresentable {
 
         context.coordinator.attach(webView: webView, serverURL: serverURL)
 
-        // 有 token：先调 /api/login 拿 wand_session cookie 注入 WKHTTPCookieStore，再加载主页。
+        // 有 token：先调 /api/login 拿 session cookie 注入 WKHTTPCookieStore，再加载主页。
         // 对称 Android ConnectActivity.testConnectionWithToken → CookieManager.setCookie。
+        // 服务端可能按 scheme 同时下发多份 cookie（__Host-wand_session / wand_session_local /
+        // 兼容用的 wand_session），这里全部注入，浏览器请求时按 scheme 选合适的发送。
         // 没有 token：当成裸 URL，直接加载，由用户在 SPA 内部登录。
         let cookieStore = cfg.websiteDataStore.httpCookieStore
         if let token, !token.isEmpty {
             NSLog("[Wand] token-login before load: %@", serverURL.absoluteString)
             WandAuth.loginWithToken(serverURL: serverURL, appToken: token) { result in
                 switch result {
-                case .success(let cookie):
+                case .success(let cookies):
                     DispatchQueue.main.async {
-                        cookieStore.setCookie(cookie) {
-                            NSLog("[Wand] cookie injected, loading %@", serverURL.absoluteString)
+                        let group = DispatchGroup()
+                        for cookie in cookies {
+                            group.enter()
+                            cookieStore.setCookie(cookie) { group.leave() }
+                        }
+                        group.notify(queue: .main) {
+                            NSLog("[Wand] %d cookie(s) injected, loading %@", cookies.count, serverURL.absoluteString)
                             webView.load(URLRequest(url: serverURL))
                         }
                     }

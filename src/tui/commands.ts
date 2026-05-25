@@ -491,6 +491,41 @@ function resolveWandBin(ctx: ServiceContext): string {
   return "wand";
 }
 
+/**
+ * 构造写入 service unit 的 PATH，要覆盖以下来源（按优先级、去重）：
+ *   1. nodeBinDir —— 保证 service 用的 node 和 install 时的一致
+ *   2. process.env.PATH —— 调用 install 的终端 PATH，里面包含用户实际能跑通的 claude/codex 等
+ *   3. 常见用户级 bin 兜底（~/.local/bin / ~/.npm-global/bin / ~/bin）—— 防 sudo 把 PATH 收窄
+ *   4. /usr/local/... 等系统标准路径
+ * 用 sudo 装系统级服务时 `process.env.PATH` 会被 secure_path 替换为极简集合，
+ * 所以兜底路径不能省，否则又退化回 "command not found" 现场。
+ */
+function buildServicePath(nodeBinDir: string, home: string): string {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string | undefined): void => {
+    if (!raw) return;
+    for (const seg of raw.split(":")) {
+      const trimmed = seg.trim();
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      out.push(trimmed);
+    }
+  };
+  push(nodeBinDir);
+  push(process.env.PATH);
+  push(`${home}/.local/bin`);
+  push(`${home}/.npm-global/bin`);
+  push(`${home}/bin`);
+  push("/usr/local/sbin");
+  push("/usr/local/bin");
+  push("/usr/sbin");
+  push("/usr/bin");
+  push("/sbin");
+  push("/bin");
+  return out.join(":");
+}
+
 /** 当前 process 的真实用户名（system unit 里要写 User=）。 */
 function currentUserName(): string {
   try {
@@ -505,6 +540,12 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
   const nodeBinDir = path.dirname(nodeBin);
+  const runHome = process.env.HOME || os.homedir();
+  // 关键：把调用 `wand service:install` 时的真实 PATH 写进 unit。
+  // 否则 systemd 默认 PATH 极简（system scope 之前写死 `nodeBin:/usr/local/...`，
+  // user scope 干脆没写），spawn 出的 claude/codex 子进程会撞 "command not found"
+  // ——比如 claude 装在 ~/.local/bin、npm global 装在 ~/.npm-global/bin 都不在默认 PATH 里。
+  const servicePath = buildServicePath(nodeBinDir, runHome);
 
   // 共同字段
   const commonExec = [
@@ -517,6 +558,7 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
     "Type=simple",
     `ExecStart=${nodeBin} ${wandBin} web -c ${ctx.configPath}`,
     `Environment=WAND_NO_TUI=1`,
+    `Environment=PATH=${servicePath}`,
     "Restart=always",
     "RestartSec=3",
     "StandardOutput=journal",
@@ -524,18 +566,14 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
     "SyslogIdentifier=wand",
   ];
 
-  // system scope 额外要：User= / HOME= / PATH=（systemd 系统级 service 默认 HOME=/root 是不行的，
-  // 而且 PATH 极简，nvm 装的 node spawn 出来的 npm 子进程找不到）
   let unitLines: string[];
   if (scope === "system") {
     const runUser = currentUserName();
-    const runHome = process.env.HOME || os.homedir();
     unitLines = [
       ...commonExec,
       `User=${runUser}`,
       `WorkingDirectory=${runHome}`,
       `Environment=HOME=${runHome}`,
-      `Environment=PATH=${nodeBinDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
       "OOMScoreAdjust=-500",
       "",
       "[Install]",
@@ -543,7 +581,8 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
       "",
     ];
   } else {
-    // user scope: 跑在 user@<uid>.service cgroup 内，HOME/PATH 自带
+    // user scope: 跑在 user@<uid>.service cgroup 内，HOME 自带；PATH 也要写，
+    // systemd 用户实例默认 PATH 同样不含 ~/.local/bin、nvm、npm-global 这些。
     unitLines = [
       ...commonExec,
       "",
@@ -613,6 +652,10 @@ function installLaunchdService(ctx: ServiceContext, scope: ServiceScope): Comman
   const plistPath = servicePathFor(scope);
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
+  const nodeBinDir = path.dirname(nodeBin);
+  const runHome = process.env.HOME || os.homedir();
+  // 与 systemd 同理：launchd 默认 PATH 极简，spawn 出的 claude 会找不到。
+  const servicePath = buildServicePath(nodeBinDir, runHome);
   // LaunchDaemon (system) 跑在 root，但 wand 数据应该归 ctx.configPath 的 owner；
   // 简化处理：system 模式下不强制改 owner，让用户自己提前 chown。
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -631,6 +674,8 @@ function installLaunchdService(ctx: ServiceContext, scope: ServiceScope): Comman
   <key>EnvironmentVariables</key>
   <dict>
     <key>WAND_NO_TUI</key><string>1</string>
+    <key>PATH</key><string>${servicePath}</string>
+    <key>HOME</key><string>${runHome}</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

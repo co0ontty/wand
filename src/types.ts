@@ -91,6 +91,15 @@ export interface WandConfig {
   port: number;
   /** Enable HTTPS with self-signed certificate (default: false) */
   https?: boolean;
+  /**
+   * 可选：使用用户自备的 TLS 证书/私钥（PEM 格式）。配了 `certPath` + `keyPath`
+   * 且文件可读时，将跳过自签证书生成。用 mkcert/Let's Encrypt 等签的证书时，
+   * 浏览器视为受信任，PWA / Service Worker 才能正常注册。
+   */
+  tls?: {
+    certPath?: string;
+    keyPath?: string;
+  };
   password: string;
   defaultMode: ExecutionMode;
   shell: string;

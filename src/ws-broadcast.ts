@@ -6,7 +6,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { EventEmitter } from "node:events";
 import type { CardExpandDefaults, SessionSnapshot, ProcessEvent } from "./types.js";
-import { validateSession } from "./auth.js";
+import { readSessionCookie, validateSession } from "./auth.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 
 export type { ProcessEvent } from "./types.js";
@@ -56,16 +56,22 @@ export class WsBroadcastManager {
   private heartbeatTimer?: NodeJS.Timeout;
 
   private getCardDefaults: () => CardExpandDefaults;
+  private useHttps: boolean;
 
-  constructor(wss: WebSocketServer, getCardDefaults?: () => CardExpandDefaults) {
+  constructor(
+    wss: WebSocketServer,
+    getCardDefaults?: () => CardExpandDefaults,
+    useHttps = false,
+  ) {
     this.wss = wss;
     this.getCardDefaults = getCardDefaults ?? (() => ({}));
+    this.useHttps = useHttps;
   }
 
   /** Set up connection handling. Should be called once during server startup. */
   setup(getSession: (id: string) => SessionSnapshot | null): void {
     this.wss.on("connection", (ws, req) => {
-      const sessionToken = this.readSessionCookie(req);
+      const sessionToken = readSessionCookie(req, this.useHttps);
 
       if (!sessionToken || !validateSession(sessionToken)) {
         ws.close(1008, "Unauthorized");
@@ -346,10 +352,4 @@ export class WsBroadcastManager {
     }
   }
 
-  private readSessionCookie(req: { headers: { cookie?: string } }): string | undefined {
-    const cookie = req.headers.cookie;
-    if (!cookie) return undefined;
-    const match = cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("wand_session="));
-    return match?.slice("wand_session=".length);
-  }
 }

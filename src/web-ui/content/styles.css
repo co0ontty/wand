@@ -3846,6 +3846,7 @@
        横向溢出都不应该冒到聊天容器，由它们各自的内部滚动负责。 */
     .chat-messages {
       flex: 1;
+      min-width: 0;
       overflow-y: auto;
       overflow-x: hidden;
       display: flex;
@@ -6358,19 +6359,18 @@
     }
 
     /* ─────────────────────────────────────────────────────────────────────
-       排队消息条（.queue-bar）—— 浮在 .input-composer 上方，靠 .queue-bar-host
-       右对齐到对话框右下角。结构：
-         .queue-bar (折叠条 row)
-           ├ .queue-bar-toggle  (● 排队 N · 预览 ⌃)
-           ├ .queue-bar-divider
-           ├ .queue-bar-promote (⚡ 立即)
-           └ .queue-bar-panel   (展开后下拉的消息列表，默认隐)
-       展开时给 .queue-bar 加 .expanded class，CSS 控制 panel 显形 + chevron 翻转。
+       排队消息条（.queue-bar）—— 浮在 "回复中" 状态条上方，垂直堆叠。
+       交互参考 iOS 通讯录右侧字母选择条：
+         · 默认只展开队首 chip（橙色完整气泡，显示编号 + 文本 + × 删除）
+         · 其他 chip 收成一根小横杠（橙色细线，宽 32px 高 4px）
+         · 鼠标悬到任一横杠 → 该条展开、原本展开的收回横杠
+         · 悬停期间可按住任意位置上下拖拽换序，整条 chip 都是拖拽起手区
+       末尾是独立的 ⚡ 立即按钮：中断当前回复，把队首作为新输入插队发出去。
        ───────────────────────────────────────────────────────────────────── */
     .queue-bar-host {
       display: flex;
       justify-content: flex-end;
-      padding: 0 6px 6px;
+      padding: 4px 8px 0;
       position: relative;
       z-index: 2;
       pointer-events: none; /* host 自身不挡点击，bar 内子节点 auto */
@@ -6380,358 +6380,199 @@
     .queue-bar {
       pointer-events: auto;
       position: relative;
-      display: inline-flex;
-      align-items: stretch;
-      gap: 0;
-      width: 340px;
-      max-width: calc(100% - 4px);
-      height: 38px;
-      padding: 0;
-      border-radius: 999px;
-      background: linear-gradient(180deg, #fffaf2 0%, #f6ead8 100%);
-      box-shadow:
-        0 0 0 1.2px rgba(197, 101, 61, 0.42),
-        inset 0 1px 0 rgba(255, 255, 255, 0.85),
-        var(--shadow-sm);
-      transition: box-shadow var(--transition-fast), transform var(--transition-fast);
-      animation: queueBarEnter 220ms ease-out both;
-    }
-    .queue-bar:hover {
-      transform: translateY(-1px);
-      box-shadow:
-        0 0 0 1.2px rgba(197, 101, 61, 0.55),
-        inset 0 1px 0 rgba(255, 255, 255, 0.9),
-        var(--shadow-md);
-    }
-    .queue-bar.queue-bar-capacity {
-      box-shadow:
-        0 0 0 1.4px rgba(169, 106, 47, 0.6),
-        inset 0 1px 0 rgba(255, 255, 255, 0.85),
-        var(--shadow-sm);
-    }
-    .queue-bar.queue-bar-inflight {
-      animation: queueBarEnter 220ms ease-out both, queuePulse 1.6s ease-in-out 220ms infinite;
-    }
-    @keyframes queueBarEnter {
-      from { opacity: 0; transform: translateY(4px) scale(0.98); }
-      to   { opacity: 1; transform: translateY(0)   scale(1); }
-    }
-
-    .queue-bar-toggle {
-      flex: 1 1 auto;
-      min-width: 0;
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 0 10px 0 14px;
-      border: none;
-      background: transparent;
-      cursor: pointer;
-      font: inherit;
-      color: var(--text-primary);
-      border-radius: 999px 0 0 999px;
-      text-align: left;
-    }
-    .queue-bar-toggle:focus-visible {
-      outline: 2px solid var(--border-focus);
-      outline-offset: -2px;
-    }
-    .queue-bar-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--accent);
-      flex-shrink: 0;
-      box-shadow: 0 0 0 2px rgba(197, 101, 61, 0.18);
-    }
-    .queue-bar-dot.queue-bar-dot-pulse {
-      animation: queueDotPulse 1.0s ease-in-out infinite;
-    }
-    .queue-bar-count {
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: var(--accent);
-      letter-spacing: 0.02em;
-      flex-shrink: 0;
-      line-height: 1;
-    }
-    .queue-bar-sep {
-      color: var(--text-muted);
-      opacity: 0.55;
-      font-size: 0.7rem;
-      flex-shrink: 0;
-    }
-    .queue-bar-preview {
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-      flex: 1 1 auto;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      line-height: 1;
-    }
-    .queue-bar-chevron {
-      color: var(--text-tertiary);
-      flex-shrink: 0;
-      transition: transform 180ms ease-out;
-    }
-    .queue-bar.expanded .queue-bar-chevron {
-      transform: rotate(180deg);
-      color: var(--accent);
-    }
-
-    .queue-bar-divider {
-      width: 1px;
-      background: rgba(197, 101, 61, 0.28);
-      margin: 7px 0;
-      flex-shrink: 0;
-    }
-
-    .queue-bar-promote {
-      flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 0 14px 0 12px;
-      border: none;
-      cursor: pointer;
-      font: inherit;
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: #fff;
-      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-active) 100%);
-      border-radius: 0 999px 999px 0;
-      letter-spacing: 0.04em;
-      transition: filter var(--transition-fast), transform var(--transition-fast);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
-    }
-    .queue-bar-promote:hover { filter: brightness(1.06); }
-    .queue-bar-promote:active { transform: scale(0.97); }
-    .queue-bar-promote:focus-visible {
-      outline: 2px solid var(--border-focus);
-      outline-offset: 2px;
-    }
-    .queue-bar-promote svg { flex-shrink: 0; }
-    .queue-bar-promote-label { line-height: 1; }
-
-    /* 展开面板：默认折叠（不可见 + 不占空间），加 .expanded 时滑出 */
-    .queue-bar-panel {
-      position: absolute;
-      right: 0;
-      bottom: calc(100% + 8px);
-      width: min(380px, calc(100vw - 24px));
-      max-height: 280px;
       display: flex;
       flex-direction: column;
-      background: var(--bg-elevated);
-      border-radius: 14px;
-      box-shadow:
-        0 0 0 1px var(--border-default),
-        var(--shadow-lg);
-      overflow: hidden;
-      opacity: 0;
-      transform: scale(0.96) translateY(4px);
-      transform-origin: bottom right;
-      pointer-events: none;
-      transition: opacity 180ms ease-out, transform 180ms ease-out;
+      align-items: flex-end;
+      gap: 4px;
+      max-width: min(360px, calc(100vw - 24px));
+      animation: queueBarEnter 220ms ease-out both;
     }
-    .queue-bar.expanded .queue-bar-panel {
-      opacity: 1;
-      transform: scale(1) translateY(0);
-      pointer-events: auto;
+    @keyframes queueBarEnter {
+      from { opacity: 0; transform: translateY(4px) scale(0.96); }
+      to   { opacity: 1; transform: translateY(0)   scale(1); }
     }
-
-    .queue-bar-panel-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 9px 12px;
-      border-bottom: 1px solid var(--border-subtle);
-      background: linear-gradient(180deg, rgba(246, 234, 216, 0.55) 0%, transparent 100%);
-    }
-    .queue-bar-panel-title {
-      font-size: 0.78rem;
-      font-weight: 600;
-      color: var(--text-primary);
-      flex: 1 1 auto;
-      min-width: 0;
-    }
-    .queue-bar-clear,
-    .queue-bar-collapse {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      padding: 3px 9px;
-      border: 1px solid transparent;
-      background: transparent;
-      cursor: pointer;
-      font: inherit;
-      font-size: 0.7rem;
-      color: var(--text-tertiary);
-      border-radius: 8px;
-      transition: all var(--transition-fast);
-      line-height: 1;
-    }
-    .queue-bar-clear:hover:not([disabled]) {
-      color: var(--danger);
-      background: var(--danger-muted);
-      border-color: rgba(178, 79, 69, 0.25);
-    }
-    .queue-bar-clear[disabled] {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-    .queue-bar-collapse:hover {
-      color: var(--accent);
-      background: var(--accent-muted);
-    }
-    .queue-bar-collapse svg { flex-shrink: 0; }
 
     .queue-bar-list {
       list-style: none;
       margin: 0;
-      padding: 6px;
+      padding: 0;
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      overflow-y: auto;
-      overscroll-behavior: contain;
-      flex: 1 1 auto;
-      min-height: 0;
+      align-items: flex-end;
+      gap: 3px;
+      width: 100%;
     }
 
+    /* 折叠态 chip：一根小横杠（橙色细线，cursor 提示"可指"） */
     .queue-bar-item {
       display: flex;
-      align-items: flex-start;
-      gap: 6px;
-      padding: 8px 8px 8px 4px;
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0;
+      height: 5px;
+      width: 32px;
+      padding: 0;
+      border: none;
+      border-radius: 999px;
+      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
+      box-shadow: 0 1px 2px rgba(197, 101, 61, 0.25);
+      color: #fff;
+      cursor: pointer;
+      overflow: hidden;
       position: relative;
-      transition: transform 140ms ease-out, box-shadow var(--transition-fast),
-                  background var(--transition-fast), border-color var(--transition-fast);
+      transition: width 200ms cubic-bezier(0.2, 0.7, 0.2, 1),
+                  height 200ms cubic-bezier(0.2, 0.7, 0.2, 1),
+                  padding 200ms cubic-bezier(0.2, 0.7, 0.2, 1),
+                  gap 200ms cubic-bezier(0.2, 0.7, 0.2, 1),
+                  box-shadow var(--transition-fast),
+                  transform 140ms ease-out;
       will-change: transform;
+      touch-action: none; /* 防止触屏滚动抢拖拽手势 */
     }
     .queue-bar-item:hover {
-      background: rgba(255, 251, 245, 0.92);
-      border-color: var(--border-default);
+      box-shadow: 0 2px 6px rgba(197, 101, 61, 0.42);
+    }
+
+    /* 展开态：完整气泡（橙色填充 + 编号 + 文本 + × 删除） */
+    .queue-bar-item.expanded,
+    .queue-bar-item.dragging {
+      width: auto;
+      max-width: 100%;
+      height: 24px;
+      padding: 0 4px 0 5px;
+      gap: 5px;
+      box-shadow: 0 2px 6px rgba(197, 101, 61, 0.34);
+      cursor: grab;
     }
     .queue-bar-item.dragging {
       z-index: 5;
-      box-shadow: var(--shadow-lg), 0 0 0 1.5px var(--accent);
-      background: var(--bg-elevated);
+      box-shadow: 0 6px 16px rgba(197, 101, 61, 0.45), 0 0 0 1.5px rgba(255, 255, 255, 0.4);
       transition: box-shadow var(--transition-fast); /* dragging 期间禁用 transform 过渡 */
       cursor: grabbing;
     }
-    .queue-bar-item-sliding {
-      transition: transform 140ms ease-out;
-    }
+    .queue-bar-item.expanded:active { cursor: grabbing; }
 
-    .queue-bar-item-drag {
-      flex-shrink: 0;
-      width: 18px;
-      height: 28px;
-      border: none;
-      background: transparent;
-      cursor: grab;
-      color: var(--text-muted);
-      padding: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 4px;
-      touch-action: none; /* 不让浏览器抢走拖拽手势用作滚动 */
-      transition: color var(--transition-fast), background var(--transition-fast);
-    }
-    .queue-bar-item-drag:hover { color: var(--accent); background: var(--accent-muted); }
-    .queue-bar-item-drag:active { cursor: grabbing; }
-    .queue-bar-item-drag[disabled] {
-      opacity: 0.35;
-      cursor: default;
-    }
-    .queue-bar-item-drag[disabled]:hover {
-      color: var(--text-muted);
-      background: transparent;
-    }
+    /* 单条排队时不必拖动 */
+    .queue-bar-item-single { cursor: default; }
+    .queue-bar-item-single.expanded { cursor: default; }
+    .queue-bar-item-single.expanded:active { cursor: default; }
 
+    /* sibling 在被拖期间平滑回位 */
+    .queue-bar-item-sliding { transition: transform 160ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+
+    /* chip 内部三件：编号 + 文本 + 删除按钮。默认折叠态全部隐起来。 */
     .queue-bar-item-index {
       flex-shrink: 0;
-      font-family: var(--font-mono);
-      font-size: 0.65rem;
-      font-weight: 600;
-      color: var(--accent);
-      background: var(--accent-muted);
-      padding: 3px 6px;
-      border-radius: 6px;
-      line-height: 1;
-      margin-top: 1px;
-      min-width: 26px;
+      font-size: 0.6rem;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.95);
+      background: rgba(255, 255, 255, 0.22);
+      padding: 0 5px;
+      height: 15px;
+      min-width: 15px;
+      border-radius: 999px;
+      line-height: 15px;
       text-align: center;
+      letter-spacing: 0.02em;
+      opacity: 0;
+      transform: scale(0.4);
+      transition: opacity 150ms ease, transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+      pointer-events: none;
+    }
+    .queue-bar-item.expanded .queue-bar-item-index,
+    .queue-bar-item.dragging .queue-bar-item-index {
+      opacity: 1;
+      transform: scale(1);
     }
 
     .queue-bar-item-text {
       flex: 1 1 auto;
       min-width: 0;
-      border: none;
-      background: transparent;
-      cursor: pointer;
-      font: inherit;
-      font-size: 0.78rem;
-      color: var(--text-primary);
-      text-align: left;
-      padding: 1px 0;
-      line-height: 1.4;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
+      font-size: 0.7rem;
+      color: #fff;
+      line-height: 1;
+      white-space: nowrap;
       overflow: hidden;
-      white-space: pre-wrap;
-      word-break: break-word;
-      transition: color var(--transition-fast);
+      text-overflow: ellipsis;
+      letter-spacing: 0.02em;
+      opacity: 0;
+      transition: opacity 120ms ease 50ms;
+      pointer-events: none;
     }
-    .queue-bar-item.expanded .queue-bar-item-text {
-      display: block;
-      -webkit-line-clamp: unset;
-      max-height: 200px;
-      overflow-y: auto;
+    .queue-bar-item.expanded .queue-bar-item-text,
+    .queue-bar-item.dragging .queue-bar-item-text {
+      opacity: 1;
     }
-    .queue-bar-item-text:hover { color: var(--accent); }
 
     .queue-bar-item-delete {
       flex-shrink: 0;
-      width: 22px;
-      height: 22px;
+      width: 16px;
+      height: 16px;
       border: none;
-      background: transparent;
+      background: rgba(255, 255, 255, 0.16);
+      color: #fff;
       cursor: pointer;
-      color: var(--text-muted);
-      border-radius: 6px;
+      border-radius: 999px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      padding: 0;
       opacity: 0;
-      transition: opacity var(--transition-fast), color var(--transition-fast),
-                  background var(--transition-fast);
+      pointer-events: none;
+      transition: opacity 120ms ease 70ms, background var(--transition-fast);
     }
-    .queue-bar-item:hover .queue-bar-item-delete,
-    .queue-bar-item:focus-within .queue-bar-item-delete {
+    .queue-bar-item.expanded .queue-bar-item-delete,
+    .queue-bar-item.dragging .queue-bar-item-delete {
       opacity: 1;
+      pointer-events: auto;
     }
     .queue-bar-item-delete:hover {
-      color: var(--danger);
-      background: var(--danger-muted);
+      background: rgba(255, 255, 255, 0.34);
+    }
+    .queue-bar-item-delete svg { flex-shrink: 0; }
+
+    /* ⚡ 立即按钮 —— 独立小圆按钮，跟在列表末尾 */
+    .queue-bar-promote {
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: none;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(197, 101, 61, 0.30);
+      transition: transform var(--transition-fast), box-shadow var(--transition-fast),
+                  background var(--transition-fast);
+      animation: queuePulse 1.5s ease-in-out infinite;
+    }
+    .queue-bar-promote:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 10px rgba(197, 101, 61, 0.45);
+    }
+    .queue-bar-promote:active { transform: scale(0.94); }
+    .queue-bar-promote:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+    .queue-bar-promote svg { flex-shrink: 0; }
+    .queue-bar-promote-label { display: none; } /* label 留作 aria，视觉不展示 */
+
+    /* 容量满了的视觉提示 —— 整组颜色稍暗 */
+    .queue-bar.queue-bar-capacity .queue-bar-item,
+    .queue-bar.queue-bar-capacity .queue-bar-promote {
+      background: linear-gradient(180deg, #a8522f 0%, #8e4426 100%);
     }
 
-    /* 窄屏：bar 撑满，preview 隐藏，操作按钮始终显形 */
+    /* 窄屏：max-width 适配视口；横杠加宽方便指 */
     @media (max-width: 560px) {
-      .queue-bar-host { padding: 0 4px 6px; }
-      .queue-bar { width: 100%; }
-      .queue-bar-preview { display: none; }
-      .queue-bar-sep { display: none; }
-      .queue-bar-item-delete { opacity: 1; }
-      .queue-bar-panel { width: calc(100vw - 16px); right: -2px; }
+      .queue-bar-host { padding: 4px 6px 0; }
+      .queue-bar { max-width: calc(100vw - 20px); }
+      .queue-bar-item { width: 40px; height: 6px; }
     }
 
     /* Queued message in chat view：用户最容易"觉得排队没生效"是因为旧版徽章太小。
@@ -10353,7 +10194,11 @@
       .chat-container {
         min-height: 0;
         flex: 1 1 auto;
-        overflow: auto;
+        /* 注意：这里必须 hidden，不能 auto——内部的 .inline-terminal /
+           .tool-use-card 默认 max-width: 720px，如果 chat-container 允许
+           横向滚动，这些卡片会把整个容器推宽，结果窄屏看到右边内容被屏幕
+           边缘截掉。垂直滚动由内层 .chat-messages (overflow-y: auto) 负责。 */
+        overflow: hidden;
         display: none;
         flex-direction: column;
       }
@@ -15752,14 +15597,6 @@
 
     /* 附件 pill 缩略图 svg */
     .attachment-pill .att-icon > svg { display: block; }
-
-    /* 排队面板标题 (排队中) —— 现在 icon + text 用 inline-flex 排 */
-    .queue-bar-panel-title {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .queue-bar-panel-title-icon { flex-shrink: 0; }
 
     /* 紧凑目录选择器（新建会话时显示的小条）的图标 + 折叠箭头 */
     .folder-picker-compact-icon {
