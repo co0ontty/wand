@@ -80,6 +80,33 @@
       var configPath = "${escapeHtml(configPath)}";
       var CHAT_EXPAND_STATE_STORAGE_KEY = "wand-chat-expand-state-v1";
 
+      // ===== 一次性 localStorage 迁移 =====
+      // 用 schema 版本号确保每个 migration 只跑一次。每加一项就 ++LS_SCHEMA_VERSION
+      // 并在 LS_MIGRATIONS append 一个函数。已升级用户的 wand-ls-schema 大于等于
+      // 当前长度时整段跳过；新用户首次加载会一口气把所有 migration 都跑完再写
+      // schema 号 —— 因此每个 migration 函数对「key 不存在」的输入也必须是无害的。
+      var LS_MIGRATIONS = [
+        // v1（2026-05）取消独立的「图钉」按钮，呼出侧栏即常驻。旧版残留的
+        // wand-sidebar-pinned=false 会让老用户继续走 drawer 模式看不到新行为，
+        // 这里直接清掉，让 state 初始化回退到默认 true。
+        function migrateSidebarPinDefault() {
+          try { localStorage.removeItem("wand-sidebar-pinned"); } catch (e) {}
+        }
+      ];
+      (function runLocalStorageMigrations() {
+        try {
+          var raw = localStorage.getItem("wand-ls-schema");
+          var applied = raw == null ? 0 : parseInt(raw, 10);
+          if (!(applied >= 0)) applied = 0;
+          for (var i = applied; i < LS_MIGRATIONS.length; i++) {
+            try { LS_MIGRATIONS[i](); } catch (e) {}
+          }
+          if (applied < LS_MIGRATIONS.length) {
+            localStorage.setItem("wand-ls-schema", String(LS_MIGRATIONS.length));
+          }
+        } catch (e) { /* localStorage 不可用就跳过，按默认行为运行 */ }
+      })();
+
       var state = {
         selectedId: (function() {
           try { return localStorage.getItem("wand-selected-session") || null; } catch (e) { return null; }
@@ -154,7 +181,12 @@
         bootstrapping: true,
         sessionsDrawerOpen: false,
         sidebarPinned: (function() {
-          try { return localStorage.getItem("wand-sidebar-pinned") === "true"; } catch (e) { return false; }
+          // 新交互：桌面默认呼出即常驻；只有用户主动 X 关闭过才记 "false"。
+          // 老用户的旧值（"true"/"false"）继续生效，没存过 key 时回退到 true。
+          try {
+            var v = localStorage.getItem("wand-sidebar-pinned");
+            return v === null ? true : v !== "false";
+          } catch (e) { return true; }
         })(),
         sidebarCollapsed: (function() {
           try { return localStorage.getItem("wand-sidebar-collapsed") === "true"; } catch (e) { return false; }
@@ -1380,6 +1412,36 @@
           });
       }
 
+      // ===== 桌面：点 sidebar 外的空白处自动收起 =====
+      // 旧版 drawer 模式下点 backdrop 关闭的便利性，在「呼出即常驻」之后用
+      // document 级捕获 handler 续上。
+      // - 仅 desktop + 全尺寸（非窄条）+ 已打开 时生效
+      // - 窄条态不触发（窄条本来就是稳定常驻形态）
+      // - 手机端由 .drawer-backdrop 元素自己接住点击，不在这里重复处理
+      // - 各类弹层（modal / topbar-more / overflow 菜单 / 文件夹下拉等）不算
+      //   「sidebar 外的空白」，否则点弹层会顺带把 sidebar 关掉
+      // 用 capture 阶段是为了绕过下游按钮自己的 stopPropagation。
+      document.addEventListener("click", function(e) {
+        if (isMobileLayout()) return;
+        if (!state.sidebarPinned) return;
+        if (state.sidebarCollapsed) return;
+        if (!state.sessionsDrawerOpen) return;
+        var target = e.target;
+        if (!target || !(target instanceof Element)) return;
+        if (target.closest("#sessions-drawer")) return;
+        if (target.closest("#sessions-toggle-button")) return;
+        if (target.closest(".floating-sidebar-toggle")) return;
+        if (target.closest(".sidebar-tile-bubble")) return;
+        if (target.closest(
+          ".modal-backdrop, .modal-overlay, .modal-container, " +
+          "[role='dialog'], [role='menu'], " +
+          ".topbar-more-menu, .sidebar-header-overflow, " +
+          ".folder-picker-dropdown, .path-suggestions, " +
+          ".permission-prompt-overlay, .restart-overlay"
+        )) return;
+        closeSessionsDrawer();
+      }, true);
+
       renderBootLoading();
       restoreLoginSession();
 
@@ -1604,9 +1666,6 @@
                       '</button>' +
                     '</div>' +
                   '</div>' +
-                  '<button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? ' pinned' : '') + '" type="button" title="' + (state.sidebarPinned ? '取消固定侧栏' : '固定侧栏') + '">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg>' +
-                  '</button>' +
                   '<button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? ' collapsed' : '') + '" type="button" title="' + (isCollapsed ? '展开侧栏' : '收起为窄条') + '" aria-label="' + (isCollapsed ? '展开侧栏' : '收起为窄条') + '">' +
                     (isCollapsed
                       ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>'
@@ -1841,13 +1900,8 @@
                       '<button id="stop-button" class="btn-circle btn-circle-stop' + (state.selectedId ? "" : " hidden") + '" title="停止">' +
                         '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
                       '</button>' +
-                      // 结构化模式且正在出 token 时显示：中断当前回复、立刻发送新输入。
-                      // 默认走 #send-input-button → 排队；想插队的人显式按这颗。
-                      // 用 pill 形态 + 文字 + 脉动，让用户一眼就看到「立即发送」这条快捷路径。
-                      '<button id="interrupt-send-button" class="btn-pill btn-pill-interrupt hidden" type="button" title="中断当前回复并立即发送新输入（Cmd/Ctrl+Enter）" aria-label="立即发送">' +
-                        '<svg class="btn-pill-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>' +
-                        '<span class="btn-pill-label">立即</span>' +
-                      '</button>' +
+                      // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队
+                      // 请点输入框上方那条气泡（chip）。Cmd/Ctrl+Enter 快捷键仍保留。
                       '<button id="send-input-button" class="btn-circle btn-circle-send" title="发送">' +
                         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
                       '</button>' +
@@ -5823,8 +5877,6 @@
         if (drawerBackdrop) drawerBackdrop.addEventListener("click", closeSessionsDrawer);
         var closeDrawerBtn = document.getElementById("close-drawer-button");
         if (closeDrawerBtn) closeDrawerBtn.addEventListener("click", closeSessionsDrawer);
-        var pinBtn = document.getElementById("sidebar-pin-btn");
-        if (pinBtn) pinBtn.addEventListener("click", toggleSidebarPin);
         var collapseBtn = document.getElementById("sidebar-collapse-btn");
         if (collapseBtn) collapseBtn.addEventListener("click", toggleSidebarCollapsed);
         var sidebarMoreBtn = document.getElementById("sidebar-more-btn");
@@ -6091,11 +6143,6 @@
         if (sendBtn) sendBtn.addEventListener("click", function() {
           closeSessionsDrawer();
           sendOrStart();
-        });
-        var interruptSendBtn = document.getElementById("interrupt-send-button");
-        if (interruptSendBtn) interruptSendBtn.addEventListener("click", function() {
-          closeSessionsDrawer();
-          sendOrStart({ interrupt: true });
         });
         var stopBtn = document.getElementById("stop-button");
         if (stopBtn) stopBtn.addEventListener("click", stopSession);
@@ -8159,14 +8206,17 @@
         // Keep placeholders short so they don't wrap on portrait mobile screens.
         // Only show informative state hints; drop the redundant "send to X" labels.
         if (terminalInteractive) return "终端交互中";
-        if (session && session.status !== "running") {
+        // 只有真正进入终止态（exited / failed / stopped）才提示"会话已结束"。
+        // 结构化会话刚创建或一次回复结束后会回到 "idle"——那是等待下一条输入的
+        // 正常状态，不应该被当成结束。
+        if (session && (session.status === "exited" || session.status === "failed" || session.status === "stopped")) {
           if (canAutoResumeSession(session)) return "";
           return "会话已结束";
         }
         // 结构化会话在出 token 时，输入框仍然可用——告诉用户默认行为是排队，
-        // 想插队请按右侧的 » 按钮。短语保持单行不换行。
+        // 想插队请直接点上面的气泡。短语尽量短，避免在窄屏手机上换行。
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) {
-          return "回复中…Enter 排队 · 旁边的「» 立即」按钮中断并立即发送";
+          return "回复中…Enter 排队 · 点气泡插队";
         }
         return "";
       }
@@ -9266,7 +9316,6 @@
       function updatePinState() {
         var drawer = document.getElementById("sessions-drawer");
         var mainLayout = document.querySelector(".main-layout");
-        var pinBtn = document.getElementById("sidebar-pin-btn");
         // 与 renderAppShell 保持一致：手机端只允许窄条形态 anchored。
         var isMobile = isMobileLayout();
         var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
@@ -9278,10 +9327,6 @@
         if (mainLayout) {
           mainLayout.classList.toggle("sidebar-pinned", isAnchored);
           mainLayout.classList.toggle("sidebar-collapsed", isCollapsed);
-        }
-        if (pinBtn) {
-          pinBtn.classList.toggle("pinned", state.sidebarPinned);
-          pinBtn.title = state.sidebarPinned ? "取消固定侧栏" : "固定侧栏";
         }
       }
 
@@ -9306,9 +9351,26 @@
       }
 
       function toggleSessionsDrawer() {
-        if (state.sidebarPinned && !isMobileLayout()) return;
+        var isMobile = isMobileLayout();
+        if (!isMobile) {
+          // 桌面：呼出 = 常驻全尺寸；再次点击 = 完全收起（floating-toggle 重新出现）。
+          // 取消了独立的「图钉」概念，sidebarPinned 现在由呼出/关闭自动管理。
+          var willOpen = !state.sidebarPinned;
+          state.sidebarPinned = willOpen;
+          state.sessionsDrawerOpen = willOpen;
+          if (willOpen) {
+            // 桌面重新呼出默认回到全尺寸；窄条形态需用户主动点 collapse 按钮切换。
+            state.sidebarCollapsed = false;
+            try { localStorage.setItem("wand-sidebar-collapsed", "false"); } catch (e) {}
+          }
+          try { localStorage.setItem("wand-sidebar-pinned", String(willOpen)); } catch (e) {}
+          updateLayoutState();
+          scheduleTerminalRefitAfterPaddingTransition();
+          return;
+        }
+        // 手机端：保持原 drawer 行为。
         state.sessionsDrawerOpen = !state.sessionsDrawerOpen;
-        if (state.sessionsDrawerOpen && isMobileLayout()) {
+        if (state.sessionsDrawerOpen) {
           state.filePanelOpen = false;
           try {
             localStorage.setItem("wand-file-panel-open", "false");
@@ -9318,11 +9380,40 @@
       }
 
       function closeSessionsDrawer() {
-        if (state.sidebarPinned && !isMobileLayout()) return;
+        var isMobile = isMobileLayout();
+        if (!isMobile) {
+          // 桌面：X 按钮 / backdrop 点击 = 完全收起，撤掉常驻状态，floating-toggle 重新出现。
+          // 窄条状态下没有 X 按钮（CSS 隐藏），不会走到这里，因此无需特判 collapsed。
+          if (!state.sidebarPinned && !state.sessionsDrawerOpen) return;
+          closeSwipedItem();
+          state.sidebarPinned = false;
+          state.sessionsDrawerOpen = false;
+          try { localStorage.setItem("wand-sidebar-pinned", "false"); } catch (e) {}
+          updateLayoutState();
+          scheduleTerminalRefitAfterPaddingTransition();
+          return;
+        }
+        // 手机端：保持原 drawer 关闭行为。
         if (!state.sessionsDrawerOpen) return;
         closeSwipedItem();
         state.sessionsDrawerOpen = false;
         updateLayoutState();
+      }
+
+      // 桌面 padding-left transition 结束后重新拟合终端尺寸。
+      // 抽出来给 toggleSessionsDrawer / closeSessionsDrawer / toggleSidebarCollapsed 复用。
+      function scheduleTerminalRefitAfterPaddingTransition() {
+        var mainLayout = document.querySelector(".main-layout");
+        if (mainLayout) {
+          var onEnd = function(e) {
+            if (e.propertyName === "padding-left") {
+              mainLayout.removeEventListener("transitionend", onEnd);
+              scheduleTerminalResize(true);
+            }
+          };
+          mainLayout.addEventListener("transitionend", onEnd);
+        }
+        setTimeout(function() { scheduleTerminalResize(true); }, 350);
       }
 
       var collapsedTileBubbleEl = null;
@@ -9390,8 +9481,7 @@
 
       function toggleSidebarCollapsed() {
         var isMobile = isMobileLayout();
-        // 在 drawer 模式（未 pin）下点 collapse 视为「先固定、再收起为窄条」——
-        // 用户直觉是「点了就该看到窄条」，过去这里 early return 让按钮看上去没反应。
+        // 任何形态下点窄条按钮都意味着「我要常驻」，确保 pinned 写上。
         if (!state.sidebarPinned) {
           state.sidebarPinned = true;
           try {
@@ -9415,47 +9505,13 @@
             localStorage.setItem("wand-sidebar-pinned", "false");
           } catch (e) {}
         } else {
-          // 桌面端展开窄条 → 300px 全栏固定，自动打开。
+          // 桌面端展开窄条 → 300px 全栏常驻。
           state.sessionsDrawerOpen = true;
         }
         render();
-        var mainLayout = document.querySelector(".main-layout");
-        if (mainLayout) {
-          var onEnd = function(e) {
-            if (e.propertyName === "padding-left") {
-              mainLayout.removeEventListener("transitionend", onEnd);
-              scheduleTerminalResize(true);
-            }
-          };
-          mainLayout.addEventListener("transitionend", onEnd);
-        }
-        setTimeout(function() { scheduleTerminalResize(true); }, 350);
+        scheduleTerminalRefitAfterPaddingTransition();
       }
 
-      function toggleSidebarPin() {
-        if (isMobileLayout()) return;
-        state.sidebarPinned = !state.sidebarPinned;
-        try {
-          localStorage.setItem("wand-sidebar-pinned", String(state.sidebarPinned));
-        } catch (e) {}
-        if (state.sidebarPinned) {
-          state.sessionsDrawerOpen = true;
-        }
-        updateLayoutState();
-        // Refit terminal after padding-left transition completes
-        var mainLayout = document.querySelector(".main-layout");
-        if (mainLayout) {
-          var onEnd = function(e) {
-            if (e.propertyName === "padding-left") {
-              mainLayout.removeEventListener("transitionend", onEnd);
-              scheduleTerminalResize(true);
-            }
-          };
-          mainLayout.addEventListener("transitionend", onEnd);
-        }
-        // Fallback refit in case transition doesn't fire
-        setTimeout(function() { scheduleTerminalResize(true); }, 350);
-      }
 
       // Store last focused element for focus trap
       var lastFocusedElement = null;
@@ -12257,9 +12313,10 @@
 
       function postStructuredInput(input, inputBox, session, opts) {
         opts = opts || {};
-        // 用户显式点击"立即发送"才会传 interrupt:true。普通 Enter / 点发送
-        // 在上一条还在流式时默认走 queue —— 后端 sendMessage(...) 会把它
-        // 追加到 queuedMessages，等当前 turn 结束自动 flush。
+        // interrupt:true 现在只来自 Cmd/Ctrl+Enter 快捷键，或点队列气泡触发的
+        // queueBarPromoteIndex()。普通 Enter / 点发送在上一条还在流式时默认走
+        // queue —— 后端 sendMessage(...) 会把它追加到 queuedMessages，等当前 turn
+        // 结束自动 flush；想插队就点输入框上方那条气泡。
         var requestedInterrupt = !!opts.interrupt;
         console.log("[WAND] postStructuredInput selectedId:", state.selectedId, "input:", input && input.substring(0, 50), "requestedInterrupt:", requestedInterrupt, "session:", session && { id: session.id, sessionKind: session.sessionKind, runner: session.runner, status: session.status, inFlight: session.structuredState && session.structuredState.inFlight });
         if (!state.selectedId || !input) return Promise.resolve();
@@ -12297,7 +12354,7 @@
           updateSessionSnapshot(optimisticPatch);
           var queueRefreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
           state.currentMessages = buildMessagesForRender(queueRefreshed, getPreferredMessages(queueRefreshed, queueRefreshed.output, false));
-          updateInputHint("已加入排队，等待当前回复完成…");
+          updateInputHint("已加入排队…");
           renderChat(true);
           updateStructuredQueueCounter();
           // 乐观 toast：原本只在 POST 完成后才提示，Claude 流式拖太久时用户根本
@@ -12458,8 +12515,9 @@
       //   · 默认只展开队首（即下一个要发的那条），显示编号 + 文本 + × 删除
       //   · 其他消息收起成一根小横杠（指示存在但不占空间）
       //   · 鼠标悬到任意小横杠 → 该条展开、原本展开的那条收回小横杠
-      //   · 悬停期间可以按住展开的那条向上 / 向下拖拽 → 换序
-      // 末尾跟一个 ⚡ "立即" 按钮：中断当前回复、把队首作为新输入插队发出去。
+      //   · 点一下任意气泡 → 中断当前回复、把这条作为新输入插队发出去
+      //   · 按住任意气泡向上 / 向下拖拽 → 换序
+      // 末尾跟一个 ⚡ 按钮：等价于点队首气泡（保留作为快速插队的视觉提示）。
       // 数据源：session.queuedMessages（后端 WS + postStructuredInput 乐观更新）。
       // ──────────────────────────────────────────────────────────────────────────
 
@@ -12499,8 +12557,8 @@
           var itemClass = "queue-bar-item";
           if (isExpanded) itemClass += " expanded";
           if (single) itemClass += " queue-bar-item-single";
-          // 拖拽起手区是整个 chip，但 delete 按钮要独占点击。
-          var titleAttr = isExpanded ? raw + "（按住可拖动调整顺序）" : raw;
+          // 整个 chip 既是拖拽起手区，也是"点一下立即发送"的触发点；delete 按钮单独占点击。
+          var titleAttr = isExpanded ? raw + "（点一下立即发送 · 按住可拖动调序）" : raw + "（点一下立即发送）";
           chips +=
             '<li class="' + itemClass + '" data-index="' + i + '" data-action="drag"' +
                 ' title="' + escapeHtml(titleAttr) + '">' +
@@ -12654,19 +12712,27 @@
       }
 
       function queueBarPromoteHead() {
+        queueBarPromoteIndex(0);
+      }
+
+      // 把队列里第 index 条剥下来，作为新的输入立刻发送出去。
+      // - inFlight：interrupt + preserveQueue（中断当前回复，保留其它排队）
+      // - 非 inFlight：当作普通新消息发出去
+      // 用户路径：点输入框上方的气泡（chip）→ 这里。
+      function queueBarPromoteIndex(index) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return;
         var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
-        if (queue.length === 0) return;
-        var head = queue[0];
-        var rest = queue.slice(1);
+        if (index < 0 || index >= queue.length) return;
+        var picked = queue[index];
+        var rest = queue.slice(0, index).concat(queue.slice(index + 1));
         var prev = queue.slice();
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
 
-        // 乐观：剥掉队首；hover 下标随之收缩
+        // 乐观：剥掉这一条；hover 下标随之收缩
         if (typeof state.queueBarHoverIndex === "number") {
-          if (state.queueBarHoverIndex === 0) state.queueBarHoverIndex = null;
-          else state.queueBarHoverIndex -= 1;
+          if (state.queueBarHoverIndex === index) state.queueBarHoverIndex = null;
+          else if (state.queueBarHoverIndex > index) state.queueBarHoverIndex -= 1;
         }
         updateSessionSnapshot({ id: session.id, queuedMessages: rest });
 
@@ -12674,14 +12740,14 @@
           ? crypto.randomUUID()
           : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
 
-        var body = { input: head, idempotencyKey: idempotencyKey };
+        var body = { input: picked, idempotencyKey: idempotencyKey };
         if (inFlight) {
           // 中断 + 保留剩余队列
           body.interrupt = true;
           body.preserveQueue = true;
         }
         // 给一个乐观 toast，让用户瞬间知道点击生效了
-        showToast(inFlight ? "已请求中断当前回复，立即发送队首。" : "已立即发送队首消息。", "info");
+        showToast(inFlight ? "已请求中断当前回复，立即发送这条。" : "已立即发送这条消息。", "info");
 
         fetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
@@ -12715,6 +12781,9 @@
       }
 
       // ── 拖拽排序（Pointer Events + 真实高度的 sort/animate）──
+      // 单条气泡的 pointerdown 也会进这里，但 queue.length <= 1 时直接返回，让
+      // 系统 click 事件穿透到 #queue-bar-host 的 click delegate（那里再判断"点击
+      // 气泡 → 立即发送"）。
       function queueBarDragStart(ev, chipEl) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return;
@@ -12746,6 +12815,7 @@
           startY: ev.clientY,
           gap: gap,
           queueSnapshot: queue,
+          moved: false, // 没真正拖动过 → 抬手时按 tap 处理：promote 这条
         };
 
         chipEl.classList.add("dragging");
@@ -12793,6 +12863,8 @@
         if (!d || ev.pointerId !== d.pointerId) return;
         ev.preventDefault();
         var deltaY = ev.clientY - d.startY;
+        // 4px 阈值过滤抖动 / 触屏轻微滑动；超过才算"真的在拖"，否则抬手当 tap。
+        if (Math.abs(deltaY) > 4) d.moved = true;
         d.itemEl.style.transform = "translateY(" + deltaY + "px)";
 
         // 拖动中心 Y 决定目标插入位置
@@ -12827,6 +12899,7 @@
         var origIndex = d.origIndex;
         var targetIndex = d.targetIndex;
         var queueSnapshot = d.queueSnapshot;
+        var wasTap = !d.moved;
 
         // 清掉 inline transform 让 CSS 自然回位
         d.siblings.forEach(function(el) {
@@ -12838,8 +12911,9 @@
         state.queueBarDrag = null;
 
         if (origIndex === targetIndex) {
-          // 没动，光擦一下重渲就行
+          // 没真的移动过 → 按 tap 处理：把这条剥下来插队发送。
           updateQueueBar();
+          if (wasTap) queueBarPromoteIndex(origIndex);
           return;
         }
 
@@ -12886,7 +12960,16 @@
           var actionEl = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
           if (!actionEl || !host.contains(actionEl)) return;
           var action = actionEl.getAttribute("data-action");
-          if (action === "drag") return; // 拖拽由 pointerdown 处理，吞掉 click
+          if (action === "drag") {
+            // queue.length > 1 时 pointerdown 已经 preventDefault → click 不会到这；
+            // queue.length === 1 时 drag-start 早退、click 会落到这里：当成 tap，
+            // 把这条直接 promote 出去。
+            ev.preventDefault();
+            ev.stopPropagation();
+            var idx = Number(actionEl.getAttribute("data-index"));
+            queueBarPromoteIndex(idx);
+            return;
+          }
           ev.preventDefault();
           ev.stopPropagation();
           if (action === "promote") { queueBarPromoteHead(); return; }
@@ -13501,12 +13584,6 @@
             ? (structuredInFlight ? "排队发送（当前回复结束后处理）" : "发送")
             : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
           sendBtn.classList.toggle("queue-mode", structuredInFlight);
-        }
-        var interruptBtn = document.getElementById("interrupt-send-button");
-        if (interruptBtn) {
-          // 仅结构化 + inFlight 时显示。pty 会话有自己的 Ctrl+C / stop 按钮，
-          // 用不上这套语义。
-          interruptBtn.classList.toggle("hidden", !structuredInFlight);
         }
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
@@ -16993,24 +17070,13 @@
           return;
         }
 
-        // 当前 turn 已结束（结构化 inFlight=false 或 PTY 非 running）就把进度条
-        // 收起来——模型经常忘了发最后一条"全 completed"的 TodoWrite，让用户
-        // 对着 "5/6" 干瞪眼很别扭。allDone 那条分支保留，提前命中更快返回。
-        var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        var turnDone = false;
-        if (sel) {
-          if (isStructuredSession(sel)) {
-            turnDone = !(sel.structuredState && sel.structuredState.inFlight);
-          } else {
-            turnDone = sel.status !== "running";
-          }
-        }
-        if (turnDone) {
-          container.classList.add("hidden");
-          if (bodyEl) bodyEl.classList.add("hidden");
-          return;
-        }
-
+        // 之前这里在 turn 结束（结构化 inFlight=false 或 PTY 非 running）时
+        // 把进度条收起来，理由是「模型经常忘了发最后一条全 completed 的
+        // TodoWrite，让用户对着 5/6 干瞪眼很别扭」。但反馈是：在结构化模式下
+        // inFlight 在流间隙会短暂置假，进度条因此跟着闪没；而且 turn 刚结束
+        // 时用户其实想再看一眼最终进度。改回「只要当前 turn 里有 todos 就显
+        // 示，allDone 时再隐藏」，跨 turn 残留交给开头那段「最后一条 user
+        // 消息后才扫 TodoWrite」的 scoping 兜住。
         container.classList.remove("hidden");
         if (bodyEl) bodyEl.classList.remove("hidden");
 

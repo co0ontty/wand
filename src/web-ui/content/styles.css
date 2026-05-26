@@ -515,30 +515,12 @@
       transition: width 0.3s var(--ease-out-expo), transform 0.35s var(--ease-out-expo), box-shadow 0.35s ease, opacity 0.25s ease;
     }
 
-    /* 多塞一层 .sidebar-header-actions 把 specificity 抬到 0,4,0，
+    /* 窄条（collapsed）状态：不显示 X 关闭按钮。
+       窄条只保留「展开」按钮，关闭操作必须先回到全尺寸。
+       多塞一层 .sidebar-header-actions 把 specificity 抬到 0,4,0，
        压过文件后段 .sidebar-header-actions .btn-ghost.btn-sm
        与 .drawer-close-btn 的 display: inline-flex 重置规则。 */
-    .sidebar.pinned .sidebar-header-actions .sidebar-close {
-      display: none;
-    }
-
-    /* 窄条（collapsed）状态：明确不显示 X 关闭按钮。
-       虽然 collapsed 当前必然蕴含 pinned（见 isSidebarNarrow），
-       上一条 .sidebar.pinned 规则已经能把它藏住，但单独写一条更直观，
-       也防止以后允许 drawer 模式下 collapse 时漏掉。
-       展开（drawer 模式）下才显示关闭按钮供用户收起侧栏。 */
     .sidebar.collapsed .sidebar-header-actions .sidebar-close {
-      display: none;
-    }
-
-    /* 与上方对称：drawer 模式（未 pin）下，X 关闭按钮已能把侧栏关掉，
-       再放一个「收起为窄条」按钮会和 X 视觉上重复，且它的行为
-       （自动 pin + collapse）也容易让人误以为是关闭。
-       只在 pinned 模式保留这颗，drawer 模式下隐藏。
-       注意：必须用 .sidebar-header-actions 多嵌一层把 specificity 提到 0,4,0，
-       否则会和文件后段 .sidebar-header-actions .btn-ghost.btn-sm (0,3,0) 打平
-       而因后定义胜出，导致 drawer 模式下窄条按钮和 X 同时显示。 */
-    .sidebar:not(.pinned) .sidebar-header-actions .sidebar-collapse-toggle {
       display: none;
     }
 
@@ -553,7 +535,6 @@
     }
     .sidebar.pinned.collapsed .sidebar-header-main,
     .sidebar.pinned.collapsed .sidebar-header-more,
-    .sidebar.pinned.collapsed .sidebar-pin-toggle,
     .sidebar.pinned.collapsed .sidebar-footer {
       display: none;
     }
@@ -699,15 +680,6 @@
     }
     .sidebar-collapse-toggle.collapsed {
       color: var(--primary);
-    }
-    /* ===== 图钉按钮 ===== */
-    .sidebar-pin-toggle {
-      flex-shrink: 0;
-      transition: transform 0.3s var(--ease-out-expo), color var(--transition-fast);
-    }
-    .sidebar-pin-toggle.pinned {
-      color: var(--primary);
-      transform: rotate(45deg);
     }
 
     /* ===== 侧边栏头部 ===== */
@@ -2617,6 +2589,11 @@
       flex: 1;
       display: flex;
       flex-direction: column;
+      /* min-width: 0 是关键：作为 .main-layout（flex row）的子项，默认
+         min-width:auto 会让 main-content 跟着内部最宽的不可断节点一起撑大，
+         窄屏上结果就是 chat 卡片把布局推宽 → 内容被 overflow:hidden 截掉
+         却又拖不动。这里强制可收缩，配合下游 .chat-* 的 break-word 才有效。 */
+      min-width: 0;
       min-height: 0;
       overflow: hidden;
       background: transparent;
@@ -4062,14 +4039,21 @@
       color: var(--text-tertiary);
     }
 
-    /* ===== 消息气泡 ===== */
+    /* ===== 消息气泡 =====
+       兜底约束：气泡不应超出聊天容器宽度。即便子节点（长 URL、不可断字符串、
+       嵌入元素）想撑宽，也由 max-width / overflow-x 截断或换行。 */
     .chat-message-bubble {
       padding: 12px 16px;
       border-radius: var(--radius-md);
       font-size: 0.875rem;
       line-height: var(--line-height-relaxed);
       word-wrap: break-word;
+      overflow-wrap: anywhere;
+      word-break: break-word;
       white-space: pre-wrap;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
       box-shadow: var(--shadow-sm);
       transition: box-shadow var(--transition-fast);
     }
@@ -4123,13 +4107,20 @@
       display: flex;
       flex-direction: column;
       gap: 2px;
+      width: 100%;
       max-width: 100%;
       min-width: 0;
+      /* overflow-x: hidden 兜底——内部 tool-use-card / inline-terminal /
+         markdown 如果还有不可断超长 token，绝不让它把整张消息推宽。
+         结合 word-break + overflow-wrap，用户看到的永远是换行不是横滚条。 */
+      overflow-x: hidden;
       font-size: 0.875rem;
       line-height: var(--line-height-relaxed);
       word-wrap: break-word;
+      word-break: break-word;
       overflow-wrap: anywhere;
       color: var(--text-primary);
+      box-sizing: border-box;
     }
 
     .chat-message-content > .thinking-inline,
@@ -4148,7 +4139,10 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
+      width: 100%;
       max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
     }
     /* user turn 默认 align-self: flex-end（右对齐）；多段渲染时强制
        容器内左对齐，否则 subagent 段会被推到右边，border-left 色条断裂。 */
@@ -4160,12 +4154,22 @@
       display: flex;
       flex-direction: column;
       align-self: flex-start;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
     }
     .chat-message.multi-agent .chat-message-segment.subagent {
       padding-left: 10px;
       margin-left: 6px;
       border-left: 2px solid var(--agent-color, var(--border-subtle));
       border-radius: 0 4px 4px 0;
+      /* 父 .chat-message-segment 是 width:100%; box-sizing:border-box，padding
+         和 border 已被 border-box 吃掉，但 margin-left:6px 是外间距，会把
+         整段推出父容器 6px 撞屏幕右边。这里把宽度从父宽减掉同等 margin，
+         视觉上左缘内缩 6px、右缘对齐父容器，刚好不溢出。 */
+      width: calc(100% - 6px);
+      max-width: calc(100% - 6px);
     }
     .chat-message.multi-agent .chat-message-segment.subagent .chat-message-content {
       /* 子 agent 段内的气泡稍微弱化背景，区分主线 */
@@ -4179,13 +4183,19 @@
       color: var(--agent-color, var(--accent));
     }
 
-    /* "勤劳初二 ↳ 让 侦探猫 帮忙" 分隔提示 */
+    /* "勤劳初二 ↳ 让 侦探猫 帮忙" 分隔提示
+       注：color-mix() 需要 Chrome/WebView 111+（2023.04）。Android APK 上常有更老
+       的 WebView，会把 color-mix(...) 当作 invalid 整条扔掉，导致背景/边框消失。
+       下面凡是 color-mix 的属性都先写一条 rgba()/纯色 fallback，再被 color-mix
+       覆盖；旧浏览器看到 fallback、新浏览器自动用 color-mix。同一文件里下方
+       .chat-handoff-tag / .subagent-reply / .subagent-reply-cycle 等也是同思路。 */
     .chat-handoff {
       align-self: flex-start;
       margin: 4px 0 2px 4px;
       padding: 2px 10px;
       font-size: 0.7rem;
       color: var(--text-tertiary);
+      background: rgba(197, 101, 61, 0.08);
       background: color-mix(in srgb, var(--agent-color, var(--accent)) 8%, transparent);
       border-left: 2px solid var(--agent-color, var(--accent));
       border-radius: 0 8px 8px 0;
@@ -4216,7 +4226,9 @@
       letter-spacing: 0.04em;
       text-transform: uppercase;
       color: var(--agent-color, var(--accent));
+      background: rgba(197, 101, 61, 0.14);
       background: color-mix(in srgb, var(--agent-color, var(--accent)) 14%, transparent);
+      border: 1px solid rgba(197, 101, 61, 0.32);
       border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 32%, transparent);
       border-radius: 4px;
       vertical-align: 1px;
@@ -4226,7 +4238,9 @@
 
     /* subagent 回复气泡（群聊角色完成任务后的发言） */
     .subagent-reply {
+      background: rgba(197, 101, 61, 0.06);
       background: color-mix(in srgb, var(--agent-color, var(--accent)) 6%, var(--bg-surface));
+      border: 1px solid rgba(197, 101, 61, 0.20);
       border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 20%, transparent);
       border-radius: 10px;
       padding: 10px 14px;
@@ -4236,6 +4250,10 @@
       color: var(--text-primary);
       word-break: break-word;
       overflow-wrap: anywhere;
+      /* box-sizing: border-box 让 padding(14px*2)+border(1px*2) 算进 width:100%，
+         不再外鼓 30px 撑出 subagent 段右边缘。 */
+      box-sizing: border-box;
+      width: 100%;
       max-width: 100%;
       min-width: 0;
       overflow-x: hidden;
@@ -4245,7 +4263,9 @@
     .subagent-reply > :last-child { margin-bottom: 0; }
 
     .subagent-reply.error {
+      background: rgba(226, 87, 76, 0.08);
       background: color-mix(in srgb, var(--danger, #e2574c) 8%, var(--bg-surface));
+      border-color: rgba(226, 87, 76, 0.35);
       border-color: color-mix(in srgb, var(--danger, #e2574c) 35%, transparent);
     }
 
@@ -4336,8 +4356,11 @@
       font-size: 0.7rem;
       font-weight: 500;
       line-height: 1.4;
+      color: var(--accent);
       color: var(--agent-color, var(--accent));
+      background: rgba(255, 248, 240, 0.95);
       background: color-mix(in srgb, var(--agent-color, var(--accent)) 8%, var(--bg-surface, #fff));
+      border: 1px solid rgba(197, 101, 61, 0.28);
       border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 28%, transparent);
       border-radius: 999px;
       cursor: pointer;
@@ -4345,7 +4368,9 @@
       transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
     }
     .subagent-reply-cycle:hover {
+      background: rgba(248, 226, 210, 1);
       background: color-mix(in srgb, var(--agent-color, var(--accent)) 16%, var(--bg-surface, #fff));
+      border-color: rgba(197, 101, 61, 0.45);
       border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, transparent);
     }
     .subagent-reply-cycle:active {
@@ -4362,6 +4387,7 @@
       height: 6px;
     }
     .subagent-reply-scroll::-webkit-scrollbar-thumb {
+      background: rgba(197, 101, 61, 0.35);
       background: color-mix(in srgb, var(--agent-color, var(--accent)) 35%, transparent);
       border-radius: 3px;
     }
@@ -4442,10 +4468,15 @@
       font-size: 0.7rem;
       color: var(--text-secondary);
       white-space: pre-wrap;
+      overflow-wrap: anywhere;
       word-break: break-all;
       max-height: 240px;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
       overflow-y: auto;
       border-top: 1px dashed var(--border-subtle);
+      box-sizing: border-box;
     }
     .unknown-block.collapsed .unknown-block-body {
       display: none;
@@ -4601,6 +4632,9 @@
       overflow: hidden;
       width: 100%;
       max-width: var(--chat-card-max-width, 720px);
+      /* min-width: 0 让卡片不被内部 <pre>/长路径撑出父容器；缺这一行时
+         手机 APK 上长命令 / 长 JSON 会把整张卡片推宽到屏幕外被截掉。 */
+      min-width: 0;
       box-sizing: border-box;
       background: linear-gradient(180deg, rgba(255, 251, 245, 0.88) 0%, rgba(255, 246, 234, 0.72) 100%);
       box-shadow: 0 1px 2px rgba(89, 58, 32, 0.04);
@@ -4780,8 +4814,12 @@
       font-family: var(--font-mono);
       color: var(--text-secondary);
       white-space: pre-wrap;
-      overflow-wrap: break-word;
+      overflow-wrap: anywhere;
+      word-break: break-word;
       max-height: 400px;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
       overflow-y: auto;
       line-height: 1.55;
     }
@@ -4796,13 +4834,20 @@
       font-family: var(--font-mono);
       color: var(--text-secondary);
       white-space: pre-wrap;
-      overflow-wrap: break-word;
+      /* anywhere + break-all 兜底长 token / 长路径 / 长 URL：手机 APK 上
+         遇到不可断字符串时换行，绝不横向溢出。 */
+      overflow-wrap: anywhere;
+      word-break: break-all;
       max-height: 320px;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
       overflow-y: auto;
       line-height: 1.55;
       background: rgba(125, 91, 57, 0.035);
       border-radius: var(--radius-xs);
       padding: 8px 10px;
+      box-sizing: border-box;
     }
     .tool-use-result-empty {
       font-size: 0.75rem;
@@ -5046,7 +5091,8 @@
     }
     .thinking-inline.expanded .thinking-inline-preview {
       white-space: pre-wrap;
-      overflow-wrap: break-word;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .thinking-inline-action {
       flex-shrink: 0;
@@ -5120,6 +5166,8 @@
       margin: 4px 0;
       width: 100%;
       max-width: var(--chat-card-max-width, 720px);
+      /* 同 .tool-use-card：内部嵌套 inline-tool 长路径不能撑爆窄屏父容器。 */
+      min-width: 0;
       box-sizing: border-box;
       border-radius: var(--radius-sm);
       border: 1px solid var(--border-subtle);
@@ -5248,6 +5296,8 @@
       margin: 1px 0;
       width: 100%;
       max-width: var(--chat-card-max-width, 720px);
+      /* 同 .tool-use-card：长路径 / 长查询不能撑爆窄屏父容器。 */
+      min-width: 0;
       box-sizing: border-box;
       border-radius: var(--radius-xs);
       cursor: pointer;
@@ -5267,6 +5317,8 @@
       font-family: var(--font-mono);
       line-height: 1.45;
       border-radius: var(--radius-xs);
+      max-width: 100%;
+      min-width: 0;
       transition: background 0.16s ease, color 0.16s ease;
     }
     .inline-tool:hover .inline-tool-row {
@@ -5339,6 +5391,9 @@
       padding: 10px 12px;
       margin-top: 6px;
       max-height: 320px;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
       overflow-y: auto;
       scrollbar-width: thin;
       scrollbar-color: rgba(125, 91, 57, 0.2) transparent;
@@ -5359,7 +5414,10 @@
       line-height: 1.55;
       color: var(--text-secondary);
       white-space: pre-wrap;
+      overflow-wrap: anywhere;
       word-break: break-all;
+      max-width: 100%;
+      min-width: 0;
       margin: 0;
     }
     .inline-tool-error-inline {
@@ -5442,6 +5500,8 @@
       margin: 4px 0;
       width: 100%;
       max-width: var(--chat-card-max-width, 720px);
+      /* 同 .tool-use-card：长命令 / 长输出不能撑爆窄屏父容器。 */
+      min-width: 0;
       box-sizing: border-box;
       border: 1px solid rgba(15, 12, 9, 0.6);
       border-radius: var(--radius-sm);
@@ -5471,6 +5531,8 @@
       cursor: pointer;
       user-select: none;
       position: relative;
+      max-width: 100%;
+      min-width: 0;
     }
     .term-header:hover {
       background:
@@ -5550,7 +5612,10 @@
       line-height: 1.55;
       margin-bottom: 6px;
       white-space: pre-wrap;
+      overflow-wrap: anywhere;
       word-break: break-all;
+      max-width: 100%;
+      min-width: 0;
     }
     .term-prompt {
       color: #6ee09a;
@@ -5563,6 +5628,9 @@
       padding-top: 8px;
       border-top: 1px dashed rgba(255, 255, 255, 0.06);
       max-height: 360px;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
       overflow-y: auto;
       scrollbar-width: thin;
       scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
@@ -5583,7 +5651,10 @@
       color: #d4c2a3;
       line-height: 1.55;
       white-space: pre-wrap;
+      overflow-wrap: anywhere;
       word-break: break-all;
+      max-width: 100%;
+      min-width: 0;
     }
     .term-exit {
       margin-top: 10px;
@@ -5605,6 +5676,8 @@
       margin: 4px 0;
       width: 100%;
       max-width: var(--chat-card-max-width, 720px);
+      /* 同 .tool-use-card：长路径 / 长 diff 不能撑爆窄屏父容器。 */
+      min-width: 0;
       box-sizing: border-box;
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-sm);
@@ -5626,6 +5699,8 @@
       font-size: 0.8125rem;
       cursor: pointer;
       transition: background 0.18s ease;
+      max-width: 100%;
+      min-width: 0;
     }
     .diff-header:hover {
       background: rgba(197, 101, 61, 0.04);
@@ -5701,11 +5776,15 @@
       display: flex;
       gap: 1px;
       background: rgba(125, 91, 57, 0.08);
+      max-width: 100%;
+      min-width: 0;
     }
     .diff-col {
-      flex: 1;
+      flex: 1 1 0;
       min-width: 0;
+      max-width: 100%;
       background: rgba(255, 253, 248, 0.85);
+      overflow: hidden;
     }
     .diff-col-half {
       flex: 1;
@@ -5731,7 +5810,12 @@
       font-size: 0.75rem;
       line-height: 1.55;
       white-space: pre-wrap;
+      /* 长 token / 长 URL 必须按字符断，否则不可断字符串会撑爆 .diff-col。 */
+      overflow-wrap: anywhere;
       word-break: break-all;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
     }
     .diff-add {
       background: rgba(79, 122, 88, 0.08);
@@ -5821,12 +5905,20 @@
       margin: 0;
       font-size: 0.7rem;
       max-height: 600px;
+      max-width: 100%;
+      min-width: 0;
+      overflow-x: hidden;
       overflow-y: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-all;
     }
     .tool-result-content code {
       font-family: var(--font-mono);
       white-space: pre-wrap;
+      overflow-wrap: anywhere;
       word-break: break-all;
+      max-width: 100%;
     }
 
     /* Markdown Content */
@@ -5902,8 +5994,14 @@
       overflow-wrap: anywhere;
       word-break: break-all;
     }
+    /* 表格容器：先让 table-layout:fixed 强制按 100% 收缩，单元格内
+       overflow-wrap:anywhere 会负责换行；只有在内容真的塞不下（比如
+       超长不可断字符串撑爆 fixed 布局）才退回横向滚动，这样大多数情况
+       下用户看到的是换行而不是横滚条。 */
     .markdown-content .md-table-wrap {
       margin: 12px 0;
+      max-width: 100%;
+      min-width: 0;
       overflow-x: auto;
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
@@ -6452,10 +6550,10 @@
     }
     .queue-bar-item.expanded:active { cursor: grabbing; }
 
-    /* 单条排队时不必拖动 */
-    .queue-bar-item-single { cursor: default; }
-    .queue-bar-item-single.expanded { cursor: default; }
-    .queue-bar-item-single.expanded:active { cursor: default; }
+    /* 单条排队时不能拖排序，但仍可点击 → 立即发送 */
+    .queue-bar-item-single { cursor: pointer; }
+    .queue-bar-item-single.expanded { cursor: pointer; }
+    .queue-bar-item-single.expanded:active { cursor: pointer; }
 
     /* sibling 在被拖期间平滑回位 */
     .queue-bar-item-sliding { transition: transform 160ms cubic-bezier(0.2, 0.7, 0.2, 1); }
@@ -6615,11 +6713,15 @@
     }
 
     .input-hint {
-      font-size: 0.5625rem;
+      font-size: 0.5rem;          /* 8px — 让位给同一行的按钮，桌面端仍清晰可读 */
+      line-height: 1.2;
       color: var(--text-muted);
       white-space: nowrap;
       user-select: none;
       opacity: 0.7;
+      max-width: 38ch;             /* 防止突然变长的状态文案撑爆右侧区域 */
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     /* Session info bar at bottom of input composer */
@@ -7519,40 +7621,8 @@
     .btn-pill-label {
       display: inline;
     }
-    .btn-pill-interrupt {
-      background: linear-gradient(180deg, rgba(197, 101, 61, 0.18) 0%, rgba(197, 101, 61, 0.10) 100%);
-      color: var(--accent);
-      margin-right: 4px;
-      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.30) inset;
-      animation: interruptPulse 1.8s ease-in-out infinite;
-    }
-    .btn-pill-interrupt:hover {
-      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
-      color: #fff;
-      box-shadow: 0 3px 10px rgba(197, 101, 61, 0.35);
-      transform: translateY(-1px);
-      animation: none;
-    }
-    .btn-pill-interrupt:active {
-      transform: translateY(0) scale(0.97);
-    }
-    .btn-pill-interrupt.hidden {
-      display: none;
-    }
-    @keyframes interruptPulse {
-      0%, 100% { box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.30) inset, 0 0 0 0 rgba(197, 101, 61, 0.0); }
-      50%      { box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.45) inset, 0 0 0 4px rgba(197, 101, 61, 0.12); }
-    }
-    /* 屏宽 < 480 时把"立即"文字藏掉，只剩 » 图标，避免和 send 一起把行挤爆。
-       hover/focus 期间临时回显，让长按移动端用户也能确认按钮含义。 */
-    @media (max-width: 480px) {
-      .btn-pill-interrupt {
-        padding: 0 8px;
-      }
-      .btn-pill-interrupt .btn-pill-label {
-        display: none;
-      }
-    }
+    /* .btn-pill-interrupt 与 @keyframes interruptPulse 已下线：
+       默认行为永远是"排队（气泡）"，想插队请点输入框上方那条气泡。 */
 
     /* send 按钮在「排队模式」下退到次要色，让相邻的"立即发送"成为视觉重点。
        不动尺寸 / 圆形，避免 layout shift。 */
@@ -8944,9 +9014,8 @@
       line-height: 1.5;
     }
 
-    /* Sidebar header icon buttons — pin / more / close — uniform 32×32 ghost */
+    /* Sidebar header icon buttons — collapse / more / close — uniform 32×32 ghost */
     .sidebar-header-actions .btn-ghost.btn-sm,
-    .sidebar-pin-toggle,
     .drawer-close-btn {
       width: 32px;
       height: 32px;
@@ -8965,15 +9034,9 @@
         color 0.16s ease,
         transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1);
     }
-    .sidebar-header-actions .btn-ghost.btn-sm:hover,
-    .sidebar-pin-toggle:hover {
+    .sidebar-header-actions .btn-ghost.btn-sm:hover {
       background: rgba(125, 91, 57, 0.08);
       color: var(--text-primary);
-    }
-    .sidebar-pin-toggle.pinned {
-      background: rgba(197, 101, 61, 0.12);
-      color: var(--accent);
-      transform: rotate(45deg);
     }
 
     /* Drawer close — same pattern as modal-close (rotate + danger tint) */
@@ -9705,9 +9768,6 @@
 
     /* 平板适配 */
     @media (max-width: 768px) {
-      /* 手机隐藏「固定侧栏」按钮：手机上完整 300px 常驻太占地，
-         只保留「收起为窄条」按钮，让用户能切到 56px 窄条形态。 */
-      .sidebar-pin-toggle { display: none; }
       /* drawer 模式（pinned 但非窄条）下若未打开，则隐藏到屏幕左侧。
          窄条模式（pinned + collapsed）由 .sidebar.pinned.collapsed 的 width:56px
          规则常驻显示，不进入这条隐藏分支。 */
@@ -10065,8 +10125,12 @@
         padding: 0 14px 0 4px;
         border-radius: 5px;
       }
+      /* 窄屏（手机）保留提示，但用更小字号 + 更紧的宽度上限，避免把发送按钮挤出行外。
+         状态切换（"思考中…" / "已加入排队…"）能截断成省略号也比整条消失友好。 */
       .input-hint {
-        display: none;
+        font-size: 0.45rem;
+        max-width: 18ch;
+        opacity: 0.6;
       }
 
       /* 移动端内联快捷键 - 折叠为展开按钮，展开到独立第二行 */
@@ -10501,6 +10565,43 @@
       .markdown-content pre,
       .markdown-content .code-block pre,
       .subagent-reply pre { padding: 10px; }
+      /* diff 卡片：窄屏下两列 side-by-side 每列只剩 ~160px，旧/新被挤成
+         单字一行的"窄条"几乎不可读。改成垂直堆叠（旧在上，新在下），
+         单列占满屏宽，长行靠 word-break 自然换行，杜绝横向溢出。 */
+      .diff-columns {
+        flex-direction: column;
+      }
+      .diff-col,
+      .diff-col-half,
+      .diff-col-full {
+        flex: 1 1 auto;
+        width: 100%;
+        max-width: 100%;
+      }
+      /* 终端命令头部也放开 wrap，长命令在 preview 里仍 ellipsis，但 dot/toggle
+         之类不会把卡片撑宽。 */
+      .term-header {
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+      .diff-header {
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+      .diff-path {
+        flex-basis: 100%;
+        order: 99;
+      }
+      /* inline-tool meta（搜索路径等）窄屏给整行，不再贴右挤标题。 */
+      .inline-tool-row {
+        flex-wrap: wrap;
+        row-gap: 2px;
+      }
+      .inline-tool-meta {
+        max-width: 100%;
+        flex-basis: 100%;
+        padding-left: 22px;
+      }
     }
 
     /* Blank chat mobile optimization */

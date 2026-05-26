@@ -49,12 +49,21 @@ public class ConnectActivity extends AppCompatActivity {
     private TextInputEditText urlInput;
     private MaterialButton connectButton;
     private MaterialButton scanQrButton;
+    private MaterialButton cancelAutoConnectButton;
+    private MaterialButton switchServerButton;
     private TextView statusText;
     private LinearLayout recentList;
     private TextView recentLabel;
     private LinearLayout autoConnectGroup;
     private LinearLayout formGroup;
     private ServerStore serverStore;
+    // 跟踪当前是否处于自动连接阶段。后台连接探测线程跑完之后会
+    // runOnUiThread 决定下一步 (跳 WebView / 报错回表单), 我们在那里
+    // 检查这面旗 — 用户如果已经点了"取消"/"切换服务器", autoConnecting
+    // 会被翻成 false, 那次姗姗来迟的结果就必须被丢掉, 否则会出现
+    // "用户已经在表单里输地址了, 突然又被旧请求强制跳到 WebView" 的
+    // 体验事故 (尤其在 socket 已发出 → 用户点取消 → 服务器其实在
+    // 这一秒内回复了这种 race 下很容易看见)。
     private boolean autoConnecting = false;
 
     // 用 single-thread executor 替代裸 new Thread, 配合 Future 在 onDestroy
@@ -75,6 +84,8 @@ public class ConnectActivity extends AppCompatActivity {
         urlInput = findViewById(R.id.urlInput);
         connectButton = findViewById(R.id.connectButton);
         scanQrButton = findViewById(R.id.scanQrButton);
+        cancelAutoConnectButton = findViewById(R.id.cancelAutoConnectButton);
+        switchServerButton = findViewById(R.id.switchServerButton);
         statusText = findViewById(R.id.statusText);
         recentList = findViewById(R.id.recentList);
         recentLabel = findViewById(R.id.recentLabel);
@@ -102,6 +113,16 @@ public class ConnectActivity extends AppCompatActivity {
 
         if (scanQrButton != null) {
             scanQrButton.setOnClickListener(v -> requestQrScan());
+        }
+
+        if (cancelAutoConnectButton != null) {
+            cancelAutoConnectButton.setOnClickListener(v -> abortAutoConnect(false));
+        }
+        if (switchServerButton != null) {
+            // "切换服务器" 比 "取消" 更明确地表达"我现在就想换一个", 所以
+            // 中断后顺手聚焦输入框 + 全选当前文本, 用户直接打字就能覆盖,
+            // 不用先去手动光标点一下。
+            switchServerButton.setOnClickListener(v -> abortAutoConnect(true));
         }
 
         urlInput.setOnEditorActionListener((v, actionId, event) -> {
@@ -214,6 +235,7 @@ public class ConnectActivity extends AppCompatActivity {
                 String appToken = decoded[1];
                 String error = testConnectionWithToken(serverUrl, appToken, 5000);
                 runOnUiThread(() -> {
+                    if (!autoConnecting) return;
                     autoConnecting = false;
                     if (error == null) {
                         serverStore.setAppToken(appToken);
@@ -237,6 +259,7 @@ public class ConnectActivity extends AppCompatActivity {
                     String error = testConnectionWithToken(normalizedUrl, savedToken, 5000);
                     if (error == null) {
                         runOnUiThread(() -> {
+                            if (!autoConnecting) return;
                             autoConnecting = false;
                             launchWebView(normalizedUrl, savedToken);
                         });
@@ -246,6 +269,7 @@ public class ConnectActivity extends AppCompatActivity {
 
                 String error = testConnection(normalizedUrl, 5000);
                 runOnUiThread(() -> {
+                    if (!autoConnecting) return;
                     autoConnecting = false;
                     if (error == null) {
                         launchWebView(normalizedUrl, null);
@@ -255,6 +279,26 @@ public class ConnectActivity extends AppCompatActivity {
                 });
             }
         });
+    }
+
+    /**
+     * 用户在自动连接界面点了"取消"或"切换服务器"。立刻把 autoConnecting
+     * 翻成 false (兜住后台请求姗姗来迟的回调), 中断网络任务, 露表单。
+     *
+     * @param focusInput true 表示切换服务器流程, 需要顺手聚焦输入框 + 全选
+     *                   文本; false 表示纯取消, 不打扰用户。
+     */
+    private void abortAutoConnect(boolean focusInput) {
+        if (!autoConnecting && autoConnectGroup.getVisibility() != View.VISIBLE) {
+            return;
+        }
+        autoConnecting = false;
+        cancelCurrentTask();
+        showForm();
+        if (focusInput && urlInput != null) {
+            urlInput.requestFocus();
+            urlInput.selectAll();
+        }
     }
 
     private void showForm() {

@@ -31,14 +31,32 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
 
     // MARK: - Self-signed HTTPS / Auth challenge
 
+    /// 对自签名证书一律放行：只要是 HTTPS 的 server trust 类型，就用拿到的 trust 构造
+    /// URLCredential 喂回去；否则走默认处理（http basic / digest 等服务端用不到的场景）。
+    /// 加入 NSLog 方便用户报问题时定位"到底是 challenge 没触发，还是 trust 拿不到"。
     func webView(_ webView: WKWebView,
                  didReceive challenge: URLAuthenticationChallenge,
                  completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-           let trust = challenge.protectionSpace.serverTrust {
-            completionHandler(.useCredential, URLCredential(trust: trust))
+        let space = challenge.protectionSpace
+        let method = space.authenticationMethod
+        let host = space.host
+        let port = space.port
+        let proto = space.protocol ?? "?"
+
+        if method == NSURLAuthenticationMethodServerTrust {
+            if let trust = space.serverTrust {
+                NSLog("[Wand] auth challenge: trust granted host=%@ port=%ld proto=%@",
+                      host, port, proto)
+                completionHandler(.useCredential, URLCredential(trust: trust))
+            } else {
+                NSLog("[Wand] auth challenge: serverTrust nil host=%@ — falling back to default", host)
+                completionHandler(.performDefaultHandling, nil)
+            }
             return
         }
+
+        NSLog("[Wand] auth challenge: non-ServerTrust method=%@ host=%@ — default handling",
+              method, host)
         completionHandler(.performDefaultHandling, nil)
     }
 

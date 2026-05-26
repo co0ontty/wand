@@ -5,8 +5,14 @@ import Foundation
 final class SelfSignedSession: NSObject, URLSessionDelegate, URLSessionDownloadDelegate {
     static let shared = SelfSignedSession()
 
+    /// session.configuration.httpCookieStorage 的便捷别名 —— 给 WandAuth 在
+    /// allHeaderFields 字典合并语义吃掉多份 Set-Cookie 时做兜底读取用。
+    var cookieStorage: HTTPCookieStorage? { session.configuration.httpCookieStorage }
+
     lazy var session: URLSession = {
-        let config = URLSessionConfiguration.default
+        // 用 ephemeral —— 它自带独立的内存 cookieStorage / URLCache，
+        // 不会和系统 / 其他 App 的 .shared 存储互相污染，也不需要 App Groups entitlement。
+        let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 600
         config.httpShouldSetCookies = true

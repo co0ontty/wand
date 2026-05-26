@@ -73,12 +73,20 @@ enum WandAuth {
             }
             switch http.statusCode {
             case 200:
-                var headers: [String: String] = [:]
+                // 优先从 SelfSignedSession 自带的 cookieStorage 拿——URLSession 已经把
+                // 所有 Set-Cookie 头都解析完丢进去，不会因 Set-Cookie 合并/覆盖丢失。
+                // 兜底再从 header 解析一次（防止 cookieStorage 因 Secure 标记跨 scheme 被滤掉）。
+                let storageCookies = SelfSignedSession.shared.cookieStorage?.cookies(for: loginURL) ?? []
+                var headerFields: [String: String] = [:]
                 for (key, value) in http.allHeaderFields {
-                    if let k = key as? String, let v = value as? String { headers[k] = v }
+                    if let k = key as? String, let v = value as? String { headerFields[k] = v }
                 }
-                let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: loginURL)
-                let sessionCookies = cookies.filter { sessionCookieNames.contains($0.name) }
+                let headerCookies = HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: loginURL)
+                // 用 name 去重合并两源
+                var merged: [String: HTTPCookie] = [:]
+                for c in storageCookies { merged[c.name] = c }
+                for c in headerCookies where merged[c.name] == nil { merged[c.name] = c }
+                let sessionCookies = merged.values.filter { sessionCookieNames.contains($0.name) }
                 if !sessionCookies.isEmpty {
                     completion(.success(sessionCookies))
                 } else {
