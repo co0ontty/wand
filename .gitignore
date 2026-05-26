@@ -24,3 +24,4 @@ avatar-seed.txt
 .wand-uploads/
 .wand-worktrees/
 .claude-*-plan.md
+.dev-pack/
