@@ -1786,6 +1786,9 @@
                   '<span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span>' +
                   '<span class="chat-unread-bubble-count" aria-hidden="true"></span>' +
                 '</button>' +
+                // 排队气泡宿主：贴在对话显示区域的右下角（在"回复中"状态线上方），
+                // 不进输入框 panel。updateQueueBar() 仅在 queuedMessages 非空时显形。
+                '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
               '</div>' +
               '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
                 '<div class="blank-chat-inner">' +
@@ -1814,10 +1817,7 @@
                 '</div>' +
               '</div>' +
               '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
-                // 排队气泡宿主：默认 display:none，updateQueueBar() 在 queuedMessages 非空时
-                // 显形。位置在 composer-top-row（含 "回复中" 状态条）之上，对话框右下角，
-                // 不进入输入框内部。所有内容由 updater 注入；这里只保留稳定的外层骨架。
-                '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
+                // #queue-bar-host 已搬到 #chat-output 内部（对话区右下角），不在这里了。
                 '<div class="composer-top-row">' +
                   '<div id="todo-progress" class="todo-progress hidden">' +
                     '<div class="todo-progress-header" id="todo-progress-toggle">' +
@@ -8214,9 +8214,9 @@
           return "会话已结束";
         }
         // 结构化会话在出 token 时，输入框仍然可用——告诉用户默认行为是排队，
-        // 想插队请直接点上面的气泡。短语尽量短，避免在窄屏手机上换行。
+        // 想插队请按气泡上的 ⚡ 按钮。短语尽量短，避免在窄屏手机上换行。
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) {
-          return "回复中…Enter 排队 · 点气泡插队";
+          return "回复中…Enter 排队 · ⚡ 立即发送";
         }
         return "";
       }
@@ -12544,12 +12544,15 @@
         return 0;
       }
 
-      function renderQueueBarHtml(items, inFlight, atCapacity, immediateLabel) {
+      function renderQueueBarHtml(items, inFlight, atCapacity) {
+        // 底部独立 ⚡ 按钮已下线，每条 chip 内部自带 ⚡ "立即"按钮 ——
+        // 这样用户一眼就能看出"是把哪一条插队"。
         var single = items.length <= 1;
         var barClass = "queue-bar";
         if (atCapacity) barClass += " queue-bar-capacity";
         if (inFlight) barClass += " queue-bar-inflight";
         var expandedIdx = queueBarExpandedIndex(items.length);
+        var promoteTip = inFlight ? "中断当前回复，立即发送这条" : "立即发送这条";
         var chips = "";
         for (var i = 0; i < items.length; i++) {
           var raw = items[i] == null ? "" : String(items[i]);
@@ -12557,13 +12560,21 @@
           var itemClass = "queue-bar-item";
           if (isExpanded) itemClass += " expanded";
           if (single) itemClass += " queue-bar-item-single";
-          // 整个 chip 既是拖拽起手区，也是"点一下立即发送"的触发点；delete 按钮单独占点击。
-          var titleAttr = isExpanded ? raw + "（点一下立即发送 · 按住可拖动调序）" : raw + "（点一下立即发送）";
+          // chip 本体是"拖拽起手区"；内部 ⚡ 按钮独占 click 用于立即发送、× 用于删除。
+          var titleAttr = isExpanded ? raw + "（按住可拖动调序）" : raw;
           chips +=
             '<li class="' + itemClass + '" data-index="' + i + '" data-action="drag"' +
                 ' title="' + escapeHtml(titleAttr) + '">' +
               '<span class="queue-bar-item-index" aria-hidden="true">' + (i + 1) + '</span>' +
               '<span class="queue-bar-item-text">' + escapeHtml(queueChipTruncate(raw)) + '</span>' +
+              '<button type="button" class="queue-bar-item-promote" data-action="promote-item"' +
+                    ' title="' + escapeHtml(promoteTip) + '" aria-label="立即发送这条"' +
+                    ' tabindex="' + (isExpanded ? "0" : "-1") + '">' +
+                '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+                  '<path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/>' +
+                '</svg>' +
+                '<span class="queue-bar-item-promote-label">立即</span>' +
+              '</button>' +
               '<button type="button" class="queue-bar-item-delete" data-action="delete"' +
                     ' aria-label="删除这条排队消息" title="删除" tabindex="' + (isExpanded ? "0" : "-1") + '">' +
                 '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
@@ -12575,13 +12586,6 @@
         return (
           '<div class="' + barClass + '" data-queue-bar="1">' +
             '<ol class="queue-bar-list" data-queue-list="1">' + chips + '</ol>' +
-            '<button type="button" class="queue-bar-promote" data-action="promote"' +
-                  ' title="中断当前回复，立刻发送队首这条"' +
-                  ' aria-label="' + escapeHtml(immediateLabel) + '队首">' +
-              '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-                '<path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/>' +
-              '</svg>' +
-            '</button>' +
           '</div>'
         );
       }
@@ -12607,9 +12611,8 @@
         host.hidden = false;
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
         var atCapacity = queue.length >= QUEUE_BAR_MAX;
-        var immediateLabel = inFlight ? "立即" : "发送";
 
-        host.innerHTML = renderQueueBarHtml(queue, inFlight, atCapacity, immediateLabel);
+        host.innerHTML = renderQueueBarHtml(queue, inFlight, atCapacity);
       }
 
       // 只切换 .expanded class，不重建 DOM —— 避免鼠标移过去触发的重建
@@ -12709,10 +12712,6 @@
           rollbackQueueOptimistic(session, prev);
           showToast((err && err.message) || "清空排队消息失败。", "error");
         });
-      }
-
-      function queueBarPromoteHead() {
-        queueBarPromoteIndex(0);
       }
 
       // 把队列里第 index 条剥下来，作为新的输入立刻发送出去。
@@ -12815,7 +12814,6 @@
           startY: ev.clientY,
           gap: gap,
           queueSnapshot: queue,
-          moved: false, // 没真正拖动过 → 抬手时按 tap 处理：promote 这条
         };
 
         chipEl.classList.add("dragging");
@@ -12863,8 +12861,6 @@
         if (!d || ev.pointerId !== d.pointerId) return;
         ev.preventDefault();
         var deltaY = ev.clientY - d.startY;
-        // 4px 阈值过滤抖动 / 触屏轻微滑动；超过才算"真的在拖"，否则抬手当 tap。
-        if (Math.abs(deltaY) > 4) d.moved = true;
         d.itemEl.style.transform = "translateY(" + deltaY + "px)";
 
         // 拖动中心 Y 决定目标插入位置
@@ -12899,7 +12895,6 @@
         var origIndex = d.origIndex;
         var targetIndex = d.targetIndex;
         var queueSnapshot = d.queueSnapshot;
-        var wasTap = !d.moved;
 
         // 清掉 inline transform 让 CSS 自然回位
         d.siblings.forEach(function(el) {
@@ -12911,9 +12906,9 @@
         state.queueBarDrag = null;
 
         if (origIndex === targetIndex) {
-          // 没真的移动过 → 按 tap 处理：把这条剥下来插队发送。
+          // 没动 → 单纯刷新一下。立即发送由 chip 内部的 ⚡ 按钮触发，
+          // 不在 chip 本体上做隐式 tap-to-promote（容易误触）。
           updateQueueBar();
-          if (wasTap) queueBarPromoteIndex(origIndex);
           return;
         }
 
@@ -12960,19 +12955,18 @@
           var actionEl = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
           if (!actionEl || !host.contains(actionEl)) return;
           var action = actionEl.getAttribute("data-action");
-          if (action === "drag") {
-            // queue.length > 1 时 pointerdown 已经 preventDefault → click 不会到这；
-            // queue.length === 1 时 drag-start 早退、click 会落到这里：当成 tap，
-            // 把这条直接 promote 出去。
-            ev.preventDefault();
-            ev.stopPropagation();
-            var idx = Number(actionEl.getAttribute("data-index"));
-            queueBarPromoteIndex(idx);
-            return;
-          }
+          // chip 本体（data-action="drag"）由 pointerdown 走 drag-or-tap 流程；
+          // click 阶段不处理，否则会和拖拽收尾冲突。
+          if (action === "drag") return;
           ev.preventDefault();
           ev.stopPropagation();
-          if (action === "promote") { queueBarPromoteHead(); return; }
+          if (action === "promote-item") {
+            // chip 内部的 ⚡ "立即"按钮：把这一条剥下来插队发送，让用户一眼看到
+            // 自己点的就是哪一条。
+            var pItem = actionEl.closest(".queue-bar-item");
+            if (pItem) queueBarPromoteIndex(Number(pItem.getAttribute("data-index")));
+            return;
+          }
           if (action === "delete") {
             var itemEl = actionEl.closest(".queue-bar-item");
             if (itemEl) queueBarDeleteItem(Number(itemEl.getAttribute("data-index")));
@@ -12990,10 +12984,11 @@
           if (state.queueBarDrag) return;
           setQueueBarHoverIndex(null);
         });
-        // 整个气泡都是拖拽起手区。delete / promote 按钮通过 closest 检查跳过
+        // 整个气泡都是拖拽起手区。chip 内部的 ⚡ / × 按钮通过 closest 跳过，
+        // 让 click 阶段去处理它们。
         host.addEventListener("pointerdown", function(ev) {
           if (ev.button !== undefined && ev.button !== 0) return;
-          if (ev.target && ev.target.closest && ev.target.closest('[data-action="delete"], [data-action="promote"]')) return;
+          if (ev.target && ev.target.closest && ev.target.closest('[data-action="delete"], [data-action="promote-item"]')) return;
           var chip = ev.target && ev.target.closest ? ev.target.closest('.queue-bar-item') : null;
           if (!chip) return;
           // 拖拽前先把这条切到 expanded（鼠标按下时通常已经 hovered，但触屏没 hover）
@@ -13044,37 +13039,14 @@
         });
       }
 
-      // Append queued user message placeholders to currentMessages so they
-      // remain visible across WS updates and re-renders.
+      // 结构化会话的"对话视图"现在只渲染真实的 user/assistant turn。排队消息（还没
+      // flush 出去那批）由 .queue-bar 在对话区右下角统一展示，不再在 chat 流里贴一份
+      // 半透明 "排队中" 用户气泡——避免同一条消息在 UI 上出现两次。
       function buildMessagesForRender(session, messages) {
         var sanitized = Array.isArray(messages) ? stripRenderOnlyStructuredMessages(messages) : [];
         var base = Array.isArray(sanitized) ? sanitized.slice() : [];
         if (!session || session.sessionKind !== "structured") {
           return base;
-        }
-        var queued = getStructuredQueuedInputs(session);
-        if (queued && queued.length > 0) {
-          // Collect recent user message texts to deduplicate against queued items.
-          // A queued message that already appears as a real user turn should not
-          // be rendered a second time with the "排队中" badge.
-          var existingUserTexts = {};
-          for (var ei = base.length - 1; ei >= 0 && Object.keys(existingUserTexts).length < queued.length + 5; ei--) {
-            var em = base[ei];
-            if (em && em.role === "user" && Array.isArray(em.content)) {
-              for (var ej = 0; ej < em.content.length; ej++) {
-                if (em.content[ej] && em.content[ej].type === "text" && em.content[ej].text) {
-                  existingUserTexts[em.content[ej].text] = (existingUserTexts[em.content[ej].text] || 0) + 1;
-                }
-              }
-            }
-          }
-          for (var qi = 0; qi < queued.length; qi++) {
-            if (existingUserTexts[queued[qi]]) {
-              existingUserTexts[queued[qi]]--;
-              continue; // Skip — this queued text is already shown as a real message
-            }
-            base.push({ role: "user", content: [{ type: "text", text: queued[qi], __queued: true }] });
-          }
         }
         if (session.structuredState && session.structuredState.inFlight) {
           var last = base[base.length - 1];
