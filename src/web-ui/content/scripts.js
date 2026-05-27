@@ -1916,9 +1916,14 @@
                         if (selectedSession.provider === "claude" && selectedSession.claudeSessionId) {
                           bits += '<span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">' + iconSvg("cloud", { size: 11, strokeWidth: 1.7, cls: "claude-session-id-icon" }) + '<span class="claude-session-id-text">' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span></span>';
                         }
-                        if (!isStructuredSession(selectedSession) && selectedSession.exitCode !== undefined && selectedSession.exitCode !== null) {
-                          if (bits) bits += '<span class="session-info-separator">|</span>';
-                          bits += '<span id="session-exit-display" class="session-exit-display">退出码=' + selectedSession.exitCode + '</span>';
+                        // 非结构化会话：进程退出后展示退出码（哪怕 0，告诉用户已正常结束）。
+                        // 结构化会话：只在退出码非 0（即真有失败）时展示，避免成功的多轮对话也挂个 "退出码=0" 误导。
+                        if (selectedSession.exitCode !== undefined && selectedSession.exitCode !== null) {
+                          var showExit = !isStructuredSession(selectedSession) || selectedSession.exitCode !== 0;
+                          if (showExit) {
+                            if (bits) bits += '<span class="session-info-separator">|</span>';
+                            bits += '<span id="session-exit-display" class="session-exit-display">退出码=' + selectedSession.exitCode + '</span>';
+                          }
                         }
                         return bits ? '<div class="input-session-info-bar">' + bits + '</div>' : '';
                       })()

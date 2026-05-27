@@ -51,13 +51,24 @@ if [ "$(id -u)" -ne 0 ] && command -v sudo &>/dev/null; then
 fi
 
 info "Stopping running wand processes (if any)..."
+# 同时检测系统级和用户级 systemd unit，升级后要按对应 scope 重新生成
+# unit 文件（详见下面 WAND_SYSTEMD_SCOPE 的用途）。
+WAND_SYSTEMD_SCOPE=""
 if command -v systemctl &>/dev/null; then
   for unit in wand wand.service; do
     if systemctl list-unit-files 2>/dev/null | grep -q "^${unit}"; then
       $SUDO systemctl stop "$unit" 2>/dev/null || true
       WAND_SYSTEMD_UNIT="$unit"
+      WAND_SYSTEMD_SCOPE="system"
     fi
   done
+  # 用户级 unit（XDG_RUNTIME_DIR 有时不会一直在；用 --user list-unit-files
+  # 安全地探测，失败就当没有）。
+  if [ -z "$WAND_SYSTEMD_SCOPE" ] && systemctl --user list-unit-files 2>/dev/null | grep -q "^wand"; then
+    systemctl --user stop wand.service 2>/dev/null || true
+    WAND_SYSTEMD_UNIT="wand.service"
+    WAND_SYSTEMD_SCOPE="user"
+  fi
 fi
 pkill -f "wand web" 2>/dev/null || true
 pkill -f "wand/dist/cli\\.js" 2>/dev/null || true
@@ -78,15 +89,39 @@ fi
 info "Installing @co0ontty/wand..."
 npm install -g @co0ontty/wand || error "npm install failed."
 
-# --- Restart systemd unit if we stopped it ---
-if [ -n "${WAND_SYSTEMD_UNIT:-}" ]; then
-  info "Restarting ${WAND_SYSTEMD_UNIT}..."
-  $SUDO systemctl start "$WAND_SYSTEMD_UNIT" 2>/dev/null || warn "Failed to restart ${WAND_SYSTEMD_UNIT}, please start it manually."
-fi
-
-# --- Init ---
+# --- Init (needed before service:install reads config) ---
 info "Initializing wand..."
 wand init
+
+# --- Re-register systemd unit if we stopped one (升级场景) ---
+# 关键修复：以前这里只 `systemctl start`，但 unit 文件里的 `Environment=PATH=...`
+# 是上次 `wand service:install` 那一刻烧的快照。用户切 node 版本 / 把 claude 装
+# 到新位置后，老 unit 的 PATH 找不到 claude → "command not found"。
+# 现在改成重新跑 `wand service:install`：它会按当前 shell 的 PATH 重新生成 unit
+# 文件，然后 daemon-reload + enable --now，等价于 stop+regen+start。
+# 升级成功后置 SKIP_INSTALL_MENU=1，跳过下面的"选启动方式"交互（用户本来就在用服务）。
+SKIP_INSTALL_MENU=0
+if [ -n "${WAND_SYSTEMD_UNIT:-}" ]; then
+  if [ "$WAND_SYSTEMD_SCOPE" = "user" ]; then
+    info "Re-registering ${WAND_SYSTEMD_UNIT} (user scope) to refresh baked-in PATH..."
+    if wand service:install --user; then
+      SKIP_INSTALL_MENU=1
+    else
+      warn "wand service:install --user 失败，回退到 systemctl --user start"
+      systemctl --user start "$WAND_SYSTEMD_UNIT" 2>/dev/null \
+        || warn "也起不来，请手动跑 'wand service:install --user'"
+    fi
+  else
+    info "Re-registering ${WAND_SYSTEMD_UNIT} to refresh baked-in PATH..."
+    if $SUDO wand service:install; then
+      SKIP_INSTALL_MENU=1
+    else
+      warn "wand service:install 失败，回退到 systemctl start"
+      $SUDO systemctl start "$WAND_SYSTEMD_UNIT" 2>/dev/null \
+        || warn "也起不来，请手动跑 '${SUDO:+sudo }wand service:install'"
+    fi
+  fi
+fi
 
 # --- Choose run mode ---
 # 装完后让用户选启动方式。Root 看到 2 项,非 root 看到 3 项:
@@ -139,6 +174,23 @@ choose_install_mode() {
     esac
   fi
 }
+
+if [ "$SKIP_INSTALL_MENU" = "1" ]; then
+  # 升级场景：老服务已被 wand service:install 重新生成 + enable --now，没必要
+  # 再问用户怎么启动。直接打印升级完成 + 状态查询提示。
+  echo ""
+  if [ "$WAND_SYSTEMD_SCOPE" = "user" ]; then
+    info "升级完成，用户级服务已用最新 PATH 重新注册并启动。"
+    info "查看状态：${GREEN}wand service:status --user${NC}"
+    info "看 日 志：${GREEN}wand service:logs --user${NC}"
+  else
+    info "升级完成，系统级服务已用最新 PATH 重新注册并启动。"
+    info "查看状态：${GREEN}wand service:status${NC}"
+    info "看 日 志：${GREEN}wand service:logs${NC}"
+  fi
+  info "接入 TUI：${GREEN}wand web${NC}"
+  exit 0
+fi
 
 MODE=$(choose_install_mode)
 

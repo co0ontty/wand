@@ -1374,10 +1374,18 @@ export class StructuredSessionManager {
           closedAt: new Date().toISOString(),
           spawnError: error.message,
         });
-        reject(error);
+        // spawn 直接失败（最常见是 ENOENT —— PATH 里找不到 codex 可执行文件）。
+        // 之前只 reject(error)，外层 catch 会把 error.message 直接当 lastError，
+        // 用户看到的就是裸的 "spawn codex ENOENT"，没法快速反应。这里加一层
+        // 包装把上下文（runner 名 + 常见排查建议）拼好。
+        const nodeErr = error as NodeJS.ErrnoException;
+        const hint = nodeErr.code === "ENOENT"
+          ? "（PATH 中找不到 codex 可执行文件；请确认 codex 已安装，或重跑 `wand service:install` 刷新服务的 PATH）"
+          : "";
+        reject(new Error(`codex exec 启动失败：${error.message}${hint}`));
       });
 
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         this.pendingChildren.delete(sessionId);
         this.lastStreamSaveAt.delete(sessionId);
         if (lineBuf.trim()) {
@@ -1407,11 +1415,12 @@ export class StructuredSessionManager {
         // codex 把模型/网络/沙箱等错误写到 stdout 的 NDJSON 流（type: error / turn.failed），
         // 而不是 stderr。我们以 turn.failed 的 message 为准，其次是最后一个 error 事件。
         const codexFailed = codexTurnFailed !== null;
-        if ((codexFailed || (code !== 0 && code !== null)) && !interruptedByUser) {
-          const errorText = (codexTurnFailed && codexTurnFailed.trim())
-            || (codexErrors.length > 0 ? codexErrors[codexErrors.length - 1] : "")
-            || stderr.trim()
-            || `codex exec exited with code ${code}`;
+        if ((codexFailed || (code !== 0 && code !== null) || signal) && !interruptedByUser) {
+          const errorText = this.formatStructuredExitError("codex exec", code, signal, {
+            stderr,
+            primary: codexTurnFailed,
+            extras: codexErrors,
+          });
           const exitForSnapshot = typeof code === "number" ? code : 1;
           const failed = this.finishStructuredFailure(current, exitForSnapshot, errorText, turnState);
           this.sessions.set(sessionId, failed);
@@ -1831,10 +1840,16 @@ export class StructuredSessionManager {
       };
 
       let stderr = "";
+      // 兜底：当 stderr 是空、JSON 也没解析到任何错误事件时，把最后一段非空
+      // stdout 文本作为上下文塞给错误信息。claude -p 偶尔会把 fatal error 以
+      // 纯文本（非 JSON）打到 stdout 然后非零退出，之前的实现会丢掉这部分。
+      let lastRawStdoutChunk = "";
 
       child.stdout?.on("data", (chunk: Buffer) => {
         const text = chunk.toString();
         this.logger?.appendStructuredStdout(sessionId, text);
+        const trimmed = text.trim();
+        if (trimmed) lastRawStdoutChunk = trimmed.slice(-1024);
         lineBuf += text;
         const lines = lineBuf.split("\n");
         // Keep the last (possibly incomplete) segment in the buffer.
@@ -1861,10 +1876,15 @@ export class StructuredSessionManager {
           closedAt: new Date().toISOString(),
           spawnError: error.message,
         });
-        reject(error);
+        // 同 codex 那边：spawn ENOENT 最常见，提示用户去 service:install 刷 PATH。
+        const nodeErr = error as NodeJS.ErrnoException;
+        const hint = nodeErr.code === "ENOENT"
+          ? "（PATH 中找不到 claude 可执行文件；请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH）"
+          : "";
+        reject(new Error(`claude -p 启动失败：${error.message}${hint}`));
       });
 
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         this.pendingChildren.delete(sessionId);
         this.lastStreamSaveAt.delete(sessionId);
         this.logger?.appendStructuredSpawn(sessionId, {
@@ -1896,8 +1916,14 @@ export class StructuredSessionManager {
         // 可能以非零 exit code 退出（内部 handler 调了 exit(1)）。这种情况属于正常
         // 中断流程，不应走失败路径——后续 interruptedWith 逻辑会发送新消息。
         const interruptedByUser = this.interruptedWith.has(sessionId);
-        if (code !== 0 && code !== null && !interruptedByUser) {
-          const errorText = stderr.trim() || `claude -p exited with code ${code}`;
+        const failedExit = (code !== null && code !== 0) || signal !== null;
+        if (failedExit && !interruptedByUser) {
+          const errorText = this.formatStructuredExitError("claude -p", code, signal, {
+            stderr,
+            // claude -p 没有 codex 那种独立的 turn.failed 事件，所以 primary 留空；
+            // 退路是 stderr / stdoutTail。
+            stdoutTail: lastRawStdoutChunk,
+          });
           const failureTurn: ConversationTurn = {
             role: "assistant",
             content: [{ type: "text", text: `结构化会话执行失败：${errorText}` }],
@@ -1909,10 +1935,12 @@ export class StructuredSessionManager {
           } else {
             msgs.push(failureTurn);
           }
+          // 仅 signal 终止时 code 为 null；用 1 占位，让 UI 的"exitCode !== 0"判定也能命中。
+          const exitForSnapshot = typeof code === "number" ? code : 1;
           const failed: SessionSnapshot = {
             ...current,
             status: "failed",
-            exitCode: code,
+            exitCode: exitForSnapshot,
             endedAt: new Date().toISOString(),
             output: errorText,
             claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
@@ -2714,6 +2742,52 @@ export class StructuredSessionManager {
       }
     }
     blocks.push(block);
+  }
+
+  /**
+   * 组装结构化 runner 退出失败时的可读错误字符串。
+   *
+   * 痛点：之前 claude -p / codex exec 异常退出只把"stderr.trim() || `... exited
+   * with code N`"塞给 UI。如果 stderr 是空的，用户在前端只能看到 "EXIT 1" 这种
+   * 没有任何上下文的串，根本不知道是网络错误、参数错误还是 binary 找不着。
+   *
+   * 这里固定把"provider + 退出码 / 信号"放在最前面，再把 stderr / NDJSON 错误
+   * 事件 / 最后一段 stdout 之类的上下文跟在后面，方便定位。
+   */
+  private formatStructuredExitError(
+    provider: "claude -p" | "codex exec",
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    options: {
+      /** stderr 累积内容；空字符串也行。 */
+      stderr?: string;
+      /** 从 NDJSON 解析出的最关键的错误消息（codex turn.failed / claude system.error）。 */
+      primary?: string | null;
+      /** 备用错误条目（按时间顺序排列，取最后一条）。 */
+      extras?: string[];
+      /** 当 stderr / primary / extras 都空时的兜底 tail，比如最后一行 stdout。 */
+      stdoutTail?: string;
+    } = {},
+  ): string {
+    const head = signal
+      ? `${provider} terminated by signal ${signal}${code !== null ? ` (code ${code})` : ""}`
+      : code !== null
+        ? `${provider} exited with code ${code}`
+        : `${provider} exited (unknown status)`;
+
+    const primary = options.primary?.trim();
+    const stderrTrim = options.stderr?.trim() ?? "";
+    const lastExtra = options.extras && options.extras.length > 0
+      ? options.extras[options.extras.length - 1].trim()
+      : "";
+    const stdoutTail = options.stdoutTail?.trim() ?? "";
+
+    // 选第一个非空的"详情"作为正文展示，剩下的不再追加避免太长。
+    const detail = primary || lastExtra || stderrTrim || stdoutTail;
+    if (!detail) return head;
+    // 控制长度，避免大段 stderr 撑爆 UI；保留尾部信息（最近的更相关）。
+    const trimmed = detail.length > 2048 ? `...${detail.slice(-2048)}` : detail;
+    return `${head}\n${trimmed}`;
   }
 
   private finishStructuredFailure(

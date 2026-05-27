@@ -40,6 +40,7 @@ import { installPackageGloballyAsync } from "./npm-update-utils.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
+import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, type PathRepairResult } from "./path-repair.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
@@ -875,10 +876,34 @@ export interface ServerHandle {
   httpsEnabled: boolean;
   version: string;
   orphanRecoveredCount: number;
+  pathRepair: PathRepairResult;
   close(): Promise<void>;
 }
 
 export async function startServer(config: WandConfig, configPath: string): Promise<ServerHandle> {
+  // 关键：在创建 ProcessManager / 任何 spawn 之前先修 PATH。
+  // 服务被注册为 systemd / launchd 时，unit 文件里的 PATH 是安装那一刻烧死的，
+  // 之后用户切 node 版本 / 重装 wand / 把 claude 装到新位置都不会更新 unit，
+  // 服务进程的 process.env.PATH 就长期 stale。这里追加常见工具链 bin 目录，
+  // 让 spawn 出的 PTY 子进程能找到 claude / codex。详见 src/path-repair.ts。
+  const pathRepair = repairRuntimePath();
+  // 同步追加完后还有一层兜底：起 login shell 拉用户实际 $PATH，把 nvm / fnm /
+  // volta 这类动态注入的目录也合并进来。失败会静默走 sync 结果，不阻塞启动。
+  try {
+    await deepRepairRuntimePath(pathRepair, { shell: config.shell });
+  } catch {
+    // deepRepairRuntimePath 内部已经 catch 了所有异常并写到 result.warnings；
+    // 这里只是兜底，避免任何意外 throw 阻断启动。
+  }
+  if (
+    pathRepair.added.length > 0
+    || Object.values(pathRepair.resolved).some((v) => v === null)
+    || pathRepair.warnings.length > 0
+  ) {
+    // 有改动 / 有命令没解析到 / 有告警时才打 log，避免正常启动刷屏。
+    process.stdout.write(`[wand] ${formatPathRepairSummary(pathRepair)}\n`);
+  }
+
   const app = express();
   const storage = new WandStorage(resolveDatabasePath(configPath));
   setAuthStorage(storage);
@@ -2269,6 +2294,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     httpsEnabled: useHttps,
     version: PKG_VERSION,
     orphanRecoveredCount: processes.getOrphanRecoveredCount(),
+    pathRepair,
     close,
   };
 }
