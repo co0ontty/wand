@@ -677,18 +677,18 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 16px;
+      padding: 12px 14px;
       border-bottom: 1px solid var(--border-subtle);
       background: rgba(255, 251, 245, 0.8);
       flex-shrink: 0;
-      min-height: 56px;
-      gap: 12px;
+      min-height: 52px;
+      gap: 10px;
     }
 
     .sidebar-header-main {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 9px;
       min-width: 0;
       flex: 1;
     }
@@ -696,8 +696,14 @@
     .sidebar-header-actions {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
       flex-shrink: 0;
+    }
+
+    /* On desktop pinned mode the close (X) button is redundant — the hamburger
+       toggle in the topbar already opens/closes the sidebar. Hide it to declutter. */
+    .sidebar.pinned .sidebar-header-actions .sidebar-close {
+      display: none;
     }
 
     .sidebar-header-more {
@@ -1260,7 +1266,7 @@
       flex: 1;
       min-height: 0;
       overflow-y: auto;
-      padding: 12px;
+      padding: 10px 10px 12px;
     }
 
     .sessions-list:empty::before {
@@ -1282,7 +1288,7 @@
        the "Liquid Glass — sidebar" section below. */
 
     .session-group-title {
-      padding: 8px 8px 12px;
+      padding: 4px 6px 10px;
       font-size: 0.6875rem;
       font-weight: 700;
       letter-spacing: 0.08em;
@@ -1296,9 +1302,9 @@
     .session-group-title::before {
       content: '';
       width: 3px;
-      height: 14px;
+      height: 12px;
       background: var(--accent);
-      opacity: 0.7;
+      opacity: 0.65;
       border-radius: var(--radius-full);
     }
 
@@ -1408,17 +1414,21 @@
       z-index: 1;
     }
 
+    /* Keep content transparent by default so it doesn't paint a second
+       gradient inside the card (which created a visible "white box" in the
+       middle). Only opaque when swiped, so the actions stay hidden behind. */
     .session-item-content {
       position: relative;
       z-index: 2;
-      background: inherit;
+      background: transparent;
       border-radius: inherit;
-      transition: transform 0.3s var(--ease-out-expo);
+      transition: transform 0.3s var(--ease-out-expo), background 0.18s ease;
       will-change: transform;
     }
 
     .session-item.swiped .session-item-content {
       transform: translateX(-72px);
+      background: linear-gradient(180deg, rgba(255, 252, 247, 0.96) 0%, rgba(252, 246, 237, 0.94) 100%);
     }
 
     .session-manage-check {
@@ -1443,11 +1453,18 @@
       width: 18px;
       height: 18px;
       border-radius: 6px;
-      border: 1px solid var(--border-subtle);
-      background: var(--bg-surface);
+      border: 1px solid rgba(125, 91, 57, 0.22);
+      background: rgba(255, 251, 245, 0.55);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .session-manage-check:hover span {
+      background: rgba(255, 251, 245, 0.8);
+      border-color: rgba(125, 91, 57, 0.35);
     }
 
     .session-manage-check input:checked + span {
@@ -1504,10 +1521,11 @@
     }
 
     .session-main {
+      flex: 1;
       min-width: 0;
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 4px;
       padding-right: 64px;
     }
 
@@ -2220,8 +2238,158 @@
       font-weight: 500;
     }
 
+    /* ===== Sidebar: docked Claude history region =====
+       Lives between .sidebar-body and .sidebar-footer. Collapsed by default —
+       only a slim header row ("历史消息" + 数字气泡) is visible, so the main
+       scrolling area focuses on recent / archived sessions. Expanding it
+       grows the region with a 40% max-height cap so it can never eat the
+       sessions list above. */
+    .sidebar-history-region {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      max-height: 40%;
+      border-top: 1px solid var(--border-subtle);
+      background: rgba(255, 251, 245, 0.66);
+      transition: max-height 0.28s var(--ease-out-expo);
+    }
+
+    .sidebar-history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 9px 14px;
+      min-height: 38px;
+      flex-shrink: 0;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      cursor: pointer;
+      text-align: left;
+      font-family: var(--font-sans);
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.005em;
+      color: var(--text-secondary);
+      transition: background var(--transition-fast), color var(--transition-fast);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .sidebar-history-header:hover {
+      background: rgba(150, 118, 85, 0.06);
+      color: var(--text-primary);
+    }
+
+    .sidebar-history-header:active {
+      background: rgba(150, 118, 85, 0.1);
+    }
+
+    .sidebar-history-header.expanded {
+      background: rgba(255, 251, 245, 0.85);
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .sidebar-history-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .sidebar-history-right {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    /* Count bubble — pill shape, tabular numerals, accent-tinted when there
+       are items, muted when empty/loading. */
+    .history-bubble {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 18px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: var(--accent-muted);
+      color: var(--accent);
+      font-size: 0.6875rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .history-bubble.empty {
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
+      opacity: 0.65;
+    }
+
+    .history-bubble.loading {
+      background: transparent;
+      color: var(--text-muted);
+      letter-spacing: 0.1em;
+      padding: 0 4px;
+      font-weight: 600;
+    }
+
+    .sidebar-history-chevron {
+      flex-shrink: 0;
+      color: var(--text-muted);
+      transition: transform 0.22s var(--ease-out-expo), color var(--transition-fast);
+    }
+
+    .sidebar-history-header.expanded .sidebar-history-chevron {
+      transform: rotate(180deg);
+      color: var(--text-secondary);
+    }
+
+    /* Expanded body — scrollable, capped via parent max-height. */
+    .sidebar-history-body {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 6px 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      animation: historyBodyFadeIn 0.22s var(--ease-out-expo);
+    }
+
+    @keyframes historyBodyFadeIn {
+      from { opacity: 0; transform: translateY(-2px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .sidebar-history-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      padding: 2px 4px 6px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-history-clear {
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .sidebar-history-clear:hover {
+      color: var(--danger);
+      background: var(--danger-muted);
+    }
+
+    .sidebar-history-scroll {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
     .sidebar-footer {
-      padding: 14px;
+      padding: 12px 12px 14px;
       border-top: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: column;
@@ -2229,10 +2397,13 @@
       background: rgba(255, 251, 245, 0.7);
     }
 
+    /* Auto-fit grid: 3 buttons stretch to fill, extra buttons (PWA install
+       / switch server) drop in without breaking the row. minmax(56px,1fr)
+       guarantees touch-friendly width while not leaving big empty cells. */
     .sidebar-footer-actions {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 6px;
+      grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
+      gap: 4px;
     }
 
     .sidebar-footer-actions .btn {
@@ -2240,25 +2411,32 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 3px;
+      gap: 4px;
       font-size: 0.625rem;
+      font-weight: 500;
       color: var(--text-muted);
-      padding: 8px 4px;
-      min-height: 48px;
-      border-radius: var(--radius-sm);
-      transition: all var(--transition-fast);
+      padding: 7px 4px;
+      min-height: 46px;
+      border-radius: 9px;
+      transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
     }
 
     .sidebar-footer-actions .btn svg {
       width: 16px;
       height: 16px;
       flex-shrink: 0;
+      opacity: 0.85;
+      transition: opacity var(--transition-fast);
     }
 
     .sidebar-footer-actions .btn:hover {
       color: var(--text-primary);
       background: rgba(150, 118, 85, 0.08);
       transform: translateY(-1px);
+    }
+
+    .sidebar-footer-actions .btn:hover svg {
+      opacity: 1;
     }
 
     .sidebar-footer-actions .btn:active {
@@ -2268,6 +2446,30 @@
 
     .sidebar-footer-actions .btn.hidden {
       display: none;
+    }
+
+    /* Subtle visual separation for the destructive "退出" so it doesn't
+       sit visually equal to "文件 / 设置". A hairline divider on the left
+       (collapses gracefully if it lands at the start of a wrapped row). */
+    .sidebar-footer-actions .sidebar-logout {
+      position: relative;
+    }
+    .sidebar-footer-actions .sidebar-logout::before {
+      content: "";
+      position: absolute;
+      left: -3px;
+      top: 22%;
+      bottom: 22%;
+      width: 1px;
+      background: var(--border-subtle);
+      pointer-events: none;
+    }
+    .sidebar-footer-actions .sidebar-logout:hover {
+      color: var(--danger);
+      background: var(--danger-muted);
+    }
+    .sidebar-footer-actions .sidebar-logout:hover svg {
+      color: var(--danger);
     }
 
     .sidebar-meta {
@@ -15687,5 +15889,192 @@
       line-height: 0;
     }
     .working-dir-indicator-icon > svg { display: block; }
+
+    /* ===== 终端悬浮摇杆遥控器（手机端 PTY 遥控） ===== */
+    .wand-joystick-root {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s ease;
+    }
+    .wand-joystick-root.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+    .wand-joystick-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(20, 15, 12, 0);
+      pointer-events: none;
+      transition: background 0.2s ease;
+    }
+    .wand-joystick-backdrop.active {
+      background: rgba(20, 15, 12, 0.28);
+      pointer-events: auto;
+    }
+    .wand-joystick-ball {
+      position: fixed;
+      right: 18px;
+      bottom: 96px;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(245, 235, 225, 0.95);
+      background: rgba(32, 25, 21, 0.78);
+      border: 1px solid rgba(197, 101, 61, 0.34);
+      box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.36),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      pointer-events: auto;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      z-index: 43;
+      cursor: grab;
+      transition: transform 0.18s var(--ease-spring), background 0.2s ease, border-color 0.2s ease;
+    }
+    .wand-joystick-ball:hover { border-color: rgba(197, 101, 61, 0.55); }
+    .wand-joystick-ball:active { background: rgba(44, 34, 28, 0.88); }
+    .wand-joystick-ball.dragging {
+      transform: scale(1.12);
+      cursor: grabbing;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+    }
+    /* 环形菜单：圆心运行期由 JS 对齐球球中心 */
+    .wand-joystick-ring {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 0;
+      height: 0;
+      z-index: 42;
+      pointer-events: none;
+      opacity: 0;
+      transform: scale(0.6);
+      transition: opacity 0.18s var(--ease-out-expo), transform 0.22s var(--ease-spring);
+    }
+    .wand-joystick-ring.active {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .wjr-svg {
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform: translate(-50%, -50%);
+      overflow: visible;
+      pointer-events: none;
+      filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.5));
+    }
+    /* 底盘：所有扇区之下的玻璃圆盘，扇区细缝与外缘透出它，统一成一颗整盘 */
+    .wjr-base {
+      fill: rgba(18, 13, 10, 0.8);
+      stroke: rgba(245, 235, 225, 0.14);
+      stroke-width: 1;
+    }
+    .wjr-svg text {
+      text-anchor: middle;
+      dominant-baseline: central;
+      font-size: 10.5px;
+      font-weight: 600;
+      fill: #f6ede3;
+      /* 描边垫底 → 标签在任意扇区色/穿透的终端字上都清晰 */
+      paint-order: stroke;
+      stroke: rgba(10, 7, 5, 0.55);
+      stroke-width: 2.2px;
+      stroke-linejoin: round;
+      pointer-events: none;
+    }
+    .wjr-inner text { font-size: 16px; fill: #fff; }
+    .wjr-svg .wjr-2line { font-size: 9.5px; }
+    .wjr-sector path {
+      fill: rgba(74, 61, 53, 0.9);          /* 功能圈：暖玻璃面，明显高于底盘与终端背景 */
+      stroke: none;
+      transition: fill 0.12s ease;
+    }
+    .wjr-inner path { fill: rgba(56, 45, 39, 0.92); }   /* 方向圈略深，与功能圈区分层次 */
+    .wjr-sector.is-repeating path,
+    .wjr-sector.is-hover path { fill: var(--accent); }
+    .wjr-sector.is-repeating text,
+    .wjr-sector.is-hover text { fill: #fff; stroke: rgba(120, 42, 18, 0.5); }
+    .wjr-sector.is-repeating,
+    .wjr-sector.is-hover { filter: drop-shadow(0 0 9px rgba(197, 101, 61, 0.6)); }
+    .wjr-hub {
+      fill: rgba(14, 10, 8, 0.96);
+      stroke: rgba(245, 235, 225, 0.22);
+      stroke-width: 1.5;
+    }
+    text.wjr-hub-label { font-size: 12px; font-weight: 700; fill: #f6ede3; stroke: none; }
+    .wand-joystick-ball.is-ringing { opacity: 0; }
+    /* 钉住面板 */
+    .wand-joystick-panel {
+      position: fixed;
+      right: 18px;
+      bottom: 160px;
+      z-index: 44;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(28, 22, 18, 0.92);
+      border: 1px solid rgba(245, 235, 225, 0.14);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(8px) scale(0.96);
+      transform-origin: bottom right;
+      transition: opacity 0.18s var(--ease-out-expo), transform 0.22s var(--ease-spring);
+      max-width: calc(100vw - 36px);
+    }
+    .wand-joystick-panel.active {
+      pointer-events: auto;
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    .wjp-title {
+      font-size: 0.66rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(245, 235, 225, 0.5);
+      text-align: center;
+    }
+    .wjp-dpad { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .wjp-dpad-row { display: flex; gap: 4px; }
+    .wjp-grid { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+    .wjp-fnkeys { max-width: 200px; }
+    .wjp-key {
+      min-width: 44px;
+      height: 40px;
+      padding: 0 8px;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: rgba(245, 235, 225, 0.92);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(245, 235, 225, 0.14);
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      transition: transform 0.1s ease, background 0.15s ease;
+    }
+    .wjp-key:active { background: var(--accent-soft, rgba(197, 101, 61, 0.2)); transform: scale(0.94); }
+    .wjp-key.wjp-mod.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
 
     /* 结束标记 */

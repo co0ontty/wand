@@ -326,6 +326,36 @@
         miniKeyboardVisible: false,
         shortcutsExpanded: false,
         modifiers: { ctrl: false, alt: false, shift: false },
+        // ── 终端悬浮摇杆遥控器（手机端 PTY 遥控）状态 ──
+        // joystickPos 持久化球球位置 {right, bottom}（localStorage wand-ball-pos）
+        joystickPos: (function() {
+          try {
+            var saved = localStorage.getItem("wand-ball-pos");
+            if (!saved) return null;
+            var parsed = JSON.parse(saved);
+            return parsed && typeof parsed === "object" ? parsed : null;
+          } catch (e) {
+            return null;
+          }
+        })(),
+        joystickPinnedOpen: false,      // 钉住面板是否展开（不持久化，切会话复位）
+        joystickRootEl: null,           // 以下均为运行期句柄，teardown 复位
+        joystickRingEl: null,
+        joystickPanelEl: null,
+        joystickBackdropEl: null,
+        joystickBallEl: null,
+        joystickPointerId: null,
+        joystickGesture: null,          // null|'pending'|'ring'|'move'
+        joystickPressStart: null,       // {x, y, t}
+        joystickCenter: null,           // 手势开始时球球中心，用于径向命中
+        joystickLongPressTimer: null,
+        joystickRepeatTimer: null,
+        joystickRepeatKey: null,
+        joystickHoverOuter: null,       // 外圈当前高亮键（松手发送）
+        joystickLastHoverKey: null,     // 上一次悬停的扇区键（用于切换震动反馈）
+        joystickMoveHandler: null,
+        joystickUpHandler: null,
+        joystickResizeHandler: null,
         fileSearchQuery: "",
         fileExplorerLoading: false,
         allFiles: [],
@@ -334,7 +364,7 @@
         fileExplorerTotal: 0,
         claudeHistory: [],
         claudeHistoryLoaded: false,
-        claudeHistoryExpanded: true,
+        claudeHistoryExpanded: false,
         claudeHistoryExpandedDirs: {},
         archivedExpanded: false,
         sessionsManageMode: false,
@@ -1685,6 +1715,7 @@
                   '<div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div>' +
                 '</div>' +
               '</div>' +
+              '<div id="sidebar-history-region" class="sidebar-history-region">' + renderClaudeHistoryRegion() + '</div>' +
               '<div class="sidebar-footer">' +
                 '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
                 '<div class="sidebar-footer-actions">' +
@@ -3361,6 +3392,9 @@
       }
 
       function renderSessions() {
+        // Claude history is no longer inlined here — it lives in its own
+        // collapsible region between .sidebar-body and .sidebar-footer, so
+        // the scrolling sessions list focuses on recent / archived sessions.
         var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
         var groups = [];
         groups.push(renderSessionManageBar());
@@ -3373,9 +3407,8 @@
         if (archivedSessions.length > 0) {
           groups.push(renderArchivedGroup(archivedSessions));
         }
-        groups.push(renderClaudeHistorySection());
         if (recentEntries.length === 0 && archivedSessions.length === 0) {
-          return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>' + renderClaudeHistorySection();
+          return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
         }
         return groups.join("");
       }
@@ -3482,37 +3515,62 @@
         return html;
       }
 
-      function renderClaudeHistorySection() {
-        // Exclude recent 24h items from history section
+      // Compute the items eligible for the history region (older than 24h —
+       // the recent-24h ones already show in the recent group above).
+      function getClaudeHistoryRegionItems() {
         var cutoff = Date.now() - 24 * 60 * 60 * 1000;
-        var visibleHistory = getVisibleClaudeHistorySessions().filter(function(s) {
+        return getVisibleClaudeHistorySessions().filter(function(s) {
           return !s.timestamp || new Date(s.timestamp).getTime() <= cutoff;
         });
-        var chevron = state.claudeHistoryExpanded ? "&#9662;" : "&#9656;";
-        var countBadge = state.claudeHistoryLoaded && visibleHistory.length > 0
-          ? ' <span class="history-count">' + visibleHistory.length + '</span>'
-          : '';
-        var clearAllButton = state.claudeHistoryExpanded && state.claudeHistoryLoaded && visibleHistory.length > 0
-          ? '<button class="btn btn-danger btn-xs session-history-clear" data-action="clear-all-history" type="button">清空</button>'
-          : '';
-        var header = '<div class="session-group-title claude-history-toggle" id="claude-history-toggle">' +
-          '<span class="chevron">' + chevron + '</span> Claude 历史' + countBadge +
-          '</div>' + clearAllButton;
+      }
 
-        if (!state.claudeHistoryExpanded) {
-          return '<section class="session-group">' + header + '</section>';
+      // Render the docked Claude-history region that lives between
+      // `.sidebar-body` and `.sidebar-footer`. Collapsed by default — only
+      // shows a slim header ("历史消息" + count bubble). Expanded reveals the
+      // grouped-by-cwd list inside a scroll cap.
+      function renderClaudeHistoryRegion() {
+        var visibleHistory = getClaudeHistoryRegionItems();
+        var expanded = !!state.claudeHistoryExpanded;
+        var loaded = !!state.claudeHistoryLoaded;
+        var count = loaded ? visibleHistory.length : 0;
+
+        var badgeCls = "history-bubble";
+        var badgeContent;
+        if (!loaded) {
+          badgeCls += " loading";
+          badgeContent = "···";
+        } else if (count === 0) {
+          badgeCls += " empty";
+          badgeContent = "0";
+        } else {
+          badgeContent = count > 999 ? "999+" : String(count);
         }
+        var badge = '<span class="' + badgeCls + '">' + badgeContent + '</span>';
 
+        // Chevron rotates: collapsed → up (▲, suggests "expand upward"),
+        // expanded → down (▼, suggests "collapse downward").
+        var chevronSvg = '<svg class="sidebar-history-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>';
+
+        var headerCls = "sidebar-history-header" + (expanded ? " expanded" : "");
+        var header = '<button type="button" class="' + headerCls + '" id="claude-history-toggle" aria-expanded="' + expanded + '" aria-controls="sidebar-history-body" title="' + (expanded ? "收起历史消息" : "展开历史消息") + '">' +
+          '<span class="sidebar-history-label">历史消息</span>' +
+          '<span class="sidebar-history-right">' + badge + chevronSvg + '</span>' +
+        '</button>';
+
+        var body = expanded
+          ? '<div class="sidebar-history-body" id="sidebar-history-body">' + renderClaudeHistoryBodyContent(visibleHistory) + '</div>'
+          : '';
+
+        return header + body;
+      }
+
+      function renderClaudeHistoryBodyContent(visibleHistory) {
         if (!state.claudeHistoryLoaded) {
-          return '<section class="session-group">' + header +
-            '<div class="claude-history-loading">扫描历史会话中…</div></section>';
+          return '<div class="claude-history-loading">扫描历史会话中…</div>';
         }
-
         if (visibleHistory.length === 0) {
-          return '<section class="session-group">' + header +
-            '<div class="claude-history-loading">没有更早的 Claude 历史会话</div></section>';
+          return '<div class="claude-history-loading">没有更早的 Claude 历史会话</div>';
         }
-
         var groups = {};
         var groupOrder = [];
         visibleHistory.forEach(function(s) {
@@ -3522,18 +3580,27 @@
           }
           groups[s.cwd].push(s);
         });
-
-        var html = '';
+        var toolbar = '<div class="sidebar-history-toolbar">' +
+          '<button class="btn btn-ghost btn-xs sidebar-history-clear" data-action="clear-all-history" type="button">清空全部</button>' +
+        '</div>';
+        var listHtml = '';
         groupOrder.forEach(function(cwd) {
           var cwdShort = cwd.split("/").filter(Boolean).slice(-3).join("/");
           var isDirExpanded = !!state.claudeHistoryExpandedDirs[cwd];
-          html += renderClaudeHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length, isDirExpanded);
+          listHtml += renderClaudeHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length, isDirExpanded);
           if (isDirExpanded) {
-            html += groups[cwd].map(function(session) { return renderClaudeHistoryItem(session, "history"); }).join("");
+            listHtml += groups[cwd].map(function(session) { return renderClaudeHistoryItem(session, "history"); }).join("");
           }
         });
+        return toolbar + '<div class="sidebar-history-scroll">' + listHtml + '</div>';
+      }
 
-        return '<section class="session-group">' + header + html + '</section>';
+      // Re-render only the docked history region in place. Called by
+      // updateSessionsList() so existing callers (load complete, delete, etc.)
+      // keep working without changes.
+      function updateClaudeHistoryRegion() {
+        var region = document.getElementById("sidebar-history-region");
+        if (region) region.innerHTML = renderClaudeHistoryRegion();
       }
 
       function getVisibleClaudeHistorySessions() {
@@ -5858,6 +5925,15 @@
           sessionsList.addEventListener("mouseout", handleCollapsedTileLeave);
           initSwipeToDelete(sessionsList);
         }
+        // The docked history region lives outside #sessions-list now, but it
+        // still wants the same delegated handlers (toggle button, directory
+        // expand/collapse, history-item clicks, clear-all, etc.). Reuse the
+        // same callbacks so behavior stays identical.
+        var historyRegion = document.getElementById("sidebar-history-region");
+        if (historyRegion) {
+          historyRegion.addEventListener("click", handleSessionItemClick);
+          historyRegion.addEventListener("keydown", handleSessionItemKeydown);
+        }
         window.addEventListener("scroll", hideCollapsedTileBubble, true);
         window.addEventListener("resize", hideCollapsedTileBubble);
 
@@ -5942,7 +6018,8 @@
           state.selectedId = null;
           persistSelectedId();
           resetChatRenderCache();
-          closeSessionsDrawer();
+          // 回到首页是导航语义，不是「收侧栏」。桌面常驻栏保留；手机只把 overlay 收掉。
+          dismissDrawerIfOverlay();
           render();
         });
         var refreshBtn = document.getElementById("sidebar-refresh-btn");
@@ -6188,7 +6265,8 @@
         if (autoApproveToggle) autoApproveToggle.addEventListener("click", toggleAutoApprove);
         var sendBtn = document.getElementById("send-input-button");
         if (sendBtn) sendBtn.addEventListener("click", function() {
-          closeSessionsDrawer();
+          // 与 input focus 同理：手机 drawer 盖在上面才收起，桌面常驻栏保持原状。
+          dismissDrawerIfOverlay();
           sendOrStart();
         });
         var stopBtn = document.getElementById("stop-button");
@@ -6241,8 +6319,10 @@
             if (state.terminalInteractive) handleInteractiveTextInput(inputBox);
           });
           inputBox.addEventListener("focus", function() {
-            // Close drawer when user focuses input to avoid backdrop blocking clicks
-            closeSessionsDrawer();
+            // 只在手机 drawer 真的盖在输入区上面时才收起，避免 backdrop 挡点击。
+            // 桌面 pinned/窄条形态下 drawer 是常驻并列布局，不会挡输入，调
+            // closeSessionsDrawer 会把 sidebarPinned 一起清掉、侧栏整个不见。
+            dismissDrawerIfOverlay();
             handleInputBoxFocus({ target: inputBox });
           });
           inputBox.addEventListener("blur", handleInputBoxBlur);
@@ -6960,9 +7040,11 @@
         } else {
           selectSession(sessionId);
         }
-        if (!state.sidebarPinned || isMobileLayout()) {
-          closeSessionsDrawer();
-        }
+        // 桌面常驻栏与窄条形态都保留；只在手机端真的有 overlay drawer 时才收。
+        // （旧条件 !sidebarPinned || isMobileLayout() 在桌面 not-pinned 状态下也会
+        // 调 closeSessionsDrawer，靠内部 early-return 才不至于出错——含义不清晰，
+        // 统一走 dismissDrawerIfOverlay 反过来表达"只收 overlay 不撤常驻"。）
+        dismissDrawerIfOverlay();
       }
 
       function handleSessionItemClick(event) {
@@ -7097,7 +7179,8 @@
                   state.drafts[data.id] = "";
                   loadSessions().then(function() {
                     selectSession(data.id);
-                    closeSessionsDrawer();
+                    // 桌面常驻/窄条形态不要撤掉，只把手机端 overlay 收掉。
+                    dismissDrawerIfOverlay();
                   });
                 }
               });
@@ -7131,7 +7214,8 @@
                 state.drafts[data.id] = "";
                 loadSessions().then(function() {
                   selectSession(data.id);
-                  closeSessionsDrawer();
+                  // 桌面常驻/窄条形态不要撤掉，只把手机端 overlay 收掉。
+                  dismissDrawerIfOverlay();
                 });
               }
             });
@@ -8197,6 +8281,7 @@
           container.addEventListener("click", state.terminalClickHandler);
           updateTerminalJumpToBottomButton();
           initTerminalResizeHandle();
+          initTerminalJoystick();
           observeTerminalResize();
           startTerminalHealthCheck();
           // Container may have been hidden / zero-width at construction
@@ -9225,6 +9310,10 @@
         var countEl = document.getElementById("session-count");
         if (listEl) listEl.innerHTML = renderSessionsListContent();
         if (countEl) countEl.textContent = String(state.sessions.length);
+        // The docked history region lives outside #sessions-list — refresh it
+        // too so callers that mutate state.claudeHistory (load complete,
+        // delete, clear) don't need to know about it.
+        updateClaudeHistoryRegion();
         if (typeof hideCollapsedTileBubble === "function") hideCollapsedTileBubble();
         updateShellChrome();
         // Re-render cross-session queue (container may have been destroyed by DOM rebuild)
@@ -9517,6 +9606,19 @@
         closeSwipedItem();
         state.sessionsDrawerOpen = false;
         updateLayoutState();
+      }
+
+      // 把"浮在内容上的 drawer/backdrop"关掉，但保留桌面常驻栏与窄条形态。
+      // 用法：从 input focus / send 按钮 / 选中会话 / 新建会话回调里调，这些场
+      // 景只想避免遮罩挡住内容，并不想撤掉用户主动开启的常驻侧栏。
+      //
+      // 直接调 closeSessionsDrawer() 会在桌面把 state.sidebarPinned 置 false，
+      // 进而让 .pinned/.collapsed 这两个类一起脱落，窄条整体消失 —— 这是
+      // sidebar-collapsed-tile 点击后侧栏整个不见的根因。
+      function dismissDrawerIfOverlay() {
+        if (isMobileLayout() && state.sessionsDrawerOpen) {
+          closeSessionsDrawer();
+        }
       }
 
       // 桌面 padding-left transition 结束后重新拟合终端尺寸。
@@ -11336,7 +11438,9 @@
           .then(function(data) {
             saveWorkingDir(cwd);
             closeSessionModal();
-            closeSessionsDrawer();
+            // 桌面常驻栏要保留：用户刚建完会话，希望左侧栏继续看到列表里的新条目，
+            // 不能因为模态关闭顺手把 sidebarPinned 抹掉让侧栏整体消失。
+            dismissDrawerIfOverlay();
             return data;
           })
           .then(function() { focusInputBox(true); })
@@ -11382,7 +11486,8 @@
           state.drafts[data.id] = "";
           resetChatRenderCache();
           closeSessionModal();
-          closeSessionsDrawer();
+          // 同 structured 路径：模态关闭后只收手机端的 overlay，保留桌面常驻侧栏。
+          dismissDrawerIfOverlay();
           return refreshAll();
         })
         .then(function() {
@@ -13610,6 +13715,48 @@
         "_": 31
       };
 
+      // ── 终端悬浮摇杆遥控器常量与布局表 ──
+      var JOYSTICK_LONG_PRESS_MS = 400;     // 按住不动多久进入移动模式
+      var JOYSTICK_MOVE_THRESHOLD = 10;     // px：区分"拖动选键"与"静止长按"
+      var JOYSTICK_TAP_THRESHOLD = 8;       // px：快速点击的最大位移
+      var JOYSTICK_REPEAT_MS = 130;         // 内圈方向键连发间隔
+      var JOYSTICK_R0 = 24;                 // 扇形中心空洞 = 死区半径
+      var JOYSTICK_R1 = 60;                 // 内圈(方向)/外圈(功能)分界半径
+      var JOYSTICK_R2 = 104;                // 外圈外缘半径
+      var JOYSTICK_DEADZONE_R = 24;         // 命中死区（= R0）
+      var JOYSTICK_RING_SPLIT_R = 60;       // 命中分界（= R1）：< 内圈方向，>= 外圈功能
+      var JOYSTICK_MOVE_OUT_R = 140;        // 拖出此半径（超出外圈区域）→ 切"正在移动"
+      var JOYSTICK_BALL_SIZE = 52;          // 球球直径（与 CSS 一致）
+      var JOYSTICK_EDGE_MARGIN = 8;         // 球球钳进视口的留白
+      var JOYSTICK_RING_RADIUS = JOYSTICK_R2 + 8;  // 环整体半径（含标签外延），用于把圆心钳进视口
+      var JOYSTICK_RING_VIEW_PAD = 6;       // 环外缘与视口边的最小留白
+      var JOYSTICK_SECTOR_GAP_DEG = 2;      // 外圈扇区之间的角度细缝（°），读成独立按钮
+      // 内圈 4 方向：i=0 上、1 右、2 下、3 左（与渲染角 -90° 起顺时针一致）
+      var JOYSTICK_INNER_KEYS = [
+        { key: "up", label: "↑" },
+        { key: "right", label: "→" },
+        { key: "down", label: "↓" },
+        { key: "left", label: "←" }
+      ];
+      // 外圈 8 功能：i=0 正上方起顺时针，与八分扇区 idx 对应
+      var JOYSTICK_OUTER_KEYS = [
+        { key: "enter", label: "Enter" },
+        { key: "escape", label: "Esc" },
+        { key: "tab", label: "Tab" },
+        { key: "shift_tab", label: "Shift+Tab" },
+        { key: "ctrl_c", label: "Ctrl+C" },
+        { key: "ctrl_z", label: "Ctrl+Z" },
+        { key: "ctrl_d", label: "Ctrl+D" },
+        { key: "ctrl_l", label: "Ctrl+L" }
+      ];
+      // 钉住面板四角翻页键
+      var JOYSTICK_CORNER_KEYS = [
+        { key: "pageup", label: "PgUp" },
+        { key: "home", label: "Home" },
+        { key: "pagedown", label: "PgDn" },
+        { key: "end", label: "End" }
+      ];
+
       var ignoredInteractiveTargetIds = new Set([
         "mini-keyboard-fab",
         "mini-keyboard-toggle",
@@ -13783,6 +13930,7 @@
         }
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
+        updateJoystickVisibility();
       }
 
       // COPY-2/COPY-4: 是否存在落在终端输出区(#output)内的活动文本选区。用于：
@@ -14411,7 +14559,8 @@
               persistSelectedId();
               state.drafts[data.id] = "";
               activateSession(data).then(function() {
-                closeSessionsDrawer();
+                // 桌面常驻/窄条形态不要撤掉，仅手机端 overlay 需要收。
+                dismissDrawerIfOverlay();
               });
             }
           })
@@ -15450,6 +15599,588 @@
         document.addEventListener("touchend", state.resizeTouchEnd);
       }
 
+      // ====== 终端悬浮摇杆遥控器（手机端 PTY 遥控） ======
+      // 纯前端覆盖层：fixed 挂到 body，绕开 #output 的 overflow:hidden 裁切。
+      // 用 Pointer Events 统一鼠标/触摸；球球 touch-action:none 让 preventDefault 稳定。
+      // 不改动终端背景的 touch/scroll/wheel —— 单指空白处仍是原生滚动看历史。
+
+      function isJoystickAvailable() {
+        // 触屏与桌面网页端都显示（球球用 Pointer Events，鼠标拖拽同样可用）
+        if (state.currentView !== "terminal") return false;
+        var session = getSelectedSession();
+        if (!session) return false;
+        if (isStructuredSession(session)) return false;
+        return true;
+      }
+
+      function clampJoystickPos(pos) {
+        var maxRight = Math.max(JOYSTICK_EDGE_MARGIN, window.innerWidth - JOYSTICK_BALL_SIZE - JOYSTICK_EDGE_MARGIN);
+        var maxBottom = Math.max(JOYSTICK_EDGE_MARGIN, window.innerHeight - JOYSTICK_BALL_SIZE - JOYSTICK_EDGE_MARGIN);
+        return {
+          right: Math.min(Math.max(JOYSTICK_EDGE_MARGIN, pos.right), maxRight),
+          bottom: Math.min(Math.max(JOYSTICK_EDGE_MARGIN, pos.bottom), maxBottom)
+        };
+      }
+
+      function applyJoystickPosition() {
+        if (!state.joystickBallEl) return;
+        var pos = clampJoystickPos(state.joystickPos || { right: 18, bottom: 96 });
+        state.joystickBallEl.style.right = pos.right + "px";
+        state.joystickBallEl.style.bottom = pos.bottom + "px";
+      }
+
+      function saveJoystickPosition(right, bottom) {
+        var pos = clampJoystickPos({ right: right, bottom: bottom });
+        state.joystickPos = pos;
+        try {
+          localStorage.setItem("wand-ball-pos", JSON.stringify(pos));
+        } catch (e) {
+          // Ignore localStorage errors
+        }
+      }
+
+      function renderJoystickPanel() {
+        function keyBtn(key, label, cls) {
+          return '<button type="button" class="wjp-key' + (cls ? " " + cls : "") +
+            '" data-key="' + key + '">' + label + "</button>";
+        }
+        var dpad =
+          '<div class="wjp-dpad">' +
+            '<div class="wjp-dpad-row">' + keyBtn("up", "↑", "wjp-dir") + "</div>" +
+            '<div class="wjp-dpad-row">' +
+              keyBtn("left", "←", "wjp-dir") + keyBtn("down", "↓", "wjp-dir") + keyBtn("right", "→", "wjp-dir") +
+            "</div>" +
+          "</div>";
+        var fnRow = "";
+        var i;
+        for (i = 0; i < JOYSTICK_OUTER_KEYS.length; i++) {
+          fnRow += keyBtn(JOYSTICK_OUTER_KEYS[i].key, JOYSTICK_OUTER_KEYS[i].label, "");
+        }
+        var cornerRow = "";
+        for (i = 0; i < JOYSTICK_CORNER_KEYS.length; i++) {
+          cornerRow += keyBtn(JOYSTICK_CORNER_KEYS[i].key, JOYSTICK_CORNER_KEYS[i].label, "");
+        }
+        var modRow = keyBtn("ctrl", "Ctrl", "wjp-mod") + keyBtn("alt", "Alt", "wjp-mod");
+        return '<div class="wjp-title">遥控面板</div>' +
+          dpad +
+          '<div class="wjp-grid wjp-fnkeys">' + fnRow + "</div>" +
+          '<div class="wjp-grid wjp-corners">' + cornerRow + "</div>" +
+          '<div class="wjp-grid wjp-mods">' + modRow + "</div>";
+      }
+
+      function joystickPolar(r, deg) {
+        var a = deg * Math.PI / 180;
+        return { x: +(r * Math.cos(a)).toFixed(2), y: +(r * Math.sin(a)).toFixed(2) };
+      }
+
+      // 环形扇区（annular sector）路径：外弧顺时针、内弧逆时针闭合
+      function joystickSectorPath(rIn, rOut, startDeg, endDeg) {
+        var a = joystickPolar(rOut, startDeg), b = joystickPolar(rOut, endDeg);
+        var c = joystickPolar(rIn, endDeg), d = joystickPolar(rIn, startDeg);
+        return "M" + a.x + " " + a.y +
+          "A" + rOut + " " + rOut + " 0 0 1 " + b.x + " " + b.y +
+          "L" + c.x + " " + c.y +
+          "A" + rIn + " " + rIn + " 0 0 0 " + d.x + " " + d.y + "Z";
+      }
+
+      // 标签渲染：组合键（含 "+"）拆成两行，前缀在上、+键在下，省横向空间更清晰。
+      function joystickLabelMarkup(label, x, y) {
+        var plus = label.indexOf("+");
+        if (plus > 0) {
+          var top = label.slice(0, plus);
+          var bot = "+" + label.slice(plus + 1);
+          return '<text class="wjr-2line" x="' + x + '" y="' + y + '">' +
+            '<tspan x="' + x + '" dy="-0.42em">' + top + '</tspan>' +
+            '<tspan x="' + x + '" dy="0.95em">' + bot + '</tspan></text>';
+        }
+        return '<text x="' + x + '" y="' + y + '">' + label + "</text>";
+      }
+
+      // 构建两圈扇形 pie 菜单 SVG：内圈 4×90° 方向、外圈 8×45° 功能 + 中心选中提示。
+      // 扇区角度与 joystickHitTest 完全对应（正上=0、顺时针）。
+      function buildJoystickRingSvg() {
+        var size = (JOYSTICK_R2 + 6) * 2;
+        var half = size / 2;
+        var gap = JOYSTICK_SECTOR_GAP_DEG / 2;   // 每个扇区起止各内缩半个细缝
+        var svg = '<svg class="wjr-svg" width="' + size + '" height="' + size +
+          '" viewBox="' + (-half) + " " + (-half) + " " + size + " " + size + '">';
+        // 底盘：所有扇区之下的一整块玻璃圆盘，细缝/外缘透出它作分隔与外圈光环
+        svg += '<circle class="wjr-base" cx="0" cy="0" r="' + (JOYSTICK_R2 + 4) + '"/>';
+        var i, k, center, lp;
+        for (i = 0; i < JOYSTICK_INNER_KEYS.length; i++) {
+          k = JOYSTICK_INNER_KEYS[i];
+          center = -90 + i * 90;
+          lp = joystickPolar((JOYSTICK_R0 + JOYSTICK_R1) / 2, center);
+          svg += '<g class="wjr-sector wjr-inner" data-key="' + k.key + '">' +
+            '<path d="' + joystickSectorPath(JOYSTICK_R0, JOYSTICK_R1, center - 45 + gap, center + 45 - gap) + '"/>' +
+            joystickLabelMarkup(k.label, lp.x, lp.y) + "</g>";
+        }
+        for (i = 0; i < JOYSTICK_OUTER_KEYS.length; i++) {
+          k = JOYSTICK_OUTER_KEYS[i];
+          center = -90 + i * 45;
+          lp = joystickPolar((JOYSTICK_R1 + JOYSTICK_R2) / 2, center);
+          svg += '<g class="wjr-sector wjr-outer" data-key="' + k.key + '">' +
+            '<path d="' + joystickSectorPath(JOYSTICK_R1, JOYSTICK_R2, center - 22.5 + gap, center + 22.5 - gap) + '"/>' +
+            joystickLabelMarkup(k.label, lp.x, lp.y) + "</g>";
+        }
+        svg += '<circle class="wjr-hub" cx="0" cy="0" r="' + (JOYSTICK_R0 - 1) + '"/>';
+        svg += '<text class="wjr-hub-label" x="0" y="0"></text>';
+        return svg + "</svg>";
+      }
+
+      function joystickLabelForKey(key) {
+        var i;
+        for (i = 0; i < JOYSTICK_INNER_KEYS.length; i++) {
+          if (JOYSTICK_INNER_KEYS[i].key === key) return JOYSTICK_INNER_KEYS[i].label;
+        }
+        for (i = 0; i < JOYSTICK_OUTER_KEYS.length; i++) {
+          if (JOYSTICK_OUTER_KEYS[i].key === key) return JOYSTICK_OUTER_KEYS[i].label;
+        }
+        return "";
+      }
+
+      function setJoystickCenterLabel(text) {
+        if (!state.joystickRingEl) return;
+        var el = state.joystickRingEl.querySelector(".wjr-hub-label");
+        if (el) el.textContent = text || "";
+      }
+
+      function joystickHaptic(ms) {
+        try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
+      }
+
+      function initTerminalJoystick() {
+        if (state.joystickRootEl) return;   // 已存在不重复建（触屏/桌面均构建）
+
+        var root = document.createElement("div");
+        root.className = "wand-joystick-root";
+
+        var backdrop = document.createElement("div");
+        backdrop.className = "wand-joystick-backdrop";
+        root.appendChild(backdrop);
+
+        // 环形菜单容器（圆心运行期对齐球球中心）—— 扇形 pie 菜单（SVG，带文字 + 中心提示）
+        var ring = document.createElement("div");
+        ring.className = "wand-joystick-ring";
+        ring.innerHTML = buildJoystickRingSvg();
+        root.appendChild(ring);
+
+        // 钉住面板
+        var panel = document.createElement("div");
+        panel.className = "wand-joystick-panel";
+        panel.innerHTML = renderJoystickPanel();
+        panel.addEventListener("click", onJoystickPanelClick);
+        root.appendChild(panel);
+
+        // 球球本体
+        var ball = document.createElement("div");
+        ball.className = "wand-joystick-ball";
+        ball.setAttribute("role", "button");
+        ball.setAttribute("aria-label", "终端摇杆遥控");
+        ball.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" ' +
+          'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<circle cx="12" cy="12" r="3"/><path d="M12 5V3M12 21v-2M5 12H3M21 12h-2"/></svg>';
+        root.appendChild(ball);
+
+        document.body.appendChild(root);
+
+        state.joystickRootEl = root;
+        state.joystickBackdropEl = backdrop;
+        state.joystickRingEl = ring;
+        state.joystickPanelEl = panel;
+        state.joystickBallEl = ball;
+
+        applyJoystickPosition();
+
+        ball.addEventListener("pointerdown", onJoystickPointerDown);
+        backdrop.addEventListener("pointerdown", function(e) {
+          // 钉住面板开着且无进行中手势时，点遮罩收起面板
+          if (state.joystickPinnedOpen && state.joystickGesture == null) {
+            e.preventDefault();
+            closeJoystickPanel();
+          }
+        });
+
+        // 旋转/窗口尺寸变化时重新钳制球球位置
+        state.joystickResizeHandler = function() { applyJoystickPosition(); };
+        window.addEventListener("resize", state.joystickResizeHandler);
+        window.addEventListener("orientationchange", state.joystickResizeHandler);
+
+        updateJoystickVisibility();
+      }
+
+      function getJoystickCenter() {
+        if (!state.joystickBallEl) return { x: 0, y: 0 };
+        var r = state.joystickBallEl.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
+
+      function onJoystickPointerDown(e) {
+        if (!isJoystickAvailable()) return;
+        if (state.joystickPointerId !== null) return;  // 已有手势在进行
+        e.preventDefault();
+        e.stopPropagation();
+        state.joystickPointerId = e.pointerId;
+        state.joystickPressStart = { x: e.clientX, y: e.clientY, t: Date.now() };
+        state.joystickGesture = "pending";
+        state.joystickHoverOuter = null;
+        state.joystickCenter = getJoystickCenter();
+        try { state.joystickBallEl.setPointerCapture(e.pointerId); } catch (err) {}
+        // 起长按定时器：不动到 400ms → 移动模式
+        state.joystickLongPressTimer = setTimeout(function() {
+          if (state.joystickGesture === "pending") enterJoystickMoveMode();
+        }, JOYSTICK_LONG_PRESS_MS);
+        state.joystickMoveHandler = onJoystickPointerMove;
+        state.joystickUpHandler = onJoystickPointerUp;
+        document.addEventListener("pointermove", state.joystickMoveHandler);
+        document.addEventListener("pointerup", state.joystickUpHandler);
+        document.addEventListener("pointercancel", state.joystickUpHandler);
+      }
+
+      function enterJoystickMoveMode() {
+        state.joystickGesture = "move";
+        if (state.joystickPinnedOpen) closeJoystickPanel();
+        if (state.joystickBallEl) state.joystickBallEl.classList.add("dragging");
+        if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
+      }
+
+      function moveJoystickBallTo(clientX, clientY) {
+        if (!state.joystickBallEl) return;
+        var pos = clampJoystickPos({
+          right: window.innerWidth - clientX - JOYSTICK_BALL_SIZE / 2,
+          bottom: window.innerHeight - clientY - JOYSTICK_BALL_SIZE / 2
+        });
+        state.joystickBallEl.style.right = pos.right + "px";
+        state.joystickBallEl.style.bottom = pos.bottom + "px";
+      }
+
+      // 环形手势里把手指往外拖出外圈区域时调用：收起环，切到"正在移动"状态，
+      // 球球立刻挪到手指下，之后跟手慢慢移动，松手保存位置。
+      function switchJoystickToMoveMode(e) {
+        stopJoystickRepeat();
+        state.joystickHoverOuter = null;
+        closeJoystickRing();
+        state.joystickGesture = "move";
+        if (state.joystickBallEl) state.joystickBallEl.classList.add("dragging");
+        if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
+        joystickHaptic(18);
+        moveJoystickBallTo(e.clientX, e.clientY);
+      }
+
+      function onJoystickPointerMove(e) {
+        if (e.pointerId !== state.joystickPointerId) return;
+        if (!state.joystickBallEl) return;
+        e.preventDefault();
+        var dxStart = e.clientX - state.joystickPressStart.x;
+        var dyStart = e.clientY - state.joystickPressStart.y;
+        if (state.joystickGesture === "pending") {
+          if (Math.sqrt(dxStart * dxStart + dyStart * dyStart) > JOYSTICK_MOVE_THRESHOLD) {
+            // 先动 → 选键手势
+            if (state.joystickLongPressTimer) {
+              clearTimeout(state.joystickLongPressTimer);
+              state.joystickLongPressTimer = null;
+            }
+            if (state.joystickPinnedOpen) closeJoystickPanel();
+            state.joystickGesture = "ring";
+            state.joystickCenter = getJoystickCenter();
+            openJoystickRing();
+          } else {
+            return;
+          }
+        }
+        if (state.joystickGesture === "ring") {
+          var c = state.joystickCenter || getJoystickCenter();
+          var rdx = e.clientX - c.x;
+          var rdy = e.clientY - c.y;
+          // 往外拖超出外圈区域 → 切到"正在移动"状态，球球开始跟手
+          if (Math.sqrt(rdx * rdx + rdy * rdy) > JOYSTICK_MOVE_OUT_R) {
+            switchJoystickToMoveMode(e);
+            return;
+          }
+          applyJoystickRingHit(joystickHitTest(rdx, rdy));
+          return;
+        }
+        if (state.joystickGesture === "move") {
+          moveJoystickBallTo(e.clientX, e.clientY);
+          return;
+        }
+      }
+
+      function onJoystickPointerUp(e) {
+        if (e.pointerId !== state.joystickPointerId) return;
+        if (state.joystickLongPressTimer) {
+          clearTimeout(state.joystickLongPressTimer);
+          state.joystickLongPressTimer = null;
+        }
+        var gesture = state.joystickGesture;
+        if (gesture === "ring") {
+          stopJoystickRepeat();
+          if (state.joystickHoverOuter) {
+            joystickHaptic(18);
+            sendJoystickKey(state.joystickHoverOuter);
+          }
+        } else if (gesture === "pending") {
+          var dx = e.clientX - state.joystickPressStart.x;
+          var dy = e.clientY - state.joystickPressStart.y;
+          if (Math.sqrt(dx * dx + dy * dy) <= JOYSTICK_TAP_THRESHOLD) toggleJoystickPanel();
+        } else if (gesture === "move") {
+          var r = state.joystickBallEl ? state.joystickBallEl.getBoundingClientRect() : null;
+          if (r) saveJoystickPosition(window.innerWidth - r.right, window.innerHeight - r.bottom);
+        }
+        endJoystickGesture();
+      }
+
+      function endJoystickGesture() {
+        stopJoystickRepeat();
+        if (state.joystickLongPressTimer) {
+          clearTimeout(state.joystickLongPressTimer);
+          state.joystickLongPressTimer = null;
+        }
+        if (state.joystickBallEl && state.joystickPointerId !== null) {
+          try { state.joystickBallEl.releasePointerCapture(state.joystickPointerId); } catch (err) {}
+        }
+        if (state.joystickMoveHandler) {
+          document.removeEventListener("pointermove", state.joystickMoveHandler);
+          state.joystickMoveHandler = null;
+        }
+        if (state.joystickUpHandler) {
+          document.removeEventListener("pointerup", state.joystickUpHandler);
+          document.removeEventListener("pointercancel", state.joystickUpHandler);
+          state.joystickUpHandler = null;
+        }
+        closeJoystickRing();
+        if (state.joystickBallEl) state.joystickBallEl.classList.remove("dragging");
+        // 钉住面板若仍开着则保留遮罩，否则移除
+        if (state.joystickBackdropEl && !state.joystickPinnedOpen) {
+          state.joystickBackdropEl.classList.remove("active");
+        }
+        state.joystickPointerId = null;
+        state.joystickGesture = null;
+        state.joystickHoverOuter = null;
+        state.joystickLastHoverKey = null;
+        state.joystickPressStart = null;
+        state.joystickCenter = null;
+      }
+
+      function joystickHitTest(dx, dy) {
+        var r = Math.sqrt(dx * dx + dy * dy);
+        if (r < JOYSTICK_DEADZONE_R) return { zone: "dead", key: null };
+        if (r < JOYSTICK_RING_SPLIT_R) {
+          // 内圈：主轴象限（往上滑 dy<0 = up）
+          if (Math.abs(dy) >= Math.abs(dx)) return { zone: "inner", key: dy < 0 ? "up" : "down" };
+          return { zone: "inner", key: dx < 0 ? "left" : "right" };
+        }
+        // 外圈：8 等分扇区，正上方为 0，顺时针递增；+π/8 让扇区中心对准按钮
+        var ang = Math.atan2(dx, -dy);
+        if (ang < 0) ang += Math.PI * 2;
+        var idx = Math.floor((ang + Math.PI / 8) / (Math.PI / 4)) % 8;
+        return { zone: "outer", key: JOYSTICK_OUTER_KEYS[idx].key };
+      }
+
+      function applyJoystickRingHit(hit) {
+        if (!state.joystickRingEl) return;
+        var key = hit.zone === "dead" ? null : hit.key;
+        if (key !== state.joystickLastHoverKey) {  // 切换扇区 → 轻震反馈
+          state.joystickLastHoverKey = key;
+          joystickHaptic(8);
+        }
+        if (hit.zone === "inner") {
+          state.joystickHoverOuter = null;
+          setJoystickOuterHighlight(null);
+          startJoystickRepeat(hit.key);
+          setJoystickInnerHighlight(hit.key);
+          setJoystickCenterLabel(joystickLabelForKey(hit.key));
+        } else if (hit.zone === "outer") {
+          stopJoystickRepeat();
+          setJoystickInnerHighlight(null);
+          state.joystickHoverOuter = hit.key;
+          setJoystickOuterHighlight(hit.key);
+          setJoystickCenterLabel(joystickLabelForKey(hit.key));
+        } else {
+          stopJoystickRepeat();
+          setJoystickInnerHighlight(null);
+          state.joystickHoverOuter = null;
+          setJoystickOuterHighlight(null);
+          setJoystickCenterLabel("取消");
+        }
+      }
+
+      function setJoystickInnerHighlight(key) {
+        if (!state.joystickRingEl) return;
+        var btns = state.joystickRingEl.querySelectorAll(".wjr-inner");
+        for (var i = 0; i < btns.length; i++) {
+          btns[i].classList.toggle("is-repeating", btns[i].getAttribute("data-key") === key);
+        }
+      }
+
+      function setJoystickOuterHighlight(key) {
+        if (!state.joystickRingEl) return;
+        var btns = state.joystickRingEl.querySelectorAll(".wjr-outer");
+        for (var i = 0; i < btns.length; i++) {
+          btns[i].classList.toggle("is-hover", btns[i].getAttribute("data-key") === key);
+        }
+      }
+
+      // 把环圆心钳进视口，保证整圈（含标签）不被屏幕边裁掉。视口比环还小则回退到正中。
+      function clampJoystickRingCenter(c) {
+        var pad = JOYSTICK_RING_RADIUS + JOYSTICK_RING_VIEW_PAD;
+        var vw = window.innerWidth, vh = window.innerHeight;
+        return {
+          x: vw < pad * 2 ? vw / 2 : Math.min(Math.max(pad, c.x), vw - pad),
+          y: vh < pad * 2 ? vh / 2 : Math.min(Math.max(pad, c.y), vh - pad)
+        };
+      }
+
+      function openJoystickRing() {
+        if (!state.joystickRingEl) return;
+        // 圆心钳进视口后写回 state.joystickCenter：球球此刻已 is-ringing(opacity:0)，
+        // 圆心内移不露馅，且命中测试与可见环始终对齐。
+        var c = clampJoystickRingCenter(state.joystickCenter || getJoystickCenter());
+        state.joystickCenter = c;
+        state.joystickRingEl.style.left = c.x + "px";
+        state.joystickRingEl.style.top = c.y + "px";
+        state.joystickRingEl.classList.add("active");
+        state.joystickLastHoverKey = null;
+        setJoystickCenterLabel("取消");                 // 初始在死区，提示松手取消
+        if (state.joystickBallEl) state.joystickBallEl.classList.add("is-ringing");  // 隐球球露中心
+        if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
+        joystickHaptic(10);
+      }
+
+      function closeJoystickRing() {
+        if (state.joystickRingEl) state.joystickRingEl.classList.remove("active");
+        if (state.joystickBallEl) state.joystickBallEl.classList.remove("is-ringing");
+        setJoystickInnerHighlight(null);
+        setJoystickOuterHighlight(null);
+      }
+
+      function startJoystickRepeat(key) {
+        if (state.joystickRepeatKey === key) return;  // 同方向不重启，保持节奏
+        stopJoystickRepeat();
+        state.joystickRepeatKey = key;
+        sendJoystickKey(key);                          // 立即发一次
+        state.joystickRepeatTimer = setInterval(function() {
+          if (state.joystickRepeatKey) sendJoystickKey(state.joystickRepeatKey);
+        }, JOYSTICK_REPEAT_MS);
+      }
+
+      function stopJoystickRepeat() {
+        if (state.joystickRepeatTimer) {
+          clearInterval(state.joystickRepeatTimer);
+          state.joystickRepeatTimer = null;
+        }
+        state.joystickRepeatKey = null;
+      }
+
+      function sendJoystickKey(key) {
+        if (key === "ctrl" || key === "alt" || key === "shift") {
+          state.modifiers[key] = !state.modifiers[key];
+          updateJoystickPanelUI();
+          return;
+        }
+        var seq = buildPtySequence(key, {
+          ctrl: state.modifiers.ctrl,
+          alt: state.modifiers.alt,
+          shift: state.modifiers.shift
+        });
+        if (seq) sendTerminalSequence(seq, key);
+        clearModifiers();              // 发后自动清修饰键（应用到下一个发送的键）
+        updateJoystickPanelUI();
+        scheduleShortcutResync();
+      }
+
+      function toggleJoystickPanel() {
+        if (state.joystickPinnedOpen) closeJoystickPanel();
+        else openJoystickPanel();
+      }
+
+      function openJoystickPanel() {
+        if (!state.joystickPanelEl || !state.joystickBallEl) return;
+        state.joystickPinnedOpen = true;
+        var r = state.joystickBallEl.getBoundingClientRect();
+        // 面板锚定在球球上方（球球在右下→面板往左上展开），贴右/底边对齐
+        state.joystickPanelEl.style.right = Math.max(JOYSTICK_EDGE_MARGIN, window.innerWidth - r.right) + "px";
+        state.joystickPanelEl.style.bottom = Math.max(JOYSTICK_EDGE_MARGIN, window.innerHeight - r.top + 10) + "px";
+        state.joystickPanelEl.classList.add("active");
+        if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
+        updateJoystickPanelUI();
+      }
+
+      function closeJoystickPanel() {
+        state.joystickPinnedOpen = false;
+        if (state.joystickPanelEl) state.joystickPanelEl.classList.remove("active");
+        if (state.joystickBackdropEl && state.joystickGesture == null) {
+          state.joystickBackdropEl.classList.remove("active");
+        }
+      }
+
+      function updateJoystickPanelUI() {
+        if (!state.joystickPanelEl) return;
+        ["ctrl", "alt"].forEach(function(name) {
+          var btn = state.joystickPanelEl.querySelector('.wjp-mod[data-key="' + name + '"]');
+          if (btn) btn.classList.toggle("active", !!state.modifiers[name]);
+        });
+      }
+
+      function onJoystickPanelClick(e) {
+        var btn = e.target && e.target.closest ? e.target.closest(".wjp-key") : null;
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var key = btn.getAttribute("data-key");
+        if (key) sendJoystickKey(key);
+      }
+
+      function updateJoystickVisibility() {
+        var root = state.joystickRootEl;
+        if (!root) return;
+        var available = isJoystickAvailable();
+        root.classList.toggle("visible", available);
+        if (!available) {
+          // 不可用：强制收手势 + 收面板 + 停连发 + 清修饰键，杜绝残留
+          if (state.joystickPointerId !== null || state.joystickGesture) endJoystickGesture();
+          stopJoystickRepeat();
+          if (state.joystickPinnedOpen) closeJoystickPanel();
+          if (state.joystickBackdropEl) state.joystickBackdropEl.classList.remove("active");
+        }
+      }
+
+      function teardownJoystick() {
+        stopJoystickRepeat();
+        if (state.joystickLongPressTimer) {
+          clearTimeout(state.joystickLongPressTimer);
+          state.joystickLongPressTimer = null;
+        }
+        if (state.joystickMoveHandler) {
+          document.removeEventListener("pointermove", state.joystickMoveHandler);
+          state.joystickMoveHandler = null;
+        }
+        if (state.joystickUpHandler) {
+          document.removeEventListener("pointerup", state.joystickUpHandler);
+          document.removeEventListener("pointercancel", state.joystickUpHandler);
+          state.joystickUpHandler = null;
+        }
+        if (state.joystickResizeHandler) {
+          window.removeEventListener("resize", state.joystickResizeHandler);
+          window.removeEventListener("orientationchange", state.joystickResizeHandler);
+          state.joystickResizeHandler = null;
+        }
+        if (state.joystickRootEl && state.joystickRootEl.parentNode) {
+          state.joystickRootEl.parentNode.removeChild(state.joystickRootEl);
+        }
+        state.joystickRootEl = null;
+        state.joystickRingEl = null;
+        state.joystickPanelEl = null;
+        state.joystickBackdropEl = null;
+        state.joystickBallEl = null;
+        state.joystickPointerId = null;
+        state.joystickGesture = null;
+        state.joystickPressStart = null;
+        state.joystickHoverOuter = null;
+        state.joystickCenter = null;
+        state.joystickPinnedOpen = false;
+      }
+
       function observeTerminalResize() {
         var output = document.getElementById("output");
         if (!output) return;
@@ -15644,6 +16375,7 @@
         // 尺寸下创建的会话时，若新算出的 cols/rows 恰好等于上次值会被去重跳过，导致
         // 后端该会话列宽停在旧值、整段折行。teardown 重置后新会话首次 resize 必发出。
         state.lastResize = { cols: 0, rows: 0 };
+        teardownJoystick();
       }
 
       function sendTerminalResize(cols, rows) {
