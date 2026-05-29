@@ -232,6 +232,15 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
 
+        // 终端 / 控制台是等宽固定布局, 必须按 1.0 scale 渲染。一旦页面被缩放
+        // (双指 pinch-zoom, 或 APK 刚启动、手指还没离屏时被识别成的多点触摸误触)
+        // 就会缩成 75% 之类, 弹出系统缩放浮层、等宽行换行全乱。这里彻底关掉
+        // WebView 缩放: setSupportZoom(false) 禁掉手势缩放, 另两项关掉内置 +/-
+        // 控件。配合网页 viewport 的 maximum-scale=1 / user-scalable=no 双保险。
+        settings.setSupportZoom(false);
+        settings.setBuiltInZoomControls(false);
+        settings.setDisplayZoomControls(false);
+
         // 设 WebView 背景色匹配主题 background, 避免 (a) 首次 loadUrl 之前
         // WebView 默认白底闪一下; (b) 暗黑色页面切换时露出 WebView 的白底。
         // 跟 themes.xml 的 windowBackground 同一色, 整个启动 → ConnectActivity
