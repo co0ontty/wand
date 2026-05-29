@@ -2915,7 +2915,7 @@
                   '<div id="android-auto-update-row" class="settings-toggle-row hidden">' +
                     '<div class="settings-toggle-text">' +
                       '<span class="settings-toggle-title">自动更新</span>' +
-                      '<span class="settings-toggle-desc" id="android-auto-update-hint">检测到新版 APK 将自动下载安装。</span>' +
+                      '<span class="settings-toggle-desc" id="android-auto-update-hint">检测到新版 APK 时自动拉起下载，安装仍需在系统中确认。</span>' +
                     '</div>' +
                     '<label class="settings-switch">' +
                       '<input type="checkbox" id="auto-update-apk-toggle" class="switch-toggle">' +
@@ -10301,9 +10301,81 @@
             var autoUpdateWebToggle = document.getElementById("auto-update-web-toggle");
             if (autoUpdateWebToggle) autoUpdateWebToggle.checked = !!autoUpdate.web;
             var autoUpdateApkToggle = document.getElementById("auto-update-apk-toggle");
-            if (autoUpdateApkToggle) autoUpdateApkToggle.checked = !!autoUpdate.apk;
+            // 自动更新开关只对 APK 壳生效, 浏览器里不绑定状态(该行也保持隐藏), 避免静默写一个看不见的控件。
+            if (autoUpdateApkToggle) autoUpdateApkToggle.checked = !!_apkVersion && !!autoUpdate.apk;
             var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle");
-            if (autoUpdateDmgToggle) autoUpdateDmgToggle.checked = !!autoUpdate.dmg;
+            if (autoUpdateDmgToggle) autoUpdateDmgToggle.checked = !!_macAppVersion && !!autoUpdate.dmg;
+
+            // ── 原生包下载 helper（APK / DMG 共用）──
+            function safeNotify(msg, type) {
+              if (typeof window.wandAlert === "function") {
+                window.wandAlert(msg, { type: type === "error" ? "danger" : "info" });
+              } else if (typeof showToast === "function") {
+                showToast(msg, type === "error" ? "error" : "info");
+              } else if (type === "error") {
+                alert(msg);
+              }
+            }
+            // 同源本地下载：先 HEAD 探测状态码, 避免 window.open("_self") 把整页导航成裸 JSON;
+            // 命中则用隐藏 <a download> 触发下载, 并给出明确反馈。
+            function triggerLocalDownload(url, fileName, btn) {
+              var original = btn ? btn.textContent : "";
+              if (btn) { btn.disabled = true; btn.textContent = "下载中…"; }
+              function restore() { if (btn) { btn.disabled = false; btn.textContent = original; } }
+              fetch(url, { method: "HEAD", credentials: "same-origin" })
+                .then(function(resp) {
+                  if (!resp.ok) {
+                    safeNotify(resp.status === 404 ? "下载未启用或文件已移除" : ("下载失败 (HTTP " + resp.status + ")"), "error");
+                    restore();
+                    return;
+                  }
+                  var a = document.createElement("a");
+                  a.href = url;
+                  a.download = fileName || "";
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  safeNotify("已开始下载，请在通知栏/下载管理中查看", "info");
+                  restore();
+                })
+                .catch(function(err) {
+                  safeNotify("下载失败: " + (err && err.message ? err.message : err), "error");
+                  restore();
+                });
+            }
+
+            // 设置页版本比较 (仅主版本三段, 预发布忽略) — 判断该升级 / 已最新 / 更旧。
+            function compareVer(a, b) {
+              function parse(v) {
+                return String(v || "").replace(/^v/, "").split("-")[0].split(".").map(function(n) { return parseInt(n, 10) || 0; });
+              }
+              var pa = parse(a), pb = parse(b);
+              for (var i = 0; i < 3; i++) {
+                var d = (pa[i] || 0) - (pb[i] || 0);
+                if (d !== 0) return d > 0 ? 1 : -1;
+              }
+              return 0;
+            }
+            // 壳内按钮: 据版本比较结果决定文案/可点性, 避免线上比已装旧时仍诱导"下载安装"。
+            function applyApkButton(btn, cmp, url, fileName, source) {
+              btn.classList.remove("hidden");
+              btn.disabled = false;
+              if (cmp > 0) {
+                btn.textContent = "升级";
+              } else if (cmp === 0) {
+                btn.textContent = "已是最新";
+                btn.disabled = true;
+              } else {
+                btn.textContent = "重新安装";
+              }
+              btn.onclick = btn.disabled ? null : function() {
+                try {
+                  WandNative.downloadUpdate(url, fileName, source);
+                } catch (e) {
+                  safeNotify("调用下载失败: " + (e && e.message ? e.message : e), "error");
+                }
+              };
+            }
 
             // ── Android APK version display ──
             var apkSection = document.getElementById("android-apk-section");
@@ -10318,7 +10390,9 @@
             var apkMessageEl = document.getElementById("android-apk-message");
             var androidApk = data.androidApk || {};
             var isInApk = !!_apkVersion;
-            var hasApkInfo = isInApk || !!androidApk.github || !!androidApk.local;
+            // 浏览器模式下若管理员未启用 Android 分发(enabled===false), 整段隐藏; 壳内保留以便自升级。
+            var apkEnabled = androidApk.enabled !== false;
+            var hasApkInfo = isInApk || (apkEnabled && (!!androidApk.github || !!androidApk.local));
             if (apkSection) {
               if (hasApkInfo) apkSection.classList.remove("hidden");
               else apkSection.classList.add("hidden");
@@ -10337,21 +10411,8 @@
                 apkGithubEl.textContent = ghLabel;
                 apkGithubRow.classList.remove("hidden");
                 if (apkGithubBtn) {
-                  apkGithubBtn.textContent = "下载安装";
-                  apkGithubBtn.classList.remove("hidden");
-                  apkGithubBtn.onclick = function() {
-                    try {
-                      WandNative.downloadUpdate(androidApk.github.downloadUrl, androidApk.github.fileName || "wand-update.apk", "github");
-                    } catch (e) {
-                      if (typeof window.wandAlert === "function") {
-                        window.wandAlert("调用下载失败: " + e.message, { type: "danger", title: "下载失败" });
-                      } else if (typeof showToast === "function") {
-                        showToast("调用下载失败: " + e.message, "error");
-                      } else {
-                        alert("调用下载失败: " + e.message);
-                      }
-                    }
-                  };
+                  var ghCmp = androidApk.github.version ? compareVer(androidApk.github.version, _apkVersion) : 1;
+                  applyApkButton(apkGithubBtn, ghCmp, androidApk.github.downloadUrl, androidApk.github.fileName || "wand-update.apk", "github");
                 }
               }
               // 本地版本
@@ -10361,21 +10422,8 @@
                 apkLocalEl.textContent = lcLabel;
                 apkLocalRow.classList.remove("hidden");
                 if (apkLocalBtn) {
-                  apkLocalBtn.textContent = "下载安装";
-                  apkLocalBtn.classList.remove("hidden");
-                  apkLocalBtn.onclick = function() {
-                    try {
-                      WandNative.downloadUpdate(androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", "local");
-                    } catch (e) {
-                      if (typeof window.wandAlert === "function") {
-                        window.wandAlert("调用下载失败: " + e.message, { type: "danger", title: "下载失败" });
-                      } else if (typeof showToast === "function") {
-                        showToast("调用下载失败: " + e.message, "error");
-                      } else {
-                        alert("调用下载失败: " + e.message);
-                      }
-                    }
-                  };
+                  var lcCmp = androidApk.local.version ? compareVer(androidApk.local.version, _apkVersion) : 1;
+                  applyApkButton(apkLocalBtn, lcCmp, androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", "local");
                 }
               }
               // 都没有时
@@ -10400,6 +10448,7 @@
                   apkGithubBtn.classList.remove("hidden");
                   apkGithubBtn.onclick = function() {
                     window.open(androidApk.github.downloadUrl, "_blank");
+                    safeNotify("正在打开下载页…", "info");
                   };
                 }
               }
@@ -10413,12 +10462,12 @@
                   apkLocalBtn.textContent = "下载";
                   apkLocalBtn.classList.remove("hidden");
                   apkLocalBtn.onclick = function() {
-                    window.open(androidApk.local.downloadUrl, "_self");
+                    triggerLocalDownload(androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", apkLocalBtn);
                   };
                 }
               }
               if (!androidApk.github && !androidApk.local && apkMessageEl) {
-                apkMessageEl.textContent = "暂未提供";
+                apkMessageEl.textContent = apkEnabled ? "在线版本暂时获取失败，可稍后重试" : "Android 下载未在服务端启用";
                 apkMessageEl.classList.remove("hidden");
               }
             }
@@ -10436,7 +10485,8 @@
             var dmgMessageEl = document.getElementById("macos-dmg-message");
             var macosDmg = data.macosDmg || {};
             var isInMacApp = !!_macAppVersion;
-            var hasDmgInfo = isInMacApp || !!macosDmg.github || !!macosDmg.local;
+            var dmgEnabled = macosDmg.enabled !== false;
+            var hasDmgInfo = isInMacApp || (dmgEnabled && (!!macosDmg.github || !!macosDmg.local));
             if (dmgSection) {
               if (hasDmgInfo) dmgSection.classList.remove("hidden");
               else dmgSection.classList.add("hidden");
@@ -10454,21 +10504,8 @@
                 dmgGithubEl.textContent = dghLabel;
                 dmgGithubRow.classList.remove("hidden");
                 if (dmgGithubBtn) {
-                  dmgGithubBtn.textContent = "下载安装";
-                  dmgGithubBtn.classList.remove("hidden");
-                  dmgGithubBtn.onclick = function() {
-                    try {
-                      WandNative.downloadUpdate(macosDmg.github.downloadUrl, macosDmg.github.fileName || "wand-update.dmg", "github");
-                    } catch (e) {
-                      if (typeof window.wandAlert === "function") {
-                        window.wandAlert("调用下载失败: " + e.message, { type: "danger", title: "下载失败" });
-                      } else if (typeof showToast === "function") {
-                        showToast("调用下载失败: " + e.message, "error");
-                      } else {
-                        alert("调用下载失败: " + e.message);
-                      }
-                    }
-                  };
+                  var dghCmp = macosDmg.github.version ? compareVer(macosDmg.github.version, _macAppVersion) : 1;
+                  applyApkButton(dmgGithubBtn, dghCmp, macosDmg.github.downloadUrl, macosDmg.github.fileName || "wand-update.dmg", "github");
                 }
               }
               if (macosDmg.local && dmgLocalRow && dmgLocalEl) {
@@ -10477,21 +10514,8 @@
                 dmgLocalEl.textContent = dlcLabel;
                 dmgLocalRow.classList.remove("hidden");
                 if (dmgLocalBtn) {
-                  dmgLocalBtn.textContent = "下载安装";
-                  dmgLocalBtn.classList.remove("hidden");
-                  dmgLocalBtn.onclick = function() {
-                    try {
-                      WandNative.downloadUpdate(macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", "local");
-                    } catch (e) {
-                      if (typeof window.wandAlert === "function") {
-                        window.wandAlert("调用下载失败: " + e.message, { type: "danger", title: "下载失败" });
-                      } else if (typeof showToast === "function") {
-                        showToast("调用下载失败: " + e.message, "error");
-                      } else {
-                        alert("调用下载失败: " + e.message);
-                      }
-                    }
-                  };
+                  var dlcCmp = macosDmg.local.version ? compareVer(macosDmg.local.version, _macAppVersion) : 1;
+                  applyApkButton(dmgLocalBtn, dlcCmp, macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", "local");
                 }
               }
               if (!macosDmg.github && !macosDmg.local && dmgMessageEl) {
@@ -10514,6 +10538,7 @@
                   dmgGithubBtn.classList.remove("hidden");
                   dmgGithubBtn.onclick = function() {
                     window.open(macosDmg.github.downloadUrl, "_blank");
+                    safeNotify("正在打开下载页…", "info");
                   };
                 }
               }
@@ -10526,12 +10551,12 @@
                   dmgLocalBtn.textContent = "下载";
                   dmgLocalBtn.classList.remove("hidden");
                   dmgLocalBtn.onclick = function() {
-                    window.open(macosDmg.local.downloadUrl, "_self");
+                    triggerLocalDownload(macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", dmgLocalBtn);
                   };
                 }
               }
               if (!macosDmg.github && !macosDmg.local && dmgMessageEl) {
-                dmgMessageEl.textContent = "暂未提供";
+                dmgMessageEl.textContent = dmgEnabled ? "在线版本暂时获取失败，可稍后重试" : "macOS 下载未在服务端启用";
                 dmgMessageEl.classList.remove("hidden");
               }
             }

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
@@ -19,6 +20,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
@@ -52,6 +54,7 @@ public class ConnectActivity extends AppCompatActivity {
     private MaterialButton cancelAutoConnectButton;
     private MaterialButton switchServerButton;
     private TextView statusText;
+    private TextView autoConnectStatus;
     private LinearLayout recentList;
     private TextView recentLabel;
     private LinearLayout autoConnectGroup;
@@ -87,6 +90,7 @@ public class ConnectActivity extends AppCompatActivity {
         cancelAutoConnectButton = findViewById(R.id.cancelAutoConnectButton);
         switchServerButton = findViewById(R.id.switchServerButton);
         statusText = findViewById(R.id.statusText);
+        autoConnectStatus = findViewById(R.id.autoConnectStatus);
         recentList = findViewById(R.id.recentList);
         recentLabel = findViewById(R.id.recentLabel);
         autoConnectGroup = findViewById(R.id.autoConnectGroup);
@@ -154,12 +158,30 @@ public class ConnectActivity extends AppCompatActivity {
         integrator.initiateScan();
     }
 
+    private void showCameraPermissionSettingsDialog() {
+        new MaterialAlertDialogBuilder(this)
+            .setTitle("需要相机权限")
+            .setMessage("扫码连接需要相机权限。你也可以直接粘贴连接码连接。\n\n如需扫码，请在系统设置中开启相机权限。")
+            .setPositiveButton("去设置", (d, w) -> {
+                try {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                } catch (Exception ignored) {}
+            })
+            .setNegativeButton("知道了", null)
+            .show();
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_CAMERA_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 launchQrScanner();
+            } else if (!ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.CAMERA)) {
+                // 永久拒绝(勾了"不再询问"): 引导去系统设置, 否则再点扫码毫无反应。
+                showCameraPermissionSettingsDialog();
             } else {
                 Toast.makeText(this, R.string.scan_qr_camera_denied, Toast.LENGTH_LONG).show();
             }
@@ -233,6 +255,7 @@ public class ConnectActivity extends AppCompatActivity {
             if (decoded != null) {
                 String serverUrl = decoded[0];
                 String appToken = decoded[1];
+                setAutoStatus("正在验证连接码…");
                 String error = testConnectionWithToken(serverUrl, appToken, 5000);
                 runOnUiThread(() -> {
                     if (!autoConnecting) return;
@@ -256,6 +279,7 @@ public class ConnectActivity extends AppCompatActivity {
 
                 String savedToken = serverStore.getAppToken();
                 if (!TextUtils.isEmpty(savedToken)) {
+                    setAutoStatus("正在验证连接码…");
                     String error = testConnectionWithToken(normalizedUrl, savedToken, 5000);
                     if (error == null) {
                         runOnUiThread(() -> {
@@ -267,6 +291,7 @@ public class ConnectActivity extends AppCompatActivity {
                     }
                 }
 
+                setAutoStatus("正在尝试直接连接…");
                 String error = testConnection(normalizedUrl, 5000);
                 runOnUiThread(() -> {
                     if (!autoConnecting) return;
@@ -274,7 +299,7 @@ public class ConnectActivity extends AppCompatActivity {
                     if (error == null) {
                         launchWebView(normalizedUrl, null);
                     } else {
-                        showFormWithMessage(null);
+                        showFormWithMessage(getString(R.string.auto_connect_failed));
                     }
                 });
             }
@@ -340,7 +365,7 @@ public class ConnectActivity extends AppCompatActivity {
     private void attemptConnect() {
         String rawInput = urlInput.getText() != null ? urlInput.getText().toString().trim() : "";
         if (TextUtils.isEmpty(rawInput)) {
-            showStatus("请输入连接码或服务器地址");
+            showStatus("请输入连接码或服务器地址", false);
             return;
         }
 
@@ -454,15 +479,16 @@ public class ConnectActivity extends AppCompatActivity {
             }
             return "服务器返回了异常状态码: " + code;
         } catch (java.net.ConnectException e) {
-            return "无法连接到服务器，请确认地址和端口是否正确\n(" + e.getMessage() + ")";
+            return "无法连接到服务器，请确认地址和端口是否正确";
         } catch (java.net.SocketTimeoutException e) {
-            return "连接超时，请检查网络或服务器是否在运行\n(" + e.getMessage() + ")";
+            return "连接超时，请检查网络或服务器是否在运行";
         } catch (java.net.UnknownHostException e) {
-            return "无法解析主机名: " + e.getMessage();
+            return "无法解析地址，请检查服务器地址是否正确";
         } catch (javax.net.ssl.SSLException e) {
-            return "SSL/TLS 连接失败: " + e.getMessage();
+            // 已 trustSelfSigned 全信任, SSL 异常基本只因 host 不通, 归并到"无法连接"。
+            return "无法连接到服务器，请确认地址和端口是否正确";
         } catch (Exception e) {
-            return "连接失败: " + e.getClass().getSimpleName() + " - " + e.getMessage();
+            return "连接失败，请检查地址或稍后重试";
         } finally {
             if (conn != null) {
                 try { conn.disconnect(); } catch (Exception ignored) {}
@@ -487,17 +513,17 @@ public class ConnectActivity extends AppCompatActivity {
             }
             return "服务器返回了异常状态码: " + code;
         } catch (java.net.ConnectException e) {
-            return "无法连接到服务器，请确认地址和端口是否正确\n(" + e.getMessage() + ")";
+            return "无法连接到服务器，请确认地址和端口是否正确";
         } catch (java.net.SocketTimeoutException e) {
-            return "连接超时，请检查网络或服务器是否在运行\n(" + e.getMessage() + ")";
+            return "连接超时，请检查网络或服务器是否在运行";
         } catch (java.net.UnknownHostException e) {
-            return "无法解析主机名: " + e.getMessage();
+            return "无法解析地址，请检查服务器地址是否正确";
         } catch (javax.net.ssl.SSLException e) {
-            return "SSL/TLS 连接失败: " + e.getMessage();
+            return "无法连接到服务器，请确认地址和端口是否正确";
         } catch (java.net.MalformedURLException e) {
-            return "地址格式不正确: " + e.getMessage();
+            return "地址格式不正确，请检查后重试";
         } catch (Exception e) {
-            return "连接失败: " + e.getClass().getSimpleName() + " - " + e.getMessage();
+            return "连接失败，请检查地址或稍后重试";
         }
     }
 
@@ -529,8 +555,19 @@ public class ConnectActivity extends AppCompatActivity {
     }
 
     private void showStatus(String message) {
+        showStatus(message, true);
+    }
+
+    private void showStatus(String message, boolean isError) {
         statusText.setText(message);
+        statusText.setTextColor(getColor(isError ? R.color.error : R.color.text_secondary));
         statusText.setVisibility(View.VISIBLE);
+    }
+
+    private void setAutoStatus(String text) {
+        runOnUiThread(() -> {
+            if (autoConnecting && autoConnectStatus != null) autoConnectStatus.setText(text);
+        });
     }
 
     @Override
@@ -545,12 +582,17 @@ public class ConnectActivity extends AppCompatActivity {
         recentList.removeAllViews();
         List<String> urls = serverStore.getRecentUrls();
 
+        recentLabel.setVisibility(View.VISIBLE);
+
         if (urls.isEmpty()) {
-            recentLabel.setVisibility(View.GONE);
+            TextView empty = new TextView(this);
+            empty.setText(R.string.no_recent_servers);
+            empty.setTextSize(13f);
+            empty.setTextColor(getColor(R.color.text_hint));
+            empty.setPadding(0, dpToPx(4), 0, 0);
+            recentList.addView(empty);
             return;
         }
-
-        recentLabel.setVisibility(View.VISIBLE);
 
         for (String entry : urls) {
             LinearLayout row = new LinearLayout(this);
@@ -590,7 +632,10 @@ public class ConnectActivity extends AppCompatActivity {
             deleteBtn.setText("\u00d7");
             deleteBtn.setTextSize(18f);
             deleteBtn.setTextColor(getColor(R.color.text_hint));
-            deleteBtn.setPadding(dpToPx(12), 0, dpToPx(4), 0);
+            deleteBtn.setGravity(Gravity.CENTER);
+            int hit = dpToPx(44);
+            deleteBtn.setMinWidth(hit);
+            deleteBtn.setMinHeight(hit);
 
             row.addView(textColumn);
             row.addView(deleteBtn);
@@ -603,12 +648,37 @@ public class ConnectActivity extends AppCompatActivity {
             urlText.setOnClickListener(pickEntry);
 
             deleteBtn.setOnClickListener(v -> {
-                serverStore.removeRecentUrl(entry);
-                refreshRecentList();
+                new MaterialAlertDialogBuilder(this)
+                    .setMessage("从最近连接中移除该服务器？")
+                    .setPositiveButton("移除", (d, w) -> {
+                        serverStore.removeRecentUrl(entry);
+                        refreshRecentList();
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
             });
 
             recentList.addView(row);
         }
+
+        // 清空全部入口
+        TextView clearAll = new TextView(this);
+        clearAll.setText(R.string.clear_history);
+        clearAll.setTextSize(13f);
+        clearAll.setTextColor(getColor(R.color.text_hint));
+        clearAll.setPadding(0, dpToPx(12), 0, dpToPx(4));
+        clearAll.setOnClickListener(v -> {
+            new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.clear_history)
+                .setMessage("确定清除所有最近连接记录吗？")
+                .setPositiveButton("清除", (d, w) -> {
+                    serverStore.clearRecent();
+                    refreshRecentList();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+        });
+        recentList.addView(clearAll);
     }
 
     private int dpToPx(int dp) {

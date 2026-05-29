@@ -123,9 +123,28 @@ function compareSemver(a: string, b: string): number {
   if (!pa.pre && pb.pre) return 1;
   if (pa.pre && !pb.pre) return -1;
   if (!pa.pre && !pb.pre) return 0;
-  // Both have prerelease: lexical compare handles debug.MMDDHHMM ordering.
-  if (pa.pre < pb.pre) return -1;
-  if (pa.pre > pb.pre) return 1;
+  // Both have prerelease: 按 . 分段比较 (数字段数值比, 非数字段字典序), 贴近标准 semver,
+  // 避免跨月/跨年的 debug.MMDDHHMM 后缀因纯字典序而排反。
+  const segA = pa.pre.split(".");
+  const segB = pb.pre.split(".");
+  const segLen = Math.max(segA.length, segB.length);
+  for (let i = 0; i < segLen; i++) {
+    const sa = segA[i];
+    const sb = segB[i];
+    if (sa === undefined) return -1; // 段少者更小
+    if (sb === undefined) return 1;
+    const na = Number(sa);
+    const nb = Number(sb);
+    const aIsNum = sa !== "" && !Number.isNaN(na);
+    const bIsNum = sb !== "" && !Number.isNaN(nb);
+    if (aIsNum && bIsNum) {
+      if (na !== nb) return na < nb ? -1 : 1;
+    } else if (aIsNum !== bIsNum) {
+      return aIsNum ? -1 : 1; // 数字段 < 非数字段
+    } else if (sa !== sb) {
+      return sa < sb ? -1 : 1;
+    }
+  }
   return 0;
 }
 
@@ -136,6 +155,7 @@ interface GitHubApkInfo {
   downloadUrl: string;
   fileName: string;
   size: number;
+  releaseNotes?: string;
 }
 
 let cachedGitHubApk: GitHubApkInfo | null = null;
@@ -156,6 +176,7 @@ async function fetchGitHubLatestApk(forceRefresh = false): Promise<GitHubApkInfo
     if (!resp.ok) return cachedGitHubApk ?? null;
     const release = await resp.json() as {
       tag_name: string;
+      body?: string;
       assets: Array<{ name: string; browser_download_url: string; size: number }>;
     };
     const apkAsset = release.assets.find(a => a.name.toLowerCase().endsWith(".apk"));
@@ -166,6 +187,7 @@ async function fetchGitHubLatestApk(forceRefresh = false): Promise<GitHubApkInfo
       downloadUrl: apkAsset.browser_download_url,
       fileName: apkAsset.name,
       size: apkAsset.size,
+      releaseNotes: release.body ? release.body.trim().slice(0, 500) : undefined,
     };
     gitHubApkCacheTs = now;
     return cachedGitHubApk;
@@ -180,6 +202,7 @@ interface ResolvedApkVersion {
   fileName: string;
   size: number;
   source: "local" | "github";
+  releaseNotes?: string;
 }
 
 async function resolveLatestApkVersion(configDir: string, config: WandConfig): Promise<ResolvedApkVersion | null> {
@@ -203,6 +226,7 @@ async function resolveLatestApkVersion(configDir: string, config: WandConfig): P
       fileName: ghApk.fileName,
       size: ghApk.size,
       source: "github",
+      releaseNotes: ghApk.releaseNotes,
     };
   }
   return null;
@@ -574,7 +598,21 @@ async function resolveAndroidApkAsset(configDir: string, config: WandConfig): Pr
       fileStat,
     };
   }));
-  candidates.sort((a, b) => b.fileStat.mtimeMs - a.fileStat.mtimeMs);
+  // 按语义版本选"最新", 而非修改时间 —— cp/rsync/解压/checkout 都可能让低版本号文件的
+  // mtime 更新, 用 mtime 会把旧版本号当成 latest 上报。版本相同或都无版本号时退回 mtime。
+  candidates.sort((a, b) => {
+    const va = extractAndroidApkVersion(a.entry.name);
+    const vb = extractAndroidApkVersion(b.entry.name);
+    if (va && vb) {
+      const cmp = compareSemver(vb, va);
+      if (cmp !== 0) return cmp;
+    } else if (va && !vb) {
+      return -1;
+    } else if (!va && vb) {
+      return 1;
+    }
+    return b.fileStat.mtimeMs - a.fileStat.mtimeMs;
+  });
   const selected = candidates[0];
   return {
     fileName: selected.entry.name,
@@ -1107,23 +1145,69 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       fileName: updateAvailable ? latest.fileName : null,
       size: updateAvailable ? latest.size : null,
       source: latest.source,
+      releaseNotes: updateAvailable ? (latest.releaseNotes ?? null) : null,
     });
   });
 
-  app.get("/android/download", async (_req, res) => {
-    const androidApk = await resolveAndroidApkAsset(configDir, config);
+  app.get("/android/download", async (req, res) => {
     if (config.android?.enabled !== true) {
       res.status(404).json({ error: "Android APK 下载未启用。" });
       return;
     }
+    const androidApk = await resolveAndroidApkAsset(configDir, config);
     if (!androidApk) {
       res.status(404).json({ error: "当前没有可下载的 APK 文件。" });
       return;
     }
+
+    const total = androidApk.size;
     res.setHeader("Content-Type", "application/vnd.android.package-archive");
-    res.setHeader("Content-Length", String(androidApk.size));
     res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(androidApk.fileName)}"`);
-    createReadStream(androidApk.filePath).pipe(res);
+    // 声明支持断点续传 — 弱网/移动网络下中断后客户端可带 Range 续传, 而非从头重下。
+    res.setHeader("Accept-Ranges", "bytes");
+
+    // 解析 Range: bytes=start-end (含后缀范围 bytes=-N)。命中则返回 206 + 局部内容。
+    let start = 0;
+    let end = total - 1;
+    let isPartial = false;
+    const rangeHeader = req.headers.range;
+    if (rangeHeader) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+      if (match && (match[1] !== "" || match[2] !== "")) {
+        if (match[1] === "") {
+          // bytes=-N: 最后 N 字节
+          start = Math.max(0, total - Number(match[2]));
+          end = total - 1;
+        } else {
+          start = Number(match[1]);
+          end = match[2] === "" ? total - 1 : Math.min(Number(match[2]), total - 1);
+        }
+        isPartial = true;
+        if (start > end || start < 0 || start >= total) {
+          res.status(416);
+          res.setHeader("Content-Range", `bytes */${total}`);
+          res.end();
+          return;
+        }
+      }
+    }
+
+    if (isPartial) {
+      res.status(206);
+      res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+    }
+    res.setHeader("Content-Length", String(end - start + 1));
+
+    const stream = createReadStream(androidApk.filePath, { start, end });
+    stream.on("error", (err) => {
+      // 文件在 stat 之后被删/读错误时, 让客户端尽快感知断流, 而不是等满读超时。
+      if (!res.headersSent) {
+        res.status(500).json({ error: getErrorMessage(err, "读取 APK 文件失败。") });
+      } else {
+        res.destroy();
+      }
+    });
+    stream.pipe(res);
   });
 
   // ── macOS DMG update & download (no auth required) ──

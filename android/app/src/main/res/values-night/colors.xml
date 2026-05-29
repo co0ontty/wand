@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 深色模式配色: 跟随系统深色, 与浅色奶油/棕主题保持品牌一致的暖色调 -->
+<resources>
+    <color name="primary">#D97A4F</color>
+    <color name="primary_dark">#1A1410</color>
+    <color name="accent">#D97A4F</color>
+    <color name="background">#1A1410</color>
+    <color name="surface">#241C15</color>
+    <color name="text_primary">#F0E6D8</color>
+    <color name="text_secondary">#B5A593</color>
+    <color name="text_hint">#7A6A5A</color>
+    <color name="divider">#3A2E22</color>
+    <color name="error">#EF5350</color>
+    <color name="card_bg">#2A2018</color>
+</resources>

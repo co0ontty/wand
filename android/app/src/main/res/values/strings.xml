@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Wand</string>
-    <string name="connect_title">连接 Wand 服务</string>
     <string name="server_url_hint">粘贴连接码，或输入服务器地址</string>
     <string name="connect_button">连接</string>
     <string name="scan_qr_button">扫码连接</string>
@@ -16,6 +15,10 @@
     <string name="cancel_auto_connect">取消</string>
     <string name="switch_server">切换服务器</string>
     <string name="connection_failed">连接失败，请检查地址是否正确</string>
+    <string name="error_no_network">设备似乎没有联网，请检查网络后重试</string>
+    <string name="error_host_lookup">找不到服务器，请确认地址是否正确</string>
+    <string name="error_connect">无法连接到服务器，请确认服务是否在运行</string>
+    <string name="error_timeout">连接超时，请检查网络或服务器状态</string>
     <string name="disconnected">服务器连接断开</string>
     <string name="retry">重新连接</string>
     <string name="back_to_connect">返回连接页</string>
@@ -26,6 +29,12 @@
     <string name="skip_version">跳过此版本</string>
     <string name="downloading_update">正在下载更新…</string>
     <string name="download_failed">下载失败</string>
+    <string name="cancel_download">取消</string>
     <string name="loading_text">正在启动…</string>
     <string name="renderer_crashed">页面渲染进程已恢复</string>
+    <string name="install_permission_title">需要安装权限</string>
+    <string name="install_permission_message">为了安装更新，请在接下来的系统设置中允许 Wand 安装应用，授权后将自动继续安装。</string>
+    <string name="install_permission_goto">去设置</string>
+    <string name="install_permission_denied">未授予安装权限，已取消安装</string>
+    <string name="install_permission_failed">无法打开权限设置，请在系统设置中手动允许 Wand 安装应用</string>
 </resources>

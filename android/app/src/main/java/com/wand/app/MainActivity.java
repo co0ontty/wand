@@ -21,6 +21,7 @@ import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
@@ -94,6 +95,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String CHANNEL_ID_LEGACY = "wand_notifications";
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1001;
     private static final int FILE_CHOOSER_REQUEST = 1002;
+    private static final int INSTALL_PERMISSION_REQUEST = 1003;
     private static final int NOTIFICATION_ID_BASE = 2000;
     private static final long PROGRESS_UPDATE_DEBOUNCE_MS = 50;
 
@@ -117,6 +119,8 @@ public class MainActivity extends AppCompatActivity {
     private final Map<String, Runnable> pendingProgressUpdates = new HashMap<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private ValueCallback<Uri[]> pendingFileChooserCallback;
+    // 待安装的 APK — 未知来源安装权限缺失时引导用户授权, 授权返回后继续安装。
+    private File pendingInstallFile;
     private boolean keepAliveRunning = false;
     private long lastBackPressedTime = 0;
 
@@ -283,7 +287,20 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
-                    showError(getString(R.string.connection_failed));
+                    // 按错误类型给更具体的文案, 而非一律"连接失败"。
+                    int msgRes;
+                    switch (error.getErrorCode()) {
+                        case ERROR_HOST_LOOKUP:
+                            msgRes = R.string.error_host_lookup; break;
+                        case ERROR_CONNECT:
+                        case ERROR_IO:
+                            msgRes = R.string.error_connect; break;
+                        case ERROR_TIMEOUT:
+                            msgRes = R.string.error_timeout; break;
+                        default:
+                            msgRes = hasUsableNetwork ? R.string.connection_failed : R.string.error_no_network;
+                    }
+                    showError(getString(msgRes));
                 }
             }
 
@@ -1022,6 +1039,18 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == INSTALL_PERMISSION_REQUEST) {
+            File toInstall = pendingInstallFile;
+            pendingInstallFile = null;
+            if (toInstall == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    && getPackageManager().canRequestPackageInstalls()) {
+                doInstallApk(toInstall);
+            } else {
+                Toast.makeText(this, R.string.install_permission_denied, Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode != FILE_CHOOSER_REQUEST) return;
 
         ValueCallback<Uri[]> cb = pendingFileChooserCallback;
@@ -1105,6 +1134,7 @@ public class MainActivity extends AppCompatActivity {
                 String fileName = data.optString("fileName", "wand-update.apk");
                 long size = data.optLong("size", 0);
                 String source = data.optString("source", "");
+                String releaseNotes = data.optString("releaseNotes", "");
 
                 if (latestVersion.isEmpty() || downloadUrl.isEmpty()) return;
 
@@ -1117,7 +1147,7 @@ public class MainActivity extends AppCompatActivity {
                             "Wand 发现新版本",
                             "当前 " + cv + " → 最新 " + latestVersion,
                             "update:wand-update");
-                    showUpdateDialog(cv, latestVersion, downloadUrl, fileName, size, source);
+                    showUpdateDialog(cv, latestVersion, downloadUrl, fileName, size, source, releaseNotes);
                 });
 
             } catch (Exception e) {
@@ -1128,13 +1158,16 @@ public class MainActivity extends AppCompatActivity {
 
     @SuppressLint("DefaultLocale")
     private void showUpdateDialog(String currentVer, String latestVer,
-                                  String downloadUrl, String fileName, long size, String source) {
+                                  String downloadUrl, String fileName, long size, String source,
+                                  String releaseNotes) {
         String sizeText = size > 0 ? "\n文件大小: " + formatSize(size) : "";
         String sourceText = "github".equals(source) ? "\n来源: GitHub Release" : "";
+        String notesText = (releaseNotes != null && !releaseNotes.isEmpty())
+                ? "\n\n更新内容:\n" + releaseNotes : "";
 
         new MaterialAlertDialogBuilder(this, R.style.Theme_Wand_Dialog)
                 .setTitle(R.string.update_title)
-                .setMessage("当前版本: " + currentVer + "\n最新版本: " + latestVer + sizeText + sourceText)
+                .setMessage("当前版本: " + currentVer + "\n最新版本: " + latestVer + sizeText + sourceText + notesText)
                 .setPositiveButton(R.string.update_now, (dialog, which) ->
                         downloadAndInstall(downloadUrl, fileName, source, latestVer))
                 .setNegativeButton(R.string.remind_later, null)
@@ -1160,8 +1193,11 @@ public class MainActivity extends AppCompatActivity {
         final TextView progressPercent = progressView.findViewById(R.id.progressPercent);
         final TextView progressBytes = progressView.findViewById(R.id.progressBytes);
 
+        // 允许用户主动取消下载: 弱网卡住时不必干等到 readTimeout(120s)。
+        final boolean[] cancelled = {false};
         final AlertDialog progress = new MaterialAlertDialogBuilder(this, R.style.Theme_Wand_Dialog)
                 .setView(progressView)
+                .setNegativeButton(R.string.cancel_download, (d, w) -> cancelled[0] = true)
                 .setCancelable(false)
                 .create();
         progress.show();
@@ -1217,13 +1253,24 @@ public class MainActivity extends AppCompatActivity {
                 int fileLength = conn.getContentLength();
                 File outputFile = new File(getExternalFilesDir(null), safeFileName);
 
+                // 下载前粗略校验可用空间 (预留 5MB), 避免写到一半 ENOSPC 抛不可读异常。
+                if (fileLength > 0) {
+                    File dir = outputFile.getParentFile();
+                    long usable = dir != null ? dir.getUsableSpace() : Long.MAX_VALUE;
+                    if (usable < (long) fileLength + 5 * 1024 * 1024) {
+                        throw new Exception("存储空间不足，需要约 " + formatSize(fileLength) + "，请清理后重试");
+                    }
+                }
+
                 try (InputStream in = conn.getInputStream();
                      FileOutputStream out = new FileOutputStream(outputFile)) {
                     byte[] buffer = new byte[8192];
                     long total = 0;
                     int count;
                     long lastUiUpdate = 0;
+                    final long startTime = System.currentTimeMillis();
                     while ((count = in.read(buffer)) != -1) {
+                        if (cancelled[0]) break;
                         total += count;
                         out.write(buffer, 0, count);
                         long now = System.currentTimeMillis();
@@ -1232,27 +1279,45 @@ public class MainActivity extends AppCompatActivity {
                             lastUiUpdate = now;
                             final long totalSnap = total;
                             final int totalLen = fileLength;
+                            final long elapsed = Math.max(1, now - startTime);
+                            final long bytesPerSec = totalSnap * 1000 / elapsed;
                             runOnUiThread(() -> {
+                                String speedText = "  " + formatSize(bytesPerSec) + "/s";
                                 if (totalLen > 0) {
                                     int percent = (int) (totalSnap * 100 / totalLen);
+                                    progressBar.setIndeterminate(false);
                                     progressBar.setProgress(percent);
                                     progressPercent.setText(percent + "%");
-                                    progressBytes.setText(formatSize(totalSnap) + " / " + formatSize(totalLen));
+                                    progressBytes.setText(formatSize(totalSnap) + " / " + formatSize(totalLen) + speedText);
                                 } else {
+                                    // Content-Length 缺失 (GitHub 重定向/分块传输常见): 明确告知"大小未知",
+                                    // 避免停在"0% + 转圈"让用户误以为卡死。
                                     progressBar.setIndeterminate(true);
-                                    progressBytes.setText(formatSize(totalSnap));
+                                    progressPercent.setText("大小未知");
+                                    progressBytes.setText(formatSize(totalSnap) + speedText);
                                 }
                             });
                         }
                     }
                 }
 
+                if (cancelled[0]) {
+                    // 用户主动取消: 删除半成品, 不弹失败框 (进度框已被取消按钮关闭)。
+                    if (outputFile.exists()) {
+                        try { outputFile.delete(); } catch (Exception ignored) {}
+                    }
+                    return;
+                }
+
                 if (!outputFile.exists() || outputFile.length() == 0) {
                     throw new Exception("下载文件为空");
                 }
 
-                if (latestVersion != null) {
-                    new ServerStore(MainActivity.this).setDownloadedApkVersion(latestVersion);
+                // 记录已下载版本用于去重; 设置页下载路径 latestVersion 为 null 时从文件名解析,
+                // 否则装完下次仍会重复弹"发现新版本"。
+                String versionToRecord = latestVersion != null ? latestVersion : extractVersionFromFileName(safeFileName);
+                if (versionToRecord != null) {
+                    new ServerStore(MainActivity.this).setDownloadedApkVersion(versionToRecord);
                 }
 
                 runOnUiThread(() -> {
@@ -1261,13 +1326,16 @@ public class MainActivity extends AppCompatActivity {
                 });
 
             } catch (Exception e) {
-                final String errMsg = e.getMessage() != null ? e.getMessage() : "未知错误";
+                if (cancelled[0]) return; // 取消引发的读异常, 不再提示
+                final String errMsg = friendlyDownloadError(e);
                 runOnUiThread(() -> {
                     progress.dismiss();
                     new MaterialAlertDialogBuilder(MainActivity.this, R.style.Theme_Wand_Dialog)
                         .setTitle("下载失败")
                         .setMessage(errMsg)
-                        .setPositiveButton(android.R.string.ok, null)
+                        .setPositiveButton("重试", (d, w) ->
+                                downloadAndInstall(downloadUrl, safeFileName, source, latestVersion))
+                        .setNegativeButton(android.R.string.cancel, null)
                         .show();
                 });
             } finally {
@@ -1279,6 +1347,41 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void installApk(File apkFile) {
+        // Android 8+ 安装 APK 需要"未知来源"特殊权限。未授予时直接 ACTION_VIEW 会被系统
+        // 静默拦下, 用户以为更新失败。这里先引导授权, 授权返回后在 onActivityResult 续装。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !getPackageManager().canRequestPackageInstalls()) {
+            pendingInstallFile = apkFile;
+            new MaterialAlertDialogBuilder(this, R.style.Theme_Wand_Dialog)
+                .setTitle(R.string.install_permission_title)
+                .setMessage(R.string.install_permission_message)
+                .setPositiveButton(R.string.install_permission_goto, (d, w) -> requestInstallPermission())
+                .setNegativeButton(android.R.string.cancel, (d, w) -> pendingInstallFile = null)
+                .setCancelable(true)
+                .show();
+            return;
+        }
+        doInstallApk(apkFile);
+    }
+
+    private void requestInstallPermission() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName()));
+            startActivityForResult(intent, INSTALL_PERMISSION_REQUEST);
+        } catch (Exception e) {
+            // 个别 ROM 不支持该 action, 退回应用详情页。
+            try {
+                Intent fallback = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + getPackageName()));
+                startActivityForResult(fallback, INSTALL_PERMISSION_REQUEST);
+            } catch (Exception ignored) {
+                Toast.makeText(this, R.string.install_permission_failed, Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void doInstallApk(File apkFile) {
         try {
             Uri apkUri = FileProvider.getUriForFile(this,
                     getPackageName() + ".fileprovider", apkFile);
@@ -1294,6 +1397,22 @@ public class MainActivity extends AppCompatActivity {
                 .setPositiveButton(android.R.string.ok, null)
                 .show();
         }
+    }
+
+    private static String friendlyDownloadError(Exception e) {
+        if (e instanceof java.net.SocketTimeoutException) return "下载超时，请检查网络后重试";
+        if (e instanceof java.net.UnknownHostException) return "无法连接到下载服务器，请检查网络";
+        if (e instanceof java.net.ConnectException) return "无法连接到下载服务器";
+        String raw = e.getMessage() != null ? e.getMessage() : "";
+        if (raw.contains("ENOSPC") || raw.toLowerCase().contains("space")) return "存储空间不足，请清理后重试";
+        return raw.isEmpty() ? "下载失败，请稍后重试" : raw;
+    }
+
+    private static String extractVersionFromFileName(String fileName) {
+        if (fileName == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(\\d+\\.\\d+\\.\\d+(?:[-+][A-Za-z0-9.-]+)?)").matcher(fileName);
+        return m.find() ? m.group(1) : null;
     }
 
     private static String formatSize(long bytes) {
@@ -1657,6 +1776,13 @@ public class MainActivity extends AppCompatActivity {
     private void dispatchNetworkChange(String state) {
         runOnUiThread(() -> {
             if (webView == null) return;
+            // 错误页可见 + 网络恢复 → 自动重连, 省去用户手动点"重新连接"。
+            if (("available".equals(state) || "validated".equals(state) || "changed".equals(state))
+                    && errorOverlay != null && errorOverlay.getVisibility() == View.VISIBLE) {
+                hideError();
+                webView.reload();
+                return;
+            }
             try {
                 String safe = state == null ? "" : state.replace("'", "");
                 webView.evaluateJavascript(
