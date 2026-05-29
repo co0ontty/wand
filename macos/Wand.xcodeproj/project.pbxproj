@@ -17,6 +17,7 @@
 		A100000000000000000000A8 /* DmgInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B8 /* DmgInstaller.swift */; };
 		A100000000000000000000A9 /* SelfSignedSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000B9 /* SelfSignedSession.swift */; };
 		A100000000000000000000AA /* WandAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BA /* WandAuth.swift */; };
+		A100000000000000000000AB /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000BB /* Theme.swift */; };
 		A100000000000000000000C1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100000000000000000000D1 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -31,6 +32,7 @@
 		A100000000000000000000B8 /* DmgInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmgInstaller.swift; sourceTree = "<group>"; };
 		A100000000000000000000B9 /* SelfSignedSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfSignedSession.swift; sourceTree = "<group>"; };
 		A100000000000000000000BA /* WandAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WandAuth.swift; sourceTree = "<group>"; };
+		A100000000000000000000BB /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		A100000000000000000000D1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A100000000000000000000E1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100000000000000000000E2 /* Wand.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Wand.entitlements; sourceTree = "<group>"; };
@@ -69,6 +71,7 @@
 				A100000000000000000000B8 /* DmgInstaller.swift */,
 				A100000000000000000000B9 /* SelfSignedSession.swift */,
 				A100000000000000000000BA /* WandAuth.swift */,
+				A100000000000000000000BB /* Theme.swift */,
 				A100000000000000000000D1 /* Assets.xcassets */,
 				A100000000000000000000E1 /* Info.plist */,
 				A100000000000000000000E2 /* Wand.entitlements */,
@@ -164,6 +167,7 @@
 				A100000000000000000000A8 /* DmgInstaller.swift in Sources */,
 				A100000000000000000000A9 /* SelfSignedSession.swift in Sources */,
 				A100000000000000000000AA /* WandAuth.swift in Sources */,
+				A100000000000000000000AB /* Theme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

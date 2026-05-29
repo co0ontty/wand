@@ -135,6 +135,7 @@
         // askuserquestion 菜单多份叠加的最强候选根因。
         syncOutputBuffer: null,
         syncOutputDeadline: 0,
+        syncFramingResidue: false,
         lastChunkAt: 0,
         terminalHealthTimer: null,
         lastTerminalResyncAt: 0,
@@ -147,12 +148,14 @@
         // scroll 动画），多次调用用 Math.max 合并、不会被短窗口缩短。
         terminalProgrammaticScrollUntil: 0,
         terminalScrollIdleTimer: null,
-        terminalScrollIdleMs: 1800,
         terminalScrollThreshold: 12,
         showTerminalJumpToBottom: false,
         terminalViewportEl: null,
         terminalViewportScrollHandler: null,
         terminalViewportTouchHandler: null,
+        terminalViewportTouchStartHandler: null,
+        terminalTouchStartY: 0,
+        terminalComposing: false,
         resizeObserver: null,
         resizeHandler: null,
         resizeTimer: null,
@@ -6179,11 +6182,24 @@
           inputBox.addEventListener("keydown", handleInputBoxKeydown);
           inputBox.addEventListener("paste", handleInputPaste);
           inputBox.addEventListener("input", function() {
+            // INPUT-3: IME 组字期间不把半成品发给 PTY，等 compositionend 再统一发。
+            if (state.terminalComposing) return;
             if (handleInteractiveTextInput(inputBox)) {
               return;
             }
             refreshInputBoxState(inputBox);
             setDraftValue(inputBox.value, true);
+          });
+          // INPUT-3: 交互模式 IME 组字承接。compositionstart 起置位标志让 input
+          // handler 静默；compositionend 取最终组字结果发 PTY 并清空。非交互模式不
+          // 介入，正常的中文聊天输入不受影响。
+          inputBox.addEventListener("compositionstart", function() {
+            if (state.terminalInteractive) state.terminalComposing = true;
+          });
+          inputBox.addEventListener("compositionend", function() {
+            if (!state.terminalComposing) return;
+            state.terminalComposing = false;
+            if (state.terminalInteractive) handleInteractiveTextInput(inputBox);
           });
           inputBox.addEventListener("focus", function() {
             // Close drawer when user focuses input to avoid backdrop blocking clicks
@@ -7132,7 +7148,10 @@
         var shouldShow = !!state.selectedId
           && state.currentView === "terminal"
           && !state.terminalAutoFollow
-          && !isTerminalNearBottom();
+          // SCROLL-2: 隐藏判据用严格 2px(isTerminalAtBottom) 而非 12px。否则距底
+          // 3–12px 区间 autoFollow 恒 false(scroll handler 只在 ≤2px 才恢复)却又
+          // 因 isTerminalNearBottom()=true 隐藏按钮 → 既不跟随又无回底入口的死区。
+          && !isTerminalAtBottom();
         state.showTerminalJumpToBottom = shouldShow;
         if (button) {
           button.classList.toggle("visible", shouldShow);
@@ -7180,22 +7199,19 @@
         }
       }
 
-      function scheduleTerminalResumeFollow() {
-        clearTerminalScrollIdleTimer();
-        updateTerminalJumpToBottomButton();
-        state.terminalScrollIdleTimer = setTimeout(function() {
-          state.terminalScrollIdleTimer = null;
-          state.terminalAutoFollow = true;
-          if (!isTerminalNearBottom()) {
-            scrollTerminalToBottom(true);
-          }
-          updateTerminalJumpToBottomButton();
-        }, state.terminalScrollIdleMs);
-      }
-
       function setTerminalManualScrollActive() {
         state.terminalAutoFollow = false;
         clearTerminalScrollIdleTimer();
+        // SCROLL-1: 用户一旦表达"看历史"意图，立刻作废任何在途的程序性拽底。
+        // 否则一个已排队、尚未 fire 的 wterm rAF _doRender 仍读着旧的
+        // _shouldScrollToBottom=true 把视口拽回底，而那次拽底触发的 scroll 事件正好
+        // 落在 120ms 程序窗口内被 scroll handler early-return 吞掉——上滚意图被悄悄
+        // 撤回。这里同步按掉 wterm 的跟随意图、并清零程序窗口，让紧随的真实 scroll
+        // 事件能被 handler 正常复判。
+        state.terminalProgrammaticScrollUntil = 0;
+        if (state.terminal && "_shouldScrollToBottom" in state.terminal) {
+          state.terminal._shouldScrollToBottom = false;
+        }
         updateTerminalJumpToBottomButton();
       }
 
@@ -7446,9 +7462,17 @@
 
       function createWideParserState() { return { mode: "normal" }; }
 
+      // PERF-1: 整块纯 ASCII 且无 ESC ⇒ 无宽字符、无 ANSI 序列，可跳过逐字符扫描。
+      function isAsciiNonEscape(s) {
+        return !/[^\x00-\x7f]/.test(s) && s.indexOf("\x1b") === -1;
+      }
+
       function widePadAnsi(data, st) {
         if (!data) return "";
         var s = String(data);
+        // PERF-1: 不在 ANSI 解析中间态、且整块纯 ASCII 无转义时原样返回，省下逐字符
+        // 拼接与 U+2060 注入。Claude 流式输出与全量重放大量命中此快路径。
+        if (st.mode === "normal" && isAsciiNonEscape(s)) return s;
         var out = "";
         for (var i = 0; i < s.length; i++) {
           var code = s.charCodeAt(i);
@@ -7535,6 +7559,9 @@
                 // 护栏：超长/超时强制 flush，避免永久卡死
                 out += state.syncOutputBuffer;
                 state.syncOutputBuffer = null;
+                // FLICKER: 这是 NEW-A 唯一"失手"路径——半个 ?2026 帧被透传给 wterm，
+                // 可能渲染错位。打标记让 R6 chunk 兜底 resync 一次（且仅此时触发）。
+                state.syncFramingResidue = true;
               }
               return out;
             }
@@ -7634,10 +7661,17 @@
           var node = anchor && anchor.nodeType === 3 ? anchor.parentNode : anchor;
           var output = document.getElementById("output");
           if (!output || !node || !output.contains(node)) return;
+          // COPY-1: 终端每行被 wterm 补齐到整列宽（空 cell 输出真实空格 + white-space:pre），
+          // 选中复制会带一长串行尾空格；同时宽字符后插了零宽填充符 U+2060。两者一起清：
+          // 逐行剥 filler + trimEnd。只要选区落在 #output 内就处理（不再要求"含 filler
+          // 才改写"，否则纯 ASCII 行的尾随空格漏网）。
           var text = sel.toString();
-          if (text.indexOf(WAND_WIDE_FILLER) === -1) return;
+          var cleaned = text.split("\n").map(function(line) {
+            return line.split(WAND_WIDE_FILLER).join("").replace(/[ \t]+$/, "");
+          }).join("\n");
+          if (cleaned === text) return; // 无可清理内容，交回浏览器默认复制
           if (e.clipboardData) {
-            e.clipboardData.setData("text/plain", text.split(WAND_WIDE_FILLER).join(""));
+            e.clipboardData.setData("text/plain", cleaned);
             e.preventDefault();
           }
         });
@@ -7760,6 +7794,11 @@
       var RESYNC_BUDGET_WINDOW_MS = 5000;
       var RESYNC_BUDGET_MAX = 12;
       var RESYNC_WARN_COOLDOWN_MS = 30000;
+      // RENDER-1: softResync 自身的重放（wandTerminalWrite 末尾会调 maybeScheduleResyncForChunk）
+      // 不应再触发新一轮 resync，否则从 health-check/onResize/刷新/重连等路径进来时，
+      // 整段含 CSI 的 replaySource 会让单次 resync 被放大成 2~3 次全量重放。重放期间置位
+      // 此标志，maybeScheduleResyncForChunk 开头据此短路。
+      var _resyncInProgress = false;
       function softResyncTerminal(options) {
         if (!state.terminal || !state.terminalOutput) return false;
         var opts = options || {};
@@ -7772,8 +7811,13 @@
         var replaySource = marker > 0 ? state.terminalOutput.slice(marker) : state.terminalOutput;
         var bufLen = replaySource.length;
         var startedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
-        resetTerminal();
-        wandTerminalWrite(state.terminal, replaySource);
+        _resyncInProgress = true;
+        try {
+          resetTerminal();
+          wandTerminalWrite(state.terminal, replaySource);
+        } finally {
+          _resyncInProgress = false;
+        }
         state.lastTerminalResyncAt = Date.now();
         maybeScrollTerminalToBottom("output");
         if (!opts.skipFit) ensureTerminalFit("refresh");
@@ -7824,6 +7868,14 @@
       var _resyncChunkLastAt = 0;
       var _resyncChunkTailTimer = null;
       function maybeScheduleResyncForChunk(chunk) {
+        if (_resyncInProgress) return; // RENDER-1: 屏蔽 softResync 自身重放触发的递归
+        // FLICKER: R6 chunk 热路径 resync 仅在 NEW-A 失手时兜底——即 ?2026 残帧被
+        // processSyncOutputFraming 超时/超长强制 flush 透传给 wterm 之后。正常完整包帧
+        // 的重绘（菜单/todo/thinking spinner）已被 NEW-A 原子化、wterm 渲染正确，无需
+        // resync。旧实现对每个含 CSI 的 chunk 都触发，使 thinking 期间每 ~1.5s 一次
+        // resetTerminal→空白帧→重画，终端区持续闪烁。残帧标记在此消费一次（仅此触发）。
+        if (!state.syncFramingResidue) return;
+        state.syncFramingResidue = false;
         if (!chunk || typeof chunk !== "string") return;
         if (chunk.indexOf("\x1b[") === -1) return;
         if (!IN_PLACE_REDRAW_RE.test(chunk)) return;
@@ -8053,15 +8105,32 @@
               }
               setTerminalManualScrollActive();
             };
-            state.terminalViewportTouchHandler = function() {
-              setTerminalManualScrollActive();
+            // SCROLL-3: 触摸只在"看历史"方向（手指下拉、clientY 增大）才下台跟随；
+            // 手指上滑（朝新内容/底部）不关跟随，交给 scroll handler 在到底时恢复。
+            // 终端非 column-reverse：手指下拉=内容下移=看上方历史=上滚意图，与 wheel
+            // 的 deltaY<0 对称。原实现任何 touchmove 都关跟随，移动端在底部轻微回弹
+            // 就丢跟随。
+            state.terminalViewportTouchStartHandler = function(e) {
+              if (e.touches && e.touches.length === 1) {
+                state.terminalTouchStartY = e.touches[0].clientY;
+              }
+            };
+            state.terminalViewportTouchHandler = function(e) {
+              if (!e.touches || e.touches.length !== 1) return;
+              if (typeof state.terminalTouchStartY !== "number") return;
+              if (e.touches[0].clientY - state.terminalTouchStartY > 4) {
+                setTerminalManualScrollActive();
+              }
             };
             viewport.addEventListener("scroll", state.terminalViewportScrollHandler, { passive: true });
+            viewport.addEventListener("touchstart", state.terminalViewportTouchStartHandler, { passive: true });
             viewport.addEventListener("touchmove", state.terminalViewportTouchHandler, { passive: true });
           }
 
+          // SCROLL-5: 只在上滚（朝历史，deltaY<0）时下台跟随；向下滚（想回去）交给
+          // scroll handler 在真正到底时恢复，避免"远离底部时向下滚也被一直按住不跟随"。
           state.terminalWheelHandler = function(e) {
-            if (!isTerminalNearBottom() || e.deltaY < 0) {
+            if (e.deltaY < 0) {
               setTerminalManualScrollActive();
             }
             e.stopPropagation();
@@ -8079,7 +8148,13 @@
             wandTerminalWrite(term, "点击上方「新对话」开始你的第一次对话。\r\n");
           }
 
-          state.terminalClickHandler = focusInputBox;
+          // COPY-4: 有终端选区时不抢焦点到输入框，否则打断双击选词/三击选行后的复制
+          // （焦点与后续 Ctrl+C 目标被夺走）。wterm 自带 _onClickFocus 有同款护栏。
+          // 透传 event 给 focusInputBox(skipMobile)，保留"移动端点终端不自动弹键盘"。
+          state.terminalClickHandler = function(e) {
+            if (hasActiveTerminalSelection()) return;
+            focusInputBox(e);
+          };
           container.addEventListener("click", state.terminalClickHandler);
           updateTerminalJumpToBottomButton();
           initTerminalResizeHandle();
@@ -11431,16 +11506,37 @@
 
         if (event.key === "Escape") {
           event.preventDefault();
-          queueDirectInput(getControlInput("escape"), "escape");
+          var escSess = getSelectedSession();
+          if (isStructuredSession(escSess)) {
+            // INPUT-2: 结构化会话没有 PTY，Esc 不能把 \x1b 当消息发给 Claude。
+            // 用户语义 Esc=中断：正在生成时等同点"停止"按钮，否则无操作。
+            if (escSess && escSess.structuredState && escSess.structuredState.inFlight) {
+              stopSession();
+            }
+          } else {
+            queueDirectInput(getControlInput("escape"), "escape");
+          }
           return;
         }
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
-          // Allow copy when text is selected; otherwise send SIGINT to terminal
-          var inputBox = document.getElementById("input-box");
-          var hasSelection = inputBox && (inputBox.selectionStart !== inputBox.selectionEnd);
-          if (hasSelection) {
+          // COPY-2: 有选区（输入框内或终端输出区）时放行浏览器原生复制，而不是发
+          // SIGINT。原实现只看输入框选区，漏了文档级终端选区。
+          var inputBoxC = document.getElementById("input-box");
+          var hasSelectionC = (inputBoxC && inputBoxC.selectionStart !== inputBoxC.selectionEnd)
+            || hasActiveTerminalSelection();
+          if (hasSelectionC) {
             return; // Let browser handle copy
+          }
+          var ccSess = getSelectedSession();
+          if (isStructuredSession(ccSess)) {
+            // INPUT-2: 结构化会话不把 SIGINT(\x03) 当消息发给 Claude。Ctrl+C 视为
+            // 中断当前生成（等同停止按钮），非生成态则无操作。
+            event.preventDefault();
+            if (ccSess && ccSess.structuredState && ccSess.structuredState.inFlight) {
+              stopSession();
+            }
+            return;
           }
           event.preventDefault();
           queueDirectInput(getControlInput("ctrl_c"), "ctrl_c");
@@ -11448,11 +11544,18 @@
         }
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
-          // Allow copy when text is selected; otherwise send EOF to terminal
+          // COPY-2: 有选区（输入框内或终端输出区）时放行浏览器复制。
           var inputBox2 = document.getElementById("input-box");
-          var hasSelection2 = inputBox2 && (inputBox2.selectionStart !== inputBox2.selectionEnd);
+          var hasSelection2 = (inputBox2 && (inputBox2.selectionStart !== inputBox2.selectionEnd))
+            || hasActiveTerminalSelection();
           if (hasSelection2) {
             return; // Let browser handle copy
+          }
+          var cdSess = getSelectedSession();
+          if (isStructuredSession(cdSess)) {
+            // INPUT-2: 结构化会话吞掉 Ctrl+D（EOF 对 Claude 对话无意义，别当消息发）
+            event.preventDefault();
+            return;
           }
           event.preventDefault();
           queueDirectInput(getControlInput("ctrl_d"), "ctrl_d");
@@ -11461,6 +11564,11 @@
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
           event.preventDefault();
+          var clSess = getSelectedSession();
+          if (isStructuredSession(clSess)) {
+            // INPUT-2: 结构化会话吞掉 Ctrl+L（清屏对 Claude 对话无意义）
+            return;
+          }
           queueDirectInput(getControlInput("ctrl_l"), "ctrl_l");
           return;
         }
@@ -13547,10 +13655,12 @@
           composer.placeholder = getComposerPlaceholder(selectedSession, state.terminalInteractive);
           composer.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
           composer.setAttribute("aria-disabled", composer.disabled ? "true" : "false");
-          // 终端交互模式下按键由 document capture phase 透传到 PTY；用
-          // readOnly 而非 disabled 防止 IME 组合输入等边界场景下字符同时
-          // 落到 textarea，又保留 focus 能力。
-          composer.readOnly = !!state.terminalInteractive;
+          // INPUT-3: 交互模式不再设 readOnly。readOnly 的 textarea 上 IME 根本不会
+          // 激活（compositionstart 不触发），导致中文/日文等组字输入彻底打不出。普通
+          // 字符 keydown 已由 capture 阶段的 captureTerminalInput preventDefault 拦截、
+          // 不会落进 textarea；唯独 IME 组字期间 capture 放行(isComposing)，字符临时
+          // 落入 textarea，由 compositionend 取最终文本发 PTY 后清空。
+          composer.readOnly = false;
           composer.classList.toggle("is-terminal-passthrough", !!state.terminalInteractive);
         }
         var sendBtn = document.getElementById("send-input-button");
@@ -13566,15 +13676,40 @@
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
       }
 
+      // COPY-2/COPY-4: 是否存在落在终端输出区(#output)内的活动文本选区。用于：
+      // 有选区时 Ctrl+C 放行浏览器原生复制而非发 SIGINT；click 不抢焦点以免打断
+      // 双击选词/三击选行后的复制。
+      function hasActiveTerminalSelection() {
+        var sel = window.getSelection && window.getSelection();
+        if (!sel || sel.isCollapsed) return false;
+        var output = document.getElementById("output");
+        if (!output) return false;
+        var node = sel.anchorNode;
+        if (node && node.nodeType === 3) node = node.parentNode;
+        return !!(node && output.contains(node));
+      }
+
       function captureTerminalInput(event) {
         if (!shouldCaptureTerminalEvent(event)) return;
+        // INPUT-1: 放行 Cmd/Meta 组合键给浏览器（复制/粘贴/刷新/切标签）。PTY 用
+        // Ctrl 不用 Cmd，拦下来既破坏 macOS 原生快捷键，又会把裸字母(Cmd+X→'x')
+        // 误塞进 PTY。
+        if (event.metaKey) return;
         var key = keyFromKeyboardEvent(event);
         if (!key) return;
-        event.preventDefault();
         var mods = getModifierStateFromEvent(event, key);
         if (isModifierKey(key)) return;
+        // COPY-2: 有选区时 Ctrl+C 放行浏览器原生复制，而不是发 SIGINT(0x03) 把进程
+        // 杀了还复制不到。无选区的 Ctrl+C 仍透传给 PTY。
+        if (mods.ctrl && key.length === 1 && key.toLowerCase() === "c" && hasActiveTerminalSelection()) {
+          return;
+        }
         var sequence = buildPtySequence(key, mods);
-        if (sequence) sendTerminalSequence(sequence, key);
+        // INPUT-4: 只有真正要发给 PTY 的键才 preventDefault；空序列(F5/F12/死键等)
+        // 放行给浏览器，避免"既没发 PTY 又吞掉浏览器默认行为"。
+        if (!sequence) return;
+        event.preventDefault();
+        sendTerminalSequence(sequence, key);
       }
 
       function handleMiniKeyboardClick(event) {
@@ -15255,7 +15390,11 @@
           var now = Date.now();
           var chunkPause = state.lastChunkAt > 0 && (now - state.lastChunkAt > 300);
           var resyncDue = (now - state.lastTerminalResyncAt) > 30000;
-          if (resyncDue && (chunkPause || selectedSession.status !== "running") && state.terminalOutput) {
+          // RENDER-2: 仅在"自上次 resync 以来确有新输出"时才重放。静止/已结束会话
+          // buffer 不再变化，30s 周期 resync 是纯无用功，还会把 cursor-home 中间帧
+          // 重堆进 scrollback、扰动滚动位置。lastChunkAt>lastTerminalResyncAt 即脏。
+          var dirtySinceResync = state.lastChunkAt > state.lastTerminalResyncAt;
+          if (resyncDue && dirtySinceResync && (chunkPause || selectedSession.status !== "running") && state.terminalOutput) {
             softResyncTerminal();
           }
         }, 5000);
@@ -15311,6 +15450,9 @@
           if (state.terminalViewportTouchHandler) {
             state.terminalViewportEl.removeEventListener("touchmove", state.terminalViewportTouchHandler);
           }
+          if (state.terminalViewportTouchStartHandler) {
+            state.terminalViewportEl.removeEventListener("touchstart", state.terminalViewportTouchStartHandler);
+          }
         }
         if (output) {
           if (state.terminalWheelHandler) {
@@ -15323,13 +15465,24 @@
         state.terminalViewportEl = null;
         state.terminalViewportScrollHandler = null;
         state.terminalViewportTouchHandler = null;
+        state.terminalViewportTouchStartHandler = null;
         state.terminalWheelHandler = null;
         state.terminalClickHandler = null;
+        // LIFE-1: 清理 initTerminalScrollbar 注册的 hide-timer 与拖拽状态。否则
+        // hide-timer 闭包引用游离节点（置 El=null 拦不住它），且若拖拽中途 teardown，
+        // 残留 dragging=true 会让新会话 scrollbar 的 scheduleHideScrollbar 被永久抑制
+        // （开头 if(dragging)return）→ 滚动条出现后再也不自动消失。
+        if (state.terminalScrollbarHideTimer) {
+          clearTimeout(state.terminalScrollbarHideTimer);
+          state.terminalScrollbarHideTimer = null;
+        }
         if (state.terminalScrollbarEl && state.terminalScrollbarEl.parentNode) {
           state.terminalScrollbarEl.parentNode.removeChild(state.terminalScrollbarEl);
         }
         state.terminalScrollbarEl = null;
         state.terminalScrollbarThumbEl = null;
+        state.terminalScrollbarDragging = false;
+        state.terminalScrollbarRafPending = false;
         if (state.terminal) {
           state.terminal.destroy();
           state.terminal = null;
@@ -15354,6 +15507,7 @@
         // 会让新会话的首批 PTY 字节全部被吞进 buffer 等永远不会来的 end。
         state.syncOutputBuffer = null;
         state.syncOutputDeadline = 0;
+        state.syncFramingResidue = false;
         state.terminalSessionId = null;
         state.terminalOutput = "";
         state.terminalOutputMarker = 0; // R8: teardown 时重置 /clear marker
@@ -15376,6 +15530,11 @@
         _resyncStatsWindowStart = 0;
         _resyncStatsCount = 0;
         _resyncLastWarnAt = 0;
+        _resyncInProgress = false;
+        // SIZE-2: lastResize 是全局去重缓存，记"上次 POST 的尺寸"。切到另一个在不同
+        // 尺寸下创建的会话时，若新算出的 cols/rows 恰好等于上次值会被去重跳过，导致
+        // 后端该会话列宽停在旧值、整段折行。teardown 重置后新会话首次 resize 必发出。
+        state.lastResize = { cols: 0, rows: 0 };
       }
 
       function sendTerminalResize(cols, rows) {
@@ -15388,6 +15547,10 @@
         // wterm WASM grid 的 maxCols 硬编码 256。POST 给服务端的 cols 也同步
         // clamp，避免服务端 pty.resize 给 Claude 一个 wterm 实际渲不下的列宽。
         if (cols > 256) cols = 256;
+        // SIZE-1: rows 也 clamp 到后端上限 160（process-manager clampDimension 10..160）。
+        // 否则高分屏+小字号客户端算出 rows>160 时，后端压到 160，客户端网格底部多出的
+        // 行对应的 PTY 内容永不写入 → 底部大片空白 / 光标错位 / 全屏菜单画到不存在的行。
+        if (rows > 160) rows = 160;
         var nextSize = { cols: cols, rows: rows };
         if (state.lastResize.cols !== nextSize.cols || state.lastResize.rows !== nextSize.rows) {
           state.lastResize = nextSize;

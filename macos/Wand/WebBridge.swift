@@ -1,17 +1,32 @@
 import AppKit
 import WebKit
 
-/// JS → 原生消息处理 + 自签名证书 + WKWebView 委托。对称 Android NotificationBridge / downloadUpdate。
+/// JS → 原生消息处理 + 自签名证书 + WKWebView 委托。导航状态通过 `WebViewModel`
+/// 驱动 SwiftUI 覆盖层（加载中 / 出错），不再用 NSAlert 打断用户。
 final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
+    private let model: WebViewModel
     private weak var webView: WKWebView?
     private var serverURL: URL?
     private lazy var installer: DmgInstaller = DmgInstaller(server: ServerStore.shared)
     private var didKickOffAutoUpdate = false
+    private var hasLoadedOnce = false
+
+    init(model: WebViewModel) {
+        self.model = model
+    }
 
     func attach(webView: WKWebView, serverURL: URL) {
         self.webView = webView
         self.serverURL = serverURL
+        self.model.webView = webView
         installer.serverURL = serverURL
+    }
+
+    /// 切换到错误覆盖层（主线程）。token 登录失败时由 WebViewRepresentable 调用。
+    func fail(title: String, message: String, canRetry: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            self?.model.phase = .failed(title: title, message: message, canRetry: canRetry)
+        }
     }
 
     // MARK: - JS → Native
@@ -33,7 +48,6 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
 
     /// 对自签名证书一律放行：只要是 HTTPS 的 server trust 类型，就用拿到的 trust 构造
     /// URLCredential 喂回去；否则走默认处理（http basic / digest 等服务端用不到的场景）。
-    /// 加入 NSLog 方便用户报问题时定位"到底是 challenge 没触发，还是 trust 拿不到"。
     func webView(_ webView: WKWebView,
                  didReceive challenge: URLAuthenticationChallenge,
                  completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
@@ -45,8 +59,7 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
 
         if method == NSURLAuthenticationMethodServerTrust {
             if let trust = space.serverTrust {
-                NSLog("[Wand] auth challenge: trust granted host=%@ port=%ld proto=%@",
-                      host, port, proto)
+                NSLog("[Wand] auth challenge: trust granted host=%@ port=%ld proto=%@", host, port, proto)
                 completionHandler(.useCredential, URLCredential(trust: trust))
             } else {
                 NSLog("[Wand] auth challenge: serverTrust nil host=%@ — falling back to default", host)
@@ -55,8 +68,7 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
             return
         }
 
-        NSLog("[Wand] auth challenge: non-ServerTrust method=%@ host=%@ — default handling",
-              method, host)
+        NSLog("[Wand] auth challenge: non-ServerTrust method=%@ host=%@ — default handling", method, host)
         completionHandler(.performDefaultHandling, nil)
     }
 
@@ -64,11 +76,16 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         NSLog("[Wand] navigation start: %@", webView.url?.absoluteString ?? "?")
+        // 仅首屏加载（或显式重试）显示加载层；会话中途的局部跳转不打扰用户。
+        if !hasLoadedOnce {
+            model.phase = .loading
+        }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let ns = error as NSError
-        let url = webView.url?.absoluteString ?? "?"
+        if ns.code == NSURLErrorCancelled { return } // 被新导航/reload 打断，不算错误
+        let url = webView.url?.absoluteString ?? serverURL?.absoluteString ?? "?"
         NSLog("[Wand] provisional navigation FAILED url=%@ domain=%@ code=%ld reason=%@",
               url, ns.domain, ns.code, ns.localizedDescription)
         showLoadError(error: ns, url: url)
@@ -76,9 +93,9 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let ns = error as NSError
-        NSLog("[Wand] navigation FAILED domain=%@ code=%ld reason=%@",
-              ns.domain, ns.code, ns.localizedDescription)
-        showLoadError(error: ns, url: webView.url?.absoluteString ?? "?")
+        if ns.code == NSURLErrorCancelled { return }
+        NSLog("[Wand] navigation FAILED domain=%@ code=%ld reason=%@", ns.domain, ns.code, ns.localizedDescription)
+        showLoadError(error: ns, url: webView.url?.absoluteString ?? serverURL?.absoluteString ?? "?")
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
@@ -86,57 +103,22 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
     }
 
     private func showLoadError(error: NSError, url: String) {
-        DispatchQueue.main.async { [weak self] in
-            guard let win = self?.webView?.window else { return }
-            let alert = NSAlert()
-            alert.messageText = "无法加载 wand 服务器"
-            alert.informativeText = """
-            URL: \(url)
-            错误: \(error.localizedDescription)
-            (\(error.domain) #\(error.code))
+        let message = """
+        \(url)
+        \(error.localizedDescription)（\(error.domain) #\(error.code)）
 
-            请确认 wand 服务正在运行，并检查地址是否正确。
-            """
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "重新连接")
-            alert.addButton(withTitle: "重试")
-            alert.beginSheetModal(for: win) { resp in
-                if resp == .alertFirstButtonReturn {
-                    ServerStore.shared.disconnect()
-                } else {
-                    self?.webView?.reload()
-                }
-            }
-        }
+        请确认 wand 服务正在运行，并检查地址是否正确。
+        """
+        model.phase = .failed(title: "无法加载 wand 服务器", message: message, canRetry: true)
     }
 
-    /// /api/login 失败（token 失效 / 网络问题）时调用，提示用户重新连接。
-    /// makeNSView 阶段 webView 可能还没挂到 window 上，所以做了无 window 的兜底。
-    func presentAuthFailure(message: String) {
-        DispatchQueue.main.async { [weak self] in
-            let alert = NSAlert()
-            alert.messageText = "无法登录 wand 服务器"
-            alert.informativeText = message
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "重新连接")
-            alert.addButton(withTitle: "稍后")
-            let handle: (NSApplication.ModalResponse) -> Void = { resp in
-                if resp == .alertFirstButtonReturn {
-                    ServerStore.shared.disconnect()
-                }
-            }
-            if let win = self?.webView?.window {
-                alert.beginSheetModal(for: win, completionHandler: handle)
-            } else {
-                handle(alert.runModal())
-            }
-        }
-    }
-
-    // MARK: - Lifecycle: 启动后做一次自动更新检测
+    // MARK: - Lifecycle: 加载完成 + 启动后做一次自动更新检测
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         NSLog("[Wand] navigation finished: %@", webView.url?.absoluteString ?? "?")
+        hasLoadedOnce = true
+        model.phase = .ready
+
         guard !didKickOffAutoUpdate, let serverURL else { return }
         didKickOffAutoUpdate = true
         DispatchQueue.global().asyncAfter(deadline: .now() + 5) {

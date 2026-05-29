@@ -7,7 +7,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             // 全窗口背景，避免 ConnectView/加载中状态留下空白
-            Color(NSColor.windowBackgroundColor)
+            Theme.background
                 .ignoresSafeArea()
             if let serverURL = store.serverURL {
                 WebContainerView(serverURL: serverURL, token: store.token)

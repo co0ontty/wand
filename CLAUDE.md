@@ -7,14 +7,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm install                # Install dependencies (requires Node.js >= 22.5.0)
 npm run check              # Type-check only (tsc --noEmit)
-npm run build              # Three steps: bundle wterm → tsc → copy src/web-ui/content into dist/web-ui/
+npm run build              # Four steps: bundle wterm → bundle qrcode → tsc → copy src/web-ui/content into dist/web-ui/
 npm run dev                # Run the CLI entrypoint directly from src/ via tsx
 node dist/cli.js init      # Create or refresh config + SQLite files
 node dist/cli.js web       # Start the packaged web server from dist/
 wand config:path           # Print resolved config path
 wand config:show           # Print merged runtime config
 wand config:set host 0.0.0.0  # Update a simple config value
+wand service:install          # Install + start as systemd (Linux) / launchd (macOS) service; --user for user-level
+wand service:status           # Service state; also :start :stop :restart :logs :uninstall
 ```
+
+`wand web` is single-instance per config: if a wand instance is already running, it **attaches** (TUI or banner) instead of starting a second server. In a TTY it renders a neo-blessed TUI dashboard; set `WAND_NO_TUI=1` to force the plain one-line banner. `wand service:*` flags: `--user`/`--system` (default system, needs root), `--verbose`, `--lines <N>` (for `service:logs`).
 
 There is no automated test suite, no single-test command, and no lint/format script in this repo.
 
@@ -56,6 +60,7 @@ The runtime config file is `~/.wand/config.json` by default.
 - `ensureConfig()` rewrites the config file with defaults merged in, so config-schema changes must also update `src/config.ts`.
 - `npm run build` must keep copying `src/web-ui/content/` into `dist/web-ui/`; the packaged app depends on those static assets.
 - `scripts/bundle-wterm.js` uses esbuild to bundle `@wterm/dom` into `src/web-ui/content/vendor/wterm/wterm.bundle.js` and copies `terminal.css` next to it. It also patches the renderer to strip an underline branch (`stripUnderlinePlugin`). After changing wterm-related code or upgrading `@wterm/dom`, you must re-run this script — `npm run dev` does not rebundle automatically. The committed bundle is what the browser loads.
+- `scripts/bundle-qrcode.js` similarly bundles the `qrcode` npm package (entry `scripts/qrcode-entry.js`) into `src/web-ui/content/vendor/qrcode/qrcode.bundle.js`, used by the browser to render the mobile-connect QR code. Re-run it after upgrading `qrcode`. `npm run build` runs both bundlers before `tsc`.
 
 ## Android APK Build & Deployment
 
@@ -214,7 +219,7 @@ git tag v1.15.0
 
 ### Runtime flow
 
-1. `src/cli.ts` is the only entrypoint. It parses `wand init`, `wand web`, and `config:*`, resolves `-c/--config`, and always ensures config + SQLite files exist before startup.
+1. `src/cli.ts` is the only entrypoint. It parses `wand init`, `wand web`, `config:*`, and `service:*`, resolves `-c/--config`, and always ensures config + SQLite files exist before startup. `wand web` is single-instance: if `pidfile.ts` reports a live instance it attaches over the IPC socket instead of starting a second server.
 2. `src/server.ts` wires the whole application together: Express routes, auth/session APIs, file browser APIs, update endpoints, static assets, and the `/ws` WebSocket server.
 3. `ProcessManager` in `src/process-manager.ts` is the core runtime owner for PTY-backed sessions. It launches commands, persists snapshots, handles resume/auto-recovery, watches for confirmation prompts, and bridges UI input back into the process.
 4. `ClaudePtyBridge` in `src/claude-pty-bridge.ts` parses Claude PTY output into structured conversation turns, permission events, task/tool updates, and captured Claude session IDs while preserving raw terminal output in parallel.
@@ -227,9 +232,19 @@ When debugging a user-visible session bug, trace the full chain: `cli.ts` -> `se
 A session can run in one of two modes, owned by different managers:
 
 - **PTY runner** (`src/process-manager.ts`) — interactive PTY-backed sessions for `claude` / `codex` / shells. This is the default and drives both the terminal view and (via `ClaudePtyBridge`) the structured chat view. Permission prompts, resume, archive/idle transitions and most lifecycle logic live here.
-- **Structured runner** (`src/structured-session-manager.ts`) — non-PTY sessions that spawn `claude -p` and consume its streamed JSON output, for prompts that don't need an interactive terminal. Output debounce is 16 ms (`STREAM_EMIT_DEBOUNCE_MS`). It shares `WandStorage`, `SessionSnapshot`, and `ProcessEvent` types with the PTY runner, and can also use git worktrees via `prepareSessionWorktree()`.
+- **Structured runner** (`src/structured-session-manager.ts`) — non-PTY sessions for prompts that don't need an interactive terminal. It runs Claude two ways: the CLI runner (`claude -p --output-format stream-json`) and the **Agent SDK** (`query()` from `@anthropic-ai/claude-agent-sdk`, with live handles tracked in `pendingSdkQueries` so a run can be interrupted). Both paths consume streamed JSON output; output debounce is 16 ms (`STREAM_EMIT_DEBOUNCE_MS`). It shares `WandStorage`, `SessionSnapshot`, and `ProcessEvent` types with the PTY runner, and can also use git worktrees via `prepareSessionWorktree()`. These runs are non-interactive — there is no permission prompt, so `mcp__*` tools fail rather than escalate.
 
 When debugging session behavior, first check which runner owns the session — they share types but execute on independent code paths.
+
+### Process model: single instance, TUI, and system service
+
+`wand web` runs as one instance per config. On launch it checks `pidfile.ts` for a live instance:
+- **No instance** → start the Express/WebSocket server, write a pidfile, and start an IPC server over a unix socket (`src/tui/ipc-server.ts`). In a TTY it then renders the neo-blessed TUI dashboard (`src/tui/index.ts`); otherwise it prints a one-line startup banner (`WAND_NO_TUI=1` forces the banner).
+- **Live instance** → *attach* over the IPC socket (`src/tui/attach.ts`) instead of starting a second server.
+
+`src/tui/` is a self-contained subsystem: the dashboard/attach UI, the IPC protocol/client/server, and the **system-service** commands (`commands.ts`) behind `wand service:*` — systemd units on Linux (`/etc/systemd/system` for `--system`, `~/.config/systemd/user` for `--user`) and launchd plists on macOS. Because a service unit freezes `PATH` at install time, `src/path-repair.ts` re-derives `PATH` at runtime so a spawned `claude` keeps resolving after the user switches Node versions (nvm/fnm/volta) or reinstalls without re-running `service:install`.
+
+Auxiliary Claude features — quick-commit messages (`git-quick-commit.ts`) and prompt optimization (`prompt-optimizer.ts`) — use neither session runner; they call `claude-sdk-runner.ts`'s one-shot `runClaudePrint()` through the Agent SDK.
 
 ### API and UI boundary
 
@@ -292,7 +307,7 @@ There are two parallel representations of assistant output:
 - raw PTY output for terminal view
 - structured conversation data for chat view
 
-`src/message-parser.ts` derives simple `ChatMessage[]` from terminal text, while `ClaudePtyBridge` maintains richer block-based `ConversationTurn[]` with tool use/results. Bugs in chat rendering often come from drift between these two representations.
+`ClaudePtyBridge` maintains the richer block-based `ConversationTurn[]` (with tool use/results) that backs the chat view, derived from the same raw PTY stream that drives the terminal view. Bugs in chat rendering often come from drift between these two representations.
 
 WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and receive debounced `ProcessEvent` updates. Output events are throttled to reduce churn, and oversized queues are dropped instead of backpressuring the server.
 
@@ -318,6 +333,15 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/git-worktree.ts` | Per-session git worktree create/merge/cleanup, backs `.wand-worktrees/` |
 | `src/upload-routes.ts` | `POST /api/sessions/:id/upload` — multer-backed uploads to `<cwd>/.wand-uploads/` |
 | `src/models.ts` | Built-in Claude model list, `claude --version` probing, model cache |
+| `src/claude-sdk-runner.ts` | One-shot `runClaudePrint()` via the Agent SDK; resolves the native `claude` binary (musl/glibc aware). Backs quick-commit + prompt-optimizer |
+| `src/git-quick-commit.ts` | Git status, quick commit (AI-generated message via `claude-sdk-runner`), tag, and push; wired into `server-session-routes.ts` |
+| `src/prompt-optimizer.ts` | One-shot prompt rewrite via `claude-sdk-runner`, exposed by a `server.ts` route |
+| `src/env-utils.ts` | Child-process env assembly; minimal whitelist when "inherit env" is off, to keep API keys/tokens out of spawned tools |
+| `src/path-repair.ts` | Runtime PATH self-repair so service-installed instances still find `claude` after Node-version/reinstall changes |
+| `src/pidfile.ts` | Single-instance pidfile + IPC unix-socket path that back the attach/TUI model |
+| `src/npm-update-utils.ts` | npm global self-update + leftover cleanup, shared by server and TUI |
+| `src/ensure-node-pty-helper.ts` | Marks the bundled node-pty helper binary executable before server start |
+| `src/tui/` | neo-blessed dashboard, IPC client/server (over the pidfile socket), and systemd/launchd service commands (`commands.ts`) behind `wand service:*` |
 | `src/middleware/path-safety.ts` | Path-traversal guard for the file browser API |
 | `src/middleware/rate-limit.ts` | Login / sensitive endpoint rate limiting |
 | `src/pty-text-utils.ts` | ANSI / control-sequence helpers for terminal output processing |

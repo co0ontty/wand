@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// 连接界面：输入服务器 URL（http://host:port）或 wand 设置页生成的"连接码"。
+/// 连接界面：输入服务器地址（host:port，自动判别 http/https）或 wand 设置页生成的"连接码"。
+/// 解析与可达性探测统一收敛到 `WandAuth.resolve`，错误就地内联展示，不再依赖弹窗。
 struct ConnectView: View {
     @EnvironmentObject var store: ServerStore
 
@@ -10,108 +11,259 @@ struct ConnectView: View {
     @State private var input: String = ""
     @State private var error: String? = nil
     @State private var isConnecting = false
+    @FocusState private var inputFocused: Bool
+
+    private var trimmedInput: String {
+        input.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
-        VStack(spacing: 24) {
-            VStack(spacing: 8) {
-                Image(systemName: "terminal.fill")
-                    .font(.system(size: 56))
-                    .foregroundColor(.accentColor)
-                Text("连接到 Wand")
-                    .font(.title2.bold())
-                Text("粘贴 Wand 设置页的连接码，或直接输入服务器地址")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
+        ZStack {
+            Theme.background.ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("连接码 / 服务器地址")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                TextEditor(text: $input)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 80)
-                    .padding(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
-                    )
-                if let error {
-                    Text(error)
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                }
-            }
-
-            HStack {
+            VStack(spacing: 0) {
                 if isPresentedAsSheet {
-                    Button("取消", role: .cancel) { onDismiss?() }
+                    sheetHeader
+                    Rectangle().fill(Theme.border).frame(height: 1)
                 }
-                Spacer()
-                Button(action: connect) {
-                    if isConnecting {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("连接")
-                            .frame(minWidth: 80)
+                Spacer(minLength: 0)
+                card
+                    .frame(maxWidth: 440)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 24)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(
+            minWidth: isPresentedAsSheet ? 520 : nil,
+            minHeight: isPresentedAsSheet ? 580 : nil
+        )
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { inputFocused = true }
+        }
+    }
+
+    // MARK: - 区块
+
+    private var sheetHeader: some View {
+        HStack {
+            Text("切换服务器")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(Theme.textPrimary)
+            Spacer()
+            Button("取消") { onDismiss?() }
+                .buttonStyle(.plain)
+                .foregroundColor(Theme.textSecondary)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+    }
+
+    private var card: some View {
+        VStack(spacing: 22) {
+            VStack(spacing: 14) {
+                WandBrandMark(size: 64)
+                VStack(spacing: 6) {
+                    Text("连接到 Wand")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(Theme.textPrimary)
+                    Text("粘贴设置页的连接码，或直接输入服务器地址")
+                        .font(.system(size: 13))
+                        .foregroundColor(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+
+            inputField
+
+            if let error {
+                errorBanner(error)
+            }
+
+            connectButton
+
+            if !store.recentInputs.isEmpty {
+                recentSection
+            }
+
+            footerHint
+        }
+    }
+
+    private var inputField: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("连接码 / 服务器地址")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Theme.textSecondary)
+
+            HStack(spacing: 8) {
+                Image(systemName: "link")
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.textSecondary)
+                TextField("例如 192.168.1.10:7777 或粘贴连接码", text: $input)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+                    .focused($inputFocused)
+                    .onSubmit { connect() }
+                    .disabled(isConnecting)
+                if !input.isEmpty {
+                    Button { input = ""; error = nil } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(Theme.textSecondary)
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(isConnecting || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(inputFocused ? Theme.brand : Theme.border,
+                            lineWidth: inputFocused ? 1.5 : 1)
+            )
+        }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundColor(Theme.danger)
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundColor(Theme.danger)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Theme.danger.opacity(0.1))
+        )
+    }
+
+    private var connectButton: some View {
+        Button(action: connect) {
+            HStack(spacing: 8) {
+                if isConnecting {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                }
+                Text(isConnecting ? "连接中…" : "连接")
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(WandPrimaryButtonStyle())
+        .disabled(isConnecting || trimmedInput.isEmpty)
+    }
+
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("最近连接")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Theme.textSecondary)
+            VStack(spacing: 6) {
+                ForEach(store.recentInputs, id: \.self) { raw in
+                    recentRow(raw)
+                }
             }
         }
-        .padding(32)
-        .frame(width: 480)
     }
+
+    private func recentRow(_ raw: String) -> some View {
+        let info = recentDisplay(raw)
+        return HStack(spacing: 8) {
+            Image(systemName: info.isCode ? "qrcode" : "network")
+                .font(.system(size: 12))
+                .foregroundColor(Theme.textSecondary)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(info.text)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if info.isCode {
+                    Text("🔑 已绑定连接码")
+                        .font(.system(size: 10))
+                        .foregroundColor(Theme.textSecondary)
+                }
+            }
+            Spacer(minLength: 4)
+            Button {
+                store.removeRecent(raw)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Theme.textSecondary)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Theme.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Theme.border, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { useRecent(raw) }
+    }
+
+    private var footerHint: some View {
+        Text("在电脑端 Wand 的「设置 → 连接 App」里获取连接码")
+            .font(.system(size: 11))
+            .foregroundColor(Theme.textSecondary)
+            .multilineTextAlignment(.center)
+            .padding(.top, 2)
+    }
+
+    // MARK: - 逻辑
 
     private func connect() {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        let raw = trimmedInput
+        guard !raw.isEmpty, !isConnecting else { return }
         isConnecting = true
         error = nil
+        inputFocused = false
 
-        // 连接码格式：base64(url#token)
-        // 先调 /api/login 验证 token，避免存了无效 token 后到 WebView 才发现密码已改。
-        // 对称 Android ConnectActivity.testConnectionWithToken。
-        if let decoded = decodeConnectCode(trimmed) {
-            WandAuth.loginWithToken(serverURL: decoded.url, appToken: decoded.token) { result in
-                DispatchQueue.main.async {
-                    isConnecting = false
-                    switch result {
-                    case .success:
-                        store.connect(serverURL: decoded.url, token: decoded.token)
-                        onDismiss?()
-                    case .failure(let err):
-                        error = err.userMessage
-                    }
+        WandAuth.resolve(rawInput: raw) { result in
+            DispatchQueue.main.async {
+                isConnecting = false
+                switch result {
+                case .success(let target):
+                    store.addRecent(raw)
+                    store.connect(serverURL: target.url, token: target.token)
+                    onDismiss?()
+                case .failure(let err):
+                    error = err.userMessage
                 }
             }
-            return
         }
-
-        // 裸 URL：默认补 https://（wand 默认开启 HTTPS）。无 token 时由 SPA 自行登录。
-        var raw = trimmed
-        if !raw.lowercased().hasPrefix("http://") && !raw.lowercased().hasPrefix("https://") {
-            raw = "https://" + raw
-        }
-        guard let url = URL(string: raw), url.host != nil else {
-            error = "无法识别的连接码或地址"
-            isConnecting = false
-            return
-        }
-        store.connect(serverURL: url, token: nil)
-        onDismiss?()
-        isConnecting = false
     }
 
-    private func decodeConnectCode(_ code: String) -> (url: URL, token: String)? {
-        guard let data = Data(base64Encoded: code),
-              let s = String(data: data, encoding: .utf8),
-              let hash = s.range(of: "#", options: .backwards) else { return nil }
-        let urlPart = String(s[..<hash.lowerBound])
-        let token = String(s[hash.upperBound...])
-        guard let url = URL(string: urlPart), token.count >= 16 else { return nil }
-        return (url, token)
+    private func useRecent(_ raw: String) {
+        guard !isConnecting else { return }
+        input = raw
+        connect()
+    }
+
+    private func recentDisplay(_ raw: String) -> (text: String, isCode: Bool) {
+        if let decoded = WandAuth.decodeConnectCode(raw) {
+            return (decoded.url.absoluteString, true)
+        }
+        return (raw, false)
     }
 }

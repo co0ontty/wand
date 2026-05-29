@@ -102,4 +102,108 @@ enum WandAuth {
         }
         task.resume()
     }
+
+    // MARK: - 连接码解码
+
+    /// 解码连接码：base64(url#token)。服务端用标准 base64（src/server.ts encodeConnectCode），
+    /// 但用户从聊天/二维码界面复制时可能混入换行或空格，所以先剥掉所有空白再用
+    /// `.ignoreUnknownCharacters` 容错。token 是 HMAC-SHA256 的 64 位 hex，长度足够。
+    static func decodeConnectCode(_ code: String) -> (url: URL, token: String)? {
+        let cleaned = code.components(separatedBy: .whitespacesAndNewlines).joined()
+        guard !cleaned.isEmpty,
+              let data = Data(base64Encoded: cleaned, options: .ignoreUnknownCharacters),
+              let s = String(data: data, encoding: .utf8),
+              let hash = s.range(of: "#", options: .backwards) else { return nil }
+        let urlPart = String(s[..<hash.lowerBound])
+        let token = String(s[hash.upperBound...])
+        guard urlPart.lowercased().hasPrefix("http"),
+              let url = URL(string: urlPart), url.host != nil,
+              token.count >= 16 else { return nil }
+        return (url, token)
+    }
+
+    // MARK: - 智能解析 + 连接
+
+    /// 解析用户输入并验证可达性，得到最终要连接的目标。
+    /// - 连接码：走 `/api/login` 校验 token（token 失效会立刻报"连接码已过期"）。
+    /// - 裸地址：按 http→https 顺序探测 `/api/session-check`（wand 默认 HTTP，所以 http 优先），
+    ///   命中即用该 scheme。修复了旧版"裸地址一律补 https 导致连不上 HTTP 服务"的问题。
+    struct ConnectTarget {
+        let url: URL
+        let token: String?
+    }
+
+    static func resolve(rawInput: String,
+                        completion: @escaping (Result<ConnectTarget, Failure>) -> Void) {
+        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { completion(.failure(.invalidURL)); return }
+
+        if let decoded = decodeConnectCode(trimmed) {
+            loginWithToken(serverURL: decoded.url, appToken: decoded.token) { result in
+                switch result {
+                case .success:
+                    completion(.success(ConnectTarget(url: decoded.url, token: decoded.token)))
+                case .failure(let err):
+                    completion(.failure(err))
+                }
+            }
+            return
+        }
+
+        let candidates = candidateURLs(from: trimmed)
+        guard !candidates.isEmpty else { completion(.failure(.invalidURL)); return }
+        probeSequential(candidates, index: 0, completion: completion)
+    }
+
+    /// 把裸输入展开成候选 URL：已带 scheme 则原样；否则 http 在前、https 在后。
+    static func candidateURLs(from input: String) -> [URL] {
+        var s = input
+        while s.hasSuffix("/") { s.removeLast() }
+        guard !s.isEmpty else { return [] }
+        let lower = s.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
+            if let u = URL(string: s), u.host != nil { return [u] }
+            return []
+        }
+        return ["http://\(s)", "https://\(s)"].compactMap { raw -> URL? in
+            guard let u = URL(string: raw), u.host != nil else { return nil }
+            return u
+        }
+    }
+
+    private static func probeSequential(_ urls: [URL], index: Int,
+                                        completion: @escaping (Result<ConnectTarget, Failure>) -> Void) {
+        guard index < urls.count else {
+            completion(.failure(.network("无法连接到服务器，请确认地址和端口，以及 wand 服务是否在运行")))
+            return
+        }
+        let url = urls[index]
+        probe(url: url) { reachable in
+            if reachable {
+                completion(.success(ConnectTarget(url: url, token: nil)))
+            } else {
+                probeSequential(urls, index: index + 1, completion: completion)
+            }
+        }
+    }
+
+    /// 用公开端点 `/api/session-check` 探测可达性（始终返回 200，不会污染失败登录计数）。
+    static func probe(url: URL, timeout: TimeInterval = 6, completion: @escaping (Bool) -> Void) {
+        guard let checkURL = URL(string: "/api/session-check", relativeTo: url)?.absoluteURL else {
+            completion(false); return
+        }
+        var req = URLRequest(url: checkURL)
+        req.timeoutInterval = timeout
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        let task = SelfSignedSession.shared.session.dataTask(with: req) { _, response, error in
+            if error != nil { completion(false); return }
+            // 200（公开探测）或 401（旧版服务把 /api 全锁了）都说明服务器可达。
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 || http.statusCode == 401 {
+                completion(true)
+            } else {
+                completion(false)
+            }
+        }
+        task.resume()
+    }
 }
