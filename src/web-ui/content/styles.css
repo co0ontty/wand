@@ -574,9 +574,8 @@
       justify-content: center;
       padding: 0;
       box-shadow:
-        0 1px 3px rgba(184, 92, 55, 0.28),
-        inset 0 1px 0 rgba(255, 255, 255, 0.28),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+        0 1px 2px rgba(184, 92, 55, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28);
       transition:
         filter var(--transition-fast),
         box-shadow 0.22s ease,
@@ -586,40 +585,31 @@
       filter: brightness(1.06);
       transform: translateY(-1px);
       box-shadow:
-        0 4px 12px -2px rgba(184, 92, 55, 0.42),
-        inset 0 1px 0 rgba(255, 255, 255, 0.35),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+        0 4px 10px -3px rgba(184, 92, 55, 0.36),
+        inset 0 1px 0 rgba(255, 255, 255, 0.32);
     }
     /* History tile — softer cream tone to distinguish from active sessions */
     .sidebar-collapsed-tile.history {
       background: linear-gradient(145deg, #e8d3c0 0%, #d3b69d 50%, #b89478 100%);
       color: rgba(89, 58, 32, 0.88);
       box-shadow:
-        0 1px 3px rgba(120, 88, 56, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.45),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.06);
+        0 1px 2px rgba(120, 88, 56, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.42);
     }
     .sidebar-collapsed-tile.history:hover {
       box-shadow:
-        0 4px 12px -2px rgba(120, 88, 56, 0.34),
-        inset 0 1px 0 rgba(255, 255, 255, 0.5),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.06);
+        0 4px 10px -3px rgba(120, 88, 56, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.48);
     }
-    /* Active — liquid glass crown: outer ring + warm halo + crisp top sheen */
+    /* Active — accent ring + 一层柔和暖投影 + 顶高光。原先 7 层叠加在 36px 小块上
+       糊成一团，精简到 3 层即可表达「升起 + 选中」。 */
     .sidebar-collapsed-tile.active {
       background: linear-gradient(145deg, #d27358 0%, #b35434 50%, #934128 100%);
       transform: translateY(-1px);
       box-shadow:
-        /* outer glow halo */
-        0 0 0 1px rgba(255, 255, 255, 0.7),
-        0 0 0 3px rgba(197, 101, 61, 0.32),
-        0 8px 22px -4px rgba(160, 74, 46, 0.55),
-        0 3px 8px -2px rgba(160, 74, 46, 0.32),
-        /* top sheen */
-        inset 0 1px 0 rgba(255, 255, 255, 0.45),
-        inset 1px 0 0 rgba(255, 255, 255, 0.18),
-        /* bottom depth */
-        inset 0 -1px 0 rgba(0, 0, 0, 0.16);
+        0 0 0 2px rgba(197, 101, 61, 0.3),
+        0 5px 14px -4px rgba(160, 74, 46, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.4);
     }
     .sidebar-collapsed-tile:active {
       transform: translateY(0) scale(0.94);
@@ -9034,7 +9024,6 @@
       background: rgba(178, 79, 69, 0.12);
       color: var(--danger);
       transform: rotate(90deg);
-      box-shadow: 0 2px 8px rgba(178, 79, 69, 0.16);
     }
     .drawer-close-btn:active {
       background: rgba(178, 79, 69, 0.2);
@@ -9184,17 +9173,17 @@
       opacity: 1;
     }
 
-    /* ── Session item — clean card on glass ── */
+    /* ── Session item — clean card on glass ──
+       克制原则：基础态用 hairline 描边 + 极轻顶部高光让卡片「贴」在侧栏上，
+       不给每张卡都加漂浮投影；hover/active 才升起一层柔和投影。避免多层
+       box-shadow 在半透明侧栏里互相叠加显脏。 */
     .session-item {
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(255, 252, 247, 0.42) 100%);
-      border: 0.5px solid rgba(255, 255, 255, 0.55);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 252, 247, 0.38) 100%);
+      border: 1px solid rgba(125, 91, 57, 0.08);
       border-radius: 13px;
       padding: 11px 14px;
       margin-bottom: 6px;
-      box-shadow:
-        0 0 0 0.5px rgba(125, 91, 57, 0.05),
-        0 1px 2px rgba(125, 91, 57, 0.03),
-        inset 0 1px 0 rgba(255, 255, 255, 0.6);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
       transition:
         background 0.2s ease,
         border-color 0.2s ease,
@@ -9211,53 +9200,39 @@
     }
     .session-item:hover {
       background: linear-gradient(180deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 253, 248, 0.62) 100%);
-      border-color: rgba(255, 255, 255, 0.7);
+      border-color: rgba(125, 91, 57, 0.14);
       transform: translateY(-1px);
-      box-shadow:
-        0 0 0 0.5px rgba(125, 91, 57, 0.08),
-        0 6px 16px -6px rgba(125, 91, 57, 0.18),
-        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      box-shadow: 0 4px 12px -4px rgba(125, 91, 57, 0.16);
     }
     .session-item:hover::before {
       opacity: 0.5;
       transform: scaleY(1);
     }
-    /* Selected (active) — true liquid glass pill with depth + accent glow */
+    /* Selected (active) — accent ring 用边框表达，再叠一层柔和暖投影 + 顶高光。
+       去掉原先的 6 层叠加（外环/光晕/底影/三向 inset），层数过多在玻璃上显脏。 */
     .session-item.active {
       background:
         linear-gradient(180deg, rgba(255, 252, 247, 0.92) 0%, rgba(255, 244, 232, 0.78) 100%);
-      border: 0.5px solid rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(197, 101, 61, 0.32);
       transform: translateY(-1px);
       backdrop-filter: blur(20px) saturate(180%);
       -webkit-backdrop-filter: blur(20px) saturate(180%);
       box-shadow:
-        /* outer accent ring (soft) */
-        0 0 0 1px rgba(197, 101, 61, 0.28),
-        /* warm glow halo */
-        0 8px 28px -6px rgba(197, 101, 61, 0.32),
-        /* base elevation */
-        0 2px 6px -1px rgba(125, 91, 57, 0.1),
-        /* top inner highlight — light from above */
-        inset 0 1px 0 rgba(255, 255, 255, 0.95),
-        /* bottom inner shadow — depth at base */
-        inset 0 -1px 0 rgba(197, 101, 61, 0.08),
-        /* left inner glint */
-        inset 1px 0 0 rgba(255, 255, 255, 0.4);
+        0 4px 14px -4px rgba(197, 101, 61, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
     }
+    /* ::before 的左侧高亮条受父级 overflow:hidden 裁切，原来的 box-shadow 光晕
+       根本显示不出来，移除以省一次绘制。 */
     .session-item.active::before {
       opacity: 1;
       transform: scaleY(1);
-      box-shadow: 0 0 8px rgba(197, 101, 61, 0.5);
     }
     /* Multi-select state — quieter glass tint, no accent halo */
     .session-item.selected {
       background:
         linear-gradient(180deg, rgba(255, 250, 244, 0.85) 0%, rgba(255, 246, 236, 0.65) 100%);
-      border: 0.5px solid rgba(255, 255, 255, 0.7);
-      box-shadow:
-        0 0 0 1px rgba(197, 101, 61, 0.18),
-        0 4px 14px -4px rgba(125, 91, 57, 0.14),
-        inset 0 1px 0 rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(197, 101, 61, 0.2);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
     }
     .session-item.selected::before {
       opacity: 0.7;
@@ -9402,21 +9377,19 @@
       transform: scale(0.96);
       transition-duration: 0.06s;
     }
-    /* Footer tab active — same liquid glass language as .session-item.active */
+    /* Footer tab active — same liquid glass language as .session-item.active
+       （同步精简为 accent 边框 + 1 层柔和投影 + 顶高光） */
     .sidebar-footer-actions .btn.active {
       background:
         linear-gradient(180deg, rgba(255, 252, 247, 0.95) 0%, rgba(255, 242, 228, 0.78) 100%);
-      border: 0.5px solid rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(197, 101, 61, 0.28);
       color: var(--accent);
       transform: translateY(-1px);
       backdrop-filter: blur(16px) saturate(180%);
       -webkit-backdrop-filter: blur(16px) saturate(180%);
       box-shadow:
-        0 0 0 1px rgba(197, 101, 61, 0.28),
-        0 6px 18px -4px rgba(197, 101, 61, 0.32),
-        0 2px 4px -1px rgba(125, 91, 57, 0.08),
-        inset 0 1px 0 rgba(255, 255, 255, 0.95),
-        inset 0 -1px 0 rgba(197, 101, 61, 0.08);
+        0 3px 10px -3px rgba(197, 101, 61, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
     }
     .sidebar-footer-actions .btn.sidebar-logout:hover {
       background: rgba(178, 79, 69, 0.08);

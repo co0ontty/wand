@@ -1390,7 +1390,7 @@
                 checkDmgAutoUpdate();
               }
               if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
-                loadClaudeHistory();
+                ensureClaudeHistoryLoaded();
               }
             });
           })
@@ -1462,8 +1462,11 @@
         // Suppress CSS transitions during initial DOM build
         document.documentElement.classList.add("no-transition");
 
-        // Apply persisted pin state before rendering
-        if (state.sidebarPinned && !isMobileLayout()) {
+        // Apply persisted pin state before rendering.
+        // 窄条（collapsed）形态不靠 .open 显示，靠 .pinned.collapsed 的 width:56px
+        // 常驻；此时强制 sessionsDrawerOpen=true 会与 toggleSidebarCollapsed 里设的
+        // false 打架，并在手机端误触发背景遮罩。窄条态下不强制 open。
+        if (state.sidebarPinned && !state.sidebarCollapsed && !isMobileLayout()) {
           state.sessionsDrawerOpen = true;
         }
         app.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
@@ -3558,6 +3561,11 @@
 
       function toggleManageMode(force) {
         state.sessionsManageMode = typeof force === "boolean" ? force : !state.sessionsManageMode;
+        if (state.sessionsManageMode && !state.claudeHistoryLoaded) {
+          // 进入管理模式即后台补齐 Claude 历史，让「已选 N」「全选」计数从一开始
+          // 就覆盖全部历史，而不是只统计已加载的那部分。
+          ensureClaudeHistoryLoaded().then(updateSessionsList);
+        }
         if (!state.sessionsManageMode) {
           clearManageSelections();
           closeSwipedItem();
@@ -3574,6 +3582,16 @@
       }
 
       function selectAllVisibleItems() {
+        // 全选语义 = 选中所有可管理项（会话 + 全部 Claude 历史）。历史在登录后
+        // 异步扫描，若用户在扫描完成前点「全选」，state.claudeHistory 仍为空会漏选，
+        // 删除时表现为"只删了已加载的，跨目录/未扫完的历史还在"。这里先确保历史
+        // 加载完成再全选。
+        if (!state.claudeHistoryLoaded) {
+          ensureClaudeHistoryLoaded().then(selectAllVisibleItems);
+          return;
+        }
+        // 展开 Claude 历史分组，让用户能直观看到这些历史项也被选中了。
+        state.claudeHistoryExpanded = true;
         var nextSessionIds = {};
         getSelectableSessions().forEach(function(session) {
           nextSessionIds[session.id] = true;
@@ -3780,6 +3798,21 @@
             state.claudeHistory = [];
             updateSessionsList();
           });
+      }
+
+      // 去重包装：登录后历史会异步扫描，多个入口（管理模式、全选、展开分组）
+      // 可能同时想确保历史就绪。共享同一个 in-flight Promise，避免重复 fetch，
+      // 且在已加载时立即 resolve。
+      var _claudeHistoryLoadingPromise = null;
+      function ensureClaudeHistoryLoaded() {
+        if (state.claudeHistoryLoaded) return Promise.resolve();
+        if (_claudeHistoryLoadingPromise) return _claudeHistoryLoadingPromise;
+        _claudeHistoryLoadingPromise = loadClaudeHistory().then(function() {
+          _claudeHistoryLoadingPromise = null;
+        }, function() {
+          _claudeHistoryLoadingPromise = null;
+        });
+        return _claudeHistoryLoadingPromise;
       }
 
       function isMobileLayout() {
@@ -5892,9 +5925,15 @@
         if (sidebarMoreBtn && sidebarOverflow) {
           sidebarMoreBtn.addEventListener("click", function(e) {
             e.stopPropagation();
-            sidebarOverflow.classList.toggle("open");
+            var willOpen = !sidebarOverflow.classList.contains("open");
+            sidebarOverflow.classList.toggle("open", willOpen);
+            if (willOpen) positionSidebarOverflowMenu(sidebarOverflow);
           });
           document.addEventListener("click", function() {
+            sidebarOverflow.classList.remove("open");
+          });
+          // 视口尺寸变化时关闭，避免 clamp 后的定位与新尺寸不符。
+          window.addEventListener("resize", function() {
             sidebarOverflow.classList.remove("open");
           });
         }
@@ -6964,7 +7003,7 @@
           event.stopPropagation();
           state.claudeHistoryExpanded = !state.claudeHistoryExpanded;
           if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
-            loadClaudeHistory();
+            ensureClaudeHistoryLoaded();
           }
           updateSessionsList();
           return;
@@ -9588,8 +9627,53 @@
           // 桌面端展开窄条 → 300px 全栏常驻。
           state.sessionsDrawerOpen = true;
         }
-        render();
+        // 轻量更新而非全量 render()：render() 会 teardown 并重建整个终端 DOM，
+        // 导致收窄/展开时终端闪烁、丢失滚动与渲染状态。这里只切布局 class
+        // （宽度 56↔300 走 CSS width transition）、重渲侧栏列表内容、刷新
+        // 收窄按钮自身的图标/文案，终端区保持不动。
+        updateLayoutState();
+        updateSessionsList();
+        updateSidebarCollapseButton();
+        hideCollapsedTileBubble();
         scheduleTerminalRefitAfterPaddingTransition();
+      }
+
+      // 收窄按钮的图标/title/状态随 collapsed 切换。抽出来给轻量更新路径用，
+      // 避免为了换一个箭头方向就走全量 render()。
+      function updateSidebarCollapseButton() {
+        var btn = document.getElementById("sidebar-collapse-btn");
+        if (!btn) return;
+        var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
+        btn.classList.toggle("collapsed", isCollapsed);
+        btn.title = isCollapsed ? "展开侧栏" : "收起为窄条";
+        btn.setAttribute("aria-label", isCollapsed ? "展开侧栏" : "收起为窄条");
+        btn.innerHTML = isCollapsed
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>'
+          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>';
+      }
+
+      // 「更多操作」下拉默认 right:0 贴 more 按钮右沿向左展开。手机窄屏下这条会把
+      // 菜单左缘顶出屏幕外。打开时按视口边界 clamp：先保持 CSS 默认右对齐，仅当
+      // 真的越界才改写 left/right 把菜单拉回视口内（留 8px 边距）。
+      function positionSidebarOverflowMenu(menu) {
+        if (!menu) return;
+        menu.style.left = "";
+        menu.style.right = "";
+        var parent = menu.offsetParent || menu.parentElement;
+        if (!parent) return;
+        var margin = 8;
+        var parentRect = parent.getBoundingClientRect();
+        var rect = menu.getBoundingClientRect();
+        var vw = window.innerWidth;
+        if (rect.left < margin) {
+          // 左缘越界：改用 left 定位，把左缘顶到视口左 margin。
+          menu.style.right = "auto";
+          menu.style.left = (margin - parentRect.left) + "px";
+        } else if (rect.right > vw - margin) {
+          // 右缘越界：拉回视口右 margin（桌面右对齐时几乎不会触发）。
+          menu.style.left = "auto";
+          menu.style.right = (parentRect.right - (vw - margin)) + "px";
+        }
       }
 
 
