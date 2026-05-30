@@ -258,9 +258,9 @@
       min-height: 100dvh;
       height: 100vh;
       height: 100dvh;
-      /* 软键盘弹起时由 JS 注入 --app-viewport-height = visualViewport.height，
-         整体 flex column 自动收缩，让底部 input-panel 上移贴键盘上沿；
-         没注入时退回 100dvh 行为。 */
+      /* JS 注入 --app-viewport-height = visualViewport.height，
+         键盘开关和 iOS 地址栏动画时整体 flex column 跟随可见视口；
+         不支持 visualViewport 时退回 100dvh。 */
       height: var(--app-viewport-height, 100dvh);
       line-height: var(--line-height-base);
       overflow: hidden;
@@ -310,7 +310,7 @@
       min-height: 100dvh;
       height: 100vh;
       height: 100dvh;
-      /* 与 body 同步：键盘弹起时跟随可见视口收缩。 */
+      /* 与 body 同步：键盘开关时跟随可见视口收缩/恢复。 */
       height: var(--app-viewport-height, 100dvh);
       overflow: hidden;
     }
@@ -547,7 +547,8 @@
     }
     .sidebar.pinned.collapsed .sidebar-header-main,
     .sidebar.pinned.collapsed .sidebar-header-more,
-    .sidebar.pinned.collapsed .sidebar-footer {
+    .sidebar.pinned.collapsed .sidebar-footer,
+    .sidebar.pinned.collapsed .sidebar-history-region {
       display: none;
     }
     .sidebar.pinned.collapsed .sidebar-header-actions {
@@ -613,6 +614,24 @@
         0 4px 10px -3px rgba(120, 88, 56, 0.3),
         inset 0 1px 0 rgba(255, 255, 255, 0.48);
     }
+    /* 快速新建会话 tile —— 虚线描边 + 加号，区别于实心会话方块 */
+    .sidebar-collapsed-tile.add {
+      background: rgba(184, 92, 55, 0.06);
+      border: 1.5px dashed rgba(184, 92, 55, 0.5);
+      color: #a04a2e;
+      box-shadow: none;
+      margin-top: 2px;
+    }
+    .sidebar-collapsed-tile.add:hover {
+      filter: none;
+      transform: translateY(-1px);
+      background: rgba(184, 92, 55, 0.12);
+      border-color: rgba(184, 92, 55, 0.72);
+      box-shadow: 0 3px 8px -3px rgba(184, 92, 55, 0.32);
+    }
+    .sidebar-collapsed-tile.add:active {
+      transform: translateY(0) scale(0.94);
+    }
     /* Active — accent ring + 一层柔和暖投影 + 顶高光。原先 7 层叠加在 36px 小块上
        糊成一团，精简到 3 层即可表达「升起 + 选中」。 */
     .sidebar-collapsed-tile.active {
@@ -626,13 +645,6 @@
     .sidebar-collapsed-tile:active {
       transform: translateY(0) scale(0.94);
       transition-duration: 0.08s;
-    }
-    .sidebar-collapsed-empty {
-      color: var(--text-muted, rgba(89, 58, 32, 0.45));
-      text-align: center;
-      font-size: 16px;
-      padding: 12px 0;
-      user-select: none;
     }
     /* Hover tooltip bubble for narrow tiles — chat-bubble look */
     .sidebar-tile-bubble {
@@ -4045,6 +4057,12 @@
       min-height: 0;
       min-width: 0;
       scrollbar-gutter: stable;
+      /* iOS Safari: 聊天到顶 / 到底再用力滑, scroll 会从 .chat-messages 冒到
+         body, 即使父级有 overflow:hidden 也拦不住 (Safari 已知行为)。这一冒
+         有两个用户可见的副作用: 1) 整页跟着一起被推一帧, 输入框跳动;
+         2) 偶尔触发地址栏 / 工具栏的折叠动画。contain 把惯性吃在容器内,
+         保留 iOS 那种橡皮筋反弹手感, 但不向外溢出。 */
+      overscroll-behavior: contain;
     }
 
     /* ===== 历史消息懒加载 ===== */
@@ -10169,8 +10187,8 @@
       }
 
       html, body {
-        min-height: 100dvh;
-        height: auto;
+        min-height: var(--app-viewport-height, 100dvh);
+        height: var(--app-viewport-height, 100dvh);
       }
 
       body {
@@ -10181,9 +10199,9 @@
       .app-container {
         min-height: 100dvh;
         height: 100dvh;
-        /* 与 body 同步：键盘弹起时 JS 注入 --app-viewport-height，
-           app-container 跟随 visualViewport 收缩，input-panel 自动贴键盘上沿；
-           键盘收起后变量被移除，回到 100dvh，input-panel 自然回到屏幕底部。 */
+        /* 与 body 同步：JS 持续注入 --app-viewport-height，
+           app-container 跟随 visualViewport 收缩/恢复，input-panel 自动贴键盘
+           上沿或屏幕底部。 */
         height: var(--app-viewport-height, 100dvh);
         overflow: hidden;
       }
@@ -10740,7 +10758,11 @@
       .file-search-box { padding: 6px 10px 8px; }
       .file-search-icon { left: 20px; }
       .file-search-clear { right: 16px; }
-      .file-search-input { min-height: 34px; font-size: 14px; padding: 7px 32px 7px 30px; }
+      /* 16px 兜底 iOS Safari 聚焦自动放大:
+         即使设了 user-scalable=no, 部分 iOS 版本 (尤其 15 / 16 早期补丁) 仍会
+         在 input font-size < 16px 时强制 zoom in, 之后回不到原 scale, 用户得
+         手动双指捏回。所有移动端会被聚焦的 input 都统一到 16px。 */
+      .file-search-input { min-height: 34px; font-size: 16px; padding: 7px 32px 7px 30px; }
       .file-item { padding: 6px 8px; min-height: 32px; }
 
       /* 欢迎页移动端 */

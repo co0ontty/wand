@@ -1912,7 +1912,7 @@
                   '</div>' +
                   '<div class="file-search-box">' +
                     '<span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span>' +
-                    '<input type="text" id="file-search-input" class="file-search-input" placeholder="搜索当前目录…" autocomplete="off" />' +
+                    '<input type="text" id="file-search-input" class="file-search-input" placeholder="搜索当前目录…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />' +
                     '<button class="file-search-clear" id="file-search-clear" type="button" aria-label="清除搜索" title="清除">' +
                       wandFileIcon("x", { size: 13 }) +
                     '</button>' +
@@ -2095,7 +2095,7 @@
                     '<div id="folder-breadcrumb" class="folder-breadcrumb"></div>' +
                     '<div class="folder-picker">' +
                       '<span class="folder-picker-icon">' + iconSvg("folder", { size: 15, strokeWidth: 1.7 }) + '</span>' +
-                      '<input type="text" id="folder-picker-input" class="folder-picker-input" value="" placeholder="输入或选择工作目录..." autocomplete="off" />' +
+                      '<input type="text" id="folder-picker-input" class="folder-picker-input" value="" placeholder="输入或选择工作目录..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />' +
                     '</div>' +
                     '<div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div>' +
                     '<div id="folder-picker-validation" class="folder-picker-validation"></div>' +
@@ -3538,9 +3538,6 @@
 
       function renderCollapsedSessionTiles() {
         var entries = getRecentEntries();
-        if (entries.length === 0) {
-          return '<div class="sidebar-collapsed-empty" title="无会话">—</div>';
-        }
         var tiles = entries.map(function(e, i) {
           var idx = i + 1;
           if (e.kind === "session") {
@@ -3554,7 +3551,11 @@
           var hTitle = preview + " · " + formatHistoryTime(h.timestamp);
           return '<button class="sidebar-collapsed-tile history" type="button" data-collapsed-history-id="' + escapeHtml(h.claudeSessionId) + '" data-cwd="' + escapeHtml(h.cwd || "") + '" title="' + escapeHtml(hTitle) + '">' + idx + '</button>';
         }).join("");
-        return '<div class="sidebar-collapsed-tiles">' + tiles + '</div>';
+        // 窄条底部固定一个「+」快速新建会话方块，替代被隐藏的 footer 新会话入口。
+        var addTile = '<button class="sidebar-collapsed-tile add" type="button" data-collapsed-new-session="1" title="新建会话" aria-label="新建会话">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
+          '</button>';
+        return '<div class="sidebar-collapsed-tiles">' + tiles + addTile + '</div>';
       }
 
       function renderSessionsListContent() {
@@ -7248,6 +7249,12 @@
 
         var collapsedTile = target.closest(".sidebar-collapsed-tile");
         if (collapsedTile && collapsedTile instanceof HTMLElement) {
+          if (collapsedTile.dataset.collapsedNewSession) {
+            event.preventDefault();
+            event.stopPropagation();
+            openSessionModal();
+            return;
+          }
           if (collapsedTile.dataset.collapsedSessionId) {
             event.preventDefault();
             event.stopPropagation();
@@ -13941,24 +13948,24 @@
         { key: "down", label: "↓" },
         { key: "left", label: "←" }
       ];
-      // 外圈 8 功能：i=0 正上方起顺时针，与八分扇区 idx 对应
+      // 外圈功能键：N 个均分扇区，i=0 正上方起顺时针。
+      // 数组长度即扇区数 —— buildJoystickRingSvg / joystickHitTest 都是按
+      // OUTER_KEYS.length 动态算角度,所以这里随便加减都不需要改几何。
+      // 当前 4 键: 上=Enter 右=Ctrl+C 下=Esc 左=Shift+Tab。
+      // 选这 4 个的原因: Claude / Codex 交互里只有方向键 + Enter + Esc +
+      // Shift+Tab (back-tab) + Ctrl+C (abort) 有真实用途, 之前的 Tab /
+      // Ctrl+Z/D/L 在结构化 / chat / PTY claude 里都拿不到效果, 留着只是
+      // 占位 + 误点。
       var JOYSTICK_OUTER_KEYS = [
         { key: "enter", label: "Enter" },
-        { key: "escape", label: "Esc" },
-        { key: "tab", label: "Tab" },
-        { key: "shift_tab", label: "Shift+Tab" },
         { key: "ctrl_c", label: "Ctrl+C" },
-        { key: "ctrl_z", label: "Ctrl+Z" },
-        { key: "ctrl_d", label: "Ctrl+D" },
-        { key: "ctrl_l", label: "Ctrl+L" }
+        { key: "escape", label: "Esc" },
+        { key: "shift_tab", label: "Shift+Tab" }
       ];
-      // 钉住面板四角翻页键
-      var JOYSTICK_CORNER_KEYS = [
-        { key: "pageup", label: "PgUp" },
-        { key: "home", label: "Home" },
-        { key: "pagedown", label: "PgDn" },
-        { key: "end", label: "End" }
-      ];
+      // 钉住面板四角翻页键 —— 已弃用 (PgUp/Home/PgDn/End 在 Claude TUI 里
+      // 不是常用导航, 也跟终端历史回滚冲突)。留空数组让面板渲染逻辑自然
+      // 跳过这一排, 不删数组以保 ringSvg 之外别处 reference 安全。
+      var JOYSTICK_CORNER_KEYS = [];
 
       var ignoredInteractiveTargetIds = new Set([
         "mini-keyboard-fab",
@@ -14947,7 +14954,8 @@
       function handleInputBoxBlur() {
         resetInputPanelViewportSpacing();
         setTimeout(function() {
-          window.scrollTo(0, 0);
+          resetRootViewportScroll();
+          syncAppViewportHeight(false);
           // On mobile, force terminal refit + scroll after keyboard dismissal.
           // The container height restores but terminal needs time to
           // fill the expanded space, and the scroll position needs resetting.
@@ -14959,6 +14967,10 @@
             maybeScrollTerminalToBottom("keyboard");
           }
         }, 100);
+        setTimeout(function() {
+          resetRootViewportScroll();
+          syncAppViewportHeight(false);
+        }, 360);
       }
 
       function adjustInputBoxSelection(inputBox) {
@@ -15669,18 +15681,74 @@
       // adjustResize 不再自动 resize WebView 内容；同时仅给 input-panel
       // 加 padding-bottom 只是把 panel 内部底部撑空，并不会让 panel 自身
       // 上移。这里通过 CSS 变量驱动整层高度，是跨 WebView/Chrome/PWA 的
-      // 统一兜底。仅在视口比窗口明显变小时（典型 = 软键盘弹起）覆盖，
-      // 桌面与无键盘场景维持 100dvh 不抖。
-      function syncAppViewportHeight() {
+      // 统一兜底。iOS 的 100dvh 在键盘动画后会短暂滞后，所以这里持续用
+      // visualViewport 的实测高度驱动布局，桌面场景下该值基本等于窗口高度。
+      function getRootViewportScrollTop(vv) {
+        var values = [
+          window.scrollY || window.pageYOffset || 0,
+          document.documentElement ? document.documentElement.scrollTop || 0 : 0,
+          document.body ? document.body.scrollTop || 0 : 0
+        ];
+        if (vv) {
+          // pageTop is the visual viewport's top edge in layout coordinates.
+          // On iOS it captures the focus pan that can survive keyboard close.
+          if (typeof vv.pageTop === "number") {
+            values.push(vv.pageTop);
+          } else if (typeof vv.offsetTop === "number") {
+            values.push(vv.offsetTop);
+          }
+        }
+        return Math.max.apply(Math, values);
+      }
+
+      function resetRootViewportScroll() {
+        try { window.scrollTo(0, 0); } catch (e) {}
+        if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+        if (document.documentElement) document.documentElement.scrollTop = 0;
+        if (document.body) document.body.scrollTop = 0;
+      }
+
+      function syncAppViewportHeight(isKeyboardOpen) {
         var vv = window.visualViewport;
         if (!vv) return;
-        var diff = window.innerHeight - vv.height - vv.offsetTop;
         var root = document.documentElement;
-        if (diff > 50) {
-          root.style.setProperty('--app-viewport-height', vv.height + 'px');
-        } else {
-          root.style.removeProperty('--app-viewport-height');
+        var visualTop = window.__wandImeNative ? 0 : getRootViewportScrollTop(vv);
+        // iOS Safari 上 100dvh 在键盘 / 地址栏切换后有更新延迟, 经常"卡"在
+        // 上一刻的小值 -> body 比真实可见区还短一截, 输入框下方留出一大段
+        // 奶油色 html 背景。改成直接拿 visualViewport.height 当 body 高度的
+        // 权威值, 每帧实时跟随 (vv.resize/scroll 触发), 不再依赖 dvh。
+        // 桌面浏览器上 vv.height ≈ window.innerHeight, 同样无副作用。
+        // 之前的 diff > 50 阈值现在只用来判断"是不是真键盘上来了"以做
+        // iOS html 滚动复位 (offsetTop hack), 不再控制 body 高度。
+        //
+        // 但 iOS 还有一个更隐蔽的状态: 键盘收起后 visual viewport 已经变高,
+        // 根页面却仍停在键盘弹起时的 pageTop/scrollY。此时如果只写 vv.height,
+        // .app-container 的底边落在 visualViewport 顶点之前, input-panel 会悬在
+        // 屏幕底部上方。把 visualTop 临时加回高度, 再滚回 0; 后续 settle timer
+        // 会用新的 visualTop=0 覆盖回来。
+        root.style.setProperty('--app-viewport-height', Math.ceil(vv.height + Math.max(0, visualTop)) + 'px');
+        // iOS Safari: 当 textarea 获得焦点 / 键盘弹起时, 浏览器会主动把
+        // <html> 向上滚一段, 让焦点元素进可见区 —— 体现为 vv.offsetTop > 0。
+        // 但 body 已经被收缩到 vv.height, 这一段 offsetTop 就变成 body 底部
+        // (= .input-panel) 与键盘上沿之间的"空洞", 用户看到的就是
+        // "输入框离键盘还有很远一截"。这里强行把 html 滚回 0, 让 body 底部
+        // 重新贴回键盘上沿。Wand APK 内 (window.__wandImeNative=true) 走
+        // 原生 IME 回调精确 resize, 这里跳过避免双重补偿。
+        if (!window.__wandImeNative && (isKeyboardOpen || visualTop > 1)) {
+          resetRootViewportScroll();
         }
+      }
+
+      function isEditableFocusTarget(el) {
+        if (!el) return false;
+        var tag = el.tagName;
+        if (tag === "TEXTAREA") return true;
+        if (tag === "SELECT") return true;
+        if (tag === "INPUT") {
+          var type = (el.getAttribute("type") || "text").toLowerCase();
+          return !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/i.test(type);
+        }
+        return !!el.isContentEditable;
       }
 
       // Visual viewport handling for better mobile keyboard support
@@ -15690,17 +15758,66 @@
         var vv = window.visualViewport;
         var lastHeight = vv.height;
         var keyboardOpen = false;
+        var lastViewportWidth = Math.max(window.innerWidth || 0, vv.width || 0);
+        var largestViewportHeight = Math.max(window.innerHeight || 0, vv.height || 0);
+        var viewportSettleTimers = [];
+
+        function getCurrentViewportHeightBaseline() {
+          return Math.max(window.innerHeight || 0, vv.height || 0);
+        }
+
+        function refreshViewportBaseline() {
+          var width = Math.max(window.innerWidth || 0, vv.width || 0);
+          var height = getCurrentViewportHeightBaseline();
+          if (Math.abs(width - lastViewportWidth) > 8) {
+            lastViewportWidth = width;
+            largestViewportHeight = height;
+            return;
+          }
+          if (height > largestViewportHeight) {
+            largestViewportHeight = height;
+          }
+        }
+
+        function detectKeyboardOpen(inputBox, offsetBottom) {
+          var activeEl = document.activeElement;
+          var hasEditableFocus = activeEl === inputBox || isEditableFocusTarget(activeEl);
+          var shrinkFromLargest = largestViewportHeight - vv.height;
+          var innerShrinkFromLargest = largestViewportHeight - (window.innerHeight || vv.height || 0);
+          if (offsetBottom > 80) return true;
+          // iOS/Chrome iOS sometimes resize window.innerHeight together with
+          // visualViewport.height, so offsetBottom stays near zero. The
+          // focused-editable + baseline shrink path catches that case.
+          if (hasEditableFocus && (shrinkFromLargest > 120 || innerShrinkFromLargest > 120)) return true;
+          // During close animation focus can disappear before viewport height
+          // is fully restored. Keep the "open" state until the shrink is small.
+          if (keyboardOpen && (shrinkFromLargest > 80 || offsetBottom > 32)) return true;
+          return false;
+        }
+
+        function scheduleViewportSettle() {
+          viewportSettleTimers.forEach(function(timer) { clearTimeout(timer); });
+          viewportSettleTimers = [60, 180, 360, 620].map(function(delay) {
+            return setTimeout(function() {
+              if (!window.__wandImeNative) {
+                resetRootViewportScroll();
+              }
+              syncAppViewportHeight(keyboardOpen);
+            }, delay);
+          });
+        }
 
         function updateViewport() {
           if (!vv) return;
           var inputBox = document.getElementById('input-box');
           var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
-          var isKeyboardOpen = offsetBottom > 50;
+          refreshViewportBaseline();
+          var isKeyboardOpen = detectKeyboardOpen(inputBox, offsetBottom);
           var heightChanged = Math.abs(vv.height - lastHeight) > 8;
 
           // 键盘开/关与视口尺寸变化时同步 --app-viewport-height，
           // 让 body 高度跟随可见区域，input-panel 自然贴键盘上沿。
-          syncAppViewportHeight();
+          syncAppViewportHeight(isKeyboardOpen);
 
           if (isKeyboardOpen && (!keyboardOpen || heightChanged) && shouldAdjustForKeyboard(vv, inputBox)) {
             syncInputBoxScroll(inputBox);
@@ -15720,6 +15837,21 @@
             // final scroll lands AFTER the animation settles.
             var wasStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
             ensureTerminalFit("keyboard-open", { forceReplay: true });
+            // iOS Safari 二次复位: 第一次 syncAppViewportHeight 在键盘动画
+            // 起始帧把 html 滚回 0, 但 iOS 在键盘动画收尾时还会再尝试一次
+            // "把焦点元素拽进可见区", 把 html 重新推上去 —— 留下用户报的
+            // "输入框距离键盘还有很长距离"。镜像 keyboard-close 的 200ms 兜底,
+            // 等键盘动画完整跑完后再清一次 scrollTop + 重算 viewport 高度,
+            // 让 input-panel 最终稳定贴在键盘上沿。
+            // Wand APK (__wandImeNative=true) 跳过, 原生 IME callback 已经在
+            // WebView 层精确 resize, 这里再 scroll 反而抖。
+            if (!window.__wandImeNative) {
+              setTimeout(function() {
+                resetRootViewportScroll();
+                syncAppViewportHeight(true);
+              }, 220);
+            }
+            scheduleViewportSettle();
             // Mirror the keyboard-close 200ms delay: by then the iOS / Android
             // keyboard slide-in animation is done, vv.height is final, and
             // scrollHeight reflects the post-replay grid. One more force
@@ -15742,8 +15874,8 @@
             // window.scrollTo(0,0) 不跑，页面停在键盘抬起时被 iOS 推上去的
             // 偏移位置，input-panel 看起来"没回到底"。
             // 这里在 visualViewport 检测到键盘收起的瞬间直接强制复位一次，
-            // 并把 --app-viewport-height 兜底清掉，确保 .app-container 回到
-            // 100dvh、input-panel 重新贴屏幕底部。
+            // 并把 --app-viewport-height 同步到键盘收起后的实测高度，确保
+            // input-panel 重新贴屏幕底部。
             //
             // Android APK (window.__wandImeNative=true) 跳过这段 iOS hack —
             // MainActivity 已经在 IME 动画 callback 里逐帧把 root setPadding,
@@ -15753,21 +15885,22 @@
             var rootEl = document.documentElement;
             var imeIsNative = !!window.__wandImeNative;
             if (!imeIsNative) {
-              rootEl.style.removeProperty('--app-viewport-height');
-              window.scrollTo(0, 0);
-              if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
-              rootEl.scrollTop = 0;
-              if (document.body) document.body.scrollTop = 0;
+              // 不要 removeProperty('--app-viewport-height') —— 那样会让 body 退回
+              // 到 100dvh, 而 iOS Safari 的 100dvh 在键盘动画跑完前经常还停留
+              // 在小值, body 立刻短一截 -> 输入框下方露出大段奶油色 html 背景。
+              // 直接让 syncAppViewportHeight 把它更新为新的 vv.height (键盘已收
+              // 起所以是全可见高度), body 平滑过渡, 不出现空洞。
+              syncAppViewportHeight(false);
+              resetRootViewportScroll();
             }
+            scheduleViewportSettle();
             setTimeout(function() {
               if (!imeIsNative) {
                 // 二次复位：等键盘收起动画 + iOS 自身的回滚跑完后再清一次，
                 // 防止 iOS 在动画过程中又把 scrollTop 推上去。
-                window.scrollTo(0, 0);
-                if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
-                rootEl.scrollTop = 0;
-                if (document.body) document.body.scrollTop = 0;
-                syncAppViewportHeight();
+                resetRootViewportScroll();
+                if (rootEl) rootEl.scrollTop = 0;
+                syncAppViewportHeight(false);
               }
               ensureTerminalFit("keyboard-close", { forceReplay: true });
               // 同 handleInputBoxBlur：尊重 terminalAutoFollow，避免把上滚
@@ -15883,11 +16016,18 @@
       // 不改动终端背景的 touch/scroll/wheel —— 单指空白处仍是原生滚动看历史。
 
       function isJoystickAvailable() {
-        // 触屏与桌面网页端都显示（球球用 Pointer Events，鼠标拖拽同样可用）
-        if (state.currentView !== "terminal") return false;
+        // 触屏与桌面网页端都显示（球球用 Pointer Events，鼠标拖拽同样可用）。
+        // 不再用 currentView/isStructuredSession 关掉:
+        // - chat 视图 (含 PTY Claude 的对话视图): 用户偶尔要给底层 PTY 发
+        //   方向键 / Esc / Shift+Tab 选权限菜单, 但只能切到 terminal 视图才点
+        //   摇杆 —— 现在 chat 视图直接可用。sendJoystickKey 已经走 /input
+        //   接口, 服务端不挑视图。
+        // - 结构化会话: 大多数键 (方向 / Tab) 在 SDK runner 里没真实 effect,
+        //   但 Ctrl+C / Esc 都映射到 query.interrupt() 中断当前回复, 用户
+        //   场景是"等不及当前回答, 想停掉重发"。sendJoystickKey 里按 session
+        //   类型分支处理: PTY 走原本 sequence, 结构化只接受中断意图键。
         var session = getSelectedSession();
         if (!session) return false;
-        if (isStructuredSession(session)) return false;
         return true;
       }
 
@@ -15934,16 +16074,21 @@
         for (i = 0; i < JOYSTICK_OUTER_KEYS.length; i++) {
           fnRow += keyBtn(JOYSTICK_OUTER_KEYS[i].key, JOYSTICK_OUTER_KEYS[i].label, "");
         }
-        var cornerRow = "";
-        for (i = 0; i < JOYSTICK_CORNER_KEYS.length; i++) {
-          cornerRow += keyBtn(JOYSTICK_CORNER_KEYS[i].key, JOYSTICK_CORNER_KEYS[i].label, "");
-        }
-        var modRow = keyBtn("ctrl", "Ctrl", "wjp-mod") + keyBtn("alt", "Alt", "wjp-mod");
-        return '<div class="wjp-title">遥控面板</div>' +
+        // 角键 (PgUp/Home/PgDn/End) 与修饰键 (Ctrl/Alt) 排已被裁剪 ——
+        // 当前外圈 4 键全是独立功能键 (Enter / Ctrl+C / Esc / Shift+Tab),
+        // 没有"先按 Ctrl 再按字母"的复合组合, 所以修饰键 toggle 没意义。
+        // CORNER_KEYS 为空时, 对应的 grid 不渲染, 面板高度自动收缩。
+        var html = '<div class="wjp-title">遥控面板</div>' +
           dpad +
-          '<div class="wjp-grid wjp-fnkeys">' + fnRow + "</div>" +
-          '<div class="wjp-grid wjp-corners">' + cornerRow + "</div>" +
-          '<div class="wjp-grid wjp-mods">' + modRow + "</div>";
+          '<div class="wjp-grid wjp-fnkeys">' + fnRow + "</div>";
+        if (JOYSTICK_CORNER_KEYS.length > 0) {
+          var cornerRow = "";
+          for (i = 0; i < JOYSTICK_CORNER_KEYS.length; i++) {
+            cornerRow += keyBtn(JOYSTICK_CORNER_KEYS[i].key, JOYSTICK_CORNER_KEYS[i].label, "");
+          }
+          html += '<div class="wjp-grid wjp-corners">' + cornerRow + "</div>";
+        }
+        return html;
       }
 
       function joystickPolar(r, deg) {
@@ -15993,12 +16138,17 @@
             '<path d="' + joystickSectorPath(JOYSTICK_R0, JOYSTICK_R1, center - 45 + gap, center + 45 - gap) + '"/>' +
             joystickLabelMarkup(k.label, lp.x, lp.y) + "</g>";
         }
-        for (i = 0; i < JOYSTICK_OUTER_KEYS.length; i++) {
+        // 外圈扇区宽度跟随 OUTER_KEYS.length 动态计算: 4 键 → 90° 每片,
+        // 8 键 → 45° 每片。half 是单片半宽 (扇区中心两侧各延半个 step)。
+        var outerCount = JOYSTICK_OUTER_KEYS.length;
+        var outerStep = outerCount > 0 ? 360 / outerCount : 360;
+        var outerHalf = outerStep / 2;
+        for (i = 0; i < outerCount; i++) {
           k = JOYSTICK_OUTER_KEYS[i];
-          center = -90 + i * 45;
+          center = -90 + i * outerStep;
           lp = joystickPolar((JOYSTICK_R1 + JOYSTICK_R2) / 2, center);
           svg += '<g class="wjr-sector wjr-outer" data-key="' + k.key + '">' +
-            '<path d="' + joystickSectorPath(JOYSTICK_R1, JOYSTICK_R2, center - 22.5 + gap, center + 22.5 - gap) + '"/>' +
+            '<path d="' + joystickSectorPath(JOYSTICK_R1, JOYSTICK_R2, center - outerHalf + gap, center + outerHalf - gap) + '"/>' +
             joystickLabelMarkup(k.label, lp.x, lp.y) + "</g>";
         }
         svg += '<circle class="wjr-hub" cx="0" cy="0" r="' + (JOYSTICK_R0 - 1) + '"/>';
@@ -16248,10 +16398,14 @@
           if (Math.abs(dy) >= Math.abs(dx)) return { zone: "inner", key: dy < 0 ? "up" : "down" };
           return { zone: "inner", key: dx < 0 ? "left" : "right" };
         }
-        // 外圈：8 等分扇区，正上方为 0，顺时针递增；+π/8 让扇区中心对准按钮
+        // 外圈：OUTER_KEYS.length 等分扇区，正上方为 0，顺时针递增；
+        // +halfStep 让扇区中心对准按钮 (原本 N=8 时是 +π/8)。
         var ang = Math.atan2(dx, -dy);
         if (ang < 0) ang += Math.PI * 2;
-        var idx = Math.floor((ang + Math.PI / 8) / (Math.PI / 4)) % 8;
+        var outerCount = JOYSTICK_OUTER_KEYS.length;
+        if (outerCount === 0) return { zone: "dead", key: null };
+        var outerStepRad = (Math.PI * 2) / outerCount;
+        var idx = Math.floor((ang + outerStepRad / 2) / outerStepRad) % outerCount;
         return { zone: "outer", key: JOYSTICK_OUTER_KEYS[idx].key };
       }
 
@@ -16356,6 +16510,24 @@
           updateJoystickPanelUI();
           return;
         }
+        var session = getSelectedSession();
+        // ── 结构化会话分支 ──
+        // SDK / claude -p 通道没有 PTY 可写, 把原始 escape 序列丢给
+        // /api/sessions/:id/input 会被结构化 sendMessage 当成对话文本 (例如
+        // 把 "\x1b[A" 作为 prompt 发出去), 既无效又污染上下文。
+        // 这里按"中断意图"白名单转发: Ctrl+C / Esc → query.interrupt()。
+        // 其他键 (方向 / Enter / Shift+Tab) 在结构化里没有合理 mapping, 静默
+        // no-op, 同时震一下做反馈。
+        if (session && isStructuredSession(session)) {
+          if (key === "ctrl_c" || key === "escape") {
+            interruptStructuredSessionFromJoystick(session, key);
+          }
+          // 不论是否真发出去, 都消化掉修饰键 + 更新 UI, 避免下次发送残留状态
+          clearModifiers();
+          updateJoystickPanelUI();
+          return;
+        }
+        // ── PTY 会话原路径 ──
         var seq = buildPtySequence(key, {
           ctrl: state.modifiers.ctrl,
           alt: state.modifiers.alt,
@@ -16365,6 +16537,44 @@
         clearModifiers();              // 发后自动清修饰键（应用到下一个发送的键）
         updateJoystickPanelUI();
         scheduleShortcutResync();
+      }
+
+      // 摇杆触发的结构化会话中断: 复用 /api/structured-sessions/:id/messages
+      // 的 interrupt=true 路径 (sendMessage 内部走 query.interrupt 优雅停止,
+      // 失败 fallback 到 abortController.abort)。空 input + interrupt=true =
+      // "停掉当前回复但不发新消息", 跟用户从摇杆按 Ctrl+C/Esc 的预期一致。
+      function interruptStructuredSessionFromJoystick(session, key) {
+        if (!session || !session.id) return;
+        fetch("/api/structured-sessions/" + session.id + "/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ input: "", interrupt: true, preserveQueue: true }),
+        })
+        .then(function(res) {
+          if (!res.ok) return res.json().catch(function() { return {}; }).then(function(p) {
+            throw new Error((p && p.error) || ("中断失败 (key=" + key + ")"));
+          });
+          return res.json();
+        })
+        .then(function(snapshot) {
+          if (snapshot && snapshot.id) {
+            updateSessionSnapshot(snapshot);
+            if (snapshot.id === state.selectedId) {
+              var refreshed = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
+              state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, snapshot.output, false));
+              renderChat(true);
+              if (typeof updateQueueBar === "function") updateQueueBar();
+            }
+          }
+        })
+        .catch(function(err) {
+          // 已经在 SDK 内部完成 / 没有 pending query 时, 服务端会返回 400,
+          // 这里静默吃掉, 避免给用户冒出"中断失败"toast (按了也是想停, 没东西可停就当成功)。
+          if (window && window.console && err && err.message) {
+            console.debug("[wand] joystick interrupt no-op:", err.message);
+          }
+        });
       }
 
       function toggleJoystickPanel() {
