@@ -285,9 +285,9 @@ export class QuickCommitError extends Error {
 
 // ── AI commit message generation ──
 
-async function callClaudeText(prompt: string, cwd: string): Promise<string> {
+async function callClaudeText(prompt: string, cwd: string, language?: string): Promise<string> {
   try {
-    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS });
+    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS, language });
   } catch (error) {
     if (error instanceof ClaudeRunError) {
       // 把通用 ClaudeRunError 翻译成 quick-commit 自己的错误码 + 中文话术。
@@ -330,7 +330,7 @@ async function generateCommitMessage(cwd: string, language: string): Promise<str
   const diff = collectStagedDiff(cwd);
   const lang = language.trim() || "中文";
   const prompt = `阅读以下 git diff，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。\n\n${diff}`;
-  const raw = await callClaudeText(prompt, cwd);
+  const raw = await callClaudeText(prompt, cwd, language);
   const message = raw.replace(/^["'`]+|["'`]+$/g, "").trim();
   if (!message) {
     throw new QuickCommitError("Claude 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -392,7 +392,7 @@ async function generateCommitMessageWithTag(
 
 git diff:
 ${diff}`;
-  const raw = await callClaudeText(prompt, cwd);
+  const raw = await callClaudeText(prompt, cwd, language);
   const parsed = tryParseJson(raw);
 
   let message: string;
@@ -474,7 +474,7 @@ commit message：${commitMessage}
 
 git diff：
 ${diff}`;
-  const raw = await callClaudeText(prompt, cwd);
+  const raw = await callClaudeText(prompt, cwd, language);
   const parsed = tryParseJson(raw);
   let suggested: string | undefined;
   if (parsed && typeof parsed.tag === "string") {

@@ -384,6 +384,81 @@
         })()
       };
 
+      // ── 前端 i18n（最小化）──
+      // 后端 config.language 是给 Claude 用的"回答语言"偏好（"中文" / "English" / 任意字符串），
+      // 之前 frontend 完全没收 → UI label 一直 hardcoded 中文 + 个别英文（"SUBAGENT" 那个 tag）。
+      // 用户设的是中文时，"SUBAGENT" 这类英文残留就和"配置语言不一致"。
+      //
+      // 设计取舍：
+      //   - 只维护两套：中文（默认） + 英文。其它取值（"日本語"、"Français"等）回退到英文，
+      //     因为 Claude 会按用户语言回答，UI 至少不卡在中文上让英语圈用户看不懂。
+      //   - 不引入 i18n 库，几十个 key 用平铺对象，t(key, params) 是个十行 helper。
+      //   - params 支持 "{name}" 占位符替换，避免在调用点拼字符串。
+      //   - 缺 key 时回退到中文表，再没有就返回 key 本身（debug 友好）。
+      var I18N_DEFAULT_LANG = "中文";
+      var I18N = {
+        "中文": {
+          "subagent.tag": "子代理",
+          "subagent.handoff": "{parent} 让 {sub} 帮忙",
+          "subagent.handoff.with_desc": "{parent} 让 {sub} 帮忙：",
+          "subagent.continued": "继续输出",
+          "subagent.task.done": "任务完成",
+          "subagent.task.failed": "任务失败",
+          "subagent.running": "运行中",
+          "subagent.no_output": "（无输出）",
+          "subagent.helper_fallback_prefix": "协作猫·",
+          "subagent.title_aria": "点击展开 / 收起子代理输出",
+          "subagent.tag_title": "子代理 / subagent",
+          "ui.expand": "展开",
+          "ui.collapse": "收起",
+          "ui.expand_panel_aria": "展开子代理输出",
+          "ui.collapse_panel_aria": "收起子代理输出"
+        },
+        "English": {
+          "subagent.tag": "Subagent",
+          "subagent.handoff": "{parent} asked {sub} for help",
+          "subagent.handoff.with_desc": "{parent} asked {sub} for help with: ",
+          "subagent.continued": "continued",
+          "subagent.task.done": "Task complete",
+          "subagent.task.failed": "Task failed",
+          "subagent.running": "Running",
+          "subagent.no_output": "(no output)",
+          "subagent.helper_fallback_prefix": "Helper·",
+          "subagent.title_aria": "Click to expand / collapse subagent output",
+          "subagent.tag_title": "Subagent",
+          "ui.expand": "Expand",
+          "ui.collapse": "Collapse",
+          "ui.expand_panel_aria": "Expand subagent output",
+          "ui.collapse_panel_aria": "Collapse subagent output"
+        }
+      };
+      function getActiveLang() {
+        var raw = state.config && typeof state.config.language === "string" ? state.config.language.trim() : "";
+        if (!raw) return I18N_DEFAULT_LANG;
+        if (I18N[raw]) return raw;
+        // 模糊匹配：用户可能写 "english" / "en" / "ENG"
+        var lower = raw.toLowerCase();
+        if (lower === "english" || lower === "en" || lower.indexOf("english") === 0 || lower.indexOf("英") === 0) return "English";
+        if (lower === "中文" || lower === "zh" || lower.indexOf("zh") === 0 || lower.indexOf("中") === 0 || lower.indexOf("chinese") === 0) return "中文";
+        return "English"; // 其它语言走英文 fallback（Claude 会按 raw 回答，UI 至少英文不卡）
+      }
+      function t(key, params) {
+        var lang = getActiveLang();
+        var table = I18N[lang] || I18N[I18N_DEFAULT_LANG];
+        var template = table && key in table ? table[key] : null;
+        if (template == null) {
+          var def = I18N[I18N_DEFAULT_LANG];
+          template = def && key in def ? def[key] : key;
+        }
+        if (params && typeof template === "string") {
+          for (var k in params) {
+            if (!Object.prototype.hasOwnProperty.call(params, k)) continue;
+            template = template.split("{" + k + "}").join(params[k]);
+          }
+        }
+        return template;
+      }
+
       // ── 统一线性图标库 ──
       // 替代页面里散落的 emoji（🛡 / ⌨ / 📁 / 🔔 …）。这些 emoji 在系统字体里渲染成
       // 彩色卡通形态，与项目温暖米色 + 棕橙的复古主题视觉冲突明显。这里集中维护
@@ -1070,6 +1145,10 @@
           }
           case "tool-group":
             return el.getAttribute("data-expanded") === "true";
+          case "subagent-reply":
+            return el.getAttribute("data-expanded") === "true";
+          case "subagent-panel":
+            return el.getAttribute("data-expanded") === "true";
           default:
             return false;
         }
@@ -1116,6 +1195,35 @@
             if (groupBody) groupBody.style.display = expanded ? "block" : "none";
             var chevron = el.querySelector(".tool-group-chevron");
             if (chevron) chevron.style.transform = expanded ? "rotate(180deg)" : "";
+            break;
+          }
+          case "subagent-reply": {
+            el.setAttribute("data-expanded", expanded ? "true" : "false");
+            var subLabel = el.querySelector(".subagent-reply-toggle-label");
+            if (subLabel) subLabel.textContent = expanded ? "收起" : "展开";
+            var subToggleBtn = el.querySelector(".subagent-reply-toggle");
+            if (subToggleBtn) {
+              subToggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+              subToggleBtn.setAttribute("aria-label", expanded ? "收起子代理回复" : "展开子代理回复全文");
+            }
+            break;
+          }
+          case "subagent-panel": {
+            el.setAttribute("data-expanded", expanded ? "true" : "false");
+            // 头/尾两个按钮都得同步——label、aria-expanded、aria-label
+            var panelBtns = el.querySelectorAll(".subagent-panel-toggle");
+            for (var pbi = 0; pbi < panelBtns.length; pbi++) {
+              var pb = panelBtns[pbi];
+              pb.setAttribute("aria-expanded", expanded ? "true" : "false");
+              pb.setAttribute("aria-label", expanded ? "收起子代理输出" : "展开子代理输出");
+              var pblbl = pb.querySelector(".subagent-panel-toggle-label");
+              if (pblbl) pblbl.textContent = expanded ? "收起" : "展开";
+            }
+            // 展开时把 body 滚到顶，避免延续上次的滚动位置造成"展开后看到一半"
+            if (expanded) {
+              var pbody = el.querySelector(".subagent-panel-body");
+              if (pbody) pbody.scrollTop = 0;
+            }
             break;
           }
         }
@@ -5658,35 +5766,28 @@
         }
         persistElementExpandState(el, "thinking");
       };
-      // Toggle function for subagent reply bubbles — cycles preview → expanded → collapsed.
-      // 三态循环（preview 默认 ~5 行可滚 / expanded 大区可滚 / collapsed 完全收起）。
-      window.__subagentReplyCycle = function(e, btn) {
+      // Toggle function for subagent reply bubbles — simple two-state preview/expanded.
+      // 参考 opencode 的折叠面板：默认固定高度预览（含底部渐隐 mask），点击切到全文展开。
+      // 状态写在 data-expanded 上，配套 CSS 控制 max-height + mask；用 data-expand-key
+      // 走通用持久化通道（applyPersistedExpandState 会自动恢复用户上次的选择）。
+      window.__subagentReplyToggle = function(e, target) {
         if (e) { e.preventDefault(); e.stopPropagation(); }
-        var bubble = btn.closest(".subagent-reply");
+        var bubble = target && target.closest ? target.closest(".subagent-reply") : null;
         if (!bubble) return;
-        var modes = ["preview", "expanded", "collapsed"];
-        var current = bubble.getAttribute("data-collapse-mode") || "preview";
-        var idx = modes.indexOf(current);
-        if (idx < 0) idx = 0;
-        var next = modes[(idx + 1) % modes.length];
-        bubble.setAttribute("data-collapse-mode", next);
-        var label = btn.querySelector(".subagent-reply-cycle-label");
-        var icon = btn.querySelector(".subagent-reply-cycle-icon");
-        if (label) {
-          label.textContent = next === "preview" ? "展开"
-            : next === "expanded" ? "收起"
-            : "预览";
-        }
-        if (icon) {
-          icon.textContent = next === "collapsed" ? "▸"
-            : next === "expanded" ? "▴"
-            : "▾";
-        }
-        btn.setAttribute("aria-label",
-          next === "preview" ? "点击展开全部" :
-          next === "expanded" ? "点击完全收起" :
-          "点击切回预览"
-        );
+        var expanded = bubble.getAttribute("data-expanded") === "true";
+        applyExpandedState(bubble, "subagent-reply", !expanded);
+        persistElementExpandState(bubble, "subagent-reply");
+      };
+      // Toggle function for whole subagent panel (handoff + body + footer)。
+      // 头部 / 尾部按钮、整条 header 都绑这个；data-expanded 一变，CSS 切 body max-height
+      // + 旋转 chevron，applyExpandedState 走通用通道写持久化。
+      window.__subagentPanelToggle = function(e, target) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        var panel = target && target.closest ? target.closest(".subagent-panel") : null;
+        if (!panel) return;
+        var expanded = panel.getAttribute("data-expanded") === "true";
+        applyExpandedState(panel, "subagent-panel", !expanded);
+        persistElementExpandState(panel, "subagent-panel");
       };
       // Toggle function for inline tool rows (Read, Glob, Grep, etc.)
       window.__inlineToolToggle = function(el) {
@@ -18905,8 +19006,8 @@
         var agentType = sub.agentType || "";
         if (agentType && SUBAGENT_NAME_MAP[agentType]) return SUBAGENT_NAME_MAP[agentType];
         if (agentType) return agentType;
-        var tail = (sub.taskId || "").slice(-4) || "未知";
-        return "协作猫·" + tail;
+        var tail = (sub.taskId || "").slice(-4) || (getActiveLang() === "English" ? "?" : "未知");
+        return t("subagent.helper_fallback_prefix") + tail;
       }
       function getSubagentPalette(sub) {
         // 哈希优先用 agentType，让同类型 agent 跨 turn 颜色稳定；没有 agentType 时
@@ -18924,33 +19025,35 @@
         '</div>';
       }
 
-      // subagent tool_result → 独立 reply 气泡（markdown 渲染）。出错时显示红色错误体，
-      // 没文本时显示打字指示器（subagent 还在跑）。
+      // subagent 最终回复（父 Task 的 tool_result）——现在外层 .subagent-panel 已经
+      // 负责整段折叠 / 滚动，这里只需把"任务完成 / 失败"做个轻量标记块，markdown
+      // 内容平铺，让 panel 的 body 滚动条统一接管。
       function renderSubagentReplyBubble(block, role) {
         if (!block || block.type !== "tool_result") return "";
         var text = extractToolResultText(block.content);
         var isError = block.is_error === true;
+        var rawText = typeof text === "string" ? text : (text == null ? "" : String(text));
 
-        if (isError) {
-          return '<div class="subagent-reply error">' +
-            '<span class="subagent-reply-icon">✗</span>' +
-            '<div class="subagent-reply-body">' + (text ? renderMarkdown(text) : escapeHtml("（无输出）")) + '</div>' +
+        // pending：subagent 还在跑，没收到结果。在 panel body 里画一个 typing 指示器
+        // 占位，告诉用户"还在跑"。
+        if (!isError && !rawText.trim()) {
+          return '<div class="subagent-reply pending">' +
+            '<span class="subagent-reply-marker pending">' + escapeHtml(t("subagent.running")) + '</span>' +
+            '<span class="typing-indicator"><span></span><span></span><span></span></span>' +
           '</div>';
         }
 
-        if (!text || !String(text).trim()) {
-          return '<div class="subagent-reply pending"><span class="typing-indicator"><span></span><span></span><span></span></span></div>';
-        }
+        var displayText = rawText.trim() ? rawText : t("subagent.no_output");
+        var bodyHtml = rawText.trim() ? renderMarkdown(displayText) : escapeHtml(displayText);
+        var markerLabel = isError ? t("subagent.task.failed") : t("subagent.task.done");
+        var markerSymbol = isError ? "✗" : "✓";
 
-        // 三态折叠：preview（默认 ~5 行预览，内部可滚）→ expanded（高一些上限，可滚）→
-        // collapsed（完全收起，只剩工具条）→ preview。按钮一直可见在右下，状态写在
-        // data-collapse-mode 上，配套 CSS 控制 max-height。
-        return '<div class="subagent-reply collapsible" data-collapse-mode="preview">' +
-          '<div class="subagent-reply-scroll">' + renderMarkdown(text) + '</div>' +
-          '<button type="button" class="subagent-reply-cycle" onclick="__subagentReplyCycle(event, this)" title="展开 / 收起">' +
-            '<span class="subagent-reply-cycle-label">展开</span>' +
-            '<span class="subagent-reply-cycle-icon" aria-hidden="true">▾</span>' +
-          '</button>' +
+        return '<div class="subagent-reply final' + (isError ? ' error' : '') + '">' +
+          '<div class="subagent-reply-marker ' + (isError ? 'error' : 'done') + '">' +
+            '<span class="subagent-reply-marker-icon" aria-hidden="true">' + markerSymbol + '</span>' +
+            '<span class="subagent-reply-marker-label">' + escapeHtml(markerLabel) + '</span>' +
+          '</div>' +
+          '<div class="subagent-reply-content">' + bodyHtml + '</div>' +
         '</div>';
       }
       var PIXEL_AVATAR = {
@@ -19301,23 +19404,12 @@
           // 跳过整段。否则会渲染出"只有头像没内容"的空气泡。
           if (!segHtml || !segHtml.trim()) continue;
           if (seg.subagent) {
-            var subPalette = getSubagentPalette(seg.subagent);
-            if (showHandoff && lastSubId !== seg.subagent.taskId) {
-              var subName = getSubagentDisplayName(seg.subagent);
-              var desc = seg.subagent.taskDescription
-                ? '：<span class="chat-handoff-desc">' + escapeHtml(seg.subagent.taskDescription) + '</span>'
-                : '';
-              html += '<div class="chat-handoff" style="--agent-color:' + subPalette.primary + '">' +
-                '<span class="chat-handoff-arrow">↳</span> ' +
-                escapeHtml(parentPersonaName) + ' 让 <strong>' + escapeHtml(subName) + '</strong>' +
-                '<span class="chat-handoff-tag" title="子代理 / subagent">subagent</span>' +
-                '帮忙' + desc +
-              '</div>';
-            }
-            html += '<div class="chat-message-segment subagent" data-agent-id="' + escapeHtml(seg.subagent.taskId) + '" style="--agent-color:' + subPalette.primary + '">' +
-              subagentAvatarHtml(seg.subagent) +
-              '<div class="chat-message-content">' + segHtml + '</div>' +
-            '</div>';
+            // 整段 subagent 输出包成一个统一的可折叠面板：
+            // 头部 = handoff title + 展开按钮；body = segHtml（所有工具卡、文本、最终回复
+            // 都在 body 里）；footer = 同款按钮。同一 taskId 的连续段（极少出现的
+            // parent→sub→parent→sub 交错）只在第一次露 handoff title。
+            var includeHandoff = showHandoff && lastSubId !== seg.subagent.taskId;
+            html += buildSubagentPanelHtml(seg, parentPersonaName, segHtml, messageKey, includeHandoff);
             lastSubId = seg.subagent.taskId;
           } else {
             html += '<div class="chat-message-segment parent">' +
@@ -19328,6 +19420,85 @@
           }
         }
         return html;
+      }
+
+      // 渲染整段 subagent 输出为一个可折叠面板：
+      //   ┌─ subagent-panel ──────────────────────────────────┐
+      //   │ [🐱] ↳ 勤劳初二 让 协作猫 帮忙：xxx     [展开 ▾] │  ← header (always visible)
+      //   ├───────────────────────────────────────────────────┤
+      //   │ <tool 卡 1>                                       │
+      //   │ <text>                                            │  ← body
+      //   │ <tool 卡 2>                                       │     默认 max-height 22em
+      //   │ <... 最终回复 ...>                                │     + 内部 overflow-y:auto
+      //   ├───────────────────────────────────────────────────┤
+      //   │                              [展开 ▾]            │  ← footer (always visible)
+      //   └───────────────────────────────────────────────────┘
+      // 状态写在 .subagent-panel[data-expanded]，按 messageKey + taskId 持久化。
+      // 默认折叠（preview）；用户点头/尾按钮或头部标题条都能切。
+      function buildSubagentPanelHtml(seg, parentPersonaName, segHtml, messageKey, includeHandoff) {
+        var sub = seg.subagent;
+        var subPalette = getSubagentPalette(sub);
+        var subName = getSubagentDisplayName(sub);
+        var taskId = sub.taskId || "";
+        var avatarSvg = buildPixelSvg(buildCatGrid(subPalette));
+
+        var titleHtml;
+        if (includeHandoff) {
+          // 用 i18n 模板拼 handoff title。{parent}/{sub} 用占位符避免在调用点拼字符串导致
+          // 顺序错乱（中文 "X 让 Y 帮忙"，英文 "X asked Y for help"，词序完全不同）。
+          // tag 是单独的彩色 chip，所以把模板里的 {sub} 替换成空 span 占位，然后再 splice
+          // 进 <strong> + chip——保证模板可读、调用点不脏。
+          var subInlineHtml = '<strong class="subagent-panel-name">' + escapeHtml(subName) + '</strong>' +
+            '<span class="subagent-panel-tag" title="' + escapeHtml(t("subagent.tag_title")) + '">' + escapeHtml(t("subagent.tag")) + '</span>';
+          var hasDesc = !!(sub.taskDescription && String(sub.taskDescription).trim());
+          var handoffTpl = hasDesc ? t("subagent.handoff.with_desc", { parent: escapeHtml(parentPersonaName), sub: subInlineHtml })
+                                   : t("subagent.handoff", { parent: escapeHtml(parentPersonaName), sub: subInlineHtml });
+          var descSpan = hasDesc
+            ? '<span class="subagent-panel-task-desc">' + escapeHtml(sub.taskDescription) + '</span>'
+            : '';
+          titleHtml = '<span class="subagent-panel-arrow" aria-hidden="true">↳</span>' +
+            '<span class="subagent-panel-attribution">' + handoffTpl + descSpan + '</span>';
+        } else {
+          titleHtml = '<span class="subagent-panel-attribution">' +
+            '<strong class="subagent-panel-name">' + escapeHtml(subName) + '</strong>' +
+            '<span class="subagent-panel-task-desc"> ' + escapeHtml(t("subagent.continued")) + '</span>' +
+          '</span>';
+        }
+
+        var expandKey = buildExpandKey("subagent-panel", [messageKey, taskId]);
+        var persisted = getPersistedExpandState(expandKey);
+        var expanded = persisted === null ? false : !!persisted;
+
+        function toggleBtnHtml(position) {
+          return '<button type="button" class="subagent-panel-toggle" ' +
+                          'data-position="' + position + '" ' +
+                          'onclick="__subagentPanelToggle(event, this)" ' +
+                          'aria-expanded="' + (expanded ? "true" : "false") + '" ' +
+                          'aria-label="' + escapeHtml(expanded ? t("ui.collapse_panel_aria") : t("ui.expand_panel_aria")) + '">' +
+              '<span class="subagent-panel-toggle-label">' + escapeHtml(expanded ? t("ui.collapse") : t("ui.expand")) + '</span>' +
+              '<svg class="subagent-panel-toggle-icon" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">' +
+                '<path d="M2.5 3.75L5 6.25L7.5 3.75" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+              '</svg>' +
+            '</button>';
+        }
+
+        return '<div class="subagent-panel" ' +
+                    'data-expand-kind="subagent-panel" ' +
+                    'data-expand-key="' + escapeHtml(expandKey) + '" ' +
+                    'data-agent-id="' + escapeHtml(taskId) + '" ' +
+                    'data-expanded="' + (expanded ? "true" : "false") + '" ' +
+                    'style="--agent-color:' + subPalette.primary + '">' +
+          '<div class="subagent-panel-header" onclick="__subagentPanelToggle(event, this)" role="button" tabindex="0" aria-label="' + escapeHtml(t("subagent.title_aria")) + '">' +
+            '<span class="subagent-panel-avatar" aria-hidden="true">' + avatarSvg + '</span>' +
+            titleHtml +
+            toggleBtnHtml("top") +
+          '</div>' +
+          '<div class="subagent-panel-body">' + segHtml + '</div>' +
+          '<div class="subagent-panel-footer">' +
+            '<span class="subagent-panel-footer-hint" aria-hidden="true">— ' + escapeHtml(subName) + ' —</span>' +
+            toggleBtnHtml("bottom") +
+          '</div>' +
+        '</div>';
       }
 
       function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {

@@ -10,9 +10,9 @@ export class PromptOptimizeError extends Error {
   }
 }
 
-async function callClaudeText(prompt: string, cwd?: string): Promise<string> {
+async function callClaudeText(prompt: string, cwd?: string, language?: string): Promise<string> {
   try {
-    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_TIMEOUT_MS });
+    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_TIMEOUT_MS, language });
   } catch (error) {
     if (error instanceof ClaudeRunError) {
       // 翻译成 prompt-optimizer 自己的话术 + 错误码（与原文案保持一致）。
@@ -55,7 +55,7 @@ export async function optimizePrompt(rawText: string, language: string, cwd?: st
     );
   }
   const prompt = buildOptimizePrompt(text, language);
-  const raw = await callClaudeText(prompt, cwd);
+  const raw = await callClaudeText(prompt, cwd, language);
   const cleaned = raw
     .replace(/^```[a-zA-Z]*\n?/, "")
     .replace(/\n?```$/, "")

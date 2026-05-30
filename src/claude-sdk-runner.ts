@@ -8,6 +8,8 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
+import { buildLanguageDirective } from "./language-prompt.js";
+
 export type ClaudeRunErrorCode =
   | "CLAUDE_CLI_MISSING"
   | "CLAUDE_TIMEOUT"
@@ -24,6 +26,13 @@ export class ClaudeRunError extends Error {
 export interface RunClaudePrintOptions {
   cwd?: string;
   timeoutMs: number;
+  /**
+   * 用户偏好的回复语言（取自 config.language）。传进来时会以
+   * `appendSystemPrompt` 形式灌给 Claude，保证 quick-commit / prompt-optimizer
+   * 这种一次性调用也跟用户主会话同语言——之前 wand 的 git commit message 会
+   * 莫名其妙变中英混搭，根因就在这。
+   */
+  language?: string;
 }
 
 /**
@@ -104,12 +113,14 @@ export async function runClaudePrint(
   const timeoutHandle = setTimeout(() => abortController.abort(), options.timeoutMs);
 
   const sdkClaudeBinary = resolveSdkClaudeBinary();
+  const languageDirective = options.language ? buildLanguageDirective(options.language) : "";
   const sdkOptions: SdkOptions = {
     abortController,
     tools: [],
     persistSession: false,
     ...(cwd ? { cwd } : {}),
     ...(sdkClaudeBinary ? { pathToClaudeCodeExecutable: sdkClaudeBinary } : {}),
+    ...(languageDirective ? { appendSystemPrompt: languageDirective } : {}),
   };
 
   // 单条 user message → AsyncGenerator，SDK 的 streaming input 协议要求。

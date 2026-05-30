@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.ComponentName;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
@@ -114,6 +115,13 @@ public class MainActivity extends AppCompatActivity {
     private String appToken;
     private boolean hasLoadedPage = false;
     private boolean updateCheckDone = false;
+    // 当前正在加载 (或刚加载完) 的页面是否在 onReceivedError 里翻车。
+    // WebView 在主框架加载失败时会先 dispatch onReceivedError, 然后 *再*
+    // 把它自己合成的"网页无法打开"错误页喂给 onPageFinished — 如果在
+    // onPageFinished 里无脑 hideError(), 就会把刚弹出的自定义错误层撤掉,
+    // 让用户看到 Chromium 系统错误页。用这个 flag 在 onPageStarted 时重置、
+    // 在 onReceivedError 时置位, onPageFinished 据此决定是否真的清错误层。
+    private boolean lastLoadFailed = false;
     private int notificationCounter = 0;
     private final Map<String, Long> progressUpdateTimestamps = new HashMap<>();
     private final Map<String, Runnable> pendingProgressUpdates = new HashMap<>();
@@ -277,8 +285,24 @@ public class MainActivity extends AppCompatActivity {
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                // 每次新一轮主框架加载开始, 把"上一轮是否失败"的 flag 清零。
+                // 这样 onPageFinished 在收尾时能区分: 这是一次成功加载 → 撤掉
+                // 错误层 + loading overlay; 还是 Chromium 自己合成的错误页
+                // finish 信号 → 保留错误层 (即任务一的核心修复点)。
+                lastLoadFailed = false;
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
                 hasLoadedPage = true;
+                if (lastLoadFailed) {
+                    // 主框架刚 onReceivedError 过 — 不要 hideError()!
+                    // 否则 WebView 会把自己的"网页无法打开"系统错误页露出来,
+                    // 完全盖掉我们刚 showError() 的自定义错误层。loading overlay
+                    // showError() 里已经处理过, 这里也不重复 fade out。
+                    return;
+                }
                 hideError();
                 // 首帧到达, fade out 启动 loading overlay (原生层接力 web 的
                 // boot-loading 卡片, 全程无白闪)。淡出 200ms 后 gone 掉, 这样
@@ -296,6 +320,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
+                    // 标记当前加载已失败 — 紧跟着会进来的 onPageFinished 会读这个
+                    // flag, 不去 hideError()。否则系统会用 Chromium 自带错误页盖掉
+                    // 我们的自定义层 (Android WebView 任何主框架失败都会跟一发
+                    // onPageFinished, 这是 Chromium 设计行为, 不是 bug)。
+                    lastLoadFailed = true;
                     // 按错误类型给更具体的文案, 而非一律"连接失败"。
                     int msgRes;
                     switch (error.getErrorCode()) {

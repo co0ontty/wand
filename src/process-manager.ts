@@ -14,6 +14,7 @@ import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import { buildChildEnv } from "./env-utils.js";
+import { buildLanguageDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getResumeCommandSessionId } from "./resume-policy.js";
 import { applyThinkingEffortToPrompt, normalizeThinkingEffort } from "./structured-session-manager.js";
@@ -1893,11 +1894,13 @@ export class ProcessManager extends EventEmitter {
     }
 
     if (language) {
-      const langPrompt = isChinese
-        ? "请使用中文回复。所有解释、注释和对话文本都使用中文。"
-        : `Please respond in ${language}. Use ${language} for all your explanations, comments, and conversational text.`;
-      const escaped = langPrompt.replace(/'/g, "'\\''");
-      result += ` --append-system-prompt '${escaped}'`;
+      // 与 structured-session-manager.ts 走同一个 buildLanguageDirective，保证 PTY 与
+      // structured 两种 runner 用同一条强约束指令——避免"换个模式 Claude 又开始夹英文"。
+      const langPrompt = buildLanguageDirective(language);
+      if (langPrompt) {
+        const escaped = langPrompt.replace(/'/g, "'\\''");
+        result += ` --append-system-prompt '${escaped}'`;
+      }
     }
 
     return result;

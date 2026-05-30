@@ -2,7 +2,7 @@
  * PWA manifest and Service Worker generation.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,8 +10,38 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgPath = path.join(__dirname, "..", "package.json");
 const pkgVersion = JSON.parse(readFileSync(pkgPath, "utf-8")).version ?? "0";
-/** Cache version derived from package version — only busts on actual releases */
-const CACHE_VERSION = createHash("md5").update(pkgVersion).digest("hex").slice(0, 8);
+
+/** Cache version: package version + content fingerprint.
+ *
+ * 之前只用 pkgVersion 派生，本地 dev 时同一个 1.36.0 下改了几次 CSS / scripts，
+ * SW 的 cache key 都没变 → 旧的 RUNTIME_CACHE 会一直回放老 HTML 给已安装 PWA，
+ * 用户表现是"我明明改了 UI，怎么手机上一点变化都没有"。
+ * 把内容 mtime 也喂进 hash，dev iterate 时每次磁盘改动都换 cache key，
+ * SW activate 会把不匹配前缀的缓存 keys 删掉，从而强制重拉。
+ * 正式发版时由于 pkgVersion 也会变，效果叠加，无副作用。
+ */
+function buildCacheVersion(): string {
+  const h = createHash("md5").update(pkgVersion);
+  const fingerprintTargets = [
+    path.join(__dirname, "web-ui", "content", "scripts.js"),
+    path.join(__dirname, "web-ui", "content", "styles.css"),
+  ];
+  for (const p of fingerprintTargets) {
+    try {
+      if (existsSync(p)) {
+        const s = statSync(p);
+        h.update(":").update(p).update(":").update(String(s.mtimeMs)).update(":").update(String(s.size));
+      }
+    } catch {
+      // best effort — fingerprint 只是为了 bust 缓存，失败就退化成 pkg-only
+    }
+  }
+  return h.digest("hex").slice(0, 8);
+}
+// 不 freeze 进模块加载时——SW JS 是每次请求 generateServiceWorker() 现拼的，
+// 这里也对应每次现算，dev 改 CSS 不用重启进程都能 bust 浏览器/PWA 端缓存。
+// 缓存层会自己做 mtime check（styles.ts 的 mtime 缓存模式同思路），这里直接
+// statSync，磁盘命中本地 fs 几十微秒级，可忽略。
 
 export function generatePwaManifest(): string {
   return JSON.stringify({
@@ -48,9 +78,10 @@ export function generatePwaManifest(): string {
 }
 
 export function generateServiceWorker(): string {
+  const cacheVersion = buildCacheVersion();
   return `
-const STATIC_CACHE = 'wand-static-${CACHE_VERSION}';
-const RUNTIME_CACHE = 'wand-runtime-${CACHE_VERSION}';
+const STATIC_CACHE = 'wand-static-${cacheVersion}';
+const RUNTIME_CACHE = 'wand-runtime-${cacheVersion}';
 const APP_SHELL = '/';
 const STATIC_ASSETS = [
   '/manifest.json',

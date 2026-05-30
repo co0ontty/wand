@@ -112,9 +112,21 @@
       --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
     }
 
-    /* 尊重用户的减少动画偏好 */
+    /* 尊重用户的减少动画偏好。
+       但 Android WebView 例外: Chromium 在 Android 上会把系统 Developer
+       Options 里的 "Animator duration scale" / "Transition animation scale"
+       (设为 0 = 关) 直接映射成 prefers-reduced-motion: reduce — 这俩开关其实
+       是为 Android 原生 UI 转场设计的, 不少老用户为求"启动快"长期关着,
+       省电模式也会强制关掉。结果就是 Wand APK 内所有入场动画 (queueBarEnter、
+       messageSlideUser 等) 被压成 0.01ms, 用户看不到"消息已加入排队"这种
+       关键反馈, 跟浏览器版表现不一致。
+       html.is-wand-app 由 scripts.js 在 UA 含 WandApp/* 时挂到 <html> 上 ——
+       Wand APK 内自己定义动画策略, 不跟 Android 系统级开关绑死; 浏览器 /
+       普通 PWA / 桌面端仍然完整尊重用户偏好 (排除 .is-wand-app 后规则不变)。 */
     @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
+      html:not(.is-wand-app) *,
+      html:not(.is-wand-app) *::before,
+      html:not(.is-wand-app) *::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
@@ -4380,7 +4392,7 @@
        的 WebView，会把 color-mix(...) 当作 invalid 整条扔掉，导致背景/边框消失。
        下面凡是 color-mix 的属性都先写一条 rgba()/纯色 fallback，再被 color-mix
        覆盖；旧浏览器看到 fallback、新浏览器自动用 color-mix。同一文件里下方
-       .chat-handoff-tag / .subagent-reply / .subagent-reply-cycle 等也是同思路。 */
+       .chat-handoff-tag / .subagent-reply / .subagent-reply-toggle 等也是同思路。 */
     .chat-handoff {
       align-self: flex-start;
       margin: 4px 0 2px 4px;
@@ -4466,15 +4478,18 @@
       padding: 14px 16px;
     }
 
-    .subagent-reply-icon {
-      display: inline-block;
-      color: var(--danger, #e2574c);
-      margin-right: 6px;
-      font-weight: 700;
+    /* 短内容（error）形态：图标 + body 并列。用 flex 而不是 inline-block + display:inline，
+       后者在 body 内含块级 markdown（段落 / 代码块）时会塌掉。 */
+    .subagent-reply:not(.collapsible) {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
     }
-
-    .subagent-reply-body {
-      display: inline;
+    .subagent-reply-icon {
+      flex: 0 0 auto;
+      color: var(--danger, #e2574c);
+      font-weight: 700;
+      line-height: 1.55;
     }
 
     .subagent-reply pre,
@@ -4495,97 +4510,249 @@
       min-width: 0;
     }
 
-    /* ===== subagent 回复三态折叠 =====
-       preview（默认）→ 限高 ~5 行 + 渐隐 mask + 内部可滚
-       expanded       → 拉到一个比较大的上限，内部可滚
-       collapsed      → 完全收起，只剩底部一条工具栏，按钮还能再点回来 */
-    .subagent-reply.collapsible {
-      position: relative;
-      padding-right: 14px;
-      padding-bottom: 28px;
-    }
-
-    .subagent-reply-scroll {
+    /* ===== subagent panel（整段输出统一折叠面板）=====
+       结构：header（handoff + 展开按钮）+ body（max-height 22em 滚动）+ footer（同款按钮）
+       状态：data-expanded="false" 预览 / "true" 展开（body 拉到 70vh 仍可滚）
+       色彩：跟随 --agent-color（外层 inline style 注入），同 agent 跨 turn 颜色稳定 */
+    .subagent-panel {
+      margin: 8px 0;
+      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent);
+      border-left: 3px solid color-mix(in srgb, var(--agent-color, var(--accent)) 55%, transparent);
+      border-radius: 10px;
       overflow: hidden;
-      transition: max-height 0.32s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
-      min-width: 0;
-      max-width: 100%;
-    }
-    .subagent-reply-scroll > :first-child { margin-top: 0; }
-    .subagent-reply-scroll > :last-child { margin-bottom: 0; }
-
-    .subagent-reply.collapsible[data-collapse-mode="preview"] .subagent-reply-scroll {
-      max-height: 7.5em; /* ~5 行 */
-      overflow-y: auto;
-      -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
-              mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 3%, var(--bg-surface));
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
     }
 
-    .subagent-reply.collapsible[data-collapse-mode="expanded"] .subagent-reply-scroll {
-      max-height: 360px;
-      overflow-y: auto;
+    .subagent-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--bg-surface));
+      border-bottom: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 16%, transparent);
+      cursor: pointer;
+      user-select: none;
+      font-size: 0.78rem;
+      line-height: 1.35;
+      transition: background 0.15s ease;
+    }
+    .subagent-panel-header:hover {
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 14%, var(--bg-surface));
+    }
+    .subagent-panel-header:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--agent-color, var(--accent)) 55%, transparent);
+      outline-offset: -2px;
     }
 
-    .subagent-reply.collapsible[data-collapse-mode="collapsed"] {
-      padding-top: 6px;
-      padding-bottom: 26px;
-    }
-    .subagent-reply.collapsible[data-collapse-mode="collapsed"] .subagent-reply-scroll {
-      max-height: 0;
+    .subagent-panel-avatar {
+      flex: 0 0 auto;
+      width: 22px;
+      height: 22px;
+      border-radius: 5px;
       overflow: hidden;
-      margin: 0;
-    }
-
-    /* 三态循环按钮：固定在气泡右下角，三种模式下都可见 */
-    .subagent-reply-cycle {
-      position: absolute;
-      right: 8px;
-      bottom: 6px;
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 18%, transparent);
       display: inline-flex;
       align-items: center;
-      gap: 3px;
-      padding: 2px 8px;
+      justify-content: center;
+    }
+    .subagent-panel-avatar svg,
+    .subagent-panel-avatar img {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .subagent-panel-arrow {
+      flex: 0 0 auto;
+      color: color-mix(in srgb, var(--agent-color, var(--accent)) 65%, var(--text-primary));
+      opacity: 0.8;
+      font-weight: 600;
+    }
+
+    .subagent-panel-attribution {
+      flex: 1 1 auto;
+      min-width: 0;
+      color: var(--text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .subagent-panel-name {
+      color: color-mix(in srgb, var(--agent-color, var(--accent)) 88%, var(--text-primary));
+      font-weight: 600;
+    }
+    .subagent-panel-tag {
+      display: inline-block;
+      margin: 0 6px;
+      padding: 0 6px;
+      font-size: 0.62rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      color: var(--agent-color, var(--accent));
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 30%, transparent);
+      border-radius: 4px;
+      vertical-align: 1px;
+      line-height: 1.4;
+      white-space: nowrap;
+      /* 注意：不要加 text-transform: uppercase。之前用 lowercase "subagent" + uppercase 强转
+         出来 "SUBAGENT"，结果中文 UI 里冒出来一个英文大写词跟用户配置语言（中文）对不上。
+         现在文案直接走 i18n（t("subagent.tag") = "子代理" / "Subagent"），无需大小写强制。 */
+    }
+    .subagent-panel-task-desc {
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    .subagent-panel-toggle {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
       font-size: 0.7rem;
       font-weight: 500;
-      line-height: 1.4;
-      color: var(--accent);
-      color: var(--agent-color, var(--accent));
-      background: rgba(255, 248, 240, 0.95);
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 8%, var(--bg-surface, #fff));
-      border: 1px solid rgba(197, 101, 61, 0.28);
-      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 28%, transparent);
+      line-height: 1.3;
+      color: color-mix(in srgb, var(--agent-color, var(--accent)) 78%, var(--text-primary));
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 8%, var(--bg-surface));
+      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 30%, transparent);
       border-radius: 999px;
       cursor: pointer;
       user-select: none;
-      transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
     }
-    .subagent-reply-cycle:hover {
-      background: rgba(248, 226, 210, 1);
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 16%, var(--bg-surface, #fff));
-      border-color: rgba(197, 101, 61, 0.45);
+    .subagent-panel-toggle:hover {
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 18%, var(--bg-surface));
       border-color: color-mix(in srgb, var(--agent-color, var(--accent)) 45%, transparent);
     }
-    .subagent-reply-cycle:active {
+    .subagent-panel-toggle:active {
       transform: translateY(1px);
     }
-    .subagent-reply-cycle-icon {
-      font-size: 0.7rem;
-      line-height: 1;
+    .subagent-panel-toggle-icon {
+      transition: transform 0.2s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+    }
+    .subagent-panel[data-expanded="true"] .subagent-panel-toggle-icon {
+      transform: rotate(180deg);
     }
 
-    /* 内部滚动条做小一点，别抢戏 */
-    .subagent-reply-scroll::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
+    /* body：默认 max-height 22em（≈14 行），内部滚动；展开后拉到 70vh 仍内部可滚，
+       避免一个超长 subagent 把整页撑爆。展开过渡只动 max-height，body 内的卡片
+       不动，不会有抖动。 */
+    .subagent-panel-body {
+      padding: 10px 14px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      min-width: 0;
+      max-width: 100%;
+      transition: max-height 0.28s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+      scrollbar-gutter: stable;
     }
-    .subagent-reply-scroll::-webkit-scrollbar-thumb {
-      background: rgba(197, 101, 61, 0.35);
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 35%, transparent);
-      border-radius: 3px;
+    .subagent-panel[data-expanded="false"] .subagent-panel-body {
+      max-height: 22em;
     }
-    .subagent-reply-scroll::-webkit-scrollbar-track {
+    .subagent-panel[data-expanded="true"] .subagent-panel-body {
+      max-height: 70vh;
+    }
+    .subagent-panel-body > :first-child { margin-top: 0; }
+    .subagent-panel-body > :last-child { margin-bottom: 0; }
+
+    /* body 里的工具卡 / 文本：缩一点字号 + 减小 margin，让 22em 能装下更多内容 */
+    .subagent-panel-body .tool-use-card,
+    .subagent-panel-body .tool-group,
+    .subagent-panel-body .inline-tool,
+    .subagent-panel-body .inline-terminal,
+    .subagent-panel-body .inline-diff {
+      margin: 4px 0;
+    }
+    .subagent-panel-body .markdown-content {
+      font-size: 0.875rem;
+    }
+
+    /* body 滚动条：弱化但仍可见，对应 agent 色 */
+    .subagent-panel-body::-webkit-scrollbar {
+      width: 7px;
+      height: 7px;
+    }
+    .subagent-panel-body::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 32%, transparent);
+      border-radius: 4px;
+    }
+    .subagent-panel-body::-webkit-scrollbar-thumb:hover {
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 50%, transparent);
+    }
+    .subagent-panel-body::-webkit-scrollbar-track {
       background: transparent;
     }
+
+    /* footer：跟 header 对称，永远可见在 panel 底部。滚到 body 最下时用户能就近点。
+       hint 是个软提示"— 协作猫 —"，告诉用户 panel 边界，避免与下一段父消息混淆。 */
+    .subagent-panel-footer {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 12px;
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 6%, var(--bg-surface));
+      border-top: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 14%, transparent);
+      font-size: 0.7rem;
+    }
+    .subagent-panel-footer-hint {
+      flex: 1 1 auto;
+      min-width: 0;
+      color: var(--text-muted);
+      opacity: 0.7;
+      font-family: var(--font-mono);
+      letter-spacing: 0.04em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ===== panel 内最终回复的简化标记块（外层 panel 已经管折叠，这里只剩"任务完成"标记）===== */
+    .subagent-reply.collapsible {
+      padding: 0;
+      overflow: hidden;
+    }
+    .subagent-reply.final {
+      margin: 6px 0 0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border-left: 3px solid color-mix(in srgb, var(--agent-color, var(--accent)) 60%, transparent);
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 5%, var(--bg-surface));
+    }
+    .subagent-reply.final.error {
+      border-left-color: var(--danger, #e2574c);
+      background: color-mix(in srgb, var(--danger, #e2574c) 5%, var(--bg-surface));
+    }
+    .subagent-reply-marker {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 4px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--agent-color, var(--accent)) 78%, var(--text-primary));
+    }
+    .subagent-reply-marker.error {
+      color: var(--danger, #e2574c);
+    }
+    .subagent-reply-marker.pending {
+      color: var(--text-muted);
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 500;
+    }
+    .subagent-reply-marker-icon {
+      font-weight: 700;
+    }
+    .subagent-reply.final .subagent-reply-content > :first-child { margin-top: 0; }
+    .subagent-reply.final .subagent-reply-content > :last-child { margin-bottom: 0; }
+
+    /* （旧的 .subagent-reply-header / .subagent-reply-toggle / .subagent-reply-body /
+       .subagent-reply-fade / .subagent-reply-body-inline 系列已移除——现在外层
+       .subagent-panel 接管整段折叠 + 滚动，内层最终回复退化为简化标记块。） */
 
     /* ===== 消息使用量信息 ===== */
     .message-usage {
@@ -10723,6 +10890,26 @@
       .tool-use-file { max-width: 100%; }
       .tool-use-body { padding: 10px 12px; }
       .subagent-reply { padding: 9px 12px; }
+      .subagent-reply.collapsible { padding: 0; }
+      .subagent-reply.final { padding: 9px 11px; }
+      /* subagent-panel：窄屏头部不省略 attribution（可换行多行 vs 单行省略），
+         body 高度收紧一点，footer hint 隐掉只留按钮。 */
+      .subagent-panel { margin: 6px 0; }
+      .subagent-panel-header {
+        padding: 7px 10px;
+        gap: 6px;
+        font-size: 0.74rem;
+      }
+      .subagent-panel-attribution {
+        white-space: normal;
+        line-height: 1.4;
+      }
+      .subagent-panel-tag { margin: 0 4px; padding: 0 4px; }
+      .subagent-panel-body { padding: 9px 11px; }
+      .subagent-panel[data-expanded="false"] .subagent-panel-body { max-height: 18em; }
+      .subagent-panel[data-expanded="true"] .subagent-panel-body { max-height: 60vh; }
+      .subagent-panel-footer { padding: 5px 10px; }
+      .subagent-panel-footer-hint { display: none; }
       .markdown-content .code-block { margin: 8px 0; }
       .markdown-content pre,
       .markdown-content .code-block pre,

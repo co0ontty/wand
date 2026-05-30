@@ -1275,6 +1275,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       ],
       structuredChatPersona,
       cardDefaults: config.cardDefaults,
+      // 把语言偏好暴露给前端做 UI 文案 i18n。后端原本只用它给 Claude 拼 system prompt，
+      // 前端没收到 → "SUBAGENT" / "Read" 这些 UI label 一直是英文，跟用户设的中文不匹配。
+      language: config.language ?? "",
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
       currentVersion: PKG_VERSION,
