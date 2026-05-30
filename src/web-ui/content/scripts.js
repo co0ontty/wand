@@ -277,10 +277,9 @@
         quickCommitSubmitting: false,
         quickCommitGenerating: false,
         quickCommitError: "",
-        // primaryAction: "commit" (commit only, no push) or "commit-push" (commit then push).
-        // Whether the commit is also tagged is controlled by `makeTag` independently —
-        // that keeps "commit + tag, push later" possible.
-        quickCommitForm: { customMessage: "", makeTag: false, tag: "", primaryAction: "commit" },
+        // commitMode: "commit-tag" (commit + version tag) | "commit" (commit only).
+        // Pushing is a separate, standalone action — never bundled into the commit button.
+        quickCommitForm: { customMessage: "", tag: "", tagEdited: false, commitMode: "commit-tag" },
         // Which inline panel/dropdown is open. Only one can be open at a time, so a
         // single field beats juggling three sibling booleans with mutual-exclusion code.
         // Values: null | "action" | "push" | "tag-head".
@@ -2234,16 +2233,17 @@
       var quickCommitEscHandler = null;
       var quickCommitDocClickHandler = null;
 
-      // Restore the user's last "primary action" choice so the split button feels sticky.
-      function readSavedPrimaryAction() {
+      // Restore the user's last commit-mode choice so the split button feels sticky.
+      // Modes: "commit-tag" (commit + version tag) | "commit" (commit only).
+      function readSavedCommitMode() {
         try {
-          var v = localStorage.getItem("wand.quickCommit.primaryAction");
-          if (v === "commit" || v === "commit-push") return v;
+          var v = localStorage.getItem("wand.quickCommit.commitMode");
+          if (v === "commit" || v === "commit-tag") return v;
         } catch (e) { /* localStorage may be blocked */ }
-        return "commit";
+        return "commit-tag"; // default: commit + tag
       }
-      function savePrimaryAction(value) {
-        try { localStorage.setItem("wand.quickCommit.primaryAction", value); } catch (e) { /* no-op */ }
+      function saveCommitMode(value) {
+        try { localStorage.setItem("wand.quickCommit.commitMode", value); } catch (e) { /* no-op */ }
       }
 
       function openQuickCommitModal() {
@@ -2253,9 +2253,11 @@
         state.quickCommitError = "";
         state.quickCommitForm = {
           customMessage: "",
-          makeTag: false,
           tag: "",
-          primaryAction: readSavedPrimaryAction(),
+          // Whether the user has manually edited the tag (so we stop auto-overwriting it).
+          tagEdited: false,
+          // "commit-tag" → commit + version tag; "commit" → commit only.
+          commitMode: readSavedCommitMode(),
         };
         state.quickCommitOpenMenu = null;
         state.quickCommitTagHeadForm = { tag: "", push: false };
@@ -2305,6 +2307,12 @@
         document.addEventListener("click", quickCommitDocClickHandler, true);
         loadGitStatus(state.selectedId, { force: true }).then(function() {
           if (!state.quickCommitOpen) return;
+          // Seed the tag field with the locally-derived suggestion so a tag is
+          // always shown by default (greyed until the toggle is turned on).
+          var st = state.gitStatus || {};
+          if (!state.quickCommitForm.tagEdited && st.suggestedTag) {
+            state.quickCommitForm.tag = st.suggestedTag;
+          }
           rerenderQuickCommitModal();
         });
       }
@@ -2356,23 +2364,31 @@
         var aiBtn = document.getElementById("quick-commit-ai-btn");
         if (aiBtn) aiBtn.addEventListener("click", generateCommitMessageAI);
         var msgEl = document.getElementById("quick-commit-message");
-        if (msgEl) msgEl.addEventListener("input", function() {
-          state.quickCommitForm.customMessage = msgEl.value;
-        });
-        var tagCb = document.getElementById("quick-commit-make-tag");
-        if (tagCb) tagCb.addEventListener("change", function() {
-          state.quickCommitForm.makeTag = tagCb.checked;
-          var row = document.getElementById("quick-commit-tag-row");
-          if (row) row.classList.toggle("hidden", !tagCb.checked);
-          if (tagCb.checked) {
-            var input = document.getElementById("quick-commit-tag");
-            if (input) setTimeout(function() { input.focus(); }, 0);
-          }
-        });
+        if (msgEl) {
+          msgEl.addEventListener("input", function() {
+            state.quickCommitForm.customMessage = msgEl.value;
+          });
+          // Cmd/Ctrl+Enter submits, matching the common editor shortcut.
+          msgEl.addEventListener("keydown", function(e) {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              submitQuickCommit();
+            }
+          });
+        }
         var tagInput = document.getElementById("quick-commit-tag");
-        if (tagInput) tagInput.addEventListener("input", function() {
-          state.quickCommitForm.tag = tagInput.value;
-        });
+        if (tagInput) {
+          tagInput.addEventListener("input", function() {
+            state.quickCommitForm.tag = tagInput.value;
+            state.quickCommitForm.tagEdited = true;
+          });
+          tagInput.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submitQuickCommit();
+            }
+          });
+        }
 
         var actionCaret = document.getElementById("quick-commit-action-caret");
         if (actionCaret) actionCaret.addEventListener("click", function(e) {
@@ -2382,17 +2398,24 @@
         });
         var actionMenu = document.getElementById("quick-commit-action-menu");
         if (actionMenu) {
-          var actionItems = actionMenu.querySelectorAll("[data-qc-action]");
+          var actionItems = actionMenu.querySelectorAll("[data-qc-commit-mode]");
           for (var i = 0; i < actionItems.length; i++) {
             (function(btn) {
               btn.addEventListener("click", function() {
-                var value = btn.getAttribute("data-qc-action");
-                if (value === "commit" || value === "commit-push") {
-                  state.quickCommitForm.primaryAction = value;
-                  savePrimaryAction(value);
+                // Keep what the user typed before the re-render.
+                var liveTag = document.getElementById("quick-commit-tag");
+                if (liveTag && !liveTag.disabled) state.quickCommitForm.tag = liveTag.value;
+                var value = btn.getAttribute("data-qc-commit-mode");
+                if (value === "commit" || value === "commit-tag") {
+                  state.quickCommitForm.commitMode = value;
+                  saveCommitMode(value);
                 }
                 state.quickCommitOpenMenu = null;
                 rerenderQuickCommitModal();
+                if (value === "commit-tag") {
+                  var inp = document.getElementById("quick-commit-tag");
+                  if (inp) setTimeout(function() { inp.focus(); var v = inp.value; inp.value = ""; inp.value = v; }, 0);
+                }
               });
             })(actionItems[i]);
           }
@@ -2402,7 +2425,14 @@
         if (tagHeadToggle) tagHeadToggle.addEventListener("click", function() {
           var willOpen = state.quickCommitOpenMenu !== "tag-head";
           state.quickCommitOpenMenu = willOpen ? "tag-head" : null;
-          if (willOpen) state.quickCommitTagHeadError = "";
+          if (willOpen) {
+            state.quickCommitTagHeadError = "";
+            // Pre-fill with the locally-derived suggestion (unless already set).
+            var sug = (state.gitStatus || {}).suggestedTag;
+            if (sug && !(state.quickCommitTagHeadForm.tag || "").trim()) {
+              state.quickCommitTagHeadForm.tag = sug;
+            }
+          }
           rerenderQuickCommitModal();
           if (willOpen) {
             var inp = document.getElementById("quick-commit-tag-head-input");
@@ -2489,14 +2519,19 @@
             var data = result.data || {};
             var aiMessage = typeof data.message === "string" ? data.message : "";
             var aiTag = typeof data.suggestedTag === "string" ? data.suggestedTag.trim() : "";
-            // Only fill fields that are currently empty; never overwrite user input.
+            // "AI 生成" recommends BOTH a commit message and a version tag.
+            // Fill the message only when empty (never clobber what the user typed).
             var currentMessage = (state.quickCommitForm.customMessage || "").trim();
             if (!currentMessage && aiMessage) {
               state.quickCommitForm.customMessage = aiMessage;
             }
-            var currentTag = (state.quickCommitForm.tag || "").trim();
-            if (state.quickCommitForm.makeTag && !currentTag && aiTag) {
-              state.quickCommitForm.tag = aiTag;
+            // Adopt the AI tag (smarter than the local patch-bump default) unless the
+            // user has manually edited it, and switch to "commit + tag" so the
+            // recommendation is actually applied on commit.
+            if (aiTag) {
+              if (!state.quickCommitForm.tagEdited) state.quickCommitForm.tag = aiTag;
+              state.quickCommitForm.commitMode = "commit-tag";
+              saveCommitMode("commit-tag");
             }
           })
           .catch(function(error) {
@@ -2515,21 +2550,22 @@
         var tagEl = document.getElementById("quick-commit-tag");
         if (tagEl) state.quickCommitForm.tag = tagEl.value;
         var form = state.quickCommitForm || {};
-        var userTag = form.makeTag ? (form.tag || "").trim() : "";
+        var withTag = form.commitMode === "commit-tag";
+        var userTag = withTag ? (form.tag || "").trim() : "";
         var message = (form.customMessage || "").trim();
         if (!message) {
-          state.quickCommitError = "请填写 commit message，或点击 AI 生成。";
+          state.quickCommitError = "请填写提交信息，或点击「AI 生成」。";
           rerenderQuickCommitModal();
           return;
         }
-        var willPush = form.primaryAction === "commit-push";
-        // 开了 tag 开关但没填 → 由后端在提交时调 AI 生成
+        // Commit no longer pushes — pushing is a separate, standalone action.
+        // 选了「提交并打 Tag」但 tag 留空 → 由后端在提交时调 AI 生成。
         var payload = {
           autoMessage: false,
           customMessage: message,
           tag: userTag,
-          autoTag: !!(form.makeTag && !userTag),
-          push: willPush
+          autoTag: !!(withTag && !userTag),
+          push: false
         };
         state.quickCommitSubmitting = true;
         state.quickCommitError = "";
@@ -2552,14 +2588,8 @@
             var subPrefix = subCommits.length > 0
               ? "已先提交 " + subCommits.length + " 个 submodule（" + subCommits.map(function(c) { return c.path; }).join("、") + "），"
               : "";
-            var base = subPrefix + "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 tag " + tagName : "");
-            if (willPush && data.pushError) {
-              var msg = base + "；push 失败：" + data.pushError;
-              if (typeof showToast === "function") showToast(msg, "error");
-            } else {
-              var okMsg = base + (data.pushed ? "，已 push" : "");
-              if (typeof showToast === "function") showToast(okMsg, "success");
-            }
+            var base = subPrefix + "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 Tag " + tagName : "");
+            if (typeof showToast === "function") showToast(base + "。可在「同步」区推送到远端。", "success");
             closeQuickCommitModal();
             if (state.selectedId) loadGitStatus(state.selectedId, { force: true });
           })
@@ -2699,16 +2729,37 @@
           });
       }
 
+      // Map a porcelain status (XY two-char, e.g. " M", "A.", "??") to a single
+      // VS-Code-style letter badge: pick the first meaningful char, color by kind.
+      function qcStatusBadge(status) {
+        var raw = (status || "").trim();
+        if (raw === "??") return { letter: "U", cls: "untracked", title: "未跟踪" };
+        if (raw === "!!") return { letter: "I", cls: "ignored", title: "已忽略" };
+        var c = "";
+        for (var i = 0; i < status.length; i++) {
+          if (status[i] && status[i] !== "." && status[i] !== " ") { c = status[i]; break; }
+        }
+        c = (c || raw[0] || "?").toUpperCase();
+        var map = {
+          A: { cls: "add", title: "新增" },
+          M: { cls: "mod", title: "修改" },
+          D: { cls: "del", title: "删除" },
+          R: { cls: "ren", title: "重命名" },
+          C: { cls: "ren", title: "复制" },
+          T: { cls: "mod", title: "类型变更" },
+          U: { cls: "del", title: "冲突" }
+        };
+        var hit = map[c] || { cls: "other", title: "已更改" };
+        return { letter: c, cls: hit.cls, title: hit.title };
+      }
+
       function renderQuickCommitFileRows(files) {
         var rows = files.map(function(item) {
-          var status = (item.status || "  ").substring(0, 2);
-          var flag = status.trim() || "?";
-          var cls = "qc-flag";
-          if (flag === "A" || status[0] === "A") cls += " qc-flag-add";
-          else if (flag === "D" || status[0] === "D") cls += " qc-flag-del";
-          else if (flag === "M" || status[0] === "M") cls += " qc-flag-mod";
-          else if (flag === "??" || status === "??") cls += " qc-flag-untracked";
-          else if (flag === "R") cls += " qc-flag-ren";
+          var badge = qcStatusBadge(item.status || "");
+          var fullPath = item.path || "";
+          var slash = fullPath.lastIndexOf("/");
+          var dir = slash >= 0 ? fullPath.slice(0, slash + 1) : "";
+          var base = slash >= 0 ? fullPath.slice(slash + 1) : fullPath;
           var subBadge = "";
           if (item.isSubmodule) {
             var st = item.submoduleState || {};
@@ -2719,7 +2770,13 @@
             var label = parts.length ? "submodule · " + parts.join(" / ") : "submodule";
             subBadge = '<span class="qc-submodule-badge">' + escapeHtml(label) + '</span>';
           }
-          return '<div class="qc-file-row"><span class="' + cls + '">' + escapeHtml(status) + '</span><span class="qc-file-path">' + escapeHtml(item.path || "") + '</span>' + subBadge + '</div>';
+          return '<div class="qc-file-row" title="' + escapeHtml(fullPath) + '">' +
+            '<span class="qc-file-badge qc-badge-' + badge.cls + '" title="' + escapeHtml(badge.title) + '">' + escapeHtml(badge.letter) + '</span>' +
+            '<span class="qc-file-path">' +
+              (dir ? '<span class="qc-file-dir">' + escapeHtml(dir) + '</span>' : '') +
+              '<span class="qc-file-name">' + escapeHtml(base) + '</span>' +
+            '</span>' + subBadge +
+          '</div>';
         }).join("");
         return rows || '<div class="qc-empty">没有可提交的改动。</div>';
       }
@@ -2728,23 +2785,25 @@
         return state.quickCommitSubmitting || state.quickCommitTagHeadSubmitting || state.quickCommitPushing;
       }
 
-      function renderQuickCommitPrimary(hasChanges) {
+      function renderQuickCommitCommitButton(hasChanges) {
         var f = state.quickCommitForm;
+        var withTag = f.commitMode === "commit-tag";
         var label;
         if (state.quickCommitSubmitting) label = "提交中…";
-        else if (f.primaryAction === "commit-push") label = "提交并 push";
-        else label = "仅提交";
+        else label = withTag ? "提交并打 Tag" : "提交";
         var disabled = !hasChanges || isQuickCommitOpInFlight();
         var menuOpen = state.quickCommitOpenMenu === "action";
         var caretActive = menuOpen ? " is-active" : "";
         var menuItems = [
-          { value: "commit", label: "仅提交", desc: "只 commit，不 push" },
-          { value: "commit-push", label: "提交并 push", desc: "commit 后立即 push 到远端" }
+          { value: "commit-tag", label: "提交并打 Tag", desc: "创建 commit，并为它打一个版本 Tag" },
+          { value: "commit", label: "仅提交", desc: "只创建 commit，不打 Tag" }
         ];
         var menuHtml = menuItems.map(function(item) {
-          var sel = f.primaryAction === item.value ? " is-selected" : "";
-          return '<button type="button" class="qc-dropdown-item' + sel + '" data-qc-action="' + item.value + '">' +
-            '<span class="qc-dropdown-item-title">' + escapeHtml(item.label) + '</span>' +
+          var sel = f.commitMode === item.value ? " is-selected" : "";
+          return '<button type="button" class="qc-dropdown-item' + sel + '" data-qc-commit-mode="' + item.value + '" role="menuitemradio" aria-checked="' + (f.commitMode === item.value ? 'true' : 'false') + '">' +
+            '<span class="qc-dropdown-item-main"><span class="qc-dropdown-check" aria-hidden="true">' +
+              (f.commitMode === item.value ? '<svg viewBox="0 0 16 16" width="13" height="13"><path d="M13 4.5l-6 6L3 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '') +
+            '</span><span class="qc-dropdown-item-title">' + escapeHtml(item.label) + '</span></span>' +
             '<span class="qc-dropdown-item-desc">' + escapeHtml(item.desc) + '</span>' +
             '</button>';
         }).join("");
@@ -2752,7 +2811,7 @@
           '<button id="quick-commit-submit-btn" class="btn btn-primary qc-split-main" type="button"' + (disabled ? ' disabled' : '') + '>' +
             escapeHtml(label) +
           '</button>' +
-          '<button id="quick-commit-action-caret" class="btn btn-primary qc-split-caret' + caretActive + '" type="button" data-qc-dropdown-toggle="action"' + (disabled ? ' disabled' : '') + ' aria-haspopup="menu" aria-expanded="' + (menuOpen ? 'true' : 'false') + '" aria-label="更多提交方式">' +
+          '<button id="quick-commit-action-caret" class="btn btn-primary qc-split-caret' + caretActive + '" type="button" data-qc-dropdown-toggle="action"' + (disabled ? ' disabled' : '') + ' aria-haspopup="menu" aria-expanded="' + (menuOpen ? 'true' : 'false') + '" aria-label="切换提交方式">' +
             '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
           '</button>' +
           (menuOpen ?
@@ -2783,18 +2842,19 @@
         var submitting = state.quickCommitTagHeadSubmitting;
         var generating = state.quickCommitTagHeadGenerating;
         return '<div class="qc-tag-head-panel">' +
+          '<div class="qc-tag-head-hint">为当前最新提交（HEAD）打 Tag，不创建新提交。</div>' +
           '<div class="qc-tag-head-row">' +
-            '<input type="text" id="quick-commit-tag-head-input" class="field-input" placeholder="输入 tag 名（例如 v1.2.0），或点 AI 建议" value="' + escapeHtml(thf.tag || "") + '"' + (submitting ? ' disabled' : '') + '>' +
+            '<input type="text" id="quick-commit-tag-head-input" class="field-input" placeholder="版本号，如 v1.2.0" value="' + escapeHtml(thf.tag || "") + '"' + (submitting ? ' disabled' : '') + '>' +
             '<button type="button" id="quick-commit-tag-head-ai" class="btn btn-ghost btn-sm"' + (generating || submitting ? ' disabled' : '') + '>' + (generating ? '建议中…' : 'AI 建议') + '</button>' +
           '</div>' +
           '<label class="qc-tag-head-push">' +
             '<input type="checkbox" id="quick-commit-tag-head-push"' + (thf.push ? ' checked' : '') + (submitting ? ' disabled' : '') + '>' +
-            '<span>打完 tag 立即推送这个 tag</span>' +
+            '<span>打完后立即推送这个 Tag 到远端</span>' +
           '</label>' +
           (state.quickCommitTagHeadError ? '<p class="error-message">' + escapeHtml(state.quickCommitTagHeadError) + '</p>' : '') +
           '<div class="qc-tag-head-actions">' +
             '<button type="button" id="quick-commit-tag-head-cancel" class="btn btn-ghost btn-sm"' + (submitting ? ' disabled' : '') + '>收起</button>' +
-            '<button type="button" id="quick-commit-tag-head-submit" class="btn btn-secondary btn-sm"' + (submitting ? ' disabled' : '') + '>' + (submitting ? '打 tag 中…' : '为 HEAD 打 tag') + '</button>' +
+            '<button type="button" id="quick-commit-tag-head-submit" class="btn btn-secondary btn-sm"' + (submitting ? ' disabled' : '') + '>' + (submitting ? '打 Tag 中…' : '打 Tag') + '</button>' +
           '</div>' +
         '</div>';
       }
@@ -2837,56 +2897,53 @@
 
       function renderQuickCommitModal() {
         var s = state.gitStatus || {};
-        var f = state.quickCommitForm || { customMessage: "", makeTag: false, tag: "", primaryAction: "commit" };
+        var f = state.quickCommitForm || { customMessage: "", tag: "", tagEdited: false, commitMode: "commit-tag" };
         var hasChanges = (s.modifiedCount || 0) > 0;
         var files = Array.isArray(s.files) ? s.files : [];
         var fileRows = renderQuickCommitFileRows(files);
 
-        // Subtitle: branch · N 改动 · ↑X ↓Y
+        // Subtitle: branch · N 改动 · ↑X ↓Y  (clean repos show a small ✓ badge instead of "0 个改动")
         var subParts = [];
         subParts.push(s.branch || "(no branch)");
-        subParts.push((s.modifiedCount || 0) + " 个改动");
+        if (hasChanges) subParts.push((s.modifiedCount || 0) + " 个改动");
         if (typeof s.ahead === "number" && s.ahead > 0) subParts.push("↑" + s.ahead);
         if (typeof s.behind === "number" && s.behind > 0) subParts.push("↓" + s.behind);
 
         // Section 1: changes + commit form (only when there are changes)
         var section1 = "";
         if (hasChanges) {
+          var genBusy = state.quickCommitGenerating;
+          var withTag = f.commitMode === "commit-tag";
           section1 = '<section class="qc-section qc-section--changes">' +
-            '<div class="qc-section-head"><span class="qc-section-title">暂存改动</span><span class="qc-section-meta">' + escapeHtml(s.modifiedCount + " 个文件") + '</span></div>' +
+            '<div class="qc-section-head"><span class="qc-section-title">更改</span><span class="qc-section-meta">' + escapeHtml(s.modifiedCount + " 个文件") + '</span></div>' +
             '<div class="qc-files-wrap">' + fileRows + '</div>' +
             '<div class="qc-message-row" id="quick-commit-message-row">' +
-              '<div class="qc-message-header"><label class="field-label" for="quick-commit-message">commit message</label>' +
-                '<div class="qc-ai-controls">' +
-                  '<button type="button" id="quick-commit-ai-btn" class="btn btn-ghost btn-sm"' + (state.quickCommitGenerating ? ' disabled' : '') + '>' + (state.quickCommitGenerating ? '生成中…' : 'AI 生成') + '</button>' +
-                  '<label class="qc-ai-tag-toggle" title="开启后，AI 会一并建议 tag，提交时会为本次 commit 打 tag">' +
-                    '<span class="qc-ai-tag-label">含 tag</span>' +
-                    '<span class="qc-switch qc-switch--compact">' +
-                      '<input type="checkbox" id="quick-commit-make-tag" class="switch-toggle" aria-label="同时为本次 commit 打 tag"' + (f.makeTag ? ' checked' : '') + ((state.quickCommitSubmitting || state.quickCommitGenerating) ? ' disabled' : '') + '>' +
-                      '<span class="switch-slider"></span>' +
-                    '</span>' +
-                  '</label>' +
-                '</div>' +
+              '<div class="qc-message-header">' +
+                '<label class="field-label qc-message-label" for="quick-commit-message">提交信息</label>' +
+                '<button type="button" id="quick-commit-ai-btn" class="btn btn-ghost btn-sm qc-ai-btn"' + (genBusy ? ' disabled' : '') + ' title="读取改动，用 AI 生成提交信息与版本 Tag">' +
+                  '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M8 1.5l1.4 3.6L13 6.5 9.4 7.9 8 11.5 6.6 7.9 3 6.5l3.6-1.4L8 1.5zM12.5 10.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z" fill="currentColor"/></svg>' +
+                  '<span>' + (genBusy ? '生成中…' : 'AI 生成') + '</span>' +
+                '</button>' +
               '</div>' +
-              '<textarea id="quick-commit-message" class="field-input" rows="2" placeholder="输入 commit message 或点击 AI 生成"' + (state.quickCommitSubmitting ? ' disabled' : '') + '>' + escapeHtml(f.customMessage || "") + '</textarea>' +
+              '<textarea id="quick-commit-message" class="field-input qc-message-input" rows="3" placeholder="描述这次改动；或点「AI 生成」自动填写" ' + (state.quickCommitSubmitting ? 'disabled' : '') + '>' + escapeHtml(f.customMessage || "") + '</textarea>' +
             '</div>' +
-            '<div class="qc-tag-row' + (f.makeTag ? '' : ' hidden') + '" id="quick-commit-tag-row">' +
-              '<input type="text" id="quick-commit-tag" class="field-input" placeholder="输入 tag 名称；留空则提交时由 AI 自动生成" value="' + escapeHtml(f.tag || "") + '"' + (state.quickCommitSubmitting ? ' disabled' : '') + '>' +
+            '<div class="qc-tag-field' + (withTag ? '' : ' is-off') + '">' +
+              '<span class="qc-tag-field-label" title="' + (withTag ? '这次提交会打上这个版本 Tag' : '当前为「仅提交」，不会打 Tag') + '">Tag</span>' +
+              '<input type="text" id="quick-commit-tag" class="field-input qc-tag-field-input" placeholder="版本号，如 v1.2.0" value="' + escapeHtml(f.tag || "") + '"' + ((!withTag || state.quickCommitSubmitting) ? ' disabled' : '') + '>' +
+              (withTag ? '' : '<span class="qc-tag-field-note">仅提交</span>') +
             '</div>' +
             (state.quickCommitError ? '<p class="error-message">' + escapeHtml(state.quickCommitError) + '</p>' : '') +
             '<div class="qc-section-actions">' +
               '<button id="quick-commit-cancel-btn" class="btn btn-ghost btn-sm" type="button">取消</button>' +
-              renderQuickCommitPrimary(hasChanges) +
-            '</div>' +
-          '</section>';
-        } else {
-          section1 = '<section class="qc-section qc-section--empty">' +
-            '<div class="qc-empty-state">' +
-              '<span class="qc-empty-icon">✓</span>' +
-              '<div><div class="qc-empty-title">工作区干净</div><div class="qc-empty-sub">没有暂存改动可提交。仍可在下方为 HEAD 打 tag 或推送。</div></div>' +
+              '<div class="qc-action-group">' +
+                renderQuickCommitCommitButton(hasChanges) +
+                renderQuickCommitPushButton(s) +
+              '</div>' +
             '</div>' +
           '</section>';
         }
+        // When clean, we skip the big "changes" card entirely — a small green
+        // indicator in the header subtitle is enough of a signal (see below).
 
         // Section 2: repo status + secondary actions (always show when there's at least one commit)
         var section2 = "";
@@ -2894,32 +2951,38 @@
           var lc = s.lastCommit || {};
           var headLine = lc.shortHash ? lc.shortHash + " · " + (lc.subject || "") : (s.head ? s.head.substring(0, 7) : "(no commit)");
           var upstreamLine = s.upstream ? escapeHtml(s.branch || "") + " → " + escapeHtml(s.upstream) : escapeHtml(s.branch || "(no branch)") + " · 无 upstream";
+          var tagHeadOpen = state.quickCommitOpenMenu === "tag-head";
           section2 = '<section class="qc-section qc-section--repo">' +
-            '<div class="qc-section-head"><span class="qc-section-title">仓库状态</span><span class="qc-section-meta">' + upstreamLine + '</span></div>' +
+            '<div class="qc-section-head"><span class="qc-section-title">仓库 · 同步</span><span class="qc-section-meta">' + upstreamLine + '</span></div>' +
             '<div class="qc-head-card">' +
               '<span class="qc-head-label">HEAD</span>' +
               '<code class="qc-head-text">' + escapeHtml(headLine) + '</code>' +
             '</div>' +
             renderQuickCommitStatusChips(s) +
-            (state.quickCommitOpenMenu === "tag-head" ? renderQuickCommitTagHeadPanel() : '') +
+            (tagHeadOpen ? renderQuickCommitTagHeadPanel() : '') +
             '<div class="qc-section-actions qc-section-actions--secondary">' +
-              '<button id="quick-commit-tag-head-toggle" class="btn btn-ghost btn-sm" type="button"' + (state.quickCommitPushing ? ' disabled' : '') + '>' +
-                '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="vertical-align:-2px;margin-right:4px;"><path d="M2 2h6.5l5 5-5.5 5.5L2 7.5V2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="5" cy="5" r="1" fill="currentColor"/></svg>' +
-                (state.quickCommitOpenMenu === "tag-head" ? '收起' : '为 HEAD 打 tag') +
+              '<button id="quick-commit-tag-head-toggle" class="btn btn-secondary btn-sm qc-tag-head-btn' + (tagHeadOpen ? ' is-open' : '') + '" type="button"' + (state.quickCommitPushing ? ' disabled' : '') + ' title="给当前最新提交（HEAD）打 Tag，不会创建新提交">' +
+                '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 2h6.5l5 5-5.5 5.5L2 7.5V2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="5" cy="5" r="1" fill="currentColor"/></svg>' +
+                '<span>' + (tagHeadOpen ? '收起' : '为当前提交打 Tag') + '</span>' +
               '</button>' +
-              renderQuickCommitPushButton(s) +
+              // Push lives in the commit footer when there are changes; show it here otherwise.
+              (hasChanges ? '' : renderQuickCommitPushButton(s)) +
             '</div>' +
           '</section>';
         }
 
         var subtitleHtml = subParts.map(escapeHtml).join(" · ");
+        // Small "clean" badge shown inline in the header subtitle (replaces the old empty-state card).
+        var cleanBadge = (!hasChanges && s.isGit !== false)
+          ? '<span class="qc-clean-badge" title="工作区干净，没有待提交的改动"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 4.5l-6 6L3 7"/></svg>干净</span>'
+          : '';
 
         return '<section id="quick-commit-modal" class="modal-backdrop' + (state.quickCommitOpen ? '' : ' hidden') + '">' +
           '<div class="modal quick-commit-modal" role="dialog" aria-labelledby="quick-commit-title">' +
             '<div class="modal-header">' +
               '<div>' +
                 '<h2 id="quick-commit-title" class="modal-title">快捷提交</h2>' +
-                '<p class="modal-subtitle">' + subtitleHtml + '</p>' +
+                '<p class="modal-subtitle">' + subtitleHtml + cleanBadge + '</p>' +
               '</div>' +
               '<button id="quick-commit-close-btn" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
             '</div>' +

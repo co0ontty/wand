@@ -15339,7 +15339,7 @@
 
     /* ── 快捷提交模态框 ── */
     .quick-commit-modal {
-      max-width: 560px;
+      max-width: 540px;
     }
     .quick-commit-modal .modal-body {
       display: flex;
@@ -15347,17 +15347,17 @@
       gap: 12px;
     }
     .qc-files-wrap {
-      max-height: 200px;
+      max-height: 190px;
       overflow-y: auto;
-      padding: 8px 10px;
-      border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.45);
+      padding: 6px 8px;
+      border: 1px solid rgba(125, 91, 57, 0.10);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.4);
       font-family: var(--font-mono, monospace);
       font-size: 0.78rem;
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 1px;
     }
     .qc-empty {
       color: var(--text-muted);
@@ -15368,30 +15368,45 @@
     .qc-file-row {
       display: flex;
       align-items: center;
-      gap: 8px;
-      line-height: 1.5;
+      gap: 9px;
+      line-height: 1.6;
+      padding: 1px 2px;
+      border-radius: 5px;
     }
-    .qc-flag {
+    .qc-file-row:hover {
+      background: rgba(125, 91, 57, 0.06);
+    }
+    /* Single-letter status badge, VS Code style */
+    .qc-file-badge {
       flex-shrink: 0;
-      width: 24px;
-      text-align: center;
-      font-weight: 700;
-      color: var(--text-muted);
+      width: 17px;
+      height: 17px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      font-size: 0.66rem;
+      font-weight: 800;
       letter-spacing: 0;
+      line-height: 1;
+      font-family: var(--font-sans);
     }
-    .qc-flag-add { color: rgba(60, 160, 90, 0.95); }
-    .qc-flag-mod { color: rgba(220, 150, 30, 0.95); }
-    .qc-flag-del { color: rgba(200, 70, 70, 0.95); }
-    .qc-flag-ren { color: rgba(110, 130, 200, 0.95); }
-    .qc-flag-untracked { color: rgba(140, 140, 140, 0.95); }
+    .qc-badge-add { color: rgba(34, 128, 66, 0.98); background: rgba(60, 160, 90, 0.16); }
+    .qc-badge-mod { color: rgba(170, 110, 14, 0.98); background: rgba(220, 150, 30, 0.16); }
+    .qc-badge-del { color: rgba(190, 56, 56, 0.98); background: rgba(200, 70, 70, 0.15); }
+    .qc-badge-ren { color: rgba(78, 100, 188, 0.98); background: rgba(110, 130, 200, 0.16); }
+    .qc-badge-untracked { color: rgba(34, 128, 66, 0.95); background: rgba(60, 160, 90, 0.12); }
+    .qc-badge-ignored,
+    .qc-badge-other { color: var(--text-muted); background: rgba(120, 120, 120, 0.12); }
     .qc-file-path {
-      color: var(--text-secondary);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       flex: 1 1 auto;
       min-width: 0;
     }
+    .qc-file-dir { color: var(--text-muted); }
+    .qc-file-name { color: var(--text-primary); font-weight: 500; }
     .qc-submodule-badge {
       flex-shrink: 0;
       padding: 1px 6px;
@@ -15403,20 +15418,12 @@
       letter-spacing: 0.02em;
       white-space: nowrap;
     }
-    .qc-switch {
-      flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      cursor: pointer;
-    }
-    .qc-message-row,
-    .qc-tag-row {
+    .qc-message-row {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 6px;
     }
-    .qc-message-row.hidden,
-    .qc-tag-row.hidden {
+    .qc-message-row.hidden {
       display: none;
     }
     .qc-message-header {
@@ -15424,68 +15431,75 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
-      flex-wrap: wrap;
     }
-    .qc-ai-controls {
+    .qc-message-label {
+      margin-bottom: 0;
+    }
+    /* AI generate button: icon + text */
+    .qc-ai-btn {
       display: inline-flex;
       align-items: center;
-      justify-content: flex-end;
-      gap: 7px;
-      margin-left: auto;
-      flex: 0 0 auto;
+      gap: 5px;
+      color: var(--accent);
     }
-    .qc-ai-tag-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      min-height: 30px;
-      padding: 3px 7px 3px 9px;
-      border: 1px solid rgba(125, 91, 57, 0.12);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.58);
+    .qc-ai-btn svg {
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .qc-ai-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
       color: var(--text-muted);
-      font-size: 0.74rem;
-      font-weight: 700;
-      line-height: 1;
-      user-select: none;
-      cursor: pointer;
-      transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
     }
-    .qc-ai-tag-toggle:hover {
-      background: rgba(255, 255, 255, 0.82);
-      border-color: rgba(125, 91, 57, 0.20);
-    }
-    .qc-ai-tag-toggle:has(.switch-toggle:checked) {
-      color: rgba(170, 79, 42, 0.98);
-      background: linear-gradient(180deg, #fff8f1 0%, #fff1e3 100%);
-      border-color: rgba(197, 101, 61, 0.32);
-      box-shadow: 0 1px 4px rgba(197, 101, 61, 0.10);
-    }
-    .qc-ai-tag-toggle:has(.switch-toggle:disabled) {
-      cursor: default;
-      opacity: 0.68;
-    }
-    .qc-ai-tag-label {
-      white-space: nowrap;
-    }
-    .qc-switch--compact .switch-slider {
-      width: 34px;
-      min-width: 34px;
-      height: 20px;
-      border-radius: 999px;
-    }
-    .qc-switch--compact .switch-slider::after {
-      width: 16px;
-      height: 16px;
-    }
-    .qc-switch--compact .switch-toggle:checked + .switch-slider::after {
-      transform: translateX(14px);
-    }
-    .qc-message-row textarea {
+    .qc-ai-btn:disabled svg { color: var(--text-muted); }
+    .qc-message-input {
       resize: vertical;
-      min-height: 56px;
+      min-height: 68px;
       font-family: var(--font-mono, monospace);
-      font-size: 0.85rem;
+      font-size: 0.84rem;
+      line-height: 1.55;
+    }
+
+    /* Tag field — single line: [Tag] [version input] */
+    .qc-tag-field {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .qc-tag-field-label {
+      flex-shrink: 0;
+      width: 2.4em;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .qc-tag-field.is-off .qc-tag-field-label {
+      color: var(--text-muted);
+    }
+    .qc-tag-field-input {
+      flex: 1 1 auto;
+      min-width: 0;
+      font-family: var(--font-mono, monospace);
+      font-size: 0.82rem;
+    }
+    /* "Commit only" state: show the suggested tag greyed, as a non-editable preview. */
+    .qc-tag-field-input:disabled {
+      color: var(--text-muted);
+      background: rgba(125, 91, 57, 0.04);
+      border-color: rgba(125, 91, 57, 0.08);
+      cursor: default;
+      box-shadow: none;
+    }
+    .qc-tag-field-note {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(125, 91, 57, 0.08);
     }
     .quick-commit-modal .worktree-merge-actions {
       display: flex;
@@ -15500,21 +15514,17 @@
       flex-direction: column;
       gap: 14px;
     }
+    /* Flat sections — no nested cards. Sections are just grouped rows,
+       separated by a hairline divider rather than boxed in their own card. */
     .qc-section {
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      padding: 12px 14px;
-      background: rgba(255, 255, 255, 0.6);
-      border: 1px solid rgba(125, 91, 57, 0.10);
-      border-radius: 14px;
-      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.04);
+      gap: 12px;
     }
+    /* The repo/sync block sits below a divider instead of inside its own card. */
     .qc-section--repo {
-      background: linear-gradient(180deg, rgba(255, 250, 244, 0.7) 0%, rgba(255, 247, 238, 0.7) 100%);
-    }
-    .qc-section--empty {
-      background: rgba(245, 245, 245, 0.5);
+      padding-top: 16px;
+      border-top: 1px solid rgba(125, 91, 57, 0.12);
     }
     .qc-section-head {
       display: flex;
@@ -15523,14 +15533,14 @@
       gap: 8px;
     }
     .qc-section-title {
-      font-size: 0.78rem;
+      font-size: 0.72rem;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
+      letter-spacing: 0.07em;
+      color: var(--text-secondary);
     }
     .qc-section-meta {
-      font-size: 0.75rem;
+      font-size: 0.74rem;
       color: var(--text-muted);
       font-family: var(--font-mono, monospace);
       overflow: hidden;
@@ -15549,55 +15559,46 @@
     .qc-section-actions--secondary {
       justify-content: space-between;
     }
+    /* Groups the Commit split-button + standalone Push button in the footer. */
+    .qc-action-group {
+      display: inline-flex;
+      align-items: stretch;
+      gap: 8px;
+    }
 
-    /* Empty state */
-    .qc-empty-state {
-      display: flex;
+    /* Small "工作区干净" badge shown inline in the modal subtitle. */
+    .qc-clean-badge {
+      display: inline-flex;
       align-items: center;
-      gap: 12px;
-      padding: 6px 4px;
-    }
-    .qc-empty-icon {
-      flex-shrink: 0;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      background: rgba(60, 160, 90, 0.14);
-      color: rgba(40, 130, 70, 0.95);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 1rem;
-    }
-    .qc-empty-title {
-      font-size: 0.9rem;
+      gap: 3px;
+      margin-left: 8px;
+      padding: 1px 8px;
+      border-radius: 999px;
+      font-size: 0.7rem;
       font-weight: 600;
-      color: var(--text-primary);
+      color: rgba(40, 130, 70, 0.95);
+      background: rgba(60, 160, 90, 0.12);
+      border: 1px solid rgba(60, 160, 90, 0.22);
+      vertical-align: 1px;
     }
-    .qc-empty-sub {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-    }
+    .qc-clean-badge svg { flex-shrink: 0; }
 
-    /* HEAD card (last commit info) */
+    /* HEAD — a plain inline line (no nested box). */
     .qc-head-card {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 8px 12px;
-      background: rgba(255, 255, 255, 0.7);
-      border: 1px solid rgba(125, 91, 57, 0.08);
-      border-radius: 10px;
-      min-height: 36px;
+      gap: 8px;
     }
     .qc-head-label {
       flex-shrink: 0;
-      font-size: 0.7rem;
+      font-size: 0.66rem;
       font-weight: 700;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
       color: var(--text-muted);
       text-transform: uppercase;
+      padding: 1px 6px;
+      border-radius: 5px;
+      background: rgba(125, 91, 57, 0.08);
     }
     .qc-head-text {
       flex: 1 1 auto;
@@ -15642,11 +15643,6 @@
       color: rgba(160, 90, 50, 0.95);
       border-color: rgba(180, 100, 60, 0.28);
     }
-    .qc-chip--tag {
-      background: rgba(140, 100, 200, 0.14);
-      color: rgba(110, 70, 180, 0.95);
-      border-color: rgba(140, 100, 200, 0.28);
-    }
     .qc-chip--warn {
       background: rgba(220, 150, 30, 0.14);
       color: rgba(180, 110, 20, 0.95);
@@ -15658,15 +15654,33 @@
       border-color: rgba(60, 160, 90, 0.24);
     }
 
+    /* "为当前提交打 Tag" button (icon + text, balances the push button) */
+    .qc-tag-head-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .qc-tag-head-btn svg { flex-shrink: 0; opacity: 0.8; }
+    .qc-tag-head-btn.is-open {
+      background: rgba(140, 100, 200, 0.12);
+      border-color: rgba(140, 100, 200, 0.28);
+      color: rgba(96, 60, 160, 0.98);
+    }
+
     /* Tag HEAD inline drawer */
     .qc-tag-head-panel {
       display: flex;
       flex-direction: column;
       gap: 8px;
-      padding: 10px 12px;
+      padding: 11px 12px;
       background: rgba(255, 255, 255, 0.85);
       border: 1px solid rgba(140, 100, 200, 0.18);
       border-radius: 10px;
+    }
+    .qc-tag-head-hint {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+      line-height: 1.4;
     }
     .qc-tag-head-row {
       display: flex;
@@ -15750,7 +15764,7 @@
       all: unset;
       display: flex;
       flex-direction: column;
-      gap: 1px;
+      gap: 2px;
       padding: 8px 10px;
       border-radius: 8px;
       cursor: pointer;
@@ -15760,11 +15774,25 @@
       background: rgba(197, 101, 61, 0.08);
     }
     .qc-dropdown-item.is-selected {
-      background: rgba(197, 101, 61, 0.12);
+      background: rgba(197, 101, 61, 0.10);
     }
     .qc-dropdown-item.is-disabled {
       opacity: 0.5;
       cursor: not-allowed;
+    }
+    .qc-dropdown-item-main {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .qc-dropdown-check {
+      flex-shrink: 0;
+      width: 13px;
+      height: 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
     }
     .qc-dropdown-item-title {
       font-size: 0.84rem;
@@ -15775,6 +15803,7 @@
       font-size: 0.72rem;
       color: var(--text-muted);
       line-height: 1.4;
+      padding-left: 19px;
     }
 
     @media (max-width: 720px) {
@@ -15782,12 +15811,11 @@
       .topbar-git-badge { padding: 0 8px; font-size: 0.7rem; }
       .quick-commit-modal { max-width: 95vw; }
       .qc-files-wrap { max-height: 160px; }
-      .qc-section { padding: 10px 12px; }
       .qc-dropdown-menu { min-width: 180px; }
-      .qc-ai-controls {
-        width: 100%;
-        justify-content: flex-end;
-      }
+      .qc-section-actions--secondary { flex-wrap: wrap; gap: 8px; }
+      .qc-section-actions--secondary .qc-tag-head-btn { flex: 1 1 auto; justify-content: center; }
+      /* Keep the commit footer one row, but let the two button groups share width. */
+      .qc-action-group { flex: 1 1 auto; justify-content: flex-end; }
     }
 
     /* ============================================================ */
