@@ -45,7 +45,7 @@ struct WandPrimaryButtonStyle: ButtonStyle {
         Body(configuration: configuration)
     }
 
-    private struct Body: View {
+    struct Body: View {
         let configuration: ButtonStyleConfiguration
         @Environment(\.isEnabled) private var isEnabled
 
