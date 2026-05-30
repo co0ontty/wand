@@ -24,7 +24,7 @@ final class SelfSignedSession: NSObject, URLSessionDelegate, URLSessionDownloadD
 
     func urlSession(_ session: URLSession,
                     didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+                    completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust else {
             completionHandler(.performDefaultHandling, nil)

@@ -50,7 +50,7 @@ final class WebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, W
     /// URLCredential 喂回去；否则走默认处理（http basic / digest 等服务端用不到的场景）。
     func webView(_ webView: WKWebView,
                  didReceive challenge: URLAuthenticationChallenge,
-                 completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+                 completionHandler: @escaping @MainActor @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         let space = challenge.protectionSpace
         let method = space.authenticationMethod
         let host = space.host

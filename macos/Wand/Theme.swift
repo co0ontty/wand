@@ -41,7 +41,8 @@ enum Theme {
 
 /// 实心珊瑚色主按钮，禁用态自动变淡。
 struct WandPrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
+    @MainActor
+    func makeBody(configuration: Configuration) -> Body {
         Body(configuration: configuration)
     }
 
@@ -67,6 +68,7 @@ struct WandPrimaryButtonStyle: ButtonStyle {
 
 /// 描边次按钮，用于「重新连接 / 取消」等次要动作。
 struct WandSecondaryButtonStyle: ButtonStyle {
+    @MainActor
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 14, weight: .medium))
