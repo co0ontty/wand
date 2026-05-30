@@ -1784,7 +1784,9 @@
         // isAnchored = 边栏占据布局空间（推开主内容）。桌面 pin 或 任意端窄条都算 anchored。
         var isMobile = isMobileLayout();
         var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
-        var isAnchored = isCollapsed || (!!state.sidebarPinned && !isMobile);
+        // 桌面端任何「可见」的侧栏都停靠（推开内容），绝不悬浮遮挡——避免主区被压到
+        // 侧栏下面。pinned 只表示「锁定常驻」，open 则是临时可见，两者都算停靠。
+        var isAnchored = isCollapsed || (!isMobile && (!!state.sidebarPinned || !!state.sessionsDrawerOpen));
         var collapsedCls = isCollapsed ? ' sidebar-collapsed' : '';
         var sidebarCollapsedCls = isCollapsed ? ' collapsed' : '';
         return '<div class="app-container">' +
@@ -1813,7 +1815,10 @@
                       '</button>' +
                     '</div>' +
                   '</div>' +
-                  '<button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? ' collapsed' : '') + '" type="button" title="' + (isCollapsed ? '展开侧栏' : '收起为窄条') + '" aria-label="' + (isCollapsed ? '展开侧栏' : '收起为窄条') + '">' +
+                  '<button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? ' pinned' : '') + '" type="button" title="' + (state.sidebarPinned ? '已固定常驻（点击解除锁定）' : '固定侧栏常驻') + '" aria-label="' + (state.sidebarPinned ? '解除固定常驻' : '固定侧栏常驻') + '" aria-pressed="' + (state.sidebarPinned ? 'true' : 'false') + '">' +
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg>' +
+                  '</button>' +
+                  '<button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? ' collapsed' : '') + '" type="button" title="' + (isCollapsed ? '展开为全尺寸' : '收起为窄条') + '" aria-label="' + (isCollapsed ? '展开为全尺寸' : '收起为窄条') + '">' +
                     (isCollapsed
                       ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>'
                       : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') +
@@ -3687,8 +3692,9 @@
       }
 
       function renderRecentGroup(entries) {
-        var html = '<section class="session-group">' +
-          '<div class="session-group-title">最近</div>';
+        // No "最近" group title here — the section intro ("最近的会话记录") above
+        // already labels this group, so a second label would be redundant.
+        var html = '<section class="session-group session-group--recent">';
         html += entries.map(function(e) {
           return e.kind === "session"
             ? renderSessionItem(e.ref, "sessions")
@@ -6258,6 +6264,8 @@
         if (closeDrawerBtn) closeDrawerBtn.addEventListener("click", closeSessionsDrawer);
         var collapseBtn = document.getElementById("sidebar-collapse-btn");
         if (collapseBtn) collapseBtn.addEventListener("click", toggleSidebarCollapsed);
+        var pinBtn = document.getElementById("sidebar-pin-btn");
+        if (pinBtn) pinBtn.addEventListener("click", toggleSidebarPin);
         var sidebarMoreBtn = document.getElementById("sidebar-more-btn");
         var sidebarOverflow = document.getElementById("sidebar-overflow-menu");
         if (sidebarMoreBtn && sidebarOverflow) {
@@ -9803,7 +9811,7 @@
         // 与 renderAppShell 保持一致：手机端只允许窄条形态 anchored。
         var isMobile = isMobileLayout();
         var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
-        var isAnchored = isCollapsed || (!!state.sidebarPinned && !isMobile);
+        var isAnchored = isCollapsed || (!isMobile && (!!state.sidebarPinned || !!state.sessionsDrawerOpen));
         if (drawer) {
           drawer.classList.toggle("pinned", isAnchored);
           drawer.classList.toggle("collapsed", isCollapsed);
@@ -9811,6 +9819,13 @@
         if (mainLayout) {
           mainLayout.classList.toggle("sidebar-pinned", isAnchored);
           mainLayout.classList.toggle("sidebar-collapsed", isCollapsed);
+        }
+        var pinBtn = document.getElementById("sidebar-pin-btn");
+        if (pinBtn) {
+          pinBtn.classList.toggle("pinned", !!state.sidebarPinned);
+          pinBtn.title = state.sidebarPinned ? "已固定常驻（点击解除锁定）" : "固定侧栏常驻";
+          pinBtn.setAttribute("aria-label", state.sidebarPinned ? "解除固定常驻" : "固定侧栏常驻");
+          pinBtn.setAttribute("aria-pressed", state.sidebarPinned ? "true" : "false");
         }
       }
 
@@ -10013,6 +10028,26 @@
         updateSessionsList();
         updateSidebarCollapseButton();
         hideCollapsedTileBubble();
+        scheduleTerminalRefitAfterPaddingTransition();
+      }
+
+      // 常驻（图钉）开关：把侧栏「留在原地」并排停靠 ⟷ 悬浮抽屉。
+      //   - 常驻 ON：停靠并推开内容；配合「收起为窄条」可在全尺寸/窄条间切换。
+      //   - 常驻 OFF：变为悬浮抽屉，交互时自动收起（非常驻）。
+      // 手机端不支持常驻（屏幕太窄），保持抽屉行为。
+      // 「图钉」只切换「是否锁定常驻」，绝不收起 / 隐藏侧栏——这是用户两次反馈的核心：
+      // 点图钉不该让侧栏消失，也不该把主区压到侧栏下面。
+      //   - 锁定（pinned）：常驻停靠，不会被「关闭(X)」一键收走的语义区分开。
+      //   - 解除锁定（unpinned）：仍然停靠可见（因为 isAnchored 把 open 也算停靠），
+      //     只是变成「可被 X 关闭」的临时态。
+      // 全尺寸 / 窄条由「收起为窄条」按钮控制，与图钉正交。
+      function toggleSidebarPin() {
+        if (isMobileLayout()) return;
+        state.sidebarPinned = !state.sidebarPinned;
+        // 关键：保持侧栏可见停靠，无论锁定与否，点图钉都不让它消失。
+        state.sessionsDrawerOpen = true;
+        try { localStorage.setItem("wand-sidebar-pinned", String(state.sidebarPinned)); } catch (e) {}
+        updateLayoutState();
         scheduleTerminalRefitAfterPaddingTransition();
       }
 
