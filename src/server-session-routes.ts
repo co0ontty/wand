@@ -751,6 +751,40 @@ export function registerSessionRoutes(
     }
   });
 
+  app.post("/api/codex-sessions/:threadId/resume", express.json(), async (req, res) => {
+    const threadId = String(req.params.threadId || "").trim();
+    const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean };
+    console.log("[WAND] POST /api/codex-sessions/:threadId/resume threadId:", threadId, "cwd:", body.cwd);
+    try {
+      if (!threadId) {
+        res.status(400).json({ error: "Codex 会话 ID 不能为空。" });
+        return;
+      }
+      const history = processes.listCodexHistorySessions().find((s) => s.claudeSessionId === threadId);
+      if (!history) {
+        res.status(400).json({ error: "对应的 Codex 历史会话不存在，无法恢复。" });
+        return;
+      }
+      const cwd = body.cwd?.trim() || history.cwd;
+      if (!cwd) {
+        res.status(400).json({ error: "无法确定工作目录 (cwd)，无法恢复。" });
+        return;
+      }
+      const newMode = normalizeMode(body.mode, defaultMode);
+      const snapshot = structured.createSession({
+        cwd,
+        mode: newMode,
+        provider: "codex",
+        runner: "codex-cli-exec",
+        worktreeEnabled: body.worktreeEnabled === true,
+        claudeSessionId: threadId,
+      });
+      onSessionCreated?.(cwd);
+      res.status(201).json({ resumedClaudeSessionId: threadId, ...snapshot });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法按 Codex 会话 ID 恢复会话。") });
+    }
+  });
   app.post("/api/sessions/:id/resize", (req, res) => {
     const body = req.body as ResizeRequest;
     try {
@@ -947,6 +981,82 @@ export function registerClaudeHistoryRoutes(app: Express, processes: ProcessMana
 
       const deleted = processes.deleteClaudeHistoryFiles(toDelete);
       removeFromHiddenClaudeSessionIds(storage, toDelete.map((s) => s.claudeSessionId));
+
+      if (toHide.length > 0) {
+        const hidden = getHiddenClaudeSessionIds(storage);
+        let added = 0;
+        for (const id of toHide) {
+          if (!hidden.has(id)) {
+            hidden.add(id);
+            added++;
+          }
+        }
+        if (added > 0) saveHiddenClaudeSessionIds(storage, hidden);
+      }
+
+      res.json({ ok: true, deleted: deleted + toHide.length });
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "无法批量删除历史会话。") });
+    }
+  });
+
+  // ── Codex history（~/.codex/sessions/ 扫描，对齐 Claude 历史区） ──
+  // codex 历史的"恢复"是新建一个结构化 codex 会话并预填 thread id（存进 claudeSessionId
+  // 字段），用户发第一条消息时 buildCodexArgs 自动拼 `codex exec ... resume <thread_id>`。
+  // hidden 集合与 claude 共用（id 全局唯一，不会冲突）。
+
+  app.get("/api/codex-history", (_req, res) => {
+    try {
+      const sessions = processes.listCodexHistorySessions();
+      const hidden = getHiddenClaudeSessionIds(storage);
+      const filtered = hidden.size > 0
+        ? sessions.filter((s) => !hidden.has(s.claudeSessionId))
+        : sessions;
+      res.json(filtered);
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "无法扫描 Codex 历史会话。") });
+    }
+  });
+
+  app.delete("/api/codex-history/:threadId", (req, res) => {
+    const threadId = req.params.threadId?.trim();
+    if (!threadId) {
+      res.status(400).json({ error: "会话 ID 不能为空。" });
+      return;
+    }
+    const exists = processes.listCodexHistorySessions().some((s) => s.claudeSessionId === threadId);
+    if (exists) {
+      processes.deleteCodexHistoryFiles([threadId]);
+      removeFromHiddenClaudeSessionIds(storage, [threadId]);
+    } else {
+      const hidden = getHiddenClaudeSessionIds(storage);
+      if (!hidden.has(threadId)) {
+        hidden.add(threadId);
+        saveHiddenClaudeSessionIds(storage, hidden);
+      }
+    }
+    res.json({ ok: true });
+  });
+
+  app.post("/api/codex-history/batch-delete", express.json(), (req, res) => {
+    const threadIds = Array.isArray(req.body?.claudeSessionIds)
+      ? req.body.claudeSessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+    if (threadIds.length === 0) {
+      res.status(400).json({ error: "至少提供一个历史会话 ID。" });
+      return;
+    }
+    try {
+      const existing = new Set(processes.listCodexHistorySessions().map((s) => s.claudeSessionId));
+      const toDelete: string[] = [];
+      const toHide: string[] = [];
+      for (const id of threadIds) {
+        if (existing.has(id)) toDelete.push(id);
+        else toHide.push(id);
+      }
+
+      const deleted = processes.deleteCodexHistoryFiles(toDelete);
+      removeFromHiddenClaudeSessionIds(storage, toDelete);
 
       if (toHide.length > 0) {
         const hidden = getHiddenClaudeSessionIds(storage);

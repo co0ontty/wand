@@ -410,6 +410,181 @@ function listAllClaudeHistorySessions(): ClaudeHistorySession[] {
   }
 }
 
+// ── Codex history (~/.codex/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl) ──
+//
+// Codex 把每个会话写成 rollout JSONL，首行是 session_meta，payload.id 即 thread id
+// （UUID v7），payload.cwd 即工作目录。wand 用 SessionSnapshot.claudeSessionId 字段
+// 复用存 codex 的 thread id，因此这里的 CodexHistorySession 形状与 ClaudeHistorySession
+// 对齐，前端历史区组件可直接复用。
+
+/** A Codex session discovered by scanning ~/.codex/sessions/ rollout files. */
+export interface CodexHistorySession {
+  /** Codex thread id（存进 claudeSessionId 字段以复用前端/路由）。 */
+  claudeSessionId: string;
+  cwd: string;
+  firstUserMessage: string;
+  timestamp: string;
+  mtimeMs: number;
+  hasConversation: boolean;
+  managedByWand: boolean;
+  provider: "codex";
+}
+
+function getCodexSessionsDir(): string {
+  return path.join(os.homedir(), ".codex", "sessions");
+}
+
+/**
+ * codex 的 user message 里混杂了系统注入（AGENTS.md 指令、<environment_context> 等
+ * XML 包裹块），它们都以 "#" 或 "<" 开头。真正的用户输入是首条不以这两者开头的
+ * input_text。
+ */
+function isCodexSystemInjectedText(text: string): boolean {
+  const trimmed = text.trimStart();
+  return trimmed.startsWith("#") || trimmed.startsWith("<");
+}
+
+/**
+ * Read the head of a rollout file to extract summary metadata. Codex prepends a
+ * large session_meta (full base_instructions + AGENTS.md + <environment_context>)
+ * before the first real user turn, so a small window misses it. 64KB covers the
+ * first real user message in every observed session.
+ */
+function readCodexSessionSummary(filePath: string): CodexHistorySession | null {
+  try {
+    const stats = statSync(filePath);
+    const fd = openSync(filePath, "r");
+    const buffer = Buffer.alloc(65536);
+    const bytesRead = readSync(fd, buffer, 0, 65536, 0);
+    closeSync(fd);
+    const chunk = buffer.toString("utf8", 0, bytesRead);
+    const lines = chunk.split("\n").filter((line) => line.trim().length > 0);
+
+    let id = "";
+    let cwd = "";
+    let timestamp = "";
+    let firstUserMessage = "";
+    let hasUser = false;
+    let hasAssistant = false;
+
+    for (const line of lines) {
+      let parsed: {
+        type?: string;
+        timestamp?: string;
+        payload?: {
+          type?: string;
+          id?: string;
+          cwd?: string;
+          role?: string;
+          content?: Array<{ type?: string; text?: string }>;
+        };
+      };
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!timestamp && parsed.timestamp) {
+        timestamp = parsed.timestamp;
+      }
+      const payload = parsed.payload;
+      if (!payload) continue;
+
+      if (parsed.type === "session_meta" || payload.type === "session_meta") {
+        if (!id && typeof payload.id === "string") id = payload.id;
+        if (!cwd && typeof payload.cwd === "string") cwd = payload.cwd;
+        continue;
+      }
+
+      if (payload.type === "message" && payload.role === "user") {
+        const text = Array.isArray(payload.content)
+          ? payload.content
+              .filter((b) => b?.type === "input_text" && typeof b.text === "string")
+              .map((b) => b.text as string)
+              .join("")
+          : "";
+        if (text.trim()) {
+          hasUser = true;
+          if (!firstUserMessage && !isCodexSystemInjectedText(text)) {
+            firstUserMessage = text.trim().slice(0, 120);
+          }
+        }
+      } else if (payload.type === "message" && payload.role === "assistant") {
+        hasAssistant = true;
+      }
+    }
+
+    if (!id) return null;
+
+    return {
+      claudeSessionId: id,
+      cwd,
+      firstUserMessage,
+      timestamp: timestamp || new Date(stats.mtimeMs).toISOString(),
+      mtimeMs: stats.mtimeMs,
+      hasConversation: hasUser && hasAssistant,
+      managedByWand: false,
+      provider: "codex",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Recursively collect rollout-*.jsonl paths under ~/.codex/sessions/. */
+function listCodexRolloutFiles(): string[] {
+  const root = getCodexSessionsDir();
+  try {
+    return readdirSync(root, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile()
+        && entry.name.startsWith("rollout-")
+        && entry.name.endsWith(".jsonl"))
+      .map((entry) => {
+        // Node ≥ 20 dirents from a recursive read carry parentPath/path.
+        const parent = (entry as { parentPath?: string; path?: string }).parentPath
+          ?? (entry as { path?: string }).path
+          ?? root;
+        return path.join(parent, entry.name);
+      });
+  } catch {
+    return [];
+  }
+}
+
+/** Scan ~/.codex/sessions/ and return one entry per thread id (newest rollout wins). */
+function listAllCodexHistorySessions(): CodexHistorySession[] {
+  const files = listCodexRolloutFiles();
+  // 同一 thread 同一天可能有多个 rollout 文件，按 thread id 去重保留 mtime 最新。
+  const byThread = new Map<string, CodexHistorySession>();
+  for (const filePath of files) {
+    const summary = readCodexSessionSummary(filePath);
+    if (!summary) continue;
+    const existing = byThread.get(summary.claudeSessionId);
+    if (!existing || summary.mtimeMs > existing.mtimeMs) {
+      byThread.set(summary.claudeSessionId, summary);
+    }
+  }
+  return Array.from(byThread.values()).sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+/** Delete every rollout file belonging to the given codex thread ids. */
+function deleteCodexRolloutFiles(threadIds: Set<string>): number {
+  if (threadIds.size === 0) return 0;
+  let deleted = 0;
+  for (const filePath of listCodexRolloutFiles()) {
+    const summary = readCodexSessionSummary(filePath);
+    if (summary && threadIds.has(summary.claudeSessionId)) {
+      try {
+        unlinkSync(filePath);
+        deleted++;
+      } catch {
+        // Best-effort — file may already be gone
+      }
+    }
+  }
+  return deleted;
+}
+
 function snapshotMessages(record: Pick<SessionRecord, "ptyBridge" | "messages">): ConversationTurn[] {
   return record.ptyBridge?.getMessages() ?? record.messages;
 }
@@ -1055,6 +1230,47 @@ export class ProcessManager extends EventEmitter {
     }
     if (sessions.length > 0) {
       this.claudeHistoryCache = null;
+    }
+    return deleted;
+  }
+
+  private codexHistoryCache: { data: CodexHistorySession[]; expiresAt: number } | null = null;
+
+  listCodexHistorySessions(): CodexHistorySession[] {
+    const now = Date.now();
+    if (this.codexHistoryCache && now < this.codexHistoryCache.expiresAt) {
+      return this.codexHistoryCache.data;
+    }
+
+    const allSessions = listAllCodexHistorySessions();
+
+    // Cross-reference with wand-managed sessions（codex 的 thread id 存在 claudeSessionId 字段）
+    const managedIds = new Set<string>();
+    for (const record of this.sessions.values()) {
+      if (record.provider === "codex" && record.claudeSessionId) {
+        managedIds.add(record.claudeSessionId);
+      }
+    }
+    for (const session of allSessions) {
+      if (managedIds.has(session.claudeSessionId)) {
+        session.managedByWand = true;
+      }
+    }
+
+    this.codexHistoryCache = { data: allSessions, expiresAt: now + ProcessManager.HISTORY_CACHE_TTL_MS };
+    return allSessions;
+  }
+
+  hasCodexSessionFile(threadId: string): boolean {
+    if (!UUID_V4_PATTERN.test(threadId)) return false;
+    return listAllCodexHistorySessions().some((s) => s.claudeSessionId === threadId);
+  }
+
+  deleteCodexHistoryFiles(threadIds: string[]): number {
+    const valid = new Set(threadIds.filter((id) => UUID_V4_PATTERN.test(id)));
+    const deleted = deleteCodexRolloutFiles(valid);
+    if (valid.size > 0) {
+      this.codexHistoryCache = null;
     }
     return deleted;
   }

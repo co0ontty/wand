@@ -370,6 +370,10 @@
         sessionsManageMode: false,
         selectedSessionIds: {},
         selectedClaudeHistoryIds: {},
+        codexHistory: [],
+        codexHistoryLoaded: false,
+        codexHistoryExpandedDirs: {},
+        selectedCodexHistoryIds: {},
         askUserSelections: {},  // { toolUseId: { 0: [optIdx...], submitted: false } }
         queueEpoch: 0,  // Monotonic counter for queue state freshness
         pendingAttachments: [],  // [{ file, previewUrl, name, size }]
@@ -2358,6 +2362,10 @@
           state.quickCommitForm.makeTag = tagCb.checked;
           var row = document.getElementById("quick-commit-tag-row");
           if (row) row.classList.toggle("hidden", !tagCb.checked);
+          if (tagCb.checked) {
+            var input = document.getElementById("quick-commit-tag");
+            if (input) setTimeout(function() { input.focus(); }, 0);
+          }
         });
         var tagInput = document.getElementById("quick-commit-tag");
         if (tagInput) tagInput.addEventListener("input", function() {
@@ -2485,9 +2493,8 @@
               state.quickCommitForm.customMessage = aiMessage;
             }
             var currentTag = (state.quickCommitForm.tag || "").trim();
-            if (!currentTag && aiTag) {
+            if (state.quickCommitForm.makeTag && !currentTag && aiTag) {
               state.quickCommitForm.tag = aiTag;
-              state.quickCommitForm.makeTag = true;
             }
           })
           .catch(function(error) {
@@ -2848,19 +2855,21 @@
             '<div class="qc-files-wrap">' + fileRows + '</div>' +
             '<div class="qc-message-row" id="quick-commit-message-row">' +
               '<div class="qc-message-header"><label class="field-label" for="quick-commit-message">commit message</label>' +
-                '<button type="button" id="quick-commit-ai-btn" class="btn btn-ghost btn-sm"' + (state.quickCommitGenerating ? ' disabled' : '') + '>' + (state.quickCommitGenerating ? '生成中…' : 'AI 生成') + '</button>' +
+                '<div class="qc-ai-controls">' +
+                  '<button type="button" id="quick-commit-ai-btn" class="btn btn-ghost btn-sm"' + (state.quickCommitGenerating ? ' disabled' : '') + '>' + (state.quickCommitGenerating ? '生成中…' : 'AI 生成') + '</button>' +
+                  '<label class="qc-ai-tag-toggle" title="开启后，AI 会一并建议 tag，提交时会为本次 commit 打 tag">' +
+                    '<span class="qc-ai-tag-label">含 tag</span>' +
+                    '<span class="qc-switch qc-switch--compact">' +
+                      '<input type="checkbox" id="quick-commit-make-tag" class="switch-toggle" aria-label="同时为本次 commit 打 tag"' + (f.makeTag ? ' checked' : '') + ((state.quickCommitSubmitting || state.quickCommitGenerating) ? ' disabled' : '') + '>' +
+                      '<span class="switch-slider"></span>' +
+                    '</span>' +
+                  '</label>' +
+                '</div>' +
               '</div>' +
               '<textarea id="quick-commit-message" class="field-input" rows="2" placeholder="输入 commit message 或点击 AI 生成"' + (state.quickCommitSubmitting ? ' disabled' : '') + '>' + escapeHtml(f.customMessage || "") + '</textarea>' +
             '</div>' +
-            '<div class="qc-checkbox-row">' +
-              '<label class="qc-checkbox-label" for="quick-commit-make-tag">同时为本次 commit 打 tag</label>' +
-              '<label class="qc-switch">' +
-                '<input type="checkbox" id="quick-commit-make-tag" class="switch-toggle"' + (f.makeTag ? ' checked' : '') + '>' +
-                '<span class="switch-slider"></span>' +
-              '</label>' +
-            '</div>' +
             '<div class="qc-tag-row' + (f.makeTag ? '' : ' hidden') + '" id="quick-commit-tag-row">' +
-              '<input type="text" id="quick-commit-tag" class="field-input" placeholder="输入 tag 名称；留空将由 AI 在提交时自动生成" value="' + escapeHtml(f.tag || "") + '"' + (state.quickCommitSubmitting ? ' disabled' : '') + '>' +
+              '<input type="text" id="quick-commit-tag" class="field-input" placeholder="输入 tag 名称；留空则提交时由 AI 自动生成" value="' + escapeHtml(f.tag || "") + '"' + (state.quickCommitSubmitting ? ' disabled' : '') + '>' +
             '</div>' +
             (state.quickCommitError ? '<p class="error-message">' + escapeHtml(state.quickCommitError) + '</p>' : '') +
             '<div class="qc-section-actions">' +
@@ -3640,7 +3649,9 @@
         var visibleHistory = getClaudeHistoryRegionItems();
         var expanded = !!state.claudeHistoryExpanded;
         var loaded = !!state.claudeHistoryLoaded;
-        var count = loaded ? visibleHistory.length : 0;
+        var codexVisible = getVisibleCodexHistorySessions();
+        var codexLoaded = !!state.codexHistoryLoaded;
+        var count = (loaded ? visibleHistory.length : 0) + (codexLoaded ? codexVisible.length : 0);
 
         var badgeCls = "history-bubble";
         var badgeContent;
@@ -3666,7 +3677,7 @@
         '</button>';
 
         var body = expanded
-          ? '<div class="sidebar-history-body" id="sidebar-history-body">' + renderClaudeHistoryBodyContent(visibleHistory) + '</div>'
+          ? '<div class="sidebar-history-body" id="sidebar-history-body">' + renderClaudeHistoryBodyContent(visibleHistory) + renderCodexHistoryBodyContent(codexVisible) + '</div>'
           : '';
 
         return header + body;
@@ -3897,6 +3908,44 @@
         });
       }
 
+      function renderCodexHistoryDirectoryHeader(cwd, cwdShort, count, isExpanded) {
+        var chevron = isExpanded ? "\u25be" : "\u25b8";
+        return '<div class="claude-history-directory-header codex-history-directory-header" data-action="toggle-codex-history-directory" data-cwd="' + escapeHtml(cwd) + '" role="button" tabindex="0">' +
+          '<div class="session-group-title claude-history-directory-title">' +
+            '<span class="chevron">' + chevron + '</span>' +
+            '<span class="claude-history-directory-label">' + escapeHtml(cwdShort) + ' (' + count + ')</span>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function renderCodexHistoryBodyContent(visibleHistory) {
+        if (!state.codexHistoryLoaded) {
+          return '<div class="claude-history-loading">\u626b\u63cf Codex \u5386\u53f2\u4f1a\u8bdd\u4e2d\u2026</div>';
+        }
+        if (visibleHistory.length === 0) {
+          return '';
+        }
+        var groups = {};
+        var groupOrder = [];
+        visibleHistory.forEach(function(s) {
+          if (!groups[s.cwd]) {
+            groups[s.cwd] = [];
+            groupOrder.push(s.cwd);
+          }
+          groups[s.cwd].push(s);
+        });
+        var listHtml = '<div class="sidebar-history-section-label">Codex</div>';
+        groupOrder.forEach(function(cwd) {
+          var cwdShort = cwd.split("/").filter(Boolean).slice(-3).join("/");
+          var isDirExpanded = !!state.codexHistoryExpandedDirs[cwd];
+          listHtml += renderCodexHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length, isDirExpanded);
+          if (isDirExpanded) {
+            listHtml += groups[cwd].map(function(session) { return renderClaudeHistoryItem(session, "codex"); }).join("");
+          }
+        });
+        return '<div class="sidebar-history-scroll codex-history-scroll">' + listHtml + '</div>';
+      }
+
       function renderClaudeHistoryDirectoryHeader(cwd, cwdShort, count, isExpanded) {
         var chevron = isExpanded ? "&#9662;" : "&#9656;";
         return '<div class="claude-history-directory-header" data-action="toggle-history-directory" data-cwd="' + escapeHtml(cwd) + '" role="button" tabindex="0">' +
@@ -3910,19 +3959,23 @@
       }
 
       function renderClaudeHistoryItem(session, kind) {
+        var isCodex = kind === "codex";
+        var rAct = isCodex ? "resume-codex-history" : "resume-history";
+        var dAct = isCodex ? "delete-codex-history" : "delete-history";
+        var selMap = isCodex ? state.selectedCodexHistoryIds : state.selectedClaudeHistoryIds;
         var shortId = session.claudeSessionId.slice(0, 8);
         var preview = session.firstUserMessage || "(空会话)";
         var timeStr = formatHistoryTime(session.timestamp);
         var checkbox = renderManageCheckbox(kind, session.claudeSessionId, "选择历史会话 " + preview);
         var deleteButton = state.sessionsManageMode ? '' :
-          '<button class="session-action-btn delete-btn" data-action="delete-history" data-claude-session-id="' +
+          '<button class="session-action-btn delete-btn" data-action="' + dAct + '" data-claude-session-id="' +
           session.claudeSessionId + '" type="button" aria-label="删除会话" title="隐藏此历史会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
         var resumeButton = state.sessionsManageMode ? '' :
-          '<button class="session-action-btn" data-action="resume-history" data-claude-session-id="' +
+          '<button class="session-action-btn" data-action="' + rAct + '" data-claude-session-id="' +
           session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) +
-          '" type="button" aria-label="恢复会话" title="恢复此 Claude 历史会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
+          '" type="button" aria-label="恢复会话" title="' + (isCodex ? "恢复此 Codex 历史会话" : "恢复此 Claude 历史会话") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
 
-        return '<div class="session-item claude-history-item' + (state.sessionsManageMode && state.selectedClaudeHistoryIds[session.claudeSessionId] ? ' selected' : '') + '" data-claude-history-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
+        return '<div class="session-item claude-history-item' + (state.sessionsManageMode && selMap[session.claudeSessionId] ? ' selected' : '') + '" data-claude-history-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +
               checkbox +
@@ -3980,6 +4033,7 @@
       // 且在已加载时立即 resolve。
       var _claudeHistoryLoadingPromise = null;
       function ensureClaudeHistoryLoaded() {
+        ensureCodexHistoryLoaded();
         if (state.claudeHistoryLoaded) return Promise.resolve();
         if (_claudeHistoryLoadingPromise) return _claudeHistoryLoadingPromise;
         _claudeHistoryLoadingPromise = loadClaudeHistory().then(function() {
@@ -3988,6 +4042,46 @@
           _claudeHistoryLoadingPromise = null;
         });
         return _claudeHistoryLoadingPromise;
+      }
+
+      function loadCodexHistory() {
+        return fetch("/api/codex-history", { credentials: "same-origin" })
+          .then(function(res) {
+            if (!res.ok) return [];
+            return res.json();
+          })
+          .then(function(sessions) {
+            state.codexHistory = sessions || [];
+            state.codexHistoryLoaded = true;
+            updateSessionsList();
+          })
+          .catch(function() {
+            state.codexHistoryLoaded = true;
+            state.codexHistory = [];
+            updateSessionsList();
+          });
+      }
+
+      var _codexHistoryLoadingPromise = null;
+      function ensureCodexHistoryLoaded() {
+        if (state.codexHistoryLoaded) return Promise.resolve();
+        if (_codexHistoryLoadingPromise) return _codexHistoryLoadingPromise;
+        _codexHistoryLoadingPromise = loadCodexHistory().then(function() {
+          _codexHistoryLoadingPromise = null;
+        }, function() {
+          _codexHistoryLoadingPromise = null;
+        });
+        return _codexHistoryLoadingPromise;
+      }
+
+      function getVisibleCodexHistorySessions() {
+        var managedIds = new Set();
+        state.sessions.forEach(function(s) {
+          if (s.claudeSessionId) managedIds.add(s.claudeSessionId);
+        });
+        return state.codexHistory.filter(function(s) {
+          return s.hasConversation && !s.managedByWand && !managedIds.has(s.claudeSessionId);
+        });
       }
 
       function isMobileLayout() {
@@ -7244,6 +7338,14 @@
             handleResumeAction(actionButton);
           } else if (actionButton.dataset.action === "resume-history" && actionButton.dataset.claudeSessionId) {
             handleResumeHistoryAction(actionButton);
+          } else if (actionButton.dataset.action === "resume-codex-history" && actionButton.dataset.claudeSessionId) {
+            handleResumeCodexHistoryAction(actionButton);
+          } else if (actionButton.dataset.action === "delete-codex-history" && actionButton.dataset.claudeSessionId) {
+            handleDeleteCodexHistoryAction(actionButton);
+          } else if (actionButton.dataset.action === "toggle-codex-history-directory" && actionButton.dataset.cwd) {
+            var codexDirCwd = actionButton.dataset.cwd;
+            state.codexHistoryExpandedDirs[codexDirCwd] = !state.codexHistoryExpandedDirs[codexDirCwd];
+            updateSessionsList();
           } else if (actionButton.dataset.action === "worktree-merge" && actionButton.dataset.sessionId) {
             openWorktreeMergeModal(actionButton.dataset.sessionId);
           } else if (actionButton.dataset.action === "worktree-cleanup" && actionButton.dataset.sessionId) {
@@ -14641,6 +14743,81 @@
         resumeSessionFromList(actionButton.dataset.sessionId)
           .finally(function() {
             actionButton.disabled = false;
+          });
+      }
+
+      function handleResumeCodexHistoryAction(actionButton) {
+        var threadId = actionButton.dataset.claudeSessionId;
+        var cwd = actionButton.dataset.cwd;
+        console.log("[WAND] handleResumeCodexHistoryAction threadId:", threadId, "cwd:", cwd);
+        if (!threadId) return;
+        actionButton.disabled = true;
+        resumeCodexHistorySession(threadId, cwd)
+          .then(function(data) {
+            if (data && data.id) {
+              state.codexHistory = state.codexHistory.filter(function(s) {
+                return s.claudeSessionId !== threadId;
+              });
+              state.selectedId = data.id;
+              persistSelectedId();
+              state.drafts[data.id] = "";
+              activateSession(data).then(function() {
+                dismissDrawerIfOverlay();
+              });
+            }
+          })
+          .finally(function() {
+            actionButton.disabled = false;
+          });
+      }
+
+      function resumeCodexHistorySession(threadId, cwd) {
+        return fetch("/api/codex-sessions/" + encodeURIComponent(threadId) + "/resume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(withTerminalDimensions({
+            mode: state.chatMode || (state.config && state.config.defaultMode) || "default",
+            cwd: cwd
+          }))
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            showToast(data.error, "error");
+            return null;
+          }
+          return data;
+        })
+        .catch(function(error) {
+          showToast((error && error.message) || "无法恢复历史会话。", "error");
+          return null;
+        });
+      }
+
+      function handleDeleteCodexHistoryAction(actionButton) {
+        var threadId = actionButton.dataset.claudeSessionId;
+        if (!threadId) return;
+        console.log("[WAND] handleDeleteCodexHistoryAction threadId:", threadId);
+        var item = actionButton.closest(".claude-history-item");
+        if (item) item.style.opacity = "0.5";
+        fetch("/api/codex-history/" + encodeURIComponent(threadId), {
+          method: "DELETE",
+          credentials: "same-origin"
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && data.ok) {
+              state.codexHistory = state.codexHistory.filter(function(s) {
+                return s.claudeSessionId !== threadId;
+              });
+              updateSessionsList();
+            } else if (item) {
+              item.style.opacity = "1";
+            }
+          })
+          .catch(function() {
+            if (item) item.style.opacity = "1";
           });
       }
 

@@ -30,6 +30,13 @@ interface CreateStructuredSessionOptions {
   model?: string;
   /** 用户预设的思考深度。留空 / null 视为 off。 */
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
+  /**
+   * 恢复用的初始会话 id：
+   *   - Codex：历史 thread id，首条消息即 `codex exec ... resume <id>` 续接。
+   *   - Claude：历史 session id，首条消息即 `--resume` / SDK resume 续接。
+   * 留空表示新建会话。
+   */
+  claudeSessionId?: string;
 }
 
 function defaultStructuredRunner(provider: SessionProvider): SessionRunner {
@@ -648,7 +655,7 @@ export class StructuredSessionManager {
       output: "",
       archived: false,
       archivedAt: null,
-      claudeSessionId: null,
+      claudeSessionId: options.claudeSessionId?.trim() || null,
       messages: [],
       queuedMessages: [],
       structuredState: {

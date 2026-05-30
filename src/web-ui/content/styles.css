@@ -1351,6 +1351,14 @@
       text-align: center;
       font-style: italic;
     }
+    .sidebar-history-section-label {
+      padding: 8px 10px 4px 10px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      opacity: 0.5;
+    }
     .claude-history-directory-header {
       margin-top: 6px;
       cursor: pointer;
