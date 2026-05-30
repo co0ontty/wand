@@ -1,0 +1,57 @@
+name: Beta Branch
+
+# 每次 push 到 master，预编译并把含 dist/ 的产物 force-push 到 `beta` 分支。
+# 服务端 Beta 通道更新 = `npm install -g github:co0ontty/wand#beta`：beta 分支已带
+# 预编译 dist、且无 prepare 脚本 → npm 直接安装、免现场构建、免装 devDeps。
+# 用内置 GITHUB_TOKEN 推同仓库分支，无需任何额外 secret。
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta-branch
+  cancel-in-progress: true
+
+jobs:
+  build-and-push-beta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (stamp beta channel)
+        run: npm run build
+        env:
+          # 让 scripts/stamp-build-info.js 写 channel=beta、commit=master HEAD。
+          WAND_BUILD_CHANNEL: beta
+
+      - name: Publish prebuilt dist to beta branch
+        env:
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "github-actions[bot]@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "github-actions[bot]"
+          GIT_COMMITTER_EMAIL: "github-actions[bot]@users.noreply.github.com"
+        run: |
+          set -euo pipefail
+          SRC_SHA="$(git rev-parse HEAD)"
+          # 基于当前 master 工作树重置 beta 分支，force-add 预编译 dist（master 的
+          # .gitignore 忽略 dist，所以必须 -f）。每次都是一个全新 commit + force push，
+          # beta 分支永远 = 最新 master + 对应 dist。
+          git checkout -B beta
+          git add -f dist
+          git commit -m "beta build from ${SRC_SHA}" --no-verify || echo "nothing to commit"
+          git push --force origin beta

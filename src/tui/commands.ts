@@ -11,7 +11,8 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { installPackageGloballySync } from "../npm-update-utils.js";
+import { installPackageGloballySync, resolveGlobalWandCli } from "../npm-update-utils.js";
+import { computeRelaunch } from "../relaunch.js";
 
 export interface CommandResult {
   ok: boolean;
@@ -32,7 +33,17 @@ const PACKAGE_NAME = "@co0ontty/wand";
  */
 export function restartSelf(): CommandResult {
   try {
-    const child = spawn(process.execPath, process.argv.slice(1), {
+    const plan = computeRelaunch({
+      serviceInstalled: isServiceInstalled(),
+      globalCli: resolveGlobalWandCli(),
+    });
+    if (plan.mode === "exit-only") {
+      // systemd 托管：仅退出，交给 Restart=always 用 unit 里的 ExecStart 拉起，
+      // 避免再 spawn 一个 detached 子进程与 systemd 抢单实例 pidfile。
+      setTimeout(() => process.exit(0), 200);
+      return { ok: true, message: "重启中…交由 systemd 拉起" };
+    }
+    const child = spawn(process.execPath, [plan.bin ?? "", ...(plan.args ?? [])], {
       detached: true,
       stdio: "inherit",
       env: process.env,
@@ -168,6 +179,12 @@ export interface ServiceContext {
   wandBin?: string;
   /** 显式指定作用域。不传走 DEFAULT_SERVICE_SCOPE。 */
   scope?: ServiceScope;
+  /**
+   * 更新后自修复场景：优先把 ExecStart 钉到「全局安装的 wand」(npm root -g 下的
+   * dist/cli.js)，而不是 process.argv[1]。源码安装的用户更新到 npm/GitHub 版后，
+   * argv[1] 仍是旧源码路径，沿用它会让重启跑回旧二进制。
+   */
+  preferGlobalBin?: boolean;
 }
 
 export interface ServiceOpts {
@@ -187,7 +204,7 @@ function isRoot(): boolean {
 }
 
 /** 自动检测哪个 scope 已经装了 unit；优先 system，找不到就 user。两个都没装返回 null。 */
-function detectInstalledScope(): ServiceScope | null {
+export function detectInstalledScope(): ServiceScope | null {
   if (existsSync(servicePathFor("system"))) return "system";
   if (existsSync(servicePathFor("user"))) return "user";
   return null;
@@ -483,6 +500,11 @@ function servicePathFor(scope: ServiceScope): string {
 }
 
 function resolveWandBin(ctx: ServiceContext): string {
+  // 更新后自修复：优先全局安装的 dist/cli.js，避免沿用旧源码路径。
+  if (ctx.preferGlobalBin) {
+    const global = resolveGlobalWandCli();
+    if (global) return global;
+  }
   if (ctx.wandBin && existsSync(ctx.wandBin)) return ctx.wandBin;
   const argv1 = process.argv[1];
   if (argv1 && existsSync(argv1)) return argv1;

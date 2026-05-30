@@ -36,7 +36,10 @@ import { SessionLogger } from "./session-logger.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
 import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
-import { installPackageGloballyAsync } from "./npm-update-utils.js";
+import { installPackageGloballyAsync, resolveGlobalWandCli } from "./npm-update-utils.js";
+import { repairServiceUnitAfterUpdate } from "./service-self-repair.js";
+import { computeRelaunch } from "./relaunch.js";
+import { isServiceInstalled } from "./tui/commands.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
@@ -146,6 +149,96 @@ function compareSemver(a: string, b: string): number {
     }
   }
   return 0;
+}
+
+// ── Build info (构建时打入的 commit SHA) + Beta 通道 ──
+
+interface WandBuildInfo {
+  commit: string | null;
+  builtAt: string | null;
+  version: string | null;
+  channel: string | null;
+}
+
+/** 读取 dist/build-info.json（由 scripts/stamp-build-info.js 在 build 时生成）。 */
+function readBuildInfo(): WandBuildInfo {
+  try {
+    const raw = readFileSync(path.join(SERVER_MODULE_DIR, "build-info.json"), "utf8");
+    const j = JSON.parse(raw) as Partial<WandBuildInfo>;
+    return {
+      commit: typeof j.commit === "string" && j.commit ? j.commit : null,
+      builtAt: typeof j.builtAt === "string" && j.builtAt ? j.builtAt : null,
+      version: typeof j.version === "string" && j.version ? j.version : null,
+      channel: typeof j.channel === "string" && j.channel ? j.channel : null,
+    };
+  } catch {
+    // dev（tsx 跑 src/）或老版本（无此文件）时降级为全 null。
+    return { commit: null, builtAt: null, version: null, channel: null };
+  }
+}
+
+const BUILD_INFO = readBuildInfo();
+
+// owner/repo（从 PKG_REPO_URL 派生），用于拼 beta 分支 raw 地址与 git 安装 spec。
+const PKG_REPO_SLUG = PKG_REPO_URL.replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "");
+const BETA_BRANCH = "beta";
+const BETA_BUILD_INFO_URL = `https://raw.githubusercontent.com/${PKG_REPO_SLUG}/${BETA_BRANCH}/dist/build-info.json`;
+const BETA_INSTALL_SPEC = `github:${PKG_REPO_SLUG}#${BETA_BRANCH}`;
+
+interface BetaUpdateInfo {
+  channel: "beta";
+  /** 当前构建的 short sha（或 "unknown"）。 */
+  current: string;
+  /** 远端 beta 分支的 short sha（或 "unknown"）。 */
+  latest: string;
+  updateAvailable: boolean;
+  localCommit: string | null;
+  remoteCommit: string | null;
+  remoteBuiltAt: string | null;
+}
+
+let cachedBetaInfo: BetaUpdateInfo | null = null;
+let betaCacheTs = 0;
+
+/**
+ * 通过 beta 分支的 dist/build-info.json 判定 beta 更新。
+ * 比对本地构建 commit 与远端 commit（两者记录的都是「构建源自的 master commit」）。
+ * 取不到远端 → updateAvailable=false（不冒进）。
+ */
+async function checkBetaUpdate(forceRefresh = false): Promise<BetaUpdateInfo> {
+  const now = Date.now();
+  if (!forceRefresh && cachedBetaInfo && now - betaCacheTs < CACHE_TTL_MS) {
+    return cachedBetaInfo;
+  }
+  const localCommit = BUILD_INFO.commit;
+  let remoteCommit: string | null = null;
+  let remoteBuiltAt: string | null = null;
+  try {
+    const resp = await fetch(BETA_BUILD_INFO_URL, {
+      headers: { "User-Agent": "wand-server", Accept: "application/json" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (resp.ok) {
+      const j = (await resp.json()) as Partial<WandBuildInfo>;
+      remoteCommit = typeof j.commit === "string" && j.commit ? j.commit : null;
+      remoteBuiltAt = typeof j.builtAt === "string" && j.builtAt ? j.builtAt : null;
+    }
+  } catch {
+    /* 网络失败：保持 null，下面判定为无更新 */
+  }
+  const short = (c: string | null): string => (c ? c.slice(0, 7) : "unknown");
+  const info: BetaUpdateInfo = {
+    channel: "beta",
+    current: short(localCommit),
+    latest: short(remoteCommit),
+    updateAvailable: !!remoteCommit && remoteCommit !== localCommit,
+    localCommit,
+    remoteCommit,
+    remoteBuiltAt,
+  };
+  cachedBetaInfo = info;
+  betaCacheTs = now;
+  return info;
 }
 
 // ── Android APK update check cache ──
@@ -1318,6 +1411,13 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       hasCert: existsSync(certPaths.keyPath) && existsSync(certPaths.certPath),
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
+      updateChannel: getUpdateChannel(),
+      build: {
+        commit: BUILD_INFO.commit,
+        shortCommit: BUILD_INFO.commit ? BUILD_INFO.commit.slice(0, 7) : null,
+        builtAt: BUILD_INFO.builtAt,
+        channel: BUILD_INFO.channel,
+      },
       autoUpdate: {
         web: storage.getConfigValue("autoUpdateWeb") === "true",
         apk: storage.getConfigValue("autoUpdateApk") === "true",
@@ -1571,10 +1671,33 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     });
   }
 
+  /** 当前更新通道：stable（npm @latest，semver）或 beta（GitHub beta 分支，按 commit）。 */
+  const getUpdateChannel = (): "stable" | "beta" =>
+    storage.getConfigValue("updateChannel") === "beta" ? "beta" : "stable";
+
   app.get("/api/check-update", async (_req, res) => {
     try {
+      const channel = getUpdateChannel();
+      if (channel === "beta") {
+        const b = await checkBetaUpdate(true);
+        res.json({
+          channel: "beta",
+          current: b.current,
+          latest: b.latest,
+          updateAvailable: b.updateAvailable,
+          builtAt: b.remoteBuiltAt,
+        });
+        return;
+      }
       const result = await checkNpmLatestVersion(true);
-      res.json(result);
+      // 离开 beta 边界：当前跑的是 beta 构建、但通道切回 stable 时，强制提示可更新，
+      // 让用户能从 beta 装回干净的正式版（否则 semver 相等会卡在 beta 构建上）。
+      const onBetaBuild = BUILD_INFO.channel === "beta";
+      res.json({
+        channel: "stable",
+        ...result,
+        updateAvailable: result.updateAvailable || onBetaBuild,
+      });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "检查更新失败。") });
     }
@@ -1588,18 +1711,52 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
     updateInFlight = true;
     try {
-      const { updateAvailable, latest } = await checkNpmLatestVersion(true);
-      if (!updateAvailable) {
-        res.json({ ok: true, message: "已经是最新版本。" });
+      const channel = getUpdateChannel();
+      let installSpec: string;
+      let targetLabel: string;
+      if (channel === "beta") {
+        const b = await checkBetaUpdate(true);
+        if (!b.updateAvailable) {
+          res.json({ ok: true, message: "已是最新 Beta 构建。" });
+          return;
+        }
+        installSpec = BETA_INSTALL_SPEC;
+        targetLabel = `Beta ${b.latest}`;
+      } else {
+        const { updateAvailable, latest } = await checkNpmLatestVersion(true);
+        const onBetaBuild = BUILD_INFO.channel === "beta";
+        if (!updateAvailable && !onBetaBuild) {
+          res.json({ ok: true, message: "已经是最新版本。" });
+          return;
+        }
+        installSpec = `${PKG_NAME}@latest`;
+        targetLabel = onBetaBuild ? "最新正式版" : latest;
+      }
+
+      // beta 走 git 安装（clone + 装依赖），比 registry tarball 慢，给足超时。
+      const logLines: string[] = [];
+      try {
+        await installPackageGloballyAsync(installSpec, 300000, (line) => {
+          logLines.push(line);
+          process.stdout.write(`${line}\n`);
+        });
+      } catch (e) {
+        res.status(500).json({
+          error: getErrorMessage(e, "更新失败。"),
+          detail: logLines.join("\n").slice(-2000),
+        });
         return;
       }
-      await npmInstallGlobal(`${PKG_NAME}@latest`, 120000);
+
+      // 镜像 install.sh：装完用全局安装刷新服务 unit（ExecStart/PATH），重启才会跑到新版。
+      const repair = repairServiceUnitAfterUpdate(configPath);
       // 装包成功后告知前端可以发起重启；前端会随即调用 /api/restart 完成自动重启。
       res.json({
         ok: true,
-        message: `已更新到 ${latest}`,
+        message: `已更新到 ${targetLabel}`,
         restartRequired: true,
-        version: latest,
+        version: targetLabel,
+        serviceRepair: repair.scope ? { repaired: repair.repaired, message: repair.message } : null,
       });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "更新失败。") });
@@ -2193,6 +2350,45 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   // ── Restart endpoint (needs server + wss in scope) ──
 
+  function safeServiceInstalled(): boolean {
+    try {
+      return isServiceInstalled();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 统一的关服 + 重启。重启方式由 computeRelaunch 决定：
+   *   - systemd 托管且已装服务 → 仅退出，交给 Restart=always 用（更新自修复后可能刚被
+   *     重写的）ExecStart 拉起，避免再 spawn detached 子进程与 systemd 抢单实例 pidfile；
+   *   - 否则 → spawn 一个 detached 子进程（bin 优先全局安装，确保更新后跑到新版）再退出。
+   */
+  function relaunchAfterShutdown(): void {
+    const plan = computeRelaunch({
+      serviceInstalled: safeServiceInstalled(),
+      globalCli: resolveGlobalWandCli(),
+    });
+    try {
+      wss.clients.forEach((client) => client.close());
+    } catch {
+      /* noop */
+    }
+    server.close(() => {
+      if (plan.mode === "spawn") {
+        spawn(process.execPath, [plan.bin ?? "", ...(plan.args ?? [])], {
+          detached: true,
+          stdio: "inherit",
+          cwd: process.cwd(),
+          env: process.env,
+        }).unref();
+      }
+      process.exit(0);
+    });
+    // Force exit after 5s if graceful shutdown stalls
+    setTimeout(() => process.exit(0), 5000);
+  }
+
   app.post("/api/restart", async (_req, res) => {
     res.json({ ok: true, message: "服务正在重启..." });
     wsManager.emitEvent({
@@ -2201,19 +2397,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       data: { kind: "restart" },
     });
     setTimeout(() => {
-      // Close all WebSocket connections first
-      wss.clients.forEach((client) => client.close());
-      server.close(() => {
-        spawn(process.execPath, process.argv.slice(1), {
-          detached: true,
-          stdio: "inherit",
-          cwd: process.cwd(),
-          env: process.env,
-        }).unref();
-        process.exit(0);
-      });
-      // Force exit after 5s if graceful shutdown stalls
-      setTimeout(() => process.exit(0), 5000);
+      relaunchAfterShutdown();
     }, 600);
   });
 
@@ -2286,10 +2470,41 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     });
   });
 
+  // ── Update channel (stable / beta) ──
+
+  app.get("/api/update-channel", (_req, res) => {
+    res.json({
+      channel: getUpdateChannel(),
+      build: {
+        commit: BUILD_INFO.commit,
+        shortCommit: BUILD_INFO.commit ? BUILD_INFO.commit.slice(0, 7) : null,
+        builtAt: BUILD_INFO.builtAt,
+        channel: BUILD_INFO.channel,
+      },
+    });
+  });
+
+  app.post("/api/update-channel", express.json(), (req, res) => {
+    const body = (req.body ?? {}) as { channel?: string };
+    const channel = body.channel === "beta" ? "beta" : "stable";
+    storage.setConfigValue("updateChannel", channel);
+    res.json({ channel });
+  });
+
   // ── Auto-update logic ──
 
   async function performAutoUpdate(): Promise<void> {
-    const info = await checkNpmLatestVersion(true);
+    const channel = getUpdateChannel();
+    let info: { current: string; latest: string; updateAvailable: boolean };
+    let updateSpec: string;
+    if (channel === "beta") {
+      const b = await checkBetaUpdate(true);
+      info = { current: b.current, latest: b.latest, updateAvailable: b.updateAvailable };
+      updateSpec = BETA_INSTALL_SPEC;
+    } else {
+      info = await checkNpmLatestVersion(true);
+      updateSpec = `${PKG_NAME}@latest`;
+    }
     cachedUpdateInfo = info;
     if (!info.updateAvailable) return;
 
@@ -2297,7 +2512,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     if (!autoEnabled) {
       // Not auto-updating, just notify
       process.stdout.write(
-        `[wand] 发现新版本 ${info.latest}（当前 ${info.current}）。运行 npm install -g ${PKG_NAME}@latest 进行更新。\n`
+        `[wand] 发现新版本 ${info.latest}（当前 ${info.current}）。可在设置中更新${channel === "beta" ? "（Beta 通道）" : ""}。\n`
       );
       wsManager.emitEvent({
         type: "notification",
@@ -2318,7 +2533,10 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     });
 
     try {
-      await npmInstallGlobal(`${PKG_NAME}@latest`, 120000);
+      await npmInstallGlobal(updateSpec, 120000);
+      // 镜像 install.sh：装完用全局安装刷新服务 unit（ExecStart/PATH），重启才会跑到新版。
+      const repair = repairServiceUnitAfterUpdate(configPath);
+      if (repair.scope) process.stdout.write(`[wand] ${repair.message}\n`);
       process.stdout.write(`[wand] 自动更新完成，正在重启...\n`);
       wsManager.emitEvent({
         type: "notification",
@@ -2327,20 +2545,17 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       });
       // Restart after a brief delay
       setTimeout(() => {
-        wss.clients.forEach((client) => client.close());
-        server.close(() => {
-          spawn(process.execPath, process.argv.slice(1), {
-            detached: true,
-            stdio: "inherit",
-            cwd: process.cwd(),
-            env: process.env,
-          }).unref();
-          process.exit(0);
-        });
-        setTimeout(() => process.exit(0), 5000);
+        relaunchAfterShutdown();
       }, 1000);
     } catch (error) {
-      process.stdout.write(`[wand] 自动更新失败: ${getErrorMessage(error, "未知错误")}\n`);
+      const msg = getErrorMessage(error, "未知错误");
+      process.stdout.write(`[wand] 自动更新失败: ${msg}\n`);
+      // 失败不重启、保留旧版；通知前端，避免静默。
+      wsManager.emitEvent({
+        type: "notification",
+        sessionId: "__system__",
+        data: { kind: "auto-update-failed", current: info.current, latest: info.latest, error: msg },
+      });
     }
   }
 

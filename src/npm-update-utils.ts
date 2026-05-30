@@ -15,6 +15,7 @@
 import { exec, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
+import process from "node:process";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
@@ -127,9 +128,10 @@ export async function installPackageGloballyAsync(
   }
 
   // 终极兜底：uninstall + force install
-  const baseName = pkg.replace(/@[^@/]*$/, ""); // strip @latest / @1.2.3
+  // 卸载用固定包名 PACKAGE_NAME，而不是从 install spec 反推：spec 可能是 git
+  // 形式（`github:co0ontty/wand#beta`），用正则 strip @tag 反推会得到错误的卸载目标。
   try {
-    await execAsync(`npm uninstall -g ${baseName}`, { timeout: timeoutMs });
+    await execAsync(`npm uninstall -g ${PACKAGE_NAME}`, { timeout: timeoutMs });
   } catch {
     /* 卸载失败也继续，下一步 --force 可能仍然能装上 */
   }
@@ -173,13 +175,44 @@ export function installPackageGloballySync(
   if (res.status === 0) return { ...res, attempts };
   if (!hitENOTEMPTY(res)) return { ...res, attempts };
 
-  // 终极兜底
-  const baseName = pkg.replace(/@[^@/]*$/, "");
-  attempts.push(`npm uninstall -g ${baseName}`);
-  spawnSync("npm", ["uninstall", "-g", baseName], { encoding: "utf8", timeout: timeoutMs });
+  // 终极兜底（卸载用固定包名，兼容 git spec，见 async 版同样注释）
+  attempts.push(`npm uninstall -g ${PACKAGE_NAME}`);
+  spawnSync("npm", ["uninstall", "-g", PACKAGE_NAME], { encoding: "utf8", timeout: timeoutMs });
   cleanupNpmLeftovers();
   res = tryInstall(["--force"]);
   return { ...res, attempts };
+}
+
+/**
+ * 解析「刚装好的全局 wand CLI 入口」(dist/cli.js) 的绝对路径。
+ *
+ * 用途：应用内更新装完新包后，要把 systemd/launchd unit 的 ExecStart 钉到这个
+ * 全局安装，而不是 process.argv[1]（源码安装场景下 argv[1] 是旧源码路径）。
+ *
+ * 优先 `npm root -g`/@co0ontty/wand/dist/cli.js（最准确）；失败回退 `which wand`
+ * （npm 全局 bin 里的符号链接，node 跟随软链一样能跑）。都找不到返回 null。
+ */
+export function resolveGlobalWandCli(): string | null {
+  const root = getNpmGlobalRoot();
+  if (root) {
+    const cli = path.join(root, PACKAGE_SCOPE, PACKAGE_BASENAME, "dist", "cli.js");
+    try {
+      if (existsSync(cli)) return cli;
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    const tool = process.platform === "win32" ? "where" : "which";
+    const r = spawnSync(tool, ["wand"], { encoding: "utf8", timeout: 10_000 });
+    if (r.status === 0) {
+      const first = (r.stdout || "").split(/\r?\n/).find((line) => line.trim().length > 0);
+      if (first) return first.trim();
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export const NPM_UPDATE_PACKAGE_NAME = PACKAGE_NAME;

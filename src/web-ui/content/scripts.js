@@ -86,11 +86,9 @@
       // 当前长度时整段跳过；新用户首次加载会一口气把所有 migration 都跑完再写
       // schema 号 —— 因此每个 migration 函数对「key 不存在」的输入也必须是无害的。
       var LS_MIGRATIONS = [
-        // v1（2026-05）取消独立的「图钉」按钮，呼出侧栏即常驻。旧版残留的
-        // wand-sidebar-pinned=false 会让老用户继续走 drawer 模式看不到新行为，
-        // 这里直接清掉，让 state 初始化回退到默认 true。
+        // v1 保留为 no-op：曾经这里会删除 wand-sidebar-pinned，导致升级或刷新时
+        // 覆盖用户明确选择的侧栏状态。迁移函数必须只修正格式，不能抹掉偏好。
         function migrateSidebarPinDefault() {
-          try { localStorage.removeItem("wand-sidebar-pinned"); } catch (e) {}
         }
       ];
       (function runLocalStorageMigrations() {
@@ -106,6 +104,23 @@
           }
         } catch (e) { /* localStorage 不可用就跳过，按默认行为运行 */ }
       })();
+
+      function readStoredBoolean(key, defaultValue) {
+        try {
+          var value = localStorage.getItem(key);
+          if (value === "true") return true;
+          if (value === "false") return false;
+          return defaultValue;
+        } catch (e) {
+          return defaultValue;
+        }
+      }
+
+      function writeStoredBoolean(key, value) {
+        try {
+          localStorage.setItem(key, String(!!value));
+        } catch (e) {}
+      }
 
       var state = {
         selectedId: (function() {
@@ -182,18 +197,10 @@
         loginPending: false,
         loginChecked: false,
         bootstrapping: true,
-        sessionsDrawerOpen: false,
-        sidebarPinned: (function() {
-          // 新交互：桌面默认呼出即常驻；只有用户主动 X 关闭过才记 "false"。
-          // 老用户的旧值（"true"/"false"）继续生效，没存过 key 时回退到 true。
-          try {
-            var v = localStorage.getItem("wand-sidebar-pinned");
-            return v === null ? true : v !== "false";
-          } catch (e) { return true; }
-        })(),
-        sidebarCollapsed: (function() {
-          try { return localStorage.getItem("wand-sidebar-collapsed") === "true"; } catch (e) { return false; }
-        })(),
+        sessionsDrawerOpen: readStoredBoolean("wand-sidebar-open", false),
+        // 新交互：桌面默认呼出即常驻；只有用户主动关闭过才记 "false"。
+        sidebarPinned: readStoredBoolean("wand-sidebar-pinned", true),
+        sidebarCollapsed: readStoredBoolean("wand-sidebar-collapsed", false),
         modalOpen: false,
         presetValue: "",
         cwdValue: "",
@@ -1563,9 +1570,9 @@
       }
 
       // ===== 桌面：点 sidebar 外的空白处自动收起 =====
-      // 旧版 drawer 模式下点 backdrop 关闭的便利性，在「呼出即常驻」之后用
-      // document 级捕获 handler 续上。
-      // - 仅 desktop + 全尺寸（非窄条）+ 已打开 时生效
+      // 只对「临时打开但未锁定」的全尺寸侧栏生效；已锁定的 pinned 侧栏
+      // 必须保持常驻，除非用户明确点 X / hamburger 关闭。
+      // - 仅 desktop + 未锁定 + 全尺寸（非窄条）+ 已打开 时生效
       // - 窄条态不触发（窄条本来就是稳定常驻形态）
       // - 手机端由 .drawer-backdrop 元素自己接住点击，不在这里重复处理
       // - 各类弹层（modal / topbar-more / overflow 菜单 / 文件夹下拉等）不算
@@ -1573,7 +1580,7 @@
       // 用 capture 阶段是为了绕过下游按钮自己的 stopPropagation。
       document.addEventListener("click", function(e) {
         if (isMobileLayout()) return;
-        if (!state.sidebarPinned) return;
+        if (state.sidebarPinned) return;
         if (state.sidebarCollapsed) return;
         if (!state.sessionsDrawerOpen) return;
         var target = e.target;
@@ -1615,6 +1622,7 @@
         // false 打架，并在手机端误触发背景遮罩。窄条态下不强制 open。
         if (state.sidebarPinned && !state.sidebarCollapsed && !isMobileLayout()) {
           state.sessionsDrawerOpen = true;
+          writeStoredBoolean("wand-sidebar-open", true);
         }
         app.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
         // Reset chat render tracking since DOM was fully replaced
@@ -3104,6 +3112,16 @@
                   '<p id="update-message" class="hint hidden"></p>' +
                   '<div class="settings-toggle-row">' +
                     '<div class="settings-toggle-text">' +
+                      '<span class="settings-toggle-title">Beta 通道</span>' +
+                      '<span class="settings-toggle-desc">更新到最新提交构建（commit 版本），尝鲜新功能，可能不稳定。</span>' +
+                    '</div>' +
+                    '<label class="settings-switch">' +
+                      '<input type="checkbox" id="beta-channel-toggle" class="switch-toggle">' +
+                      '<span class="switch-slider"></span>' +
+                    '</label>' +
+                  '</div>' +
+                  '<div class="settings-toggle-row">' +
+                    '<div class="settings-toggle-text">' +
                       '<span class="settings-toggle-title">自动更新</span>' +
                       '<span class="settings-toggle-desc">检测到新版本将自动下载安装并重启服务。</span>' +
                     '</div>' +
@@ -4157,6 +4175,7 @@
         } catch (e) {}
         if (state.filePanelOpen && isMobileLayout()) {
           state.sessionsDrawerOpen = false;
+          writeStoredBoolean("wand-sidebar-open", false);
         }
         updateLayoutState();
         if (state.filePanelOpen) {
@@ -6370,6 +6389,10 @@
         var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle");
         if (autoUpdateDmgToggle) autoUpdateDmgToggle.addEventListener("change", function() {
           toggleAutoUpdate("dmg", autoUpdateDmgToggle.checked);
+        });
+        var betaChannelToggle = document.getElementById("beta-channel-toggle");
+        if (betaChannelToggle) betaChannelToggle.addEventListener("change", function() {
+          setUpdateChannel(betaChannelToggle.checked ? "beta" : "stable");
         });
         var copyConnectCodeBtn = document.getElementById("copy-connect-code-button");
         if (copyConnectCodeBtn) copyConnectCodeBtn.addEventListener("click", function() {
@@ -8644,6 +8667,7 @@
         state.claudeHistoryExpanded = false;
         state.claudeHistoryExpandedDirs = {};
         state.sessionsDrawerOpen = false;
+        writeStoredBoolean("wand-sidebar-open", false);
         render();
       }
 
@@ -9842,15 +9866,17 @@
           if (willOpen) {
             // 桌面重新呼出默认回到全尺寸；窄条形态需用户主动点 collapse 按钮切换。
             state.sidebarCollapsed = false;
-            try { localStorage.setItem("wand-sidebar-collapsed", "false"); } catch (e) {}
+            writeStoredBoolean("wand-sidebar-collapsed", false);
           }
-          try { localStorage.setItem("wand-sidebar-pinned", String(willOpen)); } catch (e) {}
+          writeStoredBoolean("wand-sidebar-pinned", willOpen);
+          writeStoredBoolean("wand-sidebar-open", state.sessionsDrawerOpen);
           updateLayoutState();
           scheduleTerminalRefitAfterPaddingTransition();
           return;
         }
         // 手机端：保持原 drawer 行为。
         state.sessionsDrawerOpen = !state.sessionsDrawerOpen;
+        writeStoredBoolean("wand-sidebar-open", state.sessionsDrawerOpen);
         if (state.sessionsDrawerOpen) {
           state.filePanelOpen = false;
           try {
@@ -9869,7 +9895,8 @@
           closeSwipedItem();
           state.sidebarPinned = false;
           state.sessionsDrawerOpen = false;
-          try { localStorage.setItem("wand-sidebar-pinned", "false"); } catch (e) {}
+          writeStoredBoolean("wand-sidebar-pinned", false);
+          writeStoredBoolean("wand-sidebar-open", false);
           updateLayoutState();
           scheduleTerminalRefitAfterPaddingTransition();
           return;
@@ -9878,6 +9905,7 @@
         if (!state.sessionsDrawerOpen) return;
         closeSwipedItem();
         state.sessionsDrawerOpen = false;
+        writeStoredBoolean("wand-sidebar-open", false);
         updateLayoutState();
       }
 
@@ -9978,14 +10006,10 @@
         // 任何形态下点窄条按钮都意味着「我要常驻」，确保 pinned 写上。
         if (!state.sidebarPinned) {
           state.sidebarPinned = true;
-          try {
-            localStorage.setItem("wand-sidebar-pinned", "true");
-          } catch (e) {}
+          writeStoredBoolean("wand-sidebar-pinned", true);
         }
         state.sidebarCollapsed = !state.sidebarCollapsed;
-        try {
-          localStorage.setItem("wand-sidebar-collapsed", String(state.sidebarCollapsed));
-        } catch (e) {}
+        writeStoredBoolean("wand-sidebar-collapsed", state.sidebarCollapsed);
         if (state.sidebarCollapsed) {
           // 进入窄条形态：sessionsDrawerOpen 设 false，避免手机上 .drawer-backdrop
           // 仍带 .open 类导致背景遮罩误显示（窄条已经常驻显示，不需要遮罩）。
@@ -9995,13 +10019,12 @@
           // 改为回到 drawer 模式并自动打开抽屉，让用户看到完整会话列表。
           state.sidebarPinned = false;
           state.sessionsDrawerOpen = true;
-          try {
-            localStorage.setItem("wand-sidebar-pinned", "false");
-          } catch (e) {}
+          writeStoredBoolean("wand-sidebar-pinned", false);
         } else {
           // 桌面端展开窄条 → 300px 全栏常驻。
           state.sessionsDrawerOpen = true;
         }
+        writeStoredBoolean("wand-sidebar-open", state.sessionsDrawerOpen);
         // 轻量更新而非全量 render()：render() 会 teardown 并重建整个终端 DOM，
         // 导致收窄/展开时终端闪烁、丢失滚动与渲染状态。这里只切布局 class
         // （宽度 56↔300 走 CSS width transition）、重渲侧栏列表内容、刷新
@@ -10028,7 +10051,8 @@
         state.sidebarPinned = !state.sidebarPinned;
         // 关键：保持侧栏可见停靠，无论锁定与否，点图钉都不让它消失。
         state.sessionsDrawerOpen = true;
-        try { localStorage.setItem("wand-sidebar-pinned", String(state.sidebarPinned)); } catch (e) {}
+        writeStoredBoolean("wand-sidebar-pinned", state.sidebarPinned);
+        writeStoredBoolean("wand-sidebar-open", true);
         updateLayoutState();
         scheduleTerminalRefitAfterPaddingTransition();
       }
@@ -10081,6 +10105,7 @@
         closeSettingsModal();
         state.modalOpen = true;
         state.sessionsDrawerOpen = false;
+        writeStoredBoolean("wand-sidebar-open", false);
         updateDrawerState();
         var modal = document.getElementById("session-modal");
         if (modal) {
@@ -10691,6 +10716,10 @@
               }
             }
 
+            // Beta channel toggle
+            var betaChannelToggle = document.getElementById("beta-channel-toggle");
+            if (betaChannelToggle) betaChannelToggle.checked = data.updateChannel === "beta";
+
             // Auto-update toggles
             var autoUpdate = data.autoUpdate || {};
             var autoUpdateWebToggle = document.getElementById("auto-update-web-toggle");
@@ -11233,12 +11262,22 @@
               if (latestEl) latestEl.textContent = "检查失败";
               return;
             }
-            if (latestEl) latestEl.textContent = data.latest;
+            var isBeta = data.channel === "beta";
+            if (latestEl) {
+              if (isBeta) {
+                var label = "beta · " + (data.latest || "unknown");
+                if (data.builtAt) { try { label += " · " + timeAgo(data.builtAt); } catch (_e) {} }
+                latestEl.textContent = label;
+              } else {
+                latestEl.textContent = data.latest;
+              }
+            }
             if (data.updateAvailable && updateBtn) {
+              updateBtn.textContent = isBeta ? "更新到最新 Beta" : "更新到最新版";
               updateBtn.classList.remove("hidden");
             }
             if (!data.updateAvailable && msgEl) {
-              msgEl.textContent = "已是最新版本。";
+              msgEl.textContent = isBeta ? "已是最新 Beta 构建。" : "已是最新版本。";
               msgEl.style.color = "var(--success)";
               msgEl.classList.remove("hidden");
             }
@@ -11366,6 +11405,26 @@
           // Revert toggle on failure
           var toggle = document.getElementById("auto-update-" + type + "-toggle");
           if (toggle) toggle.checked = !enabled;
+        });
+      }
+
+      function setUpdateChannel(channel) {
+        fetch("/api/update-channel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ channel: channel }),
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          var toggle = document.getElementById("beta-channel-toggle");
+          if (toggle) toggle.checked = data.channel === "beta";
+          // 切换通道后重新检查更新，刷新"最新版本"显示与更新按钮。
+          checkForUpdate();
+        })
+        .catch(function() {
+          var toggle = document.getElementById("beta-channel-toggle");
+          if (toggle) toggle.checked = channel !== "beta";
         });
       }
 
@@ -16771,9 +16830,11 @@
             lastKnownDesktop = isDesktop;
             if (!isDesktop && state.sidebarPinned && state.sessionsDrawerOpen) {
               state.sessionsDrawerOpen = false;
+              writeStoredBoolean("wand-sidebar-open", false);
               updateDrawerState();
             } else if (isDesktop && state.sidebarPinned && !state.sessionsDrawerOpen) {
               state.sessionsDrawerOpen = true;
+              writeStoredBoolean("wand-sidebar-open", true);
               updateDrawerState();
             }
           }
@@ -21849,6 +21910,7 @@
           state.selectedId = null;
           persistSelectedId();
           state.sessionsDrawerOpen = true;
+          writeStoredBoolean("wand-sidebar-open", true);
           render();
           return true;
         }

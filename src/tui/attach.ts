@@ -16,6 +16,7 @@ import {
   uninstallService,
 } from "./commands.js";
 import { spawnSync } from "node:child_process";
+import { repairServiceUnitAfterUpdate } from "../service-self-repair.js";
 import { IpcClient } from "./ipc-client.js";
 import { IpcSnapshotData } from "./ipc-protocol.js";
 import { PidInfo } from "../pidfile.js";
@@ -246,6 +247,11 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
     const r = await runOffMicrotask(() => installUpdate());
     layout.showToast(r.message, r.ok ? "success" : "error", 5000);
     if (r.detail) layout.showDetail(r.ok ? "更新输出" : "更新失败", r.detail);
+    if (r.ok) {
+      // 镜像 install.sh：装完用全局安装刷新服务 unit（ExecStart/PATH），再按 R 重启服务生效。
+      const repair = await runOffMicrotask(() => repairServiceUnitAfterUpdate(deps.configPath));
+      if (repair.scope) layout.showToast(repair.message, repair.repaired ? "success" : "warn", 4500);
+    }
   }
 
   async function handleInstallService(): Promise<void> {
