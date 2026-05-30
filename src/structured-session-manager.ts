@@ -115,6 +115,13 @@ interface StreamingTurnState {
   sessionId: string | null;
   model?: string;
   usage?: ConversationTurn["usage"];
+  /**
+   * codex item.id → index of the FIRST block this item produced in `blocks`.
+   * Used on `item.updated` / `item.completed` to replace an in-place text /
+   * thinking / TodoWrite card instead of duplicating it. tool_use ↔ tool_result
+   * pairing for codex stays driven by `upsertCodexBlock` via matching ids.
+   */
+  codexBlockIndex?: Map<string, number>;
 }
 
 /**
@@ -1242,6 +1249,7 @@ export class StructuredSessionManager {
         sessionId: session.claudeSessionId,
         model: session.selectedModel ?? session.structuredState?.model,
         usage: undefined,
+        codexBlockIndex: new Map(),
       };
       let lineBuf = "";
       let stderr = "";
@@ -1307,22 +1315,24 @@ export class StructuredSessionManager {
           return;
         }
         if (parsed?.type === "item.started" && parsed.item) {
-          const block = this.extractCodexItemBlock(parsed.item, false);
-          if (block) {
-            turnState.blocks.push(block);
-            syncSnapshot();
-            scheduleEmit();
-          }
+          this.applyCodexItem(turnState, parsed.item, "started");
+          syncSnapshot();
+          scheduleEmit();
+          return;
+        }
+        if (parsed?.type === "item.updated" && parsed.item) {
+          // codex `item.updated` 重新发送完整 ThreadItem（不是 delta）。
+          // 对 text/thinking/TodoWrite 走 codexBlockIndex 替换；对 tool_use
+          // 仍然按现有 id 复用，避免重复卡片。
+          this.applyCodexItem(turnState, parsed.item, "updated");
+          syncSnapshot();
+          scheduleEmit();
           return;
         }
         if (parsed?.type === "item.completed" && parsed.item) {
-          const block = this.extractCodexItemBlock(parsed.item, true);
-          if (block) {
-            if (block.type === "text") turnState.result = block.text;
-            this.upsertCodexBlock(turnState.blocks, block);
-            syncSnapshot();
-            scheduleEmit();
-          }
+          this.applyCodexItem(turnState, parsed.item, "completed");
+          syncSnapshot();
+          scheduleEmit();
           return;
         }
         if (parsed?.type === "turn.completed") {
@@ -2688,45 +2698,310 @@ export class StructuredSessionManager {
     return "";
   }
 
-  private extractCodexItemBlock(item: Record<string, unknown>, completed: boolean): ContentBlock | null {
+  /**
+   * Merge one codex `item.*` event into `turnState.blocks`.
+   *
+   * 三种 phase 行为：
+   *   - "started":   首次出现的 item，块直接 push（tool_result 走 upsert 配对）。
+   *                  text/thinking/TodoWrite 这种"靠 id 替换"的块记录到
+   *                  codexBlockIndex 里，方便后续 updated/completed 找回原位。
+   *   - "updated":   codex 重发完整 ThreadItem（不是 delta）。已记录过的块就
+   *                  替换；新块按 started 路径处理。
+   *   - "completed": 把"in_progress"卡片定型——text 同时更新 turnState.result
+   *                  以便 result fallback 不为空；tool_use ↔ tool_result 通过
+   *                  共享 id 配对到一起（包括 file_change 子项的 `${id}#i`）。
+   */
+  private applyCodexItem(
+    turnState: StreamingTurnState,
+    item: Record<string, unknown>,
+    phase: "started" | "updated" | "completed",
+  ): void {
+    const completed = phase === "completed";
+    const itemId = typeof item.id === "string" ? item.id : "";
+    const blocks = this.extractCodexItemBlock(item, completed);
+    if (blocks.length === 0) return;
+
+    const index = turnState.codexBlockIndex ??= new Map<string, number>();
+
+    for (const block of blocks) {
+      // text / thinking / TodoWrite tool_use 的卡片是"按 item id 整体替换"语义，
+      // 否则一个 agent_message 在 updated/completed 时会被重复 push 多次。
+      const replaceable =
+        block.type === "text"
+        || block.type === "thinking"
+        || (block.type === "tool_use" && block.name === "TodoWrite");
+
+      if (replaceable && itemId) {
+        const existing = index.get(itemId);
+        if (existing !== undefined && existing < turnState.blocks.length) {
+          turnState.blocks[existing] = block;
+        } else {
+          index.set(itemId, turnState.blocks.length);
+          turnState.blocks.push(block);
+        }
+        if (block.type === "text" && completed) {
+          turnState.result = block.text;
+        }
+        continue;
+      }
+
+      // 其它块（tool_use 非 Todo / tool_result / 文件改动的多 sub-id 块）
+      // 仍然走原有 upsert：tool_result 按 tool_use_id 配对，其余直接 push。
+      this.upsertCodexBlock(turnState.blocks, block);
+    }
+  }
+
+  /**
+   * Map a codex `item.{started,updated,completed}` payload into wand's
+   * `ContentBlock[]` so the chat UI's existing tool/diff/todo cards just work.
+   *
+   * Codex `exec --json` emits 8 item.type values (see
+   * `codex-rs/exec/src/exec_events.rs`); below they're routed to whatever wand
+   * tool name reuses an existing renderer:
+   *
+   *   agent_message     → text
+   *   reasoning         → thinking
+   *   command_execution → tool_use "Bash" + tool_result
+   *   file_change       → one tool_use per file, named Edit/Write/Bash by `kind`
+   *                       (codex does NOT carry old_string/new_string in the
+   *                       exec stream, only the path list; diff card body is
+   *                       empty but the file row + status still render)
+   *   mcp_tool_call     → tool_use named "<server>__<tool>" + tool_result
+   *   web_search        → tool_use "WebSearch" + tool_result (results not in stream)
+   *   todo_list         → tool_use "TodoWrite" (replaced in place on each update)
+   *   error             → text block prefixed with ❌
+   *
+   * Returns [] when there is nothing to emit yet (e.g. agent_message at
+   * `item.started` before any text has been produced).
+   *
+   * Callers handle in-place replacement for `item.updated` via
+   * `turnState.codexBlockIndex`; tool_use ↔ tool_result pairing still goes
+   * through `upsertCodexBlock` by matching ids.
+   */
+  private extractCodexItemBlock(item: Record<string, unknown>, completed: boolean): ContentBlock[] {
     const id = typeof item.id === "string" ? item.id : randomUUID();
     const type = typeof item.type === "string" ? item.type : "unknown";
+
     if (type === "agent_message") {
       const text = this.extractCodexText(item);
-      return text ? { type: "text", text } : null;
+      return text ? [{ type: "text", text }] : [];
     }
+
     if (type === "reasoning") {
       const text = this.extractCodexText(item);
-      return text ? { type: "thinking", thinking: text } : null;
+      return text ? [{ type: "thinking", thinking: text }] : [];
     }
+
     if (type === "command_execution") {
       const command = typeof item.command === "string" ? item.command : "";
       const aggregatedOutput = typeof item.aggregated_output === "string" ? item.aggregated_output : "";
       const exitCode = typeof item.exit_code === "number" ? item.exit_code : null;
       const status = typeof item.status === "string" ? item.status : completed ? "completed" : "in_progress";
       if (!completed) {
-        return {
+        return [{
           type: "tool_use",
           id,
           name: "Bash",
           input: { command, status },
-        };
+        }];
       }
-      return {
+      // codex 的 status 可能是 declined（sandbox 拒了命令）/ failed（执行失败）—
+      // 这时 exit_code 经常是 null，光靠 exitCode !== 0 判 is_error 会漏。
+      const isError = status === "failed" || status === "declined"
+        || (typeof exitCode === "number" && exitCode !== 0);
+      const fallbackText = status === "declined"
+        ? "command declined by sandbox"
+        : (exitCode === null ? "" : `exit_code: ${exitCode}`);
+      return [{
         type: "tool_result",
         tool_use_id: id,
-        content: aggregatedOutput || (exitCode === null ? "" : `exit_code: ${exitCode}`),
-        is_error: typeof exitCode === "number" && exitCode !== 0,
-      };
+        content: aggregatedOutput || fallbackText,
+        is_error: isError,
+      }];
     }
+
+    if (type === "file_change") {
+      // 注意：codex exec stream 没有 old_string/new_string——只给 path + kind。
+      // 这里每个 file 一个 sub-id（`${item.id}#${i}`），这样如果 codex 一次给多
+      // 个文件，每个文件能独立成卡片 + 独立 tool_result 状态。
+      const rawChanges = Array.isArray(item.changes) ? item.changes : [];
+      const status = typeof item.status === "string" ? item.status : completed ? "completed" : "in_progress";
+      const isError = status === "failed";
+      const blocks: ContentBlock[] = [];
+      rawChanges.forEach((entry, idx) => {
+        if (!entry || typeof entry !== "object") return;
+        const change = entry as Record<string, unknown>;
+        const path = typeof change.path === "string" ? change.path : "";
+        const kind = typeof change.kind === "string" ? change.kind : "update";
+        const subId = `${id}#${idx}`;
+        let toolName: string;
+        let input: Record<string, unknown>;
+        if (kind === "add") {
+          toolName = "Write";
+          input = { file_path: path, content: "" };
+        } else if (kind === "delete") {
+          // 复用 Bash 终端卡，rm 语义直观
+          toolName = "Bash";
+          input = { command: `rm ${path}`, description: `delete ${path}`, status };
+        } else {
+          toolName = "Edit";
+          input = { file_path: path, old_string: "", new_string: "" };
+        }
+        if (!completed) {
+          blocks.push({ type: "tool_use", id: subId, name: toolName, input });
+        } else {
+          blocks.push({ type: "tool_use", id: subId, name: toolName, input });
+          blocks.push({
+            type: "tool_result",
+            tool_use_id: subId,
+            content: isError ? `file change failed: ${path}` : "",
+            is_error: isError,
+          });
+        }
+      });
+      return blocks;
+    }
+
+    if (type === "mcp_tool_call") {
+      const server = typeof item.server === "string" ? item.server : "mcp";
+      const tool = typeof item.tool === "string" ? item.tool : "tool";
+      const args = item.arguments && typeof item.arguments === "object" ? item.arguments as Record<string, unknown> : {};
+      const errObj = item.error && typeof item.error === "object" ? item.error as Record<string, unknown> : null;
+      const status = typeof item.status === "string" ? item.status : completed ? "completed" : "in_progress";
+      const isError = !!errObj || status === "failed";
+      if (!completed) {
+        return [{
+          type: "tool_use",
+          id,
+          name: `${server}__${tool}`,
+          input: args,
+        }];
+      }
+      let resultText = "";
+      if (errObj && typeof errObj.message === "string") {
+        resultText = errObj.message;
+      } else if (item.result && typeof item.result === "object") {
+        const resultRec = item.result as Record<string, unknown>;
+        const inner = this.extractCodexText(resultRec.content);
+        resultText = inner || JSON.stringify(resultRec).slice(0, 4096);
+      }
+      return [{
+        type: "tool_result",
+        tool_use_id: id,
+        content: resultText,
+        is_error: isError,
+      }];
+    }
+
+    if (type === "web_search") {
+      const query = typeof item.query === "string" ? item.query : "";
+      if (!completed) {
+        return [{
+          type: "tool_use",
+          id,
+          name: "WebSearch",
+          input: { query },
+        }];
+      }
+      return [{
+        type: "tool_result",
+        tool_use_id: id,
+        // codex 不在 exec 流里回 search 结果，这里给个占位让 UI 卡片完成态。
+        content: query ? `query: ${query}` : "",
+      }];
+    }
+
+    if (type === "collab_tool_call") {
+      // codex 的子-agent 编排（spawn_agent / send_input / wait / close_agent）。
+      // 没有对应 Claude tool，所以名称用 "Codex/<op>" 让 UI 默认 tool 卡渲染时
+      // 一眼能看出来是 codex 多 agent 操作。
+      const tool = typeof item.tool === "string" ? item.tool : "collab";
+      const prompt = typeof item.prompt === "string" ? item.prompt : "";
+      const senderId = typeof item.sender_thread_id === "string" ? item.sender_thread_id : "";
+      const receiverIds = Array.isArray(item.receiver_thread_ids)
+        ? (item.receiver_thread_ids.filter((v) => typeof v === "string") as string[])
+        : [];
+      const agentsStates = item.agents_states && typeof item.agents_states === "object"
+        ? item.agents_states as Record<string, unknown>
+        : {};
+      const status = typeof item.status === "string" ? item.status : completed ? "completed" : "in_progress";
+      const toolName = `Codex/${tool}`;
+      const input: Record<string, unknown> = { tool };
+      if (prompt) input.prompt = prompt;
+      if (senderId) input.sender_thread_id = senderId;
+      if (receiverIds.length > 0) input.receiver_thread_ids = receiverIds;
+      if (Object.keys(agentsStates).length > 0) input.agents_states = agentsStates;
+      if (!completed) {
+        return [{ type: "tool_use", id, name: toolName, input }];
+      }
+      // 完成态：把每个 receiver agent 的最终状态汇总成可读 result。
+      const summaryLines: string[] = [];
+      for (const [tid, state] of Object.entries(agentsStates)) {
+        if (!state || typeof state !== "object") continue;
+        const rec = state as Record<string, unknown>;
+        const s = typeof rec.status === "string" ? rec.status : "?";
+        const msg = typeof rec.message === "string" && rec.message ? ` — ${rec.message}` : "";
+        summaryLines.push(`${tid.slice(0, 8)}: ${s}${msg}`);
+      }
+      const isError = status === "failed"
+        || summaryLines.some((l) => /errored|not_found|interrupted/.test(l));
+      const content = summaryLines.length > 0
+        ? summaryLines.join("\n")
+        : (status === "completed" ? "ok" : status);
+      return [
+        { type: "tool_use", id, name: toolName, input },
+        { type: "tool_result", tool_use_id: id, content, is_error: isError },
+      ];
+    }
+
+    if (type === "todo_list") {
+      // codex 的 todo: { items: [{ text, completed: bool }] }
+      // wand UI（renderTodoWrite）读的是 block.input.todos = [{content, status, activeForm}]
+      // 这里做形状翻译；in_progress 状态 codex 不区分，全部 pending → completed 二值。
+      const rawItems = Array.isArray(item.items) ? item.items : [];
+      const todos = rawItems.map((entry) => {
+        const rec = (entry && typeof entry === "object") ? entry as Record<string, unknown> : {};
+        const text = typeof rec.text === "string" ? rec.text : "";
+        const done = rec.completed === true;
+        return {
+          content: text,
+          status: done ? "completed" : "pending",
+          activeForm: text,
+        };
+      });
+      return [{
+        type: "tool_use",
+        id,
+        name: "TodoWrite",
+        input: { todos },
+      }];
+    }
+
+    if (type === "error") {
+      // item-level error（不是 top-level error 事件，那个走 codexErrors / 退出报错路径）
+      const message = this.extractCodexText(item) || "codex item error";
+      return [{ type: "text", text: `❌ ${message}` }];
+    }
+
+    // unknown / 兜底：completed 时尝试取 text 字段免得 silently 丢
     if (completed) {
       const text = this.extractCodexText(item);
-      if (text) return { type: "text", text };
+      if (text) return [{ type: "text", text }];
     }
-    return null;
+    return [];
   }
 
   private upsertCodexBlock(blocks: ContentBlock[], block: ContentBlock): void {
+    // tool_use 按 id 去重——file_change 在 item.started 已经 push 过一份 tool_use，
+    // 到 item.completed 还会再发一份相同 id 的（带 status 更新），不去重就出现
+    // 两张同名卡片。command_execution 不受影响（它在 completed 只 emit tool_result）。
+    if (block.type === "tool_use") {
+      const existingIndex = blocks.findIndex((existing) => existing.type === "tool_use" && existing.id === block.id);
+      if (existingIndex >= 0) {
+        blocks[existingIndex] = block;
+        return;
+      }
+    }
     if (block.type === "tool_result") {
       const toolUseIndex = blocks.findIndex((existing) => existing.type === "tool_use" && existing.id === block.tool_use_id);
       if (toolUseIndex >= 0) {
@@ -2872,8 +3147,14 @@ export class StructuredSessionManager {
       inputTokens: typeof source.input_tokens === "number" ? source.input_tokens : undefined,
       outputTokens: typeof source.output_tokens === "number" ? source.output_tokens : undefined,
       cacheReadInputTokens: typeof source.cached_input_tokens === "number" ? source.cached_input_tokens : undefined,
+      reasoningOutputTokens: typeof source.reasoning_output_tokens === "number" ? source.reasoning_output_tokens : undefined,
     };
-    if (value.inputTokens === undefined && value.outputTokens === undefined && value.cacheReadInputTokens === undefined) {
+    if (
+      value.inputTokens === undefined
+      && value.outputTokens === undefined
+      && value.cacheReadInputTokens === undefined
+      && value.reasoningOutputTokens === undefined
+    ) {
       return undefined;
     }
     return value;
