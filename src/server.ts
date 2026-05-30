@@ -597,6 +597,62 @@ function encodeConnectCode(url: string, token: string): string {
   return Buffer.from(`${url}#${token}`).toString("base64");
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function firstHeaderListValue(value: string | string[] | undefined): string | undefined {
+  return firstHeaderValue(value)?.split(",")[0]?.trim();
+}
+
+function unquoteHeaderValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function getForwardedParam(req: Request, key: string): string | undefined {
+  const forwarded = firstHeaderListValue(req.headers.forwarded);
+  if (!forwarded) return undefined;
+  const targetKey = key.toLowerCase();
+  for (const part of forwarded.split(";")) {
+    const eqIdx = part.indexOf("=");
+    if (eqIdx < 1) continue;
+    const partKey = part.slice(0, eqIdx).trim().toLowerCase();
+    if (partKey !== targetKey) continue;
+    return unquoteHeaderValue(part.slice(eqIdx + 1));
+  }
+  return undefined;
+}
+
+function normalizePublicProtocol(value: string | undefined): "http" | "https" | undefined {
+  const proto = value?.trim().toLowerCase();
+  if (proto === "http" || proto === "https") return proto;
+  return undefined;
+}
+
+function getPublicRequestProtocol(req: Request, fallback: "http" | "https"): "http" | "https" {
+  return (
+    normalizePublicProtocol(firstHeaderListValue(req.headers["x-forwarded-proto"]))
+    ?? normalizePublicProtocol(getForwardedParam(req, "proto"))
+    ?? (firstHeaderListValue(req.headers["x-forwarded-ssl"])?.toLowerCase() === "on" ? "https" : undefined)
+    ?? (firstHeaderListValue(req.headers["x-forwarded-scheme"])?.toLowerCase() === "https" ? "https" : undefined)
+    ?? fallback
+  );
+}
+
+function getPublicRequestHost(req: Request, config: WandConfig): string {
+  return (
+    firstHeaderListValue(req.headers["x-forwarded-host"])
+    ?? getForwardedParam(req, "host")
+    ?? req.headers.host
+    ?? `${config.host}:${config.port}`
+  );
+}
+
 function decodeConnectCode(code: string): { url: string; token: string } | null {
   try {
     const decoded = Buffer.from(code, "base64").toString("utf8");
@@ -1543,8 +1599,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   app.get("/api/app-connect-code", requireAuth, (req, res) => {
     const dbPassword = storage.getPassword();
     const effectivePassword = dbPassword ?? config.password;
-    const protocol = useHttps ? "https" : "http";
-    const host = req.headers.host || `${config.host}:${config.port}`;
+    const protocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
+    const host = getPublicRequestHost(req, config);
     const serverUrl = `${protocol}://${host}`;
     const appSecret = config.appSecret ?? "";
     const token = generateAppToken(effectivePassword, appSecret);
