@@ -16,7 +16,7 @@
   ],
   "preferGlobal": true,
   "scripts": {
-    "build": "node scripts/bundle-wterm.js && node scripts/bundle-qrcode.js && tsc -p tsconfig.json && npm run build:copy-content && node scripts/stamp-build-info.js",
+    "build": "node scripts/bundle-wterm.js && node scripts/bundle-qrcode.js && tsc -p tsconfig.json && npm run build:copy-content && node scripts/stamp-build-info.js && node scripts/fix-dist-permissions.js",
     "build:copy-content": "cp -r src/web-ui/content dist/web-ui/",
     "dev": "tsx src/cli.ts web",
     "check": "tsc --noEmit -p tsconfig.json",

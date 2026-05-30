@@ -13,7 +13,7 @@
  */
 
 import { exec, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -79,6 +79,70 @@ export function cleanupNpmLeftovers(): { removed: string[]; errors: string[] } {
   return { removed, errors };
 }
 
+const REQUIRED_RUNTIME_FILES = [
+  "package.json",
+  path.join("dist", "cli.js"),
+  path.join("dist", "server.js"),
+  path.join("dist", "web-ui", "index.js"),
+  path.join("dist", "web-ui", "scripts.js"),
+  path.join("dist", "web-ui", "styles.js"),
+  path.join("dist", "web-ui", "content", "scripts.js"),
+  path.join("dist", "web-ui", "content", "styles.css"),
+  path.join("dist", "web-ui", "content", "vendor", "wterm", "wterm.bundle.js"),
+  path.join("dist", "web-ui", "content", "vendor", "qrcode", "qrcode.bundle.js"),
+];
+
+function getGlobalPackageDir(): string | null {
+  const root = getNpmGlobalRoot();
+  return root ? path.join(root, PACKAGE_SCOPE, PACKAGE_BASENAME) : null;
+}
+
+function validateGlobalWandInstall(): { ok: true; packageDir: string } | { ok: false; message: string } {
+  const packageDir = getGlobalPackageDir();
+  if (!packageDir) {
+    return { ok: false, message: "无法解析 npm 全局安装目录。" };
+  }
+  const missing: string[] = [];
+  for (const rel of REQUIRED_RUNTIME_FILES) {
+    const fullPath = path.join(packageDir, rel);
+    try {
+      if (!statSync(fullPath).isFile()) {
+        missing.push(rel);
+      }
+    } catch {
+      missing.push(rel);
+    }
+  }
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      message: `全局 wand 安装不完整: ${packageDir} 缺少 ${missing.join(", ")}`,
+    };
+  }
+  if (process.platform !== "win32") {
+    const cliPath = path.join(packageDir, "dist", "cli.js");
+    try {
+      const mode = statSync(cliPath).mode;
+      if ((mode & 0o111) === 0) {
+        chmodSync(cliPath, mode | 0o755);
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        message: `全局 wand CLI 无法设置执行权限: ${cliPath}: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+  return { ok: true, packageDir };
+}
+
+function assertGlobalWandInstallComplete(): void {
+  const result = validateGlobalWandInstall();
+  if (!result.ok) {
+    throw new Error(result.message);
+  }
+}
+
 /**
  * 异步版本的全局安装：
  * 1. 清理残留
@@ -106,25 +170,31 @@ export async function installPackageGloballyAsync(
 
   try {
     await execAsync(`npm install -g ${pkg}`, { timeout: timeoutMs });
+    assertGlobalWandInstallComplete();
     return;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     if (!/ENOTEMPTY|EEXIST/.test(msg)) {
-      throw error;
+      if (/全局 wand 安装不完整|无法解析 npm 全局安装目录/.test(msg)) {
+        note(`[wand] npm install 后安装目录不完整，尝试强制重装...`);
+      } else {
+        throw error;
+      }
+    } else {
+      note(`[wand] npm install 遇到 ENOTEMPTY/EEXIST，清理后重试一次...`);
+      cleanupNpmLeftovers();
+      try {
+        await execAsync(`npm install -g ${pkg}`, { timeout: timeoutMs });
+        assertGlobalWandInstallComplete();
+        return;
+      } catch (retryError) {
+        const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
+        if (!/ENOTEMPTY|EEXIST|全局 wand 安装不完整|无法解析 npm 全局安装目录/.test(retryMsg)) {
+          throw retryError;
+        }
+      }
+      note(`[wand] 重试仍失败，尝试先卸载再强制安装...`);
     }
-    note(`[wand] npm install 遇到 ENOTEMPTY/EEXIST，清理后重试一次...`);
-  }
-
-  cleanupNpmLeftovers();
-  try {
-    await execAsync(`npm install -g ${pkg}`, { timeout: timeoutMs });
-    return;
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (!/ENOTEMPTY|EEXIST/.test(msg)) {
-      throw error;
-    }
-    note(`[wand] 重试仍失败，尝试先卸载再强制安装...`);
   }
 
   // 终极兜底：uninstall + force install
@@ -137,6 +207,7 @@ export async function installPackageGloballyAsync(
   }
   cleanupNpmLeftovers();
   await execAsync(`npm install -g --force ${pkg}`, { timeout: timeoutMs });
+  assertGlobalWandInstallComplete();
 }
 
 /**
@@ -149,15 +220,27 @@ export function installPackageGloballySync(
   timeoutMs: number,
 ): { status: number | null; stdout: string; stderr: string; attempts: string[] } {
   const attempts: string[] = [];
+  const withValidation = (
+    res: { status: number | null; stdout: string; stderr: string },
+  ): { status: number | null; stdout: string; stderr: string } => {
+    if (res.status !== 0) return res;
+    const validation = validateGlobalWandInstall();
+    if (validation.ok) return res;
+    return {
+      status: 1,
+      stdout: res.stdout,
+      stderr: `${res.stderr ? `${res.stderr}\n` : ""}${validation.message}`,
+    };
+  };
   const tryInstall = (extra: string[]): { status: number | null; stdout: string; stderr: string } => {
     const args = ["install", "-g", ...extra, pkg];
     attempts.push(`npm ${args.join(" ")}`);
     const r = spawnSync("npm", args, { encoding: "utf8", timeout: timeoutMs });
-    return {
+    return withValidation({
       status: r.status,
       stdout: r.stdout || "",
       stderr: r.stderr || "",
-    };
+    });
   };
 
   cleanupNpmLeftovers();
@@ -165,15 +248,15 @@ export function installPackageGloballySync(
   let res = tryInstall([]);
   if (res.status === 0) return { ...res, attempts };
 
-  const hitENOTEMPTY = (r: { stdout: string; stderr: string }): boolean =>
-    /ENOTEMPTY|EEXIST/.test(r.stdout + r.stderr);
+  const hitRecoverableInstallError = (r: { stdout: string; stderr: string }): boolean =>
+    /ENOTEMPTY|EEXIST|全局 wand 安装不完整|无法解析 npm 全局安装目录/.test(r.stdout + r.stderr);
 
-  if (!hitENOTEMPTY(res)) return { ...res, attempts };
+  if (!hitRecoverableInstallError(res)) return { ...res, attempts };
 
   cleanupNpmLeftovers();
   res = tryInstall([]);
   if (res.status === 0) return { ...res, attempts };
-  if (!hitENOTEMPTY(res)) return { ...res, attempts };
+  if (!hitRecoverableInstallError(res)) return { ...res, attempts };
 
   // 终极兜底（卸载用固定包名，兼容 git spec，见 async 版同样注释）
   attempts.push(`npm uninstall -g ${PACKAGE_NAME}`);
