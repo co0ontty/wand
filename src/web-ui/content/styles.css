@@ -548,8 +548,7 @@
     .sidebar.pinned.collapsed .sidebar-header-main,
     .sidebar.pinned.collapsed .sidebar-header-more,
     .sidebar.pinned.collapsed .sidebar-pin-toggle,
-    .sidebar.pinned.collapsed .sidebar-footer,
-    .sidebar.pinned.collapsed .sidebar-history-region {
+    .sidebar.pinned.collapsed .sidebar-footer {
       display: none;
     }
     .sidebar.pinned.collapsed .sidebar-header-actions {
@@ -835,6 +834,8 @@
       font-weight: 600;
       color: var(--text-primary);
       letter-spacing: -0.01em;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .session-count {
@@ -1288,6 +1289,7 @@
       flex: 1;
       min-height: 0;
       overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
       position: relative;
     }
 
@@ -1299,10 +1301,24 @@
 
     /* ===== 会话列表 ===== */
     .sessions-list {
-      flex: 1;
+      /* Flex column that fills the scroll body so the 历史会话 group can pin to
+         the very bottom (margin-top:auto) when the list is short, yet flow
+         naturally and scroll when it's long. #sessions-panel is display:contents
+         so this is effectively a direct child of the scrolling .sidebar-body. */
+      flex: 1 0 auto;
       min-height: 0;
-      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      /* No own scroll: .sidebar-body is the scroll container. overflow:visible
+         lets the manage bar's position:sticky bind to .sidebar-body. */
+      overflow: visible;
       padding: 10px 10px 12px;
+    }
+
+    /* Unwrap the panel so .sessions-list is a direct flex child of the
+       scrolling .sidebar-body (enables fill + bottom-pin). */
+    #sessions-panel {
+      display: contents;
     }
 
     .sessions-list:empty::before {
@@ -1394,9 +1410,16 @@
     }
     .claude-history-directory-title {
       font-size: 0.6875rem;
-      padding: 6px 8px;
+      padding: 6px 8px 6px 12px;
       opacity: 0.8;
       justify-content: space-between;
+    }
+    /* No accent bar on nested directory rows — the 3px bar stays on top-level
+       groups (历史会话 / 已归档) only, so the hierarchy reads as group → folder
+       → items instead of a column of identical orange ticks. The chevron +
+       slight indent already signal the sub-level. */
+    .claude-history-directory-header .claude-history-directory-title::before {
+      display: none;
     }
     .claude-history-directory-label {
       min-width: 0;
@@ -2289,126 +2312,36 @@
       font-weight: 500;
     }
 
-    /* ===== Sidebar: docked Claude history region =====
-       Lives between .sidebar-body and .sidebar-footer. Collapsed by default —
-       only a slim header row ("历史消息" + 数字气泡) is visible, so the main
-       scrolling area focuses on recent / archived sessions. Expanding it
-       grows the region with a 40% max-height cap so it can never eat the
-       sessions list above. */
-    .sidebar-history-region {
-      flex-shrink: 0;
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-      max-height: 40%;
-      border-top: 1px solid var(--border-subtle);
-      background: rgba(255, 251, 245, 0.66);
-      transition: max-height 0.28s var(--ease-out-expo);
+    /* ===== Sidebar: inline 历史会话 group =====
+       History (older Claude + Codex CLI sessions) is the final collapsible
+       group of #sessions-list — same scroll, same idiom as 已归档. No docked
+       region, no 40% cap, no stranded bar above the footer: when the list is
+       short the empty space simply falls below the content, as a list should. */
+    /* Pin the history group to the very bottom of the sidebar (just above the
+       footer). margin-top:auto eats the free space when the list is short;
+       when the list overflows there is no free space, so history simply
+       follows the content and scrolls. Collapsed + minimized by default. */
+    .session-group--history {
+      margin-top: auto;
+      padding-top: 6px;
     }
 
-    .sidebar-history-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      width: 100%;
-      padding: 9px 14px;
-      min-height: 38px;
-      flex-shrink: 0;
+    /* Toggle header reuses .session-group-title + .claude-history-toggle.
+       The count chip turns into a quiet ellipsis while history is still
+       scanning, then settles to the real number. */
+    .session-history-toggle .history-count.loading {
+      letter-spacing: 0.12em;
+      color: var(--text-muted);
       background: transparent;
-      border: none;
-      border-radius: 0;
-      cursor: pointer;
-      text-align: left;
-      font-family: var(--font-sans);
-      font-size: 0.75rem;
-      font-weight: 600;
-      letter-spacing: 0.005em;
-      color: var(--text-secondary);
-      transition: background var(--transition-fast), color var(--transition-fast);
-      -webkit-tap-highlight-color: transparent;
+      padding-left: 2px;
+      padding-right: 2px;
     }
 
-    .sidebar-history-header:hover {
-      background: rgba(150, 118, 85, 0.06);
-      color: var(--text-primary);
-    }
-
-    .sidebar-history-header:active {
-      background: rgba(150, 118, 85, 0.1);
-    }
-
-    .sidebar-history-header.expanded {
-      background: rgba(255, 251, 245, 0.85);
-      color: var(--text-primary);
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .sidebar-history-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .sidebar-history-right {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-
-    /* Count bubble — pill shape, tabular numerals, accent-tinted when there
-       are items, muted when empty/loading. */
-    .history-bubble {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 22px;
-      height: 18px;
-      padding: 0 7px;
-      border-radius: 999px;
-      background: var(--accent-muted);
-      color: var(--accent);
-      font-size: 0.6875rem;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-      line-height: 1;
-      letter-spacing: 0;
-    }
-
-    .history-bubble.empty {
-      background: var(--bg-tertiary);
-      color: var(--text-muted);
-      opacity: 0.65;
-    }
-
-    .history-bubble.loading {
-      background: transparent;
-      color: var(--text-muted);
-      letter-spacing: 0.1em;
-      padding: 0 4px;
-      font-weight: 600;
-    }
-
-    .sidebar-history-chevron {
-      flex-shrink: 0;
-      color: var(--text-muted);
-      transition: transform 0.22s var(--ease-out-expo), color var(--transition-fast);
-    }
-
-    .sidebar-history-header.expanded .sidebar-history-chevron {
-      transform: rotate(180deg);
-      color: var(--text-secondary);
-    }
-
-    /* Expanded body — scrollable, capped via parent max-height. */
-    .sidebar-history-body {
-      flex: 1;
-      min-height: 0;
-      overflow-y: auto;
-      padding: 6px 8px 10px;
+    .session-history-body {
       display: flex;
       flex-direction: column;
       gap: 4px;
+      padding: 2px 0 4px;
       animation: historyBodyFadeIn 0.22s var(--ease-out-expo);
     }
 
@@ -9486,11 +9419,16 @@
       transform: scale(0.98);
     }
 
-    /* ── Manage bar — Linear-style toolbar ── */
+    /* ── Manage bar ──
+       Normal: a quiet sub-header ("最近的会话记录" + 管理 toggle).
+       Active: the SAME row morphs IN PLACE to a flat selection toolbar —
+       no card, no shadow, no layout jump — and sticks to the top of the
+       scroll so the count + 删除 stay reachable while selecting rows below. */
     .session-manage-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
       padding: 4px 4px 4px 10px;
       border-radius: 10px;
       margin-bottom: 10px;
@@ -9506,22 +9444,53 @@
       letter-spacing: 0.005em;
     }
 
-    /* Active toolbar — iOS toolbar look: card with hairline + summary + actions */
     .session-manage-bar.active {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 10px;
-      padding: 10px 12px;
-      background: rgba(255, 255, 255, 0.6);
-      border: 1px solid rgba(125, 91, 57, 0.1);
-      border-radius: 14px;
-      box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+      position: sticky;
+      top: 0;
+      z-index: 6;
+      /* bleed to the list edges and cancel the #sessions-list top padding so
+         the bar sits flush at the scroll top — a flat header, not a card. */
+      margin: -10px -10px 8px;
+      padding: 9px 10px 9px 6px;
+      border-radius: 0;
+      background: rgba(255, 251, 245, 0.94);
+      -webkit-backdrop-filter: saturate(1.2) blur(8px);
+      backdrop-filter: saturate(1.2) blur(8px);
+      border-bottom: 1px solid var(--border-subtle);
+      box-shadow: none;
+    }
+    .session-manage-bar.active:hover {
+      background: rgba(255, 251, 245, 0.94);
+    }
+
+    /* Exit (✕) — the in-place "leave manage mode" affordance on the left. */
+    .session-manage-exit {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background 0.14s ease, color 0.14s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .session-manage-exit:hover {
+      background: rgba(125, 91, 57, 0.1);
+      color: var(--text-primary);
     }
 
     .session-manage-summary {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
+      min-width: 0;
+      flex: 1;
       font-size: 0.75rem;
       color: var(--text-secondary);
       font-weight: 500;
@@ -9530,33 +9499,29 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 22px;
-      height: 22px;
-      padding: 0 7px;
+      min-width: 20px;
+      height: 18px;
+      padding: 0 6px;
       background: var(--accent);
       color: var(--text-inverse);
       font-size: 0.6875rem;
       font-weight: 700;
       border-radius: 999px;
       font-variant-numeric: tabular-nums;
-      box-shadow: 0 1px 2px rgba(197, 101, 61, 0.32);
     }
     .session-manage-summary-label {
       color: var(--text-secondary);
       font-weight: 600;
     }
+    .session-manage-summary-label.muted {
+      color: var(--text-muted);
+      font-weight: 500;
+    }
 
     .session-manage-actions {
       display: flex;
       align-items: center;
-      gap: 4px;
-      flex-wrap: wrap;
-    }
-    .session-manage-divider {
-      width: 1px;
-      height: 16px;
-      background: rgba(125, 91, 57, 0.16);
-      margin: 0 4px;
+      gap: 6px;
       flex-shrink: 0;
     }
 
@@ -10332,13 +10297,15 @@
       }
 
       .sessions-list {
-        display: block;
-        flex: 1;
+        /* Match desktop: flex column that fills the scroll body so 历史会话
+           bottom-pins and the manage bar stays sticky. .sidebar-body owns the
+           scroll (and momentum) on mobile, so this stays overflow:visible. */
+        display: flex;
+        flex-direction: column;
+        flex: 1 0 auto;
         min-height: 0;
-        overflow-x: hidden;
-        overflow-y: auto;
+        overflow: visible;
         padding: 4px;
-        -webkit-overflow-scrolling: touch;
       }
 
       /* 移动端会话项 - 紧凑 */

@@ -188,21 +188,19 @@ App 启动 5 秒后异步调 `/api/macos-dmg-update?currentVersion=<X>` → 弹 
 
 ## Publishing & Release
 
-版本号由 git tag 驱动，发布流程：
+版本号由 git tag 驱动。**发布全部交给 GitHub Actions**——push 一个 `v*` tag 即可：
 
 ```bash
 git tag v1.15.0
-./publish.sh
+git push origin v1.15.0
 ```
 
-`publish.sh` 做以下事情：
-1. 从最新 git tag 提取版本号，写入 `package.json`
-2. `npm run build`
-3. 编译 Android APK（版本号与 npm 同步），部署到 `~/.wand/android/`
-4. **在 macOS 上额外编译 DMG，部署到 `~/.wand/macos/`**（非 macOS 跳过这一步，由 GitHub Actions 在 push tag 时自动构建）
-5. `npm publish --access public`
+push tag 后三个 workflow 并行触发：
+- `.github/workflows/npm-release.yml`（`ubuntu-latest`）：从 tag 同步版本号到 `package.json` → `npm ci` → `npm run build` → `npm publish --access public`。需要仓库 secret **`NPM_TOKEN`**（npm Automation / Granular Access token，对 `@co0ontty/wand` 有读写权限）。
+- `.github/workflows/android-release.yml`（`ubuntu-latest`）：构建 APK 上传到对应 Release。
+- `.github/workflows/macos-release.yml`（`macos-latest`）：构建 DMG 上传到对应 Release。
 
-`.github/workflows/android-release.yml` 与 `.github/workflows/macos-release.yml` 都在 push `v*` tag 时触发，分别在 `ubuntu-latest` 与 `macos-latest` runner 上构建并上传产物到对应 Release。
+`publish.sh` 现在**只做本地构建 + 把 APK/DMG 部署到 `~/.wand/{android,macos}/`** 供本地实例分发，**不再 `npm publish`**（避免和 CI 撞 "version already exists"）。本地日常用 `start.sh`，正式发版用「打 tag + push」。
 
 `install.sh` 是面向终端用户的一键安装脚本（自动装 Node.js 22+，然后 `npm install -g`）。
 
@@ -210,6 +208,7 @@ git tag v1.15.0
 
 - `README.md` contains the end-user install/start flow (`npm install -g @co0ontty/wand`, `wand init`, `wand web`).
 - There is no `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` in this repo.
+- `.github/workflows/npm-release.yml` handles GitHub Actions npm publish on tag push (needs `NPM_TOKEN` secret).
 - `.github/workflows/android-release.yml` handles GitHub Actions APK builds on tag push.
 - `.github/workflows/macos-release.yml` handles GitHub Actions DMG builds on tag push (runs on `macos-latest`).
 

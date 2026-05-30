@@ -1530,8 +1530,14 @@
               if (_macAppVersion) {
                 checkDmgAutoUpdate();
               }
-              if (state.claudeHistoryExpanded && !state.claudeHistoryLoaded) {
-                ensureClaudeHistoryLoaded();
+              // Warm up history in the background a beat after first paint so
+              // the inline 历史会话 count is real (not "···") and recent CLI
+              // sessions merge into the list without a manual expand. Deferred
+              // to avoid competing with the initial session/output load.
+              if (!state.claudeHistoryLoaded) {
+                setTimeout(function() {
+                  if (!state.claudeHistoryLoaded) ensureClaudeHistoryLoaded();
+                }, 600);
               }
             });
           })
@@ -1831,7 +1837,6 @@
                   '<div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div>' +
                 '</div>' +
               '</div>' +
-              '<div id="sidebar-history-region" class="sidebar-history-region">' + renderClaudeHistoryRegion() + '</div>' +
               '<div class="sidebar-footer">' +
                 '<button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> 新会话</button>' +
                 '<div class="sidebar-footer-actions">' +
@@ -3579,14 +3584,16 @@
       }
 
       function renderSessions() {
-        // Claude history is no longer inlined here — it lives in its own
-        // collapsible region between .sidebar-body and .sidebar-footer, so
-        // the scrolling sessions list focuses on recent / archived sessions.
+        // Claude/Codex history is rendered INLINE as the final collapsible
+        // group of this same scrolling list (see renderClaudeHistoryGroup),
+        // styled like 已归档. There is no separate docked region anymore —
+        // that previously stranded an empty void above the footer.
         var archivedSessions = state.sessions.filter(function(session) { return session.archived; });
         var groups = [];
         groups.push(renderSessionManageBar());
 
         var recentEntries = getRecentEntries();
+        var historyGroup = renderClaudeHistoryGroup();
 
         if (recentEntries.length > 0) {
           groups.push(renderRecentGroup(recentEntries));
@@ -3594,8 +3601,11 @@
         if (archivedSessions.length > 0) {
           groups.push(renderArchivedGroup(archivedSessions));
         }
-        if (recentEntries.length === 0 && archivedSessions.length === 0) {
+        if (recentEntries.length === 0 && archivedSessions.length === 0 && !historyGroup) {
           return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
+        }
+        if (historyGroup) {
+          groups.push(historyGroup);
         }
         return groups.join("");
       }
@@ -3653,19 +3663,21 @@
         var selectAllAction = allSelected ? "clear-selection" : "select-all-visible";
         var selectAllDisabled = selectable === 0 ? ' disabled' : '';
 
-        // Linear-style toolbar:
-        //   [N selected]  ─────────  [全选] [清空]  [delete (danger)] [完成 (primary)]
+        // Flat in-place toolbar (NOT a popped card): the same sub-header row
+        // morphs to [✕]  N 已选 ........ 全选/取消全选  删除. Sticky to the top
+        // of the scroll so the count + delete stay reachable while selecting.
+        var exitBtn = '<button class="session-manage-exit" data-action="toggle-manage-mode" type="button" aria-label="退出管理模式" title="退出管理模式">' +
+          '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>' +
+        '</button>';
+        var summary = hasAny
+          ? '<span class="session-manage-count">' + totalCount + '</span><span class="session-manage-summary-label">已选择</span>'
+          : '<span class="session-manage-summary-label muted">选择要管理的项目</span>';
         return '<div class="session-manage-bar active">' +
-          '<div class="session-manage-summary">' +
-            '<span class="session-manage-count">' + totalCount + '</span>' +
-            '<span class="session-manage-summary-label">已选择</span>' +
-          '</div>' +
+          exitBtn +
+          '<div class="session-manage-summary">' + summary + '</div>' +
           '<div class="session-manage-actions">' +
             '<button class="btn btn-ghost btn-xs" data-action="' + selectAllAction + '" type="button"' + selectAllDisabled + '>' + selectAllLabel + '</button>' +
-            '<button class="btn btn-ghost btn-xs" data-action="clear-selection" type="button"' + (hasAny ? '' : ' disabled') + '>清空</button>' +
-            '<span class="session-manage-divider"></span>' +
-            '<button class="btn btn-danger btn-xs" data-action="delete-selected" type="button"' + (hasAny ? '' : ' disabled') + '>删除</button>' +
-            '<button class="btn btn-primary btn-xs" data-action="toggle-manage-mode" type="button">完成</button>' +
+            '<button class="btn btn-danger btn-xs" data-action="delete-selected" type="button"' + (hasAny ? '' : ' disabled') + '>删除' + (hasAny ? ' ' + totalCount : '') + '</button>' +
           '</div>' +
         '</div>';
       }
@@ -3713,46 +3725,30 @@
         });
       }
 
-      // Render the docked Claude-history region that lives between
-      // `.sidebar-body` and `.sidebar-footer`. Collapsed by default — only
-      // shows a slim header ("历史消息" + count bubble). Expanded reveals the
-      // grouped-by-cwd list inside a scroll cap.
-      function renderClaudeHistoryRegion() {
+      // Render history as the final INLINE collapsible group of #sessions-list,
+      // styled like the 已归档 group. Returns '' when history is fully loaded
+      // and empty, so a workspace with no older CLI history shows no stray
+      // "历史会话 0" row (and no stranded bar above the footer).
+      function renderClaudeHistoryGroup() {
         var visibleHistory = getClaudeHistoryRegionItems();
-        var expanded = !!state.claudeHistoryExpanded;
         var loaded = !!state.claudeHistoryLoaded;
         var codexVisible = getVisibleCodexHistorySessions();
         var codexLoaded = !!state.codexHistoryLoaded;
+        var fullyLoaded = loaded && codexLoaded;
         var count = (loaded ? visibleHistory.length : 0) + (codexLoaded ? codexVisible.length : 0);
+        if (fullyLoaded && count === 0) return '';
 
-        var badgeCls = "history-bubble";
-        var badgeContent;
-        if (!loaded) {
-          badgeCls += " loading";
-          badgeContent = "···";
-        } else if (count === 0) {
-          badgeCls += " empty";
-          badgeContent = "0";
-        } else {
-          badgeContent = count > 999 ? "999+" : String(count);
-        }
-        var badge = '<span class="' + badgeCls + '">' + badgeContent + '</span>';
-
-        // Chevron rotates: collapsed → up (▲, suggests "expand upward"),
-        // expanded → down (▼, suggests "collapse downward").
-        var chevronSvg = '<svg class="sidebar-history-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>';
-
-        var headerCls = "sidebar-history-header" + (expanded ? " expanded" : "");
-        var header = '<button type="button" class="' + headerCls + '" id="claude-history-toggle" aria-expanded="' + expanded + '" aria-controls="sidebar-history-body" title="' + (expanded ? "收起历史消息" : "展开历史消息") + '">' +
-          '<span class="sidebar-history-label">历史消息</span>' +
-          '<span class="sidebar-history-right">' + badge + chevronSvg + '</span>' +
-        '</button>';
-
+        var expanded = !!state.claudeHistoryExpanded;
+        var chevron = expanded ? "&#9662;" : "&#9656;";
+        var countContent = fullyLoaded ? (count > 999 ? "999+" : String(count)) : "···";
+        var header = '<div class="session-group-title claude-history-toggle session-history-toggle" id="claude-history-toggle" role="button" tabindex="0" aria-expanded="' + expanded + '" title="' + (expanded ? "收起历史会话" : "展开历史会话") + '">' +
+          '<span class="chevron">' + chevron + '</span> 历史会话 ' +
+          '<span class="history-count' + (fullyLoaded ? '' : ' loading') + '">' + countContent + '</span>' +
+        '</div>';
         var body = expanded
-          ? '<div class="sidebar-history-body" id="sidebar-history-body">' + renderClaudeHistoryBodyContent(visibleHistory) + renderCodexHistoryBodyContent(codexVisible) + '</div>'
+          ? '<div class="session-history-body">' + renderClaudeHistoryBodyContent(visibleHistory) + renderCodexHistoryBodyContent(codexVisible) + '</div>'
           : '';
-
-        return header + body;
+        return '<section class="session-group session-group--history">' + header + body + '</section>';
       }
 
       function renderClaudeHistoryBodyContent(visibleHistory) {
@@ -3760,7 +3756,9 @@
           return '<div class="claude-history-loading">扫描历史会话中…</div>';
         }
         if (visibleHistory.length === 0) {
-          return '<div class="claude-history-loading">没有更早的 Claude 历史会话</div>';
+          // Group is only rendered when there is content somewhere (Claude or
+          // Codex); a Claude-empty/Codex-present case shows just the Codex list.
+          return '';
         }
         var groups = {};
         var groupOrder = [];
@@ -3784,14 +3782,6 @@
           }
         });
         return toolbar + '<div class="sidebar-history-scroll">' + listHtml + '</div>';
-      }
-
-      // Re-render only the docked history region in place. Called by
-      // updateSessionsList() so existing callers (load complete, delete, etc.)
-      // keep working without changes.
-      function updateClaudeHistoryRegion() {
-        var region = document.getElementById("sidebar-history-region");
-        if (region) region.innerHTML = renderClaudeHistoryRegion();
       }
 
       function getVisibleClaudeHistorySessions() {
@@ -6193,15 +6183,9 @@
           sessionsList.addEventListener("mouseout", handleCollapsedTileLeave);
           initSwipeToDelete(sessionsList);
         }
-        // The docked history region lives outside #sessions-list now, but it
-        // still wants the same delegated handlers (toggle button, directory
-        // expand/collapse, history-item clicks, clear-all, etc.). Reuse the
-        // same callbacks so behavior stays identical.
-        var historyRegion = document.getElementById("sidebar-history-region");
-        if (historyRegion) {
-          historyRegion.addEventListener("click", handleSessionItemClick);
-          historyRegion.addEventListener("keydown", handleSessionItemKeydown);
-        }
+        // History now renders inline as the final group inside #sessions-list,
+        // so the delegated handlers above already cover its toggle / directory
+        // expand-collapse / item clicks / clear-all — no separate region wiring.
         window.addEventListener("scroll", hideCollapsedTileBubble, true);
         window.addEventListener("resize", hideCollapsedTileBubble);
 
@@ -8657,7 +8641,7 @@
         state.sessions = [];
         state.claudeHistory = [];
         state.claudeHistoryLoaded = false;
-        state.claudeHistoryExpanded = true;
+        state.claudeHistoryExpanded = false;
         state.claudeHistoryExpandedDirs = {};
         state.sessionsDrawerOpen = false;
         render();
@@ -9594,10 +9578,8 @@
         var countEl = document.getElementById("session-count");
         if (listEl) listEl.innerHTML = renderSessionsListContent();
         if (countEl) countEl.textContent = String(state.sessions.length);
-        // The docked history region lives outside #sessions-list — refresh it
-        // too so callers that mutate state.claudeHistory (load complete,
-        // delete, clear) don't need to know about it.
-        updateClaudeHistoryRegion();
+        // History renders inline inside #sessions-list now, so the line above
+        // already refreshed it — no separate docked region to update.
         if (typeof hideCollapsedTileBubble === "function") hideCollapsedTileBubble();
         updateShellChrome();
         // Re-render cross-session queue (container may have been destroyed by DOM rebuild)

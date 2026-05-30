@@ -46,8 +46,7 @@ else
   echo "==> 当前系统非 macOS，跳过 DMG 构建（push tag 后 GitHub Actions 会自动构建并发布到 Release）"
 fi
 
-# 发布
-echo "==> 发布 @co0ontty/wand@$VERSION 到 NPM..."
-npm publish --access public
-
-echo "==> 发布完成！"
+# NPM 发布交给 GitHub Actions（push v* tag 触发 .github/workflows/npm-release.yml）。
+# 本脚本只负责本地构建 + 把 APK/DMG 部署到 ~/.wand 供本地实例分发。
+echo "==> 本地构建/部署完成。"
+echo "==> NPM 发布请用：git tag v$VERSION && git push origin v$VERSION（CI 会自动 npm publish + 构建 APK/DMG 到 Release）"
