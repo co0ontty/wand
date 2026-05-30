@@ -15381,39 +15381,10 @@
       letter-spacing: 0.02em;
       white-space: nowrap;
     }
-    /* Switch row inside quick-commit modal — same iOS rhythm as settings */
-    .qc-checkbox-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 11px 14px;
-      background: rgba(255, 255, 255, 0.55);
-      border: 1px solid rgba(125, 91, 57, 0.08);
-      border-radius: 12px;
-      box-shadow: 0 1px 1px rgba(125, 91, 57, 0.02);
-      transition: background 0.16s ease, border-color 0.16s ease;
-      user-select: none;
-    }
-    .qc-checkbox-row:hover {
-      background: rgba(255, 255, 255, 0.78);
-      border-color: rgba(125, 91, 57, 0.16);
-    }
-    .qc-checkbox-row:has(.switch-toggle:checked) {
-      background: linear-gradient(180deg, #fff7ef 0%, #fff1de 100%);
-      border-color: rgba(197, 101, 61, 0.3);
-    }
-    .qc-checkbox-label {
-      flex: 1;
-      min-width: 0;
-      font-size: 0.8125rem;
-      font-weight: 600;
-      color: var(--text-primary);
-      cursor: pointer;
-      line-height: 1.4;
-    }
     .qc-switch {
       flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
       cursor: pointer;
     }
     .qc-message-row,
@@ -15431,6 +15402,62 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      flex-wrap: wrap;
+    }
+    .qc-ai-controls {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 7px;
+      margin-left: auto;
+      flex: 0 0 auto;
+    }
+    .qc-ai-tag-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 30px;
+      padding: 3px 7px 3px 9px;
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.58);
+      color: var(--text-muted);
+      font-size: 0.74rem;
+      font-weight: 700;
+      line-height: 1;
+      user-select: none;
+      cursor: pointer;
+      transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+    }
+    .qc-ai-tag-toggle:hover {
+      background: rgba(255, 255, 255, 0.82);
+      border-color: rgba(125, 91, 57, 0.20);
+    }
+    .qc-ai-tag-toggle:has(.switch-toggle:checked) {
+      color: rgba(170, 79, 42, 0.98);
+      background: linear-gradient(180deg, #fff8f1 0%, #fff1e3 100%);
+      border-color: rgba(197, 101, 61, 0.32);
+      box-shadow: 0 1px 4px rgba(197, 101, 61, 0.10);
+    }
+    .qc-ai-tag-toggle:has(.switch-toggle:disabled) {
+      cursor: default;
+      opacity: 0.68;
+    }
+    .qc-ai-tag-label {
+      white-space: nowrap;
+    }
+    .qc-switch--compact .switch-slider {
+      width: 34px;
+      min-width: 34px;
+      height: 20px;
+      border-radius: 999px;
+    }
+    .qc-switch--compact .switch-slider::after {
+      width: 16px;
+      height: 16px;
+    }
+    .qc-switch--compact .switch-toggle:checked + .switch-slider::after {
+      transform: translateX(14px);
     }
     .qc-message-row textarea {
       resize: vertical;
@@ -15735,6 +15762,10 @@
       .qc-files-wrap { max-height: 160px; }
       .qc-section { padding: 10px 12px; }
       .qc-dropdown-menu { min-width: 180px; }
+      .qc-ai-controls {
+        width: 100%;
+        justify-content: flex-end;
+      }
     }
 
     /* ============================================================ */
