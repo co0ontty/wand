@@ -2057,13 +2057,14 @@
                     '</div>' +
                   '</div>' +
                   renderExpandedShortcutsRow() +
-                  // Session info bar at bottom — 仅保留信息类徽章（Claude session id / exit code）。
+                  // Session info bar at bottom — 仅保留信息类徽章（历史会话 id / exit code）。
                   // 自动批准已从这里移到主 pill 行（renderAutoApproveChip）。
                   (selectedSession
                     ? (function() {
                         var bits = "";
-                        if (selectedSession.provider === "claude" && selectedSession.claudeSessionId) {
-                          bits += '<span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="点击复制 Claude 会话 ID">' + iconSvg("cloud", { size: 11, strokeWidth: 1.7, cls: "claude-session-id-icon" }) + '<span class="claude-session-id-text">' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span></span>';
+                        if ((selectedSession.provider === "claude" || selectedSession.provider === "codex") && selectedSession.claudeSessionId) {
+                          var historyIdTitle = selectedSession.provider === "codex" ? "点击复制 Codex thread ID" : "点击复制 Claude 会话 ID";
+                          bits += '<span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="' + historyIdTitle + '">' + iconSvg("cloud", { size: 11, strokeWidth: 1.7, cls: "claude-session-id-icon" }) + '<span class="claude-session-id-text">' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span></span>';
                         }
                         // 非结构化会话：进程退出后展示退出码（哪怕 0，告诉用户已正常结束）。
                         // 结构化会话：只在退出码非 0（即真有失败）时展示，避免成功的多轮对话也挂个 "退出码=0" 误导。
@@ -2162,7 +2163,8 @@
 
         var infoItems = "";
         if (hasClaudeId) {
-          infoItems += '<button class="topbar-more-item" data-action="copy-claude-session-id" type="button" role="menuitem">' + cloudIconSvg + '<span>复制 Claude 会话 ID</span></button>';
+          var historyIdLabel = session.provider === "codex" ? "复制 Codex thread ID" : "复制 Claude 会话 ID";
+          infoItems += '<button class="topbar-more-item" data-action="copy-claude-session-id" type="button" role="menuitem">' + cloudIconSvg + '<span>' + historyIdLabel + '</span></button>';
         }
         if (hasCwd) {
           infoItems += '<button class="topbar-more-item" data-action="copy-cwd" type="button" role="menuitem">' + folderIconSvg + '<span>复制工作目录</span></button>';
@@ -5536,9 +5538,10 @@
         var resumeButton = "";
         var checkbox = renderManageCheckbox("sessions", session.id, "选择会话 " + session.command);
 
-        if (session.provider === "claude" && session.claudeSessionId) {
+        if ((session.provider === "claude" || session.provider === "codex") && session.claudeSessionId) {
           if (session.status !== "running" && !state.sessionsManageMode && !isStructuredSession(session)) {
-            resumeButton = '<button class="session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="恢复会话" title="恢复 Claude 会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
+            var resumeTitle = session.provider === "codex" ? "恢复 Codex 会话" : "恢复 Claude 会话";
+            resumeButton = '<button class="session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="' + resumeTitle + '" title="' + resumeTitle + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
           }
         }
 
@@ -5557,7 +5560,7 @@
         // Title: summary or command
         var titleHtml = session.summary
           ? '<div class="session-title">' + escapeHtml(session.summary) + '</div>'
-          : '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '') : session.command) + '</div>';
+          : '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '').replace(/\s+resume\s+[0-9a-f-]+/, '') : session.command) + '</div>';
 
         // Activity description for running sessions
         var activityDesc = getSessionActivityDesc(session);
@@ -6673,7 +6676,7 @@
             topbarMoreBtn.setAttribute("aria-expanded", "false");
             switch (action) {
               case "copy-claude-session-id":
-                copySelectedSessionField("claudeSessionId", "Claude 会话 ID 已复制");
+                copySelectedSessionField("claudeSessionId", getSelectedSession() && getSelectedSession().provider === "codex" ? "Codex thread ID 已复制" : "Claude 会话 ID 已复制");
                 break;
               case "copy-cwd":
                 copySelectedSessionField("cwd", "工作目录已复制");
@@ -12812,7 +12815,7 @@
 
             return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
               if (!readySession) {
-                // ensureSessionReadyForInput / resumeClaudeSessionById 已经在失败路径里
+                // ensureSessionReadyForInput / resumeSession 已经在失败路径里
                 // 自行 toast，这里不再重复提示，避免叠两条消息。
                 return null;
               }
@@ -13606,14 +13609,14 @@
         var isCodex = selectedSession && selectedSession.provider === "codex";
         if (error && (error.errorCode === "SESSION_NOT_RUNNING" || error.errorCode === "SESSION_NO_PTY")) {
           return isCodex
-            ? "Codex 会话已结束，请新建会话后继续。"
+            ? "Codex 会话已结束；若存在 Codex 历史会话，将在你下次发送消息时自动恢复。"
             : "会话已结束；若存在 Claude 历史会话，将在你下次发送消息时自动恢复。";
         }
         if (error && error.errorCode === "SESSION_NOT_FOUND") {
           return "会话不存在，请重新选择或新建会话。";
         }
         return (error && error.message) || (isCodex
-          ? "Codex 会话暂不可用，请检查终端视图或新建会话。"
+          ? "Codex 会话暂不可用；若存在 Codex 历史会话，将自动尝试恢复。"
           : "会话暂不可用；若存在 Claude 历史会话，将自动尝试恢复。");
       }
 
@@ -13654,10 +13657,10 @@
       }
 
       function canAutoResumeSession(session) {
-        // 只要是 Claude provider + 非运行中 + 有 claudeSessionId，
+        // 只要是 Claude/Codex PTY provider + 非运行中 + 有可恢复历史 id，
         // 就允许在用户发送时静默触发恢复。不再要求 messages 里同时
         // 有 user + assistant 文本（slim 列表/截断历史会让该判断失真）。
-        return !!(session && session.provider === "claude" && session.status !== "running" && session.claudeSessionId);
+        return !!(session && !isStructuredSession(session) && (session.provider === "claude" || session.provider === "codex") && session.status !== "running" && session.claudeSessionId);
       }
 
       function ensureSessionReadyForInput(session, errorEl) {
@@ -13670,12 +13673,13 @@
           return Promise.resolve(session);
         }
         if (!canAutoResumeSession(session)) {
-          showToast("该会话没有可恢复的 Claude 历史上下文，请新建会话。", "error");
+          var providerLabel = session && session.provider === "codex" ? "Codex" : "Claude";
+          showToast("该会话没有可恢复的 " + providerLabel + " 历史上下文，请新建会话。", "error");
           return Promise.resolve(null);
         }
 
         // 静默恢复：不再弹 "正在恢复历史会话…" 提示，让用户发送动作看起来无缝。
-        return resumeClaudeSessionById(session.claudeSessionId, errorEl).then(function(data) {
+        return resumeSession(session.id, errorEl).then(function(data) {
           if (!data) return null;
           updateSessionSnapshot(data);
           updateSessionsList();
@@ -14114,7 +14118,7 @@
               : "Enter 发送 · Shift+Enter 换行";
           }
         }
-        // 历史会话只要可自动恢复（Claude provider + 有 claudeSessionId），输入框/发送按钮
+        // 历史会话只要可自动恢复（Claude/Codex PTY + 有历史 id），输入框/发送按钮
         // 就保持可用——发送时由 ensureSessionReadyForInput 透明完成恢复。
         var canResumeOnSend = !structured && !isRunning && canAutoResumeSession(selectedSession);
         if (composer) {
@@ -14649,9 +14653,15 @@
         return resumeSession(sessionId).then(function(data) {
           if (!data) return null;
           if (data.claudeSessionId) {
-            state.claudeHistory = state.claudeHistory.filter(function(s) {
-              return s.claudeSessionId !== data.claudeSessionId;
-            });
+            if (data.provider === "codex") {
+              state.codexHistory = state.codexHistory.filter(function(s) {
+                return s.claudeSessionId !== data.claudeSessionId;
+              });
+            } else {
+              state.claudeHistory = state.claudeHistory.filter(function(s) {
+                return s.claudeSessionId !== data.claudeSessionId;
+              });
+            }
           }
           return activateSession(data).then(function() {
             return data;

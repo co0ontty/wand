@@ -16,7 +16,7 @@ import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, nor
 import { buildChildEnv } from "./env-utils.js";
 import { buildLanguageDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
-import { getResumeCommandSessionId } from "./resume-policy.js";
+import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./resume-policy.js";
 import { applyThinkingEffortToPrompt, normalizeThinkingEffort } from "./structured-session-manager.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {
@@ -101,6 +101,10 @@ interface SessionRecord extends SessionSnapshot {
   initialInputTimer?: NodeJS.Timeout | null;
   /** Claude project jsonl mtimes visible before this session started */
   knownClaudeProjectMtimes?: Map<string, number>;
+  /** Codex rollout mtimes visible before this session started */
+  knownCodexSessionMtimes?: Map<string, number>;
+  /** Retry timer for discovering the real Codex resumable thread id */
+  codexSessionDiscoveryTimer?: NodeJS.Timeout | null;
   /** Auto-approval stats per session */
   approvalStats: { tool: number; command: number; file: number; total: number };
 }
@@ -199,7 +203,7 @@ function listClaudeProjectSessionMtimes(cwd: string): Map<string, number> {
   return new Map(listClaudeProjectSessionCandidates(cwd).map((candidate) => [candidate.id, candidate.mtimeMs]));
 }
 
-function hasRecentProjectActivity(candidate: ClaudeProjectSessionCandidate, startedAt: string): boolean {
+function hasRecentProjectActivity(candidate: { mtimeMs: number }, startedAt: string): boolean {
   const startedAtMs = Date.parse(startedAt);
   if (!Number.isFinite(startedAtMs)) {
     return true;
@@ -567,6 +571,46 @@ function listAllCodexHistorySessions(): CodexHistorySession[] {
   return Array.from(byThread.values()).sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
+function listCodexSessionMtimes(): Map<string, number> {
+  return new Map(listAllCodexHistorySessions().map((session) => [session.claudeSessionId, session.mtimeMs]));
+}
+
+function isSameResolvedPath(left: string | undefined, right: string | undefined): boolean {
+  if (!left || !right) return false;
+  return path.resolve(left) === path.resolve(right);
+}
+
+function selectCodexSessionForRecord(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownCodexSessionMtimes">): CodexHistorySession | null {
+  const knownMtimes = record.knownCodexSessionMtimes ?? new Map<string, number>();
+  const candidates = listAllCodexHistorySessions()
+    .filter((session) => session.hasConversation)
+    .filter((session) => isSameResolvedPath(session.cwd, record.cwd))
+    .filter((session) => {
+      const previousMtime = knownMtimes.get(session.claudeSessionId);
+      return previousMtime === undefined || session.mtimeMs > previousMtime;
+    })
+    .filter((session) => hasRecentProjectActivity(session, record.startedAt))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const fresh = candidates.filter((session) => !knownMtimes.has(session.claudeSessionId));
+  if (fresh.length === 1) {
+    return fresh[0];
+  }
+  if (fresh.length > 1) {
+    return null;
+  }
+
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function getLatestCodexSessionId(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownCodexSessionMtimes">): string | null {
+  return selectCodexSessionForRecord(record)?.claudeSessionId ?? null;
+}
+
 /** Delete every rollout file belonging to the given codex thread ids. */
 function deleteCodexRolloutFiles(threadIds: Set<string>): number {
   if (threadIds.size === 0) return 0;
@@ -708,7 +752,12 @@ export class ProcessManager extends EventEmitter {
       }
       const provider = snapshot.provider ?? resolveProviderFromCommand(snapshot.command);
       const isClaudeCmd = provider === "claude";
-      const resumeCommandSessionId = isClaudeCmd ? getResumeCommandSessionId(snapshot.command) : null;
+      const isCodexCmd = provider === "codex";
+      const resumeCommandSessionId = isClaudeCmd
+        ? getResumeCommandSessionId(snapshot.command)
+        : isCodexCmd
+          ? getCodexResumeCommandSessionId(snapshot.command)
+          : null;
       // Sessions restored from storage have ptyProcess: null — the old server's PTY
       // belongs to a dead process. Mark running sessions as exited so the UI
       // reflects reality and users can start fresh sessions.
@@ -751,6 +800,8 @@ export class ProcessManager extends EventEmitter {
           knownClaudeTaskIds: undefined,
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
+          knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes() : undefined,
+          codexSessionDiscoveryTimer: null,
           claudeSessionId: resumeCommandSessionId ?? updated.claudeSessionId,
           approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
           ptyCols: snapshot.ptyCols ?? 120,
@@ -786,6 +837,8 @@ export class ProcessManager extends EventEmitter {
           knownClaudeTaskIds: undefined,
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(snapshot.cwd) : undefined,
+          knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes() : undefined,
+          codexSessionDiscoveryTimer: null,
           claudeSessionId: resumeCommandSessionId ?? snapshot.claudeSessionId,
           approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
           ptyCols: snapshot.ptyCols ?? 120,
@@ -847,7 +900,9 @@ export class ProcessManager extends EventEmitter {
       const record = this.sessions.get(id);
       if (record) {
         this.logger.deleteSession(id);
-        this.deleteClaudeCache(record);
+        if (record.provider === "claude") {
+          this.deleteClaudeCache(record);
+        }
       }
       this.sessions.delete(id);
       this.lastPersistedMessageState.delete(id);
@@ -855,6 +910,7 @@ export class ProcessManager extends EventEmitter {
     }
     if (toRemove.length > 0) {
       this.claudeHistoryCache = null;
+      this.codexHistoryCache = null;
     }
   }
 
@@ -894,9 +950,16 @@ export class ProcessManager extends EventEmitter {
     const resumeCommandSessionId = isClaudeProvider
       ? getResumeCommandSessionId(processedCommand) ?? getResumeCommandSessionId(command)
       : null;
+    const isCodexProvider = provider === "codex";
+    const codexResumeCommandSessionId = isCodexProvider
+      ? getCodexResumeCommandSessionId(processedCommand) ?? getCodexResumeCommandSessionId(command)
+      : null;
     const knownClaudeTaskIds = isClaudeProvider ? new Set(listRecentClaudeProjectSessionIds(resolvedCwd, new Date().toISOString())) : null;
     const knownClaudeProjectMtimes = isClaudeProvider ? listClaudeProjectSessionMtimes(resolvedCwd) : null;
-    const initialClaudeSessionId = isClaudeProvider ? resumeCommandSessionId ?? null : null;
+    const knownCodexSessionMtimes = isCodexProvider && !codexResumeCommandSessionId ? listCodexSessionMtimes() : null;
+    const initialClaudeSessionId = isClaudeProvider
+      ? resumeCommandSessionId ?? null
+      : codexResumeCommandSessionId ?? null;
     const startedAt = new Date().toISOString();
 
     const record: SessionRecord = {
@@ -942,6 +1005,8 @@ export class ProcessManager extends EventEmitter {
       knownClaudeTaskIds: knownClaudeTaskIds ?? undefined,
       claudeTaskDiscoveryTimer: null,
       knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
+      knownCodexSessionMtimes: knownCodexSessionMtimes ?? undefined,
+      codexSessionDiscoveryTimer: null,
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
       thinkingEffort: normalizeThinkingEffort(opts?.thinkingEffort),
@@ -966,9 +1031,13 @@ export class ProcessManager extends EventEmitter {
     }
 
     this.sessions.set(id, record);
-    this.persist(record);
+    this.persist(record, { forceFullSave: true });
     if (initialClaudeSessionId) {
-      this.claudeHistoryCache = null;
+      if (provider === "codex") {
+        this.codexHistoryCache = null;
+      } else {
+        this.claudeHistoryCache = null;
+      }
     }
     this.cleanupOldSessions();
 
@@ -1010,6 +1079,10 @@ export class ProcessManager extends EventEmitter {
         clearTimeout(current.claudeTaskDiscoveryTimer);
         current.claudeTaskDiscoveryTimer = null;
       }
+      if (current.codexSessionDiscoveryTimer) {
+        clearTimeout(current.codexSessionDiscoveryTimer);
+        current.codexSessionDiscoveryTimer = null;
+      }
       if (current.initialInputTimer) {
         clearTimeout(current.initialInputTimer);
         current.initialInputTimer = null;
@@ -1020,6 +1093,7 @@ export class ProcessManager extends EventEmitter {
       }
       current.pendingEscalation = null;
       current.ptyPermissionBlocked = false;
+      this.captureCodexSessionId(current);
       current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
       current.exitCode = current.stopRequested ? null : exitCode;
       current.endedAt = new Date().toISOString();
@@ -1153,6 +1227,26 @@ export class ProcessManager extends EventEmitter {
       record.claudeTaskDiscoveryTimer = setTimeout(tryDiscoverClaudeTaskId, 500);
     }
 
+    if (record.knownCodexSessionMtimes) {
+      const tryDiscoverCodexSessionId = () => {
+        const current = this.sessions.get(id);
+        if (!current || current.status !== "running" || current.claudeSessionId || !current.knownCodexSessionMtimes) {
+          return;
+        }
+        if (getCodexResumeCommandSessionId(current.command)) {
+          current.codexSessionDiscoveryTimer = null;
+          return;
+        }
+        if (this.captureCodexSessionId(current)) {
+          current.codexSessionDiscoveryTimer = null;
+          this.persist(current);
+          return;
+        }
+        current.codexSessionDiscoveryTimer = setTimeout(tryDiscoverCodexSessionId, 1000);
+      };
+      record.codexSessionDiscoveryTimer = setTimeout(tryDiscoverCodexSessionId, 500);
+    }
+
     return this.snapshot(record);
   }
 
@@ -1188,7 +1282,7 @@ export class ProcessManager extends EventEmitter {
     // Cross-reference with wand-managed sessions
     const managedClaudeIds = new Set<string>();
     for (const record of this.sessions.values()) {
-      if (record.claudeSessionId) {
+      if (record.provider === "claude" && record.claudeSessionId) {
         managedClaudeIds.add(record.claudeSessionId);
       }
     }
@@ -1273,6 +1367,25 @@ export class ProcessManager extends EventEmitter {
       this.codexHistoryCache = null;
     }
     return deleted;
+  }
+
+  private captureCodexSessionId(record: SessionRecord): boolean {
+    if (record.provider !== "codex" || record.claudeSessionId || !record.knownCodexSessionMtimes) {
+      return false;
+    }
+    const discoveredThreadId = getLatestCodexSessionId({
+      cwd: record.cwd,
+      startedAt: record.startedAt,
+      knownCodexSessionMtimes: record.knownCodexSessionMtimes,
+    });
+    if (!discoveredThreadId) {
+      return false;
+    }
+    record.claudeSessionId = discoveredThreadId;
+    record.knownCodexSessionMtimes.set(discoveredThreadId, Date.now());
+    this.codexHistoryCache = null;
+    process.stderr.write(`[wand] Captured Codex thread ID: ${discoveredThreadId}\n`);
+    return true;
   }
 
   get(id: string): SessionSnapshot | null {
@@ -1440,6 +1553,10 @@ export class ProcessManager extends EventEmitter {
       clearTimeout(record.claudeTaskDiscoveryTimer);
       record.claudeTaskDiscoveryTimer = null;
     }
+    if (record.codexSessionDiscoveryTimer) {
+      clearTimeout(record.codexSessionDiscoveryTimer);
+      record.codexSessionDiscoveryTimer = null;
+    }
     if (record.initialInputTimer) {
       clearTimeout(record.initialInputTimer);
       record.initialInputTimer = null;
@@ -1469,6 +1586,7 @@ export class ProcessManager extends EventEmitter {
     }
 
     // Update lifecycle
+    this.captureCodexSessionId(record);
     this.persist(record);
     return this.snapshot(record);
   }
@@ -1481,6 +1599,10 @@ export class ProcessManager extends EventEmitter {
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
       record.claudeTaskDiscoveryTimer = null;
+    }
+    if (record.codexSessionDiscoveryTimer) {
+      clearTimeout(record.codexSessionDiscoveryTimer);
+      record.codexSessionDiscoveryTimer = null;
     }
     if (record.initialInputTimer) {
       clearTimeout(record.initialInputTimer);
@@ -1519,6 +1641,10 @@ export class ProcessManager extends EventEmitter {
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
       record.claudeTaskDiscoveryTimer = null;
+    }
+    if (record.codexSessionDiscoveryTimer) {
+      clearTimeout(record.codexSessionDiscoveryTimer);
+      record.codexSessionDiscoveryTimer = null;
     }
     if (record.initialInputTimer) {
       clearTimeout(record.initialInputTimer);
@@ -1559,11 +1685,17 @@ export class ProcessManager extends EventEmitter {
     // so a storage failure doesn't leave orphan records in the database.
     this.storage.deleteSession(id);
     this.logger.deleteSession(id);
-    this.deleteClaudeCache(record);
+    if (record.provider === "claude") {
+      this.deleteClaudeCache(record);
+    }
     this.sessions.delete(id);
     this.lastPersistedMessageState.delete(id);
     if (record.claudeSessionId) {
-      this.claudeHistoryCache = null;
+      if (record.provider === "codex") {
+        this.codexHistoryCache = null;
+      } else {
+        this.claudeHistoryCache = null;
+      }
     }
   }
 
@@ -1727,14 +1859,15 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
-  private persist(record: SessionRecord): void {
+  private persist(record: SessionRecord, options?: { forceFullSave?: boolean }): void {
     // Update messages from bridge before persisting
     const messages = record.ptyBridge?.getMessages() ?? record.messages;
     if (messages !== record.messages) {
       record.messages = messages;
     }
     const snapshot = this.snapshot(record);
-    const shouldSaveMessages = shouldPersistMessages(this.lastPersistedMessageState.get(record.id), messages);
+    const shouldSaveMessages = options?.forceFullSave === true
+      || shouldPersistMessages(this.lastPersistedMessageState.get(record.id), messages);
     // Persist full messages as soon as the structured conversation changes so
     // service restarts cannot roll the session back to an older tail message.
     if (shouldSaveMessages) {

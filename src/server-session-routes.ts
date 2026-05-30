@@ -165,6 +165,14 @@ function getLatestSessionSnapshot(processes: ProcessManager, structured: Structu
   return getSessionById(processes, structured, id) ?? storage.getSession(id);
 }
 
+function buildCodexResumeCommand(command: string, threadId: string): string {
+  const trimmed = command.trim();
+  const withoutExistingResume = trimmed
+    .replace(/\s+resume\s+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\s|$)/i, " ")
+    .trim();
+  return `${withoutExistingResume || "codex"} resume ${threadId}`;
+}
+
 function canMergeSession(snapshot: SessionSnapshot): boolean {
   return Boolean(snapshot.worktreeEnabled && snapshot.worktree?.branch && snapshot.worktree?.path);
 }
@@ -646,28 +654,41 @@ export function registerSessionRoutes(
         return;
       }
       if ((existingSession.sessionKind ?? "pty") !== "pty") {
-        res.status(400).json({ error: "结构化会话不支持 Claude CLI resume。" });
-        return;
-      }
-      if (existingSession.provider && existingSession.provider !== "claude") {
-        res.status(400).json({ error: "只有 Claude provider 支持恢复功能。" });
-        return;
-      }
-      const claudeSessionId = existingSession.claudeSessionId;
-      if (!claudeSessionId) {
-        res.status(400).json({ error: "此会话没有 Claude 会话 ID，无法恢复。" });
+        res.status(400).json({ error: "结构化会话不支持 PTY resume。" });
         return;
       }
       const command = existingSession.command.trim();
-      if (!/^claude\b/.test(command)) {
+      const provider = existingSession.provider ?? (/^codex\b/.test(command) ? "codex" : "claude");
+      if (provider !== "claude" && provider !== "codex") {
+        res.status(400).json({ error: "只有 Claude 或 Codex provider 支持恢复功能。" });
+        return;
+      }
+      const resumeSessionId = existingSession.claudeSessionId;
+      if (!resumeSessionId) {
+        res.status(400).json({ error: provider === "codex" ? "此会话没有 Codex thread ID，无法恢复。" : "此会话没有 Claude 会话 ID，无法恢复。" });
+        return;
+      }
+      if (provider === "claude" && !/^claude\b/.test(command)) {
         res.status(400).json({ error: "只有 Claude 命令支持恢复功能。" });
         return;
       }
+      if (provider === "codex") {
+        if (!/^codex\b/.test(command)) {
+          res.status(400).json({ error: "只有 Codex 命令支持恢复功能。" });
+          return;
+        }
+        if (!processes.hasCodexSessionFile(resumeSessionId)) {
+          res.status(400).json({ error: "对应的 Codex 历史会话不存在，无法恢复。" });
+          return;
+        }
+      }
       const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
-      const resumeCommand = `${command} --resume ${claudeSessionId}`;
+      const resumeCommand = provider === "codex"
+        ? buildCodexResumeCommand(command, resumeSessionId)
+        : `${command} --resume ${resumeSessionId}`;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
-      const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: sessionId, cols: reqCols, rows: reqRows });
+      const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: sessionId, cols: reqCols, rows: reqRows, provider });
       res.status(201).json(newSnapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
