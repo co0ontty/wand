@@ -78,13 +78,6 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
-
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -1140,7 +1133,7 @@ public class MainActivity extends AppCompatActivity {
                         java.net.URLEncoder.encode(cv, "UTF-8");
                 URL url = new URL(apiUrl);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                trustSelfSigned(conn);
+                NetUtils.trustSelfSigned(conn);
 
                 // Forward session cookie
                 String cookie = CookieManager.getInstance().getCookie(serverUrl);
@@ -1257,7 +1250,7 @@ public class MainActivity extends AppCompatActivity {
 
                 URL url = new URL(fullUrl);
                 conn = (HttpURLConnection) url.openConnection();
-                trustSelfSigned(conn);
+                NetUtils.trustSelfSigned(conn);
 
                 // Forward cookies for local downloads
                 if (!downloadUrl.startsWith("http")) {
@@ -1457,25 +1450,6 @@ public class MainActivity extends AppCompatActivity {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
         return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
-    }
-
-    // ── SSL helper ──
-
-    private void trustSelfSigned(HttpURLConnection conn) throws Exception {
-        if (conn instanceof HttpsURLConnection) {
-            HttpsURLConnection httpsConn = (HttpsURLConnection) conn;
-            TrustManager[] trustAll = new TrustManager[]{
-                new X509TrustManager() {
-                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                    public void checkClientTrusted(X509Certificate[] certs, String authType) {}
-                    public void checkServerTrusted(X509Certificate[] certs, String authType) {}
-                }
-            };
-            SSLContext sc = SSLContext.getInstance("TLS");
-            sc.init(null, trustAll, new SecureRandom());
-            httpsConn.setSSLSocketFactory(sc.getSocketFactory());
-            httpsConn.setHostnameVerifier((hostname, session) -> true);
-        }
     }
 
     // ── Lifecycle ──

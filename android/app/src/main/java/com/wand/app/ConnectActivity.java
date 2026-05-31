@@ -31,18 +31,11 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
 import android.util.Base64;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 public class ConnectActivity extends AppCompatActivity {
 
@@ -446,7 +439,7 @@ public class ConnectActivity extends AppCompatActivity {
         try {
             URL url = new URL(baseUrl + "/api/login");
             conn = (HttpURLConnection) url.openConnection();
-            trustSelfSigned(conn);
+            NetUtils.trustSelfSigned(conn);
 
             conn.setConnectTimeout(timeout);
             conn.setReadTimeout(timeout);
@@ -501,7 +494,7 @@ public class ConnectActivity extends AppCompatActivity {
         try {
             URL url = new URL(baseUrl + "/api/config");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            trustSelfSigned(conn);
+            NetUtils.trustSelfSigned(conn);
 
             conn.setConnectTimeout(timeout);
             conn.setReadTimeout(timeout);
@@ -525,23 +518,6 @@ public class ConnectActivity extends AppCompatActivity {
             return "地址格式不正确，请检查后重试";
         } catch (Exception e) {
             return "连接失败，请检查地址或稍后重试";
-        }
-    }
-
-    private void trustSelfSigned(HttpURLConnection conn) throws Exception {
-        if (conn instanceof HttpsURLConnection) {
-            HttpsURLConnection httpsConn = (HttpsURLConnection) conn;
-            TrustManager[] trustAll = new TrustManager[]{
-                new X509TrustManager() {
-                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                    public void checkClientTrusted(X509Certificate[] certs, String authType) {}
-                    public void checkServerTrusted(X509Certificate[] certs, String authType) {}
-                }
-            };
-            SSLContext sc = SSLContext.getInstance("TLS");
-            sc.init(null, trustAll, new SecureRandom());
-            httpsConn.setSSLSocketFactory(sc.getSocketFactory());
-            httpsConn.setHostnameVerifier((hostname, session) -> true);
         }
     }
 
