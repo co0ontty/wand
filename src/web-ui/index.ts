@@ -1,39 +1,16 @@
 // Main entry point for web-ui module
 // Combines CSS and JavaScript into a single HTML document
 
-import { readFileSync, existsSync } from "node:fs";
-import { createHash } from "node:crypto";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./embedded-assets.js";
 import { getCSSStyles } from "./styles.js";
 import { getScriptContent } from "./scripts.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Use String.fromCharCode to avoid template literal interpretation of </script>
 const scriptClose = String.fromCharCode(60, 47) + "script>";
 const scriptOpen = "<" + "script";
 
-// Vendor assets are served with immutable cache headers, so the URL must
-// change whenever the file content changes — otherwise the browser keeps the
-// stale copy across upgrades. We append ?v=<sha-prefix> derived from the
-// on-disk bundle so each new build busts the cache automatically.
-const vendorHashCache = new Map<string, string>();
-function vendorAssetUrl(relPath: string): string {
-  if (!vendorHashCache.has(relPath)) {
-    const fullPath = path.join(__dirname, "content", relPath);
-    let hash = "0";
-    try {
-      if (existsSync(fullPath)) {
-        const buf = readFileSync(fullPath);
-        hash = createHash("md5").update(buf).digest("hex").slice(0, 8);
-      }
-    } catch {
-      hash = String(Date.now()).slice(-8);
-    }
-    vendorHashCache.set(relPath, hash);
-  }
-  return `${relPath}?v=${vendorHashCache.get(relPath)}`;
+export function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
+  return `${relPath}?v=${EMBEDDED_WEB_ASSETS.vendor[relPath].hash}`;
 }
 
 export function renderApp(configPath: string): string {

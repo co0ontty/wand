@@ -104,8 +104,8 @@ export function applyThinkingEffortToPrompt(
   return prefix + trimmed;
 }
 
-/** Codex CLI 用：把 thinkingEffort 映射到 --reasoning-effort 参数。off → minimal（不显式思考）。 */
-export function thinkingEffortToCodexFlag(effort: SessionSnapshot["thinkingEffort"]): string | null {
+/** Codex CLI 用：把 thinkingEffort 映射到 model_reasoning_effort 配置。off → minimal。 */
+export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
   switch (effort) {
     case "standard": return "low";
     case "deep": return "medium";
@@ -942,7 +942,7 @@ export class StructuredSessionManager {
   /**
    * Update the thinking-effort level for a structured session. Takes effect on
    * the next spawn / next message (SDK runner injects `thinking`, CLI runner
-   * prepends magic words, codex runner adds --reasoning-effort).
+   * prepends magic words, codex runner overrides `model_reasoning_effort`).
    */
   setSessionThinkingEffort(
     sessionId: string,
@@ -1210,10 +1210,12 @@ export class StructuredSessionManager {
     if (modelChoice && modelChoice !== "default") {
       args.push("--model", modelChoice);
     }
-    // 思考深度 → --reasoning-effort（off → minimal，standard → low，deep → medium，max → high）
-    const reasoningFlag = thinkingEffortToCodexFlag(session.thinkingEffort);
-    if (reasoningFlag) {
-      args.push("--reasoning-effort", reasoningFlag);
+    // 思考深度 → model_reasoning_effort（off → minimal，standard → low，deep → medium，max → high）
+    // Newer Codex CLI versions removed the old dedicated exec flag, but still
+    // accept config overrides through `-c`.
+    const reasoningEffort = thinkingEffortToCodexReasoningEffort(session.thinkingEffort);
+    if (reasoningEffort) {
+      args.push("-c", `model_reasoning_effort=${reasoningEffort}`);
     }
     if (session.claudeSessionId) {
       args.push("resume", session.claudeSessionId, "-");

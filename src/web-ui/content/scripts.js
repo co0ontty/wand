@@ -8888,7 +8888,7 @@
       // 标签直接用 Claude CLI 原生 magic word：think / think hard / ultrathink。
       // 这样用户一眼能对上官方文档里的思考强度档位，PTY 模式下也是这几个词被注入到 prompt 前缀。
       var THINKING_LEVELS = [
-        { id: "off",      label: "off",        hint: "不启用思考（CLI 无前缀；SDK 关闭 thinking；Codex --reasoning-effort minimal）" },
+        { id: "off",      label: "off",        hint: "不启用思考（CLI 无前缀；SDK 关闭 thinking；Codex minimal）" },
         { id: "standard", label: "think",      hint: "Claude CLI: think · SDK budget 4096 · Codex low" },
         { id: "deep",     label: "think hard", hint: "Claude CLI: think hard · SDK budget 16000 · Codex medium" },
         { id: "max",      label: "ultrathink", hint: "Claude CLI: ultrathink · SDK budget 31999 · Codex high" }

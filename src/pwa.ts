@@ -2,14 +2,8 @@
  * PWA manifest and Service Worker generation.
  */
 
-import { readFileSync, existsSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pkgPath = path.join(__dirname, "..", "package.json");
-const pkgVersion = JSON.parse(readFileSync(pkgPath, "utf-8")).version ?? "0";
+import { EMBEDDED_WEB_ASSET_VERSION } from "./web-ui/embedded-assets.js";
 
 /** Cache version: package version + content fingerprint.
  *
@@ -21,21 +15,7 @@ const pkgVersion = JSON.parse(readFileSync(pkgPath, "utf-8")).version ?? "0";
  * 正式发版时由于 pkgVersion 也会变，效果叠加，无副作用。
  */
 function buildCacheVersion(): string {
-  const h = createHash("md5").update(pkgVersion);
-  const fingerprintTargets = [
-    path.join(__dirname, "web-ui", "content", "scripts.js"),
-    path.join(__dirname, "web-ui", "content", "styles.css"),
-  ];
-  for (const p of fingerprintTargets) {
-    try {
-      if (existsSync(p)) {
-        const s = statSync(p);
-        h.update(":").update(p).update(":").update(String(s.mtimeMs)).update(":").update(String(s.size));
-      }
-    } catch {
-      // best effort — fingerprint 只是为了 bust 缓存，失败就退化成 pkg-only
-    }
-  }
+  const h = createHash("md5").update(EMBEDDED_WEB_ASSET_VERSION);
   return h.digest("hex").slice(0, 8);
 }
 // 不 freeze 进模块加载时——SW JS 是每次请求 generateServiceWorker() 现拼的，
@@ -161,4 +141,3 @@ self.addEventListener('fetch', (event) => {
 });
 `;
 }
-

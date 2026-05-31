@@ -468,7 +468,7 @@ export interface SessionSnapshot {
   selectedModel?: string | null;
   /**
    * 用户选定的思考深度。
-   *   - off:      不启用思考（SDK: 不传 thinking；CLI: 不插魔法词；Codex: --reasoning-effort minimal）
+   *   - off:      不启用思考（SDK: 不传 thinking；CLI: 不插魔法词；Codex: model_reasoning_effort minimal）
    *   - standard: 标准（SDK: budget 4096；CLI: think；Codex: low）
    *   - deep:    深度（SDK: budget 16000；CLI: think hard；Codex: medium）
    *   - max:     最深（SDK: budget 31999；CLI: ultrathink；Codex: high）

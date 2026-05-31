@@ -8,28 +8,70 @@
  * 如果安装中途失败，这个备份目录会留下，之后每次 npm install 都会因为目标 dest 已存在
  * 报 `ENOTEMPTY: directory not empty, rename ...`。
  *
- * 我们的策略：每次 npm install 之前先清掉 `@co0ontty/.wand-*` 残留目录；
- * 如果第一次安装仍然撞上 ENOTEMPTY，清理后重试；再不行就 uninstall + force install。
+ * 我们的策略：安装前备份当前全局包，补齐 npm 子进程 PATH，清掉
+ * `@co0ontty/.wand-*` 残留目录；失败时恢复备份，避免运行中的服务被半成品安装拆掉。
  */
 
-import { exec, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { execFile, type ExecFileOptions, spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
+import { chmodSync, cpSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const PACKAGE_NAME = "@co0ontty/wand";
 const PACKAGE_SCOPE = "@co0ontty";
 const PACKAGE_BASENAME = "wand";
+const NPM_BIN = process.platform === "win32" ? "npm.cmd" : "npm";
+const COMMON_UNIX_PATHS = ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"];
+const INSTALL_MAX_BUFFER = 10 * 1024 * 1024;
+
+function getChildEnv(): NodeJS.ProcessEnv {
+  const entries = [
+    path.dirname(process.execPath),
+    ...(process.env.PATH || "").split(path.delimiter),
+    ...(process.platform === "win32" ? [] : COMMON_UNIX_PATHS),
+  ];
+  const seen = new Set<string>();
+  const pathEntries: string[] = [];
+  for (const entry of entries) {
+    if (!entry || seen.has(entry)) continue;
+    seen.add(entry);
+    pathEntries.push(entry);
+  }
+  return {
+    ...process.env,
+    PATH: pathEntries.join(path.delimiter),
+  };
+}
+
+function runNpmSync(args: string[], timeoutMs: number) {
+  const options: SpawnSyncOptionsWithStringEncoding = {
+    encoding: "utf8",
+    timeout: timeoutMs,
+    env: getChildEnv(),
+    maxBuffer: INSTALL_MAX_BUFFER,
+  };
+  return spawnSync(NPM_BIN, args, options);
+}
+
+async function runNpmAsync(args: string[], timeoutMs: number): Promise<void> {
+  const options: ExecFileOptions = {
+    timeout: timeoutMs,
+    env: getChildEnv(),
+    maxBuffer: INSTALL_MAX_BUFFER,
+  };
+  await execFileAsync(NPM_BIN, args, options);
+}
 
 /**
  * 解析当前 `npm root -g` 的目录。失败返回 null。
  */
 export function getNpmGlobalRoot(): string | null {
   try {
-    const res = spawnSync("npm", ["root", "-g"], { encoding: "utf8", timeout: 10_000 });
+    const res = runNpmSync(["root", "-g"], 10_000);
     if (res.status !== 0) return null;
     const out = (res.stdout || "").trim();
     return out.length > 0 ? out : null;
@@ -84,6 +126,7 @@ const REQUIRED_RUNTIME_FILES = [
   path.join("dist", "cli.js"),
   path.join("dist", "server.js"),
   path.join("dist", "web-ui", "index.js"),
+  path.join("dist", "web-ui", "embedded-assets.js"),
   path.join("dist", "web-ui", "scripts.js"),
   path.join("dist", "web-ui", "styles.js"),
   path.join("dist", "web-ui", "content", "scripts.js"),
@@ -143,6 +186,66 @@ function assertGlobalWandInstallComplete(): void {
   }
 }
 
+interface GlobalInstallBackup {
+  packageDir: string;
+  backupDir: string | null;
+}
+
+function createGlobalInstallBackup(note?: (line: string) => void): GlobalInstallBackup {
+  const packageDir = getGlobalPackageDir();
+  if (!packageDir) {
+    return { packageDir: "", backupDir: null };
+  }
+  if (!existsSync(packageDir)) {
+    return { packageDir, backupDir: null };
+  }
+  const backupRoot = mkdtempSync(path.join(os.tmpdir(), "wand-global-backup-"));
+  const backupDir = path.join(backupRoot, PACKAGE_BASENAME);
+  try {
+    cpSync(packageDir, backupDir, {
+      recursive: true,
+      dereference: false,
+      verbatimSymlinks: true,
+    });
+    note?.(`[wand] 已备份当前全局安装: ${backupDir}`);
+    return { packageDir, backupDir };
+  } catch (err) {
+    rmSync(backupRoot, { recursive: true, force: true });
+    note?.(`[wand] 全局安装备份失败，继续尝试更新: ${err instanceof Error ? err.message : String(err)}`);
+    return { packageDir, backupDir: null };
+  }
+}
+
+function cleanupGlobalInstallBackup(backup: GlobalInstallBackup): void {
+  if (!backup.backupDir) return;
+  rmSync(path.dirname(backup.backupDir), { recursive: true, force: true });
+}
+
+function restoreGlobalInstallBackup(backup: GlobalInstallBackup, note?: (line: string) => void): boolean {
+  if (!backup.packageDir || !backup.backupDir || !existsSync(backup.backupDir)) return false;
+  try {
+    rmSync(backup.packageDir, { recursive: true, force: true });
+    cpSync(backup.backupDir, backup.packageDir, {
+      recursive: true,
+      dereference: false,
+      verbatimSymlinks: true,
+    });
+    note?.(`[wand] 已恢复更新前的全局安装: ${backup.packageDir}`);
+    return true;
+  } catch (err) {
+    note?.(`[wand] 恢复更新前安装失败: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+async function npmInstallGlobalAsync(pkg: string, timeoutMs: number, extra: string[] = []): Promise<void> {
+  await runNpmAsync(["install", "-g", ...extra, pkg], timeoutMs);
+}
+
+function isRecoverableInstallError(message: string): boolean {
+  return /ENOTEMPTY|EEXIST|全局 wand 安装不完整|无法解析 npm 全局安装目录|全局 wand CLI 无法设置执行权限/.test(message);
+}
+
 /**
  * 异步版本的全局安装：
  * 1. 清理残留
@@ -163,51 +266,64 @@ export async function installPackageGloballyAsync(
     if (log) log(line);
   };
 
-  const cleanup = cleanupNpmLeftovers();
-  if (cleanup.removed.length > 0) {
-    note(`[wand] 清理 npm 残留目录: ${cleanup.removed.join(", ")}`);
-  }
-
+  const backup = createGlobalInstallBackup(note);
+  let success = false;
   try {
-    await execAsync(`npm install -g ${pkg}`, { timeout: timeoutMs });
-    assertGlobalWandInstallComplete();
-    return;
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (!/ENOTEMPTY|EEXIST/.test(msg)) {
-      if (/全局 wand 安装不完整|无法解析 npm 全局安装目录/.test(msg)) {
-        note(`[wand] npm install 后安装目录不完整，尝试强制重装...`);
-      } else {
+    const cleanup = cleanupNpmLeftovers();
+    if (cleanup.removed.length > 0) {
+      note(`[wand] 清理 npm 残留目录: ${cleanup.removed.join(", ")}`);
+    }
+
+    try {
+      await npmInstallGlobalAsync(pkg, timeoutMs);
+      assertGlobalWandInstallComplete();
+      success = true;
+      return;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (!isRecoverableInstallError(msg)) {
         throw error;
       }
-    } else {
-      note(`[wand] npm install 遇到 ENOTEMPTY/EEXIST，清理后重试一次...`);
-      cleanupNpmLeftovers();
-      try {
-        await execAsync(`npm install -g ${pkg}`, { timeout: timeoutMs });
-        assertGlobalWandInstallComplete();
-        return;
-      } catch (retryError) {
-        const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
-        if (!/ENOTEMPTY|EEXIST|全局 wand 安装不完整|无法解析 npm 全局安装目录/.test(retryMsg)) {
-          throw retryError;
+      if (/全局 wand 安装不完整|无法解析 npm 全局安装目录|全局 wand CLI 无法设置执行权限/.test(msg)) {
+        note(`[wand] npm install 后安装目录不完整，尝试强制重装...`);
+      } else {
+        note(`[wand] npm install 遇到 ENOTEMPTY/EEXIST，清理后重试一次...`);
+        cleanupNpmLeftovers();
+        try {
+          await npmInstallGlobalAsync(pkg, timeoutMs);
+          assertGlobalWandInstallComplete();
+          success = true;
+          return;
+        } catch (retryError) {
+          const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
+          if (!isRecoverableInstallError(retryMsg)) {
+            throw retryError;
+          }
         }
+        note(`[wand] 重试仍失败，尝试先卸载再强制安装...`);
       }
-      note(`[wand] 重试仍失败，尝试先卸载再强制安装...`);
     }
-  }
 
-  // 终极兜底：uninstall + force install
-  // 卸载用固定包名 PACKAGE_NAME，而不是从 install spec 反推：spec 可能是 git
-  // 形式（`github:co0ontty/wand#beta`），用正则 strip @tag 反推会得到错误的卸载目标。
-  try {
-    await execAsync(`npm uninstall -g ${PACKAGE_NAME}`, { timeout: timeoutMs });
-  } catch {
-    /* 卸载失败也继续，下一步 --force 可能仍然能装上 */
+    // 终极兜底：uninstall + force install
+    // 卸载用固定包名 PACKAGE_NAME，而不是从 install spec 反推：spec 可能是 git
+    // 形式（`github:co0ontty/wand#beta`），用正则 strip @tag 反推会得到错误的卸载目标。
+    try {
+      await runNpmAsync(["uninstall", "-g", PACKAGE_NAME], timeoutMs);
+    } catch {
+      /* 卸载失败也继续，下一步 --force 可能仍然能装上 */
+    }
+    cleanupNpmLeftovers();
+    await npmInstallGlobalAsync(pkg, timeoutMs, ["--force"]);
+    assertGlobalWandInstallComplete();
+    success = true;
+  } finally {
+    if (!success) {
+      if (restoreGlobalInstallBackup(backup, note)) {
+        cleanupNpmLeftovers();
+      }
+    }
+    cleanupGlobalInstallBackup(backup);
   }
-  cleanupNpmLeftovers();
-  await execAsync(`npm install -g --force ${pkg}`, { timeout: timeoutMs });
-  assertGlobalWandInstallComplete();
 }
 
 /**
@@ -220,6 +336,8 @@ export function installPackageGloballySync(
   timeoutMs: number,
 ): { status: number | null; stdout: string; stderr: string; attempts: string[] } {
   const attempts: string[] = [];
+  const backupNotes: string[] = [];
+  const backup = createGlobalInstallBackup((line) => backupNotes.push(line));
   const withValidation = (
     res: { status: number | null; stdout: string; stderr: string },
   ): { status: number | null; stdout: string; stderr: string } => {
@@ -235,35 +353,62 @@ export function installPackageGloballySync(
   const tryInstall = (extra: string[]): { status: number | null; stdout: string; stderr: string } => {
     const args = ["install", "-g", ...extra, pkg];
     attempts.push(`npm ${args.join(" ")}`);
-    const r = spawnSync("npm", args, { encoding: "utf8", timeout: timeoutMs });
+    const r = runNpmSync(args, timeoutMs);
     return withValidation({
       status: r.status,
       stdout: r.stdout || "",
       stderr: r.stderr || "",
     });
   };
+  const withBackupNotes = (res: { status: number | null; stdout: string; stderr: string }) => ({
+    ...res,
+    stderr: [res.stderr, ...backupNotes].filter(Boolean).join("\n"),
+    attempts,
+  });
+  const finishSuccess = (res: { status: number | null; stdout: string; stderr: string }) => {
+    cleanupGlobalInstallBackup(backup);
+    return withBackupNotes(res);
+  };
+  const finishFailure = (res: { status: number | null; stdout: string; stderr: string }) => {
+    if (restoreGlobalInstallBackup(backup, (line) => backupNotes.push(line))) {
+      cleanupNpmLeftovers();
+    }
+    cleanupGlobalInstallBackup(backup);
+    return withBackupNotes(res);
+  };
 
   cleanupNpmLeftovers();
 
   let res = tryInstall([]);
-  if (res.status === 0) return { ...res, attempts };
+  if (res.status === 0) {
+    return finishSuccess(res);
+  }
 
   const hitRecoverableInstallError = (r: { stdout: string; stderr: string }): boolean =>
-    /ENOTEMPTY|EEXIST|全局 wand 安装不完整|无法解析 npm 全局安装目录/.test(r.stdout + r.stderr);
+    isRecoverableInstallError(r.stdout + r.stderr);
 
-  if (!hitRecoverableInstallError(res)) return { ...res, attempts };
+  if (!hitRecoverableInstallError(res)) {
+    return finishFailure(res);
+  }
 
   cleanupNpmLeftovers();
   res = tryInstall([]);
-  if (res.status === 0) return { ...res, attempts };
-  if (!hitRecoverableInstallError(res)) return { ...res, attempts };
+  if (res.status === 0) {
+    return finishSuccess(res);
+  }
+  if (!hitRecoverableInstallError(res)) {
+    return finishFailure(res);
+  }
 
   // 终极兜底（卸载用固定包名，兼容 git spec，见 async 版同样注释）
   attempts.push(`npm uninstall -g ${PACKAGE_NAME}`);
-  spawnSync("npm", ["uninstall", "-g", PACKAGE_NAME], { encoding: "utf8", timeout: timeoutMs });
+  runNpmSync(["uninstall", "-g", PACKAGE_NAME], timeoutMs);
   cleanupNpmLeftovers();
   res = tryInstall(["--force"]);
-  return { ...res, attempts };
+  if (res.status === 0) {
+    return finishSuccess(res);
+  }
+  return finishFailure(res);
 }
 
 /**
@@ -287,7 +432,7 @@ export function resolveGlobalWandCli(): string | null {
   }
   try {
     const tool = process.platform === "win32" ? "where" : "which";
-    const r = spawnSync(tool, ["wand"], { encoding: "utf8", timeout: 10_000 });
+    const r = spawnSync(tool, ["wand"], { encoding: "utf8", timeout: 10_000, env: getChildEnv() });
     if (r.status === 0) {
       const first = (r.stdout || "").split(/\r?\n/).find((line) => line.trim().length > 0);
       if (first) return first.trim();

@@ -45,6 +45,7 @@ import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, type PathRepairResult } from "./path-repair.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
+import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
@@ -1107,12 +1108,14 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   app.use(express.json({ limit: "1mb" }));
   app.use(compression({ threshold: 1024 }));
 
-  const vendorCacheOpts = { maxAge: "7d", immutable: true };
-  const contentDir = existsSync(path.join(SERVER_MODULE_DIR, "web-ui", "content"))
-    ? path.join(SERVER_MODULE_DIR, "web-ui", "content")
-    : path.join(RUNTIME_ROOT_DIR, "src", "web-ui", "content");
-  app.use("/vendor/wterm", express.static(path.join(contentDir, "vendor", "wterm"), vendorCacheOpts));
-  app.use("/vendor/qrcode", express.static(path.join(contentDir, "vendor", "qrcode"), vendorCacheOpts));
+  const sendEmbeddedVendorAsset = (assetPath: EmbeddedVendorAssetPath, _req: Request, res: Response): void => {
+    const asset = EMBEDDED_WEB_ASSETS.vendor[assetPath];
+    res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+    res.type(asset.contentType).send(asset.content);
+  };
+  app.get("/vendor/wterm/wterm.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/wterm/wterm.bundle.js", req, res));
+  app.get("/vendor/wterm/terminal.css", (req, res) => sendEmbeddedVendorAsset("/vendor/wterm/terminal.css", req, res));
+  app.get("/vendor/qrcode/qrcode.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/qrcode/qrcode.bundle.js", req, res));
 
   // ── Web UI and PWA endpoints ──
 
@@ -1179,12 +1182,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.type("image/svg+xml").send(getAvatarSvg(avatarSeed, size));
     });
   }
-
-  const iconsDir = path.resolve(
-    existsSync(path.join(SERVER_MODULE_DIR, "web-ui", "content"))
-      ? path.join(SERVER_MODULE_DIR, "web-ui", "content")
-      : path.join(RUNTIME_ROOT_DIR, "src", "web-ui", "content")
-  );
 
   app.get("/sw.js", (_req, res) => {
     res.setHeader("Content-Type", "application/javascript");
