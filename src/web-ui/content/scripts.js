@@ -337,19 +337,13 @@
         })(),
         joystickPinnedOpen: false,      // 钉住面板是否展开（不持久化，切会话复位）
         joystickRootEl: null,           // 以下均为运行期句柄，teardown 复位
-        joystickRingEl: null,
         joystickPanelEl: null,
         joystickBackdropEl: null,
         joystickBallEl: null,
         joystickPointerId: null,
         joystickGesture: null,          // null|'pending'|'cancelled'|'move'
         joystickPressStart: null,       // {x, y, t}
-        joystickCenter: null,           // 手势开始时球球中心，用于径向命中
         joystickLongPressTimer: null,
-        joystickRepeatTimer: null,
-        joystickRepeatKey: null,
-        joystickHoverOuter: null,       // 外圈当前高亮键（松手发送）
-        joystickLastHoverKey: null,     // 上一次悬停的扇区键（用于切换震动反馈）
         joystickMoveHandler: null,
         joystickUpHandler: null,
         joystickResizeHandler: null,
@@ -491,7 +485,7 @@
         inbox:     '<polyline points="22 13 16 13 14 16 10 16 8 13 2 13"/><path d="M5 5h14l3 8v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
         zap:       '<polygon points="13 2 4 14 11 14 10 22 20 9 13 9 13 2"/>',
         wrench:    '<path d="M14.7 6.3a4 4 0 1 1 4 4l-9 9-3.5 1 1-3.5 7.5-7.5z"/>',
-        magicWand: '<path d="M15 4l5 5"/><path d="M13.5 5.5l5 5"/><path d="M4 20l10.5-10.5"/><path d="M5 4v3"/><path d="M3.5 5.5h3"/><path d="M19 15v3"/><path d="M17.5 16.5h3"/><path d="M9 2l.6 1.5L11 4l-1.4.5L9 6l-.6-1.5L7 4l1.4-.5z" fill="currentColor" stroke="none"/>',
+        paw:       '<circle cx="7.5" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="6.8" r="2" fill="currentColor" stroke="none"/><circle cx="16.5" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="18" cy="13.3" r="1.8" fill="currentColor" stroke="none"/><path d="M7.2 16.3c.5-2.9 2.3-4.8 4.8-4.8s4.3 1.9 4.8 4.8c.3 1.8-.9 3.2-2.6 2.6-.8-.3-1.4-.6-2.2-.6s-1.4.3-2.2.6c-1.7.6-2.9-.8-2.6-2.6z" fill="currentColor" stroke="none"/>',
         edit:      '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
         check:     '<polyline points="5 12 10 17 19 7"/>',
         signal:    '<path d="M2 12a15 15 0 0 1 20 0"/><path d="M5 16a10 10 0 0 1 14 0"/><path d="M9 20a4 4 0 0 1 6 0"/><circle cx="12" cy="20" r="0.5" fill="currentColor"/>',
@@ -14014,43 +14008,14 @@
       var JOYSTICK_LONG_PRESS_MS = 400;     // 按住不动多久进入移动模式
       var JOYSTICK_MOVE_THRESHOLD = 10;     // px：区分"拖动选键"与"静止长按"
       var JOYSTICK_TAP_THRESHOLD = 8;       // px：快速点击的最大位移
-      var JOYSTICK_REPEAT_MS = 130;         // 内圈方向键连发间隔
-      var JOYSTICK_R0 = 24;                 // 扇形中心空洞 = 死区半径
-      var JOYSTICK_R1 = 60;                 // 内圈(方向)/外圈(功能)分界半径
-      var JOYSTICK_R2 = 104;                // 外圈外缘半径
-      var JOYSTICK_DEADZONE_R = 24;         // 命中死区（= R0）
-      var JOYSTICK_RING_SPLIT_R = 60;       // 命中分界（= R1）：< 内圈方向，>= 外圈功能
-      var JOYSTICK_MOVE_OUT_R = 140;        // 拖出此半径（超出外圈区域）→ 切"正在移动"
       var JOYSTICK_BALL_SIZE = 54;          // 球球直径（与 CSS 一致）
       var JOYSTICK_EDGE_MARGIN = 8;         // 球球钳进视口的留白
-      var JOYSTICK_RING_RADIUS = JOYSTICK_R2 + 8;  // 环整体半径（含标签外延），用于把圆心钳进视口
-      var JOYSTICK_RING_VIEW_PAD = 6;       // 环外缘与视口边的最小留白
-      var JOYSTICK_SECTOR_GAP_DEG = 2;      // 外圈扇区之间的角度细缝（°），读成独立按钮
-      // 内圈 4 方向：i=0 上、1 右、2 下、3 左（与渲染角 -90° 起顺时针一致）
-      var JOYSTICK_INNER_KEYS = [
-        { key: "up", label: "↑" },
-        { key: "right", label: "→" },
-        { key: "down", label: "↓" },
-        { key: "left", label: "←" }
-      ];
-      // 外圈功能键：N 个均分扇区，i=0 正上方起顺时针。
-      // 数组长度即扇区数 —— buildJoystickRingSvg / joystickHitTest 都是按
-      // OUTER_KEYS.length 动态算角度,所以这里随便加减都不需要改几何。
-      // 当前 4 键: 上=Enter 右=Ctrl+C 下=Esc 左=Shift+Tab。
-      // 选这 4 个的原因: Claude / Codex 交互里只有方向键 + Enter + Esc +
-      // Shift+Tab (back-tab) + Ctrl+C (abort) 有真实用途, 之前的 Tab /
-      // Ctrl+Z/D/L 在结构化 / chat / PTY claude 里都拿不到效果, 留着只是
-      // 占位 + 误点。
-      var JOYSTICK_OUTER_KEYS = [
+      var JOYSTICK_ACTION_KEYS = [
         { key: "enter", label: "Enter" },
         { key: "ctrl_c", label: "Ctrl+C" },
         { key: "escape", label: "Esc" },
         { key: "shift_tab", label: "Shift+Tab" }
       ];
-      // 钉住面板四角翻页键 —— 已弃用 (PgUp/Home/PgDn/End 在 Claude TUI 里
-      // 不是常用导航, 也跟终端历史回滚冲突)。留空数组让面板渲染逻辑自然
-      // 跳过这一排, 不删数组以保 ringSvg 之外别处 reference 安全。
-      var JOYSTICK_CORNER_KEYS = [];
 
       var ignoredInteractiveTargetIds = new Set([
         "mini-keyboard-fab",
@@ -16128,116 +16093,17 @@
           "</div>";
         var fnRow = "";
         var i;
-        for (i = 0; i < JOYSTICK_OUTER_KEYS.length; i++) {
-          fnRow += keyBtn(JOYSTICK_OUTER_KEYS[i].key, JOYSTICK_OUTER_KEYS[i].label, "");
+        for (i = 0; i < JOYSTICK_ACTION_KEYS.length; i++) {
+          fnRow += keyBtn(JOYSTICK_ACTION_KEYS[i].key, JOYSTICK_ACTION_KEYS[i].label, "");
         }
-        // 角键 (PgUp/Home/PgDn/End) 与修饰键 (Ctrl/Alt) 排已被裁剪 ——
-        // 当前外圈 4 键全是独立功能键 (Enter / Ctrl+C / Esc / Shift+Tab),
-        // 没有"先按 Ctrl 再按字母"的复合组合, 所以修饰键 toggle 没意义。
-        // CORNER_KEYS 为空时, 对应的 grid 不渲染, 面板高度自动收缩。
         var html =
           '<div class="wjp-header">' +
-            '<span class="wjp-title">' + iconSvg("magicWand", { size: 13, strokeWidth: 1.8, cls: "wjp-title-icon" }) + '<span>Wand Remote</span></span>' +
+            '<span class="wjp-title">' + iconSvg("paw", { size: 13, strokeWidth: 1.6, cls: "wjp-title-icon" }) + '<span>遥控面板</span></span>' +
             '<button type="button" class="wjp-close" aria-label="关闭遥控面板">' + iconSvg("x", { size: 13, strokeWidth: 2 }) + '</button>' +
           '</div>' +
-          '<div class="wjp-section-label">Navigation</div>' +
           dpad +
-          '<div class="wjp-section-label">Actions</div>' +
           '<div class="wjp-grid wjp-fnkeys">' + fnRow + "</div>";
-        if (JOYSTICK_CORNER_KEYS.length > 0) {
-          var cornerRow = "";
-          for (i = 0; i < JOYSTICK_CORNER_KEYS.length; i++) {
-            cornerRow += keyBtn(JOYSTICK_CORNER_KEYS[i].key, JOYSTICK_CORNER_KEYS[i].label, "");
-          }
-          html += '<div class="wjp-grid wjp-corners">' + cornerRow + "</div>";
-        }
         return html;
-      }
-
-      function joystickPolar(r, deg) {
-        var a = deg * Math.PI / 180;
-        return { x: +(r * Math.cos(a)).toFixed(2), y: +(r * Math.sin(a)).toFixed(2) };
-      }
-
-      // 环形扇区（annular sector）路径：外弧顺时针、内弧逆时针闭合
-      function joystickSectorPath(rIn, rOut, startDeg, endDeg) {
-        var a = joystickPolar(rOut, startDeg), b = joystickPolar(rOut, endDeg);
-        var c = joystickPolar(rIn, endDeg), d = joystickPolar(rIn, startDeg);
-        return "M" + a.x + " " + a.y +
-          "A" + rOut + " " + rOut + " 0 0 1 " + b.x + " " + b.y +
-          "L" + c.x + " " + c.y +
-          "A" + rIn + " " + rIn + " 0 0 0 " + d.x + " " + d.y + "Z";
-      }
-
-      // 标签渲染：组合键（含 "+"）拆成两行，前缀在上、+键在下，省横向空间更清晰。
-      function joystickLabelMarkup(label, x, y) {
-        var plus = label.indexOf("+");
-        if (plus > 0) {
-          var top = label.slice(0, plus);
-          var bot = "+" + label.slice(plus + 1);
-          return '<text class="wjr-2line" x="' + x + '" y="' + y + '">' +
-            '<tspan x="' + x + '" dy="-0.42em">' + top + '</tspan>' +
-            '<tspan x="' + x + '" dy="0.95em">' + bot + '</tspan></text>';
-        }
-        return '<text x="' + x + '" y="' + y + '">' + label + "</text>";
-      }
-
-      // 构建两圈扇形 pie 菜单 SVG：内圈 4×90° 方向、外圈 8×45° 功能 + 中心选中提示。
-      // 扇区角度与 joystickHitTest 完全对应（正上=0、顺时针）。
-      function buildJoystickRingSvg() {
-        var size = (JOYSTICK_R2 + 6) * 2;
-        var half = size / 2;
-        var gap = JOYSTICK_SECTOR_GAP_DEG / 2;   // 每个扇区起止各内缩半个细缝
-        var svg = '<svg class="wjr-svg" width="' + size + '" height="' + size +
-          '" viewBox="' + (-half) + " " + (-half) + " " + size + " " + size + '">';
-        // 底盘：所有扇区之下的一整块玻璃圆盘，细缝/外缘透出它作分隔与外圈光环
-        svg += '<circle class="wjr-base" cx="0" cy="0" r="' + (JOYSTICK_R2 + 4) + '"/>';
-        var i, k, center, lp;
-        for (i = 0; i < JOYSTICK_INNER_KEYS.length; i++) {
-          k = JOYSTICK_INNER_KEYS[i];
-          center = -90 + i * 90;
-          lp = joystickPolar((JOYSTICK_R0 + JOYSTICK_R1) / 2, center);
-          svg += '<g class="wjr-sector wjr-inner" data-key="' + k.key + '">' +
-            '<path d="' + joystickSectorPath(JOYSTICK_R0, JOYSTICK_R1, center - 45 + gap, center + 45 - gap) + '"/>' +
-            joystickLabelMarkup(k.label, lp.x, lp.y) + "</g>";
-        }
-        // 外圈扇区宽度跟随 OUTER_KEYS.length 动态计算: 4 键 → 90° 每片,
-        // 8 键 → 45° 每片。half 是单片半宽 (扇区中心两侧各延半个 step)。
-        var outerCount = JOYSTICK_OUTER_KEYS.length;
-        var outerStep = outerCount > 0 ? 360 / outerCount : 360;
-        var outerHalf = outerStep / 2;
-        for (i = 0; i < outerCount; i++) {
-          k = JOYSTICK_OUTER_KEYS[i];
-          center = -90 + i * outerStep;
-          lp = joystickPolar((JOYSTICK_R1 + JOYSTICK_R2) / 2, center);
-          svg += '<g class="wjr-sector wjr-outer" data-key="' + k.key + '">' +
-            '<path d="' + joystickSectorPath(JOYSTICK_R1, JOYSTICK_R2, center - outerHalf + gap, center + outerHalf - gap) + '"/>' +
-            joystickLabelMarkup(k.label, lp.x, lp.y) + "</g>";
-        }
-        svg += '<circle class="wjr-hub" cx="0" cy="0" r="' + (JOYSTICK_R0 - 1) + '"/>';
-        svg += '<text class="wjr-hub-label" x="0" y="0"></text>';
-        return svg + "</svg>";
-      }
-
-      function joystickLabelForKey(key) {
-        var i;
-        for (i = 0; i < JOYSTICK_INNER_KEYS.length; i++) {
-          if (JOYSTICK_INNER_KEYS[i].key === key) return JOYSTICK_INNER_KEYS[i].label;
-        }
-        for (i = 0; i < JOYSTICK_OUTER_KEYS.length; i++) {
-          if (JOYSTICK_OUTER_KEYS[i].key === key) return JOYSTICK_OUTER_KEYS[i].label;
-        }
-        return "";
-      }
-
-      function setJoystickCenterLabel(text) {
-        if (!state.joystickRingEl) return;
-        var el = state.joystickRingEl.querySelector(".wjr-hub-label");
-        if (el) el.textContent = text || "";
-      }
-
-      function joystickHaptic(ms) {
-        try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
       }
 
       function initTerminalJoystick() {
@@ -16249,12 +16115,6 @@
         var backdrop = document.createElement("div");
         backdrop.className = "wand-joystick-backdrop";
         root.appendChild(backdrop);
-
-        // 环形菜单容器（圆心运行期对齐球球中心）—— 扇形 pie 菜单（SVG，带文字 + 中心提示）
-        var ring = document.createElement("div");
-        ring.className = "wand-joystick-ring";
-        ring.innerHTML = buildJoystickRingSvg();
-        root.appendChild(ring);
 
         // 钉住面板
         var panel = document.createElement("div");
@@ -16269,14 +16129,13 @@
         ball.setAttribute("role", "button");
         ball.setAttribute("aria-label", "Wand 遥控面板");
         ball.setAttribute("title", "点击打开遥控面板，拖动可移动位置");
-        ball.innerHTML = iconSvg("magicWand", { size: 25, strokeWidth: 2.1, cls: "wand-joystick-logo" });
+        ball.innerHTML = iconSvg("paw", { size: 25, strokeWidth: 1.6, cls: "wand-joystick-logo" });
         root.appendChild(ball);
 
         document.body.appendChild(root);
 
         state.joystickRootEl = root;
         state.joystickBackdropEl = backdrop;
-        state.joystickRingEl = ring;
         state.joystickPanelEl = panel;
         state.joystickBallEl = ball;
 
@@ -16299,12 +16158,6 @@
         updateJoystickVisibility();
       }
 
-      function getJoystickCenter() {
-        if (!state.joystickBallEl) return { x: 0, y: 0 };
-        var r = state.joystickBallEl.getBoundingClientRect();
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-      }
-
       function onJoystickPointerDown(e) {
         if (!isJoystickAvailable()) return;
         if ((e.pointerType === "mouse" || e.pointerType === "pen") && e.button !== 0) return;
@@ -16315,8 +16168,6 @@
         state.joystickPointerId = e.pointerId;
         state.joystickPressStart = { x: e.clientX, y: e.clientY, t: Date.now() };
         state.joystickGesture = "pending";
-        state.joystickHoverOuter = null;
-        state.joystickCenter = getJoystickCenter();
         try { state.joystickBallEl.setPointerCapture(e.pointerId); } catch (err) {}
         if (canDirectDrag) {
           state.joystickMoveHandler = onJoystickPointerMove;
@@ -16354,19 +16205,6 @@
         state.joystickBallEl.style.bottom = pos.bottom + "px";
       }
 
-      // 环形手势里把手指往外拖出外圈区域时调用：收起环，切到"正在移动"状态，
-      // 球球立刻挪到手指下，之后跟手慢慢移动，松手保存位置。
-      function switchJoystickToMoveMode(e) {
-        stopJoystickRepeat();
-        state.joystickHoverOuter = null;
-        closeJoystickRing();
-        state.joystickGesture = "move";
-        if (state.joystickBallEl) state.joystickBallEl.classList.add("dragging");
-        if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
-        joystickHaptic(18);
-        moveJoystickBallTo(e.clientX, e.clientY);
-      }
-
       function onJoystickPointerMove(e) {
         if (e.pointerId !== state.joystickPointerId) return;
         if (!state.joystickBallEl) return;
@@ -16392,18 +16230,6 @@
             return;
           }
         }
-        if (state.joystickGesture === "ring") {
-          var c = state.joystickCenter || getJoystickCenter();
-          var rdx = e.clientX - c.x;
-          var rdy = e.clientY - c.y;
-          // 往外拖超出外圈区域 → 切到"正在移动"状态，球球开始跟手
-          if (Math.sqrt(rdx * rdx + rdy * rdy) > JOYSTICK_MOVE_OUT_R) {
-            switchJoystickToMoveMode(e);
-            return;
-          }
-          applyJoystickRingHit(joystickHitTest(rdx, rdy));
-          return;
-        }
         if (state.joystickGesture === "move") {
           moveJoystickBallTo(e.clientX, e.clientY);
           return;
@@ -16417,13 +16243,7 @@
           state.joystickLongPressTimer = null;
         }
         var gesture = state.joystickGesture;
-        if (gesture === "ring") {
-          stopJoystickRepeat();
-          if (state.joystickHoverOuter) {
-            joystickHaptic(18);
-            sendJoystickKey(state.joystickHoverOuter);
-          }
-        } else if (gesture === "pending") {
+        if (gesture === "pending") {
           var dx = e.clientX - state.joystickPressStart.x;
           var dy = e.clientY - state.joystickPressStart.y;
           if (Math.sqrt(dx * dx + dy * dy) <= JOYSTICK_TAP_THRESHOLD) toggleJoystickPanel();
@@ -16435,7 +16255,6 @@
       }
 
       function endJoystickGesture() {
-        stopJoystickRepeat();
         if (state.joystickLongPressTimer) {
           clearTimeout(state.joystickLongPressTimer);
           state.joystickLongPressTimer = null;
@@ -16452,7 +16271,6 @@
           document.removeEventListener("pointercancel", state.joystickUpHandler);
           state.joystickUpHandler = null;
         }
-        closeJoystickRing();
         if (state.joystickBallEl) state.joystickBallEl.classList.remove("dragging");
         // 钉住面板若仍开着则保留遮罩，否则移除
         if (state.joystickBackdropEl && !state.joystickPinnedOpen) {
@@ -16460,124 +16278,7 @@
         }
         state.joystickPointerId = null;
         state.joystickGesture = null;
-        state.joystickHoverOuter = null;
-        state.joystickLastHoverKey = null;
         state.joystickPressStart = null;
-        state.joystickCenter = null;
-      }
-
-      function joystickHitTest(dx, dy) {
-        var r = Math.sqrt(dx * dx + dy * dy);
-        if (r < JOYSTICK_DEADZONE_R) return { zone: "dead", key: null };
-        if (r < JOYSTICK_RING_SPLIT_R) {
-          // 内圈：主轴象限（往上滑 dy<0 = up）
-          if (Math.abs(dy) >= Math.abs(dx)) return { zone: "inner", key: dy < 0 ? "up" : "down" };
-          return { zone: "inner", key: dx < 0 ? "left" : "right" };
-        }
-        // 外圈：OUTER_KEYS.length 等分扇区，正上方为 0，顺时针递增；
-        // +halfStep 让扇区中心对准按钮 (原本 N=8 时是 +π/8)。
-        var ang = Math.atan2(dx, -dy);
-        if (ang < 0) ang += Math.PI * 2;
-        var outerCount = JOYSTICK_OUTER_KEYS.length;
-        if (outerCount === 0) return { zone: "dead", key: null };
-        var outerStepRad = (Math.PI * 2) / outerCount;
-        var idx = Math.floor((ang + outerStepRad / 2) / outerStepRad) % outerCount;
-        return { zone: "outer", key: JOYSTICK_OUTER_KEYS[idx].key };
-      }
-
-      function applyJoystickRingHit(hit) {
-        if (!state.joystickRingEl) return;
-        var key = hit.zone === "dead" ? null : hit.key;
-        if (key !== state.joystickLastHoverKey) {  // 切换扇区 → 轻震反馈
-          state.joystickLastHoverKey = key;
-          joystickHaptic(8);
-        }
-        if (hit.zone === "inner") {
-          state.joystickHoverOuter = null;
-          setJoystickOuterHighlight(null);
-          startJoystickRepeat(hit.key);
-          setJoystickInnerHighlight(hit.key);
-          setJoystickCenterLabel(joystickLabelForKey(hit.key));
-        } else if (hit.zone === "outer") {
-          stopJoystickRepeat();
-          setJoystickInnerHighlight(null);
-          state.joystickHoverOuter = hit.key;
-          setJoystickOuterHighlight(hit.key);
-          setJoystickCenterLabel(joystickLabelForKey(hit.key));
-        } else {
-          stopJoystickRepeat();
-          setJoystickInnerHighlight(null);
-          state.joystickHoverOuter = null;
-          setJoystickOuterHighlight(null);
-          setJoystickCenterLabel("取消");
-        }
-      }
-
-      function setJoystickInnerHighlight(key) {
-        if (!state.joystickRingEl) return;
-        var btns = state.joystickRingEl.querySelectorAll(".wjr-inner");
-        for (var i = 0; i < btns.length; i++) {
-          btns[i].classList.toggle("is-repeating", btns[i].getAttribute("data-key") === key);
-        }
-      }
-
-      function setJoystickOuterHighlight(key) {
-        if (!state.joystickRingEl) return;
-        var btns = state.joystickRingEl.querySelectorAll(".wjr-outer");
-        for (var i = 0; i < btns.length; i++) {
-          btns[i].classList.toggle("is-hover", btns[i].getAttribute("data-key") === key);
-        }
-      }
-
-      // 把环圆心钳进视口，保证整圈（含标签）不被屏幕边裁掉。视口比环还小则回退到正中。
-      function clampJoystickRingCenter(c) {
-        var pad = JOYSTICK_RING_RADIUS + JOYSTICK_RING_VIEW_PAD;
-        var vw = window.innerWidth, vh = window.innerHeight;
-        return {
-          x: vw < pad * 2 ? vw / 2 : Math.min(Math.max(pad, c.x), vw - pad),
-          y: vh < pad * 2 ? vh / 2 : Math.min(Math.max(pad, c.y), vh - pad)
-        };
-      }
-
-      function openJoystickRing() {
-        if (!state.joystickRingEl) return;
-        // 圆心钳进视口后写回 state.joystickCenter：球球此刻已 is-ringing(opacity:0)，
-        // 圆心内移不露馅，且命中测试与可见环始终对齐。
-        var c = clampJoystickRingCenter(state.joystickCenter || getJoystickCenter());
-        state.joystickCenter = c;
-        state.joystickRingEl.style.left = c.x + "px";
-        state.joystickRingEl.style.top = c.y + "px";
-        state.joystickRingEl.classList.add("active");
-        state.joystickLastHoverKey = null;
-        setJoystickCenterLabel("取消");                 // 初始在死区，提示松手取消
-        if (state.joystickBallEl) state.joystickBallEl.classList.add("is-ringing");  // 隐球球露中心
-        if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
-        joystickHaptic(10);
-      }
-
-      function closeJoystickRing() {
-        if (state.joystickRingEl) state.joystickRingEl.classList.remove("active");
-        if (state.joystickBallEl) state.joystickBallEl.classList.remove("is-ringing");
-        setJoystickInnerHighlight(null);
-        setJoystickOuterHighlight(null);
-      }
-
-      function startJoystickRepeat(key) {
-        if (state.joystickRepeatKey === key) return;  // 同方向不重启，保持节奏
-        stopJoystickRepeat();
-        state.joystickRepeatKey = key;
-        sendJoystickKey(key);                          // 立即发一次
-        state.joystickRepeatTimer = setInterval(function() {
-          if (state.joystickRepeatKey) sendJoystickKey(state.joystickRepeatKey);
-        }, JOYSTICK_REPEAT_MS);
-      }
-
-      function stopJoystickRepeat() {
-        if (state.joystickRepeatTimer) {
-          clearInterval(state.joystickRepeatTimer);
-          state.joystickRepeatTimer = null;
-        }
-        state.joystickRepeatKey = null;
       }
 
       function sendJoystickKey(key) {
@@ -16712,14 +16413,12 @@
         if (!available) {
           // 不可用：强制收手势 + 收面板 + 停连发 + 清修饰键，杜绝残留
           if (state.joystickPointerId !== null || state.joystickGesture) endJoystickGesture();
-          stopJoystickRepeat();
           if (state.joystickPinnedOpen) closeJoystickPanel();
           if (state.joystickBackdropEl) state.joystickBackdropEl.classList.remove("active");
         }
       }
 
       function teardownJoystick() {
-        stopJoystickRepeat();
         if (state.joystickLongPressTimer) {
           clearTimeout(state.joystickLongPressTimer);
           state.joystickLongPressTimer = null;
@@ -16742,15 +16441,12 @@
           state.joystickRootEl.parentNode.removeChild(state.joystickRootEl);
         }
         state.joystickRootEl = null;
-        state.joystickRingEl = null;
         state.joystickPanelEl = null;
         state.joystickBackdropEl = null;
         state.joystickBallEl = null;
         state.joystickPointerId = null;
         state.joystickGesture = null;
         state.joystickPressStart = null;
-        state.joystickHoverOuter = null;
-        state.joystickCenter = null;
         state.joystickPinnedOpen = false;
       }
 

@@ -16264,7 +16264,7 @@
       transition: background 0.2s ease;
     }
     .wand-joystick-backdrop.active {
-      background: rgba(20, 15, 12, 0.28);
+      background: rgba(20, 15, 12, 0.18);
       pointer-events: auto;
     }
     .wand-joystick-ball {
@@ -16277,15 +16277,12 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #fff6e8;
-      background:
-        radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.5), transparent 26%),
-        linear-gradient(145deg, rgba(224, 126, 74, 0.94), rgba(89, 56, 38, 0.94));
-      border: 1px solid rgba(255, 225, 190, 0.42);
+      color: rgba(245, 235, 225, 0.94);
+      background: rgba(35, 28, 24, 0.86);
+      border: 1px solid rgba(245, 235, 225, 0.18);
       box-shadow:
-        0 10px 24px rgba(64, 37, 23, 0.36),
-        0 0 0 6px rgba(197, 101, 61, 0.08),
-        inset 0 1px 0 rgba(255, 255, 255, 0.28);
+        0 8px 22px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
       pointer-events: auto;
@@ -16297,107 +16294,27 @@
       cursor: grab;
       transition: transform 0.18s var(--ease-spring), background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     }
-    .wand-joystick-ball::after {
-      content: "";
-      position: absolute;
-      inset: 7px;
-      border-radius: 50%;
-      border: 1px solid rgba(255, 244, 225, 0.22);
-      pointer-events: none;
-    }
     .wand-joystick-logo {
       position: relative;
       z-index: 1;
-      filter: drop-shadow(0 2px 3px rgba(47, 25, 14, 0.42));
     }
     .wand-joystick-ball:hover {
       transform: translateY(-1px);
-      border-color: rgba(255, 231, 198, 0.64);
+      border-color: rgba(245, 235, 225, 0.3);
+      background: rgba(43, 34, 29, 0.9);
       box-shadow:
-        0 14px 30px rgba(64, 37, 23, 0.42),
-        0 0 0 7px rgba(197, 101, 61, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.34);
+        0 10px 26px rgba(0, 0, 0, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
     }
     .wand-joystick-ball:active,
     .wand-joystick-ball.panel-open {
-      background:
-        radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.45), transparent 26%),
-        linear-gradient(145deg, rgba(42, 31, 24, 0.95), rgba(118, 67, 42, 0.95));
+      background: rgba(29, 23, 20, 0.94);
     }
     .wand-joystick-ball.dragging {
       transform: scale(1.12);
       cursor: grabbing;
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
     }
-    /* 环形菜单：圆心运行期由 JS 对齐球球中心 */
-    .wand-joystick-ring {
-      position: fixed;
-      left: 0;
-      top: 0;
-      width: 0;
-      height: 0;
-      z-index: 42;
-      pointer-events: none;
-      opacity: 0;
-      visibility: hidden;
-      transform: scale(0.6);
-      transition: opacity 0.18s var(--ease-out-expo), transform 0.22s var(--ease-spring), visibility 0s linear 0.18s;
-    }
-    .wand-joystick-ring.active {
-      opacity: 1;
-      visibility: visible;
-      transform: scale(1);
-      transition-delay: 0s;
-    }
-    .wjr-svg {
-      position: absolute;
-      left: 0;
-      top: 0;
-      transform: translate(-50%, -50%);
-      overflow: visible;
-      pointer-events: none;
-      filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.5));
-    }
-    /* 底盘：所有扇区之下的玻璃圆盘，扇区细缝与外缘透出它，统一成一颗整盘 */
-    .wjr-base {
-      fill: rgba(18, 13, 10, 0.8);
-      stroke: rgba(245, 235, 225, 0.14);
-      stroke-width: 1;
-    }
-    .wjr-svg text {
-      text-anchor: middle;
-      dominant-baseline: central;
-      font-size: 10.5px;
-      font-weight: 600;
-      fill: #f6ede3;
-      /* 描边垫底 → 标签在任意扇区色/穿透的终端字上都清晰 */
-      paint-order: stroke;
-      stroke: rgba(10, 7, 5, 0.55);
-      stroke-width: 2.2px;
-      stroke-linejoin: round;
-      pointer-events: none;
-    }
-    .wjr-inner text { font-size: 16px; fill: #fff; }
-    .wjr-svg .wjr-2line { font-size: 9.5px; }
-    .wjr-sector path {
-      fill: rgba(74, 61, 53, 0.9);          /* 功能圈：暖玻璃面，明显高于底盘与终端背景 */
-      stroke: none;
-      transition: fill 0.12s ease;
-    }
-    .wjr-inner path { fill: rgba(56, 45, 39, 0.92); }   /* 方向圈略深，与功能圈区分层次 */
-    .wjr-sector.is-repeating path,
-    .wjr-sector.is-hover path { fill: var(--accent); }
-    .wjr-sector.is-repeating text,
-    .wjr-sector.is-hover text { fill: #fff; stroke: rgba(120, 42, 18, 0.5); }
-    .wjr-sector.is-repeating,
-    .wjr-sector.is-hover { filter: drop-shadow(0 0 9px rgba(197, 101, 61, 0.6)); }
-    .wjr-hub {
-      fill: rgba(14, 10, 8, 0.96);
-      stroke: rgba(245, 235, 225, 0.22);
-      stroke-width: 1.5;
-    }
-    text.wjr-hub-label { font-size: 12px; font-weight: 700; fill: #f6ede3; stroke: none; }
-    .wand-joystick-ball.is-ringing { opacity: 0; }
     /* 钉住面板 */
     .wand-joystick-panel {
       position: fixed;
@@ -16406,24 +16323,23 @@
       z-index: 44;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
       padding: 10px;
-      border-radius: 14px;
-      background:
-        linear-gradient(180deg, rgba(44, 34, 28, 0.96), rgba(25, 19, 16, 0.96));
-      border: 1px solid rgba(245, 235, 225, 0.16);
+      border-radius: 12px;
+      background: rgba(29, 23, 20, 0.96);
+      border: 1px solid rgba(245, 235, 225, 0.12);
       box-shadow:
-        0 18px 44px rgba(0, 0, 0, 0.42),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
+        0 14px 34px rgba(0, 0, 0, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       pointer-events: none;
       opacity: 0;
       visibility: hidden;
       transform: translateY(8px) scale(0.96);
       transform-origin: bottom right;
       transition: opacity 0.18s var(--ease-out-expo), transform 0.22s var(--ease-spring), visibility 0s linear 0.18s;
-      width: min(252px, calc(100vw - 36px));
+      width: min(224px, calc(100vw - 36px));
       max-width: calc(100vw - 36px);
     }
     .wand-joystick-panel.active {
@@ -16444,14 +16360,13 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-size: 0.68rem;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: rgba(245, 235, 225, 0.66);
-      font-weight: 700;
+      font-size: 0.76rem;
+      letter-spacing: 0;
+      color: rgba(245, 235, 225, 0.78);
+      font-weight: 600;
     }
     .wjp-title-icon {
-      color: rgba(255, 210, 156, 0.9);
+      color: rgba(245, 235, 225, 0.72);
     }
     .wjp-close {
       width: 24px;
@@ -16472,28 +16387,20 @@
       color: rgba(245, 235, 225, 0.95);
     }
     .wjp-close:active { transform: scale(0.94); }
-    .wjp-section-label {
-      margin: 0 2px -4px;
-      color: rgba(245, 235, 225, 0.38);
-      font-size: 0.58rem;
-      font-weight: 700;
-      letter-spacing: 0.09em;
-      text-transform: uppercase;
-    }
-    .wjp-dpad { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-    .wjp-dpad-row { display: flex; gap: 4px; }
-    .wjp-grid { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+    .wjp-dpad { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .wjp-dpad-row { display: flex; gap: 5px; }
+    .wjp-grid { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
     .wjp-fnkeys { max-width: 200px; }
     .wjp-key {
       min-width: 44px;
-      height: 40px;
+      height: 38px;
       padding: 0 8px;
-      border-radius: 10px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      color: rgba(245, 235, 225, 0.92);
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(245, 235, 225, 0.14);
+      border-radius: 8px;
+      font-size: 0.76rem;
+      font-weight: 500;
+      color: rgba(245, 235, 225, 0.84);
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid rgba(245, 235, 225, 0.11);
       cursor: pointer;
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
@@ -16501,15 +16408,11 @@
       transition: transform 0.1s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     }
     .wjp-key:hover {
-      background: rgba(255, 255, 255, 0.11);
-      border-color: rgba(255, 215, 177, 0.28);
-      color: #fff7ed;
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(245, 235, 225, 0.2);
+      color: rgba(245, 235, 225, 0.95);
     }
-    .wjp-key:active { background: var(--accent-soft, rgba(197, 101, 61, 0.2)); transform: scale(0.94); }
-    .wjp-key[data-key="enter"] { color: #a7d7a9; }
-    .wjp-key[data-key="ctrl_c"],
-    .wjp-key[data-key="escape"] { color: #f1a39d; }
-    .wjp-key[data-key="shift_tab"] { color: #c5b8ff; }
+    .wjp-key:active { background: rgba(255, 255, 255, 0.12); transform: scale(0.96); }
     .wjp-key.wjp-mod.active {
       background: var(--accent);
       color: #fff;
