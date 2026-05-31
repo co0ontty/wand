@@ -15699,6 +15699,8 @@
       --qc-knob-x: 6px;
       --qc-tone: var(--accent);
       --qc-tone-soft: rgba(197, 101, 61, 0.20);
+      /* Keep in sync with QUICK_COMMIT_TAG_DWELL_MS in scripts.js */
+      --qc-dwell-ms: 1100ms;
       position: relative;
       height: 76px;
       padding: 10px 12px;
@@ -15819,7 +15821,7 @@
     }
     .qc-drag-track[data-tag-dwell="active"] .qc-stage-tag::before {
       background: var(--qc-tone);
-      animation: qc-tag-dot-pulse 0.6s ease-out forwards;
+      animation: qc-tag-dot-pulse var(--qc-dwell-ms) ease-out forwards;
     }
     .qc-drag-track[data-tag-dwell="armed"] .qc-stage-tag::before {
       background: var(--qc-tone);
@@ -15916,7 +15918,7 @@
     }
     .qc-drag-track[data-tag-dwell="active"] .qc-drag-dwell-bar {
       opacity: 1;
-      animation: qc-dwell-fill 0.6s linear forwards;
+      animation: qc-dwell-fill var(--qc-dwell-ms) linear forwards;
     }
     .qc-drag-track[data-tag-dwell="armed"] .qc-drag-dwell-bar {
       opacity: 0.55;
@@ -15936,6 +15938,28 @@
       .qc-drag-action,
       .qc-chevron,
       .qc-drag-dwell-bar { animation: none !important; transition: none !important; }
+    }
+
+    /* Cancel mode — user has ventured past Commit, then dragged back. Release here = no-op. */
+    .qc-drag-track[data-cancel-mode="1"] {
+      --qc-tone: #8c735f;
+      --qc-tone-soft: rgba(125, 91, 57, 0.16);
+    }
+    .qc-drag-track[data-cancel-mode="1"] .qc-drag-action {
+      background: linear-gradient(180deg, #a3897a, #7a604c);
+      box-shadow: 0 4px 12px rgba(125, 91, 57, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      animation: none;
+    }
+    .qc-drag-track[data-cancel-mode="1"] .qc-drag-dwell-bar,
+    .qc-drag-track[data-cancel-mode="1"] .qc-baseline-seg,
+    .qc-drag-track[data-cancel-mode="1"] .qc-chevrons { opacity: 0.25 !important; }
+    .qc-drag-track[data-cancel-mode="1"] .qc-drag-label {
+      animation: qc-cancel-shake 0.6s ease-in-out infinite;
+    }
+    @keyframes qc-cancel-shake {
+      0%, 100% { transform: translateX(0); }
+      25%      { transform: translateX(-1.5px); }
+      75%      { transform: translateX(1.5px); }
     }
 
     .qc-drag-help {

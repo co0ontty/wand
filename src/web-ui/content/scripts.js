@@ -2314,7 +2314,9 @@
       }
 
       // How long the user must hold the knob inside the Tag zone before the Tag latch arms.
-      var QUICK_COMMIT_TAG_DWELL_MS = 600;
+      // Keep in sync with `--qc-dwell-ms` in styles.css.
+      var QUICK_COMMIT_TAG_DWELL_MS = 1100;
+      var QUICK_COMMIT_ZONE_RANK = { commit: 0, tag: 1, push: 2 };
 
       function openQuickCommitModal() {
         if (!state.selectedId) return;
@@ -2480,13 +2482,19 @@
         var label = document.getElementById("quick-commit-drag-label");
         if (label) {
           var dwell = track.getAttribute("data-tag-dwell") || "idle";
+          var cancelMode = track.getAttribute("data-cancel-mode") === "1";
           var txt;
           if (state.quickCommitSubmitting) {
             txt = state.quickCommitAutoGenerating ? "AI 生成 + 提交中…" : "执行中…";
+          } else if (cancelMode) {
+            txt = "松手取消 ✕";
+          } else if (dwell === "active") {
+            txt = "锁定 Tag 中…";
+          } else if (dwell === "armed" && zone === "tag") {
+            txt = "Tag 已就绪 · 继续推送 →";
+          } else {
+            txt = meta.label;
           }
-          else if (dwell === "active") txt = "锁定 Tag 中…";
-          else if (dwell === "armed" && zone === "tag") txt = "Tag 已就绪 · 继续推送 →";
-          else txt = meta.label;
           label.textContent = txt;
         }
         // Stage class refresh.
@@ -2523,6 +2531,8 @@
           }
         }
 
+        function setCancelMode(on) { track.setAttribute("data-cancel-mode", on ? "1" : "0"); }
+
         var onPointerDown = function(e) {
           if (knob.disabled || isQuickCommitOpInFlight()) return;
           var rect = track.getBoundingClientRect();
@@ -2532,6 +2542,7 @@
             startX: e.clientX,
             moved: false,
             zone: "commit",
+            maxZone: "commit",          // furthest zone the knob ever reached this drag
             tagArmed: false,
             tagArmTimer: null,
             action: "commit",
@@ -2539,6 +2550,7 @@
           try { knob.setPointerCapture(e.pointerId); } catch (err) { /* ignored */ }
           track.classList.add("is-dragging");
           setDwell("idle");
+          setCancelMode(false);
           updateQuickCommitDragVisual("commit", 0);
           e.preventDefault();
         };
@@ -2549,6 +2561,10 @@
           ratio = Math.max(0, Math.min(1, ratio));
           if (Math.abs(e.clientX - quickCommitDragState.startX) > 5) quickCommitDragState.moved = true;
           var zone = getQuickCommitZoneFromRatio(ratio);
+          // Track furthest zone reached so we can detect a backtrack-to-commit.
+          if (QUICK_COMMIT_ZONE_RANK[zone] > QUICK_COMMIT_ZONE_RANK[quickCommitDragState.maxZone]) {
+            quickCommitDragState.maxZone = zone;
+          }
           // Zone transitions drive the dwell state machine.
           if (zone !== quickCommitDragState.zone) {
             if (zone === "tag" && !quickCommitDragState.tagArmed) {
@@ -2565,7 +2581,7 @@
                 updateQuickCommitDragVisual(newAction);
               }, QUICK_COMMIT_TAG_DWELL_MS);
             } else if (zone !== "tag" && !quickCommitDragState.tagArmed) {
-              // Left Tag zone before arming → cancel.
+              // Left Tag zone before arming → cancel the dwell.
               clearArmTimer();
               setDwell("idle");
             } else if (zone === "tag" && quickCommitDragState.tagArmed) {
@@ -2573,6 +2589,10 @@
             }
             quickCommitDragState.zone = zone;
           }
+          // Cancel-mode: backed back to commit after venturing further.
+          // Visual cue is set here; the actual "no-submit" decision is made in finish().
+          var inCancelMode = quickCommitDragState.maxZone !== "commit" && zone === "commit";
+          setCancelMode(inCancelMode);
           var action = composeQuickCommitAction(zone, quickCommitDragState.tagArmed);
           quickCommitDragState.action = action;
           updateQuickCommitDragVisual(action, ratio);
@@ -2584,10 +2604,15 @@
           quickCommitDragState = null;
           track.classList.remove("is-dragging");
           setDwell("idle");
+          setCancelMode(false);
           try {
             if (typeof knob.releasePointerCapture === "function") knob.releasePointerCapture(current.pointerId);
           } catch (err) { /* ignored */ }
-          if (cancelled) {
+          // Backtrack: user ventured out past Commit, then dragged back and released at Commit → cancel.
+          var isBacktrack = current.moved
+            && current.zone === "commit"
+            && current.maxZone !== "commit";
+          if (cancelled || isBacktrack) {
             updateQuickCommitDragVisual("commit");
             return;
           }
