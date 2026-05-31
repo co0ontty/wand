@@ -192,13 +192,11 @@ export function registerSessionRoutes(
 ): void {
   app.get("/api/sessions", (_req, res) => {
     const all = listAllSessionsSlim(processes, structured);
-    console.log("[WAND] GET /api/sessions count:", all.length, "sessions:", all.map(s => ({ id: s.id.substring(0, 8), kind: s.sessionKind, runner: s.runner, status: s.status })));
     res.json(all);
   });
 
   app.post("/api/structured-sessions", express.json(), async (req, res) => {
     const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string };
-    console.log("[WAND] POST /api/structured-sessions body:", JSON.stringify({ cwd: body.cwd, mode: body.mode, runner: body.runner, provider: body.provider, worktreeEnabled: body.worktreeEnabled === true, hasPrompt: !!body.prompt, model: body.model, thinkingEffort: body.thinkingEffort }));
     try {
       if (body.provider && body.provider !== "claude" && body.provider !== "codex") {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude 或 Codex provider。" });
@@ -216,7 +214,6 @@ export function registerSessionRoutes(
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
           : undefined,
       });
-      console.log("[WAND] structured session created:", JSON.stringify({ id: snapshot.id, sessionKind: snapshot.sessionKind, runner: snapshot.runner, status: snapshot.status }));
       onSessionCreated?.(body.cwd ?? snapshot.cwd);
       const prompt = body.prompt?.trim();
       if (prompt) {
@@ -292,7 +289,6 @@ export function registerSessionRoutes(
     // 让退出 handler 不要把剩余 queuedMessages 清空（默认行为是清空）。
     const preserveQueue = !!req.body?.preserveQueue;
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
-    console.log("[WAND] POST /api/structured-sessions/:id/messages id:", req.params.id, "input:", input.substring(0, 50), "interrupt:", interrupt, "preserveQueue:", preserveQueue, "idempotencyKey:", idempotencyKey);
     try {
       const snapshot = await structured.sendMessage(req.params.id, input, { interrupt, preserveQueue, idempotencyKey });
       res.json(snapshot);
@@ -645,10 +641,8 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/resume", (req, res) => {
     const sessionId = req.params.id;
     const body = req.body as { mode?: ExecutionMode; view?: "chat" | "terminal"; cols?: number; rows?: number };
-    console.log("[WAND] POST /api/sessions/:id/resume sessionId:", sessionId);
     try {
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
-      console.log("[WAND] resume lookup: found:", !!existingSession, "sessionKind:", existingSession?.sessionKind, "claudeSessionId:", existingSession?.claudeSessionId);
       if (!existingSession) {
         res.status(404).json({ error: "会话不存在。" });
         return;
@@ -698,7 +692,6 @@ export function registerSessionRoutes(
   app.post("/api/claude-sessions/:claudeSessionId/resume", (req, res) => {
     const claudeSessionId = String(req.params.claudeSessionId || "").trim();
     const body = req.body as { mode?: ExecutionMode; cwd?: string; cols?: number; rows?: number };
-    console.log("[WAND] POST /api/claude-sessions/:claudeSessionId/resume claudeSessionId:", claudeSessionId, "cwd:", body.cwd);
     try {
       if (!claudeSessionId) {
         res.status(400).json({ error: "Claude 会话 ID 不能为空。" });
@@ -775,7 +768,6 @@ export function registerSessionRoutes(
   app.post("/api/codex-sessions/:threadId/resume", express.json(), async (req, res) => {
     const threadId = String(req.params.threadId || "").trim();
     const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean };
-    console.log("[WAND] POST /api/codex-sessions/:threadId/resume threadId:", threadId, "cwd:", body.cwd);
     try {
       if (!threadId) {
         res.status(400).json({ error: "Codex 会话 ID 不能为空。" });
