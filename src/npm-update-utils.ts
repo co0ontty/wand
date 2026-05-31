@@ -442,5 +442,3 @@ export function resolveGlobalWandCli(): string | null {
   }
   return null;
 }
-
-export const NPM_UPDATE_PACKAGE_NAME = PACKAGE_NAME;

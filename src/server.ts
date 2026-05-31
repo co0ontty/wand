@@ -496,15 +496,6 @@ async function buildStructuredChatPersonaPayload(
 
 // ── Git helpers ──
 
-async function isGitRepo(dirPath: string): Promise<boolean> {
-  try {
-    await execAsync("git rev-parse --is-inside-work-tree", { cwd: dirPath });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function getGitRepoRoot(dirPath: string): Promise<string | null> {
   try {
     const { stdout } = await execAsync("git rev-parse --show-toplevel", { cwd: dirPath });

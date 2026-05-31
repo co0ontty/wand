@@ -381,10 +381,6 @@ export class WandStorage {
     this.setConfigValue("appSecret", value);
   }
 
-  hasAppSecret(): boolean {
-    return this.getAppSecret() !== null;
-  }
-
   // ============ Auth Session Methods ============
 
   saveAuthSession(token: string, expiresAt: number): void {

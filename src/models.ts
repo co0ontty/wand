@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { ClaudeModelInfo, SessionProvider } from "./types.js";
+import { ClaudeModelInfo } from "./types.js";
 
 const execAsync = promisify(exec);
 
@@ -98,19 +98,4 @@ export async function refreshModels(): Promise<ModelCache> {
     refreshedAt: new Date().toISOString(),
   };
   return cache;
-}
-
-export function getModelsForProvider(provider: SessionProvider): ClaudeModelInfo[] {
-  const cached = getCachedModels();
-  return provider === "codex" ? cached.codexModels : cached.models;
-}
-
-/** 返回可用于 claude CLI 的全部已知 model id（含别名） */
-export function knownModelIds(): string[] {
-  return CLAUDE_MODELS.map((m) => m.id);
-}
-
-/** 判断传入值是否是已知模型；允许自由文本，因此总是返回 true。保留接口以便将来严格校验。 */
-export function isKnownModel(_value: string): boolean {
-  return true;
 }

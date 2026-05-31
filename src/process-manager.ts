@@ -2135,12 +2135,6 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  /** Check if a command is a Claude CLI command */
-  private isClaudeCommand(command: string): boolean {
-    const trimmed = command.trim();
-    return /^claude\b/.test(trimmed);
-  }
-
   private mustGet(id: string): SessionRecord {
     const record = this.sessions.get(id);
     if (!record) {

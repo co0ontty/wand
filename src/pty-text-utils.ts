@@ -100,8 +100,8 @@ export function appendWindow(buffer: string, chunk: string, maxSize: number): st
   return safeSliceTail(next, maxSize);
 }
 
-/** Slice keeping the last ~maxSize chars on a safe boundary. Exported for tests. */
-export function safeSliceTail(text: string, maxSize: number): string {
+/** Slice keeping the last ~maxSize chars on a safe boundary. */
+function safeSliceTail(text: string, maxSize: number): string {
   if (text.length <= maxSize) return text;
   let start = text.length - maxSize;
 

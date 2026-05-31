@@ -845,20 +845,6 @@ export class StructuredSessionManager {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Permission resolution (called from server routes)
-  // ---------------------------------------------------------------------------
-
-  /** Approve a pending permission request. */
-  approvePermission(sessionId: string): SessionSnapshot {
-    return this.resolvePermission(sessionId, true);
-  }
-
-  /** Deny a pending permission request. */
-  denyPermission(sessionId: string): SessionSnapshot {
-    return this.resolvePermission(sessionId, false);
-  }
-
   /**
    * Reorder the pending queued messages. `order` is a permutation of the current
    * indices, e.g. `[2, 0, 1]` means "move the third queued message to the front,
@@ -1146,32 +1132,6 @@ export class StructuredSessionManager {
     if (this.emitEvent) {
       this.emitEvent(event);
     }
-  }
-
-  private resolvePermission(sessionId: string, approved: boolean): SessionSnapshot {
-    const session = this.requireSession(sessionId);
-    const scope = session.pendingEscalation?.scope;
-    if (approved && scope) {
-      this.incrementApprovalStats(session, scope);
-    }
-    const updated: SessionSnapshot = {
-      ...session,
-      pendingEscalation: null,
-      permissionBlocked: false,
-      lastEscalationResult: session.pendingEscalation ? {
-        requestId: session.pendingEscalation.requestId,
-        resolution: approved ? "approve_once" : "deny",
-        reason: approved ? "user_approved" : "user_denied",
-      } : session.lastEscalationResult ?? null,
-    };
-    this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
-    this.emit({
-      type: "status",
-      sessionId,
-      data: { permissionBlocked: false, approvalStats: updated.approvalStats, sessionKind: "structured" },
-    });
-    return updated;
   }
 
   private incrementApprovalStats(session: SessionSnapshot, scope: EscalationScope): void {
