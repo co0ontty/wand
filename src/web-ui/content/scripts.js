@@ -9146,7 +9146,6 @@
           model: modelPref || undefined,
           thinkingEffort: thinkingPref
         };
-        console.log("[WAND] createStructuredSession payload:", JSON.stringify(payload));
         return fetch("/api/structured-sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -9154,11 +9153,9 @@
           body: JSON.stringify(payload)
         })
         .then(function(res) {
-          console.log("[WAND] createStructuredSession response status:", res.status);
           return res.json();
         })
         .then(function(data) {
-          console.log("[WAND] createStructuredSession data:", JSON.stringify({ id: data.id, error: data.error, sessionKind: data.sessionKind, runner: data.runner, status: data.status }));
           if (data.error) {
             throw new Error(data.error);
           }
@@ -11702,7 +11699,6 @@
 
       function startStructuredSessionFromModal(cwd, mode, worktreeEnabled, errorEl) {
         var provider = state.sessionTool === "codex" ? "codex" : "claude";
-        console.log("[WAND] startStructuredSessionFromModal provider:", provider, "cwd:", cwd, "mode:", mode, "worktreeEnabled:", worktreeEnabled);
         _sessionCreating = true;
         state.modeValue = mode;
         state.chatMode = mode;
@@ -11727,7 +11723,6 @@
       }
 
       function runPtyCommandFromModal(command, cwd, mode, worktreeEnabled, errorEl) {
-        console.log("[WAND] runPtyCommandFromModal command:", command, "cwd:", cwd, "mode:", mode, "worktreeEnabled:", worktreeEnabled);
         _sessionCreating = true;
         state.modeValue = mode;
         state.chatMode = mode;
@@ -11756,7 +11751,6 @@
             return;
           }
           state.selectedId = data.id;
-          console.log("[WAND] runPtyCommandFromModal created session:", data.id, "sessionKind:", data.sessionKind, "runner:", data.runner);
           persistSelectedId();
           saveWorkingDir(cwd);
           state.drafts[data.id] = "";
@@ -11768,7 +11762,6 @@
         })
         .then(function() {
           if (state.selectedId) {
-            console.log("[WAND] runPtyCommandFromModal calling selectSession:", state.selectedId);
             selectSession(state.selectedId);
           } else {
             focusInputBox(true);
@@ -12776,7 +12769,6 @@
 
       function switchToSessionView(sessionId) {
         var session = state.sessions.find(function(s) { return s.id === sessionId; });
-        console.log("[WAND] switchToSessionView id:", sessionId, "found:", !!session, "sessionKind:", session && session.sessionKind, "runner:", session && session.runner, "isStructured:", isStructuredSession(session), "currentView:", state.currentView);
         var blankChat = document.getElementById("blank-chat");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
@@ -12833,18 +12825,6 @@
         var hasAttachments = state.pendingAttachments.length > 0;
 
         if (value || hasAttachments) {
-          console.log("[WAND] sendInputFromBox", {
-            sessionId: state.selectedId,
-            sessionStatus: selectedSession ? selectedSession.status : null,
-            sessionKind: selectedSession ? selectedSession.sessionKind : null,
-            runner: selectedSession ? selectedSession.runner : null,
-            isStructured: isStructuredSession(selectedSession),
-            view: state.currentView,
-            wsConnected: state.wsConnected,
-            terminalInteractive: state.terminalInteractive,
-            inputLength: value.length,
-            attachments: state.pendingAttachments.length
-          });
 
           var attachUpload = hasAttachments && state.selectedId
             ? uploadAttachments(state.selectedId)
@@ -12921,7 +12901,6 @@
         // queue —— 后端 sendMessage(...) 会把它追加到 queuedMessages，等当前 turn
         // 结束自动 flush；想插队就点输入框上方那条气泡。
         var requestedInterrupt = !!opts.interrupt;
-        console.log("[WAND] postStructuredInput selectedId:", state.selectedId, "input:", input && input.substring(0, 50), "requestedInterrupt:", requestedInterrupt, "session:", session && { id: session.id, sessionKind: session.sessionKind, runner: session.runner, status: session.status, inFlight: session.structuredState && session.structuredState.inFlight });
         if (!state.selectedId || !input) return Promise.resolve();
         if (!session) {
           showToast("会话不存在，请重新选择或新建会话。", "error");
@@ -13727,7 +13706,6 @@
       }
 
       function ensureSessionReadyForInput(session, errorEl) {
-        console.log("[WAND] ensureSessionReadyForInput session:", session && { id: session.id, status: session.status, claudeSessionId: session.claudeSessionId, sessionKind: session.sessionKind, runner: session.runner });
         if (!session) {
           showToast("会话不存在，请重新选择或新建会话。", "error");
           return Promise.resolve(null);
@@ -14060,14 +14038,6 @@
         focusTerminalContainer();
       }
 
-      function setMiniKeyboardVisible(visible, clearModifiersOnHide) {
-        // Inline keyboard visibility is now based on view, not state
-        state.miniKeyboardVisible = !!visible;
-        if (!state.miniKeyboardVisible && clearModifiersOnHide !== false) {
-          clearModifiers();
-        }
-        updateKeyboardPopupUI();
-      }
 
       function hideMiniKeyboard(clearModifiersOnHide) {
         // Just clear modifiers, inline keyboard visibility follows view
@@ -14078,14 +14048,7 @@
         updateKeyboardPopupUI();
       }
 
-      function showMiniKeyboard() {
-        // Inline keyboard shows automatically in terminal view
-        updateKeyboardPopupUI();
-      }
 
-      function toggleMiniKeyboard() {
-        // No longer needed, keyboard is inline
-      }
 
       function toggleTerminalInteractive() {
         if (!isTerminalInteractionAvailable()) return;
@@ -14212,22 +14175,6 @@
         sendTerminalSequence(sequence, key);
       }
 
-      function handleMiniKeyboardClick(event) {
-        var btn = event.target.closest(".mk-key");
-        if (!btn) return;
-        var key = btn.getAttribute("data-key");
-        if (!key) return;
-        event.preventDefault();
-        if (key === "ctrl" || key === "alt" || key === "shift") {
-          state.modifiers[key] = !state.modifiers[key];
-          updateModifierUI();
-          return;
-        }
-        var sequence = buildPtySequence(key, { ctrl: state.modifiers.ctrl, alt: state.modifiers.alt, shift: state.modifiers.shift });
-        if (sequence) sendTerminalSequence(sequence, key);
-        clearModifiers();
-        scheduleShortcutResync();
-      }
 
       // 快捷键点击后做一次延迟 resync 兜底：maybeScheduleResyncForChunk 偶尔会漏
       // 抓 Codex 菜单切换之类的原地重绘，导致 DOM 行残留。500ms 是为了等服务端把
@@ -14567,7 +14514,6 @@
       var _resumeInProgress = false;
 
       function resumeSession(sessionId, errorEl) {
-        console.log("[WAND] resumeSession sessionId:", sessionId);
         if (!sessionId || _resumeInProgress) return Promise.resolve(null);
         _resumeInProgress = true;
         return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/resume", {
@@ -14649,7 +14595,6 @@
       }
 
       function resumeSessionFromList(sessionId) {
-        console.log("[WAND] resumeSessionFromList sessionId:", sessionId);
         return resumeSession(sessionId).then(function(data) {
           if (!data) return null;
           if (data.claudeSessionId) {
@@ -14755,7 +14700,6 @@
       }
 
       function handleResumeAction(actionButton) {
-        console.log("[WAND] handleResumeAction sessionId:", actionButton.dataset.sessionId);
         actionButton.disabled = true;
         resumeSessionFromList(actionButton.dataset.sessionId)
           .finally(function() {
@@ -14766,7 +14710,6 @@
       function handleResumeCodexHistoryAction(actionButton) {
         var threadId = actionButton.dataset.claudeSessionId;
         var cwd = actionButton.dataset.cwd;
-        console.log("[WAND] handleResumeCodexHistoryAction threadId:", threadId, "cwd:", cwd);
         if (!threadId) return;
         actionButton.disabled = true;
         resumeCodexHistorySession(threadId, cwd)
@@ -14815,7 +14758,6 @@
       function handleDeleteCodexHistoryAction(actionButton) {
         var threadId = actionButton.dataset.claudeSessionId;
         if (!threadId) return;
-        console.log("[WAND] handleDeleteCodexHistoryAction threadId:", threadId);
         var item = actionButton.closest(".claude-history-item");
         if (item) item.style.opacity = "0.5";
         fetch("/api/codex-history/" + encodeURIComponent(threadId), {
@@ -14841,7 +14783,6 @@
       function handleResumeHistoryAction(actionButton) {
         var claudeSessionId = actionButton.dataset.claudeSessionId;
         var cwd = actionButton.dataset.cwd;
-        console.log("[WAND] handleResumeHistoryAction claudeSessionId:", claudeSessionId, "cwd:", cwd);
         if (!claudeSessionId) return;
         actionButton.disabled = true;
         resumeClaudeHistorySession(claudeSessionId, cwd)
@@ -15033,582 +14974,6 @@
         settleInputViewport(inputBox);
       }
 
-      function refreshInputViewportState(inputBox) {
-        updateInputViewportState(inputBox);
-      }
-
-      function clearInputBoxViewportState() {
-        clearInputViewportState();
-      }
-
-      function syncInputBoxViewportState(inputBox) {
-        refreshInputViewportState(inputBox);
-      }
-
-      function resetInputBoxViewportState() {
-        clearInputBoxViewportState();
-      }
-
-      function maintainInputBoxSelection(inputBox) {
-        settleInputViewport(inputBox);
-      }
-
-      function focusInputFromViewportTap(inputBox) {
-        focusInputBoxFromTap(inputBox);
-      }
-
-      function stabilizeInputViewport(inputBox) {
-        finalizeInputViewportUpdate(inputBox);
-      }
-
-      function syncInputBoxAfterFocus(inputBox) {
-        handleInputBoxFocus({ target: inputBox });
-      }
-
-      function syncInputBoxAfterBlur() {
-        handleInputBoxBlur();
-      }
-
-      function syncInputBoxAfterViewportChange(inputBox) {
-        refreshInputViewportState(inputBox);
-      }
-
-      function syncInputBoxAfterValueChange(inputBox) {
-        refreshInputBoxState(inputBox);
-      }
-
-      function keepInputBoxCursorVisible(inputBox) {
-        maintainInputBoxSelection(inputBox);
-      }
-
-      function updateInputViewportAfterKeyboard(inputBox) {
-        updateInputViewportState(inputBox);
-      }
-
-      function clearInputViewportAfterKeyboard() {
-        clearInputViewportState();
-      }
-
-      function applyInputViewportState(inputBox) {
-        updateInputViewportState(inputBox);
-      }
-
-      function syncInputComposerAfterViewportChange(inputBox) {
-        syncInputBoxAfterViewportChange(inputBox);
-      }
-
-      function resetInputComposerAfterViewportChange() {
-        clearInputViewportAfterKeyboard();
-      }
-
-      function ensureInputBoxViewportState(inputBox) {
-        refreshInputBoxState(inputBox);
-      }
-
-      function syncInputBoxState(inputBox) {
-        ensureInputBoxViewportState(inputBox);
-      }
-
-      function syncInputBoxOnTouch(inputBox) {
-        bindInputTouchScroll(inputBox);
-      }
-
-      function clearInputViewport() {
-        resetInputViewport();
-      }
-
-      function refreshInputViewport(inputBox) {
-        updateInputViewportState(inputBox);
-      }
-
-      function stabilizeInputBoxViewport(inputBox) {
-        settleInputViewport(inputBox);
-      }
-
-      function focusInputByTap(inputBox) {
-        focusInputBoxFromTap(inputBox);
-      }
-
-      function finalizeInputBoxViewport(inputBox) {
-        stabilizeInputBoxViewport(inputBox);
-      }
-
-      function updateInputViewport(inputBox) {
-        refreshInputViewport(inputBox);
-      }
-
-      function resetInputViewportSpacing() {
-        clearInputViewport();
-      }
-
-      function keepInputViewportStable(inputBox) {
-        finalizeInputBoxViewport(inputBox);
-      }
-
-      function focusInputAtCaret(inputBox) {
-        focusInputByTap(inputBox);
-      }
-
-      function syncInputBoxViewport(inputBox) {
-        updateInputViewport(inputBox);
-      }
-
-      function clearInputBoxViewport() {
-        resetInputViewportSpacing();
-      }
-
-      function maintainInputViewport(inputBox) {
-        keepInputViewportStable(inputBox);
-      }
-
-      function focusInputFromTapTarget(inputBox) {
-        focusInputAtCaret(inputBox);
-      }
-
-      function settleInputBoxViewport(inputBox) {
-        maintainInputViewport(inputBox);
-      }
-
-      function refreshInputViewportLayout(inputBox) {
-        syncInputBoxViewport(inputBox);
-      }
-
-      function resetInputViewportLayout() {
-        clearInputBoxViewport();
-      }
-
-      function keepCaretVisible(inputBox) {
-        settleInputBoxViewport(inputBox);
-      }
-
-      function focusInputTarget(inputBox) {
-        focusInputFromTapTarget(inputBox);
-      }
-
-      function finalizeInputLayout(inputBox) {
-        refreshInputBoxState(inputBox);
-        keepCaretVisible(inputBox);
-      }
-
-      function resetInputLayout() {
-        resetInputViewportLayout();
-      }
-
-      function syncInputLayout(inputBox) {
-        refreshInputViewportLayout(inputBox);
-      }
-
-      function focusInputSelection(inputBox) {
-        focusInputTarget(inputBox);
-      }
-
-      function stabilizeInputLayout(inputBox) {
-        finalizeInputLayout(inputBox);
-      }
-
-      function clearInputLayout() {
-        resetInputLayout();
-      }
-
-      function applyInputLayout(inputBox) {
-        syncInputLayout(inputBox);
-      }
-
-      function focusInputTapSelection(inputBox) {
-        focusInputSelection(inputBox);
-      }
-
-      function settleInputLayout(inputBox) {
-        stabilizeInputLayout(inputBox);
-      }
-
-      function resetInputTapLayout() {
-        clearInputLayout();
-      }
-
-      function refreshInputTapLayout(inputBox) {
-        applyInputLayout(inputBox);
-      }
-
-      function focusInputTap(inputBox) {
-        focusInputTapSelection(inputBox);
-      }
-
-      function keepInputTapStable(inputBox) {
-        settleInputLayout(inputBox);
-      }
-
-      function clearInputTapState() {
-        resetInputTapLayout();
-      }
-
-      function updateInputTapState(inputBox) {
-        refreshInputTapLayout(inputBox);
-      }
-
-      function maintainInputTapState(inputBox) {
-        keepInputTapStable(inputBox);
-      }
-
-      function focusInputTapTarget(inputBox) {
-        focusInputTap(inputBox);
-      }
-
-      function syncInputTapState(inputBox) {
-        updateInputTapState(inputBox);
-      }
-
-      function resetInputTapState() {
-        clearInputTapState();
-      }
-
-      function stabilizeInputTapState(inputBox) {
-        maintainInputTapState(inputBox);
-      }
-
-      function activateInputTapTarget(inputBox) {
-        focusInputTapTarget(inputBox);
-      }
-
-      function refreshInputTapViewport(inputBox) {
-        syncInputTapState(inputBox);
-      }
-
-      function clearInputTapViewport() {
-        resetInputTapState();
-      }
-
-      function keepInputTapViewportStable(inputBox) {
-        stabilizeInputTapState(inputBox);
-      }
-
-      function focusInputTapViewport(inputBox) {
-        activateInputTapTarget(inputBox);
-      }
-
-      function settleInputTapViewport(inputBox) {
-        keepInputTapViewportStable(inputBox);
-      }
-
-      function updateInputTapViewport(inputBox) {
-        refreshInputTapViewport(inputBox);
-      }
-
-      function resetInputTapViewport() {
-        clearInputTapViewport();
-      }
-
-      function maintainInputTapViewport(inputBox) {
-        settleInputTapViewport(inputBox);
-      }
-
-      function focusInputTapViewportTarget(inputBox) {
-        focusInputTapViewport(inputBox);
-      }
-
-      function refreshInputPanelState(inputBox) {
-        updateInputTapViewport(inputBox);
-      }
-
-      function clearInputPanelState() {
-        resetInputTapViewport();
-      }
-
-      function stabilizeInputPanelState(inputBox) {
-        maintainInputTapViewport(inputBox);
-      }
-
-      function focusInputPanelTarget(inputBox) {
-        focusInputTapViewportTarget(inputBox);
-      }
-
-      function finalizeInputPanelState(inputBox) {
-        stabilizeInputPanelState(inputBox);
-      }
-
-      function refreshInputPanelViewport(inputBox) {
-        refreshInputPanelState(inputBox);
-      }
-
-      function clearInputPanelViewport() {
-        clearInputPanelState();
-      }
-
-      function settleInputPanelViewport(inputBox) {
-        finalizeInputPanelState(inputBox);
-      }
-
-      function focusInputPanelViewport(inputBox) {
-        focusInputPanelTarget(inputBox);
-      }
-
-      function syncInputPanelViewport(inputBox) {
-        refreshInputPanelViewport(inputBox);
-      }
-
-      function resetInputPanelViewport() {
-        clearInputPanelViewport();
-      }
-
-      function stabilizeInputPanelViewport(inputBox) {
-        settleInputPanelViewport(inputBox);
-      }
-
-      function focusInputPanelTap(inputBox) {
-        focusInputPanelViewport(inputBox);
-      }
-
-      function updateInputPanelLayout(inputBox) {
-        syncInputPanelViewport(inputBox);
-      }
-
-      function clearInputPanelLayout() {
-        resetInputPanelViewport();
-      }
-
-      function keepInputPanelLayoutStable(inputBox) {
-        stabilizeInputPanelViewport(inputBox);
-      }
-
-      function focusInputPanelSelection(inputBox) {
-        focusInputPanelTap(inputBox);
-      }
-
-      function finalizeInputPanelLayout(inputBox) {
-        keepInputPanelLayoutStable(inputBox);
-      }
-
-      function refreshInputComposerState(inputBox) {
-        updateInputPanelLayout(inputBox);
-      }
-
-      function clearInputComposerState() {
-        clearInputPanelLayout();
-      }
-
-      function settleInputComposerState(inputBox) {
-        finalizeInputPanelLayout(inputBox);
-      }
-
-      function focusInputComposerSelection(inputBox) {
-        focusInputPanelSelection(inputBox);
-      }
-
-      function syncInputComposerState(inputBox) {
-        refreshInputComposerState(inputBox);
-      }
-
-      function resetInputComposerState() {
-        clearInputComposerState();
-      }
-
-      function stabilizeInputComposerState(inputBox) {
-        settleInputComposerState(inputBox);
-      }
-
-      function focusInputComposerTap(inputBox) {
-        focusInputComposerSelection(inputBox);
-      }
-
-      function updateInputComposerLayout(inputBox) {
-        syncInputComposerState(inputBox);
-      }
-
-      function clearComposerLayout() {
-        resetInputComposerState();
-      }
-
-      function keepComposerLayoutStable(inputBox) {
-        stabilizeInputComposerState(inputBox);
-      }
-
-      function focusComposerTap(inputBox) {
-        focusInputComposerTap(inputBox);
-      }
-
-      function finalizeComposerLayout(inputBox) {
-        keepComposerLayoutStable(inputBox);
-      }
-
-      function refreshComposerLayout(inputBox) {
-        updateInputComposerLayout(inputBox);
-      }
-
-      function resetComposerLayout() {
-        clearComposerLayout();
-      }
-
-      function stabilizeComposerLayout(inputBox) {
-        finalizeComposerLayout(inputBox);
-      }
-
-      function focusComposerSelection(inputBox) {
-        focusComposerTap(inputBox);
-      }
-
-      function updateComposerViewport(inputBox) {
-        refreshComposerLayout(inputBox);
-      }
-
-      function clearComposerViewport() {
-        resetComposerLayout();
-      }
-
-      function keepComposerViewportStable(inputBox) {
-        stabilizeComposerLayout(inputBox);
-      }
-
-      function focusComposerViewport(inputBox) {
-        focusComposerSelection(inputBox);
-      }
-
-      function finalizeComposerViewport(inputBox) {
-        keepComposerViewportStable(inputBox);
-      }
-
-      function refreshComposerViewport(inputBox) {
-        updateComposerViewport(inputBox);
-      }
-
-      function resetComposerViewport() {
-        clearComposerViewport();
-      }
-
-      function stabilizeComposerViewport(inputBox) {
-        finalizeComposerViewport(inputBox);
-      }
-
-      function focusComposerViewportTap(inputBox) {
-        focusComposerViewport(inputBox);
-      }
-
-      function syncComposerViewport(inputBox) {
-        refreshComposerViewport(inputBox);
-      }
-
-      function clearComposerViewportState() {
-        resetComposerViewport();
-      }
-
-      function keepComposerViewportStateStable(inputBox) {
-        stabilizeComposerViewport(inputBox);
-      }
-
-      function focusComposerViewportTarget(inputBox) {
-        focusComposerViewportTap(inputBox);
-      }
-
-      function finalizeComposerViewportState(inputBox) {
-        keepComposerViewportStateStable(inputBox);
-      }
-
-      function refreshComposerViewportState(inputBox) {
-        syncComposerViewport(inputBox);
-      }
-
-      function resetComposerViewportState() {
-        clearComposerViewportState();
-      }
-
-      function stabilizeComposerViewportState(inputBox) {
-        finalizeComposerViewportState(inputBox);
-      }
-
-      function focusComposerViewportState(inputBox) {
-        focusComposerViewportTarget(inputBox);
-      }
-
-      function syncComposerLayoutState(inputBox) {
-        refreshComposerViewportState(inputBox);
-      }
-
-      function clearComposerLayoutState() {
-        resetComposerViewportState();
-      }
-
-      function keepComposerLayoutStateStable(inputBox) {
-        stabilizeComposerViewportState(inputBox);
-      }
-
-      function focusComposerLayoutState(inputBox) {
-        focusComposerViewportState(inputBox);
-      }
-
-      function finalizeComposerLayoutState(inputBox) {
-        keepComposerLayoutStateStable(inputBox);
-      }
-
-      function refreshInputFocusState(inputBox) {
-        syncComposerLayoutState(inputBox);
-      }
-
-      function clearInputFocusState() {
-        clearComposerLayoutState();
-      }
-
-      function stabilizeInputFocusState(inputBox) {
-        finalizeComposerLayoutState(inputBox);
-      }
-
-      function focusInputFocusState(inputBox) {
-        focusComposerLayoutState(inputBox);
-      }
-
-      function keepInputFocusStable(inputBox) {
-        stabilizeInputFocusState(inputBox);
-      }
-
-      function updateInputFocusState(inputBox) {
-        refreshInputFocusState(inputBox);
-      }
-
-      function resetInputFocusState() {
-        clearInputFocusState();
-      }
-
-      function focusInputTargetState(inputBox) {
-        focusInputFocusState(inputBox);
-      }
-
-      function settleInputFocusState(inputBox) {
-        keepInputFocusStable(inputBox);
-      }
-
-      function syncInputFocusState(inputBox) {
-        updateInputFocusState(inputBox);
-      }
-
-      function clearFocusState() {
-        resetInputFocusState();
-      }
-
-      function maintainFocusState(inputBox) {
-        settleInputFocusState(inputBox);
-      }
-
-      function activateInputTargetState(inputBox) {
-        focusInputTargetState(inputBox);
-      }
-
-      function updateInputFocusViewport(inputBox) {
-        syncInputFocusState(inputBox);
-      }
-
-      function clearInputFocusViewport() {
-        clearFocusState();
-      }
-
-      function stabilizeInputFocusViewport(inputBox) {
-        maintainFocusState(inputBox);
-      }
-
-      function focusInputViewportTarget(inputBox) {
-        activateInputTargetState(inputBox);
-      }
-
-      function finalizeInputFocusViewport(inputBox) {
-        stabilizeInputFocusViewport(inputBox);
-      }
 
       function shouldAdjustForKeyboard(vv, inputBox) {
         if (!vv || !inputBox || document.activeElement !== inputBox) return false;
