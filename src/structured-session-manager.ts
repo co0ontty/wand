@@ -691,7 +691,6 @@ export class StructuredSessionManager {
     if (opts?.idempotencyKey) {
       const mapKey = `${id}:${opts.idempotencyKey}`;
       if (this.seenIdempotencyKeys.has(mapKey)) {
-        console.log("[WAND] sendMessage: duplicate idempotency key rejected", { id, key: opts.idempotencyKey });
         const err = new Error("检测到重复发送，已拦截。") as Error & { code?: string };
         err.code = "duplicate_idempotency_key";
         throw err;
@@ -2543,7 +2542,7 @@ export class StructuredSessionManager {
       output: turnState.result,
       claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
       messages: msgs,
-      queuedMessages: interruptPrompt ? [] : current.queuedMessages,
+      queuedMessages: interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId) ? [] : current.queuedMessages,
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -2563,6 +2562,8 @@ export class StructuredSessionManager {
 
     if (interruptPrompt) {
       this.interruptedWith.delete(sessionId);
+      // 与 codex/cli runner 对齐：清掉"保留队列"标记，避免 stale flag 影响下一次普通 interrupt。
+      this.preserveQueueOnInterrupt.delete(sessionId);
       setImmediate(() => {
         this.sendMessage(sessionId, interruptPrompt).catch((err) => {
           console.error("[WAND] sdk interrupt-and-send failed:", err);
