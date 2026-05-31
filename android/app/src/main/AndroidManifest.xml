@@ -36,6 +36,14 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".QrScannerActivity"
+            android:configChanges="orientation|screenSize|keyboard|keyboardHidden"
+            android:exported="false"
+            android:label="@string/scan_qr_button"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Wand.Scanner" />
+
         <activity-alias
             android:name=".ConnectActivity.Shorthair"
             android:targetActivity=".ConnectActivity"

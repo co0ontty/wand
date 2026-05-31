@@ -10987,7 +10987,11 @@
               connectCodeEl.textContent = "加载中...";
               if (connectQrEmpty) connectQrEmpty.textContent = "生成中…";
               if (connectQrCanvas) connectQrCanvas.style.visibility = "hidden";
-              fetch("/api/app-connect-code").then(function(r) { return r.json(); }).then(function(d) {
+              var connectCodeUrl = "/api/app-connect-code";
+              if (window.location && window.location.origin) {
+                connectCodeUrl += "?origin=" + encodeURIComponent(window.location.origin);
+              }
+              fetch(connectCodeUrl, { credentials: "same-origin" }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.code) {
                   connectCodeEl.textContent = d.code;
                   state.androidConnectCode = d.code;

@@ -52,4 +52,45 @@
         <item name="rippleColor">#22C5653D</item>
     </style>
 
+    <style name="Theme.Wand.Scanner" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorAccent">@color/primary</item>
+    </style>
+
+    <style name="Wand.Scanner.IconButton" parent="Widget.MaterialComponents.Button">
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:padding">0dp</item>
+        <item name="backgroundTint">#3D000000</item>
+        <item name="cornerRadius">24dp</item>
+        <item name="iconGravity">textStart</item>
+        <item name="iconPadding">0dp</item>
+        <item name="iconTint">#FFFFFFFF</item>
+        <item name="rippleColor">#33FFFFFF</item>
+    </style>
+
+    <style name="Wand.Scanner.ToolButton" parent="Widget.MaterialComponents.Button">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:textSize">13sp</item>
+        <item name="backgroundTint">#3D000000</item>
+        <item name="cornerRadius">22dp</item>
+        <item name="iconPadding">6dp</item>
+        <item name="iconTint">#FFFFFFFF</item>
+        <item name="rippleColor">#33FFFFFF</item>
+    </style>
+
 </resources>

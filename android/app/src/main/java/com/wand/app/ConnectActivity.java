@@ -151,9 +151,10 @@ public class ConnectActivity extends AppCompatActivity {
     private void launchQrScanner() {
         IntentIntegrator integrator = new IntentIntegrator(this);
         integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE);
+        integrator.setCaptureActivity(QrScannerActivity.class);
         integrator.setPrompt(getString(R.string.scan_qr_prompt));
         integrator.setBeepEnabled(false);
-        integrator.setOrientationLocked(false);
+        integrator.setOrientationLocked(true);
         integrator.setBarcodeImageEnabled(false);
         integrator.initiateScan();
     }

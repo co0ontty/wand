@@ -655,6 +655,25 @@ function getPublicRequestHost(req: Request, config: WandConfig): string {
   );
 }
 
+function firstQueryStringValue(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return firstQueryStringValue(value[0]);
+  return undefined;
+}
+
+function normalizePublicOrigin(value: string | undefined): string | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    if (!parsed.hostname || parsed.username || parsed.password) return undefined;
+    return parsed.origin;
+  } catch {
+    return undefined;
+  }
+}
+
 function decodeConnectCode(code: string): { url: string; token: string } | null {
   try {
     const decoded = Buffer.from(code, "base64").toString("utf8");
@@ -1599,7 +1618,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     const effectivePassword = dbPassword ?? config.password;
     const protocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
     const host = getPublicRequestHost(req, config);
-    const serverUrl = `${protocol}://${host}`;
+    const browserOrigin = normalizePublicOrigin(firstQueryStringValue(req.query.origin));
+    const serverUrl = browserOrigin ?? `${protocol}://${host}`;
     const appSecret = config.appSecret ?? "";
     const token = generateAppToken(effectivePassword, appSecret);
     const code = encodeConnectCode(serverUrl, token);
