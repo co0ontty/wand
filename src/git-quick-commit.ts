@@ -156,6 +156,22 @@ function parsePorcelainV2(raw: string): GitStatusFileEntry[] {
   return out;
 }
 
+/**
+ * 仓库是否声明了 submodule（读 repo 根的 .gitmodules）。不能只看 `git status`——一个
+ * clean 的 submodule 不会出现在 status 里，但「是否提供 Submodule 选项」应基于声明而非当前改动。
+ */
+function repoDeclaresSubmodule(repoRoot: string | undefined): boolean {
+  if (!repoRoot) return false;
+  const gitmodules = `${repoRoot}/.gitmodules`;
+  if (!existsSync(gitmodules)) return false;
+  try {
+    const out = runGitAllowEmpty(["config", "-f", gitmodules, "--get-regexp", "\\.path$"], repoRoot).trim();
+    return out.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function getGitStatus(cwd: string): GitStatusResult {
   if (!cwd || !existsSync(cwd)) {
     return { isGit: false, error: "工作目录不存在。" };

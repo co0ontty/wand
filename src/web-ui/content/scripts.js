@@ -2457,21 +2457,15 @@
               push: { x: Math.min(fw - pushW - 8, fw * 0.76 - pushW / 2), y: bottomY }
             };
           }
-          // 宽屏：三个动作球一排居中（无 sub 时与原行为一致）。
+          // 宽屏：所有球（含可选的 Sub）一排居中，保持整齐——Sub 跟在 Push 之后，靠 teal 配色
+          // 区分「可选」，不再孤立偏置到右下角（那样会显得「掉到提交区下面」、与动作球脱节）。
+          // 无 sub 时 ALL === ACTION_ORDER，与原三球一排完全一致。
           var gap = 14;
-          var total = ACTION_ORDER.reduce(function(s, id) { return s + cw(id); }, 0) + (ACTION_ORDER.length - 1) * gap;
+          var total = ALL.reduce(function(s, id) { return s + cw(id); }, 0) + (ALL.length - 1) * gap;
           var x = Math.max(8, (fw - total) / 2);
           var y = (fh - H) / 2;
           var pos = {};
-          ACTION_ORDER.forEach(function(id) { pos[id] = { x: x, y: y }; x += cw(id) + gap; });
-          if (hasSub) {
-            // sub 单独偏置到右下角，与三动作球视觉分组，强调「可选、默认不参与」。
-            var subW = cw("sub");
-            pos.sub = {
-              x: Math.max(8, fw - subW - 8),
-              y: Math.min(fh - H - 8, y + H + 12)
-            };
-          }
+          ALL.forEach(function(id) { pos[id] = { x: x, y: y }; x += cw(id) + gap; });
           return pos;
         }
 
