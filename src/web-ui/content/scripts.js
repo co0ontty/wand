@@ -6050,7 +6050,55 @@
           window.__askRender(toolUseId);
         });
       };
+      // 只绑一次的全局监听（document/window）。原本散落在 attachEventListeners 里、每次 render
+      // 用匿名函数重绑会叠加泄漏。集中绑一次，handler 一律现查 DOM / 读全局 state，避免捕获
+      // 每次 render 重建的局部节点导致 stale。
+      function bindGlobalListenersOnce() {
+        if (state.__globalListenersBound) return;
+        state.__globalListenersBound = true;
+
+        // sidebar overflow 菜单：外点 / 视口变化时关闭
+        document.addEventListener("click", function() {
+          var el = document.getElementById("sidebar-overflow-menu");
+          if (el) el.classList.remove("open");
+        });
+        window.addEventListener("resize", function() {
+          var el = document.getElementById("sidebar-overflow-menu");
+          if (el) el.classList.remove("open");
+        });
+
+        // topbar more 菜单：外点 / ESC 关闭
+        var closeTopbarMore = function() {
+          state.topbarMoreOpen = false;
+          var menu = document.getElementById("topbar-more-menu");
+          var btn = document.getElementById("topbar-more-button");
+          if (menu) menu.classList.add("hidden");
+          if (btn) {
+            btn.classList.remove("active");
+            btn.setAttribute("aria-expanded", "false");
+          }
+        };
+        document.addEventListener("click", function(e) {
+          if (!state.topbarMoreOpen) return;
+          var menu = document.getElementById("topbar-more-menu");
+          var wrap = menu && menu.parentElement;
+          if (wrap && !wrap.contains(e.target)) closeTopbarMore();
+        });
+        document.addEventListener("keydown", function(e) {
+          if (e.key === "Escape" && state.topbarMoreOpen) closeTopbarMore();
+        });
+
+        // folder picker：外点关闭下拉
+        document.addEventListener("click", function(e) {
+          if (!e.target.closest(".folder-picker-container")) {
+            var dd = document.getElementById("folder-picker-dropdown");
+            if (dd) dd.classList.add("hidden");
+          }
+        });
+      }
+
       function attachEventListeners() {
+        bindGlobalListenersOnce();
 
         var loginButton = document.getElementById("login-button");
         if (loginButton) {
@@ -6216,13 +6264,6 @@
             var willOpen = !sidebarOverflow.classList.contains("open");
             sidebarOverflow.classList.toggle("open", willOpen);
             if (willOpen) positionSidebarOverflowMenu(sidebarOverflow);
-          });
-          document.addEventListener("click", function() {
-            sidebarOverflow.classList.remove("open");
-          });
-          // 视口尺寸变化时关闭，避免 clamp 后的定位与新尺寸不符。
-          window.addEventListener("resize", function() {
-            sidebarOverflow.classList.remove("open");
           });
         }
         var homeBtn = document.getElementById("sidebar-home-btn");
@@ -6679,26 +6720,6 @@
                 break;
             }
           });
-          // Close on outside click
-          document.addEventListener("click", function(e) {
-            if (!state.topbarMoreOpen) return;
-            var wrap = topbarMoreMenu.parentElement;
-            if (wrap && !wrap.contains(e.target)) {
-              state.topbarMoreOpen = false;
-              topbarMoreMenu.classList.add("hidden");
-              topbarMoreBtn.classList.remove("active");
-              topbarMoreBtn.setAttribute("aria-expanded", "false");
-            }
-          });
-          // Close on ESC
-          document.addEventListener("keydown", function(e) {
-            if (e.key === "Escape" && state.topbarMoreOpen) {
-              state.topbarMoreOpen = false;
-              topbarMoreMenu.classList.add("hidden");
-              topbarMoreBtn.classList.remove("active");
-              topbarMoreBtn.setAttribute("aria-expanded", "false");
-            }
-          });
         }
 
         // Terminal scale controls (topbar)
@@ -7024,13 +7045,6 @@
                   hideFolderDropdown();
                 }
               }
-            }
-          });
-
-          // Close dropdown when clicking outside
-          document.addEventListener("click", function(e) {
-            if (!e.target.closest(".folder-picker-container")) {
-              hideFolderDropdown();
             }
           });
         }
@@ -14994,13 +15008,16 @@
       }
 
       function focusInputFromTap() {
+        // 触摸设备上点击任何区域都不主动聚焦：聚焦输入框或终端都会唤起系统虚拟键盘，
+        // 这属于预期外行为——点输出区、点聊天区、点终端遥控悬浮面板都不该弹出输入法。
+        // 移动端需要输入时直接点输入框本身即可。
+        if (isTouchDevice()) return;
         if (state.terminalInteractive) {
+          // 桌面交互式 PTY：点终端让终端获焦，方便直接键入（鼠标不会唤起虚拟键盘）。
           focusTerminalContainer();
           return;
         }
-        var inputBox = document.getElementById('input-box');
-        if (!inputBox || !state.selectedId || document.activeElement === inputBox) return;
-        focusInputWithSelection(inputBox);
+        // 桌面非交互模式：点击输出/聊天区不再自动聚焦输入框（用户反馈为预期外行为）。
       }
 
       function focusTerminalContainer() {
