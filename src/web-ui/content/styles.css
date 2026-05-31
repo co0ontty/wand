@@ -6164,10 +6164,29 @@
       transition: opacity 0.2s ease, visibility 0s;
     }
 
+    /* ─────────────────────────────────────────────────────────────────────
+       输入区 v2：单行布局
+       ─────────────────────────────────────────────────────────────────────
+       结构：
+         .input-composer            外壳（圆角胶囊形）
+           .composer-status-row     状态行（自动批准 / 权限 / 统计），无内容时折叠
+           .composer-main-row       主输入行（单行）
+             .composer-actions-left  [+] [🎤] [⌨]
+             .composer-input-wrap    textarea + ghost meta + 语音 UI
+             .composer-actions-right [⏹] [➤]
+           .attachment-preview       附件预览
+           .input-session-info-bar   信息徽章
+
+       关键交互：
+         · ghost meta 在 textarea 为空时浮在输入位上，显示 mode·model·thinking；
+           开始输入后整体淡出隐藏，textarea 文字接管这块区域。
+         · 提示词优化按钮 (✨) 仅在 .input-composer.has-text 时显示，浮在右侧。
+         · .input-composer.voice-mode 时 textarea + ghost 隐藏，露出 .voice-input-mode。
+       ─────────────────────────────────────────────────────────────────── */
     .input-composer {
-      background: rgba(255, 255, 255, 0.85);
+      background: rgba(255, 255, 255, 0.88);
       border: 1px solid var(--border-default);
-      border-radius: 14px;
+      border-radius: 22px;
       transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
       overflow: hidden;
       position: relative;
@@ -6178,12 +6197,55 @@
       box-shadow: 0 0 0 2px var(--accent-muted), 0 0 16px rgba(197, 101, 61, 0.08);
       background: rgba(255, 255, 255, 0.98);
     }
-    .input-composer-bar {
+    /* 状态行：没"非隐藏"子节点时高度归零（不留视觉空白）；
+       :has() 选择器在 Safari 15.4+/Chrome 105+ 均可用。 */
+    .composer-status-row {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 2px 4px 3px 6px;
-      gap: 3px;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 0 10px;
+      min-height: 0;
+      transition: padding var(--transition-fast);
+    }
+    .composer-status-row > * {
+      flex-shrink: 0;
+    }
+    .composer-status-row:has(> *:not(.hidden)) {
+      padding-top: 6px;
+      padding-bottom: 0;
+    }
+    /* 兜底（不支持 :has 的旧引擎）：给点小 padding，避免布局错乱 */
+    @supports not selector(:has(*)) {
+      .composer-status-row:not(:empty) {
+        padding-top: 4px;
+      }
+    }
+    /* 主输入行：单行 flex */
+    .composer-main-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 6px;
+      min-height: 44px;
+    }
+    .composer-actions-left,
+    .composer-actions-right {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+    .composer-input-wrap {
+      position: relative;
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+    }
+    /* 兼容旧类（避免遗留引用报错） */
+    .input-composer-bar {
+      display: none;
     }
     .input-composer-left {
       display: flex;
@@ -7396,12 +7458,14 @@
       background: transparent;
       border: none;
       color: var(--text-primary);
-      padding: 8px 34px 3px 10px;
+      /* v2 单行布局：左右无 absolute 控件挤位，padding 收回正常值 */
+      padding: 6px 8px;
       outline: none;
       resize: none;
-      min-height: 32px;
+      min-height: 28px;
       max-height: var(--input-max-height);
       width: 100%;
+      display: block;
       overflow-y: hidden;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
@@ -7758,7 +7822,7 @@
         0 0 0 2px rgba(197, 101, 61, 0.10),
         0 0 18px rgba(197, 101, 61, 0.14);
     }
-    .input-composer.is-optimizing .input-textarea-wrap::before {
+    .input-composer.is-optimizing .composer-input-wrap::before {
       content: "";
       position: absolute;
       inset: 0;
@@ -7797,12 +7861,233 @@
       .prompt-optimize-btn {
         width: 26px;
         height: 26px;
-        top: 3px;
-        right: 4px;
       }
       .prompt-optimize-icon {
         width: 14px;
         height: 14px;
+      }
+    }
+
+    /* ─────────────────────────────────────────────────────────────────────
+       v2 输入区扩展样式：通用动作圆按钮 / Ghost meta / 语音模式
+       ───────────────────────────────────────────────────────────────────── */
+    /* 左侧动作圆按钮（+ / 🎤 / ⌨）—— 视觉与 btn-circle-attach 等价，
+       但单独命名以便后续区分。 */
+    .btn-circle-action {
+      background: transparent;
+      color: var(--text-muted);
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      border-radius: 50%;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      flex-shrink: 0;
+      padding: 0;
+    }
+    .btn-circle-action:hover {
+      background: rgba(197, 101, 61, 0.10);
+      color: var(--accent);
+      transform: scale(1.08);
+    }
+    .btn-circle-action:active {
+      transform: scale(0.94);
+    }
+    .btn-circle-action.active {
+      background: var(--accent-muted, rgba(197, 101, 61, 0.14));
+      color: var(--accent);
+    }
+    .btn-circle-action.active:hover {
+      background: rgba(197, 101, 61, 0.22);
+    }
+
+    /* Ghost meta —— textarea 空时浮在输入位上，显示 "default · sonnet · standard"。
+       pointer-events: none 保证点击穿透到 textarea，但内部 .composer-text-pill 重置
+       为 auto，能正常承接 select 点击。 */
+    .composer-ghost-meta {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 6px;
+      padding: 0 8px;
+      pointer-events: none;
+      font-family: var(--font-sans);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      z-index: 1;
+      transition: opacity 0.18s ease-out;
+    }
+    .composer-ghost-meta .composer-text-pill {
+      pointer-events: auto;
+      font-size: 0.78rem;
+      max-width: 140px;
+      padding: 4px 2px;
+    }
+    .composer-ghost-meta .composer-text-sep {
+      font-size: 0.78rem;
+    }
+    /* 有内容 → 鬼影消失，textarea 文字接管 */
+    .input-composer.has-text .composer-ghost-meta {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .input-composer.has-text .composer-ghost-meta .composer-text-pill {
+      pointer-events: none;
+    }
+    /* 终端交互模式：ghost meta 与会话设置无关，整体隐藏避免误导 */
+    .input-composer.is-terminal-mode .composer-ghost-meta {
+      display: none;
+    }
+
+    /* 提示词优化按钮 —— v2 改为 has-text 时显示，定位浮在右侧（textarea 与 send 之间）。
+       覆盖上面的 top/right absolute；现在改成相对于 .composer-input-wrap 定位。 */
+    .prompt-optimize-btn {
+      display: none;
+      position: absolute;
+      top: 50%;
+      right: 4px;
+      transform: translateY(-50%);
+      width: 26px;
+      height: 26px;
+    }
+    .input-composer.has-text .prompt-optimize-btn {
+      display: inline-flex;
+    }
+    .input-composer.has-text .prompt-optimize-btn:hover {
+      transform: translateY(-50%) scale(1.12);
+    }
+    .input-composer.has-text .prompt-optimize-btn:active {
+      transform: translateY(-50%) scale(0.92);
+    }
+    /* has-text 时给 textarea 留出右内边距，避免文字被优化按钮压住 */
+    .input-composer.has-text .input-textarea {
+      padding-right: 36px;
+    }
+
+    /* 语音输入模式 —— 模仿微信"按住说话"。整个 textarea 区域被替换为一颗大胶囊按钮。
+       v1 仅提供 UI scaffolding，MediaRecorder + STT 后续接入。 */
+    .voice-input-mode {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 4px;
+    }
+    .voice-input-mode.hidden {
+      display: none;
+    }
+    .voice-record-btn {
+      flex: 1 1 auto;
+      min-width: 0;
+      height: 30px;
+      border-radius: 999px;
+      border: 1px dashed var(--border-default);
+      background: rgba(246, 241, 232, 0.5);
+      color: var(--text-secondary);
+      font-family: var(--font-sans);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    .voice-record-btn:hover {
+      background: rgba(246, 241, 232, 0.9);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .voice-record-btn:active,
+    .voice-record-btn.is-recording {
+      background: var(--accent-muted, rgba(197, 101, 61, 0.14));
+      color: var(--accent);
+      border-color: var(--accent);
+      border-style: solid;
+    }
+    .voice-record-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.55;
+    }
+    .voice-record-btn.is-recording .voice-record-pulse {
+      opacity: 1;
+      animation: voice-pulse 1.1s ease-in-out infinite;
+    }
+    @keyframes voice-pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.45); opacity: 0.45; }
+    }
+    .voice-cancel-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all var(--transition-fast);
+    }
+    .voice-cancel-btn:hover {
+      background: rgba(178, 79, 69, 0.10);
+      color: var(--danger);
+    }
+
+    /* voice-mode 激活时隐藏 textarea + ghost + optimize；保留左右动作按钮 */
+    .input-composer.voice-mode .input-textarea {
+      visibility: hidden;
+    }
+    .input-composer.voice-mode .composer-ghost-meta {
+      display: none;
+    }
+    .input-composer.voice-mode .prompt-optimize-btn {
+      display: none;
+    }
+    .input-composer.voice-mode .voice-input-mode {
+      display: flex;
+    }
+    /* voice 模式下，语音按钮高亮表示当前状态 */
+    .input-composer.voice-mode #voice-btn {
+      background: var(--accent-muted, rgba(197, 101, 61, 0.18));
+      color: var(--accent);
+    }
+
+    @media (max-width: 720px) {
+      .btn-circle-action {
+        width: 30px;
+        height: 30px;
+        min-width: 30px;
+      }
+      .composer-main-row {
+        padding: 3px 4px;
+        min-height: 42px;
+        gap: 2px;
+      }
+      .composer-ghost-meta {
+        font-size: 0.72rem;
+      }
+      .composer-ghost-meta .composer-text-pill {
+        font-size: 0.72rem;
+        max-width: 96px;
       }
     }
 

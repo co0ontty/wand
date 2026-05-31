@@ -494,7 +494,11 @@
         file:      '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="14 3 14 9 20 9"/>',
         image:     '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><polyline points="3 18 9 12 14 17 21 12"/>',
         sigma:     '<polyline points="18 4 6 4 13 12 6 20 18 20"/>',
-        x:         '<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'
+        x:         '<path d="M18 6 6 18"/><path d="M6 6l12 12"/>',
+        // 「+」：附件入口（替代旧曲别针图标），更直观、与微信/iMessage 习惯一致。
+        plus:      '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+        // 麦克风：语音输入入口。stroke 线性风格与项目其他图标统一。
+        mic:       '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="9" y1="21" x2="15" y2="21"/>'
       };
       // 渲染 SVG 字符串。size 默认 14，strokeWidth 默认 1.8（与现有 send/stop 按钮线宽接近）。
       // cls 用于添加额外 class（如 .composer-pill-icon），便于 CSS 微调。
@@ -1961,7 +1965,19 @@
                     '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
                   '</div>' +
                 '</div>' +
-                '<div class="input-composer">' +
+                // v2 单行布局：
+                //   ┌─────────────────────────────────────────────────────────────────────┐
+                //   │ [+] [🎤] [⌨]  ────textarea（空时浮 mode·model·thinking 鬼影）──── [⏹] [➤] │
+                //   └─────────────────────────────────────────────────────────────────────┘
+                // 关键点：
+                //  · 三件套（mode / model / thinking）从 bar 搬到 textarea 上方的 ghost layer，
+                //    空输入时浮在 placeholder 位上显示；用户开始输入即淡出隐藏。
+                //  · 附件改成 + 图标；新增麦克风按钮，整体输入框可切到「按住说话」语音模式。
+                //  · 提示词优化按钮（✨）改成只在 textarea 有内容时显示，绝对定位浮在右侧。
+                //  · 自动批准 / 权限操作行 / 退出码徽章统一搬到 textarea 上方的状态行，
+                //    输入主行保持极简。
+                '<div class="input-composer' + (currentDraft ? ' has-text' : '') + '">' +
+                  // 提示词优化按钮 —— 有内容时显示，浮层挂在右侧。
                   '<button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="提示词优化（AI）" aria-label="提示词优化">' +
                     '<svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
                       '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/>' +
@@ -1971,20 +1987,40 @@
                     '</svg>' +
                     '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
                   '</button>' +
-                  '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
-                  '<div id="attachment-preview" class="attachment-preview hidden"></div>' +
-                  '<div class="input-composer-bar">' +
-                    '<div class="input-composer-left">' +
-                      '<button id="attach-btn" class="btn-circle btn-circle-attach" type="button" title="附加文件">' +
-                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>' +
+                  // 顶部状态行：自动批准 / 权限审批 / 统计 —— 仅在有内容时占位，
+                  // 否则折叠成 0 高度。避免与下方"主输入行"挤在一行。
+                  '<div class="composer-status-row" id="composer-status-row">' +
+                    renderAutoApproveChip(selectedSession) +
+                    '<span class="permission-actions hidden" id="permission-actions">' +
+                      '<span class="permission-actions-label" id="permission-actions-label">等待授权</span>' +
+                      '<button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">批准</button>' +
+                      '<button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">拒绝</button>' +
+                    '</span>' +
+                    renderApprovalStatsBadge() +
+                  '</div>' +
+                  // 主输入行（单行）：左动作 / 输入区 / 右动作
+                  '<div class="composer-main-row">' +
+                    '<div class="composer-actions-left">' +
+                      // 附件按钮（+）
+                      '<button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="附加文件" aria-label="附加文件">' +
+                        iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
                       '</button>' +
-                      // tabindex="-1": 把这些控件移出 iOS Safari 的表单导航链，
-                      // 这样 textarea 聚焦时键盘上方就不会出现 ⌃ ⌄ ✓ 表单辅助栏。
+                      // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
                       '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
-                      // 三件套 (Mode / Model / Thinking) 同属"会话设置"层：扁平文字 + · 分隔。
-                      // 文字下叠一个透明 <select> 承载交互，桌面端弹原生下拉、移动端弹滚轮选择。
-                      // 显示文本用 raw id（如 default / claude-sonnet-4-5 / standard），不做翻译。
-                      '<span class="composer-text-group" role="group" aria-label="会话设置">' +
+                      // 语音按钮（🎤）
+                      '<button id="voice-btn" class="btn-circle btn-circle-action" type="button" title="语音输入" aria-label="语音输入">' +
+                        iconSvg("mic", { size: 16, strokeWidth: 1.9 }) +
+                      '</button>' +
+                      // 终端交互切换（⌨）
+                      '<button id="terminal-interactive-toggle-top" class="btn-circle btn-circle-action' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式" aria-label="切换终端交互模式">' +
+                        iconSvg("keyboard", { size: 16, strokeWidth: 1.8 }) +
+                      '</button>' +
+                    '</div>' +
+                    '<div class="composer-input-wrap">' +
+                      '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
+                      // Ghost meta —— textarea 空时浮在上面显示 "mode · model · thinking"；
+                      // pointer-events: none 不挡 textarea 聚焦，唯独 .composer-text-pill 内的透明 select 接收点击。
+                      '<div class="composer-ghost-meta" id="composer-ghost-meta" aria-hidden="' + (currentDraft ? "true" : "false") + '">' +
                         '<span class="composer-text-pill" title="模式">' +
                           '<span class="composer-text-label" id="chat-mode-label">' + escapeHtml(composerMode) + '</span>' +
                           '<select id="chat-mode-select" class="composer-text-hidden-select" tabindex="-1" aria-label="模式">' +
@@ -2005,30 +2041,29 @@
                             renderChatThinkingOptionsRaw(getEffectiveThinking(selectedSession)) +
                           '</select>' +
                         '</span>' +
-                      '</span>' +
-                      renderAutoApproveChip(selectedSession) +
-                      '<button id="terminal-interactive-toggle-top" class="composer-pill composer-pill-chip composer-interactive-toggle' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式" aria-label="切换终端交互模式">' + iconSvg("keyboard", { size: 13, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '</button>' +
-                      '<span class="permission-actions hidden" id="permission-actions">' +
-                        '<span class="permission-actions-divider"></span>' +
-                        '<span class="permission-actions-label" id="permission-actions-label">等待授权</span>' +
-                        '<button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">批准</button>' +
-                        '<button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">拒绝</button>' +
-                      '</span>' +
-                      renderApprovalStatsBadge() +
+                      '</div>' +
+                      // 语音模式 UI（v1 仅 UI scaffolding；MediaRecorder 接入留待后续）
+                      '<div class="voice-input-mode hidden" id="voice-input-mode">' +
+                        '<button id="voice-record-btn" class="voice-record-btn" type="button">' +
+                          '<span class="voice-record-pulse" aria-hidden="true"></span>' +
+                          '<span class="voice-record-label">按住 说话</span>' +
+                        '</button>' +
+                        '<button id="voice-cancel-btn" class="voice-cancel-btn" type="button" title="退出语音模式" aria-label="退出语音模式">' +
+                          iconSvg("x", { size: 14, strokeWidth: 2 }) +
+                        '</button>' +
+                      '</div>' +
                     '</div>' +
-                    '<div class="input-composer-right">' +
-                      // 排队提示从这里搬到 .queue-bar（输入框上方独立浮条），原 #queue-counter 已移除。
-                      '<span class="input-hint' + (state.terminalInteractive ? ' terminal-interactive-hint' : state.currentView === "terminal" ? " hidden" : "") + '">' + (state.terminalInteractive ? '终端交互中 · Ctrl+C 中断 · Ctrl+L 清屏' : 'Enter 发送 · Shift+Enter 换行') + '</span>' +
+                    '<div class="composer-actions-right">' +
                       '<button id="stop-button" class="btn-circle btn-circle-stop' + (state.selectedId ? "" : " hidden") + '" title="停止">' +
                         '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
                       '</button>' +
-                      // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队
-                      // 请点输入框上方那条气泡（chip）。Cmd/Ctrl+Enter 快捷键仍保留。
+                      // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队点输入框上方那条气泡。
                       '<button id="send-input-button" class="btn-circle btn-circle-send" title="发送">' +
                         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
                       '</button>' +
                     '</div>' +
                   '</div>' +
+                  '<div id="attachment-preview" class="attachment-preview hidden"></div>' +
                   // Session info bar at bottom — 仅保留信息类徽章（历史会话 id / exit code）。
                   // 自动批准已从这里移到主 pill 行（renderAutoApproveChip）。
                   (selectedSession
@@ -6653,6 +6688,8 @@
             }
             refreshInputBoxState(inputBox);
             setDraftValue(inputBox.value, true);
+            // v2: 触发 ghost meta / 优化按钮的显隐切换
+            syncComposerHasText(inputBox);
           });
           // INPUT-3: 交互模式 IME 组字承接。compositionstart 起置位标志让 input
           // handler 静默；compositionend 取最终组字结果发 PTY 并清空。非交互模式不
@@ -6687,6 +6724,41 @@
             }
             fileInput.value = "";
           });
+        }
+
+        // v2: 语音输入按钮 —— 点击切换语音模式。整组语音 UI（按住说话 + 退出按钮）
+        // 都在 .voice-input-mode 容器里，CSS 由 .input-composer.voice-mode 控制显隐。
+        var voiceBtn = document.getElementById("voice-btn");
+        if (voiceBtn) {
+          voiceBtn.addEventListener("click", function() { toggleVoiceMode(); });
+        }
+        var voiceCancelBtn = document.getElementById("voice-cancel-btn");
+        if (voiceCancelBtn) {
+          voiceCancelBtn.addEventListener("click", function() { toggleVoiceMode(false); });
+        }
+        // 按住说话按钮 —— v1 仅交互反馈（高亮 + 脉冲），MediaRecorder + STT 后续接入。
+        var voiceRecordBtn = document.getElementById("voice-record-btn");
+        if (voiceRecordBtn) {
+          var startHold = function(e) {
+            e.preventDefault();
+            voiceRecordBtn.classList.add("is-recording");
+            var label = voiceRecordBtn.querySelector(".voice-record-label");
+            if (label) label.textContent = "松开 发送";
+          };
+          var endHold = function() {
+            if (!voiceRecordBtn.classList.contains("is-recording")) return;
+            voiceRecordBtn.classList.remove("is-recording");
+            var label = voiceRecordBtn.querySelector(".voice-record-label");
+            if (label) label.textContent = "按住 说话";
+            // v1 占位提示，未真正录音
+            showToast && showToast("语音输入功能开发中…", "info");
+          };
+          voiceRecordBtn.addEventListener("mousedown", startHold);
+          voiceRecordBtn.addEventListener("mouseup", endHold);
+          voiceRecordBtn.addEventListener("mouseleave", endHold);
+          voiceRecordBtn.addEventListener("touchstart", startHold, { passive: false });
+          voiceRecordBtn.addEventListener("touchend", endHold);
+          voiceRecordBtn.addEventListener("touchcancel", endHold);
         }
 
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
@@ -12467,6 +12539,36 @@
         tick();
       }
 
+      // v2: 同步 .input-composer 上的 .has-text 类 —— 决定 ghost meta 是否显示、
+      // 提示词优化按钮是否浮出。该函数应在每次 textarea 值变化后调用：
+      //   · input 事件（用户键入）
+      //   · 程序化设值（草稿恢复 / 优化后替换 / 发送后清空）
+      function syncComposerHasText(el) {
+        var composer = document.querySelector(".input-composer");
+        if (!composer) return;
+        var inputBox = el || document.getElementById("input-box");
+        var hasText = !!(inputBox && inputBox.value && inputBox.value.length > 0);
+        composer.classList.toggle("has-text", hasText);
+        // ghost meta 的 aria-hidden 同步，避免屏幕阅读器朗读已隐藏的浮层
+        var ghost = document.getElementById("composer-ghost-meta");
+        if (ghost) ghost.setAttribute("aria-hidden", hasText ? "true" : "false");
+      }
+
+      // v2: 切换语音输入模式（类似微信"按住说话"）
+      function toggleVoiceMode(force) {
+        var composer = document.querySelector(".input-composer");
+        if (!composer) return;
+        var willEnable = typeof force === "boolean" ? force : !composer.classList.contains("voice-mode");
+        composer.classList.toggle("voice-mode", willEnable);
+        if (!willEnable) {
+          // 退出语音模式时，把焦点交还 textarea，方便继续打字
+          var inputBox = document.getElementById("input-box");
+          if (inputBox && !state.terminalInteractive) {
+            try { inputBox.focus({ preventScroll: true }); } catch (_) {}
+          }
+        }
+      }
+
       function autoResizeInput(el) {
         if (!el) return;
         var minHeight = 36;
@@ -12478,6 +12580,7 @@
           el.style.minHeight = minHeight + "px";
           el.style.overflowY = touchDevice ? "auto" : "hidden";
           el.scrollTop = 0;
+          syncComposerHasText(el);
           return;
         }
         // Measure content height by temporarily setting height to minHeight
@@ -12496,6 +12599,7 @@
         } else {
           el.scrollTop = 0;
         }
+        syncComposerHasText(el);
       }
 
       function isSelectedSessionRunning() {
@@ -12826,6 +12930,7 @@
         if (value && hasAnyBusySession()) {
           if (inputBox) inputBox.value = "";
           if (welcomeInput) welcomeInput.value = "";
+          syncComposerHasText(inputBox);
           enqueueCrossSessionMessage(value);
           showToast("已排队，将在当前会话完成后自动发送。", "info");
           return;
@@ -14228,6 +14333,14 @@
           // 落入 textarea，由 compositionend 取最终文本发 PTY 后清空。
           composer.readOnly = false;
           composer.classList.toggle("is-terminal-passthrough", !!state.terminalInteractive);
+        }
+        // v2: 同步 .input-composer 上的 is-terminal-mode 类 —— 控制 ghost meta 隐藏，
+        // 因为终端交互模式下三件套（mode/model/thinking）与按键透传无关，露出来会误导。
+        var composerEl = document.querySelector(".input-composer");
+        if (composerEl) {
+          composerEl.classList.toggle("is-terminal-mode", !!state.terminalInteractive);
+          // 终端交互模式时退出语音模式（语义冲突）
+          if (state.terminalInteractive) composerEl.classList.remove("voice-mode");
         }
         var sendBtn = document.getElementById("send-input-button");
         var structuredInFlight = structured && isRunning;
