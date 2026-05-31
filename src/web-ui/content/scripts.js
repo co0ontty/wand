@@ -2371,14 +2371,6 @@
           submitPushOnly({ pushCommits: true, pushTags: !!result.tagName, closeOnSuccess: true });
         });
 
-        Array.prototype.forEach.call(document.querySelectorAll(".qc-mobile-action-btn"), function(btn) {
-          btn.addEventListener("click", function(e) {
-            e.preventDefault();
-            var action = btn.getAttribute("data-qc-action") || "commit";
-            submitQuickCommit(action);
-          });
-        });
-
         attachQuickCommitDrag();
       }
 
@@ -2424,9 +2416,24 @@
         function cw(id) { return chips[id] ? chips[id].offsetWidth : 90; }
         function chH()  { return chips.commit ? chips.commit.offsetHeight : 38; }
 
-        // Resting (home) positions — the three chips in one centered row.
+        function isCompactDock() {
+          return window.matchMedia && window.matchMedia("(max-width: 720px)").matches;
+        }
+
+        // Resting (home) positions. Wide screens use one centered row; narrow screens
+        // use a triangle so the magnetic field keeps the same interaction without crowding.
         function homePositions() {
           var fw = field.clientWidth, fh = field.clientHeight, H = chH();
+          if (isCompactDock()) {
+            var commitW = cw("commit"), tagW = cw("tag"), pushW = cw("push");
+            var topY = Math.max(8, fh * 0.18 - H / 2);
+            var bottomY = Math.min(fh - H - 8, fh * 0.72 - H / 2);
+            return {
+              commit: { x: Math.max(8, (fw - commitW) / 2), y: topY },
+              tag: { x: Math.max(8, fw * 0.24 - tagW / 2), y: bottomY },
+              push: { x: Math.min(fw - pushW - 8, fw * 0.76 - pushW / 2), y: bottomY }
+            };
+          }
           var gap = 14;
           var total = ORDER.reduce(function(s, id) { return s + cw(id); }, 0) + (ORDER.length - 1) * gap;
           var x = Math.max(8, (fw - total) / 2);
@@ -2844,20 +2851,10 @@
             '<span class="qc-chip-label">' + label + '</span>' +
           '</button>';
         }
-        function mobileAction(action, label, note, cls) {
-          return '<button type="button" class="qc-mobile-action-btn' + (cls ? ' ' + cls : '') + '"' +
-            ' data-qc-action="' + action + '"' + (disabled ? ' disabled' : '') + '>' +
-            '<span class="qc-mobile-action-label">' + escapeHtml(label) + '</span>' +
-            '<span class="qc-mobile-action-note">' + escapeHtml(note) + '</span>' +
-          '</button>';
-        }
         var hint = disabled
           ? (!hasChanges ? "工作区干净，无可提交" : "")
-          : "拖一个去碰另一个会黏在一起 · 整串丢进 ▶ 执行组合 · 单击直接执行该项";
-        var mobileHint = disabled
-          ? (!hasChanges ? "工作区干净，无可提交" : "")
-          : "空 message 或空 tag 会自动用 AI 生成";
-        return '<div class="qc-dock-wrap qc-dock-wrap--desktop"' + (disabled ? ' data-disabled="1"' : '') + '>' +
+          : "拖动磁吸组合 · 丢进提交区执行 · 单击直接执行该项";
+        return '<div class="qc-dock-wrap qc-dock-wrap--magnetic"' + (disabled ? ' data-disabled="1"' : '') + '>' +
           '<div id="qc-dock-stage" class="qc-dock-stage" data-action="commit" data-hot="0">' +
             '<div id="qc-dock-field" class="qc-dock-field">' +
               '<div id="qc-dock-cluster" class="qc-dock-cluster" aria-hidden="true"></div>' +
@@ -2873,15 +2870,6 @@
             '</button>' +
           '</div>' +
           '<div class="qc-dock-hint">' + escapeHtml(hint) + '</div>' +
-        '</div>' +
-        '<div class="qc-mobile-actions"' + (disabled ? ' data-disabled="1"' : '') + '>' +
-          '<div class="qc-mobile-action-grid">' +
-            mobileAction("commit", "仅提交", "Commit", "qc-mobile-action-primary") +
-            mobileAction("commit-tag", "提交 + Tag", "发布版本", "") +
-            mobileAction("commit-push", "提交 + Push", "同步分支", "") +
-            mobileAction("commit-tag-push", "提交 + Tag + Push", "完整发布", "qc-mobile-action-wide") +
-          '</div>' +
-          '<div class="qc-mobile-action-hint">' + escapeHtml(mobileHint) + '</div>' +
         '</div>';
       }
 
