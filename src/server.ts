@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { compareSemver, extractSemver } from "./version-utils.js";
 import compression from "compression";
 import express, { NextFunction, Request, Response } from "express";
 import { createReadStream, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -109,48 +110,6 @@ async function checkNpmLatestVersion(forceRefresh = false): Promise<{ current: s
     latest,
     updateAvailable: latest !== PKG_VERSION && compareSemver(latest, PKG_VERSION) > 0,
   };
-}
-
-function compareSemver(a: string, b: string): number {
-  const parse = (v: string) => {
-    const [main, ...rest] = v.split("-");
-    const pre = rest.join("-");
-    const mainParts = main.split(".").map((n) => Number(n) || 0);
-    return { mainParts, pre };
-  };
-  const pa = parse(a);
-  const pb = parse(b);
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa.mainParts[i] || 0) - (pb.mainParts[i] || 0);
-    if (diff !== 0) return diff;
-  }
-  // Main version equal — apply semver prerelease rule: no prerelease > with prerelease.
-  if (!pa.pre && pb.pre) return 1;
-  if (pa.pre && !pb.pre) return -1;
-  if (!pa.pre && !pb.pre) return 0;
-  // Both have prerelease: 按 . 分段比较 (数字段数值比, 非数字段字典序), 贴近标准 semver,
-  // 避免跨月/跨年的 debug.MMDDHHMM 后缀因纯字典序而排反。
-  const segA = pa.pre.split(".");
-  const segB = pb.pre.split(".");
-  const segLen = Math.max(segA.length, segB.length);
-  for (let i = 0; i < segLen; i++) {
-    const sa = segA[i];
-    const sb = segB[i];
-    if (sa === undefined) return -1; // 段少者更小
-    if (sb === undefined) return 1;
-    const na = Number(sa);
-    const nb = Number(sb);
-    const aIsNum = sa !== "" && !Number.isNaN(na);
-    const bIsNum = sb !== "" && !Number.isNaN(nb);
-    if (aIsNum && bIsNum) {
-      if (na !== nb) return na < nb ? -1 : 1;
-    } else if (aIsNum !== bIsNum) {
-      return aIsNum ? -1 : 1; // 数字段 < 非数字段
-    } else if (sa !== sb) {
-      return sa < sb ? -1 : 1;
-    }
-  }
-  return 0;
 }
 
 // ── Build info (构建时打入的 commit SHA) + Beta 通道 ──
@@ -704,11 +663,6 @@ interface MacosDmgAsset {
 }
 
 /** Match a semver-looking token in a file name (with optional pre-release / build metadata). */
-function extractSemverFromName(name: string): string | null {
-  const match = name.match(/(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)/);
-  return match ? match[1] : null;
-}
-
 function resolveAndroidApkDir(configDir: string, config: WandConfig): string {
   const configuredDir = config.android?.apkDir?.trim();
   if (!configuredDir) {
@@ -718,7 +672,7 @@ function resolveAndroidApkDir(configDir: string, config: WandConfig): string {
 }
 
 function extractAndroidApkVersion(fileName: string): string | null {
-  return extractSemverFromName(fileName.replace(/\.apk$/i, ""));
+  return extractSemver(fileName.replace(/\.apk$/i, ""));
 }
 
 async function resolveAndroidApkAsset(configDir: string, config: WandConfig): Promise<AndroidApkAsset | null> {
@@ -795,7 +749,7 @@ function resolveMacosDmgDir(configDir: string, config: WandConfig): string {
 }
 
 function extractMacosDmgVersion(fileName: string): string | null {
-  return extractSemverFromName(fileName.replace(/\.dmg$/i, ""));
+  return extractSemver(fileName.replace(/\.dmg$/i, ""));
 }
 
 async function resolveMacosDmgAsset(configDir: string, config: WandConfig): Promise<MacosDmgAsset | null> {

@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
+import { compareSemver } from "./version-utils.js";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -150,22 +151,11 @@ function listLatestVersions(base: string, limit: number): string[] {
     const entries = readdirSync(base);
     return entries
       .filter((e) => /^v?\d+\.\d+\.\d+/.test(e))
-      .sort((a, b) => semverCompare(b, a))
+      .sort((a, b) => compareSemver(b, a))
       .slice(0, limit);
   } catch {
     return [];
   }
-}
-
-function semverCompare(a: string, b: string): number {
-  const pa = a.replace(/^v/, "").split(/[.\-+]/).map((x) => Number(x) || 0);
-  const pb = b.replace(/^v/, "").split(/[.\-+]/).map((x) => Number(x) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const da = pa[i] ?? 0;
-    const db = pb[i] ?? 0;
-    if (da !== db) return da - db;
-  }
-  return 0;
 }
 
 /**

@@ -6,6 +6,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
+import { compareSemver } from "../version-utils.js";
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -748,15 +749,4 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** 简易语义化版本比较；返回正数 = a > b。 */
-function compareSemver(a: string, b: string): number {
-  const pa = a.replace(/^v/, "").split(/[.\-+]/).map((s) => Number.parseInt(s, 10));
-  const pb = b.replace(/^v/, "").split(/[.\-+]/).map((s) => Number.parseInt(s, 10));
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const x = Number.isFinite(pa[i]) ? pa[i] : 0;
-    const y = Number.isFinite(pb[i]) ? pb[i] : 0;
-    if (x !== y) return x - y;
-  }
-  return 0;
-}
+// compareSemver 已统一到 ../version-utils.ts

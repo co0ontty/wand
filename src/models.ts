@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { ClaudeModelInfo } from "./types.js";
+import { extractSemver } from "./version-utils.js";
 
 const execAsync = promisify(exec);
 
@@ -35,8 +36,7 @@ function cloneClaudeModels(): ClaudeModelInfo[] {
 async function probeClaudeVersion(): Promise<string | null> {
   try {
     const { stdout } = await execAsync("claude --version", { timeout: 5000 });
-    const match = stdout.match(/\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?/);
-    return match ? match[0] : stdout.trim().slice(0, 64) || null;
+    return extractSemver(stdout) ?? (stdout.trim().slice(0, 64) || null);
   } catch {
     return null;
   }
