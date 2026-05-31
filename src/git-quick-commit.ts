@@ -274,6 +274,8 @@ export function getGitStatus(cwd: string): GitStatusResult {
     behind,
     lastCommit,
     latestTag,
+    // 基于全量 allEntries 判定（不受 files 的 200 条 slice 影响），供前端决定是否渲染 Submodule 球。
+    hasSubmodule: allEntries.some((e) => e.isSubmodule),
   };
 }
 
@@ -286,6 +288,11 @@ interface QuickCommitOptions {
   /** When `tag` is empty, ask Claude to generate one based on the diff + commit message. */
   autoTag?: boolean;
   push?: boolean;
+  /**
+   * 是否把 commit / tag / push 递归进入各 submodule 内部。默认 false：
+   * 只处理父仓库自身（含已变化的 submodule 指针），不碰 submodule 内部 dirty。
+   */
+  submodule?: boolean;
 }
 
 export class QuickCommitError extends Error {
@@ -518,6 +525,13 @@ interface DoPushOptions {
    *   - string[]: push only these specific tag names (`git push <remote> refs/tags/<name>` per ref)
    */
   pushTags?: boolean | string[];
+  /**
+   * 父仓库 push 时对 submodule 的递归策略（默认 `"check"`）：
+   *   - `"check"`：父仓库提交的 submodule 指针若指向尚未上远端的 commit 就报错提示，
+   *     而不是像旧的 `on-demand` 那样在 submodule detached HEAD 下直接 `fatal` 崩溃。
+   *   - `"no"`：完全不递归（submodule 已由 `pushSubmodules` 单独推送过）。
+   */
+  recurseSubmodules?: "no" | "check";
 }
 
 /**
@@ -526,6 +540,7 @@ interface DoPushOptions {
  */
 function doPush(opts: DoPushOptions): PushOutcome {
   const { cwd, pushCommits, pushTags } = opts;
+  const recurseFlag = `--recurse-submodules=${opts.recurseSubmodules ?? "check"}`;
   let pushedCommits = false;
   let pushedTags = false;
   let hasUpstream = false;
@@ -540,9 +555,9 @@ function doPush(opts: DoPushOptions): PushOutcome {
   try {
     if (pushCommits) {
       if (hasUpstream) {
-        runGit(["push", "--recurse-submodules=on-demand"], cwd, GIT_PUSH_TIMEOUT_MS);
+        runGit(["push", recurseFlag], cwd, GIT_PUSH_TIMEOUT_MS);
       } else {
-        runGit(["push", "-u", "--recurse-submodules=on-demand", pushRemote, "HEAD"], cwd, GIT_PUSH_TIMEOUT_MS);
+        runGit(["push", "-u", recurseFlag, pushRemote, "HEAD"], cwd, GIT_PUSH_TIMEOUT_MS);
       }
       pushedCommits = true;
     }
@@ -633,22 +648,78 @@ interface PushOptions {
   cwd: string;
   pushCommits?: boolean;
   pushTags?: boolean;
+  /** 是否同时把各 submodule 的 HEAD（+ 同名 tag）分别推送到各自远端分支。 */
+  submodule?: boolean;
+  /** `submodule` + `pushTags` 时，要连带推送到 submodule 的同名 tag。 */
+  tagName?: string;
 }
 
 export async function runPush(opts: PushOptions): Promise<PushResult> {
-  const { cwd, pushCommits = true, pushTags = false } = opts;
+  const { cwd, pushCommits = true, pushTags = false, submodule = false, tagName } = opts;
   assertGitWorkTree(cwd);
   if (!pushCommits && !pushTags) {
     throw new QuickCommitError("没有要推送的内容。", "NOTHING_TO_PUSH");
   }
 
-  const outcome = doPush({ cwd, pushCommits, pushTags });
+  // 纳入 submodule：逐个把声明的 submodule 的 HEAD 推到各自远端分支（已是最新则 git 自身 no-op）。
+  // 这覆盖「先 commit（含 submodule）后补 Push & Close」的场景——此时 submodule 已 clean、
+  // status 看不到，但本地可能仍领先远端。父仓库随后用 recurse=no 推送。
+  let subPushErrors: string[] = [];
+  if (submodule) {
+    const { base, infos } = collectSubmodulesForPush(cwd);
+    if (infos.length > 0) {
+      const subPush = pushSubmodules(base, infos, { pushTags: !!(pushTags && tagName), tagName });
+      subPushErrors = subPush.errors;
+    }
+  }
+
+  const outcome = doPush({ cwd, pushCommits, pushTags, recurseSubmodules: submodule ? "no" : "check" });
   return {
-    ok: !outcome.error,
+    ok: !outcome.error && subPushErrors.length === 0,
     pushedCommits: outcome.pushedCommits,
     pushedTags: outcome.pushedTags,
-    error: outcome.error,
+    error: outcome.error || (subPushErrors.length ? subPushErrors.join("；") : undefined),
   };
+}
+
+/**
+ * 一个被提交的 submodule 的记录，携带「分别推送」需要的远端 + 目标分支信息。
+ * `path` 相对其父仓库（base）目录。
+ */
+interface SubmoduleCommitInfo {
+  path: string;
+  hash: string;
+  remote: string;
+  branch: string;
+}
+
+/**
+ * 解析一个 submodule 当前 HEAD 应推到哪个远端分支。submodule 经 `git submodule update`
+ * 后通常处于 detached HEAD，不能直接 `git push`，必须显式 `HEAD:<branch>`，否则父仓库
+ * `--recurse-submodules=on-demand` 会以「HEAD does not match the named branch」整体失败。
+ * 优先取远端默认分支（`<remote>/HEAD` 指向）→ 当前命名分支 → 回退 main/master。
+ */
+function resolveSubmodulePushBranch(subCwd: string, remote: string): string {
+  const prefix = `${remote}/`;
+  try {
+    const ref = runGit(["symbolic-ref", "--short", `refs/remotes/${remote}/HEAD`], subCwd);
+    const name = (ref.startsWith(prefix) ? ref.slice(prefix.length) : ref).trim();
+    if (name) return name;
+  } catch {
+    // ignore — fall through
+  }
+  try {
+    const cur = runGit(["branch", "--show-current"], subCwd);
+    if (cur) return cur;
+  } catch {
+    // ignore
+  }
+  try {
+    runGit(["rev-parse", "--verify", `refs/remotes/${remote}/main`], subCwd);
+    return "main";
+  } catch {
+    return "master";
+  }
 }
 
 /**
@@ -660,8 +731,8 @@ export async function runPush(opts: PushOptions): Promise<PushResult> {
  * 任一 submodule 提交失败都会被收集为非致命错误，不阻塞父仓库继续 commit；
  * 调用方可以在结果里读到具体哪几个 submodule 失败。
  */
-function commitDirtySubmodules(parentCwd: string, message: string): { commits: { path: string; hash: string }[]; errors: string[] } {
-  const commits: { path: string; hash: string }[] = [];
+function commitDirtySubmodules(parentCwd: string, message: string): { commits: SubmoduleCommitInfo[]; errors: string[] } {
+  const commits: SubmoduleCommitInfo[] = [];
   const errors: string[] = [];
 
   let porcelain: string;
@@ -706,13 +777,108 @@ function commitDirtySubmodules(parentCwd: string, message: string): { commits: {
     }
     let hash = "";
     try { hash = runGit(["rev-parse", "--short", "HEAD"], subCwd); } catch { /* ignore */ }
-    commits.push({ path: entry.path, hash });
+    const remote = resolvePushRemote(subCwd);
+    const branch = resolveSubmodulePushBranch(subCwd, remote);
+    commits.push({ path: entry.path, hash, remote, branch });
   }
   return { commits, errors };
 }
 
+/** 对刚提交的 submodule 打上与父仓库同名的 tag。已存在同名 tag 则记为非致命跳过。 */
+function tagSubmodules(parentCwd: string, subInfos: SubmoduleCommitInfo[], tagName: string): { tagged: string[]; errors: string[] } {
+  const tagged: string[] = [];
+  const errors: string[] = [];
+  for (const info of subInfos) {
+    const subCwd = `${parentCwd}/${info.path}`;
+    try {
+      runGit(["rev-parse", "--verify", `refs/tags/${tagName}`], subCwd);
+      errors.push(`submodule ${info.path} 已存在 tag ${tagName}，跳过`);
+      continue;
+    } catch {
+      // 不存在 → 继续打 tag
+    }
+    try {
+      runGit(["tag", tagName], subCwd);
+      tagged.push(info.path);
+    } catch (error) {
+      errors.push(`submodule ${info.path} 打 tag 失败：${getGitErrorMessage(error)}`);
+    }
+  }
+  return { tagged, errors };
+}
+
+/**
+ * 对每个 submodule 单独把当前 HEAD 推送到其远端分支（`HEAD:refs/heads/<branch>`），
+ * 解决 detached HEAD 无法直接 push 的问题；`pushTags` 时连带把同名 tag 推上去。
+ * 单个 submodule 失败收集为非致命错误。
+ */
+function pushSubmodules(
+  parentCwd: string,
+  subInfos: SubmoduleCommitInfo[],
+  opts: { pushTags?: boolean; tagName?: string },
+): { pushed: string[]; errors: string[] } {
+  const pushed: string[] = [];
+  const errors: string[] = [];
+  for (const info of subInfos) {
+    const subCwd = `${parentCwd}/${info.path}`;
+    if (!existsSync(subCwd)) {
+      errors.push(`submodule ${info.path} 路径不存在`);
+      continue;
+    }
+    try {
+      runGit(["push", info.remote, `HEAD:refs/heads/${info.branch}`], subCwd, GIT_PUSH_TIMEOUT_MS);
+    } catch (error) {
+      errors.push(`submodule ${info.path} 推送失败：${getGitErrorMessage(error)}`);
+      continue;
+    }
+    if (opts.pushTags && opts.tagName) {
+      try {
+        runGit(["push", info.remote, `refs/tags/${opts.tagName}`], subCwd, GIT_PUSH_TIMEOUT_MS);
+      } catch (error) {
+        errors.push(`submodule ${info.path} 推送 tag 失败：${getGitErrorMessage(error)}`);
+      }
+    }
+    pushed.push(info.path);
+  }
+  return { pushed, errors };
+}
+
+/**
+ * 枚举仓库声明的全部 submodule（读 repo 根的 .gitmodules），为「单独 push」准备
+ * remote + 目标分支。用于结果面板的 Push & Close：此时 submodule 多已 clean，
+ * status 里看不到，但本地 HEAD 可能仍领先远端，需要逐个尝试推送（up-to-date 则 no-op）。
+ */
+function collectSubmodulesForPush(cwd: string): { base: string; infos: SubmoduleCommitInfo[] } {
+  let base: string;
+  try {
+    base = runGit(["rev-parse", "--show-toplevel"], cwd);
+  } catch {
+    base = cwd;
+  }
+  let raw: string;
+  try {
+    raw = runGitAllowEmpty(["config", "-f", `${base}/.gitmodules`, "--get-regexp", "\\.path$"], base);
+  } catch {
+    return { base, infos: [] };
+  }
+  const infos: SubmoduleCommitInfo[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // 行格式：submodule.<name>.path <relpath>
+    const rel = trimmed.split(/\s+/).slice(1).join(" ").trim();
+    if (!rel) continue;
+    const subCwd = `${base}/${rel}`;
+    if (!existsSync(subCwd)) continue;
+    const remote = resolvePushRemote(subCwd);
+    const branch = resolveSubmodulePushBranch(subCwd, remote);
+    infos.push({ path: rel, hash: "", remote, branch });
+  }
+  return { base, infos };
+}
+
 export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCommitResult> {
-  const { cwd, language, autoMessage, customMessage, tag, autoTag, push } = opts;
+  const { cwd, language, autoMessage, customMessage, tag, autoTag, push, submodule } = opts;
 
   assertGitWorkTree(cwd);
 
@@ -740,7 +906,14 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
       (e) => e.isSubmodule && (e.submoduleState?.hasTrackedChanges || e.submoduleState?.hasUntracked),
     );
   } catch { /* keep submoduleHasDirty=false */ }
-  if (!parentHasStaged && !submoduleHasDirty) {
+  // 默认不纳入 submodule：只有显式 opts.submodule 时，submodule 内部 dirty 才计入「有改动」。
+  if (!parentHasStaged && !(submodule && submoduleHasDirty)) {
+    if (submoduleHasDirty && !submodule) {
+      throw new QuickCommitError(
+        "父仓库没有改动；检测到 submodule 内部有改动，拖入 Submodule 球可一起提交。",
+        "NOTHING_TO_COMMIT",
+      );
+    }
     throw new QuickCommitError("没有任何改动可以提交。", "NOTHING_TO_COMMIT");
   }
 
@@ -754,20 +927,23 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     }
   }
 
-  // 先提交 submodule 内部改动；父仓库随后再 add 一次，picks up 新的 submodule 指针。
-  const submoduleOutcome = commitDirtySubmodules(cwd, message);
-  if (submoduleOutcome.commits.length > 0) {
-    try {
-      runGit(["add", "-A"], cwd, 5000);
-    } catch (error) {
-      throw new QuickCommitError(`父仓库 add submodule 指针失败：${getGitErrorMessage(error)}`, "GIT_ADD_FAILED");
+  // 仅当用户显式纳入 submodule 时，才进入各 submodule 内部提交其 dirty 改动；
+  // 父仓库随后再 add 一次，picks up 新的 submodule 指针。
+  let submoduleOutcome: { commits: SubmoduleCommitInfo[]; errors: string[] } = { commits: [], errors: [] };
+  if (submodule) {
+    submoduleOutcome = commitDirtySubmodules(cwd, message);
+    if (submoduleOutcome.commits.length > 0) {
+      try {
+        runGit(["add", "-A"], cwd, 5000);
+      } catch (error) {
+        throw new QuickCommitError(`父仓库 add submodule 指针失败：${getGitErrorMessage(error)}`, "GIT_ADD_FAILED");
+      }
+      // 重新评估父仓库是否有 staged 内容：submodule 指针变了这里应为真。
+      try {
+        stagedFiles = runGitAllowEmpty(["diff", "--cached", "--name-only"], cwd).trim();
+        parentHasStaged = stagedFiles.length > 0;
+      } catch { /* keep stale value */ }
     }
-    // 重新评估父仓库是否有 staged 内容：如果 submodule 是新引入的或指针变了，
-    // 这里应当为真；如果完全没变就走 commit --allow-empty 路径不合适，直接报错。
-    try {
-      stagedFiles = runGitAllowEmpty(["diff", "--cached", "--name-only"], cwd).trim();
-      parentHasStaged = stagedFiles.length > 0;
-    } catch { /* keep stale value */ }
   }
 
   if (!parentHasStaged) {
@@ -807,19 +983,33 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     } catch (error) {
       throw new QuickCommitError(`git tag 失败：${getGitErrorMessage(error)}`, "GIT_TAG_FAILED");
     }
+    // 纳入 submodule 时给刚提交的 submodule 打同名 tag（非致命，失败不阻断父仓库流程）。
+    if (submodule && submoduleOutcome.commits.length > 0) {
+      tagSubmodules(cwd, submoduleOutcome.commits, tagName);
+    }
   }
 
   let pushed = false;
   let pushError: string | undefined;
   if (push) {
+    // 纳入 submodule：先把各 submodule 的 HEAD（+ 同名 tag）分别推到各自远端分支，
+    // 解决 detached HEAD 无法被父仓库 on-demand 递归推送的问题；父仓库随后用
+    // recurse=no 单独推（submodule 已就绪）。否则父仓库用 recurse=check 做安全校验。
+    const includeSub = !!submodule && submoduleOutcome.commits.length > 0;
+    let subPushErrors: string[] = [];
+    if (includeSub) {
+      const subPush = pushSubmodules(cwd, submoduleOutcome.commits, { pushTags: !!tagName, tagName });
+      subPushErrors = subPush.errors;
+    }
     const outcome = doPush({
       cwd,
       pushCommits: true,
       // Push only the freshly-created tag — avoids surprising users by pushing stale local tags.
       pushTags: tagName ? [tagName] : false,
+      recurseSubmodules: includeSub ? "no" : "check",
     });
-    pushed = outcome.pushedCommits && (tagName ? outcome.pushedTags : true);
-    pushError = outcome.error;
+    pushed = outcome.pushedCommits && (tagName ? outcome.pushedTags : true) && subPushErrors.length === 0;
+    pushError = outcome.error || (subPushErrors.length ? subPushErrors.join("；") : undefined);
   }
 
   return {

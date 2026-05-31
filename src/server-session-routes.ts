@@ -466,7 +466,7 @@ export function registerSessionRoutes(
       res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
       return;
     }
-    const body = (req.body ?? {}) as { autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean };
+    const body = (req.body ?? {}) as { autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean; submodule?: boolean };
     try {
       const result = await runQuickCommit({
         cwd: snapshot.cwd,
@@ -476,6 +476,7 @@ export function registerSessionRoutes(
         tag: typeof body.tag === "string" ? body.tag : undefined,
         autoTag: !!body.autoTag,
         push: !!body.push,
+        submodule: !!body.submodule,
       });
       res.json(result);
     } catch (error) {
@@ -550,12 +551,14 @@ export function registerSessionRoutes(
       res.status(400).json({ error: "会话没有工作目录。", errorCode: "NO_CWD" });
       return;
     }
-    const body = (req.body ?? {}) as { pushCommits?: boolean; pushTags?: boolean };
+    const body = (req.body ?? {}) as { pushCommits?: boolean; pushTags?: boolean; submodule?: boolean; tag?: string };
     try {
       const result = await runPush({
         cwd: snapshot.cwd,
         pushCommits: body.pushCommits !== false,
         pushTags: !!body.pushTags,
+        submodule: !!body.submodule,
+        tagName: typeof body.tag === "string" ? body.tag : undefined,
       });
       res.json(result);
     } catch (error) {

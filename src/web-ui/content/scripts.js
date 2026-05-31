@@ -289,6 +289,8 @@
         quickCommitPushError: "",
         quickCommitResult: null,
         quickCommitDragAction: "commit",
+        // 本次提交是否纳入 submodule，仅用于「执行中…」忙碌文案。
+        quickCommitSubmoduleIntent: false,
         // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
         // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
         chatStickToBottom: true,
@@ -2390,10 +2392,12 @@
       var QC_DOCK_PICKUP_R = 58;
 
       // A plain tap on a chip fires its own action directly (tag/push imply a commit too).
-      function qcChipTapAction(id) {
-        if (id === "tag") return "commit-tag";
-        if (id === "push") return "commit-push";
-        return "commit";
+      // 返回 {action, sub}：sub 是正交修饰符——单击 Submodule 球 = 提交父仓库 + 递归 submodule。
+      function qcChipTapIntent(id) {
+        if (id === "tag") return { action: "commit-tag", sub: false };
+        if (id === "push") return { action: "commit-push", sub: false };
+        if (id === "sub") return { action: "commit", sub: true };
+        return { action: "commit", sub: false };
       }
 
       // Magnetic dock: three loose chips (Commit / Tag / Push) rest in a field. Grab ANY chip and
@@ -2408,10 +2412,15 @@
         var cluster = document.getElementById("qc-dock-cluster");
         if (!field || !stage || !launch || !cluster) return;
 
-        var ORDER = ["commit", "tag", "push"];
+        var ACTION_ORDER = ["commit", "tag", "push"];
         var chips = {};
-        ORDER.forEach(function(id) { chips[id] = field.querySelector('[data-chip="' + id + '"]'); });
+        ACTION_ORDER.forEach(function(id) { chips[id] = field.querySelector('[data-chip="' + id + '"]'); });
         if (!chips.commit || !chips.tag || !chips.push) return;
+        // Submodule 球是可选的第 4 个 chip（正交 scope 修饰符），仅在仓库含 submodule 时渲染。
+        chips.sub = field.querySelector('[data-chip="sub"]');
+        var hasSub = !!chips.sub;
+        // 几何 / 渲染 / 事件 / class 清除遍历全集 ALL；磁吸候选与 action 合成只用 ACTION_ORDER。
+        var ALL = hasSub ? ACTION_ORDER.concat(["sub"]) : ACTION_ORDER;
 
         function cw(id) { return chips[id] ? chips[id].offsetWidth : 90; }
         function chH()  { return chips.commit ? chips.commit.offsetHeight : 38; }
@@ -2425,6 +2434,20 @@
         function homePositions() {
           var fw = field.clientWidth, fh = field.clientHeight, H = chH();
           if (isCompactDock()) {
+            if (hasSub) {
+              // 2×2 网格：commit/tag 上行，push/sub 下行；sub 落在右下角（可选附加项的直觉位）。
+              var topY2 = Math.max(8, fh * 0.20 - H / 2);
+              var botY2 = Math.min(fh - H - 8, fh * 0.70 - H / 2);
+              var colL = function(w) { return Math.max(8, fw * 0.27 - w / 2); };
+              var colR = function(w) { return Math.min(fw - w - 8, fw * 0.73 - w / 2); };
+              return {
+                commit: { x: colL(cw("commit")), y: topY2 },
+                tag: { x: colR(cw("tag")), y: topY2 },
+                push: { x: colL(cw("push")), y: botY2 },
+                sub: { x: colR(cw("sub")), y: botY2 }
+              };
+            }
+            // 无 sub：维持原三角布局，完全不变。
             var commitW = cw("commit"), tagW = cw("tag"), pushW = cw("push");
             var topY = Math.max(8, fh * 0.18 - H / 2);
             var bottomY = Math.min(fh - H - 8, fh * 0.72 - H / 2);
@@ -2434,12 +2457,21 @@
               push: { x: Math.min(fw - pushW - 8, fw * 0.76 - pushW / 2), y: bottomY }
             };
           }
+          // 宽屏：三个动作球一排居中（无 sub 时与原行为一致）。
           var gap = 14;
-          var total = ORDER.reduce(function(s, id) { return s + cw(id); }, 0) + (ORDER.length - 1) * gap;
+          var total = ACTION_ORDER.reduce(function(s, id) { return s + cw(id); }, 0) + (ACTION_ORDER.length - 1) * gap;
           var x = Math.max(8, (fw - total) / 2);
           var y = (fh - H) / 2;
           var pos = {};
-          ORDER.forEach(function(id) { pos[id] = { x: x, y: y }; x += cw(id) + gap; });
+          ACTION_ORDER.forEach(function(id) { pos[id] = { x: x, y: y }; x += cw(id) + gap; });
+          if (hasSub) {
+            // sub 单独偏置到右下角，与三动作球视觉分组，强调「可选、默认不参与」。
+            var subW = cw("sub");
+            pos.sub = {
+              x: Math.max(8, fw - subW - 8),
+              y: Math.min(fh - H - 8, y + H + 12)
+            };
+          }
           return pos;
         }
 
@@ -2449,7 +2481,7 @@
         }
         function layoutHome(animated) {
           home = homePositions();
-          ORDER.forEach(function(id) {
+          ALL.forEach(function(id) {
             chips[id].classList.toggle("qc-chip--anim", !!animated);
             placeChip(id, home[id].x, home[id].y);
           });
@@ -2461,7 +2493,7 @@
         // Lay the current cluster members in a tight row centered on (cx, cy) within the field.
         function layoutCluster(members, cx, cy) {
           var H = chH(), gapIn = 5;
-          var ids = ORDER.filter(function(id) { return members.indexOf(id) >= 0; });
+          var ids = ALL.filter(function(id) { return members.indexOf(id) >= 0; });
           var total = ids.reduce(function(s, id) { return s + cw(id); }, 0) + Math.max(0, ids.length - 1) * gapIn;
           var fh = field.clientHeight;
           var x = cx - total / 2;
@@ -2484,6 +2516,10 @@
             push: members.indexOf("push") >= 0,
           });
         }
+        // sub 不进 action 字符串（tone 体系不翻倍），只作为正交布尔随 cluster 传出。
+        function clusterIncludesSub(members) {
+          return members.indexOf("sub") >= 0;
+        }
         function setLaunchLabel(t) {
           var l = document.getElementById("qc-dock-launch-label");
           if (l) l.textContent = t;
@@ -2497,7 +2533,7 @@
           return function(e) {
             if (chips[id].disabled || isQuickCommitOpInFlight()) return;
             drag = { anchor: id, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false, members: [id] };
-            ORDER.forEach(function(m) { chips[m].classList.remove("qc-chip--anim"); });
+            ALL.forEach(function(m) { chips[m].classList.remove("qc-chip--anim"); });
             chips[id].classList.add("is-grabbing");
             try { chips[id].setPointerCapture(e.pointerId); } catch (err) { /* ignored */ }
             stage.classList.add("is-dragging");
@@ -2510,7 +2546,9 @@
           var fr = field.getBoundingClientRect();
           var fx = e.clientX - fr.left, fy = e.clientY - fr.top;
           // magnetic pickup: any loose chip whose home center is near the pointer joins the cluster.
-          ORDER.forEach(function(id) {
+          // 只遍历 ACTION_ORDER → sub 永远不会被「路过吸附」误触（实现「默认不纳入」）；
+          // 但 sub 仍可作为 anchor 被显式抓起，反向吸附动作球。
+          ACTION_ORDER.forEach(function(id) {
             if (drag.members.indexOf(id) >= 0) return;
             var hx = home[id].x + cw(id) / 2, hy = home[id].y + chH() / 2;
             var dx = fx - hx, dy = fy - hy;
@@ -2534,16 +2572,17 @@
           stage.setAttribute("data-hot", "0");
           setLaunchLabel("提交");
           hideCluster();
-          ORDER.forEach(function(m) { chips[m].classList.remove("is-grabbing", "is-attached"); });
+          ALL.forEach(function(m) { chips[m].classList.remove("is-grabbing", "is-attached"); });
           try { chips[cur.anchor].releasePointerCapture(cur.pointerId); } catch (err) { /* ignored */ }
 
           if (!cancelled && !cur.moved) {
             // plain tap → fire this chip's own action
-            submitQuickCommit(qcChipTapAction(cur.anchor));
+            var tap = qcChipTapIntent(cur.anchor);
+            submitQuickCommit(tap.action, tap.sub);
             return;
           }
           if (!cancelled && pointInLaunch(e.clientX, e.clientY)) {
-            submitQuickCommit(clusterAction(cur.members));
+            submitQuickCommit(clusterAction(cur.members), clusterIncludesSub(cur.members));
             return;
           }
           // released loose → everyone springs back home
@@ -2554,7 +2593,7 @@
         var onResize = function() { if (state.quickCommitOpen && !drag) layoutHome(false); };
         window.addEventListener("resize", onResize);
 
-        ORDER.forEach(function(id) {
+        ALL.forEach(function(id) {
           var c = chips[id];
           c.addEventListener("pointerdown", onDown(id));
           c.addEventListener("pointermove", onMove);
@@ -2564,7 +2603,8 @@
             if (c.disabled || isQuickCommitOpInFlight()) return;
             if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
               e.preventDefault();
-              submitQuickCommit(qcChipTapAction(id));
+              var tap = qcChipTapIntent(id);
+              submitQuickCommit(tap.action, tap.sub);
             }
           });
         });
@@ -2627,7 +2667,7 @@
           });
       }
 
-      function submitQuickCommit(action) {
+      function submitQuickCommit(action, includeSubmodule) {
         if (!state.selectedId || state.quickCommitSubmitting) return;
         var msgEl = document.getElementById("quick-commit-message");
         if (msgEl) state.quickCommitForm.customMessage = msgEl.value;
@@ -2656,9 +2696,12 @@
           customMessage: autoMessage ? "" : message,
           tag: userTag,
           autoTag: !!(withTag && !userTag),
-          push: !!meta.push
+          push: !!meta.push,
+          // 正交 scope flag：是否把 commit/tag/push 递归进入各 submodule 内部。
+          submodule: !!includeSubmodule
         };
         state.quickCommitSubmitting = true;
+        state.quickCommitSubmoduleIntent = !!includeSubmodule;
         state.quickCommitAutoGenerating = autoMessage || payload.autoTag;
         state.quickCommitError = "";
         state.quickCommitPushError = "";
@@ -2686,6 +2729,7 @@
             var base = subPrefix + "已提交" + (hash ? " " + hash : "") + (tagName ? "，已打 Tag " + tagName : "");
             state.quickCommitResult = {
               action: meta.action,
+              includeSubmodule: !!includeSubmodule,
               pushed: !!data.pushed,
               pushError: data.pushError || "",
               commitHash: hash,
@@ -2724,6 +2768,9 @@
         var pushTags = !!(opts && opts.pushTags);
         var closeOnSuccess = !!(opts && opts.closeOnSuccess);
         if (!pushCommits && !pushTags) return;
+        // 若本次提交曾纳入 submodule，补推时也递归推送各 submodule（commit + 同名 tag）。
+        var priorResult = state.quickCommitResult || {};
+        var includeSubmodule = !!priorResult.includeSubmodule;
         state.quickCommitPushing = true;
         state.quickCommitPushError = "";
         rerenderQuickCommitModal();
@@ -2731,7 +2778,7 @@
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pushCommits: pushCommits, pushTags: pushTags })
+          body: JSON.stringify({ pushCommits: pushCommits, pushTags: pushTags, submodule: includeSubmodule, tag: priorResult.tagName || "" })
         })
           .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
           .then(function(result) {
@@ -2835,25 +2882,38 @@
         '</div>';
       }
 
+      // 仓库是否含 submodule（后端 git-status 返回 hasSubmodule；旧响应缺该字段时回退扫 files）。
+      function quickCommitHasSubmodule() {
+        var s = state.gitStatus || {};
+        if (s.hasSubmodule === true) return true;
+        var files = s.files || [];
+        for (var i = 0; i < files.length; i++) {
+          if (files[i] && files[i].isSubmodule === true) return true;
+        }
+        return false;
+      }
+
       function renderQuickCommitDragControl(hasChanges) {
         var disabled = !hasChanges || isQuickCommitOpInFlight();
+        var hasSubmodule = quickCommitHasSubmodule();
         // Busy panel — replaces the dock entirely while the request is in flight.
         if (state.quickCommitSubmitting) {
-          var busyLabel = state.quickCommitAutoGenerating ? "AI 生成 + 提交中…" : "执行中…";
+          var subBusy = state.quickCommitSubmoduleIntent ? "（含 submodule）" : "";
+          var busyLabel = (state.quickCommitAutoGenerating ? "AI 生成 + 提交中…" : "执行中…") + subBusy;
           return '<div class="qc-dock-wrap">' +
             '<div class="qc-dock-busy" role="status"><span class="qc-dock-busy-dot"></span>' + escapeHtml(busyLabel) + '</div>' +
           '</div>';
         }
-        function chip(id, label) {
+        function chip(id, label, title) {
           return '<button type="button" class="qc-chip qc-chip--' + id + '"' +
-            ' data-chip="' + id + '"' + (disabled ? ' disabled' : '') + '>' +
+            ' data-chip="' + id + '"' + (title ? ' title="' + escapeHtml(title) + '"' : '') + (disabled ? ' disabled' : '') + '>' +
             '<span class="qc-chip-dot" aria-hidden="true"></span>' +
             '<span class="qc-chip-label">' + label + '</span>' +
           '</button>';
         }
         var hint = disabled
           ? (!hasChanges ? "工作区干净，无可提交" : "")
-          : "拖动磁吸组合 · 丢进提交区执行 · 单击直接执行该项";
+          : ("拖动磁吸组合 · 丢进提交区执行 · 单击直接执行该项" + (hasSubmodule ? " · Sub 球可选，纳入后递归处理 submodule" : ""));
         return '<div class="qc-dock-wrap qc-dock-wrap--magnetic"' + (disabled ? ' data-disabled="1"' : '') + '>' +
           '<div id="qc-dock-stage" class="qc-dock-stage" data-action="commit" data-hot="0">' +
             '<div id="qc-dock-field" class="qc-dock-field">' +
@@ -2861,6 +2921,7 @@
               chip("commit", "Commit") +
               chip("tag", "Tag") +
               chip("push", "Push") +
+              (hasSubmodule ? chip("sub", "Sub", "提交父仓库并递归进入 submodule（commit / tag / 分别推送）") : "") +
             '</div>' +
             '<button type="button" id="qc-dock-launch" class="qc-dock-launch"' + (disabled ? ' disabled' : '') + ' aria-label="执行提交">' +
               '<span class="qc-dock-launch-arrow" aria-hidden="true">' +
@@ -15008,17 +15069,18 @@
       }
 
       function focusInputFromTap() {
-        // 交互式 PTY：点终端让终端获焦，直接把键入透传给底层进程。这是唯一一个
-        // 触摸设备上点击需要唤起虚拟键盘的合法场景——用户主动开了交互模式 = 想打字。
         if (state.terminalInteractive) {
           focusTerminalContainer();
           return;
         }
-        // 非交互模式下，触摸设备点击任何区域都不主动聚焦输入框：自动聚焦会唤起系统
-        // 虚拟键盘，属于预期外行为——点输出区、点聊天区、以及点终端遥控悬浮球派发到
-        // 底层 #output 的合成 click，都不该弹出输入法。手机端要打字直接点输入框本身。
+        // 触摸设备点击任何区域都不主动聚焦输入框：自动聚焦会唤起系统虚拟键盘，属于
+        // 预期外行为——点输出区、点聊天区、以及点终端遥控悬浮球派发到底层 #output 的
+        // 合成 click，都不该弹出输入法。手机端要打字直接点输入框本身。桌面鼠标点击不
+        // 唤起键盘，保留原本的「点输出/聊天区聚焦输入框」便利。
         if (isTouchDevice()) return;
-        // 桌面非交互模式：点击输出/聊天区不再自动聚焦输入框（用户反馈为预期外行为）。
+        var inputBox = document.getElementById('input-box');
+        if (!inputBox || !state.selectedId || document.activeElement === inputBox) return;
+        focusInputWithSelection(inputBox);
       }
 
       function focusTerminalContainer() {

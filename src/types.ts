@@ -215,6 +215,8 @@ export interface GitStatusResult {
   lastCommit?: { hash: string; shortHash: string; subject: string };
   /** Most recent tag reachable from HEAD (`git describe --tags --abbrev=0`), if any. */
   latestTag?: string;
+  /** True 当仓库声明了 submodule（任一改动条目为 submodule）。前端据此决定是否渲染 Submodule 球。 */
+  hasSubmodule?: boolean;
   error?: string;
 }
 

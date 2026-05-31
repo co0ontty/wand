@@ -15267,11 +15267,13 @@
     .qc-chip--commit .qc-chip-dot { background: var(--accent); }
     .qc-chip--tag    .qc-chip-dot { background: #4a6fa5; }
     .qc-chip--push   .qc-chip-dot { background: #4f7a58; }
+    .qc-chip--sub    .qc-chip-dot { background: #3a8a8f; }
 
     /* Each chip carries its own identity tint at rest. */
     .qc-chip--commit { border-color: color-mix(in srgb, var(--accent) 30%, rgba(125, 91, 57, 0.2)); }
     .qc-chip--tag    { border-color: color-mix(in srgb, #4a6fa5 30%, rgba(125, 91, 57, 0.2)); }
     .qc-chip--push   { border-color: color-mix(in srgb, #4f7a58 30%, rgba(125, 91, 57, 0.2)); }
+    .qc-chip--sub    { border-color: color-mix(in srgb, #3a8a8f 30%, rgba(125, 91, 57, 0.2)); }
 
     /* Grabbed or magnetically attached → lifts and lights up in its own color. */
     .qc-chip.is-grabbing, .qc-chip.is-attached {
@@ -15283,6 +15285,7 @@
     .qc-chip--commit.is-grabbing, .qc-chip--commit.is-attached { background: linear-gradient(180deg, #fff, color-mix(in srgb, var(--accent) 16%, #fff)); border-color: color-mix(in srgb, var(--accent) 46%, transparent); }
     .qc-chip--tag.is-grabbing, .qc-chip--tag.is-attached       { background: linear-gradient(180deg, #fff, color-mix(in srgb, #4a6fa5 16%, #fff)); border-color: color-mix(in srgb, #4a6fa5 46%, transparent); }
     .qc-chip--push.is-grabbing, .qc-chip--push.is-attached     { background: linear-gradient(180deg, #fff, color-mix(in srgb, #4f7a58 16%, #fff)); border-color: color-mix(in srgb, #4f7a58 46%, transparent); }
+    .qc-chip--sub.is-grabbing, .qc-chip--sub.is-attached       { background: linear-gradient(180deg, #fff, color-mix(in srgb, #3a8a8f 16%, #fff)); border-color: color-mix(in srgb, #3a8a8f 46%, transparent); }
 
     /* Launch pad — drop target on the right; also tappable. */
     .qc-dock-launch {
