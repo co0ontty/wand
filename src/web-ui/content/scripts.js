@@ -2245,7 +2245,11 @@
       var quickCommitDragState = null;
 
       function normalizeQuickCommitAction(value) {
-        if (value === "commit-tag" || value === "commit-tag-push") return value;
+        if (
+          value === "commit-tag" ||
+          value === "commit-tag-push" ||
+          value === "commit-push"
+        ) return value;
         return "commit";
       }
 
@@ -2258,7 +2262,7 @@
             verb: "提交、打 Tag 并推送",
             withTag: true,
             push: true,
-            tone: "push",
+            tone: "all",
           };
         }
         if (action === "commit-tag") {
@@ -2271,6 +2275,16 @@
             tone: "tag",
           };
         }
+        if (action === "commit-push") {
+          return {
+            action: action,
+            label: "Commit + Push",
+            verb: "提交并推送",
+            withTag: false,
+            push: true,
+            tone: "push",
+          };
+        }
         return {
           action: "commit",
           label: "Commit",
@@ -2281,16 +2295,32 @@
         };
       }
 
-      function getQuickCommitActionFromRatio(ratio) {
-        if (ratio >= 0.74) return "commit-tag-push";
-        if (ratio >= 0.38) return "commit-tag";
+      // Knob starts at LEFT (Commit). Three zones, left → right:
+      //   commit (0.00..0.32) — starting position
+      //   tag    (0.32..0.68) — dwell here ~600ms to "arm" the Tag latch
+      //   push   (0.68..1.00) — release here to push
+      function getQuickCommitZoneFromRatio(ratio) {
+        if (ratio <= 0.32) return "commit";
+        if (ratio >= 0.68) return "push";
+        return "tag";
+      }
+
+      // tagArmed is only true if the user dwelled long enough in the Tag zone.
+      // Sliding straight through Tag → Push without dwelling = commit-push (skip Tag).
+      function composeQuickCommitAction(zone, tagArmed) {
+        if (zone === "push") return tagArmed ? "commit-tag-push" : "commit-push";
+        if (zone === "tag") return "commit-tag";
         return "commit";
       }
+
+      // How long the user must hold the knob inside the Tag zone before the Tag latch arms.
+      var QUICK_COMMIT_TAG_DWELL_MS = 600;
 
       function openQuickCommitModal() {
         if (!state.selectedId) return;
         state.quickCommitOpen = true;
         state.quickCommitSubmitting = false;
+        state.quickCommitAutoGenerating = false;
         state.quickCommitError = "";
         state.quickCommitForm = {
           customMessage: "",
@@ -2416,30 +2446,65 @@
         attachQuickCommitDrag();
       }
 
-      function updateQuickCommitDragVisual(action, ratio) {
+      // ratio: knob CENTER position as fraction of track [0..1]. 0 = left (Commit start), 1 = right (Push).
+      function updateQuickCommitDragVisual(action, ratio, opts) {
         action = normalizeQuickCommitAction(action);
         state.quickCommitDragAction = action;
         var track = document.getElementById("quick-commit-drag-track");
         if (!track) return;
         var meta = getQuickCommitActionMeta(action);
+        // Resting position per action when user isn't dragging.
+        var defaultRatio = 0;
+        if (action === "commit-tag") defaultRatio = 0.5;
+        else if (action === "commit-push" || action === "commit-tag-push") defaultRatio = 1;
         var progress = typeof ratio === "number"
           ? Math.max(0, Math.min(1, ratio))
-          : (action === "commit-tag-push" ? 1 : (action === "commit-tag" ? 0.5 : 0));
+          : defaultRatio;
+        var zone = getQuickCommitZoneFromRatio(progress);
         track.setAttribute("data-action", action);
+        track.setAttribute("data-zone", zone);
+        track.setAttribute("data-tag-armed", (action === "commit-tag" || action === "commit-tag-push") ? "1" : "0");
         track.style.setProperty("--qc-progress", (progress * 100).toFixed(1) + "%");
         var knob = document.getElementById("quick-commit-drag-action");
         if (knob) {
-          var maxX = Math.max(0, track.clientWidth - knob.offsetWidth - 14);
-          track.style.setProperty("--qc-knob-x", (maxX * progress).toFixed(1) + "px");
+          var trackWidth = track.clientWidth;
+          var knobWidth = knob.offsetWidth;
+          var pad = 6;
+          // Knob CENTER tracks ratio * trackWidth, clamped so the knob stays fully inside.
+          var center = progress * trackWidth;
+          var minLeft = pad;
+          var maxLeft = Math.max(pad, trackWidth - knobWidth - pad);
+          var left = Math.max(minLeft, Math.min(maxLeft, center - knobWidth / 2));
+          track.style.setProperty("--qc-knob-x", left.toFixed(1) + "px");
         }
         var label = document.getElementById("quick-commit-drag-label");
-        if (label) label.textContent = state.quickCommitSubmitting ? "执行中..." : meta.label;
+        if (label) {
+          var dwell = track.getAttribute("data-tag-dwell") || "idle";
+          var txt;
+          if (state.quickCommitSubmitting) {
+            txt = state.quickCommitAutoGenerating ? "AI 生成 + 提交中…" : "执行中…";
+          }
+          else if (dwell === "active") txt = "锁定 Tag 中…";
+          else if (dwell === "armed" && zone === "tag") txt = "Tag 已就绪 · 继续推送 →";
+          else txt = meta.label;
+          label.textContent = txt;
+        }
+        // Stage class refresh.
         var stages = track.querySelectorAll("[data-qc-stage]");
-        var order = { "commit": 0, "commit-tag": 1, "commit-tag-push": 2 };
         for (var i = 0; i < stages.length; i++) {
-          var stageAction = stages[i].getAttribute("data-qc-stage");
-          var passed = order[stageAction] <= order[action];
-          stages[i].classList.toggle("is-active", stageAction === action);
+          var st = stages[i].getAttribute("data-qc-stage");
+          var active = false, passed = false;
+          if (st === "commit") {
+            active = action === "commit";
+            passed = true;
+          } else if (st === "tag") {
+            active = action === "commit-tag";
+            passed = action === "commit-tag" || action === "commit-tag-push";
+          } else if (st === "push") {
+            active = action === "commit-push" || action === "commit-tag-push";
+            passed = active;
+          }
+          stages[i].classList.toggle("is-active", active);
           stages[i].classList.toggle("is-passed", passed);
         }
       }
@@ -2450,17 +2515,30 @@
         if (!track || !knob) return;
         updateQuickCommitDragVisual(state.quickCommitDragAction || "commit");
 
+        function setDwell(state) { track.setAttribute("data-tag-dwell", state); }
+        function clearArmTimer() {
+          if (quickCommitDragState && quickCommitDragState.tagArmTimer) {
+            clearTimeout(quickCommitDragState.tagArmTimer);
+            quickCommitDragState.tagArmTimer = null;
+          }
+        }
+
         var onPointerDown = function(e) {
           if (knob.disabled || isQuickCommitOpInFlight()) return;
           var rect = track.getBoundingClientRect();
           quickCommitDragState = {
             pointerId: e.pointerId,
             rect: rect,
+            startX: e.clientX,
             moved: false,
+            zone: "commit",
+            tagArmed: false,
+            tagArmTimer: null,
             action: "commit",
           };
-          knob.setPointerCapture(e.pointerId);
+          try { knob.setPointerCapture(e.pointerId); } catch (err) { /* ignored */ }
           track.classList.add("is-dragging");
+          setDwell("idle");
           updateQuickCommitDragVisual("commit", 0);
           e.preventDefault();
         };
@@ -2469,16 +2547,43 @@
           var rect = quickCommitDragState.rect;
           var ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
           ratio = Math.max(0, Math.min(1, ratio));
-          if (Math.abs(e.clientX - rect.left) > 6) quickCommitDragState.moved = true;
-          var action = getQuickCommitActionFromRatio(ratio);
+          if (Math.abs(e.clientX - quickCommitDragState.startX) > 5) quickCommitDragState.moved = true;
+          var zone = getQuickCommitZoneFromRatio(ratio);
+          // Zone transitions drive the dwell state machine.
+          if (zone !== quickCommitDragState.zone) {
+            if (zone === "tag" && !quickCommitDragState.tagArmed) {
+              // Entered Tag zone unarmed → kick off the dwell timer + CSS fill animation.
+              clearArmTimer();
+              setDwell("active");
+              quickCommitDragState.tagArmTimer = setTimeout(function() {
+                if (!quickCommitDragState) return;
+                quickCommitDragState.tagArmed = true;
+                quickCommitDragState.tagArmTimer = null;
+                setDwell("armed");
+                var newAction = composeQuickCommitAction(quickCommitDragState.zone, true);
+                quickCommitDragState.action = newAction;
+                updateQuickCommitDragVisual(newAction);
+              }, QUICK_COMMIT_TAG_DWELL_MS);
+            } else if (zone !== "tag" && !quickCommitDragState.tagArmed) {
+              // Left Tag zone before arming → cancel.
+              clearArmTimer();
+              setDwell("idle");
+            } else if (zone === "tag" && quickCommitDragState.tagArmed) {
+              setDwell("armed");
+            }
+            quickCommitDragState.zone = zone;
+          }
+          var action = composeQuickCommitAction(zone, quickCommitDragState.tagArmed);
           quickCommitDragState.action = action;
           updateQuickCommitDragVisual(action, ratio);
         };
         var finish = function(e, cancelled) {
           if (!quickCommitDragState) return;
           var current = quickCommitDragState;
+          clearArmTimer();
           quickCommitDragState = null;
           track.classList.remove("is-dragging");
+          setDwell("idle");
           try {
             if (typeof knob.releasePointerCapture === "function") knob.releasePointerCapture(current.pointerId);
           } catch (err) { /* ignored */ }
@@ -2486,7 +2591,10 @@
             updateQuickCommitDragVisual("commit");
             return;
           }
-          var action = current.moved ? current.action : "commit";
+          // Tap (no drag) → just commit. Auto-message will fire if the message is empty.
+          var action = current.moved
+            ? composeQuickCommitAction(current.zone, current.tagArmed)
+            : "commit";
           updateQuickCommitDragVisual(action);
           submitQuickCommit(action);
           if (e && typeof e.preventDefault === "function") e.preventDefault();
@@ -2499,20 +2607,31 @@
           if (!quickCommitDragState || quickCommitDragState.pointerId !== e.pointerId) return;
           finish(e, true);
         };
+        // Keyboard parity:
+        //   →  step zone right (commit → commit-tag → commit-tag-push). The first → into Tag arms it instantly.
+        //   ←  step zone left
+        //   Home → reset to commit
+        //   Enter / Space → submit current action
         var onKeyDown = function(e) {
           if (knob.disabled || isQuickCommitOpInFlight()) return;
+          var cur = state.quickCommitDragAction || "commit";
           if (e.key === "ArrowRight") {
             e.preventDefault();
-            var next = state.quickCommitDragAction === "commit"
-              ? "commit-tag"
-              : (state.quickCommitDragAction === "commit-tag" ? "commit-tag-push" : "commit-tag-push");
+            var next = cur;
+            if (cur === "commit") next = "commit-tag";          // arm Tag
+            else if (cur === "commit-tag") next = "commit-tag-push";
+            else if (cur === "commit-push") next = "commit-push";
             updateQuickCommitDragVisual(next);
           } else if (e.key === "ArrowLeft") {
             e.preventDefault();
-            var prev = state.quickCommitDragAction === "commit-tag-push"
-              ? "commit-tag"
-              : (state.quickCommitDragAction === "commit-tag" ? "commit" : "commit");
+            var prev = cur;
+            if (cur === "commit-tag-push") prev = "commit-tag";
+            else if (cur === "commit-tag") prev = "commit";
+            else if (cur === "commit-push") prev = "commit";
             updateQuickCommitDragVisual(prev);
+          } else if (e.key === "Home") {
+            e.preventDefault();
+            updateQuickCommitDragVisual("commit");
           } else if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             submitQuickCommit(state.quickCommitDragAction || "commit");
@@ -2530,6 +2649,9 @@
           knob.removeEventListener("pointerup", onPointerUp);
           knob.removeEventListener("pointercancel", onPointerCancel);
           knob.removeEventListener("keydown", onKeyDown);
+          if (quickCommitDragState && quickCommitDragState.tagArmTimer) {
+            clearTimeout(quickCommitDragState.tagArmTimer);
+          }
           quickCommitDragState = null;
         };
       }
@@ -2592,11 +2714,9 @@
         var withTag = meta.withTag;
         var userTag = withTag ? (form.tag || "").trim() : "";
         var message = (form.customMessage || "").trim();
-        if (!message) {
-          state.quickCommitError = "请填写提交信息，或点击「AI 生成」。";
-          rerenderQuickCommitModal();
-          return;
-        }
+        // Auto-generate flow: empty commit message → ask backend to write one (autoMessage:true).
+        // Empty tag (when withTag) → ask backend to derive one (autoTag:true). Both go in one round-trip.
+        var autoMessage = !message;
         var before = {
           branch: (state.gitStatus || {}).branch || "",
           commitHash: (state.gitStatus || {}).lastCommit && (state.gitStatus || {}).lastCommit.shortHash
@@ -2608,13 +2728,14 @@
           tag: (state.gitStatus || {}).latestTag || "",
         };
         var payload = {
-          autoMessage: false,
-          customMessage: message,
+          autoMessage: autoMessage,
+          customMessage: autoMessage ? "" : message,
           tag: userTag,
           autoTag: !!(withTag && !userTag),
           push: !!meta.push
         };
         state.quickCommitSubmitting = true;
+        state.quickCommitAutoGenerating = autoMessage || payload.autoTag;
         state.quickCommitError = "";
         state.quickCommitPushError = "";
         state.quickCommitResult = null;
@@ -2668,6 +2789,7 @@
           })
           .finally(function() {
             state.quickCommitSubmitting = false;
+            state.quickCommitAutoGenerating = false;
             if (state.quickCommitOpen) rerenderQuickCommitModal();
           });
       }
@@ -2793,20 +2915,42 @@
         var action = normalizeQuickCommitAction(state.quickCommitDragAction || "commit");
         var meta = getQuickCommitActionMeta(action);
         var disabled = !hasChanges || isQuickCommitOpInFlight();
-        var label = state.quickCommitSubmitting ? "执行中..." : meta.label;
+        var label = state.quickCommitSubmitting ? "执行中…" : meta.label;
+        // Stage classes derived from the current action.
+        var commitActive = action === "commit";
+        var tagActive    = action === "commit-tag";
+        var tagPassed    = action === "commit-tag" || action === "commit-tag-push";
+        var pushActive   = action === "commit-push" || action === "commit-tag-push";
+        var hint = "向右拖 · 经过 Tag 时停一下打 Tag · 直接划到 Push 跳过 Tag · 留空会自动生成";
         return '<div class="qc-drag-wrap">' +
-          '<div id="quick-commit-drag-track" class="qc-drag-track" data-action="' + escapeHtml(action) + '" style="--qc-progress: ' + (action === "commit-tag-push" ? "100%" : (action === "commit-tag" ? "50%" : "0%")) + ';">' +
-            '<div class="qc-drag-progress" aria-hidden="true"></div>' +
-            '<div class="qc-drag-stages" aria-hidden="true">' +
-              '<span class="qc-drag-stage is-active is-passed" data-qc-stage="commit">Commit</span>' +
-              '<span class="qc-drag-stage' + (action !== "commit" ? ' is-passed' : '') + (action === "commit-tag" ? ' is-active' : '') + '" data-qc-stage="commit-tag">Tag</span>' +
-              '<span class="qc-drag-stage' + (action === "commit-tag-push" ? ' is-active is-passed' : '') + '" data-qc-stage="commit-tag-push">Push</span>' +
+          '<div id="quick-commit-drag-track" class="qc-drag-track" data-action="' + escapeHtml(action) + '" data-zone="commit" data-tag-dwell="idle">' +
+            // Baseline track: subtle grey rail under everything, segments brighten as the knob passes.
+            '<svg class="qc-drag-baseline" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">' +
+              '<line class="qc-baseline-rail" x1="4" y1="12" x2="96" y2="12" />' +
+              '<line class="qc-baseline-seg qc-baseline-seg--left"  x1="4"  y1="12" x2="50" y2="12" />' +
+              '<line class="qc-baseline-seg qc-baseline-seg--right" x1="50" y1="12" x2="96" y2="12" />' +
+            '</svg>' +
+            // Three marching chevrons running right — "drag this way".
+            '<div class="qc-chevrons" aria-hidden="true">' +
+              '<svg class="qc-chevron" viewBox="0 0 12 16" width="9" height="12"><path d="M3 2 L9 8 L3 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+              '<svg class="qc-chevron" viewBox="0 0 12 16" width="9" height="12"><path d="M3 2 L9 8 L3 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+              '<svg class="qc-chevron" viewBox="0 0 12 16" width="9" height="12"><path d="M3 2 L9 8 L3 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
             '</div>' +
-            '<button id="quick-commit-drag-action" class="qc-drag-action" type="button"' + (disabled ? ' disabled' : '') + ' aria-label="' + escapeHtml(meta.verb) + '">' +
-              '<span id="quick-commit-drag-label">' + escapeHtml(label) + '</span>' +
-              '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12h14"/><path d="M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+            // Stage dots / labels along the rail.
+            '<div class="qc-drag-stages" aria-hidden="true">' +
+              '<span class="qc-drag-stage qc-stage-commit' + (commitActive ? ' is-active' : '') + ' is-passed" data-qc-stage="commit">Commit</span>' +
+              '<span class="qc-drag-stage qc-stage-tag' + (tagActive ? ' is-active' : '') + (tagPassed ? ' is-passed' : '') + '" data-qc-stage="tag">Tag</span>' +
+              '<span class="qc-drag-stage qc-stage-push' + (pushActive ? ' is-active is-passed' : '') + '" data-qc-stage="push">Push</span>' +
+            '</div>' +
+            // Knob — starts at left, slides right.
+            '<button id="quick-commit-drag-action" class="qc-drag-action" type="button"' + (disabled ? ' disabled' : '') + ' aria-label="' + escapeHtml(meta.verb) + '" title="' + escapeHtml(hint) + '">' +
+              '<span class="qc-drag-grip" aria-hidden="true"><i></i><i></i><i></i></span>' +
+              '<span id="quick-commit-drag-label" class="qc-drag-label">' + escapeHtml(label) + '</span>' +
+              // Bottom progress bar — fills 0→100% over DWELL_MS while sitting in the Tag zone.
+              '<span class="qc-drag-dwell-bar" aria-hidden="true"></span>' +
             '</button>' +
           '</div>' +
+          '<div class="qc-drag-help" aria-hidden="true">' + escapeHtml(hint) + '</div>' +
         '</div>';
       }
 
