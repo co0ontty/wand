@@ -33,19 +33,8 @@ jobs:
           chmod +x scripts/generate-icons.swift
           ./build.sh "${{ steps.version.outputs.version }}"
 
-      - name: Upload to GitHub Release
+      # body 由 .github/workflows/release-notes.yml 单点管理，这里只上传 DMG。
+      - name: Upload DMG to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: macos/dist/wand-v${{ steps.version.outputs.version }}.dmg
-          generate_release_notes: true
-          append_body: true
-          body: |
-            ## macOS DMG
-
-            下载 `wand-v${{ steps.version.outputs.version }}.dmg`，挂载后拖拽 Wand.app 到 Applications 即可。
-
-            **首次打开请右键 → 打开**（系统会提示"无法验证开发者"，点"打开"即可），之后双击即可正常使用。
-
-            - 最低系统版本: macOS 12 (Monterey)
-            - 架构: Universal Binary (arm64 + x86_64)
-            - 在 App 中粘贴 Web 端设置页的连接码即可使用

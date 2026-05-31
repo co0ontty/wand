@@ -49,16 +49,8 @@ jobs:
           mv android/app/build/outputs/apk/debug/app-debug.apk \
              android/app/build/outputs/apk/debug/wand-${{ steps.version.outputs.tag }}.apk
 
-      - name: Upload to GitHub Release
+      # body 由 .github/workflows/release-notes.yml 单点管理，这里只上传 APK。
+      - name: Upload APK to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: android/app/build/outputs/apk/debug/wand-${{ steps.version.outputs.tag }}.apk
-          generate_release_notes: true
-          append_body: true
-          body: |
-            ## Android APK
-
-            下载 `wand-${{ steps.version.outputs.tag }}.apk` 安装到 Android 设备。
-
-            - 最低 Android 版本: 7.0 (API 24)
-            - 在 App 中粘贴 Web 端设置页的连接码即可使用

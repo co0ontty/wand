@@ -1,0 +1,96 @@
+name: Cleanup Old Release Assets
+
+# 只保留最近 N 个 release 的 APK / DMG 产物，更老的 release 页面与 release notes 保留，
+# 仅删除二进制 assets。每次新 release 发布后自动跑；也可手动触发做一次性清理。
+#
+# - 排序：按 tag 的 semver 降序（sort -V），不依赖 created_at，避免回填型发布被误删。
+# - 保护刚发布的那个 tag：哪怕它的 semver 排不进前 N（例如对老分支的补丁版本），
+#   也会被排除在删除名单外。
+# - 仅删 .apk / .dmg，其他 assets 不动。
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "保留最近多少个 release 的产物（默认 10）"
+        required: false
+        default: "10"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune APK/DMG from older releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          KEEP: ${{ github.event.inputs.keep || '10' }}
+          TRIGGER_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          echo "Repo:       $REPO"
+          echo "Keep:       $KEEP most recent (by semver)"
+          echo "Trigger:    ${TRIGGER_TAG:-<manual>}"
+
+          # 拉所有非 draft release 的 tag，只保留形如 v<num>.<num>.<num> 开头的，
+          # 然后按 semver 降序排序。
+          mapfile -t TAGS < <(
+            gh release list --repo "$REPO" --limit 1000 \
+              --json tagName,isDraft \
+              --jq '.[] | select(.isDraft | not) | .tagName' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' \
+              | sort -Vr
+          )
+
+          echo "Total releases scanned: ${#TAGS[@]}"
+
+          if [ "${#TAGS[@]}" -le "$KEEP" ]; then
+            echo "Nothing to prune (${#TAGS[@]} <= $KEEP)."
+            exit 0
+          fi
+
+          # 取保留窗口之外的 tag
+          PRUNE=("${TAGS[@]:$KEEP}")
+          echo "Candidates to prune: ${#PRUNE[@]}"
+
+          deleted=0
+          skipped=0
+
+          for tag in "${PRUNE[@]}"; do
+            # 保护当前触发本次 workflow 的那个 release —— 即使它 semver 排不进前 N
+            # （例如对老 minor 的补丁版本），也不允许删它自己刚上传的产物。
+            if [ -n "$TRIGGER_TAG" ] && [ "$tag" = "$TRIGGER_TAG" ]; then
+              echo "Skip $tag (current trigger release)"
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            mapfile -t ASSETS < <(
+              gh release view "$tag" --repo "$REPO" --json assets \
+                --jq '.assets[] | select(.name | test("\\.(apk|dmg)$"; "i")) | .name' \
+                2>/dev/null || true
+            )
+
+            if [ "${#ASSETS[@]}" -eq 0 ]; then
+              continue
+            fi
+
+            for asset in "${ASSETS[@]}"; do
+              echo "Deleting: $tag / $asset"
+              if gh release delete-asset "$tag" "$asset" --repo "$REPO" --yes; then
+                deleted=$((deleted + 1))
+              else
+                echo "  -> failed, continuing"
+              fi
+            done
+          done
+
+          echo "----"
+          echo "Assets deleted: $deleted"
+          echo "Releases skipped (trigger): $skipped"

@@ -1,0 +1,98 @@
+name: Release Notes
+
+# 由这个 workflow 单点负责 release body：
+# - 从 git log 生成 changelog（项目直接推 master 不走 PR，所以 generate_release_notes
+#   的自动 PR 列表为空，必须自己从 commits 拼）
+# - 拼接 Android / macOS 下载说明段落
+# - 用 softprops/action-gh-release 创建或更新 release，body 一次性写好
+#
+# android-release.yml / macos-release.yml 只负责上传二进制 assets，不再操作 body，
+# 避免多 workflow 竞争写 body 产生的重复 / 顺序混乱。
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history & tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build release body
+        env:
+          CURRENT_TAG: ${{ steps.version.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # 上一个 tag：用 git describe 找当前 tag 父提交可达的最近 tag，避免回填发布
+          # 时拿到"semver 比自己大"的错位 tag。第一个 release 时为空。
+          PREV_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")
+
+          echo "Current : $CURRENT_TAG"
+          echo "Previous: ${PREV_TAG:-<none>}"
+
+          {
+            if [ -n "$PREV_TAG" ]; then
+              echo "## 更新内容（自 ${PREV_TAG}）"
+              echo ""
+              # --no-merges：合并提交不会贡献功能性变更，去掉；按时间倒序更符合"最新放最上"
+              # 的阅读习惯。空 range 时这里啥也不输出。
+              git log --no-merges --pretty=format:"- %s (%h)" "${PREV_TAG}..${CURRENT_TAG}"
+              echo ""
+              echo ""
+              echo "**Full Changelog**: https://github.com/${REPO}/compare/${PREV_TAG}...${CURRENT_TAG}"
+            else
+              echo "## 更新内容"
+              echo ""
+              git log --no-merges --pretty=format:"- %s (%h)" "${CURRENT_TAG}"
+              echo ""
+            fi
+
+            echo ""
+            echo "---"
+            echo ""
+            echo "## Android APK"
+            echo ""
+            echo "下载 \`wand-${CURRENT_TAG}.apk\` 安装到 Android 设备。"
+            echo ""
+            echo "- 最低 Android 版本: 7.0 (API 24)"
+            echo "- 在 App 中粘贴 Web 端设置页的连接码即可使用"
+            echo ""
+            echo "## macOS DMG"
+            echo ""
+            echo "下载 \`wand-${CURRENT_TAG}.dmg\`，挂载后拖拽 Wand.app 到 Applications 即可。"
+            echo ""
+            echo "**首次打开请右键 → 打开**（系统会提示\"无法验证开发者\"，点\"打开\"即可），之后双击即可正常使用。"
+            echo ""
+            echo "- 最低系统版本: macOS 12 (Monterey)"
+            echo "- 架构: Universal Binary (arm64 + x86_64)"
+            echo "- 在 App 中粘贴 Web 端设置页的连接码即可使用"
+          } > release-body.md
+
+          echo "---- preview ----"
+          cat release-body.md
+          echo "---- end ----"
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: release-body.md

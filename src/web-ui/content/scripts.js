@@ -1218,10 +1218,16 @@
               var pblbl = pb.querySelector(".subagent-panel-toggle-label");
               if (pblbl) pblbl.textContent = expanded ? "收起" : "展开";
             }
-            // 展开时把 body 滚到顶，避免延续上次的滚动位置造成"展开后看到一半"
-            if (expanded) {
-              var pbody = el.querySelector(".subagent-panel-body");
-              if (pbody) pbody.scrollTop = 0;
+            var pbody = el.querySelector(".subagent-panel-body");
+            if (pbody) {
+              if (expanded) {
+                // 展开时把 body 滚到顶，避免延续上次的滚动位置造成"展开后看到一半"
+                pbody.scrollTop = 0;
+              } else {
+                // 折叠回去时滚到底——折叠预览窗口要展示的是"最新到达的内容"，
+                // 跟 snapCollapsedSubagentPanelsToBottom 在 re-render 后的行为对齐。
+                pbody.scrollTop = pbody.scrollHeight;
+              }
             }
             break;
           }
@@ -5959,6 +5965,23 @@
         applyExpandedState(panel, "subagent-panel", !expanded);
         persistElementExpandState(panel, "subagent-panel");
       };
+
+      // 折叠态的 subagent-panel-body 默认 max-height 22em + overflow-y:auto。流式
+      // 输出在底部追加内容，新 DOM 节点初始 scrollTop=0 会让用户停在最上面，看不
+      // 到新到的工具卡 / 文本。re-render 后扫一遍所有折叠面板，把 body 滚到底，
+      // 表现就跟"贴底跟随"的小窗口一致。
+      // 展开态故意跳过：展开后 max-height 提到 70vh，用户多半就是想从头读，
+      // applyExpandedState 已经把 scrollTop 拉到 0，不能在这里再覆盖。
+      function snapCollapsedSubagentPanelsToBottom(container) {
+        if (!container) return;
+        var panels = container.querySelectorAll('.subagent-panel[data-expanded="false"]');
+        for (var i = 0; i < panels.length; i++) {
+          var body = panels[i].querySelector(".subagent-panel-body");
+          if (!body) continue;
+          // 直接赋 scrollHeight 即可，浏览器会自动钳到合法上界。
+          body.scrollTop = body.scrollHeight;
+        }
+      }
       // Toggle function for inline tool rows (Read, Glob, Grep, etc.)
       window.__inlineToolToggle = function(el) {
         var expanded = el.classList.toggle("inline-tool-open");
@@ -17244,6 +17267,9 @@
         // 预扫一遍全量 messages，构建 task id → subagent meta 的 map，
         // 供老消息 tool_result（没有 __subagent 盖章）按 tool_use_id 反查兜底。
         var legacyTaskMap = collectLegacyTaskIdMap(allMessages);
+        // 同时刷一遍"同显示名要加后缀"的 suffix map，让 getSubagentDisplayName 拼上
+        // " #1 / #2"。模块级变量在 doRenderChat 同步执行期间一致；下一轮 render 重置。
+        _subagentSuffixMap = collectSubagentSuffixMap(allMessages);
 
         if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
@@ -17675,6 +17701,11 @@
         } else if (msgCount < existingCount) {
           fullRenderChat();
         }
+
+        // 流式 / 全量重渲染后，把所有折叠态 subagent-panel 的 body 滚到底，让
+        // 用户在小窗口里能持续看到最新到达的工具卡 / 文本，而不是停在最上面。
+        // 展开态有自己的 scrollTop=0 逻辑（applyExpandedState），这里不会动它。
+        snapCollapsedSubagentPanelsToBottom(chatMessages);
 
         // Update structured session status bar (in-flight / completed indicator)
         renderStructuredStatusBar(chatMessages, selectedSession);
@@ -18598,13 +18629,24 @@
         "type-design-analyzer": "类型猫",
         "comment-analyzer": "注释猫",
       };
-      function getSubagentDisplayName(sub) {
+      // 同一轮对话里如果起了多个同类型 subagent（比如两只"万能猫"），光看名字会
+      // 撞车。doRenderChat 在每次 render 前预扫一遍 messages，把"同显示名 ≥ 2"
+      // 的 taskId 各自分配一个 "#1 / #2 / ..." 后缀，按首次出现顺序稳定。
+      // 单实例不加后缀，避免视觉噪音。
+      var _subagentSuffixMap = null;
+      function getSubagentBaseName(sub) {
         if (!sub) return "";
         var agentType = sub.agentType || "";
         if (agentType && SUBAGENT_NAME_MAP[agentType]) return SUBAGENT_NAME_MAP[agentType];
         if (agentType) return agentType;
         var tail = (sub.taskId || "").slice(-4) || (getActiveLang() === "English" ? "?" : "未知");
         return t("subagent.helper_fallback_prefix") + tail;
+      }
+      function getSubagentDisplayName(sub) {
+        var base = getSubagentBaseName(sub);
+        if (!base) return base;
+        var suffix = (_subagentSuffixMap && sub && sub.taskId) ? _subagentSuffixMap.get(sub.taskId) : null;
+        return suffix ? base + suffix : base;
       }
       function getSubagentPalette(sub) {
         // 哈希优先用 agentType，让同类型 agent 跨 turn 颜色稳定；没有 agentType 时
@@ -18920,6 +18962,44 @@
           }
         }
         return map;
+      }
+
+      // 预扫一遍 messages，把"同显示名 ≥ 2 个 taskId"的 subagent 各自分配一个
+      // " #1 / #2 / ..." 后缀（按首次出现顺序）。返回 taskId → suffix 字符串的 map。
+      // bucket key 走 getSubagentBaseName(sub)：不同 agentType 但相同中文名（比如
+      // "Explore" 和 "code-explorer" 都映射 "侦探猫"）也算冲突，得分别加后缀。
+      // 单实例不进 map，调用方就不会拼后缀。
+      function collectSubagentSuffixMap(allMessages) {
+        var suffix = new Map();
+        if (!Array.isArray(allMessages)) return suffix;
+        var bucketsByName = new Map(); // displayName -> ordered list of unique taskIds
+        var seenTaskIds = new Set();
+        function record(sub) {
+          if (!sub || !sub.taskId) return;
+          if (seenTaskIds.has(sub.taskId)) return;
+          seenTaskIds.add(sub.taskId);
+          var name = getSubagentBaseName(sub);
+          if (!name) return;
+          if (!bucketsByName.has(name)) bucketsByName.set(name, []);
+          bucketsByName.get(name).push(sub.taskId);
+        }
+        for (var i = 0; i < allMessages.length; i++) {
+          var m = allMessages[i];
+          if (!m || !Array.isArray(m.content)) continue;
+          for (var j = 0; j < m.content.length; j++) {
+            var b = m.content[j];
+            if (!b) continue;
+            var sub = b.__subagent || (b.type === "tool_use" ? deriveLegacySubagent(b) : null);
+            if (sub) record(sub);
+          }
+        }
+        bucketsByName.forEach(function(taskIds) {
+          if (taskIds.length < 2) return;
+          for (var k = 0; k < taskIds.length; k++) {
+            suffix.set(taskIds[k], " #" + (k + 1));
+          }
+        });
+        return suffix;
       }
 
       // 把一条 assistant turn 按相邻 block 的 __subagent.taskId 切成段。

@@ -208,10 +208,13 @@ git tag v1.15.0
 git push origin v1.15.0
 ```
 
-push tag 后三个 workflow 并行触发：
+push tag 后四个 workflow 并行触发：
 - `.github/workflows/npm-release.yml`（`ubuntu-latest`）：从 tag 同步版本号到 `package.json` → `npm ci` → `npm run build` → `npm publish --access public`。需要仓库 secret **`NPM_TOKEN`**（npm Automation / Granular Access token，对 `@co0ontty/wand` 有读写权限）。
-- `.github/workflows/android-release.yml`（`ubuntu-latest`）：构建 APK 上传到对应 Release。
-- `.github/workflows/macos-release.yml`（`macos-latest`）：构建 DMG 上传到对应 Release。
+- `.github/workflows/android-release.yml`（`ubuntu-latest`）：构建 APK 上传到对应 Release（**不动 release body**）。
+- `.github/workflows/macos-release.yml`（`macos-latest`）：构建 DMG 上传到对应 Release（**不动 release body**）。
+- `.github/workflows/release-notes.yml`（`ubuntu-latest`）：**单点负责 release body**——从 `git log <prev-tag>..<current-tag>` 拼真 changelog（项目直接推 master 不走 PR，所以 `generate_release_notes` 拿到的 PR 列表是空的，必须自己从 commits 拼），再附上 Android / macOS 下载说明段落，最后用 `softprops/action-gh-release` 一次性写入 body。其他三个 release 工作流都不再 `append_body`，避免多源写 body 撞车。第一个 release 没有前 tag 时 fallback 成「列出 tag 之前的全部 commits」。
+
+新 release 发完后还会自动触发 `.github/workflows/cleanup-old-releases.yml`：按 tag 的 semver 降序保留最近 **10** 个 release 的产物，更老的 release **页面与 release notes 不动**，但把它们身上的 `.apk` / `.dmg` 删掉，避免 GitHub Release 长期堆积二进制。手动跑（`workflow_dispatch`）可改 `keep` 参数。当前触发本次清理的 release 永远不会动到自己的 assets（防止"补丁回填到老 minor"被误删）。服务端自动更新只查 `/releases/latest`，所以删老 assets 不影响用户的更新流程。
 
 `publish.sh` 现在**只做本地构建 + 把 APK/DMG 部署到 `~/.wand/{android,macos}/`** 供本地实例分发，**不再 `npm publish`**（避免和 CI 撞 "version already exists"）。本地日常用 `start.sh`，正式发版用「打 tag + push」。
 
@@ -224,6 +227,8 @@ push tag 后三个 workflow 并行触发：
 - `.github/workflows/npm-release.yml` handles GitHub Actions npm publish on tag push (needs `NPM_TOKEN` secret).
 - `.github/workflows/android-release.yml` handles GitHub Actions APK builds on tag push.
 - `.github/workflows/macos-release.yml` handles GitHub Actions DMG builds on tag push (runs on `macos-latest`).
+- `.github/workflows/release-notes.yml` owns the release body: generates a real changelog from `git log <prev>..<current>` (PR-based auto-notes are empty for this repo) and appends Android/macOS download sections. Other release workflows must NOT touch the body.
+- `.github/workflows/cleanup-old-releases.yml` prunes `.apk` / `.dmg` from older releases after each `release: published`, keeping the 10 most recent (by semver) intact. Manual `workflow_dispatch` accepts a `keep` input.
 
 ## Architecture
 
