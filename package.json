@@ -18,7 +18,7 @@
   "scripts": {
     "generate:web-assets": "node scripts/generate-web-assets.js",
     "build": "node scripts/bundle-wterm.js && node scripts/bundle-qrcode.js && npm run generate:web-assets && tsc -p tsconfig.json && npm run build:copy-content && node scripts/stamp-build-info.js && node scripts/fix-dist-permissions.js",
-    "build:copy-content": "cp -r src/web-ui/content dist/web-ui/",
+    "build:copy-content": "cp -r src/web-ui/content dist/web-ui/ && node scripts/minify-dist-content.js",
     "dev": "npm run generate:web-assets && tsx src/cli.ts web",
     "check": "npm run generate:web-assets && tsc --noEmit -p tsconfig.json",
     "prepublishOnly": "TAG=$(git tag --sort=-v:refname --list 'v*' | head -1) && VER=${TAG#v} && npm version $VER --no-git-tag-version --allow-same-version && npm run build"

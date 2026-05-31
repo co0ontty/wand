@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { minifyJs, minifyCss } from "./minify-web-assets.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -19,7 +20,12 @@ const assets = [
 const entries = {};
 const hash = createHash("sha256");
 for (const [key, relPath, contentType] of assets) {
-  const content = readFileSync(path.join(contentDir, relPath));
+  let content = readFileSync(path.join(contentDir, relPath));
+  if (relPath === "scripts.js") {
+    content = Buffer.from(minifyJs(content.toString("utf8")), "utf8");
+  } else if (relPath === "styles.css") {
+    content = Buffer.from(minifyCss(content.toString("utf8")), "utf8");
+  }
   const assetHash = createHash("md5").update(content).digest("hex").slice(0, 8);
   hash.update(relPath).update("\0").update(content).update("\0");
   entries[key] = {
