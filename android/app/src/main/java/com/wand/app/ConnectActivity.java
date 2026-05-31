@@ -262,14 +262,7 @@ public class ConnectActivity extends AppCompatActivity {
                     }
                 });
             } else {
-                String url = savedInput;
-                if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                    url = "http://" + url;
-                }
-                if (url.endsWith("/")) {
-                    url = url.substring(0, url.length() - 1);
-                }
-                final String normalizedUrl = url;
+                final String normalizedUrl = normalizeServerUrl(savedInput);
 
                 String savedToken = serverStore.getAppToken();
                 if (!TextUtils.isEmpty(savedToken)) {
@@ -327,12 +320,10 @@ public class ConnectActivity extends AppCompatActivity {
     }
 
     private void showFormWithMessage(String errorMessage) {
-        autoConnectGroup.setVisibility(View.GONE);
-        formGroup.setVisibility(View.VISIBLE);
+        showForm();
         if (errorMessage != null) {
             showStatus(errorMessage);
         }
-        refreshRecentList();
     }
 
     /**
@@ -390,15 +381,7 @@ public class ConnectActivity extends AppCompatActivity {
                     }
                 });
             } else {
-                String url = rawInput;
-                if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                    url = "http://" + url;
-                }
-                if (url.endsWith("/")) {
-                    url = url.substring(0, url.length() - 1);
-                }
-
-                final String normalizedUrl = url;
+                final String normalizedUrl = normalizeServerUrl(rawInput);
                 String error = testConnection(normalizedUrl, 8000);
                 runOnUiThread(() -> {
                     connectButton.setEnabled(true);
@@ -472,17 +455,8 @@ public class ConnectActivity extends AppCompatActivity {
                 return "登录尝试次数过多，请稍后再试";
             }
             return "服务器返回了异常状态码: " + code;
-        } catch (java.net.ConnectException e) {
-            return "无法连接到服务器，请确认地址和端口是否正确";
-        } catch (java.net.SocketTimeoutException e) {
-            return "连接超时，请检查网络或服务器是否在运行";
-        } catch (java.net.UnknownHostException e) {
-            return "无法解析地址，请检查服务器地址是否正确";
-        } catch (javax.net.ssl.SSLException e) {
-            // 已 trustSelfSigned 全信任, SSL 异常基本只因 host 不通, 归并到"无法连接"。
-            return "无法连接到服务器，请确认地址和端口是否正确";
         } catch (Exception e) {
-            return "连接失败，请检查地址或稍后重试";
+            return describeConnectionError(e);
         } finally {
             if (conn != null) {
                 try { conn.disconnect(); } catch (Exception ignored) {}
@@ -506,19 +480,45 @@ public class ConnectActivity extends AppCompatActivity {
                 return null;
             }
             return "服务器返回了异常状态码: " + code;
-        } catch (java.net.ConnectException e) {
-            return "无法连接到服务器，请确认地址和端口是否正确";
-        } catch (java.net.SocketTimeoutException e) {
-            return "连接超时，请检查网络或服务器是否在运行";
-        } catch (java.net.UnknownHostException e) {
-            return "无法解析地址，请检查服务器地址是否正确";
-        } catch (javax.net.ssl.SSLException e) {
-            return "无法连接到服务器，请确认地址和端口是否正确";
-        } catch (java.net.MalformedURLException e) {
-            return "地址格式不正确，请检查后重试";
         } catch (Exception e) {
-            return "连接失败，请检查地址或稍后重试";
+            return describeConnectionError(e);
         }
+    }
+
+    /** 补全协议前缀 (默认 http://) 并去掉末尾斜杠, 用于直连地址归一化。 */
+    private static String normalizeServerUrl(String raw) {
+        String url = raw;
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "http://" + url;
+        }
+        if (url.endsWith("/")) {
+            url = url.substring(0, url.length() - 1);
+        }
+        return url;
+    }
+
+    /**
+     * 把连接探测过程中的异常映射成面向用户的中文文案。两个 testConnection*
+     * 方法共用 — 文案取二者并集 (MalformedURLException 仅直连路径可能触发)。
+     */
+    private static String describeConnectionError(Exception e) {
+        if (e instanceof java.net.MalformedURLException) {
+            return "地址格式不正确，请检查后重试";
+        }
+        if (e instanceof java.net.ConnectException) {
+            return "无法连接到服务器，请确认地址和端口是否正确";
+        }
+        if (e instanceof java.net.SocketTimeoutException) {
+            return "连接超时，请检查网络或服务器是否在运行";
+        }
+        if (e instanceof java.net.UnknownHostException) {
+            return "无法解析地址，请检查服务器地址是否正确";
+        }
+        if (e instanceof javax.net.ssl.SSLException) {
+            // 已 trustSelfSigned 全信任, SSL 异常基本只因 host 不通, 归并到"无法连接"。
+            return "无法连接到服务器，请确认地址和端口是否正确";
+        }
+        return "连接失败，请检查地址或稍后重试";
     }
 
     private void launchWebView(String url, String appToken) {

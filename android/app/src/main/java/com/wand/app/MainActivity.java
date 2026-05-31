@@ -178,13 +178,7 @@ public class MainActivity extends AppCompatActivity {
             webView.loadUrl(serverUrl);
         });
 
-        backButton.setOnClickListener(v -> {
-            Intent connectIntent = new Intent(this, ConnectActivity.class);
-            connectIntent.putExtra("skip_auto_connect", true);
-            connectIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(connectIntent);
-            finish();
-        });
+        backButton.setOnClickListener(v -> openConnectScreen());
 
         // Volume keys in this activity should adjust the notification stream,
         // so users see the "Notification volume" slider when they press volume
@@ -219,6 +213,18 @@ public class MainActivity extends AppCompatActivity {
                 );
             }
         });
+    }
+
+    /**
+     * 回到连接界面 (最近服务器列表)。供"返回连接"按钮和 JS 的 switchServer
+     * 共用。带 skip_auto_connect 避免又被自动连回当前服务器。
+     */
+    private void openConnectScreen() {
+        Intent connectIntent = new Intent(this, ConnectActivity.class);
+        connectIntent.putExtra("skip_auto_connect", true);
+        connectIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(connectIntent);
+        finish();
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -508,15 +514,18 @@ public class MainActivity extends AppCompatActivity {
 
     private void playNotificationSound() {
         if (isSystemMuted()) return;
-
         ServerStore store = new ServerStore(this);
-        String soundName = store.getNotificationSound();
-        float vol = store.getNotificationVolume() / 100f;
-        if (vol <= 0) return;
+        playPresetSound(store.getNotificationSound(), store.getNotificationVolume() / 100f);
+    }
 
+    /**
+     * 按预设声音名 + 音量 (0~1) 播放一次通知音, 走 STREAM_NOTIFICATION 路由。
+     * 音量 <= 0 或资源缺失时静默跳过; 播完自动 release。
+     */
+    private void playPresetSound(String soundName, float vol) {
+        if (vol <= 0) return;
         int resId = getResources().getIdentifier("notif_" + soundName, "raw", getPackageName());
         if (resId == 0) return;
-
         try {
             MediaPlayer mp = MediaPlayer.create(this, resId, NOTIF_AUDIO_ATTRS, 0);
             if (mp != null) {
@@ -525,6 +534,14 @@ public class MainActivity extends AppCompatActivity {
                 mp.start();
             }
         } catch (Exception ignored) {}
+    }
+
+    /** 校验声音名是否属于内置预设 (SOUND_PRESETS)。 */
+    private static boolean isValidSound(String name) {
+        for (String[] preset : SOUND_PRESETS) {
+            if (preset[0].equals(name)) return true;
+        }
+        return false;
     }
 
     private String resolveNotificationChannel(String tag) {
@@ -547,6 +564,27 @@ public class MainActivity extends AppCompatActivity {
         return NotificationCompat.PRIORITY_DEFAULT;
     }
 
+    /** Android 13+ 需运行时通知权限; 未授予返回 false (低版本恒为 true)。 */
+    private boolean hasPostNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true;
+        return ContextCompat.checkSelfPermission(this,
+                android.Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /**
+     * 构建"点击通知拉回 MainActivity"的 PendingIntent — 带 server_url / app_token,
+     * SINGLE_TOP|CLEAR_TOP 复用现有实例而非新开。供普通通知和实时进度通知共用。
+     */
+    private PendingIntent buildSelfPendingIntent(int requestCode) {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.putExtra("server_url", serverUrl);
+        if (appToken != null) intent.putExtra("app_token", appToken);
+        intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        return PendingIntent.getActivity(this, requestCode, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
     // ── JS bridge ──
 
     private class NotificationBridge {
@@ -558,13 +596,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void switchServer() {
-            runOnUiThread(() -> {
-                Intent connectIntent = new Intent(MainActivity.this, ConnectActivity.class);
-                connectIntent.putExtra("skip_auto_connect", true);
-                connectIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(connectIntent);
-                finish();
-            });
+            runOnUiThread(MainActivity.this::openConnectScreen);
         }
 
         @JavascriptInterface
@@ -646,23 +678,10 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void sendNotification(String title, String body, String tag) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ContextCompat.checkSelfPermission(MainActivity.this,
-                        android.Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    return;
-                }
-            }
-
-            Intent intent = new Intent(MainActivity.this, MainActivity.class);
-            intent.putExtra("server_url", serverUrl);
-            if (appToken != null) intent.putExtra("app_token", appToken);
-            intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            if (!hasPostNotificationPermission()) return;
 
             int requestCode = (tag != null ? tag.hashCode() : notificationCounter++) & 0x7FFFFFFF;
-            PendingIntent pi = PendingIntent.getActivity(
-                    MainActivity.this, requestCode, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            PendingIntent pi = buildSelfPendingIntent(requestCode);
 
             String channelId = resolveNotificationChannel(tag);
             NotificationCompat.Builder builder = new NotificationCompat.Builder(MainActivity.this, channelId)
@@ -694,12 +713,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void setNotificationSound(String name) {
-            // Validate against known presets
-            boolean valid = false;
-            for (String[] preset : SOUND_PRESETS) {
-                if (preset[0].equals(name)) { valid = true; break; }
-            }
-            if (!valid) return;
+            if (!isValidSound(name)) return;
             new ServerStore(MainActivity.this).setNotificationSound(name);
         }
 
@@ -731,13 +745,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void previewSound(String name) {
-            // Validate
-            boolean valid = false;
-            for (String[] preset : SOUND_PRESETS) {
-                if (preset[0].equals(name)) { valid = true; break; }
-            }
-            if (!valid) return;
-
+            if (!isValidSound(name)) return;
             runOnUiThread(() -> {
                 if (isSystemMuted()) {
                     Toast.makeText(MainActivity.this,
@@ -745,30 +753,14 @@ public class MainActivity extends AppCompatActivity {
                             Toast.LENGTH_SHORT).show();
                     return;
                 }
-                try {
-                    int resId = getResources().getIdentifier("notif_" + name, "raw", getPackageName());
-                    if (resId == 0) return;
-                    MediaPlayer mp = MediaPlayer.create(MainActivity.this, resId, NOTIF_AUDIO_ATTRS, 0);
-                    if (mp != null) {
-                        float vol = new ServerStore(MainActivity.this).getNotificationVolume() / 100f;
-                        mp.setVolume(vol, vol);
-                        mp.setOnCompletionListener(MediaPlayer::release);
-                        mp.start();
-                    }
-                } catch (Exception ignored) {}
+                playPresetSound(name, new ServerStore(MainActivity.this).getNotificationVolume() / 100f);
             });
         }
 
         @JavascriptInterface
         public void updateSessionProgress(String sessionId, String jsonData) {
             if (sessionId == null || sessionId.isEmpty() || jsonData == null) return;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ContextCompat.checkSelfPermission(MainActivity.this,
-                        android.Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    return;
-                }
-            }
+            if (!hasPostNotificationPermission()) return;
             long now = System.currentTimeMillis();
             Long lastUpdate = progressUpdateTimestamps.get(sessionId);
             if (lastUpdate != null && (now - lastUpdate) < PROGRESS_UPDATE_DEBOUNCE_MS) {
@@ -970,13 +962,8 @@ public class MainActivity extends AppCompatActivity {
                 contentText = "正在执行";
             }
 
-            Intent intent = new Intent(this, MainActivity.class);
-            intent.putExtra("server_url", serverUrl);
-            if (appToken != null) intent.putExtra("app_token", appToken);
-            intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             int requestCode = ("progress:" + sessionId).hashCode() & 0x7FFFFFFF;
-            PendingIntent pi = PendingIntent.getActivity(this, requestCode, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            PendingIntent pi = buildSelfPendingIntent(requestCode);
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID_PROGRESS)
                     .setSmallIcon(R.drawable.ic_notification)
@@ -1557,19 +1544,15 @@ public class MainActivity extends AppCompatActivity {
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
         if (webView == null) return;
-        try {
-            if (level >= TRIM_MEMORY_RUNNING_LOW) {
-                webView.evaluateJavascript(
-                        "(function(){try{if(window.wandTrimCache)window.wandTrimCache(" + level + ");}catch(e){}})();",
-                        null);
-            }
-            if (level >= TRIM_MEMORY_UI_HIDDEN) {
-                // UI 在后台 + 系统压力中等以上, 让 Chromium 释放渲染缓存。
-                // freeMemory 是历史 API, 但仍然是触发 Chromium 主动 GC 最直接
-                // 的 hook (即使官方标 deprecated, AOSP 内部仍会做 trim)。
-                webView.freeMemory();
-            }
-        } catch (Exception ignored) {}
+        if (level >= TRIM_MEMORY_RUNNING_LOW) {
+            evalJs("if(window.wandTrimCache)window.wandTrimCache(" + level + ");");
+        }
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            // UI 在后台 + 系统压力中等以上, 让 Chromium 释放渲染缓存。
+            // freeMemory 是历史 API, 但仍然是触发 Chromium 主动 GC 最直接
+            // 的 hook (即使官方标 deprecated, AOSP 内部仍会做 trim)。
+            try { webView.freeMemory(); } catch (Exception ignored) {}
+        }
     }
 
     // 跟踪软键盘 (IME) 当前是否处于动画 / 已展开状态。WindowInsetsAnimation
@@ -1795,13 +1778,9 @@ public class MainActivity extends AppCompatActivity {
                 webView.reload();
                 return;
             }
-            try {
-                String safe = state == null ? "" : state.replace("'", "");
-                webView.evaluateJavascript(
-                        "(function(){try{window.dispatchEvent(new CustomEvent('wand-android-network',"
-                                + "{detail:{state:'" + safe + "'}}));}catch(e){}})();",
-                        null);
-            } catch (Exception ignored) {}
+            String safe = state == null ? "" : state.replace("'", "");
+            evalJs("window.dispatchEvent(new CustomEvent('wand-android-network',"
+                    + "{detail:{state:'" + safe + "'}}));");
         });
     }
 
@@ -1822,16 +1801,10 @@ public class MainActivity extends AppCompatActivity {
     private void dispatchImeState(String state) {
         runOnUiThread(() -> {
             if (webView == null) return;
-            try {
-                String safe = state == null ? "" : state.replace("'", "");
-                webView.evaluateJavascript(
-                        "(function(){try{"
-                                + "window.__wandImeNative=true;"
-                                + "window.dispatchEvent(new CustomEvent('wand-ime-state',"
-                                + "{detail:{state:'" + safe + "'}}));"
-                                + "}catch(e){}})();",
-                        null);
-            } catch (Exception ignored) {}
+            String safe = state == null ? "" : state.replace("'", "");
+            evalJs("window.__wandImeNative=true;"
+                    + "window.dispatchEvent(new CustomEvent('wand-ime-state',"
+                    + "{detail:{state:'" + safe + "'}}));");
         });
     }
 
@@ -1855,18 +1828,23 @@ public class MainActivity extends AppCompatActivity {
      * --app-inset-* 显式置 0, 同样目的是抵消任何旧版 CSS 残留。
      */
     private void injectNativeInsetsMarker() {
+        evalJs(
+            "var r=document.documentElement;" +
+            "r.classList.add('is-wand-app-native-insets');" +
+            "r.style.setProperty('--app-inset-top','0px');" +
+            "r.style.setProperty('--app-inset-bottom','0px');" +
+            "r.style.setProperty('--app-inset-left','0px');" +
+            "r.style.setProperty('--app-inset-right','0px');");
+    }
+
+    /**
+     * 在 WebView 里执行一段 JS, 自动套 (function(){try{...}catch(e){}})() 防御
+     * 包裹 + webView null / 异常守卫。供各原生 → 页面事件桥共用。
+     */
+    private void evalJs(String innerBody) {
         if (webView == null) return;
-        String js =
-            "(function(){try{" +
-                "var r=document.documentElement;" +
-                "r.classList.add('is-wand-app-native-insets');" +
-                "r.style.setProperty('--app-inset-top','0px');" +
-                "r.style.setProperty('--app-inset-bottom','0px');" +
-                "r.style.setProperty('--app-inset-left','0px');" +
-                "r.style.setProperty('--app-inset-right','0px');" +
-            "}catch(e){}})();";
         try {
-            webView.evaluateJavascript(js, null);
+            webView.evaluateJavascript("(function(){try{" + innerBody + "}catch(e){}})();", null);
         } catch (Exception ignored) {}
     }
 }
