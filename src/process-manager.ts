@@ -13,18 +13,14 @@ import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, Escal
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
-import { buildChildEnv } from "./env-utils.js";
-import { buildLanguageDirective } from "./language-prompt.js";
+import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
+import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./resume-policy.js";
 import { applyThinkingEffortToPrompt, normalizeThinkingEffort } from "./structured-session-manager.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {
   return /^codex\b/.test(command.trim()) ? "codex" : "claude";
-}
-
-function isRunningAsRoot(): boolean {
-  return typeof process.getuid === "function" && process.getuid() === 0;
 }
 
 export type { ProcessEvent, ProcessEventHandler } from "./types.js";
@@ -2229,9 +2225,7 @@ export class ProcessManager extends EventEmitter {
     const isChinese = language === "中文";
 
     if (mode === "managed") {
-      const autonomousPrompt = isChinese
-        ? "你正在完全托管的自主模式下运行。用户可能无法及时回复问题或确认。你必须独立做出所有决策——自行选择最佳方案，而不是向用户询问偏好、确认或澄清。如果有多种可行方案，选择你认为最合适的并继续执行。除非任务本身存在根本性的歧义且无法合理推断，否则不要等待用户输入。果断行动，自主决策。"
-        : "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.";
+      const autonomousPrompt = buildManagedAutonomyDirective(isChinese);
       const escaped = autonomousPrompt.replace(/'/g, "'\\''");
       result += ` --append-system-prompt '${escaped}'`;
     }

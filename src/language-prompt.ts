@@ -67,3 +67,13 @@ export function buildLanguageDirective(language: string): string {
     `Subagent: when you dispatch a subagent via the Task tool, you MUST explicitly instruct the subagent in its prompt to also respond in ${trimmed}.`,
   ].join("\n");
 }
+
+/**
+ * 完全托管自主模式的系统提示：供 PTY runner 与 structured runner（CLI + SDK）共用，
+ * 避免两处各抄一份中英双语文案导致改一处漏一处。
+ */
+export function buildManagedAutonomyDirective(isChinese: boolean): string {
+  return isChinese
+    ? "你正在完全托管的自主模式下运行。用户可能无法及时回复问题或确认。你必须独立做出所有决策——自行选择最佳方案，而不是向用户询问偏好、确认或澄清。如果有多种可行方案，选择你认为最合适的并继续执行。除非任务本身存在根本性的歧义且无法合理推断，否则不要等待用户输入。果断行动，自主决策。"
+    : "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.";
+}

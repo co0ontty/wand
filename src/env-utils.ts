@@ -21,6 +21,11 @@ const MINIMAL_ENV_KEYS: readonly string[] = [
   "PWD",
 ];
 
+/** 是否以 root 身份运行（uid 或 euid 为 0）。供 PTY runner 与 structured runner 共用。 */
+export function isRunningAsRoot(): boolean {
+  return process.getuid?.() === 0 || process.geteuid?.() === 0;
+}
+
 /**
  * 根据 inheritEnv 配置组装子进程的环境变量。
  *

@@ -16,8 +16,8 @@ import {
   SubagentMeta, WandConfig,
 } from "./types.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
-import { buildChildEnv } from "./env-utils.js";
-import { buildLanguageDirective } from "./language-prompt.js";
+import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
+import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 
 interface CreateStructuredSessionOptions {
   cwd: string;
@@ -222,10 +222,6 @@ const STREAM_EMIT_DEBOUNCE_MS = 16;
  *  authoritative final snapshot. */
 const STREAM_SAVE_THROTTLE_MS = 200;
 const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
-
-function isRunningAsRoot(): boolean {
-  return process.getuid?.() === 0 || process.geteuid?.() === 0;
-}
 
 /**
  * 检测当前系统是否使用 musl libc（Alpine Linux 等）。
@@ -451,11 +447,7 @@ function buildAppendSystemPromptParts(language: string | undefined, mode: Execut
   const parts: string[] = [];
 
   if (mode === "managed") {
-    parts.push(
-      isChinese
-        ? "你正在完全托管的自主模式下运行。用户可能无法及时回复问题或确认。你必须独立做出所有决策——自行选择最佳方案，而不是向用户询问偏好、确认或澄清。如果有多种可行方案，选择你认为最合适的并继续执行。除非任务本身存在根本性的歧义且无法合理推断，否则不要等待用户输入。果断行动，自主决策。"
-        : "You are running in a fully managed, autonomous mode. The user may not be available to respond to questions or confirmations in a timely manner. You MUST make all decisions independently — choose the best approach yourself instead of asking the user for preferences, confirmations, or clarifications. If multiple approaches are viable, pick the one you judge most appropriate and proceed. Never block on user input unless the task is fundamentally ambiguous and cannot be reasonably inferred. Be decisive and self-directed.",
-    );
+    parts.push(buildManagedAutonomyDirective(isChinese));
   }
 
   if (trimmedLanguage) {
