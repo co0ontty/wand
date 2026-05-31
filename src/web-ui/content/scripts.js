@@ -11322,7 +11322,9 @@
             msgEl.classList.remove("hidden");
           }
           updateBtn.classList.add("hidden");
-          if (data.restartRequired !== false) {
+          if (data.detachedUpdate) {
+            showRestartOverlay();
+          } else if (data.restartRequired !== false) {
             performRestart(null, msgEl);
           } else {
             // \u670d\u52a1\u7aef\u660e\u786e\u8868\u793a\u4e0d\u9700\u8981\u91cd\u542f\uff0c\u4fdd\u7559\u624b\u52a8\u91cd\u542f\u6309\u94ae
@@ -22089,6 +22091,10 @@
             setSubtitle((data.message || "\u66f4\u65b0\u5b8c\u6210") + "\uff0c\u6b63\u5728\u91cd\u542f\u670d\u52a1\u2026");
             setStatus("");
             if (actionLabel) actionLabel.textContent = "\u6b63\u5728\u91cd\u542f\u2026";
+            if (data.detachedUpdate) {
+              showRestartOverlay();
+              return;
+            }
             if (data.restartRequired === false) {
               setProgress(false);
               card.classList.remove("is-busy");
@@ -22174,7 +22180,7 @@
         document.body.appendChild(overlay);
 
         var attempts = 0;
-        var maxAttempts = 20; // 20 * 2s = 40s
+        var maxAttempts = 180; // 180 * 2s = 6min; beta git installs can be slow
         var timer = setInterval(function() {
           attempts++;
           fetch("/api/config", { credentials: "same-origin" })

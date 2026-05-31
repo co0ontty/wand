@@ -40,6 +40,7 @@ import { installPackageGloballyAsync, resolveGlobalWandCli } from "./npm-update-
 import { repairServiceUnitAfterUpdate } from "./service-self-repair.js";
 import { computeRelaunch } from "./relaunch.js";
 import { isServiceInstalled } from "./tui/commands.js";
+import { canUseDetachedUpdateHelper, startDetachedUpdateHelper } from "./update-helper.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
@@ -1786,31 +1787,42 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         targetLabel = onBetaBuild ? "最新正式版" : latest;
       }
 
-      // beta 走 git 安装（clone + 装依赖），比 registry tarball 慢，给足超时。
-      const logLines: string[] = [];
-      try {
-        await installPackageGloballyAsync(installSpec, 300000, (line) => {
-          logLines.push(line);
-          process.stdout.write(`${line}\n`);
-        });
-      } catch (e) {
-        res.status(500).json({
-          error: getErrorMessage(e, "更新失败。"),
-          detail: logLines.join("\n").slice(-2000),
-        });
+      if (!canUseDetachedUpdateHelper()) {
+        res.status(500).json({ error: "当前平台暂不支持 Web 异步更新，请在终端运行 install.sh 更新。" });
         return;
       }
 
-      // 镜像 install.sh：装完用全局安装刷新服务 unit（ExecStart/PATH），重启才会跑到新版。
-      const repair = repairServiceUnitAfterUpdate(configPath);
-      // 装包成功后告知前端可以发起重启；前端会随即调用 /api/restart 完成自动重启。
+      const helper = startDetachedUpdateHelper({
+        installSpec,
+        configPath,
+        parentPid: process.pid,
+        cliArgs: process.argv.slice(2),
+        cwd: process.cwd(),
+        env: process.env,
+        timeoutMs: 300000,
+      });
+      if (!helper.started) {
+        res.status(500).json({ error: helper.message, detail: `script=${helper.scriptPath}\nlog=${helper.logPath}` });
+        return;
+      }
+      process.stdout.write(`[wand] ${helper.message}\n`);
+      wsManager.emitEvent({
+        type: "notification",
+        sessionId: "__system__",
+        data: { kind: "auto-update-restart", current: PKG_VERSION, latest: targetLabel },
+      });
+
       res.json({
         ok: true,
-        message: `已更新到 ${targetLabel}`,
-        restartRequired: true,
+        message: `已开始更新到 ${targetLabel}`,
+        restartRequired: false,
+        detachedUpdate: true,
         version: targetLabel,
-        serviceRepair: repair.scope ? { repaired: repair.repaired, message: repair.message } : null,
+        logPath: helper.logPath,
       });
+      setTimeout(() => {
+        shutdownForDetachedUpdate();
+      }, 500);
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "更新失败。") });
     } finally {
@@ -2440,6 +2452,18 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     });
     // Force exit after 5s if graceful shutdown stalls
     setTimeout(() => process.exit(0), 5000);
+  }
+
+  function shutdownForDetachedUpdate(): void {
+    try {
+      wss.clients.forEach((client) => client.close());
+    } catch {
+      /* noop */
+    }
+    server.close(() => {
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 3000);
   }
 
   app.post("/api/restart", async (_req, res) => {
