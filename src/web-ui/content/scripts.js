@@ -1563,7 +1563,7 @@
 
       // ===== 桌面：点 sidebar 外的空白处自动收起 =====
       // 只对「临时打开但未锁定」的全尺寸侧栏生效；已锁定的 pinned 侧栏
-      // 必须保持常驻，除非用户明确点 X / hamburger 关闭。
+      // 必须保持常驻，除非用户明确点 X 关闭。
       // - 仅 desktop + 未锁定 + 全尺寸（非窄条）+ 已打开 时生效
       // - 窄条态不触发（窄条本来就是稳定常驻形态）
       // - 手机端由 .drawer-backdrop 元素自己接住点击，不在这里重复处理
@@ -1588,7 +1588,7 @@
           ".folder-picker-dropdown, .path-suggestions, " +
           ".permission-prompt-overlay, .restart-overlay"
         )) return;
-        closeSessionsDrawer();
+        closeTransientSessionsDrawer();
       }, true);
 
       renderBootLoading();
@@ -1783,6 +1783,7 @@
         var terminalInfo = selectedSession ? (selectedSession.mode + " | " + selectedSession.status) : "点击上方「新对话」开始";
         var currentDraft = state.selectedId ? (state.drafts[state.selectedId] || "") : "";
         var drawerClass = state.sessionsDrawerOpen ? " open" : "";
+        var backdropClass = shouldShowSessionsBackdrop() ? " open" : "";
         var preferredTool = getComposerTool();
         var composerMode = getSafeModeForTool(preferredTool, state.chatMode);
 
@@ -1796,7 +1797,7 @@
         var collapsedCls = isCollapsed ? ' sidebar-collapsed' : '';
         var sidebarCollapsedCls = isCollapsed ? ' collapsed' : '';
         return '<div class="app-container">' +
-          '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + drawerClass + '"></div>' +
+          '<div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div>' +
           '<div class="main-layout' + (state.sessionsDrawerOpen ? ' sidebar-open' : '') + (isAnchored ? ' sidebar-pinned' : '') + collapsedCls + '">' +
             '<aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? ' pinned' : '') + sidebarCollapsedCls + '">' +
               '<div class="sidebar-header">' +
@@ -2295,29 +2296,6 @@
         };
       }
 
-      // Knob starts at LEFT (Commit). Three zones, left → right:
-      //   commit (0.00..0.32) — starting position
-      //   tag    (0.32..0.68) — dwell here ~600ms to "arm" the Tag latch
-      //   push   (0.68..1.00) — release here to push
-      function getQuickCommitZoneFromRatio(ratio) {
-        if (ratio <= 0.32) return "commit";
-        if (ratio >= 0.68) return "push";
-        return "tag";
-      }
-
-      // tagArmed is only true if the user dwelled long enough in the Tag zone.
-      // Sliding straight through Tag → Push without dwelling = commit-push (skip Tag).
-      function composeQuickCommitAction(zone, tagArmed) {
-        if (zone === "push") return tagArmed ? "commit-tag-push" : "commit-push";
-        if (zone === "tag") return "commit-tag";
-        return "commit";
-      }
-
-      // How long the user must hold the knob inside the Tag zone before the Tag latch arms.
-      // Keep in sync with `--qc-dwell-ms` in styles.css.
-      var QUICK_COMMIT_TAG_DWELL_MS = 1100;
-      var QUICK_COMMIT_ZONE_RANK = { commit: 0, tag: 1, push: 2 };
-
       function openQuickCommitModal() {
         if (!state.selectedId) return;
         state.quickCommitOpen = true;
@@ -2448,236 +2426,194 @@
         attachQuickCommitDrag();
       }
 
-      // ratio: knob CENTER position as fraction of track [0..1]. 0 = left (Commit start), 1 = right (Push).
-      function updateQuickCommitDragVisual(action, ratio, opts) {
-        action = normalizeQuickCommitAction(action);
-        state.quickCommitDragAction = action;
-        var track = document.getElementById("quick-commit-drag-track");
-        if (!track) return;
-        var meta = getQuickCommitActionMeta(action);
-        // Resting position per action when user isn't dragging.
-        var defaultRatio = 0;
-        if (action === "commit-tag") defaultRatio = 0.5;
-        else if (action === "commit-push" || action === "commit-tag-push") defaultRatio = 1;
-        var progress = typeof ratio === "number"
-          ? Math.max(0, Math.min(1, ratio))
-          : defaultRatio;
-        var zone = getQuickCommitZoneFromRatio(progress);
-        track.setAttribute("data-action", action);
-        track.setAttribute("data-zone", zone);
-        track.setAttribute("data-tag-armed", (action === "commit-tag" || action === "commit-tag-push") ? "1" : "0");
-        track.style.setProperty("--qc-progress", (progress * 100).toFixed(1) + "%");
-        var knob = document.getElementById("quick-commit-drag-action");
-        if (knob) {
-          var trackWidth = track.clientWidth;
-          var knobWidth = knob.offsetWidth;
-          var pad = 6;
-          // Knob CENTER tracks ratio * trackWidth, clamped so the knob stays fully inside.
-          var center = progress * trackWidth;
-          var minLeft = pad;
-          var maxLeft = Math.max(pad, trackWidth - knobWidth - pad);
-          var left = Math.max(minLeft, Math.min(maxLeft, center - knobWidth / 2));
-          track.style.setProperty("--qc-knob-x", left.toFixed(1) + "px");
-        }
-        var label = document.getElementById("quick-commit-drag-label");
-        if (label) {
-          var dwell = track.getAttribute("data-tag-dwell") || "idle";
-          var cancelMode = track.getAttribute("data-cancel-mode") === "1";
-          var txt;
-          if (state.quickCommitSubmitting) {
-            txt = state.quickCommitAutoGenerating ? "AI 生成 + 提交中…" : "执行中…";
-          } else if (cancelMode) {
-            txt = "松手取消 ✕";
-          } else if (dwell === "active") {
-            txt = "锁定 Tag 中…";
-          } else if (dwell === "armed" && zone === "tag") {
-            txt = "Tag 已就绪 · 继续推送 →";
-          } else {
-            txt = meta.label;
-          }
-          label.textContent = txt;
-        }
-        // Stage class refresh.
-        var stages = track.querySelectorAll("[data-qc-stage]");
-        for (var i = 0; i < stages.length; i++) {
-          var st = stages[i].getAttribute("data-qc-stage");
-          var active = false, passed = false;
-          if (st === "commit") {
-            active = action === "commit";
-            passed = true;
-          } else if (st === "tag") {
-            active = action === "commit-tag";
-            passed = action === "commit-tag" || action === "commit-tag-push";
-          } else if (st === "push") {
-            active = action === "commit-push" || action === "commit-tag-push";
-            passed = active;
-          }
-          stages[i].classList.toggle("is-active", active);
-          stages[i].classList.toggle("is-passed", passed);
-        }
+      // Compose the final action from which stations the orb attached during the drag.
+      // Commit is implicit — every action starts with a commit.
+      function composeOrbAction(attached) {
+        var hasTag  = !!(attached && attached.tag);
+        var hasPush = !!(attached && attached.push);
+        if (hasTag && hasPush) return "commit-tag-push";
+        if (hasTag)  return "commit-tag";
+        if (hasPush) return "commit-push";
+        return "commit";
       }
 
-      function attachQuickCommitDrag() {
-        var track = document.getElementById("quick-commit-drag-track");
-        var knob = document.getElementById("quick-commit-drag-action");
-        if (!track || !knob) return;
-        updateQuickCommitDragVisual(state.quickCommitDragAction || "commit");
+      // How close (px) the pointer must come to a loose chip's home before that chip is
+      // magnetically picked up into the chip currently being dragged.
+      var QC_DOCK_PICKUP_R = 58;
 
-        function setDwell(state) { track.setAttribute("data-tag-dwell", state); }
-        function clearArmTimer() {
-          if (quickCommitDragState && quickCommitDragState.tagArmTimer) {
-            clearTimeout(quickCommitDragState.tagArmTimer);
-            quickCommitDragState.tagArmTimer = null;
-          }
+      // A plain tap on a chip fires its own action directly (tag/push imply a commit too).
+      function qcChipTapAction(id) {
+        if (id === "tag") return "commit-tag";
+        if (id === "push") return "commit-push";
+        return "commit";
+      }
+
+      // Magnetic dock: three loose chips (Commit / Tag / Push) rest in a field. Grab ANY chip and
+      // drag it; whenever the pointer brushes another chip it sticks to the travelling cluster and
+      // moves along (ordered Commit → Tag → Push). Fling the cluster into the right-side ▶ pad to
+      // fire compose(members) — a commit is always implied. Release anywhere else and every chip
+      // springs back home. A plain tap (no drag) on a chip fires that chip's own action.
+      function attachQuickCommitDrag() {
+        var field   = document.getElementById("qc-dock-field");
+        var stage   = document.getElementById("qc-dock-stage");
+        var launch  = document.getElementById("qc-dock-launch");
+        var cluster = document.getElementById("qc-dock-cluster");
+        if (!field || !stage || !launch || !cluster) return;
+
+        var ORDER = ["commit", "tag", "push"];
+        var chips = {};
+        ORDER.forEach(function(id) { chips[id] = field.querySelector('[data-chip="' + id + '"]'); });
+        if (!chips.commit || !chips.tag || !chips.push) return;
+
+        function cw(id) { return chips[id] ? chips[id].offsetWidth : 90; }
+        function chH()  { return chips.commit ? chips.commit.offsetHeight : 38; }
+
+        // Resting (home) positions — the three chips in one centered row.
+        function homePositions() {
+          var fw = field.clientWidth, fh = field.clientHeight, H = chH();
+          var gap = 14;
+          var total = ORDER.reduce(function(s, id) { return s + cw(id); }, 0) + (ORDER.length - 1) * gap;
+          var x = Math.max(8, (fw - total) / 2);
+          var y = (fh - H) / 2;
+          var pos = {};
+          ORDER.forEach(function(id) { pos[id] = { x: x, y: y }; x += cw(id) + gap; });
+          return pos;
         }
 
-        function setCancelMode(on) { track.setAttribute("data-cancel-mode", on ? "1" : "0"); }
+        var home = {};
+        function placeChip(id, x, y) {
+          if (chips[id]) chips[id].style.transform = "translate(" + x.toFixed(1) + "px," + y.toFixed(1) + "px)";
+        }
+        function layoutHome(animated) {
+          home = homePositions();
+          ORDER.forEach(function(id) {
+            chips[id].classList.toggle("qc-chip--anim", !!animated);
+            placeChip(id, home[id].x, home[id].y);
+          });
+        }
+        layoutHome(false);
 
-        var onPointerDown = function(e) {
-          if (knob.disabled || isQuickCommitOpInFlight()) return;
-          var rect = track.getBoundingClientRect();
-          quickCommitDragState = {
-            pointerId: e.pointerId,
-            rect: rect,
-            startX: e.clientX,
-            moved: false,
-            zone: "commit",
-            maxZone: "commit",          // furthest zone the knob ever reached this drag
-            tagArmed: false,
-            tagArmTimer: null,
-            action: "commit",
+        var drag = null;
+
+        // Lay the current cluster members in a tight row centered on (cx, cy) within the field.
+        function layoutCluster(members, cx, cy) {
+          var H = chH(), gapIn = 5;
+          var ids = ORDER.filter(function(id) { return members.indexOf(id) >= 0; });
+          var total = ids.reduce(function(s, id) { return s + cw(id); }, 0) + Math.max(0, ids.length - 1) * gapIn;
+          var fh = field.clientHeight;
+          var x = cx - total / 2;
+          var y = Math.max(2, Math.min(fh - H - 2, cy - H / 2));
+          ids.forEach(function(id) { placeChip(id, x, y); x += cw(id) + gapIn; });
+          return { x: cx - total / 2 - 7, y: y - 7, w: total + 14, h: H + 14 };
+        }
+        function showCluster(box) {
+          cluster.classList.add("is-active");
+          cluster.style.transform = "translate(" + box.x.toFixed(1) + "px," + box.y.toFixed(1) + "px)";
+          cluster.style.width  = box.w.toFixed(1) + "px";
+          cluster.style.height = box.h.toFixed(1) + "px";
+        }
+        function hideCluster() { cluster.classList.remove("is-active"); }
+
+        function clusterAction(members) {
+          return composeOrbAction({
+            commit: true,
+            tag: members.indexOf("tag") >= 0,
+            push: members.indexOf("push") >= 0,
+          });
+        }
+        function setLaunchLabel(t) {
+          var l = document.getElementById("qc-dock-launch-label");
+          if (l) l.textContent = t;
+        }
+        function pointInLaunch(x, y) {
+          var r = launch.getBoundingClientRect();
+          return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+        }
+
+        function onDown(id) {
+          return function(e) {
+            if (chips[id].disabled || isQuickCommitOpInFlight()) return;
+            drag = { anchor: id, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false, members: [id] };
+            ORDER.forEach(function(m) { chips[m].classList.remove("qc-chip--anim"); });
+            chips[id].classList.add("is-grabbing");
+            try { chips[id].setPointerCapture(e.pointerId); } catch (err) { /* ignored */ }
+            stage.classList.add("is-dragging");
+            e.preventDefault();
           };
-          try { knob.setPointerCapture(e.pointerId); } catch (err) { /* ignored */ }
-          track.classList.add("is-dragging");
-          setDwell("idle");
-          setCancelMode(false);
-          updateQuickCommitDragVisual("commit", 0);
-          e.preventDefault();
-        };
-        var onPointerMove = function(e) {
-          if (!quickCommitDragState || quickCommitDragState.pointerId !== e.pointerId) return;
-          var rect = quickCommitDragState.rect;
-          var ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
-          ratio = Math.max(0, Math.min(1, ratio));
-          if (Math.abs(e.clientX - quickCommitDragState.startX) > 5) quickCommitDragState.moved = true;
-          var zone = getQuickCommitZoneFromRatio(ratio);
-          // Track furthest zone reached so we can detect a backtrack-to-commit.
-          if (QUICK_COMMIT_ZONE_RANK[zone] > QUICK_COMMIT_ZONE_RANK[quickCommitDragState.maxZone]) {
-            quickCommitDragState.maxZone = zone;
-          }
-          // Zone transitions drive the dwell state machine.
-          if (zone !== quickCommitDragState.zone) {
-            if (zone === "tag" && !quickCommitDragState.tagArmed) {
-              // Entered Tag zone unarmed → kick off the dwell timer + CSS fill animation.
-              clearArmTimer();
-              setDwell("active");
-              quickCommitDragState.tagArmTimer = setTimeout(function() {
-                if (!quickCommitDragState) return;
-                quickCommitDragState.tagArmed = true;
-                quickCommitDragState.tagArmTimer = null;
-                setDwell("armed");
-                var newAction = composeQuickCommitAction(quickCommitDragState.zone, true);
-                quickCommitDragState.action = newAction;
-                updateQuickCommitDragVisual(newAction);
-              }, QUICK_COMMIT_TAG_DWELL_MS);
-            } else if (zone !== "tag" && !quickCommitDragState.tagArmed) {
-              // Left Tag zone before arming → cancel the dwell.
-              clearArmTimer();
-              setDwell("idle");
-            } else if (zone === "tag" && quickCommitDragState.tagArmed) {
-              setDwell("armed");
+        }
+        function onMove(e) {
+          if (!drag || drag.pointerId !== e.pointerId) return;
+          if (Math.abs(e.clientX - drag.startX) > 3 || Math.abs(e.clientY - drag.startY) > 3) drag.moved = true;
+          var fr = field.getBoundingClientRect();
+          var fx = e.clientX - fr.left, fy = e.clientY - fr.top;
+          // magnetic pickup: any loose chip whose home center is near the pointer joins the cluster.
+          ORDER.forEach(function(id) {
+            if (drag.members.indexOf(id) >= 0) return;
+            var hx = home[id].x + cw(id) / 2, hy = home[id].y + chH() / 2;
+            var dx = fx - hx, dy = fy - hy;
+            if (Math.sqrt(dx * dx + dy * dy) < QC_DOCK_PICKUP_R) {
+              drag.members.push(id);
+              chips[id].classList.remove("qc-chip--anim");
+              chips[id].classList.add("is-attached");
             }
-            quickCommitDragState.zone = zone;
-          }
-          // Cancel-mode: backed back to commit after venturing further.
-          // Visual cue is set here; the actual "no-submit" decision is made in finish().
-          var inCancelMode = quickCommitDragState.maxZone !== "commit" && zone === "commit";
-          setCancelMode(inCancelMode);
-          var action = composeQuickCommitAction(zone, quickCommitDragState.tagArmed);
-          quickCommitDragState.action = action;
-          updateQuickCommitDragVisual(action, ratio);
-        };
-        var finish = function(e, cancelled) {
-          if (!quickCommitDragState) return;
-          var current = quickCommitDragState;
-          clearArmTimer();
-          quickCommitDragState = null;
-          track.classList.remove("is-dragging");
-          setDwell("idle");
-          setCancelMode(false);
-          try {
-            if (typeof knob.releasePointerCapture === "function") knob.releasePointerCapture(current.pointerId);
-          } catch (err) { /* ignored */ }
-          // Backtrack: user ventured out past Commit, then dragged back and released at Commit → cancel.
-          var isBacktrack = current.moved
-            && current.zone === "commit"
-            && current.maxZone !== "commit";
-          if (cancelled || isBacktrack) {
-            updateQuickCommitDragVisual("commit");
+          });
+          var box = layoutCluster(drag.members, fx, fy);
+          var hot = pointInLaunch(e.clientX, e.clientY);
+          stage.setAttribute("data-hot", hot ? "1" : "0");
+          stage.setAttribute("data-action", clusterAction(drag.members));
+          if (drag.members.length > 1) showCluster(box); else hideCluster();
+          setLaunchLabel(hot ? "松手执行" : "提交");
+        }
+        function endDrag(e, cancelled) {
+          if (!drag || drag.pointerId !== e.pointerId) return;
+          var cur = drag; drag = null;
+          stage.classList.remove("is-dragging");
+          stage.setAttribute("data-hot", "0");
+          setLaunchLabel("提交");
+          hideCluster();
+          ORDER.forEach(function(m) { chips[m].classList.remove("is-grabbing", "is-attached"); });
+          try { chips[cur.anchor].releasePointerCapture(cur.pointerId); } catch (err) { /* ignored */ }
+
+          if (!cancelled && !cur.moved) {
+            // plain tap → fire this chip's own action
+            submitQuickCommit(qcChipTapAction(cur.anchor));
             return;
           }
-          // Tap (no drag) → just commit. Auto-message will fire if the message is empty.
-          var action = current.moved
-            ? composeQuickCommitAction(current.zone, current.tagArmed)
-            : "commit";
-          updateQuickCommitDragVisual(action);
-          submitQuickCommit(action);
-          if (e && typeof e.preventDefault === "function") e.preventDefault();
-        };
-        var onPointerUp = function(e) {
-          if (!quickCommitDragState || quickCommitDragState.pointerId !== e.pointerId) return;
-          finish(e, false);
-        };
-        var onPointerCancel = function(e) {
-          if (!quickCommitDragState || quickCommitDragState.pointerId !== e.pointerId) return;
-          finish(e, true);
-        };
-        // Keyboard parity:
-        //   →  step zone right (commit → commit-tag → commit-tag-push). The first → into Tag arms it instantly.
-        //   ←  step zone left
-        //   Home → reset to commit
-        //   Enter / Space → submit current action
-        var onKeyDown = function(e) {
-          if (knob.disabled || isQuickCommitOpInFlight()) return;
-          var cur = state.quickCommitDragAction || "commit";
-          if (e.key === "ArrowRight") {
-            e.preventDefault();
-            var next = cur;
-            if (cur === "commit") next = "commit-tag";          // arm Tag
-            else if (cur === "commit-tag") next = "commit-tag-push";
-            else if (cur === "commit-push") next = "commit-push";
-            updateQuickCommitDragVisual(next);
-          } else if (e.key === "ArrowLeft") {
-            e.preventDefault();
-            var prev = cur;
-            if (cur === "commit-tag-push") prev = "commit-tag";
-            else if (cur === "commit-tag") prev = "commit";
-            else if (cur === "commit-push") prev = "commit";
-            updateQuickCommitDragVisual(prev);
-          } else if (e.key === "Home") {
-            e.preventDefault();
-            updateQuickCommitDragVisual("commit");
-          } else if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            submitQuickCommit(state.quickCommitDragAction || "commit");
+          if (!cancelled && pointInLaunch(e.clientX, e.clientY)) {
+            submitQuickCommit(clusterAction(cur.members));
+            return;
           }
-        };
+          // released loose → everyone springs back home
+          stage.setAttribute("data-action", "commit");
+          layoutHome(true);
+        }
 
-        knob.addEventListener("pointerdown", onPointerDown);
-        knob.addEventListener("pointermove", onPointerMove);
-        knob.addEventListener("pointerup", onPointerUp);
-        knob.addEventListener("pointercancel", onPointerCancel);
-        knob.addEventListener("keydown", onKeyDown);
+        var onResize = function() { if (state.quickCommitOpen && !drag) layoutHome(false); };
+        window.addEventListener("resize", onResize);
+
+        ORDER.forEach(function(id) {
+          var c = chips[id];
+          c.addEventListener("pointerdown", onDown(id));
+          c.addEventListener("pointermove", onMove);
+          c.addEventListener("pointerup", function(e) { endDrag(e, false); });
+          c.addEventListener("pointercancel", function(e) { endDrag(e, true); });
+          c.addEventListener("keydown", function(e) {
+            if (c.disabled || isQuickCommitOpInFlight()) return;
+            if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+              e.preventDefault();
+              submitQuickCommit(qcChipTapAction(id));
+            }
+          });
+        });
+
+        launch.addEventListener("click", function() {
+          if (launch.disabled || isQuickCommitOpInFlight() || drag) return;
+          submitQuickCommit("commit");
+        });
+
         quickCommitDragCleanup = function() {
-          knob.removeEventListener("pointerdown", onPointerDown);
-          knob.removeEventListener("pointermove", onPointerMove);
-          knob.removeEventListener("pointerup", onPointerUp);
-          knob.removeEventListener("pointercancel", onPointerCancel);
-          knob.removeEventListener("keydown", onKeyDown);
-          if (quickCommitDragState && quickCommitDragState.tagArmTimer) {
-            clearTimeout(quickCommitDragState.tagArmTimer);
-          }
-          quickCommitDragState = null;
+          window.removeEventListener("resize", onResize);
+          drag = null;
         };
       }
 
@@ -2937,45 +2873,40 @@
       }
 
       function renderQuickCommitDragControl(hasChanges) {
-        var action = normalizeQuickCommitAction(state.quickCommitDragAction || "commit");
-        var meta = getQuickCommitActionMeta(action);
         var disabled = !hasChanges || isQuickCommitOpInFlight();
-        var label = state.quickCommitSubmitting ? "执行中…" : meta.label;
-        // Stage classes derived from the current action.
-        var commitActive = action === "commit";
-        var tagActive    = action === "commit-tag";
-        var tagPassed    = action === "commit-tag" || action === "commit-tag-push";
-        var pushActive   = action === "commit-push" || action === "commit-tag-push";
-        var hint = "向右拖 · 经过 Tag 时停一下打 Tag · 直接划到 Push 跳过 Tag · 留空会自动生成";
-        return '<div class="qc-drag-wrap">' +
-          '<div id="quick-commit-drag-track" class="qc-drag-track" data-action="' + escapeHtml(action) + '" data-zone="commit" data-tag-dwell="idle">' +
-            // Baseline track: subtle grey rail under everything, segments brighten as the knob passes.
-            '<svg class="qc-drag-baseline" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">' +
-              '<line class="qc-baseline-rail" x1="4" y1="12" x2="96" y2="12" />' +
-              '<line class="qc-baseline-seg qc-baseline-seg--left"  x1="4"  y1="12" x2="50" y2="12" />' +
-              '<line class="qc-baseline-seg qc-baseline-seg--right" x1="50" y1="12" x2="96" y2="12" />' +
-            '</svg>' +
-            // Three marching chevrons running right — "drag this way".
-            '<div class="qc-chevrons" aria-hidden="true">' +
-              '<svg class="qc-chevron" viewBox="0 0 12 16" width="9" height="12"><path d="M3 2 L9 8 L3 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
-              '<svg class="qc-chevron" viewBox="0 0 12 16" width="9" height="12"><path d="M3 2 L9 8 L3 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
-              '<svg class="qc-chevron" viewBox="0 0 12 16" width="9" height="12"><path d="M3 2 L9 8 L3 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+        // Busy panel — replaces the dock entirely while the request is in flight.
+        if (state.quickCommitSubmitting) {
+          var busyLabel = state.quickCommitAutoGenerating ? "AI 生成 + 提交中…" : "执行中…";
+          return '<div class="qc-dock-wrap">' +
+            '<div class="qc-dock-busy" role="status"><span class="qc-dock-busy-dot"></span>' + escapeHtml(busyLabel) + '</div>' +
+          '</div>';
+        }
+        function chip(id, label) {
+          return '<button type="button" class="qc-chip qc-chip--' + id + '"' +
+            ' data-chip="' + id + '"' + (disabled ? ' disabled' : '') + '>' +
+            '<span class="qc-chip-dot" aria-hidden="true"></span>' +
+            '<span class="qc-chip-label">' + label + '</span>' +
+          '</button>';
+        }
+        var hint = disabled
+          ? (!hasChanges ? "工作区干净，无可提交" : "")
+          : "拖一个去碰另一个会黏在一起 · 整串丢进 ▶ 执行组合 · 单击直接执行该项";
+        return '<div class="qc-dock-wrap"' + (disabled ? ' data-disabled="1"' : '') + '>' +
+          '<div id="qc-dock-stage" class="qc-dock-stage" data-action="commit" data-hot="0">' +
+            '<div id="qc-dock-field" class="qc-dock-field">' +
+              '<div id="qc-dock-cluster" class="qc-dock-cluster" aria-hidden="true"></div>' +
+              chip("commit", "Commit") +
+              chip("tag", "Tag") +
+              chip("push", "Push") +
             '</div>' +
-            // Stage dots / labels along the rail.
-            '<div class="qc-drag-stages" aria-hidden="true">' +
-              '<span class="qc-drag-stage qc-stage-commit' + (commitActive ? ' is-active' : '') + ' is-passed" data-qc-stage="commit">Commit</span>' +
-              '<span class="qc-drag-stage qc-stage-tag' + (tagActive ? ' is-active' : '') + (tagPassed ? ' is-passed' : '') + '" data-qc-stage="tag">Tag</span>' +
-              '<span class="qc-drag-stage qc-stage-push' + (pushActive ? ' is-active is-passed' : '') + '" data-qc-stage="push">Push</span>' +
-            '</div>' +
-            // Knob — starts at left, slides right.
-            '<button id="quick-commit-drag-action" class="qc-drag-action" type="button"' + (disabled ? ' disabled' : '') + ' aria-label="' + escapeHtml(meta.verb) + '" title="' + escapeHtml(hint) + '">' +
-              '<span class="qc-drag-grip" aria-hidden="true"><i></i><i></i><i></i></span>' +
-              '<span id="quick-commit-drag-label" class="qc-drag-label">' + escapeHtml(label) + '</span>' +
-              // Bottom progress bar — fills 0→100% over DWELL_MS while sitting in the Tag zone.
-              '<span class="qc-drag-dwell-bar" aria-hidden="true"></span>' +
+            '<button type="button" id="qc-dock-launch" class="qc-dock-launch"' + (disabled ? ' disabled' : '') + ' aria-label="执行提交">' +
+              '<span class="qc-dock-launch-arrow" aria-hidden="true">' +
+                '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h12M13 6l6 6-6 6"/></svg>' +
+              '</span>' +
+              '<span id="qc-dock-launch-label" class="qc-dock-launch-label">提交</span>' +
             '</button>' +
           '</div>' +
-          '<div class="qc-drag-help" aria-hidden="true">' + escapeHtml(hint) + '</div>' +
+          '<div class="qc-dock-hint">' + escapeHtml(hint) + '</div>' +
         '</div>';
       }
 
@@ -4207,6 +4138,10 @@
 
       function isMobileLayout() {
         return window.innerWidth <= 768;
+      }
+
+      function shouldShowSessionsBackdrop() {
+        return !!state.sessionsDrawerOpen && (isMobileLayout() || !state.sidebarPinned);
       }
 
       function setFilePanelOpen(nextOpen) {
@@ -9891,7 +9826,7 @@
           drawer.classList.toggle("open", state.sessionsDrawerOpen);
         }
         if (backdrop) {
-          backdrop.classList.toggle("open", state.sessionsDrawerOpen);
+          backdrop.classList.toggle("open", shouldShowSessionsBackdrop());
         }
         if (mainLayout) {
           mainLayout.classList.toggle("sidebar-open", state.sessionsDrawerOpen);
@@ -9906,17 +9841,14 @@
       function toggleSessionsDrawer() {
         var isMobile = isMobileLayout();
         if (!isMobile) {
-          // 桌面：呼出 = 常驻全尺寸；再次点击 = 完全收起（floating-toggle 重新出现）。
-          // 取消了独立的「图钉」概念，sidebarPinned 现在由呼出/关闭自动管理。
-          var willOpen = !state.sidebarPinned;
-          state.sidebarPinned = willOpen;
+          // 桌面：hamburger 只负责临时打开/关闭；锁定常驻由图钉按钮控制。
+          var willOpen = state.sidebarPinned ? false : !state.sessionsDrawerOpen;
           state.sessionsDrawerOpen = willOpen;
           if (willOpen) {
             // 桌面重新呼出默认回到全尺寸；窄条形态需用户主动点 collapse 按钮切换。
             state.sidebarCollapsed = false;
             writeStoredBoolean("wand-sidebar-collapsed", false);
           }
-          writeStoredBoolean("wand-sidebar-pinned", willOpen);
           writeStoredBoolean("wand-sidebar-open", state.sessionsDrawerOpen);
           updateLayoutState();
           scheduleTerminalRefitAfterPaddingTransition();
@@ -9955,6 +9887,19 @@
         state.sessionsDrawerOpen = false;
         writeStoredBoolean("wand-sidebar-open", false);
         updateLayoutState();
+      }
+
+      function closeTransientSessionsDrawer() {
+        if (isMobileLayout()) {
+          closeSessionsDrawer();
+          return;
+        }
+        if (state.sidebarPinned || state.sidebarCollapsed || !state.sessionsDrawerOpen) return;
+        closeSwipedItem();
+        state.sessionsDrawerOpen = false;
+        writeStoredBoolean("wand-sidebar-open", false);
+        updateLayoutState();
+        scheduleTerminalRefitAfterPaddingTransition();
       }
 
       // 把"浮在内容上的 drawer/backdrop"关掉，但保留桌面常驻栏与窄条形态。
