@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
+import { whichSync } from "./path-repair.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -430,15 +431,7 @@ export function resolveGlobalWandCli(): string | null {
       /* ignore */
     }
   }
-  try {
-    const tool = process.platform === "win32" ? "where" : "which";
-    const r = spawnSync(tool, ["wand"], { encoding: "utf8", timeout: 10_000, env: getChildEnv() });
-    if (r.status === 0) {
-      const first = (r.stdout || "").split(/\r?\n/).find((line) => line.trim().length > 0);
-      if (first) return first.trim();
-    }
-  } catch {
-    /* ignore */
-  }
+  const found = whichSync("wand", { env: getChildEnv(), timeoutMs: 10_000 });
+  if (found) return found;
   return null;
 }

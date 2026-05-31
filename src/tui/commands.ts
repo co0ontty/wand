@@ -13,6 +13,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { installPackageGloballySync, resolveGlobalWandCli } from "../npm-update-utils.js";
+import { whichSync } from "../path-repair.js";
 import { computeRelaunch } from "../relaunch.js";
 
 export interface CommandResult {
@@ -509,8 +510,8 @@ function resolveWandBin(ctx: ServiceContext): string {
   if (ctx.wandBin && existsSync(ctx.wandBin)) return ctx.wandBin;
   const argv1 = process.argv[1];
   if (argv1 && existsSync(argv1)) return argv1;
-  const which = spawnSync("which", ["wand"], { encoding: "utf8" });
-  if (which.status === 0 && which.stdout) return which.stdout.trim();
+  const found = whichSync("wand");
+  if (found) return found;
   return "wand";
 }
 

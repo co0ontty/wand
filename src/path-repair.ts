@@ -392,12 +392,12 @@ function probeCommands(): Record<string, string | null> {
   return out;
 }
 
-function whichSync(cmd: string): string | null {
-  // Windows 用 `where`，POSIX 用 `which`；都走 process.env.PATH，因此一定要在
-  // repairRuntimePath() 追加完 PATH 之后再调。
+export function whichSync(cmd: string, options?: { env?: NodeJS.ProcessEnv; timeoutMs?: number }): string | null {
+  // Windows 用 `where`，POSIX 用 `which`。默认走 process.env.PATH（因此一定要在
+  // repairRuntimePath() 追加完 PATH 之后再调）；options.env 可覆盖（如用 buildChildEnv 的 PATH）。
   const tool = process.platform === "win32" ? "where" : "which";
   try {
-    const res = spawnSync(tool, [cmd], { encoding: "utf8" });
+    const res = spawnSync(tool, [cmd], { encoding: "utf8", env: options?.env, timeout: options?.timeoutMs });
     if (res.status !== 0) return null;
     const first = (res.stdout || "").split(/\r?\n/).find((line) => line.trim().length > 0);
     return first ? first.trim() : null;
