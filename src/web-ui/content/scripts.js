@@ -322,7 +322,6 @@
         currentTask: null, // Current task title from Claude
         terminalInteractive: false,
         miniKeyboardVisible: false,
-        shortcutsExpanded: false,
         modifiers: { ctrl: false, alt: false, shift: false },
         // ── 终端悬浮摇杆遥控器（手机端 PTY 遥控）状态 ──
         // joystickPos 持久化球球位置 {right, bottom}（localStorage wand-ball-pos）
@@ -343,7 +342,7 @@
         joystickBackdropEl: null,
         joystickBallEl: null,
         joystickPointerId: null,
-        joystickGesture: null,          // null|'pending'|'ring'|'move'
+        joystickGesture: null,          // null|'pending'|'cancelled'|'move'
         joystickPressStart: null,       // {x, y, t}
         joystickCenter: null,           // 手势开始时球球中心，用于径向命中
         joystickLongPressTimer: null,
@@ -492,12 +491,14 @@
         inbox:     '<polyline points="22 13 16 13 14 16 10 16 8 13 2 13"/><path d="M5 5h14l3 8v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
         zap:       '<polygon points="13 2 4 14 11 14 10 22 20 9 13 9 13 2"/>',
         wrench:    '<path d="M14.7 6.3a4 4 0 1 1 4 4l-9 9-3.5 1 1-3.5 7.5-7.5z"/>',
+        magicWand: '<path d="M15 4l5 5"/><path d="M13.5 5.5l5 5"/><path d="M4 20l10.5-10.5"/><path d="M5 4v3"/><path d="M3.5 5.5h3"/><path d="M19 15v3"/><path d="M17.5 16.5h3"/><path d="M9 2l.6 1.5L11 4l-1.4.5L9 6l-.6-1.5L7 4l1.4-.5z" fill="currentColor" stroke="none"/>',
         edit:      '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
         check:     '<polyline points="5 12 10 17 19 7"/>',
         signal:    '<path d="M2 12a15 15 0 0 1 20 0"/><path d="M5 16a10 10 0 0 1 14 0"/><path d="M9 20a4 4 0 0 1 6 0"/><circle cx="12" cy="20" r="0.5" fill="currentColor"/>',
         file:      '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="14 3 14 9 20 9"/>',
         image:     '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><polyline points="3 18 9 12 14 17 21 12"/>',
-        sigma:     '<polyline points="18 4 6 4 13 12 6 20 18 20"/>'
+        sigma:     '<polyline points="18 4 6 4 13 12 6 20 18 20"/>',
+        x:         '<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'
       };
       // 渲染 SVG 字符串。size 默认 14，strokeWidth 默认 1.8（与现有 send/stop 按钮线宽接近）。
       // cls 用于添加额外 class（如 .composer-pill-icon），便于 CSS 微调。
@@ -1660,21 +1661,6 @@
         }
       }
 
-      function renderShortcutKeys() {
-        return '<button class="shortcut-key' + (state.modifiers.ctrl ? ' active' : '') + '" data-key="ctrl" type="button">Ctrl</button>' +
-          '<button class="shortcut-key' + (state.modifiers.alt ? ' active' : '') + '" data-key="alt" type="button">Alt</button>' +
-          '<span class="shortcut-sep">·</span>' +
-          '<button class="shortcut-key shortcut-dir" data-key="up" type="button">↑</button>' +
-          '<button class="shortcut-key shortcut-dir" data-key="down" type="button">↓</button>' +
-          '<button class="shortcut-key shortcut-dir" data-key="left" type="button">←</button>' +
-          '<button class="shortcut-key shortcut-dir" data-key="right" type="button">→</button>' +
-          '<span class="shortcut-sep">·</span>' +
-          '<button class="shortcut-key" data-key="enter" type="button">↵</button>' +
-          '<button class="shortcut-key" data-key="ctrl_enter" type="button">C-↵</button>' +
-          '<button class="shortcut-key" data-key="shift_tab" type="button" title="Shift+Tab（切换 plan / 自动接受 模式）">⇧⇥</button>' +
-          '<button class="shortcut-key" data-key="escape" type="button">Esc</button>';
-      }
-
       function renderApprovalStatsBadge() {
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var stats = selectedSession && selectedSession.approvalStats;
@@ -1693,30 +1679,6 @@
             '<span class="approval-stats-row approval-stats-row-total"><span class="approval-stats-row-icon">' + iconSvg("sigma", { size: 12, strokeWidth: 1.8 }) + '</span><span class="approval-stats-row-label">合计</span><span class="approval-stats-row-count">' + stats.total + '</span></span>' +
           '</span>' +
         '</span>';
-      }
-
-      function renderInlineKeyboard() {
-        if (!state.selectedId) return "";
-        var isTerminal = state.currentView === "terminal";
-        if (!isTerminal) return "";
-        var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (sel && isStructuredSession(sel)) return "";
-        var keys = renderShortcutKeys();
-        var arrow = state.shortcutsExpanded ? '›' : '‹';
-        return '<div class="inline-shortcuts-wrap' + (state.shortcutsExpanded ? ' expanded' : '') + '">' +
-            '<button class="shortcuts-toggle' + (state.shortcutsExpanded ? ' active' : '') + '" type="button" title="快捷键">' + arrow + '</button>' +
-            '<div class="inline-shortcuts-strip">' + keys + '</div>' +
-            '<div class="inline-shortcuts-inline">' + keys + '</div>' +
-          '</div>';
-      }
-
-      function renderExpandedShortcutsRow() {
-        if (!state.selectedId) return "";
-        var isTerminal = state.currentView === "terminal";
-        if (!isTerminal) return "";
-        var sel = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (sel && isStructuredSession(sel)) return "";
-        return '<div class="inline-shortcuts-expanded-row' + (state.shortcutsExpanded ? ' visible' : '') + '">' + renderShortcutKeys() + '</div>';
       }
 
       function renderLogin() {
@@ -2055,7 +2017,6 @@
                     '<div class="input-composer-right">' +
                       // 排队提示从这里搬到 .queue-bar（输入框上方独立浮条），原 #queue-counter 已移除。
                       '<span class="input-hint' + (state.terminalInteractive ? ' terminal-interactive-hint' : state.currentView === "terminal" ? " hidden" : "") + '">' + (state.terminalInteractive ? '终端交互中 · Ctrl+C 中断 · Ctrl+L 清屏' : 'Enter 发送 · Shift+Enter 换行') + '</span>' +
-                      renderInlineKeyboard() +
                       '<button id="stop-button" class="btn-circle btn-circle-stop' + (state.selectedId ? "" : " hidden") + '" title="停止">' +
                         '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
                       '</button>' +
@@ -2066,7 +2027,6 @@
                       '</button>' +
                     '</div>' +
                   '</div>' +
-                  renderExpandedShortcutsRow() +
                   // Session info bar at bottom — 仅保留信息类徽章（历史会话 id / exit code）。
                   // 自动批准已从这里移到主 pill 行（renderAutoApproveChip）。
                   (selectedSession
@@ -2331,12 +2291,6 @@
         document.addEventListener("keydown", quickCommitEscHandler);
         loadGitStatus(state.selectedId, { force: true }).then(function() {
           if (!state.quickCommitOpen) return;
-          // Seed the tag field with the locally-derived suggestion so a tag is
-          // always shown by default (greyed until the toggle is turned on).
-          var st = state.gitStatus || {};
-          if (!state.quickCommitForm.tagEdited && st.suggestedTag) {
-            state.quickCommitForm.tag = st.suggestedTag;
-          }
           rerenderQuickCommitModal();
         });
       }
@@ -2421,6 +2375,14 @@
         if (pushAfterBtn) pushAfterBtn.addEventListener("click", function() {
           var result = state.quickCommitResult || {};
           submitPushOnly({ pushCommits: true, pushTags: !!result.tagName, closeOnSuccess: true });
+        });
+
+        Array.prototype.forEach.call(document.querySelectorAll(".qc-mobile-action-btn"), function(btn) {
+          btn.addEventListener("click", function(e) {
+            e.preventDefault();
+            var action = btn.getAttribute("data-qc-action") || "commit";
+            submitQuickCommit(action);
+          });
         });
 
         attachQuickCommitDrag();
@@ -2888,10 +2850,20 @@
             '<span class="qc-chip-label">' + label + '</span>' +
           '</button>';
         }
+        function mobileAction(action, label, note, cls) {
+          return '<button type="button" class="qc-mobile-action-btn' + (cls ? ' ' + cls : '') + '"' +
+            ' data-qc-action="' + action + '"' + (disabled ? ' disabled' : '') + '>' +
+            '<span class="qc-mobile-action-label">' + escapeHtml(label) + '</span>' +
+            '<span class="qc-mobile-action-note">' + escapeHtml(note) + '</span>' +
+          '</button>';
+        }
         var hint = disabled
           ? (!hasChanges ? "工作区干净，无可提交" : "")
           : "拖一个去碰另一个会黏在一起 · 整串丢进 ▶ 执行组合 · 单击直接执行该项";
-        return '<div class="qc-dock-wrap"' + (disabled ? ' data-disabled="1"' : '') + '>' +
+        var mobileHint = disabled
+          ? (!hasChanges ? "工作区干净，无可提交" : "")
+          : "空 message 或空 tag 会自动用 AI 生成";
+        return '<div class="qc-dock-wrap qc-dock-wrap--desktop"' + (disabled ? ' data-disabled="1"' : '') + '>' +
           '<div id="qc-dock-stage" class="qc-dock-stage" data-action="commit" data-hot="0">' +
             '<div id="qc-dock-field" class="qc-dock-field">' +
               '<div id="qc-dock-cluster" class="qc-dock-cluster" aria-hidden="true"></div>' +
@@ -2907,6 +2879,15 @@
             '</button>' +
           '</div>' +
           '<div class="qc-dock-hint">' + escapeHtml(hint) + '</div>' +
+        '</div>' +
+        '<div class="qc-mobile-actions"' + (disabled ? ' data-disabled="1"' : '') + '>' +
+          '<div class="qc-mobile-action-grid">' +
+            mobileAction("commit", "仅提交", "Commit", "qc-mobile-action-primary") +
+            mobileAction("commit-tag", "提交 + Tag", "发布版本", "") +
+            mobileAction("commit-push", "提交 + Push", "同步分支", "") +
+            mobileAction("commit-tag-push", "提交 + Tag + Push", "完整发布", "qc-mobile-action-wide") +
+          '</div>' +
+          '<div class="qc-mobile-action-hint">' + escapeHtml(mobileHint) + '</div>' +
         '</div>';
       }
 
@@ -2945,7 +2926,7 @@
           ? '<code>' + escapeHtml(lc.shortHash) + '</code><span>' + escapeHtml(lc.subject || "") + '</span>'
           : (s.head ? '<code>' + escapeHtml(s.head.substring(0, 7)) + '</code>' : '<span class="qc-muted">无 commit</span>');
         var oldTagHtml = s.latestTag ? '<code>' + escapeHtml(s.latestTag) + '</code>' : '<span class="qc-muted">无 tag</span>';
-        var newTagHtml = '<input type="text" id="quick-commit-tag" class="field-input qc-tag-field-input" placeholder="v1.2.0" value="' + escapeHtml(f.tag || "") + '"' + (state.quickCommitSubmitting ? ' disabled' : '') + '>';
+        var newTagHtml = '<input type="text" id="quick-commit-tag" class="field-input qc-tag-field-input" placeholder="留空则 AI 生成" value="' + escapeHtml(f.tag || "") + '"' + (state.quickCommitSubmitting ? ' disabled' : '') + '>';
         var nextCommitHtml = '<textarea id="quick-commit-message" class="field-input qc-message-input" rows="3" placeholder="New commit message" ' + (state.quickCommitSubmitting ? 'disabled' : '') + '>' + escapeHtml(f.customMessage || "") + '</textarea>';
         var subtitleParts = [];
         subtitleParts.push(s.branch || "(no branch)");
@@ -6628,44 +6609,6 @@
           var toggle = document.getElementById(id);
           if (toggle) toggle.addEventListener("click", toggleTerminalInteractive);
         });
-        // Inline shortcuts click handler
-        var inlineShortcutsWrap = document.querySelector(".inline-shortcuts-wrap");
-        if (inlineShortcutsWrap) inlineShortcutsWrap.addEventListener("click", handleInlineKeyboardClick);
-        var expandedShortcutsRow = document.querySelector(".inline-shortcuts-expanded-row");
-        if (expandedShortcutsRow) expandedShortcutsRow.addEventListener("click", handleInlineKeyboardClick);
-        // Shortcuts toggle (mobile fold/unfold)
-        var shortcutsToggleBtn = document.querySelector(".shortcuts-toggle");
-        if (shortcutsToggleBtn) shortcutsToggleBtn.addEventListener("click", function(e) {
-          e.stopPropagation();
-          state.shortcutsExpanded = !state.shortcutsExpanded;
-          var wrap = document.querySelector(".inline-shortcuts-wrap");
-          var toggle = document.querySelector(".shortcuts-toggle");
-          var row = document.querySelector(".inline-shortcuts-expanded-row");
-          if (wrap) wrap.classList.toggle("expanded", state.shortcutsExpanded);
-          if (row) row.classList.toggle("visible", state.shortcutsExpanded);
-          if (toggle) {
-            toggle.classList.toggle("active", state.shortcutsExpanded);
-            toggle.textContent = state.shortcutsExpanded ? "\u203a" : "\u2039";
-          }
-        });
-        // Close shortcuts strip on outside click
-        document.addEventListener("click", function(e) {
-          if (!state.shortcutsExpanded) return;
-          var wrap = document.querySelector(".inline-shortcuts-wrap");
-          var expandedRow = document.querySelector(".inline-shortcuts-expanded-row");
-          var clickedInsideRow = expandedRow && expandedRow.contains(e.target);
-          if (wrap && !wrap.contains(e.target) && !clickedInsideRow) {
-            state.shortcutsExpanded = false;
-            wrap.classList.remove("expanded");
-            if (expandedRow) expandedRow.classList.remove("visible");
-            var toggle = document.querySelector(".shortcuts-toggle");
-            if (toggle) {
-              toggle.classList.remove("active");
-              toggle.textContent = "\u2039";
-            }
-          }
-        });
-
         // PWA install button
         var pwaInstallBtn = document.getElementById("pwa-install-button");
         if (pwaInstallBtn) {
@@ -14078,7 +14021,7 @@
       var JOYSTICK_DEADZONE_R = 24;         // 命中死区（= R0）
       var JOYSTICK_RING_SPLIT_R = 60;       // 命中分界（= R1）：< 内圈方向，>= 外圈功能
       var JOYSTICK_MOVE_OUT_R = 140;        // 拖出此半径（超出外圈区域）→ 切"正在移动"
-      var JOYSTICK_BALL_SIZE = 52;          // 球球直径（与 CSS 一致）
+      var JOYSTICK_BALL_SIZE = 54;          // 球球直径（与 CSS 一致）
       var JOYSTICK_EDGE_MARGIN = 8;         // 球球钳进视口的留白
       var JOYSTICK_RING_RADIUS = JOYSTICK_R2 + 8;  // 环整体半径（含标签外延），用于把圆心钳进视口
       var JOYSTICK_RING_VIEW_PAD = 6;       // 环外缘与视口边的最小留白
@@ -14242,11 +14185,6 @@
             toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession);
           }
         });
-        // Inline keyboard visibility follows current view
-        var inlineKeyboard = document.querySelector(".inline-shortcuts-wrap");
-        if (inlineKeyboard) inlineKeyboard.classList.toggle("hidden", structured || state.currentView !== "terminal");
-        var expandedRow = document.querySelector(".inline-shortcuts-expanded-row");
-        if (expandedRow) expandedRow.classList.toggle("hidden", structured || state.currentView !== "terminal");
         var inputHint = document.querySelector(".input-hint");
         if (inputHint) {
           inputHint.classList.toggle("hidden", structured ? true : state.currentView === "terminal");
@@ -14338,30 +14276,6 @@
         scheduleShortcutResync();
       }
 
-      function handleInlineKeyboardClick(event) {
-        var btn = event.target.closest(".shortcut-key");
-        if (!btn) return;
-        var key = btn.getAttribute("data-key");
-        if (!key) return;
-        event.preventDefault();
-        if (key === "ctrl" || key === "alt") {
-          state.modifiers[key] = !state.modifiers[key];
-          updateKeyboardPopupUI();
-          return;
-        }
-        if (key === "ctrl_enter") {
-          var sequence = buildPtySequence("enter", { ctrl: true, alt: false, shift: false });
-          if (sequence) sendTerminalSequence(sequence, "ctrl_enter");
-          scheduleShortcutResync();
-          return;
-        }
-        var sequence = buildPtySequence(key, { ctrl: state.modifiers.ctrl, alt: state.modifiers.alt, shift: false });
-        if (sequence) sendTerminalSequence(sequence, key);
-        clearModifiers();
-        updateKeyboardPopupUI();
-        scheduleShortcutResync();
-      }
-
       // 快捷键点击后做一次延迟 resync 兜底：maybeScheduleResyncForChunk 偶尔会漏
       // 抓 Codex 菜单切换之类的原地重绘，导致 DOM 行残留。500ms 是为了等服务端把
       // 本次按键的回执完整推过来，避免 resync 只回放到 chunk 一半。
@@ -14371,12 +14285,7 @@
       }
 
       function updateKeyboardPopupUI() {
-        var container = document.querySelector(".inline-shortcuts-wrap");
-        if (!container) return;
-        ["ctrl", "alt"].forEach(function(name) {
-          var btn = container.querySelector('[data-key="' + name + '"]');
-          if (btn) btn.classList.toggle("active", !!state.modifiers[name]);
-        });
+        updateJoystickPanelUI();
       }
 
       function handleKeyboardToggle(event) {
@@ -16226,8 +16135,14 @@
         // 当前外圈 4 键全是独立功能键 (Enter / Ctrl+C / Esc / Shift+Tab),
         // 没有"先按 Ctrl 再按字母"的复合组合, 所以修饰键 toggle 没意义。
         // CORNER_KEYS 为空时, 对应的 grid 不渲染, 面板高度自动收缩。
-        var html = '<div class="wjp-title">遥控面板</div>' +
+        var html =
+          '<div class="wjp-header">' +
+            '<span class="wjp-title">' + iconSvg("magicWand", { size: 13, strokeWidth: 1.8, cls: "wjp-title-icon" }) + '<span>Wand Remote</span></span>' +
+            '<button type="button" class="wjp-close" aria-label="关闭遥控面板">' + iconSvg("x", { size: 13, strokeWidth: 2 }) + '</button>' +
+          '</div>' +
+          '<div class="wjp-section-label">Navigation</div>' +
           dpad +
+          '<div class="wjp-section-label">Actions</div>' +
           '<div class="wjp-grid wjp-fnkeys">' + fnRow + "</div>";
         if (JOYSTICK_CORNER_KEYS.length > 0) {
           var cornerRow = "";
@@ -16352,10 +16267,9 @@
         var ball = document.createElement("div");
         ball.className = "wand-joystick-ball";
         ball.setAttribute("role", "button");
-        ball.setAttribute("aria-label", "终端摇杆遥控");
-        ball.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" ' +
-          'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-          '<circle cx="12" cy="12" r="3"/><path d="M12 5V3M12 21v-2M5 12H3M21 12h-2"/></svg>';
+        ball.setAttribute("aria-label", "Wand 遥控面板");
+        ball.setAttribute("title", "点击打开遥控面板，拖动可移动位置");
+        ball.innerHTML = iconSvg("magicWand", { size: 25, strokeWidth: 2.1, cls: "wand-joystick-logo" });
         root.appendChild(ball);
 
         document.body.appendChild(root);
@@ -16393,15 +16307,25 @@
 
       function onJoystickPointerDown(e) {
         if (!isJoystickAvailable()) return;
+        if ((e.pointerType === "mouse" || e.pointerType === "pen") && e.button !== 0) return;
         if (state.joystickPointerId !== null) return;  // 已有手势在进行
         e.preventDefault();
         e.stopPropagation();
+        var canDirectDrag = e.pointerType === "mouse" || e.pointerType === "pen";
         state.joystickPointerId = e.pointerId;
         state.joystickPressStart = { x: e.clientX, y: e.clientY, t: Date.now() };
         state.joystickGesture = "pending";
         state.joystickHoverOuter = null;
         state.joystickCenter = getJoystickCenter();
         try { state.joystickBallEl.setPointerCapture(e.pointerId); } catch (err) {}
+        if (canDirectDrag) {
+          state.joystickMoveHandler = onJoystickPointerMove;
+          state.joystickUpHandler = onJoystickPointerUp;
+          document.addEventListener("pointermove", state.joystickMoveHandler);
+          document.addEventListener("pointerup", state.joystickUpHandler);
+          document.addEventListener("pointercancel", state.joystickUpHandler);
+          return;
+        }
         // 起长按定时器：不动到 400ms → 移动模式
         state.joystickLongPressTimer = setTimeout(function() {
           if (state.joystickGesture === "pending") enterJoystickMoveMode();
@@ -16451,15 +16375,19 @@
         var dyStart = e.clientY - state.joystickPressStart.y;
         if (state.joystickGesture === "pending") {
           if (Math.sqrt(dxStart * dxStart + dyStart * dyStart) > JOYSTICK_MOVE_THRESHOLD) {
-            // 先动 → 选键手势
+            if (e.pointerType === "mouse" || e.pointerType === "pen") {
+              enterJoystickMoveMode();
+              moveJoystickBallTo(e.clientX, e.clientY);
+              return;
+            }
             if (state.joystickLongPressTimer) {
               clearTimeout(state.joystickLongPressTimer);
               state.joystickLongPressTimer = null;
             }
-            if (state.joystickPinnedOpen) closeJoystickPanel();
-            state.joystickGesture = "ring";
-            state.joystickCenter = getJoystickCenter();
-            openJoystickRing();
+            // Quick swipe used to open the radial shortcut menu. That shortcut
+            // is intentionally disabled; keep tap-to-open and long-press drag.
+            state.joystickGesture = "cancelled";
+            return;
           } else {
             return;
           }
@@ -16738,6 +16666,7 @@
         state.joystickPanelEl.style.right = Math.max(JOYSTICK_EDGE_MARGIN, window.innerWidth - r.right) + "px";
         state.joystickPanelEl.style.bottom = Math.max(JOYSTICK_EDGE_MARGIN, window.innerHeight - r.top + 10) + "px";
         state.joystickPanelEl.classList.add("active");
+        state.joystickBallEl.classList.add("panel-open");
         if (state.joystickBackdropEl) state.joystickBackdropEl.classList.add("active");
         updateJoystickPanelUI();
       }
@@ -16745,6 +16674,7 @@
       function closeJoystickPanel() {
         state.joystickPinnedOpen = false;
         if (state.joystickPanelEl) state.joystickPanelEl.classList.remove("active");
+        if (state.joystickBallEl) state.joystickBallEl.classList.remove("panel-open");
         if (state.joystickBackdropEl && state.joystickGesture == null) {
           state.joystickBackdropEl.classList.remove("active");
         }
@@ -16759,6 +16689,13 @@
       }
 
       function onJoystickPanelClick(e) {
+        var closeBtn = e.target && e.target.closest ? e.target.closest(".wjp-close") : null;
+        if (closeBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeJoystickPanel();
+          return;
+        }
         var btn = e.target && e.target.closest ? e.target.closest(".wjp-key") : null;
         if (!btn) return;
         e.preventDefault();

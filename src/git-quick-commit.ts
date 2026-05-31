@@ -102,19 +102,6 @@ function resolvePushRemote(cwd: string): string {
   return "origin";
 }
 
-/**
- * Derive a default next-version tag from the latest existing tag by bumping the
- * patch component (preserving an optional `v` prefix). Returns a sane starting
- * version when there's no tag yet, or `undefined` if the latest tag isn't semver-ish.
- */
-function computeSuggestedTag(latestTag: string | undefined): string | undefined {
-  if (!latestTag) return "v0.1.0";
-  const m = latestTag.match(/^(v?)(\d+)\.(\d+)\.(\d+)$/);
-  if (!m) return undefined;
-  const [, prefix, major, minor, patch] = m;
-  return `${prefix}${major}.${minor}.${Number.parseInt(patch, 10) + 1}`;
-}
-
 function unquotePath(raw: string): string {
   if (raw.startsWith("\"") && raw.endsWith("\"")) {
     return raw.slice(1, -1).replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
@@ -263,7 +250,8 @@ export function getGitStatus(cwd: string): GitStatusResult {
   // for seconds. The "unpushed tag" UI chip is best-effort and a separate
   // async endpoint should compute it on demand if reintroduced.
 
-  // Latest tag + a locally-derived next-version suggestion (both git-local, fast).
+  // Latest tag only. Next tag suggestions are intentionally AI-derived from the
+  // diff so releases do not silently follow a fixed patch-bump rule.
   let latestTag: string | undefined;
   if (!initialCommit) {
     try {
@@ -272,7 +260,6 @@ export function getGitStatus(cwd: string): GitStatusResult {
       latestTag = undefined;
     }
   }
-  const suggestedTag = computeSuggestedTag(latestTag);
 
   return {
     isGit: true,
@@ -287,7 +274,6 @@ export function getGitStatus(cwd: string): GitStatusResult {
     behind,
     lastCommit,
     latestTag,
-    suggestedTag,
   };
 }
 

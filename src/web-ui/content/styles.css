@@ -3664,102 +3664,6 @@
       color: #9cc08a;
     }
 
-    /* Keyboard toggle button and popup */
-    /* ===== 内联快捷键 ===== */
-    /* Desktop: show inline keys directly, hide toggle button and strip */
-    .inline-shortcuts-wrap {
-      display: flex;
-      align-items: center;
-      position: relative;
-      flex-shrink: 0;
-    }
-    /* Desktop: expanded row is always hidden (mobile only) */
-    .inline-shortcuts-expanded-row {
-      display: none;
-    }
-    .shortcuts-toggle {
-      display: none;
-    }
-    .inline-shortcuts-strip {
-      display: none;
-    }
-    .inline-shortcuts-inline {
-      display: flex;
-      align-items: center;
-      gap: 3px;
-      flex-shrink: 0;
-    }
-
-    .shortcut-sep {
-      color: var(--text-muted);
-      font-size: 0.625rem;
-      opacity: 0.5;
-      margin: 0 1px;
-      user-select: none;
-    }
-
-    .shortcut-key {
-      height: 20px;
-      min-width: 20px;
-      border-radius: 3px;
-      border: 1px solid rgba(125, 91, 57, 0.12);
-      background: rgba(255, 255, 255, 0.5);
-      color: var(--text-muted);
-      font-size: 0.5625rem;
-      font-family: var(--font-mono);
-      font-weight: 500;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.12s ease;
-      padding: 0 4px;
-      flex-shrink: 0;
-      -webkit-tap-highlight-color: transparent;
-      user-select: none;
-      line-height: 1;
-    }
-
-    .shortcut-key:hover {
-      border-color: rgba(125, 91, 57, 0.3);
-      background: rgba(255, 255, 255, 0.85);
-      color: var(--text-secondary);
-    }
-
-    .shortcut-key:active {
-      background: var(--accent-soft);
-      border-color: var(--accent);
-      color: white;
-      transform: scale(0.93);
-    }
-
-    .shortcut-key.active {
-      background: rgba(197, 101, 61, 0.15);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-
-    .shortcut-key.shortcut-dir {
-      min-width: 18px;
-      padding: 0 2px;
-      font-size: 0.625rem;
-    }
-
-    .shortcut-key[data-key="escape"] {
-      color: #b06060;
-    }
-    .shortcut-key[data-key="enter"] {
-      color: #4a7c59;
-    }
-    .shortcut-key[data-key="ctrl_enter"] {
-      color: var(--accent);
-      font-weight: 600;
-    }
-    .shortcut-key[data-key="shift_tab"] {
-      color: #6a6bb0;
-      font-weight: 600;
-    }
-
     /* Mobile keyboard overlap compensation */
     @media (max-width: 640px) {
       .mini-keyboard {
@@ -10454,68 +10358,6 @@
         opacity: 0.6;
       }
 
-      /* 移动端内联快捷键 - 折叠为展开按钮，展开到独立第二行 */
-      .inline-shortcuts-inline {
-        display: none;
-      }
-      .inline-shortcuts-wrap {
-        display: flex;
-        align-items: center;
-        flex-shrink: 0;
-      }
-      /* 移动端: strip 永远不显示，展开由独立的 expanded-row 承载 */
-      .inline-shortcuts-strip {
-        display: none !important;
-      }
-      .shortcuts-toggle {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border: none;
-        border-radius: 50%;
-        background: transparent;
-        color: var(--text-muted);
-        font-size: 1rem;
-        font-weight: 700;
-        cursor: pointer;
-        flex-shrink: 0;
-        transition: all 0.15s ease;
-        -webkit-tap-highlight-color: transparent;
-        line-height: 1;
-      }
-      .shortcuts-toggle.active {
-        color: var(--accent);
-      }
-      /* 独立第二行：默认隐藏 */
-      .inline-shortcuts-expanded-row {
-        display: none;
-      }
-      /* 独立第二行：展开时显示，居中、自动换行 */
-      .inline-shortcuts-expanded-row.visible {
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        align-content: flex-start;
-        flex-wrap: wrap;
-        gap: 3px;
-        padding: 4px 6px;
-      }
-      .inline-shortcuts-expanded-row .shortcut-sep {
-        display: none;
-      }
-      .inline-shortcuts-expanded-row .shortcut-key {
-        height: 28px;
-        min-width: 28px;
-        font-size: 0.5625rem;
-        padding: 0 4px;
-        flex: 0 0 auto;
-      }
-      .inline-shortcuts-expanded-row .shortcut-key.shortcut-dir {
-        min-width: 24px;
-      }
-
       /* 回到底部按钮 - 紧凑 */
       .terminal-jump-bottom {
         width: 32px;
@@ -15885,9 +15727,12 @@
       letter-spacing: 0.02em;
       opacity: 0.8;
     }
+    .qc-mobile-actions {
+      display: none;
+    }
 
     @media (prefers-reduced-motion: reduce) {
-      .qc-chip, .qc-chip--anim, .qc-dock-cluster, .qc-dock-launch, .qc-dock-busy-dot {
+      .qc-chip, .qc-chip--anim, .qc-dock-cluster, .qc-dock-launch, .qc-dock-busy-dot, .qc-mobile-action-btn {
         animation: none !important;
         transition: none !important;
       }
@@ -15896,18 +15741,145 @@
     @media (max-width: 720px) {
       .topbar-git-branch { max-width: 8em; }
       .topbar-git-badge { padding: 0 8px; font-size: 0.7rem; }
-      .quick-commit-modal { max-width: 95vw; }
+      .quick-commit-modal {
+        width: 100%;
+        max-width: 100%;
+        max-height: calc(100dvh - max(16px, var(--wand-safe-top)) - max(12px, var(--wand-safe-bottom)));
+      }
+      .quick-commit-modal .modal-header {
+        padding: 14px 16px 12px;
+      }
+      .quick-commit-modal .modal-title {
+        font-size: 1.05rem;
+      }
+      .quick-commit-modal .modal-subtitle {
+        margin-top: 4px;
+        font-size: 0.78rem;
+        line-height: 1.35;
+      }
+      .quick-commit-modal .modal-body {
+        padding: 14px 16px calc(16px + var(--wand-safe-bottom));
+      }
+      .qc-release-panel,
+      .qc-result-panel {
+        gap: 12px;
+      }
       .qc-files-wrap { max-height: 160px; }
       .qc-pair {
         grid-template-columns: 1fr;
-        gap: 6px;
+        gap: 5px;
       }
       .qc-pair-label {
         padding-top: 0;
+        font-size: 0.68rem;
       }
       .qc-pair-flow {
-        grid-template-columns: 1fr 18px 1fr;
-        gap: 6px;
+        grid-template-columns: 1fr;
+        gap: 7px;
+        position: relative;
+      }
+      .qc-pair-arrow {
+        width: 28px;
+        height: 20px;
+        justify-self: center;
+        transform: rotate(90deg);
+        font-size: 1rem;
+        line-height: 1;
+      }
+      .qc-pair-value {
+        min-height: 36px;
+        padding: 8px 10px;
+      }
+      .qc-pair-value code {
+        font-size: 0.76rem;
+      }
+      .qc-pair-value span {
+        font-size: 0.8rem;
+      }
+      .qc-pair--commit .qc-pair-value {
+        min-height: auto;
+      }
+      .qc-pair--commit .qc-message-input {
+        min-height: 92px;
+        font-size: 16px;
+        line-height: 1.45;
+      }
+      .qc-pair--tag .qc-tag-field-input {
+        min-height: 44px;
+        font-size: 16px;
+      }
+      .qc-dock-wrap--desktop {
+        display: none;
+      }
+      .qc-mobile-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .qc-mobile-actions[data-disabled="1"] {
+        opacity: 0.6;
+        pointer-events: none;
+      }
+      .qc-mobile-action-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .qc-mobile-action-btn {
+        min-width: 0;
+        min-height: 56px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 3px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(125, 91, 57, 0.16);
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--text-primary);
+        text-align: left;
+        box-shadow: 0 1px 3px rgba(89, 58, 32, 0.06);
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        transition: transform 0.12s ease, border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+      }
+      .qc-mobile-action-btn:active {
+        transform: scale(0.98);
+        background: rgba(255, 255, 255, 0.92);
+        border-color: rgba(197, 101, 61, 0.28);
+      }
+      .qc-mobile-action-btn:disabled {
+        cursor: not-allowed;
+      }
+      .qc-mobile-action-primary {
+        border-color: rgba(197, 101, 61, 0.32);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(197, 101, 61, 0.10));
+      }
+      .qc-mobile-action-wide {
+        grid-column: 1 / -1;
+      }
+      .qc-mobile-action-label {
+        max-width: 100%;
+        font-size: 0.88rem;
+        font-weight: 800;
+        line-height: 1.15;
+        overflow-wrap: anywhere;
+      }
+      .qc-mobile-action-note {
+        max-width: 100%;
+        font-size: 0.72rem;
+        font-weight: 600;
+        line-height: 1.2;
+        color: var(--text-muted);
+        overflow-wrap: anywhere;
+      }
+      .qc-mobile-action-hint {
+        min-height: 1em;
+        color: var(--text-muted);
+        font-size: 0.7rem;
+        line-height: 1.35;
+        text-align: center;
       }
       .qc-dock-stage {
         height: 160px;
@@ -16299,20 +16271,23 @@
       position: fixed;
       right: 18px;
       bottom: 96px;
-      width: 52px;
-      height: 52px;
+      width: 54px;
+      height: 54px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: rgba(245, 235, 225, 0.95);
-      background: rgba(32, 25, 21, 0.78);
-      border: 1px solid rgba(197, 101, 61, 0.34);
+      color: #fff6e8;
+      background:
+        radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.5), transparent 26%),
+        linear-gradient(145deg, rgba(224, 126, 74, 0.94), rgba(89, 56, 38, 0.94));
+      border: 1px solid rgba(255, 225, 190, 0.42);
       box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.36),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+        0 10px 24px rgba(64, 37, 23, 0.36),
+        0 0 0 6px rgba(197, 101, 61, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       pointer-events: auto;
       touch-action: none;
       -webkit-tap-highlight-color: transparent;
@@ -16320,10 +16295,35 @@
       -webkit-user-select: none;
       z-index: 43;
       cursor: grab;
-      transition: transform 0.18s var(--ease-spring), background 0.2s ease, border-color 0.2s ease;
+      transition: transform 0.18s var(--ease-spring), background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     }
-    .wand-joystick-ball:hover { border-color: rgba(197, 101, 61, 0.55); }
-    .wand-joystick-ball:active { background: rgba(44, 34, 28, 0.88); }
+    .wand-joystick-ball::after {
+      content: "";
+      position: absolute;
+      inset: 7px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 244, 225, 0.22);
+      pointer-events: none;
+    }
+    .wand-joystick-logo {
+      position: relative;
+      z-index: 1;
+      filter: drop-shadow(0 2px 3px rgba(47, 25, 14, 0.42));
+    }
+    .wand-joystick-ball:hover {
+      transform: translateY(-1px);
+      border-color: rgba(255, 231, 198, 0.64);
+      box-shadow:
+        0 14px 30px rgba(64, 37, 23, 0.42),
+        0 0 0 7px rgba(197, 101, 61, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.34);
+    }
+    .wand-joystick-ball:active,
+    .wand-joystick-ball.panel-open {
+      background:
+        radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.45), transparent 26%),
+        linear-gradient(145deg, rgba(42, 31, 24, 0.95), rgba(118, 67, 42, 0.95));
+    }
     .wand-joystick-ball.dragging {
       transform: scale(1.12);
       cursor: grabbing;
@@ -16339,12 +16339,15 @@
       z-index: 42;
       pointer-events: none;
       opacity: 0;
+      visibility: hidden;
       transform: scale(0.6);
-      transition: opacity 0.18s var(--ease-out-expo), transform 0.22s var(--ease-spring);
+      transition: opacity 0.18s var(--ease-out-expo), transform 0.22s var(--ease-spring), visibility 0s linear 0.18s;
     }
     .wand-joystick-ring.active {
       opacity: 1;
+      visibility: visible;
       transform: scale(1);
+      transition-delay: 0s;
     }
     .wjr-svg {
       position: absolute;
@@ -16403,32 +16406,79 @@
       z-index: 44;
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      padding: 12px;
-      border-radius: 16px;
-      background: rgba(28, 22, 18, 0.92);
-      border: 1px solid rgba(245, 235, 225, 0.14);
-      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      gap: 10px;
+      padding: 10px;
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(44, 34, 28, 0.96), rgba(25, 19, 16, 0.96));
+      border: 1px solid rgba(245, 235, 225, 0.16);
+      box-shadow:
+        0 18px 44px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
       pointer-events: none;
       opacity: 0;
+      visibility: hidden;
       transform: translateY(8px) scale(0.96);
       transform-origin: bottom right;
-      transition: opacity 0.18s var(--ease-out-expo), transform 0.22s var(--ease-spring);
+      transition: opacity 0.18s var(--ease-out-expo), transform 0.22s var(--ease-spring), visibility 0s linear 0.18s;
+      width: min(252px, calc(100vw - 36px));
       max-width: calc(100vw - 36px);
     }
     .wand-joystick-panel.active {
       pointer-events: auto;
       opacity: 1;
+      visibility: visible;
       transform: translateY(0) scale(1);
+      transition-delay: 0s;
+    }
+    .wjp-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 24px;
     }
     .wjp-title {
-      font-size: 0.66rem;
-      letter-spacing: 0.08em;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
-      color: rgba(245, 235, 225, 0.5);
-      text-align: center;
+      color: rgba(245, 235, 225, 0.66);
+      font-weight: 700;
+    }
+    .wjp-title-icon {
+      color: rgba(255, 210, 156, 0.9);
+    }
+    .wjp-close {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1px solid rgba(245, 235, 225, 0.12);
+      background: rgba(255, 255, 255, 0.05);
+      color: rgba(245, 235, 225, 0.72);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      transition: background 0.14s ease, color 0.14s ease, transform 0.14s ease;
+    }
+    .wjp-close:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: rgba(245, 235, 225, 0.95);
+    }
+    .wjp-close:active { transform: scale(0.94); }
+    .wjp-section-label {
+      margin: 0 2px -4px;
+      color: rgba(245, 235, 225, 0.38);
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
     }
     .wjp-dpad { display: flex; flex-direction: column; align-items: center; gap: 4px; }
     .wjp-dpad-row { display: flex; gap: 4px; }
@@ -16448,9 +16498,18 @@
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
       user-select: none;
-      transition: transform 0.1s ease, background 0.15s ease;
+      transition: transform 0.1s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    .wjp-key:hover {
+      background: rgba(255, 255, 255, 0.11);
+      border-color: rgba(255, 215, 177, 0.28);
+      color: #fff7ed;
     }
     .wjp-key:active { background: var(--accent-soft, rgba(197, 101, 61, 0.2)); transform: scale(0.94); }
+    .wjp-key[data-key="enter"] { color: #a7d7a9; }
+    .wjp-key[data-key="ctrl_c"],
+    .wjp-key[data-key="escape"] { color: #f1a39d; }
+    .wjp-key[data-key="shift_tab"] { color: #c5b8ff; }
     .wjp-key.wjp-mod.active {
       background: var(--accent);
       color: #fff;

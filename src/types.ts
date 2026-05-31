@@ -215,8 +215,6 @@ export interface GitStatusResult {
   lastCommit?: { hash: string; shortHash: string; subject: string };
   /** Most recent tag reachable from HEAD (`git describe --tags --abbrev=0`), if any. */
   latestTag?: string;
-  /** Locally-derived next-version suggestion (patch bump of `latestTag`, or a sane default). */
-  suggestedTag?: string;
   error?: string;
 }
 
