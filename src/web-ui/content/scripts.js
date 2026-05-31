@@ -2435,43 +2435,55 @@
           return window.matchMedia && window.matchMedia("(max-width: 720px)").matches;
         }
 
-        // Resting (home) positions. Wide screens use one centered row; narrow screens
-        // use a triangle so the magnetic field keeps the same interaction without crowding.
+        // Resting (home) positions. 三角布局：Tag 左下 / Commit 顶中 / Push 右下
+        // —— 从 Tag 横向滑到 Push 的轨迹从不穿过 Commit，避免误触；同时三色球
+        // 形成的 ∧ 三角既好看又便于磁吸拾取。Sub 球（可选 scope 修饰符）站在
+        // 三角外的右侧中段，明确区分「附加项」与「主动作」。
         function homePositions() {
           var fw = field.clientWidth, fh = field.clientHeight, H = chH();
-          if (isCompactDock()) {
-            if (hasSub) {
-              // 2×2 网格：commit/tag 上行，push/sub 下行；sub 落在右下角（可选附加项的直觉位）。
-              var topY2 = Math.max(8, fh * 0.20 - H / 2);
-              var botY2 = Math.min(fh - H - 8, fh * 0.70 - H / 2);
-              var colL = function(w) { return Math.max(8, fw * 0.27 - w / 2); };
-              var colR = function(w) { return Math.min(fw - w - 8, fw * 0.73 - w / 2); };
-              return {
-                commit: { x: colL(cw("commit")), y: topY2 },
-                tag: { x: colR(cw("tag")), y: topY2 },
-                push: { x: colL(cw("push")), y: botY2 },
-                sub: { x: colR(cw("sub")), y: botY2 }
-              };
-            }
-            // 无 sub：维持原三角布局，完全不变。
-            var commitW = cw("commit"), tagW = cw("tag"), pushW = cw("push");
-            var topY = Math.max(8, fh * 0.18 - H / 2);
-            var bottomY = Math.min(fh - H - 8, fh * 0.72 - H / 2);
+          var commitW = cw("commit"), tagW = cw("tag"), pushW = cw("push");
+
+          if (isCompactDock() && hasSub) {
+            // 窄屏 + Sub：2×2 网格——commit/tag 上行，push/sub 下行；Sub 落右下角。
+            var topY2 = Math.max(8, fh * 0.20 - H / 2);
+            var botY2 = Math.min(fh - H - 8, fh * 0.70 - H / 2);
+            var colL = function(w) { return Math.max(8, fw * 0.27 - w / 2); };
+            var colR = function(w) { return Math.min(fw - w - 8, fw * 0.73 - w / 2); };
             return {
-              commit: { x: Math.max(8, (fw - commitW) / 2), y: topY },
-              tag: { x: Math.max(8, fw * 0.24 - tagW / 2), y: bottomY },
-              push: { x: Math.min(fw - pushW - 8, fw * 0.76 - pushW / 2), y: bottomY }
+              commit: { x: colL(commitW), y: topY2 },
+              tag: { x: colR(tagW), y: topY2 },
+              push: { x: colL(pushW), y: botY2 },
+              sub: { x: colR(cw("sub")), y: botY2 }
             };
           }
-          // 宽屏：所有球（含可选的 Sub）一排居中，保持整齐——Sub 跟在 Push 之后，靠 teal 配色
-          // 区分「可选」，不再孤立偏置到右下角（那样会显得「掉到提交区下面」、与动作球脱节）。
-          // 无 sub 时 ALL === ACTION_ORDER，与原三球一排完全一致。
-          var gap = 14;
-          var total = ALL.reduce(function(s, id) { return s + cw(id); }, 0) + (ALL.length - 1) * gap;
-          var x = Math.max(8, (fw - total) / 2);
-          var y = (fh - H) / 2;
-          var pos = {};
-          ALL.forEach(function(id) { pos[id] = { x: x, y: y }; x += cw(id) + gap; });
+
+          // 三角布局（窄屏无 Sub / 所有宽屏情形）：Commit 顶中、Tag 左下、Push 右下。
+          // 宽屏给出更紧的三角（左右收到 28%/72%），同时保留足够 Y 偏移让顶端
+          // 与底排之间的视觉距离 > 半个 chip 高，横向直划无误触。
+          var compact = isCompactDock();
+          var topY = compact
+            ? Math.max(8, fh * 0.18 - H / 2)
+            : Math.max(8, fh * 0.12);
+          var bottomY = compact
+            ? Math.min(fh - H - 8, fh * 0.72 - H / 2)
+            : Math.min(fh - H - 8, fh * 0.88 - H);
+          var leftRatio = compact ? 0.24 : 0.28;
+          var rightRatio = compact ? 0.76 : 0.72;
+
+          var pos = {
+            commit: { x: Math.max(8, (fw - commitW) / 2), y: topY },
+            tag: { x: Math.max(8, fw * leftRatio - tagW / 2), y: bottomY },
+            push: { x: Math.min(fw - pushW - 8, fw * rightRatio - pushW / 2), y: bottomY }
+          };
+          if (hasSub) {
+            // 宽屏 + Sub：把 Sub 放到三角右外侧中段，远离 Push 的磁吸热区，
+            // 视觉上是「主动作三角 + 附加 scope」的清晰分层。
+            var subW = cw("sub");
+            pos.sub = {
+              x: Math.min(fw - subW - 8, fw * 0.94 - subW / 2),
+              y: Math.max(8, Math.min(fh - H - 8, (fh - H) / 2))
+            };
+          }
           return pos;
         }
 

@@ -15175,7 +15175,9 @@
       display: grid;
       grid-template-columns: minmax(0, 1fr) 96px;
       gap: 10px;
-      height: 150px;
+      /* Triangle layout (Commit apex top, Tag/Push at the base) needs vertical room so
+         the apex-to-base offset is clearly bigger than half a chip, killing misclicks. */
+      height: 168px;
       padding: 8px;
       border-radius: 16px;
       border: 1px solid rgba(125, 91, 57, 0.16);
