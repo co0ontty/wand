@@ -15549,227 +15549,239 @@
     }
     .qc-clean-badge svg { flex-shrink: 0; }
 
-    /* HEAD — a plain inline line (no nested box). */
-    .qc-head-card {
+    /* ── Quick commit release panel ─────────────────────────────── */
+    .quick-commit-modal {
+      max-width: 620px;
+    }
+    .quick-commit-modal .modal-body {
+      gap: 0;
+    }
+    .qc-release-panel,
+    .qc-result-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .qc-pair {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .qc-pair-label {
+      padding-top: 9px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .qc-pair-flow {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) 24px minmax(0, 1.1fr);
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+    .qc-pair-value {
+      min-width: 0;
+      min-height: 38px;
       display: flex;
       align-items: center;
       gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.52);
+      color: var(--text-secondary);
+      overflow: hidden;
     }
-    .qc-head-label {
+    .qc-pair-value--to {
+      background: rgba(255, 255, 255, 0.84);
+      border-color: rgba(197, 101, 61, 0.22);
+      color: var(--text-primary);
+    }
+    .qc-pair-value code {
       flex-shrink: 0;
-      font-size: 0.66rem;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      padding: 1px 6px;
-      border-radius: 5px;
-      background: rgba(125, 91, 57, 0.08);
-    }
-    .qc-head-text {
-      flex: 1 1 auto;
-      min-width: 0;
       font-family: var(--font-mono, monospace);
       font-size: 0.78rem;
-      color: var(--text-primary);
+      font-weight: 700;
+      color: var(--accent);
+      background: rgba(197, 101, 61, 0.09);
+      border-radius: 5px;
+      padding: 2px 6px;
+    }
+    .qc-pair-value span {
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      background: transparent;
-      padding: 0;
+      font-size: 0.82rem;
     }
-
-    /* Status chips (ahead/behind/tags) */
-    .qc-status-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .qc-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 3px 9px;
-      border-radius: 999px;
-      font-size: 0.72rem;
-      font-weight: 600;
-      line-height: 1.4;
-      background: rgba(120, 120, 120, 0.08);
-      color: var(--text-secondary);
-      border: 1px solid rgba(120, 120, 120, 0.12);
-      white-space: nowrap;
-    }
-    .qc-chip--ahead {
-      background: rgba(60, 130, 200, 0.14);
-      color: rgba(40, 100, 170, 0.95);
-      border-color: rgba(60, 130, 200, 0.28);
-    }
-    .qc-chip--behind {
-      background: rgba(180, 100, 60, 0.14);
-      color: rgba(160, 90, 50, 0.95);
-      border-color: rgba(180, 100, 60, 0.28);
-    }
-    .qc-chip--warn {
-      background: rgba(220, 150, 30, 0.14);
-      color: rgba(180, 110, 20, 0.95);
-      border-color: rgba(220, 150, 30, 0.32);
-    }
-    .qc-chip--clean {
-      background: rgba(60, 160, 90, 0.12);
-      color: rgba(40, 130, 70, 0.95);
-      border-color: rgba(60, 160, 90, 0.24);
-    }
-
-    /* "为当前提交打 Tag" button (icon + text, balances the push button) */
-    .qc-tag-head-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .qc-tag-head-btn svg { flex-shrink: 0; opacity: 0.8; }
-    .qc-tag-head-btn.is-open {
-      background: rgba(140, 100, 200, 0.12);
-      border-color: rgba(140, 100, 200, 0.28);
-      color: rgba(96, 60, 160, 0.98);
-    }
-
-    /* Tag HEAD inline drawer */
-    .qc-tag-head-panel {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 11px 12px;
-      background: rgba(255, 255, 255, 0.85);
-      border: 1px solid rgba(140, 100, 200, 0.18);
-      border-radius: 10px;
-    }
-    .qc-tag-head-hint {
-      font-size: 0.74rem;
-      color: var(--text-muted);
-      line-height: 1.4;
-    }
-    .qc-tag-head-row {
-      display: flex;
-      gap: 6px;
+    .qc-pair--commit .qc-pair-flow {
       align-items: stretch;
     }
-    .qc-tag-head-row .field-input { flex: 1 1 auto; min-width: 0; }
-    .qc-tag-head-push {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.78rem;
-      color: var(--text-secondary);
-      cursor: pointer;
-      user-select: none;
+    .qc-pair--commit .qc-pair-value {
+      min-height: 76px;
+      align-items: flex-start;
     }
-    .qc-tag-head-actions {
+    .qc-pair--commit .qc-pair-value--to {
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .qc-pair--commit .qc-message-input {
+      min-height: 76px;
+      width: 100%;
+      resize: vertical;
+    }
+    .qc-pair--tag .qc-pair-value--to {
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .qc-pair--tag .qc-tag-field-input {
+      width: 100%;
+      min-height: 38px;
+    }
+    .qc-pair-arrow {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-weight: 800;
+      font-family: var(--font-mono, monospace);
+    }
+    .qc-muted {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+    .qc-modal-actions,
+    .qc-result-actions {
       display: flex;
       justify-content: flex-end;
-      gap: 6px;
+      gap: 8px;
+    }
+    .qc-result-panel {
+      padding-top: 2px;
+    }
+    .qc-result-pushed {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      color: rgba(40, 130, 70, 0.95);
+      background: rgba(60, 160, 90, 0.12);
+      border: 1px solid rgba(60, 160, 90, 0.24);
+      font-size: 0.78rem;
+      font-weight: 700;
     }
 
-    /* Split button (primary action: commit / commit & push) */
-    .qc-split-button {
+    .qc-drag-wrap {
+      padding-top: 2px;
+    }
+    .qc-drag-track {
+      --qc-progress: 0%;
+      --qc-knob-x: 0px;
       position: relative;
-      display: inline-flex;
-      align-items: stretch;
-      isolation: isolate;
-    }
-    .qc-split-main {
-      border-top-right-radius: 0;
-      border-bottom-right-radius: 0;
-      padding-right: 12px;
-    }
-    .qc-split-caret {
-      border-top-left-radius: 0;
-      border-bottom-left-radius: 0;
-      padding: 0 8px;
-      border-left: 1px solid rgba(255, 255, 255, 0.25);
-      min-width: 26px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .qc-split-caret svg {
-      transition: transform 0.16s ease;
-    }
-    .qc-split-caret.is-active svg {
-      transform: rotate(180deg);
-    }
-    .qc-split-button--secondary .qc-split-caret {
-      border-left-color: rgba(125, 91, 57, 0.12);
-    }
-
-    /* Dropdown menu (used by primary action + push) */
-    .qc-dropdown-menu {
-      position: absolute;
-      top: calc(100% + 6px);
-      right: 0;
-      min-width: 220px;
-      max-width: 320px;
-      background: rgba(255, 255, 255, 0.98);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(125, 91, 57, 0.16);
-      border-radius: 12px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
-      padding: 4px;
-      z-index: 20;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      animation: qcDropdownIn 0.14s ease-out;
-    }
-    .qc-dropdown-menu--right { right: 0; left: auto; }
-    @keyframes qcDropdownIn {
-      from { opacity: 0; transform: translateY(-4px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-    .qc-dropdown-item {
-      all: unset;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      padding: 8px 10px;
+      min-height: 58px;
+      padding: 7px;
       border-radius: 8px;
-      cursor: pointer;
-      transition: background 0.12s ease;
+      border: 1px solid rgba(125, 91, 57, 0.14);
+      background: rgba(255, 255, 255, 0.52);
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
     }
-    .qc-dropdown-item:hover:not(.is-disabled) {
-      background: rgba(197, 101, 61, 0.08);
+    .qc-drag-progress {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: calc(var(--qc-progress) + 78px);
+      max-width: 100%;
+      background: linear-gradient(90deg, rgba(197, 101, 61, 0.18), rgba(60, 130, 200, 0.18));
+      transition: width 0.16s ease;
+      pointer-events: none;
     }
-    .qc-dropdown-item.is-selected {
-      background: rgba(197, 101, 61, 0.10);
+    .qc-drag-track.is-dragging .qc-drag-progress {
+      transition: none;
     }
-    .qc-dropdown-item.is-disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .qc-dropdown-item-main {
-      display: flex;
+    .qc-drag-stages {
+      position: absolute;
+      inset: 7px 10px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
       align-items: center;
-      gap: 6px;
+      pointer-events: none;
     }
-    .qc-dropdown-check {
-      flex-shrink: 0;
-      width: 13px;
-      height: 13px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
+    .qc-drag-stage {
+      position: relative;
+      z-index: 1;
+      justify-self: center;
+      font-size: 0.7rem;
+      font-weight: 800;
+      color: var(--text-muted);
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    .qc-drag-stage::before {
+      content: "";
+      display: block;
+      width: 7px;
+      height: 7px;
+      margin: 0 auto 5px;
+      border-radius: 50%;
+      background: rgba(125, 91, 57, 0.22);
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.75);
+    }
+    .qc-drag-stage.is-passed {
       color: var(--accent);
     }
-    .qc-dropdown-item-title {
-      font-size: 0.84rem;
-      font-weight: 600;
-      color: var(--text-primary);
+    .qc-drag-stage.is-passed::before {
+      background: var(--accent);
     }
-    .qc-dropdown-item-desc {
-      font-size: 0.72rem;
-      color: var(--text-muted);
-      line-height: 1.4;
-      padding-left: 19px;
+    .qc-drag-action {
+      position: absolute;
+      left: 7px;
+      top: 7px;
+      z-index: 2;
+      width: 42%;
+      min-width: 132px;
+      max-width: 220px;
+      height: 44px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: white;
+      font-family: var(--font-sans);
+      font-size: 0.84rem;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: grab;
+      box-shadow: 0 8px 22px rgba(197, 101, 61, 0.26);
+      transform: translateX(var(--qc-knob-x));
+      transition: transform 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+      touch-action: none;
+    }
+    .qc-drag-track.is-dragging .qc-drag-action {
+      cursor: grabbing;
+      transition: background 0.16s ease, box-shadow 0.16s ease;
+    }
+    .qc-drag-track[data-action="commit-tag"] .qc-drag-action {
+      background: rgba(96, 110, 185, 0.96);
+      box-shadow: 0 8px 22px rgba(96, 110, 185, 0.24);
+    }
+    .qc-drag-track[data-action="commit-tag-push"] .qc-drag-action {
+      background: rgba(40, 130, 88, 0.96);
+      box-shadow: 0 8px 22px rgba(40, 130, 88, 0.24);
+    }
+    .qc-drag-action:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      box-shadow: none;
     }
 
     @media (max-width: 720px) {
@@ -15777,11 +15789,21 @@
       .topbar-git-badge { padding: 0 8px; font-size: 0.7rem; }
       .quick-commit-modal { max-width: 95vw; }
       .qc-files-wrap { max-height: 160px; }
-      .qc-dropdown-menu { min-width: 180px; }
-      .qc-section-actions--secondary { flex-wrap: wrap; gap: 8px; }
-      .qc-section-actions--secondary .qc-tag-head-btn { flex: 1 1 auto; justify-content: center; }
-      /* Keep the commit footer one row, but let the two button groups share width. */
-      .qc-action-group { flex: 1 1 auto; justify-content: flex-end; }
+      .qc-pair {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+      .qc-pair-label {
+        padding-top: 0;
+      }
+      .qc-pair-flow {
+        grid-template-columns: 1fr 18px 1fr;
+        gap: 6px;
+      }
+      .qc-drag-action {
+        width: 48%;
+        min-width: 118px;
+      }
     }
 
     /* ============================================================ */
