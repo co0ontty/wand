@@ -35,10 +35,6 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.138",
-    "@types/compression": "^1.8.1",
-    "@types/cookie": "^0.6.0",
-    "@types/multer": "^2.1.0",
-    "@wterm/dom": "^0.1.8",
     "compression": "^1.8.1",
     "express": "^4.21.2",
     "multer": "^2.1.1",
@@ -48,9 +44,12 @@
   },
   "devDependencies": {
     "@types/blessed": "^0.1.27",
+    "@types/compression": "^1.8.1",
     "@types/express": "^4.17.21",
+    "@types/multer": "^2.1.0",
     "@types/node": "^22.13.14",
     "@types/ws": "^8.18.1",
+    "@wterm/dom": "^0.1.8",
     "esbuild": "^0.28.0",
     "qrcode": "^1.5.4",
     "tsx": "^4.19.3",
