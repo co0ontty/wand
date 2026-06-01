@@ -1977,16 +1977,6 @@
                 //  · 自动批准 / 权限操作行 / 退出码徽章统一搬到 textarea 上方的状态行，
                 //    输入主行保持极简。
                 '<div class="input-composer' + (currentDraft ? ' has-text' : '') + '">' +
-                  // 提示词优化按钮 —— 有内容时显示，浮层挂在右侧。
-                  '<button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="提示词优化（AI）" aria-label="提示词优化">' +
-                    '<svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-                      '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/>' +
-                      '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/>' +
-                      '<path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/>' +
-                      '<path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/>' +
-                    '</svg>' +
-                    '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
-                  '</button>' +
                   // 顶部状态行：自动批准 / 权限审批 / 统计 —— 仅在有内容时占位，
                   // 否则折叠成 0 高度。避免与下方"主输入行"挤在一行。
                   '<div class="composer-status-row" id="composer-status-row">' +
@@ -2018,30 +2008,21 @@
                     '</div>' +
                     '<div class="composer-input-wrap">' +
                       '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
-                      // Ghost meta —— textarea 空时浮在上面显示 "mode · model · thinking"；
-                      // pointer-events: none 不挡 textarea 聚焦，唯独 .composer-text-pill 内的透明 select 接收点击。
-                      '<div class="composer-ghost-meta" id="composer-ghost-meta" aria-hidden="' + (currentDraft ? "true" : "false") + '">' +
-                        '<span class="composer-text-pill" title="模式">' +
-                          '<span class="composer-text-label" id="chat-mode-label">' + escapeHtml(composerMode) + '</span>' +
-                          '<select id="chat-mode-select" class="composer-text-hidden-select" tabindex="-1" aria-label="模式">' +
-                            renderChatModeOptionsRaw(preferredTool, composerMode) +
-                          '</select>' +
-                        '</span>' +
-                        '<span class="composer-text-sep" aria-hidden="true">·</span>' +
-                        '<span class="composer-text-pill chat-model-text-pill" title="模型">' +
-                          '<span class="composer-text-label" id="chat-model-label">' + escapeHtml(getEffectiveModel(selectedSession) || "default") + '</span>' +
-                          '<select id="chat-model-select" class="composer-text-hidden-select" tabindex="-1" aria-label="模型">' +
-                            renderChatModelOptionsRaw(getEffectiveModel(selectedSession), selectedSession) +
-                          '</select>' +
-                        '</span>' +
-                        '<span class="composer-text-sep" aria-hidden="true">·</span>' +
-                        '<span class="composer-text-pill chat-thinking-text-pill" title="思考深度">' +
-                          '<span class="composer-text-label" id="chat-thinking-label">' + escapeHtml(getEffectiveThinking(selectedSession)) + '</span>' +
-                          '<select id="chat-thinking-select" class="composer-text-hidden-select" tabindex="-1" aria-label="思考深度">' +
-                            renderChatThinkingOptionsRaw(getEffectiveThinking(selectedSession)) +
-                          '</select>' +
-                        '</span>' +
-                      '</div>' +
+                      // 提示词优化按钮 —— 浮在输入区右侧（在 send 按钮的「左边」，不再撞车）。
+                      // 默认隐藏，CSS 只在 .input-composer.has-text 时显示。
+                      '<button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="提示词优化（AI）" aria-label="提示词优化">' +
+                        '<svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                          '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/>' +
+                          '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/>' +
+                          '<path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/>' +
+                          '<path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/>' +
+                        '</svg>' +
+                        '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
+                      '</button>' +
+                      // 三件套（mode/model/thinking）的入口已从输入框搬走（避免与 placeholder 视觉重合）：
+                      //   · 结构化会话空状态 → renderChatEmptyState 那条提示下方的下拉
+                      //   · 结构化会话进行中 → 每条用户消息头像左侧的徽章按钮
+                      // PTY 模式整体不展示。
                       // 语音模式 UI（v1 仅 UI scaffolding；MediaRecorder 接入留待后续）
                       '<div class="voice-input-mode hidden" id="voice-input-mode">' +
                         '<button id="voice-record-btn" class="voice-record-btn" type="button">' +
@@ -2054,7 +2035,9 @@
                       '</div>' +
                     '</div>' +
                     '<div class="composer-actions-right">' +
-                      '<button id="stop-button" class="btn-circle btn-circle-stop' + (state.selectedId ? "" : " hidden") + '" title="停止">' +
+                      // 停止按钮默认隐藏；updateInteractiveControls() 根据 computeRunningSignal
+                      // 判断「真有 reply 在跑」时再露出，平时让位给主操作减少视觉噪声。
+                      '<button id="stop-button" class="btn-circle btn-circle-stop hidden" title="停止">' +
                         '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
                       '</button>' +
                       // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队点输入框上方那条气泡。
@@ -6653,20 +6636,23 @@
         });
         var stopBtn = document.getElementById("stop-button");
         if (stopBtn) stopBtn.addEventListener("click", stopSession);
-        var modeSelect = document.getElementById("chat-mode-select");
-        if (modeSelect) modeSelect.addEventListener("change", function() {
-          state.chatMode = this.value;
-          var label = document.getElementById("chat-mode-label");
-          if (label) label.textContent = this.value;
-          showToast("新会话模式：" + this.value, "info");
-        });
-        var modelSelect = document.getElementById("chat-model-select");
-        if (modelSelect) modelSelect.addEventListener("change", function() {
-          onChatModelChange(this.value);
-        });
-        var thinkingSelect = document.getElementById("chat-thinking-select");
-        if (thinkingSelect) thinkingSelect.addEventListener("change", function() {
-          onChatThinkingChange(this.value);
+        // 三件套（模式 / 模型 / 思考）走全局委托 —— 任何位置（空状态下拉 / 用户消息徽章）
+        // 渲染出 [data-mode-control] 的 select 都会被这条监听捕获，避免到处 wire ID。
+        document.addEventListener("change", function(e) {
+          var target = e.target;
+          if (!target || target.nodeType !== 1) return;
+          if (typeof target.matches !== "function" || !target.matches("[data-mode-control]")) return;
+          var ctrl = target.getAttribute("data-mode-control");
+          var value = target.value;
+          if (ctrl === "mode") {
+            state.chatMode = value;
+            refreshAllChatModeTrios();
+            showToast && showToast("新会话模式：" + value, "info");
+          } else if (ctrl === "model") {
+            onChatModelChange(value);
+          } else if (ctrl === "thinking") {
+            onChatThinkingChange(value);
+          }
         });
 
         var sessionModal = document.getElementById("session-modal");
@@ -8891,19 +8877,71 @@
       }
 
       function syncComposerModeSelect() {
-        var select = document.getElementById("chat-mode-select");
+        // 旧 ID 形态（chat-mode-select / chat-mode-label）已下线 —— trio 现在多实例存在。
+        // 这里只保留 state 归一化与 mode-hint 文本刷新；DOM 同步交给 refreshAllChatModeTrios。
         state.chatMode = getSafeModeForTool("claude", state.chatMode);
-        if (select) {
-          select.innerHTML = renderChatModeOptionsRaw("claude", state.chatMode);
-          select.value = state.chatMode;
-        }
-        var labelEl = document.getElementById("chat-mode-label");
-        if (labelEl) labelEl.textContent = state.chatMode;
         var modeHint = document.getElementById("mode-hint");
         if (modeHint) modeHint.textContent = getModeHint(state.chatMode);
+        refreshAllChatModeTrios();
       }
 
       // 三件套 raw 选项渲染：option 文本直接是 id（不带括号注释 / 不本地化）。
+      // ── 三件套（模式 / 模型 / 思考深度）的统一渲染器 ──
+      // 两个使用点：
+      //   · 结构化会话空状态：作为下拉菜单出现在"对话已开始"提示下方，让用户在开聊前调整
+      //   · 结构化会话用户消息：作为紧凑徽章挂在头像/名称的左侧，点击任一徽章可改"当前状态"
+      // PTY 模式整体不展示（与按键透传无关）。两种 kind 共用一组 select，靠 data-mode-control
+      // 属性绑定全局委托 change 事件，让所有 trio 实例的状态自动保持同步。
+      function renderChatModeTrioHtml(session, opts) {
+        opts = opts || {};
+        var kind = opts.kind === "compact" ? "compact" : "dropdown";
+        var preferredTool = getPreferredTool();
+        var composerMode = state.chatMode || "default";
+        var modelText = getEffectiveModel(session) || "default";
+        var thinkingText = getEffectiveThinking(session);
+        function pill(ctrl, label, value, optionsHtml) {
+          // dropdown 形态显示分组小标签（"模式" / "模型" / "思考"），compact 不显示。
+          var tagHtml = kind === "dropdown" ? ('<span class="chat-mode-trio-tag">' + escapeHtml(label) + '</span>') : "";
+          return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml(label) + '">' +
+            tagHtml +
+            '<span class="composer-text-label">' + escapeHtml(value) + '</span>' +
+            '<select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" tabindex="-1" aria-label="' + escapeHtml(label) + '">' +
+              optionsHtml +
+            '</select>' +
+          '</span>';
+        }
+        return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="会话设置">' +
+          pill("mode", "模式", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) +
+          '<span class="composer-text-sep" aria-hidden="true">·</span>' +
+          pill("model", "模型", modelText, renderChatModelOptionsRaw(modelText, session)) +
+          '<span class="composer-text-sep" aria-hidden="true">·</span>' +
+          pill("thinking", "思考", thinkingText, renderChatThinkingOptionsRaw(thinkingText)) +
+        '</div>';
+      }
+
+      // 改完任何一处 trio 的 select 后，把所有 trio 实例的 label / select.value 同步刷新。
+      // 比直接重渲染整段 HTML 轻：只 patch 三个文本节点 + 三个 select.value。
+      function refreshAllChatModeTrios() {
+        var session = getSelectedSession();
+        var mode = state.chatMode || "default";
+        var model = getEffectiveModel(session) || "default";
+        var thinking = getEffectiveThinking(session);
+        var trios = document.querySelectorAll(".chat-mode-trio");
+        trios.forEach(function(trio) {
+          function setPair(ctrl, value) {
+            var pillNode = trio.querySelector('[data-mode-control-pill="' + ctrl + '"]');
+            if (!pillNode) return;
+            var label = pillNode.querySelector(".composer-text-label");
+            if (label) label.textContent = value;
+            var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]');
+            if (sel && sel.value !== value) sel.value = value;
+          }
+          setPair("mode", mode);
+          setPair("model", model);
+          setPair("thinking", thinking);
+        });
+      }
+
       function renderChatModeOptionsRaw(tool, selectedMode) {
         return getSupportedModes(tool).map(function(mode) {
           return '<option value="' + escapeHtml(mode) + '"' + (mode === selectedMode ? " selected" : "") + '>' +
@@ -8954,17 +8992,9 @@
       }
 
       function syncComposerModelSelect(session) {
-        var select = document.getElementById("chat-model-select");
-        var effective = getEffectiveModel(session);
-        if (select) {
-          select.innerHTML = renderChatModelOptionsRaw(effective, session);
-          select.value = effective;
-        }
-        var labelEl = document.getElementById("chat-model-label");
-        if (labelEl) labelEl.textContent = effective || "default";
-        // thinking 选择器与 model 选择器属于同一组"会话级设置"，
-        // 任何刷新 model 的时机也应该同步刷新 thinking，避免漂移。
-        syncComposerThinkingSelect(session);
+        // 旧 ID 形态已下线；trio 多实例由 refreshAllChatModeTrios 同步刷新。
+        // thinking / model 同属会话级设置，refresh 一次就把所有三件套统一对齐。
+        refreshAllChatModeTrios();
       }
 
       // ── 思考深度 (thinkingEffort) —— 与 model 选择三件套对称 ──
@@ -9013,14 +9043,8 @@
       }
 
       function syncComposerThinkingSelect(session) {
-        var select = document.getElementById("chat-thinking-select");
-        var effective = getEffectiveThinking(session);
-        if (select) {
-          select.innerHTML = renderChatThinkingOptionsRaw(effective);
-          select.value = effective;
-        }
-        var labelEl = document.getElementById("chat-thinking-label");
-        if (labelEl) labelEl.textContent = effective;
+        // 旧 ID 形态已下线；trio 多实例由 refreshAllChatModeTrios 同步刷新。
+        refreshAllChatModeTrios();
       }
 
       function onChatThinkingChange(value) {
@@ -9030,8 +9054,7 @@
         }
         state.chatThinking = normalized;
         try { localStorage.setItem("wand-thinking-effort", normalized); } catch (e) {}
-        var labelEl = document.getElementById("chat-thinking-label");
-        if (labelEl) labelEl.textContent = normalized;
+        refreshAllChatModeTrios();
         var session = getSelectedSession();
         if (!session) return;
         fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
@@ -9280,8 +9303,7 @@
         var normalized = (value || "").trim();
         state.chatModel = normalized;
         try { localStorage.setItem("wand-chat-model", normalized); } catch (e) {}
-        var labelEl = document.getElementById("chat-model-label");
-        if (labelEl) labelEl.textContent = normalized || "default";
+        refreshAllChatModeTrios();
         var session = getSelectedSession();
         if (!session) return;
         fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
@@ -9759,7 +9781,8 @@
           if (blankChat) blankChat.classList.add("hidden");
           if (terminalContainer) terminalContainer.classList.remove("hidden");
           if (chatContainer) chatContainer.classList.remove("hidden");
-          if (stopBtn) stopBtn.classList.remove("hidden");
+          // v2: 停止按钮不在这里统一展示 —— 由 updateInteractiveControls()
+          // 按 computeRunningSignal 判断「真在跑」时才露出（applyCurrentView 末尾会调用）。
           if (inputPanel) inputPanel.classList.remove("hidden");
         } else {
           if (blankChat) blankChat.classList.remove("hidden");
@@ -12549,9 +12572,6 @@
         var inputBox = el || document.getElementById("input-box");
         var hasText = !!(inputBox && inputBox.value && inputBox.value.length > 0);
         composer.classList.toggle("has-text", hasText);
-        // ghost meta 的 aria-hidden 同步，避免屏幕阅读器朗读已隐藏的浮层
-        var ghost = document.getElementById("composer-ghost-meta");
-        if (ghost) ghost.setAttribute("aria-hidden", hasText ? "true" : "false");
       }
 
       // v2: 切换语音输入模式（类似微信"按住说话"）
@@ -12994,7 +13014,9 @@
         if (chatContainer) {
           chatContainer.classList.remove("hidden");
         }
-        if (stopBtn) stopBtn.classList.remove("hidden");
+        // v2: 不再无条件展示停止按钮 —— 由 updateInteractiveControls() 按
+        // computeRunningSignal 判断「真在跑」时才露出，下面 updateInteractiveControls
+        // 链路会处理（switchToSessionView 后续会触发它）。
 
         if (structured) {
           state.currentView = "chat";
@@ -14334,13 +14356,11 @@
           composer.readOnly = false;
           composer.classList.toggle("is-terminal-passthrough", !!state.terminalInteractive);
         }
-        // v2: 同步 .input-composer 上的 is-terminal-mode 类 —— 控制 ghost meta 隐藏，
-        // 因为终端交互模式下三件套（mode/model/thinking）与按键透传无关，露出来会误导。
+        // v2: 终端交互模式时强制退出语音模式（语义冲突）。三件套已不在输入框里，
+        // 不再需要 is-terminal-mode / has-placeholder 控制 ghost meta 显隐。
         var composerEl = document.querySelector(".input-composer");
-        if (composerEl) {
-          composerEl.classList.toggle("is-terminal-mode", !!state.terminalInteractive);
-          // 终端交互模式时退出语音模式（语义冲突）
-          if (state.terminalInteractive) composerEl.classList.remove("voice-mode");
+        if (composerEl && state.terminalInteractive) {
+          composerEl.classList.remove("voice-mode");
         }
         var sendBtn = document.getElementById("send-input-button");
         var structuredInFlight = structured && isRunning;
@@ -14350,6 +14370,22 @@
             ? (structuredInFlight ? "排队发送（当前回复结束后处理）" : "发送")
             : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
           sendBtn.classList.toggle("queue-mode", structuredInFlight);
+        }
+        // 停止按钮：仅当当前会话真"在跑"才露出（结构化 inFlight / PTY running / 等待权限阻塞）。
+        // 平时让位给主操作（send 按钮一侧整齐，输入区视觉更安静）。
+        var stopBtn = document.getElementById("stop-button");
+        if (stopBtn) {
+          var sig = computeRunningSignal(selectedSession);
+          stopBtn.classList.toggle("hidden", !sig.active);
+        }
+        // v2: 停止按钮仅在「真有 reply 在跑」时显示。computeRunningSignal 给出统一信号
+        //  · structured.inFlight  → 结构化会话流式输出中
+        //  · pty status==running  → PTY 会话进程在跑
+        //  · permissionBlocked    → 卡在权限审批（也允许停止解封）
+        var stopBtnEl = document.getElementById("stop-button");
+        if (stopBtnEl) {
+          var runSig = computeRunningSignal(selectedSession);
+          stopBtnEl.classList.toggle("hidden", !runSig.active);
         }
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
@@ -17398,7 +17434,19 @@
 
         if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
-            renderChatEmptyState(chatOutput, '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>');
+            // 结构化会话：在提示下方挂三件套（模式 / 模型 / 思考）。开聊前是修改这三个状态
+            // 的「主入口」，开聊之后就改到每条用户消息头像左侧的徽章里。PTY 会话不展示。
+            var emptyTrioHtml = "";
+            if (isStructuredSession(selectedSession)) {
+              emptyTrioHtml = '<div class="empty-state-trio-wrap">' +
+                '<div class="empty-state-trio-hint">默认会按以下设置发送，可点击调整：</div>' +
+                renderChatModeTrioHtml(selectedSession, { kind: "dropdown" }) +
+              '</div>';
+            }
+            renderChatEmptyState(chatOutput,
+              '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>' +
+              emptyTrioHtml
+            );
             state.lastRenderedEmpty = "empty";
             state.lastRenderedMsgCount = 0;
           }
@@ -18861,16 +18909,30 @@
         img.outerHTML = renderAvatarFallback(persona.avatarSvg);
       }
 
-      function chatAvatar(role) {
+      function chatAvatar(role, opts) {
+        opts = opts || {};
         var personaRole = role === "user" ? "user" : "assistant";
         var persona = getStructuredChatPersona(personaRole);
         var avatarInner = persona.avatar
           ? '<img class="pixel-avatar-image" src="' + escapeHtml(persona.avatar) + '" alt="' + escapeHtml(persona.name) + '" onerror="handleChatAvatarImageError(this, ' + JSON.stringify(personaRole) + ')" />'
           : renderAvatarFallback(persona.avatarSvg);
+        // leftSlot 用来挂三件套徽章。.chat-message-avatar.user 是 row-reverse，所以 DOM
+        // 中放在最后的节点会渲染到最左侧（"名字左侧"），正好满足需求；assistant 是 row，
+        // 不传 leftSlot 就不会有节点跑到右边来。
+        var leftSlotHtml = opts.leftSlot ? opts.leftSlot : "";
         return '<div class="chat-message-avatar ' + role + '">' +
           avatarInner +
           '<span class="avatar-name">' + escapeHtml(persona.name) + '</span>' +
+          leftSlotHtml +
         '</div>';
+      }
+
+      // 用户消息专用 trio：仅结构化会话渲染，PTY 不显示。
+      // 注意 doRenderChat 拿不到 session 引用（msg 没带），这里通过 getSelectedSession 取。
+      function buildUserAvatarTrioHtml() {
+        var session = getSelectedSession();
+        if (!session || !isStructuredSession(session)) return "";
+        return renderChatModeTrioHtml(session, { kind: "compact" });
       }
 
       function renderChatMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
@@ -19335,6 +19397,7 @@
           var userHasSub = userSegments.some(function(s) { return s.subagent; });
           var queuedClass = isQueued ? " queued" : "";
           var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
+          var userTrioSlot = buildUserAvatarTrioHtml();
           if (userHasSub) {
             var userMultiHtml = buildMultiAgentHtml(userSegments, role, parentPersona.name, toolResults, messageKey, { showHandoff: false });
             return '<div class="chat-message ' + role + queuedClass + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">' +
@@ -19343,7 +19406,7 @@
           }
           var userHtml = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
           return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
-            chatAvatar(role) +
+            chatAvatar(role, { leftSlot: userTrioSlot }) +
             '<div class="chat-message-content">' + userHtml + queuedBadge + '</div>' +
           '</div>';
         }

@@ -7905,67 +7905,164 @@
       background: rgba(197, 101, 61, 0.22);
     }
 
-    /* Ghost meta —— textarea 空时浮在输入位上，显示 "default · sonnet · standard"。
-       pointer-events: none 保证点击穿透到 textarea，但内部 .composer-text-pill 重置
-       为 auto，能正常承接 select 点击。 */
-    .composer-ghost-meta {
-      position: absolute;
-      inset: 0;
-      display: flex;
+    /* Ghost meta 已下线 —— 三件套搬到「空状态提示下方下拉」与「用户消息头像左侧按钮」两处。
+       .composer-text-pill / .composer-text-label / .composer-text-hidden-select / .composer-text-sep
+       这几个原子样式仍保留，复用给新位置。 */
+
+    /* ─────────────────────────────────────────────────────────────────────
+       三件套（mode / model / thinking）的新落点
+       ─────────────────────────────────────────────────────────────────────
+       两个 kind：
+         · .chat-mode-trio-dropdown：结构化会话空状态下，作为下拉菜单列在「对话已开始」
+           提示下方。视觉是带分组小标签（"模式" / "模型" / "思考"）的输入式 pill。
+         · .chat-mode-trio-compact：每条用户消息头像左侧的徽章按钮。视觉收紧，省去分组
+           小标签，仅显示当前值。点击调起原生 select。
+       通过 [data-mode-control] 的 select 与全局委托 change 监听联动，多个 trio 实例的
+       状态由 refreshAllChatModeTrios() 同步 patch。
+       ─────────────────────────────────────────────────────────────────── */
+    .chat-mode-trio {
+      display: inline-flex;
       align-items: center;
-      justify-content: flex-start;
       gap: 6px;
-      padding: 0 8px;
-      pointer-events: none;
-      font-family: var(--font-sans);
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      z-index: 1;
-      transition: opacity 0.18s ease-out;
+      flex-wrap: wrap;
     }
-    .composer-ghost-meta .composer-text-pill {
-      pointer-events: auto;
-      font-size: 0.78rem;
-      max-width: 140px;
-      padding: 4px 2px;
+    .chat-mode-trio-pill {
+      position: relative;
+      cursor: pointer;
+      user-select: none;
     }
-    .composer-ghost-meta .composer-text-sep {
-      font-size: 0.78rem;
-    }
-    /* 有内容 → 鬼影消失，textarea 文字接管 */
-    .input-composer.has-text .composer-ghost-meta {
-      opacity: 0;
-      pointer-events: none;
-    }
-    .input-composer.has-text .composer-ghost-meta .composer-text-pill {
-      pointer-events: none;
-    }
-    /* 终端交互模式：ghost meta 与会话设置无关，整体隐藏避免误导 */
-    .input-composer.is-terminal-mode .composer-ghost-meta {
-      display: none;
+    .chat-mode-trio-tag {
+      font-size: 0.625rem;
+      font-weight: 500;
+      color: var(--text-tertiary, #b5a89a);
+      letter-spacing: 0.04em;
+      margin-right: 4px;
+      text-transform: uppercase;
+      opacity: 0.75;
     }
 
-    /* 提示词优化按钮 —— v2 改为 has-text 时显示，定位浮在右侧（textarea 与 send 之间）。
-       覆盖上面的 top/right absolute；现在改成相对于 .composer-input-wrap 定位。 */
+    /* —— Dropdown 形态：空状态下的主入口 —— */
+    .empty-state-trio-wrap {
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      animation: emptyStateTrioFadeIn 0.4s ease-out;
+    }
+    .empty-state-trio-hint {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
+    }
+    .chat-mode-trio-dropdown {
+      gap: 4px;
+      padding: 6px 12px;
+      background: rgba(246, 241, 232, 0.6);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+    .chat-mode-trio-dropdown .chat-mode-trio-pill {
+      font-size: 0.78rem;
+      padding: 3px 6px;
+      border-radius: 8px;
+      transition: background var(--transition-fast);
+    }
+    .chat-mode-trio-dropdown .chat-mode-trio-pill:hover {
+      background: rgba(197, 101, 61, 0.06);
+    }
+    .chat-mode-trio-dropdown .chat-mode-trio-pill:focus-within {
+      background: rgba(197, 101, 61, 0.08);
+    }
+    .chat-mode-trio-dropdown .composer-text-label {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-primary);
+      max-width: 140px;
+    }
+    @keyframes emptyStateTrioFadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* —— Compact 形态：每条用户消息头像左侧 —— */
+    /* row-reverse 下 leftSlot 在 DOM 最后，渲染到视觉最左。chat-message-avatar 整体 gap: 6px
+       已经撑出了 trio 与 name 的间距，这里再加一点呼吸感。 */
+    .chat-message-avatar.user .chat-mode-trio-compact {
+      margin-right: 4px;
+      gap: 3px;
+      opacity: 0.55;
+      transition: opacity var(--transition-fast);
+    }
+    .chat-message-avatar.user:hover .chat-mode-trio-compact,
+    .chat-message-avatar.user .chat-mode-trio-compact:focus-within,
+    .chat-message-avatar.user .chat-mode-trio-compact:hover {
+      opacity: 1;
+    }
+    .chat-mode-trio-compact .chat-mode-trio-pill {
+      font-size: 0.6875rem;
+      padding: 2px 6px;
+      border-radius: 10px;
+      background: rgba(246, 241, 232, 0.55);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      transition: all var(--transition-fast);
+      line-height: 1;
+    }
+    .chat-mode-trio-compact .chat-mode-trio-pill:hover {
+      background: rgba(197, 101, 61, 0.10);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .chat-mode-trio-compact .composer-text-label {
+      font-size: 0.6875rem;
+      max-width: 88px;
+      letter-spacing: 0.01em;
+    }
+    .chat-mode-trio-compact .composer-text-sep {
+      display: none; /* compact 形态不画分隔点，靠 pill 之间的 gap 区分 */
+    }
+
+    @media (max-width: 720px) {
+      .chat-mode-trio-dropdown {
+        padding: 6px 10px;
+        gap: 2px;
+      }
+      .chat-mode-trio-dropdown .composer-text-label {
+        max-width: 100px;
+      }
+      .chat-mode-trio-compact .chat-mode-trio-pill {
+        font-size: 0.625rem;
+        padding: 2px 5px;
+      }
+      .chat-mode-trio-compact .composer-text-label {
+        max-width: 64px;
+      }
+    }
+
+    /* 提示词优化按钮 —— v2 改为 has-text 时显示，挂在 .composer-input-wrap 内右下角，
+       这样不会和右侧 actions 区（stop / send）撞车。多行时也始终贴文本末行的右侧。 */
     .prompt-optimize-btn {
       display: none;
       position: absolute;
-      top: 50%;
+      bottom: 4px;
       right: 4px;
-      transform: translateY(-50%);
+      top: auto;
+      left: auto;
+      transform: none;
       width: 26px;
       height: 26px;
+      z-index: 4;
     }
     .input-composer.has-text .prompt-optimize-btn {
       display: inline-flex;
     }
     .input-composer.has-text .prompt-optimize-btn:hover {
-      transform: translateY(-50%) scale(1.12);
+      transform: scale(1.12);
     }
     .input-composer.has-text .prompt-optimize-btn:active {
-      transform: translateY(-50%) scale(0.92);
+      transform: scale(0.92);
     }
     /* has-text 时给 textarea 留出右内边距，避免文字被优化按钮压住 */
     .input-composer.has-text .input-textarea {
@@ -8052,12 +8149,9 @@
       color: var(--danger);
     }
 
-    /* voice-mode 激活时隐藏 textarea + ghost + optimize；保留左右动作按钮 */
+    /* voice-mode 激活时隐藏 textarea + optimize；保留左右动作按钮 */
     .input-composer.voice-mode .input-textarea {
       visibility: hidden;
-    }
-    .input-composer.voice-mode .composer-ghost-meta {
-      display: none;
     }
     .input-composer.voice-mode .prompt-optimize-btn {
       display: none;
@@ -8081,13 +8175,6 @@
         padding: 3px 4px;
         min-height: 42px;
         gap: 2px;
-      }
-      .composer-ghost-meta {
-        font-size: 0.72rem;
-      }
-      .composer-ghost-meta .composer-text-pill {
-        font-size: 0.72rem;
-        max-width: 96px;
       }
     }
 
