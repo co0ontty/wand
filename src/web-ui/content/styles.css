@@ -6157,6 +6157,7 @@
       padding: 6px 10px;
       padding-bottom: calc(6px + var(--safe-bottom, 0px));
       flex-shrink: 0;
+      position: relative; /* 语音转写气泡（.voice-transcript-bubble）的定位参照 */
       z-index: 26;
       overscroll-behavior: contain;
       touch-action: pan-y;
@@ -8159,10 +8160,107 @@
     .input-composer.voice-mode .voice-input-mode {
       display: flex;
     }
+    /* 语音入口暂时隐藏 —— 等接入 STT 后删掉这条即可恢复（交互逻辑与气泡 UI 均已保留）。 */
+    #voice-btn {
+      display: none;
+    }
+
     /* voice 模式下，语音按钮高亮表示当前状态 */
     .input-composer.voice-mode #voice-btn {
       background: var(--accent-muted, rgba(197, 101, 61, 0.18));
       color: var(--accent);
+    }
+
+    /* 语音实时转写气泡 —— 按住录音时浮在输入框上方（.input-panel 内绝对定位，
+       绕开 .input-composer 的 overflow:hidden）。逐字展示识别文字，松手填回输入框。 */
+    .voice-transcript-bubble {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: calc(100% + 8px);
+      z-index: 40;
+      padding: 12px 16px 10px;
+      border-radius: 16px;
+      background: var(--accent, #c5653d);
+      color: #fff;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none; /* 录音浮层，不拦截指针事件 */
+      transform-origin: bottom center;
+      animation: voice-bubble-in 0.18s ease;
+    }
+    .voice-transcript-bubble.hidden {
+      display: none;
+    }
+    @keyframes voice-bubble-in {
+      from { opacity: 0; transform: translateY(8px) scale(0.96); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .voice-transcript-text {
+      font-family: var(--font-sans);
+      font-size: 0.95rem;
+      line-height: 1.5;
+      font-weight: 500;
+      word-break: break-word;
+      white-space: pre-wrap;
+      min-height: 1.4em; /* 空文字时占位，避免气泡高度跳动 */
+      color: #fff;
+    }
+    /* 尚未识别出文字时，淡化展示占位提示（靠 has-text 区分） */
+    .voice-transcript-bubble:not(.has-text) .voice-transcript-text::before {
+      content: "请开始说话…";
+      opacity: 0.6;
+    }
+    .voice-transcript-hint {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.72rem;
+      opacity: 0.85;
+    }
+    .voice-transcript-status {
+      letter-spacing: 0.02em;
+    }
+    /* 聆听动画：4 根竖条循环跳动 */
+    .voice-wave {
+      display: inline-flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 12px;
+    }
+    .voice-wave > i {
+      width: 2.5px;
+      border-radius: 2px;
+      background: currentColor;
+      animation: voice-wave-bounce 0.9s ease-in-out infinite;
+    }
+    .voice-wave > i:nth-child(1) { height: 5px;  animation-delay: 0s; }
+    .voice-wave > i:nth-child(2) { height: 12px; animation-delay: 0.15s; }
+    .voice-wave > i:nth-child(3) { height: 8px;  animation-delay: 0.3s; }
+    .voice-wave > i:nth-child(4) { height: 11px; animation-delay: 0.45s; }
+    @keyframes voice-wave-bounce {
+      0%, 100% { transform: scaleY(0.4); opacity: 0.6; }
+      50%      { transform: scaleY(1);   opacity: 1; }
+    }
+    /* 下指小三角，指向输入框 */
+    .voice-bubble-arrow {
+      position: absolute;
+      top: 100%;
+      left: 28px;
+      width: 0;
+      height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-top: 8px solid var(--accent, #c5653d);
+    }
+    /* 上滑取消态：整体转危险色，提示松开即取消 */
+    .voice-transcript-bubble.is-canceling {
+      background: var(--danger, #b24f45);
+    }
+    .voice-transcript-bubble.is-canceling .voice-bubble-arrow {
+      border-top-color: var(--danger, #b24f45);
     }
 
     @media (max-width: 720px) {

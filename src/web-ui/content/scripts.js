@@ -2069,6 +2069,16 @@
                       })()
                     : '') +
                 '</div>' +
+                // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
+                // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
+                '<div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite">' +
+                  '<div class="voice-transcript-text" id="voice-transcript-text"></div>' +
+                  '<div class="voice-transcript-hint" id="voice-transcript-hint">' +
+                    '<span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>' +
+                    '<span class="voice-transcript-status" id="voice-transcript-status">正在聆听…上滑取消</span>' +
+                  '</div>' +
+                  '<span class="voice-bubble-arrow" aria-hidden="true"></span>' +
+                '</div>' +
                 '<p id="action-error" class="error-message hidden"></p>' +
               '</div>' +
               // Folder picker modal (hidden by default)
@@ -6722,29 +6732,14 @@
         if (voiceCancelBtn) {
           voiceCancelBtn.addEventListener("click", function() { toggleVoiceMode(false); });
         }
-        // 按住说话按钮 —— v1 仅交互反馈（高亮 + 脉冲），MediaRecorder + STT 后续接入。
+        // 按住说话 —— Pointer Events 统一鼠标/触摸：按住录音、上滑取消、松手填回。
+        // 核心逻辑见模块级 startVoiceRecording / handleVoiceMove / stopVoiceRecording。
         var voiceRecordBtn = document.getElementById("voice-record-btn");
         if (voiceRecordBtn) {
-          var startHold = function(e) {
-            e.preventDefault();
-            voiceRecordBtn.classList.add("is-recording");
-            var label = voiceRecordBtn.querySelector(".voice-record-label");
-            if (label) label.textContent = "松开 发送";
-          };
-          var endHold = function() {
-            if (!voiceRecordBtn.classList.contains("is-recording")) return;
-            voiceRecordBtn.classList.remove("is-recording");
-            var label = voiceRecordBtn.querySelector(".voice-record-label");
-            if (label) label.textContent = "按住 说话";
-            // v1 占位提示，未真正录音
-            showToast && showToast("语音输入功能开发中…", "info");
-          };
-          voiceRecordBtn.addEventListener("mousedown", startHold);
-          voiceRecordBtn.addEventListener("mouseup", endHold);
-          voiceRecordBtn.addEventListener("mouseleave", endHold);
-          voiceRecordBtn.addEventListener("touchstart", startHold, { passive: false });
-          voiceRecordBtn.addEventListener("touchend", endHold);
-          voiceRecordBtn.addEventListener("touchcancel", endHold);
+          voiceRecordBtn.addEventListener("pointerdown", startVoiceRecording);
+          voiceRecordBtn.addEventListener("pointermove", handleVoiceMove);
+          voiceRecordBtn.addEventListener("pointerup", stopVoiceRecording);
+          voiceRecordBtn.addEventListener("pointercancel", stopVoiceRecording);
         }
 
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
@@ -12574,6 +12569,131 @@
         composer.classList.toggle("has-text", hasText);
       }
 
+      // ─────────────────────────────────────────────────────────────────
+      // v2 语音输入：按住说话 → 实时气泡 → 松手填回输入框（微信式交互）
+      //
+      // 数据源与交互解耦：所有识别文字都经 updateVoiceTranscript(text) 进来。
+      // 现在是临时 MOCK（逐字蹦示例文字）；接入真实 STT 后，删掉下方 MOCK 段，
+      // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
+      // ─────────────────────────────────────────────────────────────────
+      var voiceState = { recording: false, canceling: false, transcript: "", startY: 0, mockTimer: null };
+      var VOICE_CANCEL_THRESHOLD = 60; // 按住后上滑超过该像素进入"松开取消"态
+
+      // === MOCK STT（临时占位）：接入真实语音识别后删除整段 ===
+      var VOICE_MOCK_SAMPLES = [
+        "帮我把",
+        "帮我把首页的",
+        "帮我把首页的登录按钮",
+        "帮我把首页的登录按钮改成圆角，",
+        "帮我把首页的登录按钮改成圆角，并加一点阴影",
+      ];
+      function startMockRecognition() {
+        var i = 0;
+        voiceState.mockTimer = setInterval(function() {
+          if (i >= VOICE_MOCK_SAMPLES.length) return;
+          updateVoiceTranscript(VOICE_MOCK_SAMPLES[i]);
+          i++;
+        }, 420);
+      }
+      function stopMockRecognition() {
+        if (voiceState.mockTimer) { clearInterval(voiceState.mockTimer); voiceState.mockTimer = null; }
+      }
+      // === MOCK STT 段结束 ===
+
+      // STT 唯一注入点：写入累积文字并刷新气泡内容。
+      function updateVoiceTranscript(text) {
+        voiceState.transcript = text || "";
+        var textEl = document.getElementById("voice-transcript-text");
+        if (textEl) textEl.textContent = voiceState.transcript;
+        var bubble = document.getElementById("voice-transcript-bubble");
+        if (bubble) bubble.classList.toggle("has-text", !!voiceState.transcript);
+      }
+
+      function startVoiceRecording(e) {
+        if (e) {
+          e.preventDefault();
+          voiceState.startY = (typeof e.clientY === "number") ? e.clientY : 0;
+          // 指针捕获：手指/鼠标移出按钮范围也能继续收到 move / up
+          try {
+            if (e.pointerId !== undefined && e.target && e.target.setPointerCapture) {
+              e.target.setPointerCapture(e.pointerId);
+            }
+          } catch (_) {}
+        }
+        voiceState.recording = true;
+        voiceState.canceling = false;
+        voiceState.transcript = "";
+        var btn = document.getElementById("voice-record-btn");
+        if (btn) {
+          btn.classList.add("is-recording");
+          var label = btn.querySelector(".voice-record-label");
+          if (label) label.textContent = "松开 发送";
+        }
+        var bubble = document.getElementById("voice-transcript-bubble");
+        if (bubble) bubble.classList.remove("hidden", "is-canceling", "has-text");
+        updateVoiceTranscript("");
+        var status = document.getElementById("voice-transcript-status");
+        if (status) status.textContent = "正在聆听…上滑取消";
+        startMockRecognition();
+      }
+
+      function handleVoiceMove(e) {
+        if (!voiceState.recording || !e) return;
+        var dy = voiceState.startY - (typeof e.clientY === "number" ? e.clientY : voiceState.startY);
+        var shouldCancel = dy > VOICE_CANCEL_THRESHOLD;
+        if (shouldCancel === voiceState.canceling) return;
+        voiceState.canceling = shouldCancel;
+        var bubble = document.getElementById("voice-transcript-bubble");
+        if (bubble) bubble.classList.toggle("is-canceling", shouldCancel);
+        var btn = document.getElementById("voice-record-btn");
+        var label = btn && btn.querySelector(".voice-record-label");
+        if (label) label.textContent = shouldCancel ? "松开 取消" : "松开 发送";
+        var status = document.getElementById("voice-transcript-status");
+        if (status) status.textContent = shouldCancel ? "松开手指 取消" : "正在聆听…上滑取消";
+      }
+
+      function stopVoiceRecording(e) {
+        if (!voiceState.recording) return;
+        if (e) e.preventDefault();
+        voiceState.recording = false;
+        stopMockRecognition();
+        var commit = !voiceState.canceling && !!voiceState.transcript.trim();
+        var text = voiceState.transcript;
+        resetVoiceRecordingUI();
+        if (commit) {
+          commitVoiceTranscript(text);
+          toggleVoiceMode(false); // 松手提交后退出语音模式，回到打字态便于修改
+        }
+      }
+
+      // 复位录音相关 UI（按钮 + 气泡），不改变是否处于语音模式。
+      function resetVoiceRecordingUI() {
+        voiceState.canceling = false;
+        var btn = document.getElementById("voice-record-btn");
+        if (btn) {
+          btn.classList.remove("is-recording");
+          var label = btn.querySelector(".voice-record-label");
+          if (label) label.textContent = "按住 说话";
+        }
+        var bubble = document.getElementById("voice-transcript-bubble");
+        if (bubble) bubble.classList.add("hidden");
+      }
+
+      // 把识别文字填回输入框（追加在已有草稿后、不覆盖），光标停末尾。
+      // 复用 setDraftValue + autoResizeInput，与提示词优化填回 textarea 同一套范式。
+      function commitVoiceTranscript(text) {
+        var clean = (text || "").trim();
+        if (!clean) return;
+        var box = document.getElementById("input-box");
+        if (!box) return;
+        var existing = box.value || "";
+        var joined = existing ? existing.replace(/\s+$/, "") + " " + clean : clean;
+        box.value = joined;
+        setDraftValue(joined, true);
+        autoResizeInput(box); // 内部会 syncComposerHasText
+        try { box.setSelectionRange(joined.length, joined.length); } catch (_) {}
+      }
+
       // v2: 切换语音输入模式（类似微信"按住说话"）
       function toggleVoiceMode(force) {
         var composer = document.querySelector(".input-composer");
@@ -12581,7 +12701,10 @@
         var willEnable = typeof force === "boolean" ? force : !composer.classList.contains("voice-mode");
         composer.classList.toggle("voice-mode", willEnable);
         if (!willEnable) {
-          // 退出语音模式时，把焦点交还 textarea，方便继续打字
+          // 退出语音模式：停掉可能在跑的录音 + 隐藏气泡，并把焦点交还 textarea
+          voiceState.recording = false;
+          stopMockRecognition();
+          resetVoiceRecordingUI();
           var inputBox = document.getElementById("input-box");
           if (inputBox && !state.terminalInteractive) {
             try { inputBox.focus({ preventScroll: true }); } catch (_) {}
@@ -14359,8 +14482,12 @@
         // v2: 终端交互模式时强制退出语音模式（语义冲突）。三件套已不在输入框里，
         // 不再需要 is-terminal-mode / has-placeholder 控制 ghost meta 显隐。
         var composerEl = document.querySelector(".input-composer");
-        if (composerEl && state.terminalInteractive) {
+        if (composerEl && state.terminalInteractive && composerEl.classList.contains("voice-mode")) {
           composerEl.classList.remove("voice-mode");
+          // 同步停掉可能在跑的录音 + 隐藏气泡
+          voiceState.recording = false;
+          stopMockRecognition();
+          resetVoiceRecordingUI();
         }
         var sendBtn = document.getElementById("send-input-button");
         var structuredInFlight = structured && isRunning;
