@@ -258,10 +258,10 @@
       min-height: 100dvh;
       height: 100vh;
       height: 100dvh;
-      /* JS 注入 --app-viewport-height = visualViewport.height，
-         键盘开关和 iOS 地址栏动画时整体 flex column 跟随可见视口；
-         不支持 visualViewport 时退回 100dvh。 */
-      height: var(--app-viewport-height, 100dvh);
+      /* body 固定铺满视口当背景层：.app-container 已 fixed 脱流并自行跟随
+         visualViewport，键盘弹起时容器之外露出的部分由 body 渐变 / html 奶油底
+         兜住，所以 body 不再跟键盘收缩（否则会随 --app-viewport-height 一起缩，
+         在 fixed 容器之外露出空白）。 */
       line-height: var(--line-height-base);
       overflow: hidden;
     }
@@ -306,11 +306,33 @@
       --layout-main-file-panel-width: var(--file-panel-width);
       display: flex;
       flex-direction: column;
-      min-height: 100vh;
-      min-height: 100dvh;
-      height: 100vh;
-      height: 100dvh;
-      /* 与 body 同步：键盘开关时跟随可见视口收缩/恢复。 */
+      /* iOS PWA 键盘适配核心：scripts.js#syncAppViewportHeight 持续把
+           --app-viewport-top    = visualViewport.offsetTop
+           --app-viewport-height = visualViewport.height
+         写到 :root 上。容器用 fixed + 这两个变量精确贴合「当前可见视口」。
+
+         · iOS Safari：键盘弹起时 iOS 滚 layout viewport 让焦点入视，
+           vv.offsetTop ≈ 0、vv.height 收缩 → top:0 + 缩短高度，input-panel
+           自然贴键盘上沿。
+         · iOS PWA standalone：iOS 改成 pan「visual viewport」自己
+           (vv.offsetTop > 0)、layout viewport 完全不滚。position:fixed 在 iOS
+           是相对 layout viewport 的，必须把 top 写成 vv.offsetTop 才能让容器
+           跟着可见区往下走；否则容器钉在 layout 顶部、被 pan 推出可视区，
+           底部 input-panel 落到屏幕之外 = 用户报告的「键盘遮挡输入框」。
+         · Android Chrome / WebView：vv.offsetTop 恒 0，等价于 top:0 +
+           height:vv.height。
+         · 桌面：vv.height ≈ innerHeight、vv.offsetTop = 0，无副作用。
+
+         旧实现把 height 膨胀为 vv.height + vv.pageTop 再 scrollTo(0,0) 兜底，
+         在 iOS PWA standalone 失效（layout 没滚过、scrollTo 不影响 vv.offsetTop），
+         造成两种症状：键盘弹起遮挡输入框 / 键盘收起输入框停半空。已切换为直接锚定。
+
+         必须用 top/height（而非 transform）——否则内部 position:fixed 的
+         抽屉/弹层 containing block 会被改写。 */
+      position: fixed;
+      top: var(--app-viewport-top, 0px);
+      left: 0;
+      right: 0;
       height: var(--app-viewport-height, 100dvh);
       overflow: hidden;
     }
@@ -7459,11 +7481,12 @@
       background: transparent;
       border: none;
       color: var(--text-primary);
-      /* v2 单行布局：左右无 absolute 控件挤位，padding 收回正常值 */
-      padding: 6px 8px;
+      /* min-height(30) ≥ padding(10) + line-height*font-size(18.2) → 单行 line-box 不会被 textarea
+         的 overflow:hidden 切掉底端，从而消除"文字/光标视觉偏上"。 */
+      padding: 5px 8px;
       outline: none;
       resize: none;
-      min-height: 28px;
+      min-height: 30px;
       max-height: var(--input-max-height);
       width: 100%;
       display: block;
@@ -8039,6 +8062,146 @@
       }
       .chat-mode-trio-compact .composer-text-label {
         max-width: 64px;
+      }
+    }
+
+    /* ─────────────────────────────────────────────────────────────────────
+       加号 popover：向上展开气泡
+       ─────────────────────────────────────────────────────────────────────
+       结构：放在 .input-composer 之外、与 .voice-transcript-bubble 同级，
+       绕开 .input-composer 的 overflow:hidden。absolute 定位以 .input-panel 为参照，
+       left/bottom 对齐 + 按钮上方 ~8px。z-index 高于 input-composer 自身。
+       内含 .plus-popover-item（附件 / 终端交互）和 .chat-mode-trio-popover（三件套纵列）。
+       ─────────────────────────────────────────────────────────────────── */
+    .composer-plus-popover {
+      position: absolute;
+      left: 14px;
+      bottom: calc(var(--safe-bottom, 0px) + 56px);
+      z-index: 28;
+      min-width: 240px;
+      max-width: calc(100% - 28px);
+      background: rgba(255, 255, 255, 0.98);
+      border: 1px solid var(--border-default);
+      border-radius: 16px;
+      box-shadow:
+        0 12px 28px rgba(0, 0, 0, 0.18),
+        0 2px 6px rgba(0, 0, 0, 0.08);
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      animation: plusPopoverIn 0.18s ease-out;
+      transform-origin: 16px calc(100% + 8px);
+    }
+    .composer-plus-popover.hidden { display: none; }
+
+    @keyframes plusPopoverIn {
+      from { opacity: 0; transform: translateY(6px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .plus-popover-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: none;
+      background: transparent;
+      border-radius: 10px;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background var(--transition-fast), color var(--transition-fast);
+      text-align: left;
+      width: 100%;
+    }
+    .plus-popover-item:hover { background: rgba(197, 101, 61, 0.08); }
+    .plus-popover-item:active { background: rgba(197, 101, 61, 0.14); }
+    .plus-popover-icon {
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+    .plus-popover-label {
+      flex: 1;
+      line-height: 1.2;
+    }
+    /* 终端交互的"开/关"指示器：用 chip 风格压一行，开启时高亮强调色 */
+    .plus-popover-toggle-state {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      padding: 2px 8px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.05);
+      line-height: 1.2;
+      letter-spacing: 0.02em;
+    }
+    .plus-popover-item.is-on { color: var(--accent); }
+    .plus-popover-item.is-on .plus-popover-icon { color: var(--accent); }
+    .plus-popover-item.is-on .plus-popover-toggle-state {
+      color: #fff;
+      background: var(--accent);
+    }
+    .plus-popover-sep {
+      height: 1px;
+      margin: 4px 6px;
+      background: var(--border-subtle);
+    }
+    .plus-popover-trio-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    /* 三件套 popover 形态：纵向列表，每行 = tag + 当前值（点击触发原生 select）*/
+    .chat-mode-trio-popover {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 2px;
+    }
+    .chat-mode-trio-popover .composer-text-sep { display: none; }
+    .chat-mode-trio-popover .chat-mode-trio-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      max-width: none;
+      color: var(--text-primary);
+      transition: background var(--transition-fast);
+    }
+    .chat-mode-trio-popover .chat-mode-trio-pill:hover,
+    .chat-mode-trio-popover .chat-mode-trio-pill:focus-within {
+      background: rgba(197, 101, 61, 0.08);
+      color: var(--text-primary);
+    }
+    .chat-mode-trio-popover .chat-mode-trio-tag {
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      letter-spacing: 0;
+      text-transform: none;
+      opacity: 1;
+      margin-right: 0;
+      flex-shrink: 0;
+      width: 36px;
+    }
+    .chat-mode-trio-popover .composer-text-label {
+      flex: 1;
+      font-size: 0.82rem;
+      color: var(--text-primary);
+      text-align: right;
+      max-width: 100%;
+      font-weight: 500;
+    }
+
+    @media (max-width: 720px) {
+      .composer-plus-popover {
+        min-width: 220px;
+        left: 10px;
+        bottom: calc(var(--safe-bottom, 0px) + 60px);
       }
     }
 
@@ -10304,8 +10467,8 @@
       }
 
       html, body {
-        min-height: var(--app-viewport-height, 100dvh);
-        height: var(--app-viewport-height, 100dvh);
+        min-height: 100dvh;
+        height: 100dvh;
       }
 
       body {
@@ -10314,12 +10477,9 @@
       }
 
       .app-container {
-        min-height: 100dvh;
-        height: 100dvh;
-        /* 与 body 同步：JS 持续注入 --app-viewport-height，
-           app-container 跟随 visualViewport 收缩/恢复，input-panel 自动贴键盘
-           上沿或屏幕底部。 */
-        height: var(--app-viewport-height, 100dvh);
+        /* 定位与高度继承主定义（fixed + 跟随 visualViewport 的
+           --app-viewport-top/height）；移动端不再重复声明高度，避免覆盖掉
+           顶部偏移变量。 */
         overflow: hidden;
       }
 
@@ -12817,6 +12977,11 @@
         padding: 0;
         align-items: stretch;
         justify-content: stretch;
+        /* 与 .app-container 同源：键盘弹起时 overlay 顶随 visualViewport.offsetTop
+           下移、高度收到 vv.height，避免全屏 modal 顶部被推出可见区。无键盘时
+           变量未注入，回落到 inset:0 全屏。 */
+        top: var(--app-viewport-top, 0px);
+        height: var(--app-viewport-height, 100dvh);
       }
       .file-preview-modal {
         width: 100vw;

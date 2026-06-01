@@ -498,7 +498,9 @@
         // 「+」：附件入口（替代旧曲别针图标），更直观、与微信/iMessage 习惯一致。
         plus:      '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
         // 麦克风：语音输入入口。stroke 线性风格与项目其他图标统一。
-        mic:       '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="9" y1="21" x2="15" y2="21"/>'
+        mic:       '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="9" y1="21" x2="15" y2="21"/>',
+        // 曲别针：加号 popover 内"上传附件"项的图标（+ 入口已被外层占用，这里就用回曲别针）。
+        paperclip: '<path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.84-8.84a4 4 0 1 1 5.66 5.66L9.41 17.41a2 2 0 1 1-2.83-2.83l8.84-8.83"/>'
       };
       // 渲染 SVG 字符串。size 默认 14，strokeWidth 默认 1.8（与现有 send/stop 按钮线宽接近）。
       // cls 用于添加额外 class（如 .composer-pill-icon），便于 CSS 微调。
@@ -1991,20 +1993,13 @@
                   // 主输入行（单行）：左动作 / 输入区 / 右动作
                   '<div class="composer-main-row">' +
                     '<div class="composer-actions-left">' +
-                      // 附件按钮（+）
-                      '<button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="附加文件" aria-label="附加文件">' +
+                      // 加号按钮 —— 点击向上展开 popover：附件 / 终端交互 / 三件套（模式·模型·思考）
+                      '<button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="更多" aria-label="更多" aria-haspopup="menu" aria-expanded="false">' +
                         iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
                       '</button>' +
                       // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
                       '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
-                      // 语音按钮（🎤）
-                      '<button id="voice-btn" class="btn-circle btn-circle-action" type="button" title="语音输入" aria-label="语音输入">' +
-                        iconSvg("mic", { size: 16, strokeWidth: 1.9 }) +
-                      '</button>' +
-                      // 终端交互切换（⌨）
-                      '<button id="terminal-interactive-toggle-top" class="btn-circle btn-circle-action' + (state.terminalInteractive ? " active" : "") + '" type="button" title="切换终端交互模式" aria-label="切换终端交互模式">' +
-                        iconSvg("keyboard", { size: 16, strokeWidth: 1.8 }) +
-                      '</button>' +
+                      // 语音按钮已暂时隐藏（按住说话交互保留，等接 STT 后再放出）；终端交互按钮搬进了 popover。
                     '</div>' +
                     '<div class="composer-input-wrap">' +
                       '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
@@ -2068,6 +2063,29 @@
                         return bits ? '<div class="input-session-info-bar">' + bits + '</div>' : '';
                       })()
                     : '') +
+                '</div>' +
+                // 加号气泡 —— 浮在 + 按钮上方（.input-composer 之外，绕开它的 overflow:hidden）。
+                // 内容：附件 / 终端交互 / 三件套（模式·模型·思考）。默认 hidden，点 + 切换；
+                // 点 popover 外部 / Esc / 选完任一项后自动关闭。
+                '<div class="composer-plus-popover hidden" id="composer-plus-popover" role="menu" aria-label="更多操作">' +
+                  '<button class="plus-popover-item" id="plus-attach-item" type="button" role="menuitem">' +
+                    iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +
+                    '<span class="plus-popover-label">上传附件</span>' +
+                  '</button>' +
+                  '<button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" role="menuitemcheckbox" aria-checked="' + (state.terminalInteractive ? "true" : "false") + '">' +
+                    iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +
+                    '<span class="plus-popover-label">终端交互</span>' +
+                    '<span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "开" : "关") + '</span>' +
+                  '</button>' +
+                  // 三件套：复用 renderChatModeTrioHtml 的 select 委托链，
+                  // 用 kind:"popover" 由 CSS 切到纵向列表。仅结构化会话渲染，与 compact/dropdown 口径一致；
+                  // PTY 会话 mode/model/thinking 是启动时定的、改不动，露出去反而误导。
+                  (isStructuredSession(selectedSession)
+                    ? ('<div class="plus-popover-sep" aria-hidden="true"></div>' +
+                       '<div class="plus-popover-trio-wrap">' +
+                         renderChatModeTrioHtml(selectedSession, { kind: "popover" }) +
+                       '</div>')
+                    : "") +
                 '</div>' +
                 // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
                 // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
@@ -6206,6 +6224,20 @@
           if (e.key === "Escape" && state.topbarMoreOpen) closeTopbarMore();
         });
 
+        // 加号 popover：外点 / ESC 关闭。attach-btn 自身的点击在按钮 handler 里 stopPropagation 了，
+        // 不会触发外点关闭；popover 内部的 click 冒泡到这里时，contains(target) 命中 → 不关闭。
+        document.addEventListener("click", function(e) {
+          if (!state.plusPopoverOpen) return;
+          var pop = document.getElementById("composer-plus-popover");
+          var btn = document.getElementById("attach-btn");
+          if (pop && pop.contains(e.target)) return;
+          if (btn && btn.contains(e.target)) return;
+          closePlusPopover();
+        });
+        document.addEventListener("keydown", function(e) {
+          if (e.key === "Escape" && state.plusPopoverOpen) closePlusPopover();
+        });
+
         // folder picker：外点关闭下拉
         document.addEventListener("click", function(e) {
           if (!e.target.closest(".folder-picker-container")) {
@@ -6663,6 +6695,8 @@
           } else if (ctrl === "thinking") {
             onChatThinkingChange(value);
           }
+          // 在加号 popover 内改完三件套之后顺手关掉，反馈立即由 toast + 用户消息头像左侧徽章接管。
+          if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
         });
 
         var sessionModal = document.getElementById("session-modal");
@@ -6708,11 +6742,25 @@
           inputBox.addEventListener("blur", handleInputBoxBlur);
         }
 
-        // Attach button & drag-drop
+        // 加号 popover & 附件上传
+        // attach-btn 现在是 popover 触发器；真正的"上传附件"动作在 popover 内的 #plus-attach-item 上。
         var attachBtn = document.getElementById("attach-btn");
         var fileInput = document.getElementById("file-upload-input");
-        if (attachBtn && fileInput) {
-          attachBtn.addEventListener("click", function() { fileInput.click(); });
+        var plusPopover = document.getElementById("composer-plus-popover");
+        var plusAttachItem = document.getElementById("plus-attach-item");
+        if (attachBtn && plusPopover) {
+          attachBtn.addEventListener("click", function(e) {
+            e.stopPropagation();
+            togglePlusPopover();
+          });
+        }
+        if (plusAttachItem && fileInput) {
+          plusAttachItem.addEventListener("click", function() {
+            closePlusPopover();
+            fileInput.click();
+          });
+        }
+        if (fileInput) {
           fileInput.addEventListener("change", function() {
             var files = fileInput.files;
             if (files) {
@@ -8889,14 +8937,15 @@
       // 属性绑定全局委托 change 事件，让所有 trio 实例的状态自动保持同步。
       function renderChatModeTrioHtml(session, opts) {
         opts = opts || {};
-        var kind = opts.kind === "compact" ? "compact" : "dropdown";
+        // 三种 kind：dropdown（空状态横向）/ compact（用户消息徽章）/ popover（加号气泡纵向）
+        var kind = (opts.kind === "compact" || opts.kind === "popover") ? opts.kind : "dropdown";
         var preferredTool = getPreferredTool();
         var composerMode = state.chatMode || "default";
         var modelText = getEffectiveModel(session) || "default";
         var thinkingText = getEffectiveThinking(session);
         function pill(ctrl, label, value, optionsHtml) {
-          // dropdown 形态显示分组小标签（"模式" / "模型" / "思考"），compact 不显示。
-          var tagHtml = kind === "dropdown" ? ('<span class="chat-mode-trio-tag">' + escapeHtml(label) + '</span>') : "";
+          // compact 不显示分组小标签；dropdown / popover 都显示（"模式" / "模型" / "思考"）。
+          var tagHtml = kind === "compact" ? "" : ('<span class="chat-mode-trio-tag">' + escapeHtml(label) + '</span>');
           return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml(label) + '">' +
             tagHtml +
             '<span class="composer-text-label">' + escapeHtml(value) + '</span>' +
@@ -10022,6 +10071,21 @@
       // 用法：从 input focus / send 按钮 / 选中会话 / 新建会话回调里调，这些场
       // 景只想避免遮罩挡住内容，并不想撤掉用户主动开启的常驻侧栏。
       //
+      // 加号 popover：附件入口 + 终端交互开关 + 三件套，向上展开浮在 + 按钮上方。
+      // 状态走 state，类切换走 DOM；外点 / Esc / 选完三件套之后自动关闭。
+      function setPlusPopoverOpen(open) {
+        var popover = document.getElementById("composer-plus-popover");
+        var btn = document.getElementById("attach-btn");
+        state.plusPopoverOpen = !!open;
+        if (popover) popover.classList.toggle("hidden", !open);
+        if (btn) {
+          btn.classList.toggle("active", !!open);
+          btn.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+      }
+      function togglePlusPopover() { setPlusPopoverOpen(!state.plusPopoverOpen); }
+      function closePlusPopover() { if (state.plusPopoverOpen) setPlusPopoverOpen(false); }
+
       // 直接调 closeSessionsDrawer() 会在桌面把 state.sidebarPinned 置 false，
       // 进而让 .pinned/.collapsed 这两个类一起脱落，窄条整体消失 —— 这是
       // sidebar-collapsed-tile 点击后侧栏整个不见的根因。
@@ -14446,13 +14510,18 @@
           ? !!(selectedSession && selectedSession.structuredState && selectedSession.structuredState.inFlight)
           : !!selectedSession && selectedSession.status === "running";
         var composer = document.getElementById("input-box");
-        // Update both toggle buttons (topbar and terminal-header)
+        // 终端交互 toggle 现在挂在加号 popover 内的 menuitem 上。.active 保留兼容；
+        // .is-on 给 popover-item 提供独立的"已开启"视觉；同时刷新 aria-checked 与 "开/关" 文本。
         var toggles = ["terminal-interactive-toggle-top"];
         toggles.forEach(function(id) {
           var toggle = document.getElementById(id);
           if (toggle) {
             toggle.classList.toggle("active", state.terminalInteractive);
+            toggle.classList.toggle("is-on", state.terminalInteractive);
             toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession);
+            toggle.setAttribute("aria-checked", state.terminalInteractive ? "true" : "false");
+            var stateLabel = toggle.querySelector(".plus-popover-toggle-state");
+            if (stateLabel) stateLabel.textContent = state.terminalInteractive ? "开" : "关";
           }
         });
         var inputHint = document.querySelector(".input-hint");
@@ -15284,24 +15353,22 @@
 
       function handleInputBoxBlur() {
         resetInputPanelViewportSpacing();
-        setTimeout(function() {
-          resetRootViewportScroll();
-          syncAppViewportHeight(false);
-          // On mobile, force terminal refit + scroll after keyboard dismissal.
-          // The container height restores but terminal needs time to
-          // fill the expanded space, and the scroll position needs resetting.
-          if (isTouchDevice()) {
-            ensureTerminalFit("keyboard-blur", { forceReplay: true });
-            // "keyboard" 而非 "force"：用户原本在终端历史里翻看时，键盘
-            // 收起不该把视图拽走。maybeScrollTerminalToBottom 会按
-            // terminalAutoFollow 决定——贴底者继续贴底，离底者保位。
-            maybeScrollTerminalToBottom("keyboard");
-          }
-        }, 100);
-        setTimeout(function() {
-          resetRootViewportScroll();
-          syncAppViewportHeight(false);
-        }, 360);
+        // blur 触发瞬间 vv.height 通常还停在键盘弹起时的旧值——iOS 26 PWA 上动画
+        // 要再跑 ~250ms 才回弹完整。这里铺一串 settle tick 让 syncAppViewportHeight
+        // 在 vv 真正稳定后能把 top/height 收敛到正确值。
+        var dismissTicks = [80, 200, 380, 620, 900];
+        dismissTicks.forEach(function(delay, idx) {
+          setTimeout(function() {
+            syncAppViewportHeight(false);
+            // 第二档（200ms）顺便刷一次终端布局，再晚的 tick 仅校准视口变量。
+            if (idx === 1 && isTouchDevice()) {
+              ensureTerminalFit("keyboard-blur", { forceReplay: true });
+              // "keyboard" 而非 "force"：尊重 terminalAutoFollow，
+              // 上滚翻历史的用户不被键盘收起瞬间拽回底部。
+              maybeScrollTerminalToBottom("keyboard");
+            }
+          }, delay);
+        });
       }
 
       function adjustInputBoxSelection(inputBox) {
@@ -15435,14 +15502,30 @@
         }
       }
 
-      // 把 body / .app-container 的高度从 100dvh 切换为可见视口高度，
-      // 这样键盘弹起时整个 flex column 自动收缩，input-panel 跟着上移到
-      // 键盘上沿。Android targetSdk 36 在 edge-to-edge 默认开启时，
-      // adjustResize 不再自动 resize WebView 内容；同时仅给 input-panel
-      // 加 padding-bottom 只是把 panel 内部底部撑空，并不会让 panel 自身
-      // 上移。这里通过 CSS 变量驱动整层高度，是跨 WebView/Chrome/PWA 的
-      // 统一兜底。iOS 的 100dvh 在键盘动画后会短暂滞后，所以这里持续用
-      // visualViewport 的实测高度驱动布局，桌面场景下该值基本等于窗口高度。
+      // ─────────────────────────────────────────────────────────────────────
+      // 视口锚定：把 .app-container 用 fixed + top/height 钉到 visual viewport，
+      // 让键盘弹起 / 地址栏切换 / iOS PWA 焦点 pan 都自然反映到布局。
+      // ─────────────────────────────────────────────────────────────────────
+      //
+      // 设计：CSS 里 .app-container 是
+      //   position: fixed;
+      //   top:    var(--app-viewport-top, 0px);
+      //   height: var(--app-viewport-height, 100dvh);
+      //
+      // 这里把两个变量都写成 vv.offsetTop / vv.height 的实测值：
+      //   · iOS Safari 浏览器内：聚焦输入框时 iOS 滚 layout viewport 把焦点入视，
+      //     vv.offsetTop ≈ 0，vv.height = 可见高度。top:0 height:vv.height 自然正确。
+      //   · iOS PWA standalone：iOS 改成 pan 「visual viewport」自己（vv.offsetTop > 0），
+      //     layout viewport 完全不滚。position:fixed 在 iOS 是相对 layout viewport 的，
+      //     必须把 top 写成 vv.offsetTop，容器才会跟着可见区往下走；否则容器仍钉在
+      //     layout 顶部 = 被 pan 到可视区外 → 底部 input-panel 落在屏幕下方 = 被键盘挡。
+      //   · Android Chrome / WebView：vv.offsetTop 通常恒 0，等价于 top:0 height:vv.height。
+      //   · 桌面：vv.height ≈ innerHeight，vv.offsetTop = 0，无副作用。
+      //
+      // 之前的方案是 height = vv.height + vv.pageTop，配合 scrollTo(0,0) 把 layout
+      // 滚回顶；它依赖 iOS 真的滚过 layout viewport，在 PWA standalone 不成立 →
+      // height 被膨胀但 top 不动 → 容器底落到可视区之外，就是用户报告的两个症状
+      // （键盘弹起遮挡 + 键盘收起后输入框停在半空）。
       function getRootViewportScrollTop(vv) {
         var values = [
           window.scrollY || window.pageYOffset || 0,
@@ -15462,6 +15545,9 @@
       }
 
       function resetRootViewportScroll() {
+        // 仅在 iOS Safari 浏览器内有意义（layout 真被滚过的场景）。在 iOS PWA
+        // standalone 里 layout 没滚，调用是 no-op；但我们已经不依赖它来对齐布局，
+        // 它只是清掉极少数 iOS Safari 把焦点 pan 后忘记复位 layout 的残留滚动。
         try { window.scrollTo(0, 0); } catch (e) {}
         if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
         if (document.documentElement) document.documentElement.scrollTop = 0;
@@ -15472,29 +15558,24 @@
         var vv = window.visualViewport;
         if (!vv) return;
         var root = document.documentElement;
-        var visualTop = window.__wandImeNative ? 0 : getRootViewportScrollTop(vv);
-        // iOS Safari 上 100dvh 在键盘 / 地址栏切换后有更新延迟, 经常"卡"在
-        // 上一刻的小值 -> body 比真实可见区还短一截, 输入框下方留出一大段
-        // 奶油色 html 背景。改成直接拿 visualViewport.height 当 body 高度的
-        // 权威值, 每帧实时跟随 (vv.resize/scroll 触发), 不再依赖 dvh。
-        // 桌面浏览器上 vv.height ≈ window.innerHeight, 同样无副作用。
-        // 之前的 diff > 50 阈值现在只用来判断"是不是真键盘上来了"以做
-        // iOS html 滚动复位 (offsetTop hack), 不再控制 body 高度。
-        //
-        // 但 iOS 还有一个更隐蔽的状态: 键盘收起后 visual viewport 已经变高,
-        // 根页面却仍停在键盘弹起时的 pageTop/scrollY。此时如果只写 vv.height,
-        // .app-container 的底边落在 visualViewport 顶点之前, input-panel 会悬在
-        // 屏幕底部上方。把 visualTop 临时加回高度, 再滚回 0; 后续 settle timer
-        // 会用新的 visualTop=0 覆盖回来。
-        root.style.setProperty('--app-viewport-height', Math.ceil(vv.height + Math.max(0, visualTop)) + 'px');
-        // iOS Safari: 当 textarea 获得焦点 / 键盘弹起时, 浏览器会主动把
-        // <html> 向上滚一段, 让焦点元素进可见区 —— 体现为 vv.offsetTop > 0。
-        // 但 body 已经被收缩到 vv.height, 这一段 offsetTop 就变成 body 底部
-        // (= .input-panel) 与键盘上沿之间的"空洞", 用户看到的就是
-        // "输入框离键盘还有很远一截"。这里强行把 html 滚回 0, 让 body 底部
-        // 重新贴回键盘上沿。Wand APK 内 (window.__wandImeNative=true) 走
-        // 原生 IME 回调精确 resize, 这里跳过避免双重补偿。
-        if (!window.__wandImeNative && (isKeyboardOpen || visualTop > 1)) {
+        // Wand APK 原生 IME 路径：MainActivity 已逐帧 setPadding，WebView 内容已被
+        // 原生层 resize。这里把 top 钉 0、height 设 vv.height 即可，不要再额外
+        // pan/scroll 兜底，避免跟原生 padding 打架抖一帧。
+        if (window.__wandImeNative) {
+          root.style.setProperty('--app-viewport-top', '0px');
+          root.style.setProperty('--app-viewport-height', Math.round(vv.height) + 'px');
+          return;
+        }
+        // 直接锚定到 visual viewport。Math.max(0, ...) 防御 vv 边界场景里 offsetTop
+        // 出负数（旋转 / 折叠屏切折 / iOS 26 早期版本曾有报告）。
+        var offsetTop = Math.max(0, Math.round(vv.offsetTop || 0));
+        var height = Math.max(1, Math.round(vv.height));
+        root.style.setProperty('--app-viewport-top', offsetTop + 'px');
+        root.style.setProperty('--app-viewport-height', height + 'px');
+        // 防御性清掉 iOS Safari 在聚焦输入框时遗留的 layout scroll —— 不再用于
+        // 对齐布局，纯粹是避免「页面整体上推一截 + 用户手动滚回时撞 overflow:hidden
+        // 没反应」的怪状态。在 PWA standalone 里这是 no-op，无副作用。
+        if (isKeyboardOpen || (window.scrollY || 0) > 0) {
           resetRootViewportScroll();
         }
       }
@@ -15557,11 +15638,13 @@
 
         function scheduleViewportSettle() {
           viewportSettleTimers.forEach(function(timer) { clearTimeout(timer); });
-          viewportSettleTimers = [60, 180, 360, 620].map(function(delay) {
+          // 多档延迟覆盖键盘动画 + iOS 26 PWA 在动画末尾「再 pan 一次」的尾巴，
+          // 也覆盖部分场景下 vv.resize 只在动画起点 / 终点各触发一次的边界条件。
+          // 每档都会重新读取 vv.offsetTop / vv.height（已经从 hack 切换到直接锚定），
+          // 因此即便 visualViewport 中段不触发事件，最后这些 settle tick 也能把
+          // top/height 校准到真实值。
+          viewportSettleTimers = [60, 180, 360, 620, 900].map(function(delay) {
             return setTimeout(function() {
-              if (!window.__wandImeNative) {
-                resetRootViewportScroll();
-              }
               syncAppViewportHeight(keyboardOpen);
             }, delay);
           });
@@ -15597,17 +15680,12 @@
             // final scroll lands AFTER the animation settles.
             var wasStickToBottom = state.terminalAutoFollow || isTerminalNearBottom();
             ensureTerminalFit("keyboard-open", { forceReplay: true });
-            // iOS Safari 二次复位: 第一次 syncAppViewportHeight 在键盘动画
-            // 起始帧把 html 滚回 0, 但 iOS 在键盘动画收尾时还会再尝试一次
-            // "把焦点元素拽进可见区", 把 html 重新推上去 —— 留下用户报的
-            // "输入框距离键盘还有很长距离"。镜像 keyboard-close 的 200ms 兜底,
-            // 等键盘动画完整跑完后再清一次 scrollTop + 重算 viewport 高度,
-            // 让 input-panel 最终稳定贴在键盘上沿。
-            // Wand APK (__wandImeNative=true) 跳过, 原生 IME callback 已经在
-            // WebView 层精确 resize, 这里再 scroll 反而抖。
+            // 等键盘动画跑完再 sync 一次。直接锚定模式下，这一帧的 vv.offsetTop /
+            // vv.height 已经是稳定终值，不再需要 scrollTo 兜底；只是有些场景中段
+            // visualViewport 不会再触发事件，这里手动补一次。
+            // Wand APK (__wandImeNative=true) 走原生 IME callback，跳过避免抖。
             if (!window.__wandImeNative) {
               setTimeout(function() {
-                resetRootViewportScroll();
                 syncAppViewportHeight(true);
               }, 220);
             }
@@ -15629,37 +15707,24 @@
           // Keyboard just closed — force terminal refit and scroll to bottom
           // after a delay so the keyboard dismiss animation and layout settle.
           if (keyboardOpen && !isKeyboardOpen) {
-            // iOS Safari quirk: 用户按系统 Done / 下滑收起键盘 / 应用切换回来时，
-            // 经常不会触发 textarea 的 blur 事件，导致 handleInputBoxBlur 里的
-            // window.scrollTo(0,0) 不跑，页面停在键盘抬起时被 iOS 推上去的
-            // 偏移位置，input-panel 看起来"没回到底"。
-            // 这里在 visualViewport 检测到键盘收起的瞬间直接强制复位一次，
-            // 并把 --app-viewport-height 同步到键盘收起后的实测高度，确保
-            // input-panel 重新贴屏幕底部。
+            // 键盘收起：iOS 经常不触发 textarea.blur（系统 Done / 下滑收起 /
+            // 应用切回来都属于这种情况），所以单靠 handleInputBoxBlur 不够，
+            // 必须在 visualViewport 维度也独立兜一次。
             //
-            // Android APK (window.__wandImeNative=true) 跳过这段 iOS hack —
-            // MainActivity 已经在 IME 动画 callback 里逐帧把 root setPadding,
-            // WebView 直接被原生层 resize 推回到了正确位置, 这里再调
-            // scrollTo(0,0) 反而会跟原生 padding 打架, 偶尔产生一帧抖。
-            // 只保留 refit / 滚底两个纯展示动作。
-            var rootEl = document.documentElement;
+            // 直接锚定模式下，这里只需要再读一次 vv.offsetTop / vv.height 把
+            // top/height 校准到键盘收起后的最终值即可。settle timers (60/180/
+            // 360/620/900ms) 再多读几次 vv，应对 iOS 26 PWA 偶发的「vv.height
+            // 已经回弹但 offsetTop 还残留 50~100px、几百毫秒后才清零」尾巴。
+            //
+            // Android APK (window.__wandImeNative=true) 跳过：MainActivity 已经
+            // 在 IME 动画 callback 里逐帧 setPadding，原生层已经把内容 resize 到位。
             var imeIsNative = !!window.__wandImeNative;
             if (!imeIsNative) {
-              // 不要 removeProperty('--app-viewport-height') —— 那样会让 body 退回
-              // 到 100dvh, 而 iOS Safari 的 100dvh 在键盘动画跑完前经常还停留
-              // 在小值, body 立刻短一截 -> 输入框下方露出大段奶油色 html 背景。
-              // 直接让 syncAppViewportHeight 把它更新为新的 vv.height (键盘已收
-              // 起所以是全可见高度), body 平滑过渡, 不出现空洞。
               syncAppViewportHeight(false);
-              resetRootViewportScroll();
             }
             scheduleViewportSettle();
             setTimeout(function() {
               if (!imeIsNative) {
-                // 二次复位：等键盘收起动画 + iOS 自身的回滚跑完后再清一次，
-                // 防止 iOS 在动画过程中又把 scrollTop 推上去。
-                resetRootViewportScroll();
-                if (rootEl) rootEl.scrollTop = 0;
                 syncAppViewportHeight(false);
               }
               ensureTerminalFit("keyboard-close", { forceReplay: true });
@@ -15693,6 +15758,36 @@
         // Also listen to scroll — on iOS, keyboard dismiss sometimes only
         // fires a scroll event (viewport scrolls back) without a resize event.
         vv.addEventListener('scroll', debouncedUpdate);
+
+        // iOS PWA standalone 还有几个边界场景 visualViewport 不会触发 resize：
+        //  · 用户切到别的 app 再切回来：vv 状态可能停在切走时的旧值，需要主动复位。
+        //  · iOS 26 偶发：键盘已经收起、vv.height 已经回弹，但 vv.offsetTop 还残留
+        //    几十像素，过几百毫秒后才静默清零，期间不再 emit resize。
+        //  · 历史 bfcache 复活 (pageshow.persisted === true)：所有计算都需要重做。
+        // 这几个监听都跑同一个 debouncedUpdate，路径上已经覆盖 settle timers。
+        document.addEventListener('visibilitychange', function() {
+          if (document.visibilityState === 'visible') {
+            debouncedUpdate();
+            // 复活后短暂窗口期内 iOS 可能继续微调 vv，再补几次 settle。
+            setTimeout(debouncedUpdate, 240);
+            setTimeout(debouncedUpdate, 720);
+          }
+        });
+        window.addEventListener('pageshow', function(e) {
+          if (e && e.persisted) {
+            debouncedUpdate();
+            setTimeout(debouncedUpdate, 240);
+          }
+        });
+        // document 级 focusout 兜底：用户在 iOS 上从输入框失焦但 textarea blur 没
+        // 触发的情况（极少数 webview 边界），focusout 仍会冒泡到 document。
+        document.addEventListener('focusout', function(e) {
+          if (!e || !e.target) return;
+          if (!isEditableFocusTarget(e.target)) return;
+          // 让 vv 先有机会反应一下键盘动画再复位。
+          setTimeout(debouncedUpdate, 80);
+          setTimeout(debouncedUpdate, 420);
+        });
 
         updateViewport();
       }
