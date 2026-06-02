@@ -1,0 +1,500 @@
+export type SessionKind = "pty" | "structured";
+export type SessionCreateKind = "pty" | "structured";
+export type SessionProvider = "claude" | "codex";
+export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "pty";
+export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
+export type AutonomyPolicy = "assist" | "agent" | "agent-max";
+export type ApprovalPolicy = "ask-every-time" | "approve-once" | "remember-this-turn";
+export type EscalationScope = "write_file" | "run_command" | "network" | "outside_workspace" | "dangerous_shell" | "unknown";
+export type EscalationRunner = "json" | "pty";
+export type EscalationResolution = "approve_once" | "approve_turn" | "deny" | "fallback_manual";
+export type EscalationSource = "tool_permission_request" | "sandbox_hard_block" | "workspace_policy_limit" | "cli_capability_limit" | "unknown";
+/** WebSocket / ProcessManager event envelope used throughout the app. */
+export interface ProcessEvent {
+    type: "output" | "status" | "started" | "ended" | "usage" | "task" | "notification";
+    sessionId: string;
+    data?: unknown;
+    /** Monotonic per-session sequence stamped by the WS broadcast layer for
+     *  output events. Lets clients spot gaps caused by backpressure drops. */
+    seq?: number;
+}
+export type ProcessEventHandler = (event: ProcessEvent) => void;
+export interface EscalationRequest {
+    requestId: string;
+    scope: EscalationScope;
+    runner: EscalationRunner;
+    source: EscalationSource;
+    resolution?: EscalationResolution;
+    target?: string;
+    reason: string;
+}
+export interface TurnRequest {
+    message: string;
+    autonomyPolicy?: AutonomyPolicy;
+    approvalPolicy?: ApprovalPolicy;
+    allowedScopes?: EscalationScope[];
+}
+export interface EscalationDecisionRequest {
+    resolution?: Extract<EscalationResolution, "approve_once" | "approve_turn" | "deny">;
+}
+export interface CommandPreset {
+    label: string;
+    command: string;
+    mode?: ExecutionMode;
+}
+export interface StructuredChatPersonaRoleConfig {
+    name?: string;
+    avatar?: string;
+}
+export interface StructuredChatPersonaConfig {
+    user?: StructuredChatPersonaRoleConfig;
+    assistant?: StructuredChatPersonaRoleConfig;
+}
+export interface CardExpandDefaults {
+    /** Edit/Write/MultiEdit diff cards (default: false) */
+    editCards?: boolean;
+    /** Read/Glob/Grep/WebFetch/WebSearch inline tools (default: false) */
+    inlineTools?: boolean;
+    /** Bash terminal output (default: false) */
+    terminal?: boolean;
+    /** Thinking blocks (default: false) */
+    thinking?: boolean;
+    /** Tool groups (default: false) */
+    toolGroup?: boolean;
+}
+export interface AndroidApkConfig {
+    enabled?: boolean;
+    apkDir?: string;
+    currentApkFile?: string;
+}
+export interface MacosDmgConfig {
+    enabled?: boolean;
+    dmgDir?: string;
+    currentDmgFile?: string;
+}
+export interface WandConfig {
+    host: string;
+    port: number;
+    /** Enable HTTPS with self-signed certificate (default: false) */
+    https?: boolean;
+    /**
+     * 可选：使用用户自备的 TLS 证书/私钥（PEM 格式）。配了 `certPath` + `keyPath`
+     * 且文件可读时，将跳过自签证书生成。用 mkcert/Let's Encrypt 等签的证书时，
+     * 浏览器视为受信任，PWA / Service Worker 才能正常注册。
+     */
+    tls?: {
+        certPath?: string;
+        keyPath?: string;
+    };
+    password: string;
+    defaultMode: ExecutionMode;
+    shell: string;
+    defaultCwd: string;
+    startupCommands: string[];
+    allowedCommandPrefixes: string[];
+    commandPresets: CommandPreset[];
+    structuredChatPersona?: StructuredChatPersonaConfig;
+    /** Max total size (bytes) for shortcut interaction logs per session (default: 10 MB). Set 0 to disable logging. */
+    shortcutLogMaxBytes?: number;
+    /** Preferred response language for Claude (e.g. "中文", "English"). Empty string means no override. */
+    language?: string;
+    /** Per-instance secret for app connection code encryption. Auto-generated on first run. */
+    appSecret?: string;
+    android?: AndroidApkConfig;
+    macos?: MacosDmgConfig;
+    /** Default expand/collapse state for card types in structured chat view */
+    cardDefaults?: CardExpandDefaults;
+    /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */
+    defaultModel?: string;
+    /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */
+    structuredRunner?: "cli" | "sdk";
+    /**
+     * 启动 PTY / 结构化子进程时是否继承父进程的环境变量（process.env）。默认 true。
+     * 关闭后子进程仅获得最小可用环境（PATH/HOME/SHELL/LANG/LC_ALL/TERM 等）外加 WAND_* 控制变量，
+     * 用于隔离敏感凭据或避免 API key 泄漏到子命令。
+     */
+    inheritEnv?: boolean;
+}
+export interface ClaudeModelInfo {
+    /** 传给 --model 的值（别名或完整模型 ID） */
+    id: string;
+    /** UI 显示的友好标签 */
+    label: string;
+    /** 可选备注：例如 "当前默认"、"最新" */
+    note?: string;
+    /** 是否为别名（opus/sonnet 等）；完整 ID 为 false */
+    alias?: boolean;
+}
+interface WorktreeInfo {
+    branch: string;
+    path: string;
+}
+export interface WorktreeMergeInfo {
+    targetBranch?: string;
+    mergedAt?: string;
+    mergeCommit?: string;
+    cleanupDone?: boolean;
+    lastError?: string;
+    conflict?: boolean;
+}
+export interface WorktreeMergeCheckResult {
+    ok: boolean;
+    sourceBranch: string;
+    targetBranch: string;
+    worktreePath: string;
+    repoRoot: string;
+    hasUncommittedChanges: boolean;
+    aheadCount: number;
+    hasConflicts: boolean;
+    recommendedAction: "merge" | "noop" | "resolve-conflict";
+    reason?: string;
+}
+export interface WorktreeMergeResult {
+    ok: boolean;
+    sourceBranch: string;
+    targetBranch: string;
+    repoRoot: string;
+    mergeCommit?: string;
+    mergedAt?: string;
+    cleanupDone: boolean;
+    conflict: boolean;
+    errorCode?: string;
+    reason?: string;
+}
+export interface GitStatusFileEntry {
+    path: string;
+    /** Two-char porcelain status (e.g. " M", "MM", "??", "A ") */
+    status: string;
+    /** True 当条目是 submodule（来源于 porcelain v2 的 sub 字段第一位为 S）。 */
+    isSubmodule?: boolean;
+    /** submodule 子状态：指针是否变化 / 内部是否 dirty / 是否有未跟踪文件。 */
+    submoduleState?: {
+        commitChanged: boolean;
+        hasTrackedChanges: boolean;
+        hasUntracked: boolean;
+    };
+}
+export interface GitStatusResult {
+    isGit: boolean;
+    branch?: string;
+    /** Number of files with any change (modified / added / deleted / untracked). */
+    modifiedCount?: number;
+    files?: GitStatusFileEntry[];
+    head?: string;
+    repoRoot?: string;
+    /** Truthy when the repo has no commits yet (initial state). */
+    initialCommit?: boolean;
+    /** Upstream tracking branch (e.g. `origin/main`). Absent when none is configured. */
+    upstream?: string;
+    /** Number of local commits not yet on upstream. Only meaningful when `upstream` is set. */
+    ahead?: number;
+    /** Number of upstream commits not yet locally. Only meaningful when `upstream` is set. */
+    behind?: number;
+    /** HEAD commit subject + short hash (handy for "tag the current commit" UX). */
+    lastCommit?: {
+        hash: string;
+        shortHash: string;
+        subject: string;
+    };
+    /** Most recent tag reachable from HEAD (`git describe --tags --abbrev=0`), if any. */
+    latestTag?: string;
+    /** True 当仓库声明了 submodule（任一改动条目为 submodule）。前端据此决定是否渲染 Submodule 球。 */
+    hasSubmodule?: boolean;
+    error?: string;
+}
+export interface QuickCommitResult {
+    ok: boolean;
+    commit?: {
+        hash: string;
+        message: string;
+    };
+    tag?: {
+        name: string;
+    };
+    pushed?: boolean;
+    /** commit 已成功但 push 失败时填入；前端用它显示"已提交但 push 失败"。 */
+    pushError?: string;
+    /**
+     * 父仓库 commit 之前，先在 submodule 内单独提交的记录。仅包含 internal dirty
+     * 或 untracked 触发的 submodule 提交；纯指针变化（commitChanged）不会进来。
+     */
+    submoduleCommits?: {
+        path: string;
+        hash: string;
+    }[];
+}
+export interface TagHeadResult {
+    ok: boolean;
+    tag: {
+        name: string;
+        commit: string;
+    };
+    pushed?: boolean;
+    pushError?: string;
+}
+export interface PushResult {
+    ok: boolean;
+    pushedCommits: boolean;
+    pushedTags: boolean;
+    /** Either operation failed — the other may still have succeeded. */
+    error?: string;
+}
+export interface CommandRequest {
+    command: string;
+    provider?: SessionProvider;
+    cwd?: string;
+    mode?: ExecutionMode;
+    initialInput?: string;
+    worktreeEnabled?: boolean;
+    /** Claude 模型（别名或完整 ID）。仅对 claude provider 生效。留空则回落到 config.defaultModel。 */
+    model?: string;
+    /** 创建会话时由前端测得的真实列数。后端用它直接 spawn PTY，避免"先 120 列再 resize"的早期错位。 */
+    cols?: number;
+    /** 创建会话时由前端测得的真实行数。 */
+    rows?: number;
+    /** 思考深度。null/缺省 视为 off（不启用思考）。 */
+    thinkingEffort?: "off" | "standard" | "deep" | "max" | null;
+}
+export interface InputRequest {
+    input?: string;
+    /** Current UI view: "chat" or "terminal". Chat view uses PTY-derived structured messages. */
+    view?: "chat" | "terminal";
+    autonomyPolicy?: AutonomyPolicy;
+    approvalPolicy?: ApprovalPolicy;
+    allowedScopes?: EscalationScope[];
+    turn?: TurnRequest;
+    /** Shortcut key name that triggered this input (e.g. "enter", "yes", "ctrl_c"). Used for interaction logging in managed/full-access modes. */
+    shortcutKey?: string;
+}
+export interface ResizeRequest {
+    cols?: number;
+    rows?: number;
+}
+export interface PathSuggestion {
+    path: string;
+    name: string;
+    isDirectory: boolean;
+}
+export interface GitFileStatus {
+    staged?: 'modified' | 'added' | 'deleted' | 'renamed';
+    unstaged?: 'modified' | 'deleted';
+    untracked?: boolean;
+}
+export interface FileEntry {
+    path: string;
+    name: string;
+    type: 'dir' | 'file';
+    gitStatus?: GitFileStatus;
+    /** File size in bytes; absent for directories. */
+    size?: number;
+    /** ISO timestamp of the last modification. */
+    mtime?: string;
+}
+export interface DirectoryListing {
+    items: FileEntry[];
+    /** True when the result was capped before all entries were returned. */
+    truncated: boolean;
+    /** Total number of entries in the directory (before truncation). */
+    total: number;
+}
+export type FilePreviewKind = "text" | "image" | "pdf" | "video" | "audio" | "binary";
+export interface FilePreviewResponse {
+    kind: FilePreviewKind;
+    path: string;
+    name: string;
+    ext: string;
+    size: number;
+    mime?: string;
+    /** Detected language for text/code; only present when kind === "text". */
+    lang?: string;
+    /** File content; only present when kind === "text". */
+    content?: string;
+}
+export interface ChatMessage {
+    role: "user" | "assistant";
+    content: string;
+}
+/**
+ * Meta marker attached to blocks emitted by a Task-spawned subagent. Present
+ * on every block (text / thinking / tool_use / tool_result) whose origin is a
+ * subagent's stream rather than the main assistant. Drives the multi-persona
+ * chat rendering ("third cat joining the conversation").
+ *
+ * `taskId` is the parent Task tool_use id (= SDK's `parent_tool_use_id`).
+ * The parent Task tool_use block itself is NOT marked — it lives in the
+ * main assistant's stream.
+ */
+export interface SubagentMeta {
+    taskId: string;
+    agentType?: string;
+    taskDescription?: string;
+}
+export interface TextBlock {
+    type: "text";
+    text: string;
+    __subagent?: SubagentMeta;
+}
+export interface ThinkingBlock {
+    type: "thinking";
+    thinking: string;
+    __subagent?: SubagentMeta;
+}
+export interface ToolUseBlock {
+    type: "tool_use";
+    id: string;
+    name: string;
+    description?: string;
+    input: Record<string, unknown>;
+    __subagent?: SubagentMeta;
+}
+export interface ToolResultBlock {
+    type: "tool_result";
+    tool_use_id: string;
+    content: string | Array<{
+        type: string;
+        [key: string]: unknown;
+    }>;
+    is_error?: boolean;
+    /** When true, content has been truncated for transport. Client should fetch full content via API. */
+    _truncated?: boolean;
+    __subagent?: SubagentMeta;
+}
+export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;
+export interface ConversationTurn {
+    role: "user" | "assistant";
+    content: ContentBlock[];
+    /** Optional usage metadata when available from the underlying tool. */
+    usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        cacheReadInputTokens?: number;
+        cacheCreationInputTokens?: number;
+        /** codex 专属：reasoning_output_tokens（GPT-5 等带思考模型，per-turn 计费）。 */
+        reasoningOutputTokens?: number;
+        totalCostUsd?: number;
+    };
+}
+export interface StructuredSessionState {
+    provider?: SessionProvider;
+    runner: SessionRunner;
+    model?: string;
+    lastError: string | null;
+    inFlight: boolean;
+    activeRequestId: string | null;
+}
+export interface SessionSnapshot {
+    id: string;
+    sessionKind?: SessionKind;
+    provider?: SessionProvider;
+    runner?: SessionRunner;
+    command: string;
+    cwd: string;
+    mode: ExecutionMode;
+    worktreeEnabled?: boolean;
+    worktree?: WorktreeInfo | null;
+    worktreeMergeStatus?: "ready" | "checking" | "merging" | "merged" | "failed";
+    worktreeMergeInfo?: WorktreeMergeInfo | null;
+    autonomyPolicy?: AutonomyPolicy;
+    approvalPolicy?: ApprovalPolicy;
+    allowedScopes?: EscalationScope[];
+    status: "idle" | "running" | "exited" | "failed" | "stopped";
+    exitCode: number | null;
+    startedAt: string;
+    endedAt: string | null;
+    output: string;
+    archived: boolean;
+    archivedAt: string | null;
+    /** Backward-compatible derived flag from pendingEscalation */
+    permissionBlocked?: boolean;
+    pendingEscalation?: EscalationRequest | null;
+    lastEscalationResult?: {
+        requestId: string;
+        resolution: EscalationResolution;
+        reason: string;
+    } | null;
+    /** Claude Code 会话 ID，用于 --resume 恢复会话 */
+    claudeSessionId: string | null;
+    /** Structured conversation messages derived from PTY output. */
+    messages?: ConversationTurn[];
+    /** Pending structured user inputs queued while an assistant response is in flight. */
+    queuedMessages?: string[];
+    structuredState?: StructuredSessionState;
+    /** 此会话是从哪个 Wand 会话恢复而来 */
+    resumedFromSessionId?: string | null;
+    /** 服务器重启时是否自动恢复 */
+    autoRecovered?: boolean;
+    /** 是否启用自动批准权限 */
+    autoApprovePermissions?: boolean;
+    /** 自动批准统计（按类别分） */
+    approvalStats?: {
+        tool: number;
+        command: number;
+        file: number;
+        total: number;
+    };
+    /** 会话摘要：从首条用户消息或当前任务提取 */
+    summary?: string;
+    /** 当前正在执行的任务标题（用于会话列表展示） */
+    currentTaskTitle?: string;
+    /** 用户为此会话选定的 Claude 模型（别名或完整 ID）。结构化会话下次 spawn 时使用；PTY 会话仅用于展示。 */
+    selectedModel?: string | null;
+    /**
+     * 用户选定的思考深度。
+     *   - off:      不启用思考（SDK: 不传 thinking；CLI: 不插魔法词；Codex: model_reasoning_effort minimal）
+     *   - standard: 标准（SDK: budget 4096；CLI: think；Codex: low）
+     *   - deep:    深度（SDK: budget 16000；CLI: think hard；Codex: medium）
+     *   - max:     最深（SDK: budget 31999；CLI: ultrathink；Codex: high）
+     */
+    thinkingEffort?: "off" | "standard" | "deep" | "max" | null;
+    /** 当前 PTY 列宽，由最近一次 resize 决定。前端用它来判断本端 fit 是否需要校准。 */
+    ptyCols?: number;
+    /** 当前 PTY 行数，由最近一次 resize 决定。 */
+    ptyRows?: number;
+}
+/** Unified event type emitted by ClaudePtyBridge for WebSocket broadcast */
+export type SessionEventType = "output.raw" | "output.chat" | "chat.turn" | "permission.prompt" | "permission.resolved" | "session.id" | "task" | "ended";
+export interface SessionEvent {
+    type: SessionEventType;
+    sessionId: string;
+    timestamp: number;
+    data?: unknown;
+}
+export interface RawOutputData {
+    chunk: string;
+    /** Full accumulated output for terminal view */
+    output: string;
+}
+export interface ChatOutputData {
+    /** Current messages array */
+    messages: ConversationTurn[];
+    /** Index of the message being streamed */
+    streamingIndex?: number;
+    /** Whether assistant is currently responding */
+    isResponding: boolean;
+}
+export interface ChatTurnData {
+    /** The completed turn */
+    turn: ConversationTurn;
+    /** Full messages array */
+    messages: ConversationTurn[];
+}
+export interface PermissionPromptData {
+    /** Detected prompt text */
+    prompt: string;
+    /** Inferred scope */
+    scope: EscalationScope;
+    /** Target if detected */
+    target?: string;
+}
+export interface SessionIdData {
+    /** Claude CLI session UUID */
+    claudeSessionId: string;
+}
+export interface TaskData {
+    title: string;
+    tool?: string;
+}
+export interface SessionEndData {
+    exitCode: number | null;
+}
+export {};
