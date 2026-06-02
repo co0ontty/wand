@@ -7481,13 +7481,12 @@
       background: transparent;
       border: none;
       color: var(--text-primary);
-      /* padding 上下对称且 padding+line-height ≥ min-height（6+18.2+6 = 30.2 > 30），
-         让 textarea 自然撑到 30.2 而不是被 min-height 拉出底部空白——单行文字就能
-         垂直居中，不再"偏上"。 */
-      padding: 6px 8px;
+      /* autoResizeInput 强制 minHeight=36px；padding 上下各 9px 让单行文字
+         （line-height 18.2px）在 36px 高度内垂直居中：9+18.2+9 ≈ 36。 */
+      padding: 9px 8px;
       outline: none;
       resize: none;
-      min-height: 30px;
+      min-height: 36px;
       max-height: var(--input-max-height);
       width: 100%;
       display: block;

@@ -8964,25 +8964,28 @@
       }
 
       // 改完任何一处 trio 的 select 后，把所有 trio 实例的 label / select.value 同步刷新。
-      // 比直接重渲染整段 HTML 轻：只 patch 三个文本节点 + 三个 select.value。
+      // 同时重建 model select 的 options，保证异步 fetchAvailableModels 到达后选项列表完整。
       function refreshAllChatModeTrios() {
         var session = getSelectedSession();
+        var preferredTool = getPreferredTool();
         var mode = state.chatMode || "default";
         var model = getEffectiveModel(session) || "default";
         var thinking = getEffectiveThinking(session);
         var trios = document.querySelectorAll(".chat-mode-trio");
         trios.forEach(function(trio) {
-          function setPair(ctrl, value) {
+          function setPair(ctrl, value, optionsHtml) {
             var pillNode = trio.querySelector('[data-mode-control-pill="' + ctrl + '"]');
             if (!pillNode) return;
             var label = pillNode.querySelector(".composer-text-label");
             if (label) label.textContent = value;
             var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]');
-            if (sel && sel.value !== value) sel.value = value;
+            if (!sel) return;
+            if (optionsHtml) sel.innerHTML = optionsHtml;
+            if (sel.value !== value) sel.value = value;
           }
-          setPair("mode", mode);
-          setPair("model", model);
-          setPair("thinking", thinking);
+          setPair("mode", mode, renderChatModeOptionsRaw(preferredTool, mode));
+          setPair("model", model, renderChatModelOptionsRaw(model, session));
+          setPair("thinking", thinking, renderChatThinkingOptionsRaw(thinking));
         });
       }
 
@@ -15351,8 +15354,10 @@
         syncInputBoxLayout(inputBox);
       }
 
-      function handleInputBoxBlur() {
+      function handleInputBoxBlur(event) {
+        var blurredEl = event && event.target ? event.target : document.getElementById('input-box');
         resetInputPanelViewportSpacing();
+        scheduleClosedViewportBaselineWindow(2200, blurredEl);
         // blur 触发瞬间 vv.height 通常还停在键盘弹起时的旧值——iOS 26 PWA 上动画
         // 要再跑 ~250ms 才回弹完整。这里铺一串 settle tick 让 syncAppViewportHeight
         // 在 vv 真正稳定后能把 top/height 收敛到正确值。
@@ -15469,7 +15474,6 @@
       function setupMobileKeyboardHandlers() {
         var inputPanel = document.querySelector('.input-panel');
         var chatMessages = document.querySelector('.chat-messages');
-        var terminalContainer = document.querySelector('.terminal-container');
 
         // Virtual Keyboard API (Chrome/Edge)
         // 不再给 input-panel 直接 setPaddingBottom——新方案通过
@@ -15526,24 +15530,6 @@
       // 滚回顶；它依赖 iOS 真的滚过 layout viewport，在 PWA standalone 不成立 →
       // height 被膨胀但 top 不动 → 容器底落到可视区之外，就是用户报告的两个症状
       // （键盘弹起遮挡 + 键盘收起后输入框停在半空）。
-      function getRootViewportScrollTop(vv) {
-        var values = [
-          window.scrollY || window.pageYOffset || 0,
-          document.documentElement ? document.documentElement.scrollTop || 0 : 0,
-          document.body ? document.body.scrollTop || 0 : 0
-        ];
-        if (vv) {
-          // pageTop is the visual viewport's top edge in layout coordinates.
-          // On iOS it captures the focus pan that can survive keyboard close.
-          if (typeof vv.pageTop === "number") {
-            values.push(vv.pageTop);
-          } else if (typeof vv.offsetTop === "number") {
-            values.push(vv.offsetTop);
-          }
-        }
-        return Math.max.apply(Math, values);
-      }
-
       function resetRootViewportScroll() {
         // 仅在 iOS Safari 浏览器内有意义（layout 真被滚过的场景）。在 iOS PWA
         // standalone 里 layout 没滚，调用是 no-op；但我们已经不依赖它来对齐布局，
@@ -15552,6 +15538,59 @@
         if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
         if (document.documentElement) document.documentElement.scrollTop = 0;
         if (document.body) document.body.scrollTop = 0;
+      }
+
+      var appViewportBaselineWidth = 0;
+      var appViewportBaselineHeight = 0;
+      var closedViewportBaselineUntil = 0;
+
+      function isStandaloneViewportMode() {
+        var root = document.documentElement;
+        if (root && root.classList && root.classList.contains('is-pwa')) return true;
+        try { return navigator.standalone === true; } catch (e) {}
+        return false;
+      }
+
+      function markClosedViewportBaselineWindow(durationMs) {
+        closedViewportBaselineUntil = Math.max(
+          closedViewportBaselineUntil,
+          Date.now() + (durationMs || 1800)
+        );
+      }
+
+      function scheduleClosedViewportBaselineWindow(durationMs, blurredEl) {
+        setTimeout(function() {
+          var activeEl = document.activeElement;
+          if (isEditableFocusTarget(activeEl) && activeEl !== blurredEl) return;
+          markClosedViewportBaselineWindow(durationMs);
+        }, 30);
+      }
+
+      function refreshAppViewportBaseline(vv) {
+        var root = document.documentElement;
+        var width = Math.max(
+          window.innerWidth || 0,
+          vv && vv.width || 0,
+          root ? root.clientWidth || 0 : 0
+        );
+        var height = Math.max(
+          window.innerHeight || 0,
+          vv && vv.height || 0,
+          root ? root.clientHeight || 0 : 0
+        );
+        if (!appViewportBaselineWidth || Math.abs(width - appViewportBaselineWidth) > 8) {
+          appViewportBaselineWidth = width;
+          appViewportBaselineHeight = height;
+        } else if (height > appViewportBaselineHeight) {
+          appViewportBaselineHeight = height;
+        }
+        return Math.max(1, Math.round(appViewportBaselineHeight || height || 1));
+      }
+
+      function shouldUseClosedViewportBaseline(isKeyboardOpen, offsetTop, height, baselineHeight) {
+        if (isKeyboardOpen || !isStandaloneViewportMode()) return false;
+        if (Date.now() > closedViewportBaselineUntil) return false;
+        return offsetTop > 0 || baselineHeight > height + 1;
       }
 
       function syncAppViewportHeight(isKeyboardOpen) {
@@ -15568,8 +15607,17 @@
         }
         // 直接锚定到 visual viewport。Math.max(0, ...) 防御 vv 边界场景里 offsetTop
         // 出负数（旋转 / 折叠屏切折 / iOS 26 早期版本曾有报告）。
+        var baselineHeight = refreshAppViewportBaseline(vv);
         var offsetTop = Math.max(0, Math.round(vv.offsetTop || 0));
         var height = Math.max(1, Math.round(vv.height));
+        // iOS PWA 在键盘收起后偶发只回弹 visualViewport 的一部分：
+        // vv.height/offsetTop 还残留几十像素，但之后不再触发 resize/scroll。
+        // 关闭键盘的 settle 窗口内用已知的非键盘基线兜住，避免输入框底部
+        // 留出一截空白。
+        if (shouldUseClosedViewportBaseline(isKeyboardOpen, offsetTop, height, baselineHeight)) {
+          offsetTop = 0;
+          height = Math.max(height, baselineHeight);
+        }
         root.style.setProperty('--app-viewport-top', offsetTop + 'px');
         root.style.setProperty('--app-viewport-height', height + 'px');
         // 防御性清掉 iOS Safari 在聚焦输入框时遗留的 layout scroll —— 不再用于
@@ -15720,6 +15768,7 @@
             // 在 IME 动画 callback 里逐帧 setPadding，原生层已经把内容 resize 到位。
             var imeIsNative = !!window.__wandImeNative;
             if (!imeIsNative) {
+              markClosedViewportBaselineWindow(2200);
               syncAppViewportHeight(false);
             }
             scheduleViewportSettle();
@@ -15784,6 +15833,7 @@
         document.addEventListener('focusout', function(e) {
           if (!e || !e.target) return;
           if (!isEditableFocusTarget(e.target)) return;
+          scheduleClosedViewportBaselineWindow(1600, e.target);
           // 让 vv 先有机会反应一下键盘动画再复位。
           setTimeout(debouncedUpdate, 80);
           setTimeout(debouncedUpdate, 420);
@@ -15975,12 +16025,20 @@
         applyJoystickPosition();
 
         ball.addEventListener("pointerdown", onJoystickPointerDown);
+        ball.addEventListener("click", function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+        });
         backdrop.addEventListener("pointerdown", function(e) {
           // 钉住面板开着且无进行中手势时，点遮罩收起面板
           if (state.joystickPinnedOpen && state.joystickGesture == null) {
             e.preventDefault();
             closeJoystickPanel();
           }
+        });
+        backdrop.addEventListener("click", function(e) {
+          e.preventDefault();
+          e.stopPropagation();
         });
 
         // 旋转/窗口尺寸变化时重新钳制球球位置
