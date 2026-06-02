@@ -7481,9 +7481,10 @@
       background: transparent;
       border: none;
       color: var(--text-primary);
-      /* min-height(30) ≥ padding(10) + line-height*font-size(18.2) → 单行 line-box 不会被 textarea
-         的 overflow:hidden 切掉底端，从而消除"文字/光标视觉偏上"。 */
-      padding: 5px 8px;
+      /* padding 上下对称且 padding+line-height ≥ min-height（6+18.2+6 = 30.2 > 30），
+         让 textarea 自然撑到 30.2 而不是被 min-height 拉出底部空白——单行文字就能
+         垂直居中，不再"偏上"。 */
+      padding: 6px 8px;
       outline: none;
       resize: none;
       min-height: 30px;

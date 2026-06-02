@@ -2078,14 +2078,14 @@
                     '<span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "开" : "关") + '</span>' +
                   '</button>' +
                   // 三件套：复用 renderChatModeTrioHtml 的 select 委托链，
-                  // 用 kind:"popover" 由 CSS 切到纵向列表。仅结构化会话渲染，与 compact/dropdown 口径一致；
-                  // PTY 会话 mode/model/thinking 是启动时定的、改不动，露出去反而误导。
-                  (isStructuredSession(selectedSession)
-                    ? ('<div class="plus-popover-sep" aria-hidden="true"></div>' +
-                       '<div class="plus-popover-trio-wrap">' +
-                         renderChatModeTrioHtml(selectedSession, { kind: "popover" }) +
-                       '</div>')
-                    : "") +
+                  // 用 kind:"popover" 由 CSS 切到纵向列表。对所有会话都展示——
+                  // PTY 会话当前进程的 mode/model/thinking 改不了，但 state 变更会
+                  // 影响"新建会话"的默认值，所以露出来仍有意义；省去的话用户会困惑
+                  // "为什么我点开加号没看到这三个开关"。
+                  '<div class="plus-popover-sep" aria-hidden="true"></div>' +
+                  '<div class="plus-popover-trio-wrap">' +
+                    renderChatModeTrioHtml(selectedSession, { kind: "popover" }) +
+                  '</div>' +
                 '</div>' +
                 // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
                 // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
