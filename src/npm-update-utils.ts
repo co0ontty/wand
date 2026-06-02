@@ -19,15 +19,137 @@ import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 import { whichSync } from "./path-repair.js";
+import { compareSemver } from "./version-utils.js";
 
 const execFileAsync = promisify(execFile);
 
-const PACKAGE_NAME = "@co0ontty/wand";
+export const PACKAGE_NAME = "@co0ontty/wand";
 const PACKAGE_SCOPE = "@co0ontty";
 const PACKAGE_BASENAME = "wand";
 const NPM_BIN = process.platform === "win32" ? "npm.cmd" : "npm";
 const COMMON_UNIX_PATHS = ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin"];
 const INSTALL_MAX_BUFFER = 10 * 1024 * 1024;
+const NPM_VIEW_TIMEOUT_MS = 15_000;
+
+export type UpdateChannel = "stable" | "beta";
+
+export interface PackageUpdateInfo {
+  channel: UpdateChannel;
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  distTag: "latest" | "beta";
+  installSpec: string;
+}
+
+export function normalizeUpdateChannel(value: unknown): UpdateChannel {
+  return value === "beta" ? "beta" : "stable";
+}
+
+export function getUpdateDistTag(channel: UpdateChannel): "latest" | "beta" {
+  return channel === "beta" ? "beta" : "latest";
+}
+
+export function getInstallSpecForChannel(channel: UpdateChannel): string {
+  return `${PACKAGE_NAME}@${getUpdateDistTag(channel)}`;
+}
+
+function cleanVersion(value: string): string {
+  return value.trim().replace(/^v/, "");
+}
+
+export function getStableTagVersion(version: string): string {
+  return cleanVersion(version).split("+")[0]?.split("-")[0] ?? cleanVersion(version);
+}
+
+export function isBetaPackageVersion(version: string): boolean {
+  return /(?:^|-)beta(?:[.-]|$)/i.test(cleanVersion(version));
+}
+
+export function isPureStableVersion(version: string): boolean {
+  return /^\d+\.\d+\.\d+$/.test(cleanVersion(version));
+}
+
+function computeUpdateAvailable(currentVersion: string, latestVersion: string | null, channel: UpdateChannel): boolean {
+  if (!latestVersion) return false;
+
+  const current = cleanVersion(currentVersion);
+  const latest = cleanVersion(latestVersion);
+  const currentTag = getStableTagVersion(current);
+  const latestTag = getStableTagVersion(latest);
+  const tagCompare = compareSemver(latestTag, currentTag);
+
+  if (channel === "beta") {
+    if (tagCompare < 0) return false;
+    if (tagCompare > 0) return true;
+    // Beta follows the beta npm dist-tag exactly. The suffix contains the short
+    // git SHA, so recency comes from the dist-tag pointer instead of semver order.
+    return latest !== current;
+  }
+
+  if (tagCompare < 0) return false;
+  if (tagCompare > 0) return true;
+  // Stable intentionally tracks only the pure tag version. If the current build
+  // is a beta with the same base tag, switching back to stable should reinstall
+  // the clean npm @latest package.
+  return current !== latestTag;
+}
+
+export function buildPackageUpdateInfo(
+  currentVersion: string,
+  channel: UpdateChannel,
+  latestVersion: string | null,
+): PackageUpdateInfo {
+  const latest = latestVersion?.trim() || null;
+  const stableLatest = channel === "stable" && latest ? getStableTagVersion(latest) : latest;
+  return {
+    channel,
+    current: cleanVersion(currentVersion),
+    latest: stableLatest,
+    updateAvailable: computeUpdateAvailable(currentVersion, stableLatest, channel),
+    distTag: getUpdateDistTag(channel),
+    installSpec: getInstallSpecForChannel(channel),
+  };
+}
+
+async function viewPackageVersionAsync(channel: UpdateChannel, timeoutMs = NPM_VIEW_TIMEOUT_MS): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      NPM_BIN,
+      ["view", getInstallSpecForChannel(channel), "version"],
+      { timeout: timeoutMs, env: getChildEnv(), maxBuffer: INSTALL_MAX_BUFFER },
+    );
+    const version = String(stdout || "").trim();
+    return version || null;
+  } catch {
+    return null;
+  }
+}
+
+function viewPackageVersionSync(channel: UpdateChannel, timeoutMs = NPM_VIEW_TIMEOUT_MS): string | null {
+  const res = runNpmSync(["view", getInstallSpecForChannel(channel), "version"], timeoutMs);
+  if (res.status !== 0 || !res.stdout) return null;
+  const version = res.stdout.trim();
+  return version || null;
+}
+
+export async function checkPackageUpdateAsync(
+  currentVersion: string,
+  channel: UpdateChannel,
+  timeoutMs = NPM_VIEW_TIMEOUT_MS,
+): Promise<PackageUpdateInfo> {
+  const latest = await viewPackageVersionAsync(channel, timeoutMs);
+  return buildPackageUpdateInfo(currentVersion, channel, latest);
+}
+
+export function checkPackageUpdateSync(
+  currentVersion: string,
+  channel: UpdateChannel,
+  timeoutMs = NPM_VIEW_TIMEOUT_MS,
+): PackageUpdateInfo {
+  const latest = viewPackageVersionSync(channel, timeoutMs);
+  return buildPackageUpdateInfo(currentVersion, channel, latest);
+}
 
 function getChildEnv(): NodeJS.ProcessEnv {
   const entries = [
@@ -306,8 +428,8 @@ export async function installPackageGloballyAsync(
     }
 
     // 终极兜底：uninstall + force install
-    // 卸载用固定包名 PACKAGE_NAME，而不是从 install spec 反推：spec 可能是 git
-    // 形式（`github:co0ontty/wand#beta`），用正则 strip @tag 反推会得到错误的卸载目标。
+    // 卸载用固定包名 PACKAGE_NAME，而不是从 install spec 反推：spec 带 npm tag
+    // 或版本号时，用正则 strip @tag 反推会误伤 scoped package 名。
     try {
       await runNpmAsync(["uninstall", "-g", PACKAGE_NAME], timeoutMs);
     } catch {

@@ -4,8 +4,8 @@
  *
  * 用途：
  *   - server.ts 读它拿到「当前构建源自哪个 commit / 是不是 beta 构建」，
- *     用于 Beta 通道的 commit 比对与 UI 展示；
- *   - beta 分支由 GitHub Actions 构建时设 WAND_BUILD_CHANNEL=beta，stamp 出
+ *     用于 UI 展示，以及从旧 Beta 构建切回正式版时触发重装；
+ *   - Beta npm 发布由 GitHub Actions 构建时设 WAND_BUILD_CHANNEL=beta，stamp 出
  *     channel=beta、commit=master HEAD；正式版（本地 / publish.sh / npm-release CI）
  *     则 channel=stable、commit=release commit。
  *

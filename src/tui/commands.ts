@@ -6,15 +6,23 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { compareSemver } from "../version-utils.js";
-import { existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-import { installPackageGloballySync, resolveGlobalWandCli } from "../npm-update-utils.js";
+import {
+  checkPackageUpdateSync,
+  getInstallSpecForChannel,
+  installPackageGloballySync,
+  normalizeUpdateChannel,
+  resolveGlobalWandCli,
+  type UpdateChannel,
+} from "../npm-update-utils.js";
 import { whichSync } from "../path-repair.js";
 import { computeRelaunch } from "../relaunch.js";
+import { ensureDatabaseFile, resolveDatabasePath, WandStorage } from "../storage.js";
 
 export interface CommandResult {
   ok: boolean;
@@ -23,8 +31,6 @@ export interface CommandResult {
   /** 可选的详细输出（多行），供"详情"折叠展示。 */
   detail?: string;
 }
-
-const PACKAGE_NAME = "@co0ontty/wand";
 
 // ─── 重启 ────────────────────────────────────────────────────────────────
 
@@ -63,31 +69,54 @@ export function restartSelf(): CommandResult {
 
 // ─── 检查 / 安装更新 ────────────────────────────────────────────────────
 
+const TUI_MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function readLocalBuildChannel(): string | null {
+  try {
+    const raw = readFileSync(path.resolve(TUI_MODULE_DIR, "..", "build-info.json"), "utf8");
+    const parsed = JSON.parse(raw) as { channel?: unknown };
+    return typeof parsed.channel === "string" ? parsed.channel : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface UpdateInfo {
+  channel: UpdateChannel;
   current: string;
   latest: string | null;
   hasUpdate: boolean;
+  installSpec: string;
 }
 
-/** 通过 npm view 拿到最新版本号。失败返回 latest=null。 */
-export function checkUpdate(currentVersion: string): UpdateInfo {
-  const res = spawnSync("npm", ["view", PACKAGE_NAME, "version"], {
-    encoding: "utf8",
-    timeout: 15_000,
-  });
-  if (res.status !== 0 || !res.stdout) {
-    return { current: currentVersion, latest: null, hasUpdate: false };
+export function readUpdateChannel(configPath: string): UpdateChannel {
+  const dbPath = resolveDatabasePath(configPath);
+  ensureDatabaseFile(dbPath);
+  const storage = new WandStorage(dbPath);
+  try {
+    return normalizeUpdateChannel(storage.getConfigValue("updateChannel"));
+  } finally {
+    storage.close();
   }
-  const latest = res.stdout.trim();
+}
+
+/** 通过 npm dist-tag 拿到当前通道最新版本号。失败返回 latest=null。 */
+export function checkUpdate(currentVersion: string, channel: UpdateChannel = "stable"): UpdateInfo {
+  const info = checkPackageUpdateSync(currentVersion, channel);
+  const updateAvailable =
+    info.updateAvailable ||
+    (channel === "stable" && !!info.latest && readLocalBuildChannel() === "beta");
   return {
-    current: currentVersion,
-    latest,
-    hasUpdate: compareSemver(latest, currentVersion) > 0,
+    channel: info.channel,
+    current: info.current,
+    latest: info.latest,
+    hasUpdate: updateAvailable,
+    installSpec: info.installSpec,
   };
 }
 
 /**
- * 执行 `npm install -g @co0ontty/wand@latest`。
+ * 执行 `npm install -g @co0ontty/wand@<dist-tag>`。
  *
  * 此调用同步阻塞（TUI 上层应在另一线程的 setImmediate 调度，或直接 await）。
  * 通过 npm-update-utils 自动处理 `.wand-XXXXXX` 残留目录和 ENOTEMPTY 回退，
@@ -95,8 +124,8 @@ export function checkUpdate(currentVersion: string): UpdateInfo {
  *
  * 返回 npm 输出供调试。
  */
-export function installUpdate(): CommandResult {
-  const res = installPackageGloballySync(`${PACKAGE_NAME}@latest`, 180_000);
+export function installUpdate(channel: UpdateChannel = "stable"): CommandResult {
+  const res = installPackageGloballySync(getInstallSpecForChannel(channel), 180_000);
   const out = (res.stdout || "") + (res.stderr ? "\n" + res.stderr : "");
   const trail = res.attempts.length > 1
     ? `\n\n尝试过的命令：\n  ${res.attempts.join("\n  ")}`

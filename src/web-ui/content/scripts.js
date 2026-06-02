@@ -3167,7 +3167,7 @@
                   '<div class="settings-toggle-row">' +
                     '<div class="settings-toggle-text">' +
                       '<span class="settings-toggle-title">Beta 通道</span>' +
-                      '<span class="settings-toggle-desc">更新到最新提交构建（commit 版本），尝鲜新功能，可能不稳定。</span>' +
+                      '<span class="settings-toggle-desc">更新到 npm beta 版本（tag + commit 尾标），尝鲜新功能，可能不稳定。</span>' +
                     '</div>' +
                     '<label class="settings-switch">' +
                       '<input type="checkbox" id="beta-channel-toggle" class="switch-toggle">' +
@@ -11443,21 +11443,21 @@
               return;
             }
             var isBeta = data.channel === "beta";
-            if (latestEl) {
-              if (isBeta) {
-                var label = "beta · " + (data.latest || "unknown");
-                if (data.builtAt) { try { label += " · " + timeAgo(data.builtAt); } catch (_e) {} }
-                latestEl.textContent = label;
-              } else {
-                latestEl.textContent = data.latest;
+            if (latestEl) latestEl.textContent = data.latest || (isBeta ? "beta 未发布" : "-");
+            if (!data.latest) {
+              if (msgEl) {
+                msgEl.textContent = isBeta ? "无法读取 npm beta 版本。" : "无法连接到 npm registry。";
+                msgEl.style.color = "var(--error)";
+                msgEl.classList.remove("hidden");
               }
+              return;
             }
             if (data.updateAvailable && updateBtn) {
-              updateBtn.textContent = isBeta ? "更新到最新 Beta" : "更新到最新版";
+              updateBtn.textContent = isBeta ? "更新到 Beta" : "更新到最新版";
               updateBtn.classList.remove("hidden");
             }
             if (!data.updateAvailable && msgEl) {
-              msgEl.textContent = isBeta ? "已是最新 Beta 构建。" : "已是最新版本。";
+              msgEl.textContent = isBeta ? "已是最新 Beta 版本。" : "已是最新版本。";
               msgEl.style.color = "var(--success)";
               msgEl.classList.remove("hidden");
             }

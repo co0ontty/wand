@@ -13,6 +13,7 @@ import {
   installUpdate,
   isServiceInstalled,
   openInBrowser,
+  readUpdateChannel,
   uninstallService,
 } from "./commands.js";
 import { spawnSync } from "node:child_process";
@@ -227,24 +228,34 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
 
   async function handleUpdate(): Promise<void> {
     layout.showToast("正在检查更新…", "info", 2000);
-    const info = await runOffMicrotask(() => checkUpdate(deps.pidInfo.version));
+    const channel = await runOffMicrotask(() => readUpdateChannel(deps.configPath));
+    const info = await runOffMicrotask(() => checkUpdate(deps.pidInfo.version, channel));
     if (!info.latest) {
-      layout.showToast("无法连接到 npm registry", "error", 3500);
+      layout.showToast(
+        info.channel === "beta" ? "无法读取 npm beta 版本" : "无法连接到 npm registry",
+        "error",
+        3500,
+      );
       return;
     }
     if (!info.hasUpdate) {
-      layout.showToast(`已是最新版本 (v${info.current})`, "success", 3000);
+      layout.showToast(
+        info.channel === "beta" ? `已是最新 Beta 版本 (${info.current})` : `已是最新版本 (v${info.current})`,
+        "success",
+        3000,
+      );
       return;
     }
+    const channelLabel = info.channel === "beta" ? "Beta" : "正式版";
     const go = await layout.confirm({
       title: "发现新版本",
-      body: `当前 v${info.current} → 最新 v${info.latest}，立即升级？升级后请按 R 重启服务。`,
+      body: `通道 ${channelLabel}：当前 ${info.current} → 最新 ${info.latest}，立即升级？升级后请按 R 重启服务。`,
       yes: "回车 / y 安装",
       no: "Esc / n 取消",
     });
     if (!go) return;
     layout.showToast("正在执行 npm install -g …", "info", 5000);
-    const r = await runOffMicrotask(() => installUpdate());
+    const r = await runOffMicrotask(() => installUpdate(info.channel));
     layout.showToast(r.message, r.ok ? "success" : "error", 5000);
     if (r.detail) layout.showDetail(r.ok ? "更新输出" : "更新失败", r.detail);
     if (r.ok) {
