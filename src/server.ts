@@ -736,7 +736,19 @@ async function resolveMacosDmgAsset(configDir: string, config: WandConfig): Prom
       fileStat,
     };
   }));
-  candidates.sort((a, b) => b.fileStat.mtimeMs - a.fileStat.mtimeMs);
+  candidates.sort((a, b) => {
+    const va = extractMacosDmgVersion(a.entry.name);
+    const vb = extractMacosDmgVersion(b.entry.name);
+    if (va && vb) {
+      const cmp = compareSemver(vb, va);
+      if (cmp !== 0) return cmp;
+    } else if (va && !vb) {
+      return -1;
+    } else if (!va && vb) {
+      return 1;
+    }
+    return b.fileStat.mtimeMs - a.fileStat.mtimeMs;
+  });
   const selected = candidates[0];
   return {
     fileName: selected.entry.name,
@@ -956,6 +968,90 @@ function classifyFile(ext: string, baseName: string): FilePreviewKind {
 
 function mimeForExt(ext: string): string {
   return MIME_BY_EXT[ext.toLowerCase()] || "application/octet-stream";
+}
+
+interface ParsedByteRange {
+  start: number;
+  end: number;
+}
+
+function parseByteRange(rangeHeader: string | undefined, total: number): ParsedByteRange | "invalid" | null {
+  if (!rangeHeader) return null;
+  const trimmed = rangeHeader.trim();
+  if (!trimmed.startsWith("bytes=")) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(trimmed);
+  if (!match || (match[1] === "" && match[2] === "")) return "invalid";
+
+  let start: number;
+  let end: number;
+  if (match[1] === "") {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return "invalid";
+    start = Math.max(0, total - suffixLength);
+    end = total - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] === "" ? total - 1 : Math.min(Number(match[2]), total - 1);
+  }
+
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= total) {
+    return "invalid";
+  }
+  return { start, end };
+}
+
+function streamFileWithRange(
+  req: Request,
+  res: Response,
+  options: {
+    filePath: string;
+    size: number;
+    contentType: string;
+    disposition?: string;
+    headers?: Record<string, string>;
+    readErrorMessage?: string;
+  },
+): void {
+  res.setHeader("Content-Type", options.contentType);
+  if (options.disposition) res.setHeader("Content-Disposition", options.disposition);
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    res.setHeader(name, value);
+  }
+  res.setHeader("Accept-Ranges", "bytes");
+
+  if (options.size === 0) {
+    if (req.headers.range?.trim().startsWith("bytes=")) {
+      res.status(416).setHeader("Content-Range", "bytes */0").end();
+      return;
+    }
+    res.setHeader("Content-Length", "0");
+    res.end();
+    return;
+  }
+
+  const parsedRange = parseByteRange(req.headers.range, options.size);
+  if (parsedRange === "invalid") {
+    res.status(416).setHeader("Content-Range", `bytes */${options.size}`).end();
+    return;
+  }
+
+  const start = parsedRange?.start ?? 0;
+  const end = parsedRange?.end ?? options.size - 1;
+  if (parsedRange) {
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${options.size}`);
+  }
+  res.setHeader("Content-Length", String(end - start + 1));
+
+  const stream = createReadStream(options.filePath, { start, end });
+  stream.on("error", (err) => {
+    if (!res.headersSent) {
+      res.status(500).json({ error: getErrorMessage(err, options.readErrorMessage ?? "读取文件失败。") });
+    } else {
+      res.destroy();
+    }
+  });
+  stream.pipe(res);
 }
 
 // ── Main server ──
@@ -1217,54 +1313,13 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       return;
     }
 
-    const total = androidApk.size;
-    res.setHeader("Content-Type", "application/vnd.android.package-archive");
-    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(androidApk.fileName)}"`);
-    // 声明支持断点续传 — 弱网/移动网络下中断后客户端可带 Range 续传, 而非从头重下。
-    res.setHeader("Accept-Ranges", "bytes");
-
-    // 解析 Range: bytes=start-end (含后缀范围 bytes=-N)。命中则返回 206 + 局部内容。
-    let start = 0;
-    let end = total - 1;
-    let isPartial = false;
-    const rangeHeader = req.headers.range;
-    if (rangeHeader) {
-      const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
-      if (match && (match[1] !== "" || match[2] !== "")) {
-        if (match[1] === "") {
-          // bytes=-N: 最后 N 字节
-          start = Math.max(0, total - Number(match[2]));
-          end = total - 1;
-        } else {
-          start = Number(match[1]);
-          end = match[2] === "" ? total - 1 : Math.min(Number(match[2]), total - 1);
-        }
-        isPartial = true;
-        if (start > end || start < 0 || start >= total) {
-          res.status(416);
-          res.setHeader("Content-Range", `bytes */${total}`);
-          res.end();
-          return;
-        }
-      }
-    }
-
-    if (isPartial) {
-      res.status(206);
-      res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
-    }
-    res.setHeader("Content-Length", String(end - start + 1));
-
-    const stream = createReadStream(androidApk.filePath, { start, end });
-    stream.on("error", (err) => {
-      // 文件在 stat 之后被删/读错误时, 让客户端尽快感知断流, 而不是等满读超时。
-      if (!res.headersSent) {
-        res.status(500).json({ error: getErrorMessage(err, "读取 APK 文件失败。") });
-      } else {
-        res.destroy();
-      }
+    streamFileWithRange(req, res, {
+      filePath: androidApk.filePath,
+      size: androidApk.size,
+      contentType: "application/vnd.android.package-archive",
+      disposition: `attachment; filename="${encodeURIComponent(androidApk.fileName)}"`,
+      readErrorMessage: "读取 APK 文件失败。",
     });
-    stream.pipe(res);
   });
 
   // ── macOS DMG update & download (no auth required) ──
@@ -1292,7 +1347,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     });
   });
 
-  app.get("/macos/download", async (_req, res) => {
+  app.get("/macos/download", async (req, res) => {
     if (config.macos?.enabled !== true) {
       res.status(404).json({ error: "macOS DMG 下载未启用。" });
       return;
@@ -1302,10 +1357,13 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.status(404).json({ error: "当前没有可下载的 DMG 文件。" });
       return;
     }
-    res.setHeader("Content-Type", "application/x-apple-diskimage");
-    res.setHeader("Content-Length", String(macosDmg.size));
-    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(macosDmg.fileName)}"`);
-    createReadStream(macosDmg.filePath).pipe(res);
+    streamFileWithRange(req, res, {
+      filePath: macosDmg.filePath,
+      size: macosDmg.size,
+      contentType: "application/x-apple-diskimage",
+      disposition: `attachment; filename="${encodeURIComponent(macosDmg.fileName)}"`,
+      readErrorMessage: "读取 DMG 文件失败。",
+    });
   });
 
   // Public probe so the unauthenticated browser does not log a 401 on /api/config
@@ -2011,43 +2069,17 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         ? `attachment; filename*=UTF-8''${encodedName}`
         : `inline; filename*=UTF-8''${encodedName}`;
 
-      const total = fileStat.size;
-      const range = req.headers.range;
-      // Safe to cache raw bytes briefly inside the user's browser.
-      res.setHeader("Cache-Control", "private, max-age=60");
-      res.setHeader("Content-Type", contentType);
-      res.setHeader("Content-Disposition", disposition);
-      res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader("X-Content-Type-Options", "nosniff");
-
-      if (range && /^bytes=/.test(range)) {
-        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-        if (!match) {
-          res.status(416).setHeader("Content-Range", `bytes */${total}`).end();
-          return;
-        }
-        const startStr = match[1];
-        const endStr = match[2];
-        let start = startStr === "" ? 0 : parseInt(startStr, 10);
-        let end = endStr === "" ? total - 1 : parseInt(endStr, 10);
-        if (Number.isNaN(start) || Number.isNaN(end) || start > end || start < 0 || end >= total) {
-          res.status(416).setHeader("Content-Range", `bytes */${total}`).end();
-          return;
-        }
-        const chunkSize = end - start + 1;
-        res.status(206);
-        res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
-        res.setHeader("Content-Length", String(chunkSize));
-        const stream = createReadStream(resolvedPath, { start, end });
-        stream.on("error", () => res.destroy());
-        stream.pipe(res);
-        return;
-      }
-
-      res.setHeader("Content-Length", String(total));
-      const stream = createReadStream(resolvedPath);
-      stream.on("error", () => res.destroy());
-      stream.pipe(res);
+      streamFileWithRange(req, res, {
+        filePath: resolvedPath,
+        size: fileStat.size,
+        contentType,
+        disposition,
+        headers: {
+          "Cache-Control": "private, max-age=60",
+          "X-Content-Type-Options": "nosniff",
+        },
+        readErrorMessage: "Failed to read file",
+      });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "Failed to read file") });
     }
@@ -2080,10 +2112,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         });
 
       res.json({ currentPath: targetPath, items });
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      if (code === "ENOENT") {
         res.status(404).json({ error: "路径不存在：" + q, currentPath: q, items: [] });
-      } else if (error.code === "EACCES") {
+      } else if (code === "EACCES") {
         res.status(403).json({ error: "权限不足，无法访问：" + q, currentPath: q, items: [] });
       } else {
         res.status(400).json({ error: "无法读取目录：" + getErrorMessage(error, "未知错误"), currentPath: q, items: [] });

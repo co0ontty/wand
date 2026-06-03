@@ -1257,6 +1257,7 @@ public class MainActivity extends AppCompatActivity {
                     if (redirectUrl != null) {
                         url = new URL(redirectUrl);
                         conn = (HttpURLConnection) url.openConnection();
+                        NetUtils.trustSelfSigned(conn);
                         conn.setConnectTimeout(15000);
                         conn.setReadTimeout(120000);
                         conn.setInstanceFollowRedirects(true);

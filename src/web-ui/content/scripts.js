@@ -1976,7 +1976,7 @@
                 //    空输入时浮在 placeholder 位上显示；用户开始输入即淡出隐藏。
                 //  · 附件改成 + 图标；新增麦克风按钮，整体输入框可切到「按住说话」语音模式。
                 //  · 提示词优化按钮（✨）改成只在 textarea 有内容时显示，绝对定位浮在右侧。
-                //  · 自动批准 / 权限操作行 / 退出码徽章统一搬到 textarea 上方的状态行，
+                //  · 自动批准 / 权限操作行统一搬到 textarea 上方的状态行，
                 //    输入主行保持极简。
                 '<div class="input-composer' + (currentDraft ? ' has-text' : '') + '">' +
                   // 顶部状态行：自动批准 / 权限审批 / 统计 —— 仅在有内容时占位，
@@ -2042,27 +2042,6 @@
                     '</div>' +
                   '</div>' +
                   '<div id="attachment-preview" class="attachment-preview hidden"></div>' +
-                  // Session info bar at bottom — 仅保留信息类徽章（历史会话 id / exit code）。
-                  // 自动批准已从这里移到主 pill 行（renderAutoApproveChip）。
-                  (selectedSession
-                    ? (function() {
-                        var bits = "";
-                        if ((selectedSession.provider === "claude" || selectedSession.provider === "codex") && selectedSession.claudeSessionId) {
-                          var historyIdTitle = selectedSession.provider === "codex" ? "点击复制 Codex thread ID" : "点击复制 Claude 会话 ID";
-                          bits += '<span id="claude-session-id-badge" class="claude-session-id-badge" data-claude-id="' + escapeHtml(selectedSession.claudeSessionId) + '" title="' + historyIdTitle + '">' + iconSvg("cloud", { size: 11, strokeWidth: 1.7, cls: "claude-session-id-icon" }) + '<span class="claude-session-id-text">' + escapeHtml(selectedSession.claudeSessionId.slice(0, 8)) + '</span></span>';
-                        }
-                        // 非结构化会话：进程退出后展示退出码（哪怕 0，告诉用户已正常结束）。
-                        // 结构化会话：只在退出码非 0（即真有失败）时展示，避免成功的多轮对话也挂个 "退出码=0" 误导。
-                        if (selectedSession.exitCode !== undefined && selectedSession.exitCode !== null) {
-                          var showExit = !isStructuredSession(selectedSession) || selectedSession.exitCode !== 0;
-                          if (showExit) {
-                            if (bits) bits += '<span class="session-info-separator">|</span>';
-                            bits += '<span id="session-exit-display" class="session-exit-display">退出码=' + selectedSession.exitCode + '</span>';
-                          }
-                        }
-                        return bits ? '<div class="input-session-info-bar">' + bits + '</div>' : '';
-                      })()
-                    : '') +
                 '</div>' +
                 // 加号气泡 —— 浮在 + 按钮上方（.input-composer 之外，绕开它的 overflow:hidden）。
                 // 内容：附件 / 终端交互 / 三件套（模式·模型·思考）。默认 hidden，点 + 切换；
@@ -6245,6 +6224,27 @@
             if (dd) dd.classList.add("hidden");
           }
         });
+
+        // 三件套（模式 / 模型 / 思考）走全局委托 —— 任何位置（空状态下拉 / 用户消息徽章）
+        // 渲染出 [data-mode-control] 的 select 都会被这条监听捕获，避免到处 wire ID。
+        document.addEventListener("change", function(e) {
+          var target = e.target;
+          if (!target || target.nodeType !== 1) return;
+          if (typeof target.matches !== "function" || !target.matches("[data-mode-control]")) return;
+          var ctrl = target.getAttribute("data-mode-control");
+          var value = target.value;
+          if (ctrl === "mode") {
+            state.chatMode = value;
+            refreshAllChatModeTrios();
+            showToast && showToast("新会话模式：" + value, "info");
+          } else if (ctrl === "model") {
+            onChatModelChange(value);
+          } else if (ctrl === "thinking") {
+            onChatThinkingChange(value);
+          }
+          // 在加号 popover 内改完三件套之后顺手关掉，反馈立即由 toast + 用户消息头像左侧徽章接管。
+          if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
+        });
       }
 
       function attachEventListeners() {
@@ -6344,9 +6344,6 @@
         // expand-collapse / item clicks / clear-all — no separate region wiring.
         window.addEventListener("scroll", hideCollapsedTileBubble, true);
         window.addEventListener("resize", hideCollapsedTileBubble);
-
-        // Claude session ID badge click-to-copy (event delegation on document)
-        document.addEventListener("click", handleClaudeIdCopy);
 
         var providerCardsEl = document.getElementById("provider-cards");
         if (providerCardsEl) providerCardsEl.addEventListener("click", function(e) {
@@ -6678,27 +6675,6 @@
         });
         var stopBtn = document.getElementById("stop-button");
         if (stopBtn) stopBtn.addEventListener("click", stopSession);
-        // 三件套（模式 / 模型 / 思考）走全局委托 —— 任何位置（空状态下拉 / 用户消息徽章）
-        // 渲染出 [data-mode-control] 的 select 都会被这条监听捕获，避免到处 wire ID。
-        document.addEventListener("change", function(e) {
-          var target = e.target;
-          if (!target || target.nodeType !== 1) return;
-          if (typeof target.matches !== "function" || !target.matches("[data-mode-control]")) return;
-          var ctrl = target.getAttribute("data-mode-control");
-          var value = target.value;
-          if (ctrl === "mode") {
-            state.chatMode = value;
-            refreshAllChatModeTrios();
-            showToast && showToast("新会话模式：" + value, "info");
-          } else if (ctrl === "model") {
-            onChatModelChange(value);
-          } else if (ctrl === "thinking") {
-            onChatThinkingChange(value);
-          }
-          // 在加号 popover 内改完三件套之后顺手关掉，反馈立即由 toast + 用户消息头像左侧徽章接管。
-          if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
-        });
-
         var sessionModal = document.getElementById("session-modal");
         if (sessionModal) sessionModal.addEventListener("click", function(e) {
           if (e.target.id === "session-modal") closeSessionModal();
@@ -7630,23 +7606,6 @@
         }
         copyToClipboard(String(value), null, function() {
           showToast(successMsg || "已复制", "info");
-        });
-      }
-
-      /** Copy Claude session ID from badge to clipboard */
-      function handleClaudeIdCopy(event) {
-        var badge = event.target.closest("#claude-session-id-badge");
-        if (!badge) return;
-        var fullId = badge.dataset.claudeId;
-        if (!fullId) return;
-        var original = badge.textContent;
-        copyToClipboard(fullId, null, function() {
-          badge.textContent = "\u2713 已复制";
-          badge.classList.add("copied");
-          setTimeout(function() {
-            badge.textContent = original;
-            badge.classList.remove("copied");
-          }, 1200);
         });
       }
 
@@ -9781,21 +9740,9 @@
         if (titleEl && titleEl.textContent !== terminalTitle) titleEl.textContent = terminalTitle;
         if (infoEl) infoEl.textContent = selectedSession ? (terminalInfo + " · " + getSessionKindDescription(selectedSession)) : terminalInfo;
 
-        var cwdEl = document.getElementById("session-cwd-display");
-        var modeEl = document.getElementById("session-mode-display");
         var kindEl = document.getElementById("session-kind-display");
-        var statusEl = document.getElementById("session-status-display");
-        var exitEl = document.getElementById("session-exit-display");
-        var cwdText = selectedSession && selectedSession.cwd ? selectedSession.cwd : "未设置目录";
-        var modeText = selectedSession ? getModeLabel(selectedSession.mode) : "默认";
         var kindText = selectedSession ? getSessionKindLabel(selectedSession) : "终端";
-        var isStructured = selectedSession && isStructuredSession(selectedSession);
-        var exitText = isStructured ? "" : "退出码=" + (selectedSession && selectedSession.exitCode !== undefined ? selectedSession.exitCode : "n/a");
-        if (cwdEl && cwdEl.textContent !== cwdText) cwdEl.textContent = cwdText;
-        if (modeEl && modeEl.textContent !== modeText) modeEl.textContent = modeText;
         if (kindEl && kindEl.textContent !== kindText) kindEl.textContent = kindText;
-        if (statusEl && statusEl.textContent !== terminalInfo) statusEl.textContent = terminalInfo;
-        if (exitEl && exitEl.textContent !== exitText) exitEl.textContent = exitText;
         updateAutoApproveIndicator();
 
         if (!state.terminal && terminalContainer && selectedSession) {

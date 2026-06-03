@@ -1,5 +1,4 @@
 export type SessionKind = "pty" | "structured";
-export type SessionCreateKind = "pty" | "structured";
 export type SessionProvider = "claude" | "codex";
 export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "pty";
 
@@ -333,11 +332,6 @@ export interface FilePreviewResponse {
   lang?: string;
   /** File content; only present when kind === "text". */
   content?: string;
-}
-
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
 }
 
 // ── Structured chat message types derived from PTY output ──

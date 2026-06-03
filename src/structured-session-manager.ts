@@ -1398,15 +1398,7 @@ export class StructuredSessionManager {
           reject(new Error(errorText));
           return;
         }
-        const assistantTurn: ConversationTurn = {
-          role: "assistant",
-          content: this.compactContentBlocks([...turnState.blocks], turnState.result),
-          usage: turnState.usage,
-        };
-        const msgs = [...(current.messages ?? [])];
-        const lastMsg = msgs[msgs.length - 1];
-        if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = assistantTurn;
-        else msgs.push(assistantTurn);
+        const msgs = this.buildCompletedAssistantMessages(current, turnState);
         const keepRunning = !!interruptPrompt;
         const finished: SessionSnapshot = {
           ...current,
@@ -1416,7 +1408,7 @@ export class StructuredSessionManager {
           output: turnState.result,
           claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
           messages: msgs,
-          queuedMessages: interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId) ? [] : current.queuedMessages,
+          queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
           pendingEscalation: null,
           permissionBlocked: false,
           structuredState: {
@@ -1931,22 +1923,7 @@ export class StructuredSessionManager {
           return;
         }
 
-        // Build the final assistant turn.
-        const finalContent = this.compactContentBlocks([...turnState.blocks], turnState.result);
-        const assistantTurn: ConversationTurn = {
-          role: "assistant",
-          content: finalContent,
-          usage: turnState.usage,
-        };
-
-        // Ensure the final messages list has the completed assistant turn.
-        const msgs = [...(current.messages ?? [])];
-        const lastMsg = msgs[msgs.length - 1];
-        if (lastMsg && lastMsg.role === "assistant") {
-          msgs[msgs.length - 1] = assistantTurn;
-        } else {
-          msgs.push(assistantTurn);
-        }
+        const msgs = this.buildCompletedAssistantMessages(current, turnState);
 
         // 被 AskUserQuestion 检测或用户中断主动 kill 时，保持 status="running"
         // 让 UI 不跳到"已停止"。inFlight=false 才能触发后续 sendMessage。
@@ -1960,7 +1937,7 @@ export class StructuredSessionManager {
           output: turnState.result,
           claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
           messages: msgs,
-          queuedMessages: interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId) ? [] : current.queuedMessages,
+          queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
           pendingEscalation: null,
           permissionBlocked: false,
           structuredState: {
@@ -2472,17 +2449,7 @@ export class StructuredSessionManager {
 
     const interruptedByUser = this.interruptedWith.has(sessionId);
 
-    // Build final assistant turn
-    const finalContent = this.compactContentBlocks([...turnState.blocks], turnState.result);
-    const assistantTurn: ConversationTurn = {
-      role: "assistant",
-      content: finalContent,
-      usage: turnState.usage,
-    };
-    const msgs = [...(current.messages ?? [])];
-    const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = assistantTurn;
-    else msgs.push(assistantTurn);
+    const msgs = this.buildCompletedAssistantMessages(current, turnState);
 
     const interruptPrompt = this.interruptedWith.get(sessionId);
     const keepRunning = killedForAskUserQuestion || !!interruptPrompt;
@@ -2494,7 +2461,7 @@ export class StructuredSessionManager {
       output: turnState.result,
       claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
       messages: msgs,
-      queuedMessages: interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId) ? [] : current.queuedMessages,
+      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -2626,6 +2593,28 @@ export class StructuredSessionManager {
       compacted.push({ type: "text", text: fallbackResult });
     }
     return compacted;
+  }
+
+  private buildCompletedAssistantMessages(current: SessionSnapshot, turnState: StreamingTurnState): ConversationTurn[] {
+    const assistantTurn: ConversationTurn = {
+      role: "assistant",
+      content: this.compactContentBlocks([...turnState.blocks], turnState.result),
+      usage: turnState.usage,
+    };
+    const msgs = [...(current.messages ?? [])];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "assistant") msgs[msgs.length - 1] = assistantTurn;
+    else msgs.push(assistantTurn);
+    return msgs;
+  }
+
+  private resolveQueuedMessagesAfterInterrupt(
+    sessionId: string,
+    current: SessionSnapshot,
+    interruptPrompt: string | undefined,
+  ): string[] | undefined {
+    if (interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId)) return [];
+    return current.queuedMessages;
   }
 
   private normalizeToolInput(input: unknown): Record<string, unknown> {

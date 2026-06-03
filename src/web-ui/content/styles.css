@@ -6198,7 +6198,6 @@
              .composer-input-wrap    textarea + ghost meta + 语音 UI
              .composer-actions-right [⏹] [➤]
            .attachment-preview       附件预览
-           .input-session-info-bar   信息徽章
 
        关键交互：
          · ghost meta 在 textarea 为空时浮在输入位上，显示 mode·model·thinking；
@@ -6836,60 +6835,6 @@
       max-width: 38ch;             /* 防止突然变长的状态文案撑爆右侧区域 */
       overflow: hidden;
       text-overflow: ellipsis;
-    }
-
-    /* Session info bar at bottom of input composer */
-    .input-session-info-bar {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      padding: 3px 8px;
-      background: rgba(245, 240, 230, 0.5);
-      border-top: 1px solid var(--border-subtle);
-      font-size: 0.6875rem;
-      color: var(--text-secondary);
-    }
-    .session-cwd-display {
-      font-weight: 500;
-      color: var(--text-primary);
-      max-width: 180px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .session-mode-display,
-    .session-status-display,
-    .session-exit-display {
-      color: var(--text-secondary);
-      font-weight: 400;
-    }
-    .session-info-separator {
-      color: var(--border-default);
-      opacity: 0.6;
-    }
-    .claude-session-id-badge {
-      font-family: var(--font-mono);
-      font-size: 0.6875rem;
-      color: var(--text-muted);
-      background: rgba(150, 118, 85, 0.1);
-      padding: 2px 6px;
-      border-radius: 4px;
-      cursor: pointer;
-      user-select: none;
-      transition: all var(--transition-fast);
-      border: 1px solid transparent;
-    }
-    .claude-session-id-badge:hover {
-      color: var(--accent);
-      background: rgba(197, 101, 61, 0.1);
-      border-color: rgba(197, 101, 61, 0.2);
-    }
-    .claude-session-id-badge:active {
-      transform: scale(0.95);
-    }
-    .claude-session-id-badge.copied {
-      color: var(--success);
-      background: rgba(106, 165, 76, 0.1);
     }
 
     .input-row { display: flex; gap: 8px; align-items: flex-end; max-width: 100%; }
@@ -10660,11 +10605,6 @@
         padding-bottom: 4px;
       }
 
-      .input-session-info-bar {
-        padding: 2px 6px 3px;
-        font-size: 0.625rem;
-      }
-
       .input-composer {
         border-radius: 10px;
       }
@@ -10692,14 +10632,6 @@
       .input-composer-left .chat-mode-select { max-width: 64px; }
       .input-composer-left .chat-model-select { max-width: 78px; }
       .input-composer-left .chat-thinking-trigger { max-width: 72px; }
-
-      /* 移动端会话信息栏 */
-      .input-session-info-bar {
-        flex-wrap: wrap;
-      }
-      .session-cwd-display {
-        max-width: 100px;
-      }
 
       .input-row { flex-direction: column; align-items: stretch; gap: 6px; max-width: 100%; }
       .input-field { gap: 4px; min-width: 0; max-width: 100%; }
@@ -16368,15 +16300,6 @@
     }
     .folder-picker-icon > svg { display: block; }
     .folder-picker-quick-btn.btn-with-icon { gap: 5px; }
-
-    /* Claude session id 徽章：icon + text */
-    .claude-session-id-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .claude-session-id-icon { flex-shrink: 0; }
-    .claude-session-id-text { font-family: var(--font-mono); }
 
     /* 批准统计弹窗的行图标 —— 现在是 svg */
     .approval-stats-row-icon {
