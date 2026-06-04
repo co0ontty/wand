@@ -15513,6 +15513,22 @@
         }, 30);
       }
 
+      function getFullViewportHeight(vv) {
+        var root = document.documentElement;
+        var body = document.body;
+        var bodyRectHeight = 0;
+        try {
+          bodyRectHeight = body ? body.getBoundingClientRect().height || 0 : 0;
+        } catch (e) {}
+        return Math.max(
+          window.innerHeight || 0,
+          vv && vv.height || 0,
+          root ? root.clientHeight || 0 : 0,
+          body ? body.clientHeight || 0 : 0,
+          bodyRectHeight
+        );
+      }
+
       function refreshAppViewportBaseline(vv) {
         var root = document.documentElement;
         var width = Math.max(
@@ -15520,11 +15536,7 @@
           vv && vv.width || 0,
           root ? root.clientWidth || 0 : 0
         );
-        var height = Math.max(
-          window.innerHeight || 0,
-          vv && vv.height || 0,
-          root ? root.clientHeight || 0 : 0
-        );
+        var height = getFullViewportHeight(vv);
         if (!appViewportBaselineWidth || Math.abs(width - appViewportBaselineWidth) > 8) {
           appViewportBaselineWidth = width;
           appViewportBaselineHeight = height;
@@ -15537,6 +15549,15 @@
       function shouldUseClosedViewportBaseline(isKeyboardOpen, offsetTop, height, baselineHeight) {
         if (isKeyboardOpen || !isStandaloneViewportMode()) return false;
         if (Date.now() > closedViewportBaselineUntil) return false;
+        return offsetTop > 0 || baselineHeight > height + 1;
+      }
+
+      function shouldUseStandaloneFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight) {
+        if (isKeyboardOpen || !isStandaloneViewportMode()) return false;
+        // iOS PWA can report a visualViewport that is shorter than the actual
+        // app window even when the keyboard is closed. If we mirror that value,
+        // the fixed app container stops early and leaves a large blank strip
+        // under the composer. Closed standalone mode should fill the app window.
         return offsetTop > 0 || baselineHeight > height + 1;
       }
 
@@ -15561,7 +15582,10 @@
         // vv.height/offsetTop 还残留几十像素，但之后不再触发 resize/scroll。
         // 关闭键盘的 settle 窗口内用已知的非键盘基线兜住，避免输入框底部
         // 留出一截空白。
-        if (shouldUseClosedViewportBaseline(isKeyboardOpen, offsetTop, height, baselineHeight)) {
+        if (
+          shouldUseStandaloneFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight)
+          || shouldUseClosedViewportBaseline(isKeyboardOpen, offsetTop, height, baselineHeight)
+        ) {
           offsetTop = 0;
           height = Math.max(height, baselineHeight);
         }

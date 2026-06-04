@@ -156,6 +156,7 @@
       --wand-safe-left: max(var(--app-inset-left), env(safe-area-inset-left, 0px));
       --wand-safe-right: max(var(--app-inset-right), env(safe-area-inset-right, 0px));
       --safe-bottom: var(--wand-safe-bottom);
+      --input-safe-bottom: var(--safe-bottom);
       /* 默认与 wand-safe-top 等价; PWA / .is-pwa 下被覆盖为 max(inset, 14px) */
       --pwa-safe-top: var(--wand-safe-top);
     }
@@ -196,6 +197,7 @@
     @media (display-mode: standalone) {
       :root {
         --pwa-safe-top: max(env(safe-area-inset-top, 0px), 14px);
+        --input-safe-bottom: min(var(--safe-bottom), 28px);
       }
       .app-container {
         --pwa-top-inset: var(--pwa-safe-top);
@@ -212,6 +214,7 @@
     /* iOS Safari PWA fallback (navigator.standalone adds .is-pwa via JS) */
     .is-pwa {
       --pwa-safe-top: max(env(safe-area-inset-top, 0px), 14px);
+      --input-safe-bottom: min(var(--safe-bottom), 28px);
     }
     .is-pwa .app-container {
       --pwa-top-inset: var(--pwa-safe-top);
@@ -6177,7 +6180,7 @@
 
     .input-panel {
       padding: 6px 10px;
-      padding-bottom: calc(6px + var(--safe-bottom, 0px));
+      padding-bottom: calc(6px + var(--input-safe-bottom, var(--safe-bottom, 0px)));
       flex-shrink: 0;
       position: relative; /* 语音转写气泡（.voice-transcript-bubble）的定位参照 */
       z-index: 26;
@@ -10590,7 +10593,7 @@
       .input-panel {
         z-index: 30;
         padding: 4px 6px;
-        padding-bottom: calc(6px + var(--safe-bottom, 0px) + var(--keyboard-offset, 0px));
+        padding-bottom: calc(6px + var(--input-safe-bottom, var(--safe-bottom, 0px)) + var(--keyboard-offset, 0px));
         flex: 0 0 auto;
         margin-top: auto;
         /* 渐变只覆盖上半段做平滑过渡，下半段用纯色铺满 safe-area 区域，
@@ -10944,7 +10947,7 @@
 
       .input-panel {
         padding: 6px 10px;
-        padding-bottom: calc(8px + var(--safe-bottom, 0px));
+        padding-bottom: calc(8px + var(--input-safe-bottom, var(--safe-bottom, 0px)));
       }
     }
 
@@ -10971,7 +10974,7 @@
 
       .input-panel {
         padding: 5px 6px;
-        padding-bottom: calc(6px + var(--safe-bottom, 0px));
+        padding-bottom: calc(6px + var(--input-safe-bottom, var(--safe-bottom, 0px)));
       }
 
       .input-composer { border-radius: 8px; }
@@ -11041,7 +11044,7 @@
 
       .input-panel {
         padding: 8px;
-        padding-bottom: calc(8px + var(--safe-bottom, 0px));
+        padding-bottom: calc(8px + var(--input-safe-bottom, var(--safe-bottom, 0px)));
       }
 
       .input-row { flex-direction: row; gap: 8px; }
