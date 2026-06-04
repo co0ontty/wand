@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 #
-# start.sh — 把仓库当作"发布版本"装到全局，并通过 system-wide systemd 管理。
+# start.sh — 用 npm link 把仓库符号链接到全局，并通过 system-wide systemd 管理。
 #
 # 流程（默认）：
-#   1) npm run build                                   # 与 publish.sh 同
-#   2) npm pack                                        # 产物 = npm publish 出来的 tgz
-#   3) npm install -g <tgz>                            # 全局覆盖安装
-#   4) wand service:install / service:restart          # 走 src/tui/commands.ts，写 /etc/systemd/system/wand.service
-#   5) 打印面板（脚本退出后 service 继续在 systemd 下跑）
+#   1) npm run build                                   # 构建 dist/
+#   2) npm link                                        # 全局 wand → 本仓库（符号链接，无需打包）
+#   3) wand service:install / service:restart          # 走 src/tui/commands.ts，写 /etc/systemd/system/wand.service
+#   4) 打印面板（脚本退出后 service 继续在 systemd 下跑）
 #
 # 用 system-wide systemd（/etc/systemd/system/wand.service）的原因：
 #   - 开机自启，不依赖 login session，不需要 enable-linger
@@ -44,7 +43,6 @@ cd "$REPO_ROOT"
 # ── 常量 ─────────────────────────────────────────────────────────────
 SERVICE_NAME="wand"
 CONFIG_PATH="${WAND_CONFIG:-$HOME/.wand/config.json}"
-PACK_DIR="${REPO_ROOT}/.dev-pack"   # npm pack 产物的暂存目录
 
 # ── 颜色 ─────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
@@ -430,11 +428,23 @@ case "$ACTION" in
       $SUDO rm -f "$UNIT_FILE"
       $SUDO "${SYSTEMCTL[@]}" daemon-reload 2>&1 || true
     fi
-    npm uninstall -g @co0ontty/wand 2>&1 || true
+    npm unlink 2>&1 || npm uninstall -g @co0ontty/wand 2>&1 || true
     ok "卸载完成"
     exit 0
     ;;
 esac
+
+# ── dev 版本号管理 ──────────────────────────────────────────────────
+# 构建前设 dev 版本号，脚本退出时无论如何都恢复
+ORIG_VERSION="$(node -e "process.stdout.write(require('./package.json').version)" 2>/dev/null)"
+# 如果当前版本已带 -dev（上次中断没恢复），先剥掉
+ORIG_VERSION="${ORIG_VERSION%%-dev.*}"
+DEV_VERSION="${ORIG_VERSION}-dev.$(date +%m%d%H%M)"
+
+restore_version() {
+  npm version "$ORIG_VERSION" --no-git-tag-version --allow-same-version >/dev/null 2>&1 || true
+}
+trap 'restore_version' EXIT
 
 # Ctrl-C 在 install 阶段安全：service 还在跑旧二进制不会受影响。
 on_install_sigint() {
@@ -443,13 +453,15 @@ on_install_sigint() {
   ok "想重新来一次：./start.sh"
   exit 130
 }
-trap on_install_sigint INT
+trap 'restore_version; on_install_sigint' INT
 
 # ── ① 构建 ───────────────────────────────────────────────────────────
 if [[ "$DO_BUILD" == "1" ]]; then
+  msg "版本号: $ORIG_VERSION → $DEV_VERSION"
+  npm version "$DEV_VERSION" --no-git-tag-version --allow-same-version >/dev/null 2>&1
   msg "npm run build"
   npm run build
-  ok "build 完成"
+  ok "build 完成 ($DEV_VERSION)"
 else
   [[ -f "$REPO_ROOT/dist/cli.js" ]] || die "--no-build 但 dist/cli.js 不存在。"
   if [[ -n "$(find "$REPO_ROOT/src" -type f -newer "$REPO_ROOT/dist/cli.js" -print -quit 2>/dev/null)" ]]; then
@@ -457,30 +469,22 @@ else
   fi
 fi
 
-# ── ② npm pack + ③ npm install -g（可跳过） ─────────────────────────
+# ── ② npm link（可跳过） ─────────────────────────────────────────────
+# 用 npm link 取代 npm pack + npm install -g：创建符号链接而非复制，
+# 后续只要 npm run build + service:restart 就够，不用每次重打包。
 if [[ "$DO_INSTALL" == "1" ]]; then
-  rm -rf "$PACK_DIR"
-  mkdir -p "$PACK_DIR"
-  msg "npm pack → $PACK_DIR"
-  TGZ_NAME="$(npm pack --pack-destination "$PACK_DIR" --silent | tail -1)"
-  TGZ_PATH="$PACK_DIR/$TGZ_NAME"
-  [[ -f "$TGZ_PATH" ]] || die "npm pack 失败，没找到 $TGZ_PATH"
-  TGZ_SIZE="$(du -h "$TGZ_PATH" | cut -f1)"
-  ok "已打包: $TGZ_NAME ($TGZ_SIZE)"
-
-  msg "npm install -g $TGZ_NAME"
-  # 装之前先停服务，否则 npm rename 旧目录会撞 ENOTEMPTY
   if service_installed; then
     $SUDO "${SYSTEMCTL[@]}" stop "$SERVICE_NAME" 2>/dev/null || true
   fi
   cleanup_stale_wand
-  $SUDO npm install -g "$TGZ_PATH" 2>&1 | tail -5
-  ok "全局安装完成"
+  msg "npm link（全局 wand → $(pwd)）"
+  npm link 2>&1 | tail -3
+  ok "npm link 完成"
 fi
 
-# 安装完之后才能确定 wand 位置
+# link / install 之后才能确定 wand 位置
 WAND_BIN="$(detect_wand_bin)"
-[[ -n "$WAND_BIN" ]] || die "npm install -g 完成后仍未在 PATH 里找到 wand，检查 \$PATH / npm prefix。"
+[[ -n "$WAND_BIN" ]] || die "npm link 完成后仍未在 PATH 里找到 wand，检查 \$PATH / npm prefix。"
 
 # ── ④ 配置：确保 config 存在；按需改 port ────────────────────────────
 if [[ ! -f "$CONFIG_PATH" ]]; then

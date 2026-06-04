@@ -147,6 +147,7 @@ function readBuildInfo(): WandBuildInfo {
 }
 
 const BUILD_INFO = readBuildInfo();
+const DISPLAY_VERSION = BUILD_INFO.version || PKG_VERSION;
 
 // ── Android APK update check cache ──
 
@@ -1100,6 +1101,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   }
 
   const app = express();
+  app.set("trust proxy", "loopback, 172.16.0.0/12");
   const storage = new WandStorage(resolveDatabasePath(configPath));
   setAuthStorage(storage);
   const configDir = resolveConfigDir(configPath);
@@ -1395,7 +1397,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       language: config.language ?? "",
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
-      currentVersion: PKG_VERSION,
+      currentVersion: DISPLAY_VERSION,
     });
   });
 
@@ -1425,7 +1427,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         ? { hasDmg: true, fileName: ghDmg.fileName, version: ghDmg.version, size: ghDmg.size, updatedAt: null, downloadUrl: ghDmg.downloadUrl, source: "github" as const }
         : null;
     res.json({
-      version: PKG_VERSION,
+      version: DISPLAY_VERSION,
       packageName: PKG_NAME,
       nodeVersion: PKG_NODE_REQ,
       repoUrl: PKG_REPO_URL,
@@ -2586,7 +2588,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     urls: collectedUrls,
     bindAddr,
     httpsEnabled: useHttps,
-    version: PKG_VERSION,
+    version: DISPLAY_VERSION,
     orphanRecoveredCount: processes.getOrphanRecoveredCount(),
     pathRepair,
     close,

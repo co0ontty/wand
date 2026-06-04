@@ -1,0 +1,584 @@
+import { state, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
+import { renderChat } from "./chat-render";
+import { snapCollapsedSubagentPanelsToBottom } from "./events";
+import { render } from "./render";
+// import { iconSvg } from "./i18n";
+
+// TODO: import from correct module when created
+
+export function getChatScrollElement() {
+  var chatOutput = document.getElementById("chat-output");
+  if (!chatOutput) {
+    state.chatScrollElement = null;
+    return null;
+  }
+  var chatMessages = chatOutput.querySelector(".chat-messages");
+  if (chatMessages) {
+    state.chatScrollElement = chatMessages;
+    return chatMessages;
+  }
+  state.chatScrollElement = null;
+  return null;
+}
+
+// column-reverse: scrollTop=0 是视觉底部，越往上看 scrollTop 绝对值越大。
+// 部分浏览器历史上在 column-reverse 里给负 scrollTop，所以用绝对值更稳。
+export function isChatNearBottom(chatMsgs?: any) {
+  var el = chatMsgs || getChatScrollElement();
+  if (!el) return true;
+  return Math.abs(el.scrollTop) < state.chatScrollThreshold;
+}
+
+// 没有手动 toggle 了——是否贴底完全由用户的滚动行为决定。
+// 这个函数只用来在某些场景（点未读气泡）下显式把状态扳回 true。
+export function setChatStickToBottom(enabled: any) {
+  state.chatStickToBottom = !!enabled;
+  if (state.chatStickToBottom) clearChatUnread({ removeDivider: true });
+  updateChatUnreadBubble();
+}
+
+export function clearChatUnread(options?: any) {
+  options = options || {};
+  var hadUnread = state.chatUnreadCount > 0 || state.chatUnreadStartIndex >= 0;
+  state.chatUnreadCount = 0;
+  state.chatUnreadStartIndex = -1;
+  if (options.removeDivider !== false) {
+    var chatMsgs = getChatScrollElement();
+    if (chatMsgs) {
+      var divider = chatMsgs.querySelector(".chat-unread-divider");
+      if (divider && divider.parentNode) divider.parentNode.removeChild(divider);
+    }
+  }
+  if (hadUnread) updateChatUnreadBubble();
+}
+
+// 在 chatMessages 容器里把"未读分割线"放到正确位置——visually 在
+// 最后一条已读和第一条未读中间。column-reverse 下 DOM[0] 是最新（视觉底部），
+// 所以分割线在 DOM 里应该插到"第一条已读消息"之前。
+export function refreshChatUnreadDivider(chatMessages?: any) {
+  if (!chatMessages) chatMessages = getChatScrollElement();
+  if (!chatMessages) return;
+  var existing = chatMessages.querySelector(".chat-unread-divider");
+  if (state.chatUnreadStartIndex < 0 || state.chatUnreadCount <= 0) {
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    return;
+  }
+  var startIdx = state.chatUnreadStartIndex;
+  // 找到 DOM 里第一条 originalIndex < startIdx 的消息——它紧邻分割线下方（DOM 顺序），
+  // 也就是视觉上紧贴在分割线"上方"（column-reverse）。
+  var nodes = chatMessages.querySelectorAll(".chat-message");
+  var boundary = null;
+  for (var i = 0; i < nodes.length; i++) {
+    var idxAttr = nodes[i].getAttribute("data-msg-index");
+    if (idxAttr === null) continue;
+    var idx = parseInt(idxAttr, 10);
+    if (!isNaN(idx) && idx < startIdx) { boundary = nodes[i]; break; }
+  }
+  // 没找到 boundary：未读消息覆盖了整个可见窗口——把分割线挂到末尾即可。
+  var label = state.chatUnreadCount + " 条新消息";
+  if (!existing) {
+    existing = document.createElement("div");
+    existing.className = "chat-unread-divider";
+    existing.setAttribute("role", "separator");
+    existing.innerHTML = '<span class="chat-unread-divider-line"></span>'
+      + '<span class="chat-unread-divider-label"></span>'
+      + '<span class="chat-unread-divider-line"></span>';
+  }
+  existing.querySelector(".chat-unread-divider-label").textContent = label;
+  if (boundary) {
+    if (existing.nextSibling !== boundary || existing.parentNode !== chatMessages) {
+      chatMessages.insertBefore(existing, boundary);
+    }
+  } else {
+    if (existing.parentNode !== chatMessages || existing.nextSibling !== null) {
+      chatMessages.appendChild(existing);
+    }
+  }
+}
+
+export function updateChatUnreadBubble() {
+  var bubble = document.getElementById("chat-unread-bubble");
+  if (!bubble) return;
+  var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
+  var notAtBottom = !isChatNearBottom();
+  // 显示条件：有选中会话 + 在 chat 视图 + 用户已经滚开了底部。
+  // 不强制要求有未读——用户主动滚上去时也给一个"回到底部"的入口。
+  var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom;
+  bubble.classList.toggle("visible", shouldShow);
+  bubble.classList.toggle("has-unread", state.chatUnreadCount > 0);
+  var countEl = bubble.querySelector(".chat-unread-bubble-count");
+  if (countEl) {
+    if (state.chatUnreadCount > 0) {
+      countEl.textContent = state.chatUnreadCount > 99 ? "99+" : String(state.chatUnreadCount);
+      countEl.classList.add("visible");
+    } else {
+      countEl.textContent = "";
+      countEl.classList.remove("visible");
+    }
+  }
+  var label = state.chatUnreadCount > 0
+    ? (state.chatUnreadCount + " 条新消息，点击查看")
+    : "回到最新消息";
+  bubble.setAttribute("aria-label", label);
+  bubble.setAttribute("title", label);
+  var chatContainer = document.getElementById("chat-output");
+  if (chatContainer) chatContainer.classList.toggle("has-jump-btn", shouldShow);
+}
+
+export function scrollChatToBottom(smooth?: boolean) {
+  var chatMsgs = getChatScrollElement();
+  if (!chatMsgs || !(chatMsgs as any).isConnected) return;
+  state.chatIsProgrammaticScroll = true;
+  var done = function() {
+    state.chatIsProgrammaticScroll = false;
+    state.chatStickToBottom = true;
+    clearChatUnread({ removeDivider: true });
+    updateChatUnreadBubble();
+  };
+  if (smooth && typeof (chatMsgs as any).scrollTo === "function") {
+    (chatMsgs as any).scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(done, 260);
+    return;
+  }
+  (chatMsgs as any).scrollTop = 0;
+  requestAnimationFrame(done);
+}
+
+export function bindChatScrollListener() {
+  var chatMsgs = getChatScrollElement();
+  if (!chatMsgs || !(chatMsgs as any).isConnected) return;
+  if (state.chatScrollElement === chatMsgs && state.chatScrollHandler) {
+    updateChatUnreadBubble();
+    return;
+  }
+  if (state.chatScrollElement) {
+    if (state.chatScrollHandler) {
+      state.chatScrollElement.removeEventListener("scroll", state.chatScrollHandler);
+    }
+    if (state.chatScrollWheelHandler) {
+      state.chatScrollElement.removeEventListener("wheel", state.chatScrollWheelHandler);
+    }
+    if (state.chatScrollTouchStartHandler) {
+      state.chatScrollElement.removeEventListener("touchstart", state.chatScrollTouchStartHandler);
+    }
+    if (state.chatScrollTouchMoveHandler) {
+      state.chatScrollElement.removeEventListener("touchmove", state.chatScrollTouchMoveHandler);
+    }
+  }
+  state.chatScrollElement = chatMsgs;
+  state.chatScrollHandler = function() {
+    if (!(chatMsgs as any).isConnected) return;
+    // 程序触发的滚动（点了气泡）不算"用户翻页"——别把状态弄乱。
+    if (state.chatIsProgrammaticScroll) {
+      updateChatUnreadBubble();
+      return;
+    }
+    var atBottom = isChatNearBottom(chatMsgs);
+    if (atBottom) {
+      // 用户自己滚到底了——清未读、贴回底部、撤下气泡。
+      state.chatStickToBottom = true;
+      clearChatUnread({ removeDivider: true });
+    } else {
+      // 用户主动往上翻——脱离贴底状态。新消息只会累积到气泡，不滚视图。
+      state.chatStickToBottom = false;
+    }
+    updateChatUnreadBubble();
+  };
+  // wheel/touch 提前下台：浏览器要等惯性产生位移才触发 scroll 事件，
+  // 这一帧空窗里如果有 streaming chunk 进来，会在 sticky=true 状态下
+  // 被强制贴底。监听用户开始上滚的瞬间立刻把 sticky 翻成 false，
+  // 避免那一帧的拽回。column-reverse 下 deltaY<0（滚轮上推）= 看历史。
+  state.chatScrollWheelHandler = function(e: any) {
+    if (state.chatIsProgrammaticScroll) return;
+    if (e.deltaY < 0) {
+      state.chatStickToBottom = false;
+      updateChatUnreadBubble();
+    }
+  };
+  state.chatScrollTouchStartHandler = function(e: any) {
+    if (!e.touches || e.touches.length === 0) return;
+    state.chatTouchStartY = e.touches[0].clientY;
+  };
+  state.chatScrollTouchMoveHandler = function(e: any) {
+    if (state.chatIsProgrammaticScroll) return;
+    if (!e.touches || e.touches.length === 0) return;
+    // column-reverse 下：手指向下拖（clientY 变大）= 内容向下走 = 看历史。
+    var deltaY = e.touches[0].clientY - state.chatTouchStartY;
+    if (deltaY > 4) {
+      state.chatStickToBottom = false;
+      updateChatUnreadBubble();
+    }
+  };
+  chatMsgs.addEventListener("scroll", state.chatScrollHandler, { passive: true });
+  chatMsgs.addEventListener("wheel", state.chatScrollWheelHandler, { passive: true });
+  chatMsgs.addEventListener("touchstart", state.chatScrollTouchStartHandler, { passive: true });
+  chatMsgs.addEventListener("touchmove", state.chatScrollTouchMoveHandler, { passive: true });
+  updateChatUnreadBubble();
+}
+
+/** Load older messages by expanding the visible window */
+export function loadMoreChatMessages() {
+  if (state.chatRenderedCount >= state.currentMessages.length) return;
+  state.chatRenderedCount += state.chatPageSize;
+  renderChat(true);
+}
+
+// Observe the "load more" sentinel for auto-loading when scrolled into view
+export var _loadMoreObserver: any = null;
+export function observeLoadMoreSentinel() {
+  if (_loadMoreObserver) { _loadMoreObserver.disconnect(); _loadMoreObserver = null; }
+  var sentinel = document.getElementById("chat-load-more-sentinel");
+  if (!sentinel) return;
+  // Click handler for the button
+  var btn = sentinel.querySelector(".chat-load-more-btn");
+  if (btn) (btn as any).onclick = function() { loadMoreChatMessages(); };
+  // IntersectionObserver for auto-load on scroll
+  if (typeof IntersectionObserver === "undefined") return;
+  _loadMoreObserver = new IntersectionObserver(function(entries) {
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].isIntersecting) {
+        loadMoreChatMessages();
+        break;
+      }
+    }
+  }, { root: getChatScrollElement(), rootMargin: "200px" });
+  _loadMoreObserver.observe(sentinel);
+}
+
+// Helper function to persist selected session ID to localStorage
+export function persistSelectedId() {
+  try {
+    if (state.selectedId) {
+      localStorage.setItem("wand-selected-session", state.selectedId);
+    } else {
+      localStorage.removeItem("wand-selected-session");
+    }
+  } catch (e) {
+    // Ignore localStorage errors
+  }
+}
+
+export function getStructuredQueuedInputs(session: any) {
+  if (session && Array.isArray(session.queuedMessages)) {
+    return session.queuedMessages;
+  }
+  return state.structuredInputQueue;
+}
+
+export function getSelectedStructuredQueuedInputs() {
+  var session = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
+  return getStructuredQueuedInputs(session);
+}
+
+export function syncStructuredQueueFromSession(session: any) {
+  var queued = getStructuredQueuedInputs(session);
+  state.structuredInputQueue = Array.isArray(queued) ? queued.slice() : [];
+}
+
+export function hasRenderOnlyStructuredBlock(message: any, marker: string) {
+  return !!(message && Array.isArray(message.content) && message.content.some(function(block: any) {
+    return block && typeof block === "object" && block[marker];
+  }));
+}
+
+export function isQueuedStructuredMessage(message: any) {
+  return !!(message && message.role === "user" && hasRenderOnlyStructuredBlock(message, "__queued"));
+}
+
+export function isProcessingStructuredMessage(message: any) {
+  return !!(message && message.role === "assistant" && hasRenderOnlyStructuredBlock(message, "__processing"));
+}
+
+export function stripRenderOnlyStructuredMessages(messages: any) {
+  if (!Array.isArray(messages)) return [];
+  var removed = false;
+  var filtered = [];
+  for (var i = 0; i < messages.length; i++) {
+    var message = messages[i];
+    if (isQueuedStructuredMessage(message) || isProcessingStructuredMessage(message)) {
+      removed = true;
+      continue;
+    }
+    filtered.push(message);
+  }
+  return removed ? filtered : messages;
+}
+
+export function normalizeStructuredSnapshot(snapshot: any, existingSession?: any) {
+  if (!snapshot || !Array.isArray(snapshot.messages)) {
+    return snapshot;
+  }
+  var sessionKind = snapshot.sessionKind || (existingSession && existingSession.sessionKind);
+  if (sessionKind !== "structured") {
+    return snapshot;
+  }
+  var sanitizedMessages = stripRenderOnlyStructuredMessages(snapshot.messages);
+  if (sanitizedMessages === snapshot.messages) {
+    return snapshot;
+  }
+  return Object.assign({}, snapshot, { messages: sanitizedMessages });
+}
+
+export function saveStructuredQueue() {
+  try {
+    var queued = getSelectedStructuredQueuedInputs();
+    if (!state.selectedId || queued.length === 0) {
+      return;
+    }
+    localStorage.setItem("wand-structured-queue", JSON.stringify({
+      sessionId: state.selectedId,
+      items: queued
+    }));
+  } catch (e) {
+    // Ignore localStorage errors
+  }
+}
+
+export function clearStructuredQueuePersistence(sessionId?: string) {
+  try {
+    var saved = localStorage.getItem("wand-structured-queue");
+    if (!saved) return;
+    var parsed = JSON.parse(saved);
+    if (!sessionId || !parsed || parsed.sessionId === sessionId) {
+      localStorage.removeItem("wand-structured-queue");
+    }
+  } catch (e) {
+    localStorage.removeItem("wand-structured-queue");
+  }
+}
+
+export function restoreStructuredQueue() {
+  var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
+  if (selectedSession && Array.isArray(selectedSession.queuedMessages)) {
+    syncStructuredQueueFromSession(selectedSession);
+    saveStructuredQueue();
+    return;
+  }
+  try {
+    var saved = localStorage.getItem("wand-structured-queue");
+    if (!saved) return;
+    var parsed = JSON.parse(saved);
+    if (!parsed || parsed.sessionId !== state.selectedId || !Array.isArray(parsed.items)) {
+      return;
+    }
+    state.structuredInputQueue = parsed.items.slice(0, 10);
+  } catch (e) {
+    state.structuredInputQueue = [];
+  }
+}
+
+export function persistCrossSessionQueue() {
+  try {
+    if (state.crossSessionQueue.length === 0) {
+      localStorage.removeItem("wand-cross-session-queue");
+      return;
+    }
+    localStorage.setItem("wand-cross-session-queue", JSON.stringify(state.crossSessionQueue));
+  } catch (e) {
+    // Ignore localStorage errors
+  }
+}
+
+export function getConfigCwd() {
+  return (state.config && state.config.defaultCwd) || "/tmp";
+}
+
+export function loadChatExpandStateMap() {
+  try {
+    var saved = localStorage.getItem(CHAT_EXPAND_STATE_STORAGE_KEY);
+    if (!saved) return {};
+    var parsed = JSON.parse(saved);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+export function saveChatExpandStateMap(map: any) {
+  try {
+    if (!map || Object.keys(map).length === 0) {
+      localStorage.removeItem(CHAT_EXPAND_STATE_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(CHAT_EXPAND_STATE_STORAGE_KEY, JSON.stringify(map));
+  } catch (e) {
+    // Ignore localStorage errors
+  }
+}
+
+export function getCurrentChatExpandState() {
+  var sessionId = state.selectedId;
+  if (!sessionId) return {};
+  var map = loadChatExpandStateMap();
+  var sessionState = map[sessionId];
+  return sessionState && typeof sessionState === "object" ? sessionState : {};
+}
+
+export function getPersistedExpandState(itemKey: string) {
+  if (!itemKey || !state.selectedId) return null;
+  var sessionState = getCurrentChatExpandState();
+  return typeof sessionState[itemKey] === "boolean" ? sessionState[itemKey] : null;
+}
+
+export function setPersistedExpandState(itemKey: string, expanded: boolean) {
+  if (!itemKey || !state.selectedId) return;
+  var map = loadChatExpandStateMap();
+  var sessionId = state.selectedId;
+  var sessionState = map[sessionId];
+  if (!sessionState || typeof sessionState !== "object") {
+    sessionState = {};
+  }
+  sessionState[itemKey] = !!expanded;
+  map[sessionId] = sessionState;
+  saveChatExpandStateMap(map);
+}
+
+export function getMessageKey(msg: any, fallbackIndex?: number) {
+  if (!msg) {
+    return "msg:unknown-" + (typeof fallbackIndex === "number" ? fallbackIndex : 0);
+  }
+  if (msg.uuid) return "msg:" + msg.uuid;
+  if (msg.id) return "msg:" + msg.id;
+  if (msg.messageId) return "msg:" + msg.messageId;
+  if (msg.turnId) return "msg:" + msg.turnId;
+  return "msg:" + (typeof fallbackIndex === "number" ? fallbackIndex : 0);
+}
+
+export function buildExpandKey(kind: string, parts: any[]) {
+  var filtered = [];
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i];
+    if (part === undefined || part === null || part === "") continue;
+    filtered.push(String(part));
+  }
+  return kind + ":" + filtered.join(":");
+}
+
+export function getElementExpandKey(el: any) {
+  if (!el || !el.dataset) return "";
+  return el.dataset.expandKey || "";
+}
+
+export function isElementExpanded(el: any, kind: string) {
+  if (!el) return false;
+  switch (kind) {
+    case "tool-card":
+    case "diff":
+      return !el.classList.contains("collapsed");
+    case "thinking":
+      return el.classList.contains("expanded") && !el.classList.contains("collapsed");
+    case "inline-tool":
+      return el.classList.contains("inline-tool-open");
+    case "terminal": {
+      var body = el.querySelector(".term-body");
+      if (body) return body.style.display !== "none";
+      return el.dataset.expanded === "true";
+    }
+    case "tool-group":
+      return el.getAttribute("data-expanded") === "true";
+    case "subagent-reply":
+      return el.getAttribute("data-expanded") === "true";
+    case "subagent-panel":
+      return el.getAttribute("data-expanded") === "true";
+    default:
+      return false;
+  }
+}
+
+export function applyExpandedState(el: any, kind: string, expanded: boolean) {
+  if (!el) return;
+  switch (kind) {
+    case "tool-card":
+    case "diff": {
+      el.classList.toggle("collapsed", !expanded);
+      break;
+    }
+    case "thinking": {
+      el.classList.toggle("collapsed", !expanded);
+      el.classList.toggle("expanded", !!expanded);
+      var previewEl = el.querySelector(".thinking-inline-preview");
+      if (previewEl) {
+        var fullText = el.dataset.thinking || "";
+        var preview = fullText.slice(0, 57) + (fullText.length > 60 ? "…" : "");
+        previewEl.textContent = expanded ? fullText : preview;
+      }
+      var actionEl = el.querySelector(".thinking-inline-action");
+      if (actionEl) actionEl.textContent = expanded ? "收起" : "展开";
+      break;
+    }
+    case "inline-tool": {
+      el.classList.toggle("inline-tool-open", !!expanded);
+      var inlineBody = el.querySelector(".inline-tool-expanded");
+      if (inlineBody) inlineBody.style.display = expanded ? "block" : "none";
+      break;
+    }
+    case "terminal": {
+      var body = el.querySelector(".term-body");
+      if (body) body.style.display = expanded ? "block" : "none";
+      el.dataset.expanded = expanded ? "true" : "false";
+      var toggleIcon = el.querySelector(".term-toggle-icon");
+      if (toggleIcon) toggleIcon.textContent = expanded ? "▼" : "▶";
+      break;
+    }
+    case "tool-group": {
+      el.setAttribute("data-expanded", expanded ? "true" : "false");
+      var groupBody = el.querySelector(".tool-group-body");
+      if (groupBody) groupBody.style.display = expanded ? "block" : "none";
+      var chevron = el.querySelector(".tool-group-chevron");
+      if (chevron) chevron.style.transform = expanded ? "rotate(180deg)" : "";
+      break;
+    }
+    case "subagent-reply": {
+      el.setAttribute("data-expanded", expanded ? "true" : "false");
+      var subLabel = el.querySelector(".subagent-reply-toggle-label");
+      if (subLabel) subLabel.textContent = expanded ? "收起" : "展开";
+      var subToggleBtn = el.querySelector(".subagent-reply-toggle");
+      if (subToggleBtn) {
+        subToggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+        subToggleBtn.setAttribute("aria-label", expanded ? "收起子代理回复" : "展开子代理回复全文");
+      }
+      break;
+    }
+    case "subagent-panel": {
+      el.setAttribute("data-expanded", expanded ? "true" : "false");
+      // 头/尾两个按钮都得同步——label、aria-expanded、aria-label
+      var panelBtns = el.querySelectorAll(".subagent-panel-toggle");
+      for (var pbi = 0; pbi < panelBtns.length; pbi++) {
+        var pb = panelBtns[pbi];
+        pb.setAttribute("aria-expanded", expanded ? "true" : "false");
+        pb.setAttribute("aria-label", expanded ? "收起子代理输出" : "展开子代理输出");
+        var pblbl = pb.querySelector(".subagent-panel-toggle-label");
+        if (pblbl) pblbl.textContent = expanded ? "收起" : "展开";
+      }
+      var pbody = el.querySelector(".subagent-panel-body");
+      if (pbody) {
+        if (expanded) {
+          // 展开时把 body 滚到顶，避免延续上次的滚动位置造成"展开后看到一半"
+          pbody.scrollTop = 0;
+        } else {
+          // 折叠回去时滚到底——折叠预览窗口要展示的是"最新到达的内容"，
+          // 跟 snapCollapsedSubagentPanelsToBottom 在 re-render 后的行为对齐。
+          pbody.scrollTop = pbody.scrollHeight;
+        }
+      }
+      break;
+    }
+  }
+}
+
+export function persistElementExpandState(el: any, kind: string) {
+  var itemKey = getElementExpandKey(el);
+  if (!itemKey) return;
+  setPersistedExpandState(itemKey, isElementExpanded(el, kind));
+}
+
+export function applyPersistedExpandState(container: any) {
+  if (!container || !state.selectedId) return;
+  container.querySelectorAll("[data-expand-key]").forEach(function(el: any) {
+    var itemKey = getElementExpandKey(el);
+    var kind = el.dataset.expandKind || "";
+    var persisted = getPersistedExpandState(itemKey);
+    if (persisted === null || !kind) return;
+    applyExpandedState(el, kind, persisted);
+  });
+}

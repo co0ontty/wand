@@ -157,7 +157,7 @@
       --wand-safe-right: max(var(--app-inset-right), env(safe-area-inset-right, 0px));
       --safe-bottom: var(--wand-safe-bottom);
       --input-safe-bottom: var(--safe-bottom);
-      /* 默认与 wand-safe-top 等价; PWA / .is-pwa 下被覆盖为 max(inset, 14px) */
+      /* 默认与 wand-safe-top 等价; PWA / .is-pwa 下被覆盖为 max(inset, 44px) */
       --pwa-safe-top: var(--wand-safe-top);
     }
 
@@ -192,11 +192,13 @@
       padding-top: var(--wand-safe-top);
     }
 
-    /* PWA 独立窗口模式: 加一个最小 14px 的视觉缓冲, 避开 iPadOS Stage Manager
-       浮动控件 / iOS 状态栏底色和 UI 太贴的视觉粘连。 */
+    /* PWA 独立窗口模式: iOS 使用 black-translucent status-bar-style +
+       viewport-fit=cover, 内容延伸到状态栏/刘海/灵动岛下方,
+       env(safe-area-inset-top) 会返回正确的 inset 值 (47-59px)。
+       用 44px 作为最小兜底, 覆盖绝大多数 iPhone 机型。 */
     @media (display-mode: standalone) {
       :root {
-        --pwa-safe-top: max(env(safe-area-inset-top, 0px), 14px);
+        --pwa-safe-top: max(env(safe-area-inset-top, 0px), 44px);
         --input-safe-bottom: min(var(--safe-bottom), 28px);
       }
       .app-container {
@@ -213,7 +215,7 @@
 
     /* iOS Safari PWA fallback (navigator.standalone adds .is-pwa via JS) */
     .is-pwa {
-      --pwa-safe-top: max(env(safe-area-inset-top, 0px), 14px);
+      --pwa-safe-top: max(env(safe-area-inset-top, 0px), 44px);
       --input-safe-bottom: min(var(--safe-bottom), 28px);
     }
     .is-pwa .app-container {
