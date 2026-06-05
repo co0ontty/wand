@@ -20,6 +20,7 @@ import process from "node:process";
 import { promisify } from "node:util";
 import { whichSync } from "./path-repair.js";
 import { compareSemver } from "./version-utils.js";
+import { getErrorMessage } from "./error-utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -222,7 +223,7 @@ export function cleanupNpmLeftovers(): { removed: string[]; errors: string[] } {
   try {
     entries = readdirSync(scopeDir);
   } catch (err) {
-    errors.push(`readdir ${scopeDir}: ${err instanceof Error ? err.message : String(err)}`);
+    errors.push(`readdir ${scopeDir}: ${getErrorMessage(err)}`);
     return { removed, errors };
   }
 
@@ -238,7 +239,7 @@ export function cleanupNpmLeftovers(): { removed: string[]; errors: string[] } {
       rmSync(fullPath, { recursive: true, force: true });
       removed.push(fullPath);
     } catch (err) {
-      errors.push(`rm ${fullPath}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(`rm ${fullPath}: ${getErrorMessage(err)}`);
     }
   }
   return { removed, errors };
@@ -295,7 +296,7 @@ function validateGlobalWandInstall(): { ok: true; packageDir: string } | { ok: f
     } catch (err) {
       return {
         ok: false,
-        message: `全局 wand CLI 无法设置执行权限: ${cliPath}: ${err instanceof Error ? err.message : String(err)}`,
+        message: `全局 wand CLI 无法设置执行权限: ${cliPath}: ${getErrorMessage(err)}`,
       };
     }
   }
@@ -334,7 +335,7 @@ function createGlobalInstallBackup(note?: (line: string) => void): GlobalInstall
     return { packageDir, backupDir };
   } catch (err) {
     rmSync(backupRoot, { recursive: true, force: true });
-    note?.(`[wand] 全局安装备份失败，继续尝试更新: ${err instanceof Error ? err.message : String(err)}`);
+    note?.(`[wand] 全局安装备份失败，继续尝试更新: ${getErrorMessage(err)}`);
     return { packageDir, backupDir: null };
   }
 }
@@ -356,7 +357,7 @@ function restoreGlobalInstallBackup(backup: GlobalInstallBackup, note?: (line: s
     note?.(`[wand] 已恢复更新前的全局安装: ${backup.packageDir}`);
     return true;
   } catch (err) {
-    note?.(`[wand] 恢复更新前安装失败: ${err instanceof Error ? err.message : String(err)}`);
+    note?.(`[wand] 恢复更新前安装失败: ${getErrorMessage(err)}`);
     return false;
   }
 }
@@ -403,7 +404,7 @@ export async function installPackageGloballyAsync(
       success = true;
       return;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = getErrorMessage(error);
       if (!isRecoverableInstallError(msg)) {
         throw error;
       }
@@ -418,7 +419,7 @@ export async function installPackageGloballyAsync(
           success = true;
           return;
         } catch (retryError) {
-          const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
+          const retryMsg = getErrorMessage(retryError);
           if (!isRecoverableInstallError(retryMsg)) {
             throw retryError;
           }

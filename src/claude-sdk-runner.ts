@@ -9,6 +9,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { buildLanguageDirective } from "./language-prompt.js";
+import { getErrorMessage } from "./error-utils.js";
 
 export type ClaudeRunErrorCode =
   | "CLAUDE_CLI_MISSING"
@@ -158,7 +159,7 @@ export async function runClaudePrint(
     if (abortController.signal.aborted) {
       throw new ClaudeRunError("Claude 调用超时。", "CLAUDE_TIMEOUT");
     }
-    const message = err instanceof Error ? err.message : String(err);
+    const message = getErrorMessage(err);
     // SDK 找不到 native binary 时会抛 "Claude Code native binary not found"。
     // 极少数情况下也可能透出 ENOENT。两种都归到"CLI_MISSING"，文案给用户。
     if (/Claude Code native binary not found|ENOENT/i.test(message)) {

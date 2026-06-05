@@ -26,6 +26,7 @@ import { ensureCertificates } from "./cert.js";
 import { buildChildEnv } from "./env-utils.js";
 import {
   isExecutionMode,
+  normalizeMode,
   PREFERENCE_KEYS,
   resolveConfigDir,
   saveConfig,
@@ -585,10 +586,6 @@ function decodeConnectCode(code: string): { url: string; token: string } | null 
   }
 }
 
-function normalizeMode(input: string | undefined, fallback: ExecutionMode): ExecutionMode {
-  return isExecutionMode(input) ? input : fallback;
-}
-
 interface AndroidApkAsset {
   fileName: string;
   filePath: string;
@@ -796,7 +793,7 @@ process.on("uncaughtException", (err) => {
 });
 
 process.on("unhandledRejection", (reason) => {
-  const msg = reason instanceof Error ? reason.message : String(reason);
+  const msg = getErrorMessage(reason);
   wandError("未处理的异步错误", msg);
 });
 

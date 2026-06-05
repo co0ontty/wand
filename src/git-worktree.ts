@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 import { SessionSnapshot, WorktreeMergeCheckResult, WorktreeMergeResult } from "./types.js";
+import { runGit, getGitErrorMessage } from "./git-utils.js";
 
 interface WorktreeSetupOptions {
   cwd: string;
@@ -23,11 +23,6 @@ interface WorktreeMergeOptions extends WorktreeOperationOptions {
   targetBranch?: string;
 }
 
-interface GitCommandError extends Error {
-  stderr?: string;
-  stdout?: string;
-  status?: number | null;
-}
 
 const WORKTREE_MERGE_ERROR_CODES = {
   MISSING: "WORKTREE_MISSING",
@@ -60,14 +55,6 @@ interface CheckedMergeContext extends MergeContext {
   aheadCount: number;
 }
 
-function runGit(args: string[], cwd: string): string {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
-}
-
 function sanitizeBranchSegment(value: string): string {
   return value
     .toLowerCase()
@@ -81,16 +68,6 @@ function getCurrentBranch(repoRoot: string): string {
   return branch || "master";
 }
 
-function isGitCommandError(error: unknown): error is GitCommandError {
-  return error instanceof Error;
-}
-
-function getGitCommandMessage(error: unknown): string {
-  if (isGitCommandError(error)) {
-    return error.stderr?.trim() || error.stdout?.trim() || error.message;
-  }
-  return String(error);
-}
 
 function refExists(repoRoot: string, ref: string): boolean {
   try {
@@ -292,7 +269,7 @@ export function mergeSessionWorktree(options: WorktreeMergeOptions): WorktreeMer
     runGit(["checkout", context.targetBranch], context.repoRoot);
     runGit(["merge", "--no-ff", "--no-edit", context.sourceBranch], context.repoRoot);
   } catch (error) {
-    const message = getGitCommandMessage(error);
+    const message = getGitErrorMessage(error);
     throw new WorktreeMergeError(WORKTREE_MERGE_ERROR_CODES.CONFLICT, message || "合并失败，可能存在冲突。", {
       sourceBranch: context.sourceBranch,
       targetBranch: context.targetBranch,
@@ -319,7 +296,7 @@ export function mergeSessionWorktree(options: WorktreeMergeOptions): WorktreeMer
   } catch (error) {
     throw new WorktreeMergeError(
       WORKTREE_MERGE_ERROR_CODES.CLEANUP_FAILED,
-      getGitCommandMessage(error) || "已合并，但清理 worktree 失败。",
+      getGitErrorMessage(error) || "已合并，但清理 worktree 失败。",
       {
         sourceBranch: context.sourceBranch,
         targetBranch: context.targetBranch,

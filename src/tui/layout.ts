@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { LogLevel, LogRecord } from "./log-bus.js";
 import { SessionRow } from "./session-formatter.js";
+import { stripAnsi } from "../pty-text-utils.js";
 
 const require = createRequire(import.meta.url);
 // neo-blessed 是 CJS，没有匹配 @types/blessed 的 default export，统一当 any 用。
@@ -601,11 +602,6 @@ function ansiColorize(level: LogLevel, line: string): string {
   if (level === "error") return `\x1b[31m${cleaned}\x1b[39m`;
   if (level === "warn") return `\x1b[33m${cleaned}\x1b[39m`;
   return cleaned;
-}
-
-function stripAnsi(line: string): string {
-  // eslint-disable-next-line no-control-regex
-  return line.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 function formatTs(ms: number): string {

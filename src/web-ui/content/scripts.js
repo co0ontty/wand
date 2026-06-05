@@ -4406,6 +4406,7 @@
   var appViewportBaselineWidth = 0;
   var appViewportBaselineHeight = 0;
   var closedViewportBaselineUntil = 0;
+  var keyboardDismissCooldownUntil = 0;
   function isStandaloneViewportMode() {
     var root = document.documentElement;
     if (root && root.classList && root.classList.contains("is-pwa")) return true;
@@ -4468,7 +4469,10 @@
     var baselineHeight = refreshAppViewportBaseline(vv);
     var offsetTop = Math.max(0, Math.round(vv.offsetTop || 0));
     var height = Math.max(1, Math.round(vv.height));
-    if (shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight)) {
+    if (!isKeyboardOpen && isStandaloneViewportMode()) {
+      offsetTop = 0;
+      height = Math.max(height, baselineHeight);
+    } else if (shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight)) {
       offsetTop = 0;
       height = Math.max(height, baselineHeight);
     }
@@ -4517,6 +4521,11 @@
       var hasEditableFocus = activeEl === inputBox || isEditableFocusTarget(activeEl);
       var shrinkFromLargest = largestViewportHeight - vv.height;
       var innerShrinkFromLargest = largestViewportHeight - (window.innerHeight || vv.height || 0);
+      var inDismissCooldown = Date.now() < keyboardDismissCooldownUntil;
+      if (inDismissCooldown) {
+        if (hasEditableFocus && (shrinkFromLargest > 120 || innerShrinkFromLargest > 120)) return true;
+        return false;
+      }
       if (offsetBottom > 80) return true;
       if (hasEditableFocus && (shrinkFromLargest > 120 || innerShrinkFromLargest > 120)) return true;
       if (keyboardOpen && (shrinkFromLargest > 80 || offsetBottom > 32)) return true;
@@ -4563,11 +4572,16 @@
         var imeIsNative = !!window.__wandImeNative;
         if (!imeIsNative) {
           markClosedViewportBaselineWindow(2200);
+          keyboardDismissCooldownUntil = Date.now() + 1200;
           syncAppViewportHeight(false);
+          resetRootViewportScroll();
         }
         scheduleViewportSettle();
         setTimeout(function() {
-          if (!imeIsNative) syncAppViewportHeight(false);
+          if (!imeIsNative) {
+            syncAppViewportHeight(false);
+            resetRootViewportScroll();
+          }
           ensureTerminalFit2("keyboard-close", { forceReplay: true });
           maybeScrollTerminalToBottom("keyboard");
         }, 200);
@@ -4605,6 +4619,12 @@
       if (!e || !e.target) return;
       if (!isEditableFocusTarget(e.target)) return;
       scheduleClosedViewportBaselineWindow(1600, e.target);
+      if (isStandaloneViewportMode()) {
+        keyboardDismissCooldownUntil = Math.max(
+          keyboardDismissCooldownUntil,
+          Date.now() + 1200
+        );
+      }
       setTimeout(debouncedUpdate, 80);
       setTimeout(debouncedUpdate, 420);
     });

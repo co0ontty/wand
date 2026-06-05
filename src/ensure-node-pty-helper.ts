@@ -13,6 +13,7 @@ import { chmodSync, existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
+import { getErrorMessage } from "./error-utils.js";
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -48,7 +49,7 @@ export function ensureNodePtyHelperExecutable(): void {
     process.stderr.write(`[wand] Restored +x on ${helper} (npm dropped the bit on install)\n`);
   } catch (err) {
     process.stderr.write(
-      `[wand] Warning: could not chmod +x ${helper}: ${err instanceof Error ? err.message : String(err)}\n`
+      `[wand] Warning: could not chmod +x ${helper}: ${getErrorMessage(err)}\n`
         + `[wand] PTY sessions may fail to start. Run: chmod +x ${JSON.stringify(helper)}\n`,
     );
   }

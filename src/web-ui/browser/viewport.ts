@@ -12,6 +12,10 @@ import { renderChat } from "./websocket";
       export var appViewportBaselineWidth = 0;
       export var appViewportBaselineHeight = 0;
       export var closedViewportBaselineUntil = 0;
+      // iOS PWA 键盘收起冷却：收起动画期间 visualViewport 尺寸抖动会让
+      // detectKeyboardOpen 误判为 "键盘仍打开"，导致 --app-viewport-top
+      // 残留正值、输入框偏下。冷却期内抑制弱信号的 "仍打开" 判定。
+      export var keyboardDismissCooldownUntil = 0;
 
       export function isStandaloneViewportMode() {
         var root = document.documentElement;
@@ -81,7 +85,13 @@ import { renderChat } from "./websocket";
         var baselineHeight = refreshAppViewportBaseline(vv);
         var offsetTop = Math.max(0, Math.round(vv.offsetTop || 0));
         var height = Math.max(1, Math.round(vv.height));
-        if (shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight)) {
+        // iOS PWA standalone 在键盘关闭状态下无条件钉到基线：
+        // 收起动画期间 vv.height/offsetTop 会抖动，若跟随这些中间值会导致
+        // --app-viewport-top 残留正值、底部输入框偏到屏幕外。
+        if (!isKeyboardOpen && isStandaloneViewportMode()) {
+          offsetTop = 0;
+          height = Math.max(height, baselineHeight);
+        } else if (shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight)) {
           offsetTop = 0;
           height = Math.max(height, baselineHeight);
         }
@@ -137,6 +147,15 @@ import { renderChat } from "./websocket";
           var hasEditableFocus = activeEl === inputBox || isEditableFocusTarget(activeEl);
           var shrinkFromLargest = largestViewportHeight - vv.height;
           var innerShrinkFromLargest = largestViewportHeight - (window.innerHeight || vv.height || 0);
+          // 冷却期内（键盘刚收起 1.2s 内）iOS 动画会让 vv 尺寸抖动，
+          // 如果仍跟随弱信号判定 "键盘打开" 会导致 --app-viewport-top 残留。
+          // 冷却期只接受强信号：编辑焦点 + 大幅收缩（用户重新点了输入框）。
+          var inDismissCooldown = Date.now() < keyboardDismissCooldownUntil;
+          if (inDismissCooldown) {
+            // 强信号：用户重新聚焦了可编辑元素且视口明显收缩
+            if (hasEditableFocus && (shrinkFromLargest > 120 || innerShrinkFromLargest > 120)) return true;
+            return false;
+          }
           if (offsetBottom > 80) return true;
           // iOS/Chrome iOS 有时同步缩 innerHeight 导致 offsetBottom ≈ 0，用基线收缩判定。
           if (hasEditableFocus && (shrinkFromLargest > 120 || innerShrinkFromLargest > 120)) return true;
@@ -188,11 +207,18 @@ import { renderChat } from "./websocket";
             var imeIsNative = !!window.__wandImeNative;
             if (!imeIsNative) {
               markClosedViewportBaselineWindow(2200);
+              // 启动冷却：1.2s 内抑制动画抖动导致的误判回弹。
+              keyboardDismissCooldownUntil = Date.now() + 1200;
               syncAppViewportHeight(false);
+              // 清掉 iOS 残留的 layout scroll，避免容器整体偏移。
+              resetRootViewportScroll();
             }
             scheduleViewportSettle();
             setTimeout(function() {
-              if (!imeIsNative) syncAppViewportHeight(false);
+              if (!imeIsNative) {
+                syncAppViewportHeight(false);
+                resetRootViewportScroll();
+              }
               ensureTerminalFit("keyboard-close", { forceReplay: true });
               maybeScrollTerminalToBottom("keyboard");
             }, 200);
@@ -236,6 +262,13 @@ import { renderChat } from "./websocket";
           if (!e || !e.target) return;
           if (!isEditableFocusTarget(e.target)) return;
           scheduleClosedViewportBaselineWindow(1600, e.target);
+          // 即刻启动冷却，避免失焦后 iOS 收起动画抖动误判。
+          if (isStandaloneViewportMode()) {
+            keyboardDismissCooldownUntil = Math.max(
+              keyboardDismissCooldownUntil,
+              Date.now() + 1200
+            );
+          }
           setTimeout(debouncedUpdate, 80);
           setTimeout(debouncedUpdate, 420);
         });

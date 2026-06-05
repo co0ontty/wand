@@ -7,6 +7,7 @@
 import net from "node:net";
 import { existsSync, unlinkSync } from "node:fs";
 import { IpcRequest, IpcResponseErr, IpcResponseOk, IpcSnapshotData } from "./ipc-protocol.js";
+import { getErrorMessage } from "../error-utils.js";
 
 export interface IpcServerDeps {
   socketPath: string;
@@ -80,7 +81,7 @@ export function startIpcServer(deps: IpcServerDeps): IpcServerHandle | null {
       const err: IpcResponseErr = {
         id: req.id,
         ok: false,
-        error: e instanceof Error ? e.message : String(e),
+        error: getErrorMessage(e),
       };
       try { conn.write(JSON.stringify(err) + "\n"); } catch { /* peer 走了 */ }
     }

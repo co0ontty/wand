@@ -18,6 +18,7 @@ import {
   writePidfile,
 } from "./pidfile.js";
 import { WandConfig } from "./types.js";
+import { getErrorMessage } from "./error-utils.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -521,6 +522,6 @@ function printServiceResult(
 }
 
 main().catch((error) => {
-  process.stderr.write(`[wand] ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(`[wand] ${getErrorMessage(error)}\n`);
   process.exitCode = 1;
 });

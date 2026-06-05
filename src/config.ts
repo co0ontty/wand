@@ -505,6 +505,10 @@ export function isExecutionMode(value: unknown): value is ExecutionMode {
   return value === "assist" || value === "agent" || value === "agent-max" || value === "auto-edit" || value === "default" || value === "full-access" || value === "native" || value === "managed";
 }
 
+export function normalizeMode(input: string | undefined, fallback: ExecutionMode): ExecutionMode {
+  return isExecutionMode(input) ? input : fallback;
+}
+
 function normalizePresetCommand(command: string): string {
   const trimmed = command.trim();
   if (trimmed === "cloud-code" || trimmed === "cloudcode" || trimmed === "claude code") {

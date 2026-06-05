@@ -23,6 +23,7 @@ import {
 import { whichSync } from "../path-repair.js";
 import { computeRelaunch } from "../relaunch.js";
 import { ensureDatabaseFile, resolveDatabasePath, WandStorage } from "../storage.js";
+import { getErrorMessage } from "../error-utils.js";
 
 export interface CommandResult {
   ok: boolean;
@@ -63,7 +64,7 @@ export function restartSelf(): CommandResult {
     }, 200);
     return { ok: true, message: "重启中…新进程已派生" };
   } catch (err) {
-    return { ok: false, message: `重启失败: ${errMsg(err)}` };
+    return { ok: false, message: `重启失败: ${getErrorMessage(err)}` };
   }
 }
 
@@ -159,7 +160,7 @@ export function openInBrowser(url: string): CommandResult {
     child.unref();
     return { ok: true, message: `已在浏览器打开: ${url}` };
   } catch (err) {
-    return { ok: false, message: `打开失败: ${errMsg(err)}` };
+    return { ok: false, message: `打开失败: ${getErrorMessage(err)}` };
   }
 }
 
@@ -650,7 +651,7 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
     mkdirSync(path.dirname(unitPath), { recursive: true });
     writeFileSync(unitPath, unit, "utf8");
   } catch (err) {
-    return { ok: false, message: `写入 unit 失败: ${errMsg(err)}` };
+    return { ok: false, message: `写入 unit 失败: ${getErrorMessage(err)}` };
   }
 
   const base = systemctlBaseArgs(scope);
@@ -691,7 +692,7 @@ function uninstallSystemdService(scope: ServiceScope): CommandResult {
   try {
     unlinkSync(unitPath);
   } catch (err) {
-    return { ok: false, message: `删除 unit 失败: ${errMsg(err)}` };
+    return { ok: false, message: `删除 unit 失败: ${getErrorMessage(err)}` };
   }
   spawnSync("systemctl", [...base, "daemon-reload"], { encoding: "utf8" });
   return {
@@ -739,7 +740,7 @@ function installLaunchdService(ctx: ServiceContext, scope: ServiceScope): Comman
     mkdirSync(path.dirname(plistPath), { recursive: true });
     writeFileSync(plistPath, plist, "utf8");
   } catch (err) {
-    return { ok: false, message: `写入 plist 失败: ${errMsg(err)}` };
+    return { ok: false, message: `写入 plist 失败: ${getErrorMessage(err)}` };
   }
   const load = spawnSync("launchctl", ["load", "-w", plistPath], { encoding: "utf8" });
   if (load.status !== 0) {
@@ -764,7 +765,7 @@ function uninstallLaunchdService(scope: ServiceScope): CommandResult {
   try {
     unlinkSync(plistPath);
   } catch (err) {
-    return { ok: false, message: `删除 plist 失败: ${errMsg(err)}` };
+    return { ok: false, message: `删除 plist 失败: ${getErrorMessage(err)}` };
   }
   return {
     ok: true,
@@ -775,8 +776,5 @@ function uninstallLaunchdService(scope: ServiceScope): CommandResult {
 
 // ─── 工具 ────────────────────────────────────────────────────────────────
 
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 // compareSemver 已统一到 ../version-utils.ts

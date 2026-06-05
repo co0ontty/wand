@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
+import { runGit as runGitBase, runGitRaw as runGitRawBase, getGitErrorMessage } from "./git-utils.js";
 import {
   GitStatusFileEntry,
   GitStatusResult,
@@ -15,12 +15,14 @@ const GIT_PUSH_TIMEOUT_MS = 30_000;
 const MAX_FILE_ENTRIES = 200;
 const CLAUDE_MESSAGE_TIMEOUT_MS = 30_000;
 const MAX_DIFF_FOR_AI = 100_000;
+const GIT_MAX_BUFFER = 16 * 1024 * 1024;
 
-interface GitCommandError extends Error {
-  stderr?: string;
-  stdout?: string;
-  status?: number | null;
-  code?: string;
+function runGit(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS): string {
+  return runGitBase(args, cwd, { timeout: timeoutMs, maxBuffer: GIT_MAX_BUFFER });
+}
+
+function runGitAllowEmpty(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS): string {
+  return runGitRawBase(args, cwd, { timeout: timeoutMs, maxBuffer: GIT_MAX_BUFFER });
 }
 
 export type QuickCommitErrorCode =
@@ -43,32 +45,6 @@ export type QuickCommitErrorCode =
   | "CLAUDE_CLI_FAILED"
   | "CLAUDE_TIMEOUT";
 
-function runGit(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS): string {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: timeoutMs,
-    maxBuffer: 16 * 1024 * 1024,
-  }).trim();
-}
-
-function runGitAllowEmpty(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS): string {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: timeoutMs,
-    maxBuffer: 16 * 1024 * 1024,
-  });
-}
-
-function getGitErrorMessage(error: unknown): string {
-  const e = error as GitCommandError;
-  if (e?.stderr && typeof e.stderr === "string") return e.stderr.trim() || e.message || "git 命令失败";
-  if (e?.message) return e.message;
-  return String(error);
-}
 
 /** Throws `QuickCommitError` if `cwd` isn't an existing path inside a git work tree. */
 function assertGitWorkTree(cwd: string): void {

@@ -17,6 +17,7 @@ import {
 } from "./types.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
+import { getErrorMessage } from "./error-utils.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 
 interface CreateStructuredSessionOptions {
@@ -810,7 +811,7 @@ export class StructuredSessionManager {
       const finished = this.requireSession(id);
       return finished;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       const current = this.sessions.get(id);
       if (!current) throw error;
       const failed: SessionSnapshot = {
@@ -2423,7 +2424,7 @@ export class StructuredSessionManager {
           kind: "claude-sdk-error",
           spawnedAt,
           closedAt: new Date().toISOString(),
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
         throw err;
       }

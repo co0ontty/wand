@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { compareSemver } from "./version-utils.js";
+import { getErrorMessage } from "./error-utils.js";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -252,7 +253,7 @@ export async function deepRepairRuntimePath(
   try {
     probe = await probeLoginShell(shell, opts.timeoutMs ?? DEEP_PROBE_TIMEOUT_MS);
   } catch (err) {
-    result.warnings.push(`login shell 探测失败 (${shell}): ${err instanceof Error ? err.message : String(err)}`);
+    result.warnings.push(`login shell 探测失败 (${shell}): ${getErrorMessage(err)}`);
     result.deepProbe = "failed";
     return result;
   }

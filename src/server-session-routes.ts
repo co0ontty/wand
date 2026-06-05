@@ -4,6 +4,7 @@ import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
+import { normalizeMode } from "./config.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
 import {
   getGitStatus,
@@ -14,9 +15,8 @@ import {
   generateCommitMessageOnly,
 } from "./git-quick-commit.js";
 
-export function getErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
+import { getErrorMessage } from "./error-utils.js";
+export { getErrorMessage };
 
 function getInputErrorResponse(error: unknown, sessionId: string) {
   if (error instanceof SessionInputError) {
@@ -48,10 +48,6 @@ function getInputDebugMeta(error: unknown) {
     return { name: error.name, message: error.message, stack: error.stack };
   }
   return { error };
-}
-
-function normalizeMode(mode: ExecutionMode | undefined, defaultMode: ExecutionMode): ExecutionMode {
-  return mode ?? defaultMode;
 }
 
 function getHiddenClaudeSessionIds(storage: WandStorage): Set<string> {

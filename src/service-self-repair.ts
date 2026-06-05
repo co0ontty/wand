@@ -1,6 +1,7 @@
 import process from "node:process";
 
 import { detectInstalledScope, installService, type ServiceScope } from "./tui/commands.js";
+import { getErrorMessage } from "./error-utils.js";
 
 /**
  * 应用内更新后的「服务单元自修复」，对齐 install.sh 的行为。
@@ -65,7 +66,7 @@ export function repairServiceUnitAfterUpdate(configPath: string): ServiceRepairR
     return {
       repaired: false,
       scope,
-      message: `服务 unit 重写异常: ${err instanceof Error ? err.message : String(err)}`,
+      message: `服务 unit 重写异常: ${getErrorMessage(err)}`,
     };
   }
 }
