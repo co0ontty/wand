@@ -29,7 +29,6 @@ import org.json.JSONObject;
 
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import android.util.Base64;
 import java.util.List;
@@ -252,7 +251,7 @@ public class ConnectActivity extends AppCompatActivity {
                 setAutoStatus("正在验证连接码…");
                 String error = testConnectionWithToken(serverUrl, appToken, 5000);
                 runOnUiThread(() -> {
-                    if (!autoConnecting) return;
+                    if (isDestroyed() || !autoConnecting) return;
                     autoConnecting = false;
                     if (error == null) {
                         serverStore.setAppToken(appToken);
@@ -270,7 +269,7 @@ public class ConnectActivity extends AppCompatActivity {
                     String error = testConnectionWithToken(normalizedUrl, savedToken, 5000);
                     if (error == null) {
                         runOnUiThread(() -> {
-                            if (!autoConnecting) return;
+                            if (isDestroyed() || !autoConnecting) return;
                             autoConnecting = false;
                             launchWebView(normalizedUrl, savedToken);
                         });
@@ -281,7 +280,7 @@ public class ConnectActivity extends AppCompatActivity {
                 setAutoStatus("正在尝试直接连接…");
                 String error = testConnection(normalizedUrl, 5000);
                 runOnUiThread(() -> {
-                    if (!autoConnecting) return;
+                    if (isDestroyed() || !autoConnecting) return;
                     autoConnecting = false;
                     if (error == null) {
                         launchWebView(normalizedUrl, null);
@@ -368,6 +367,7 @@ public class ConnectActivity extends AppCompatActivity {
 
                 String error = testConnectionWithToken(serverUrl, appToken, 8000);
                 runOnUiThread(() -> {
+                    if (isDestroyed()) return;
                     connectButton.setEnabled(true);
                     connectButton.setText(R.string.connect_button);
 
@@ -384,6 +384,7 @@ public class ConnectActivity extends AppCompatActivity {
                 final String normalizedUrl = normalizeServerUrl(rawInput);
                 String error = testConnection(normalizedUrl, 8000);
                 runOnUiThread(() -> {
+                    if (isDestroyed()) return;
                     connectButton.setEnabled(true);
                     connectButton.setText(R.string.connect_button);
 
@@ -420,12 +421,7 @@ public class ConnectActivity extends AppCompatActivity {
     private String testConnectionWithToken(String baseUrl, String appToken, int timeout) {
         HttpURLConnection conn = null;
         try {
-            URL url = new URL(baseUrl + "/api/login");
-            conn = (HttpURLConnection) url.openConnection();
-            NetUtils.trustSelfSigned(conn);
-
-            conn.setConnectTimeout(timeout);
-            conn.setReadTimeout(timeout);
+            conn = NetUtils.openConnection(baseUrl + "/api/login", timeout, timeout);
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
@@ -466,12 +462,7 @@ public class ConnectActivity extends AppCompatActivity {
 
     private String testConnection(String baseUrl, int timeout) {
         try {
-            URL url = new URL(baseUrl + "/api/config");
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            NetUtils.trustSelfSigned(conn);
-
-            conn.setConnectTimeout(timeout);
-            conn.setReadTimeout(timeout);
+            HttpURLConnection conn = NetUtils.openConnection(baseUrl + "/api/config", timeout, timeout);
             conn.setRequestMethod("GET");
             int code = conn.getResponseCode();
             conn.disconnect();
