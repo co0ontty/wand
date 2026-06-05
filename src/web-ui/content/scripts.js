@@ -3090,7 +3090,7 @@
     }
     return "";
   }
-  function renderSessionItem(session) {
+  function renderSessionItem(session, kind) {
     var activeClass = session.id === state.selectedId ? " active" : "";
     var selectedClass = state.sessionsManageMode && state.selectedSessionIds[session.id] ? " selected" : "";
     var metaStatus = getSessionStatusLabel(session);
@@ -4429,19 +4429,11 @@
     }, 30);
   }
   function getFullViewportHeight(vv) {
-    var root = document.documentElement;
-    var body = document.body;
-    var bodyRectHeight = 0;
-    try {
-      bodyRectHeight = body ? body.getBoundingClientRect().height || 0 : 0;
-    } catch (e) {
-    }
     return Math.max(
       window.innerHeight || 0,
       vv && vv.height || 0,
-      root ? root.clientHeight || 0 : 0,
-      body ? body.clientHeight || 0 : 0,
-      bodyRectHeight
+      document.documentElement ? document.documentElement.clientHeight || 0 : 0,
+      document.body ? document.body.clientHeight || 0 : 0
     );
   }
   function refreshAppViewportBaseline(vv) {
@@ -4460,12 +4452,7 @@
     }
     return Math.max(1, Math.round(appViewportBaselineHeight || height || 1));
   }
-  function shouldUseClosedViewportBaseline(isKeyboardOpen, offsetTop, height, baselineHeight) {
-    if (isKeyboardOpen || !isStandaloneViewportMode()) return false;
-    if (Date.now() > closedViewportBaselineUntil) return false;
-    return offsetTop > 0 || baselineHeight > height + 1;
-  }
-  function shouldUseStandaloneFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight) {
+  function shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight) {
     if (isKeyboardOpen || !isStandaloneViewportMode()) return false;
     return offsetTop > 0 || baselineHeight > height + 1;
   }
@@ -4481,7 +4468,7 @@
     var baselineHeight = refreshAppViewportBaseline(vv);
     var offsetTop = Math.max(0, Math.round(vv.offsetTop || 0));
     var height = Math.max(1, Math.round(vv.height));
-    if (shouldUseStandaloneFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight) || shouldUseClosedViewportBaseline(isKeyboardOpen, offsetTop, height, baselineHeight)) {
+    if (shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight)) {
       offsetTop = 0;
       height = Math.max(height, baselineHeight);
     }
@@ -4580,9 +4567,7 @@
         }
         scheduleViewportSettle();
         setTimeout(function() {
-          if (!imeIsNative) {
-            syncAppViewportHeight(false);
-          }
+          if (!imeIsNative) syncAppViewportHeight(false);
           ensureTerminalFit2("keyboard-close", { forceReplay: true });
           maybeScrollTerminalToBottom("keyboard");
         }, 200);
@@ -4686,9 +4671,7 @@
     document.addEventListener("touchend", state.resizeTouchEnd);
   }
   function isJoystickAvailable() {
-    var session = getSelectedSession3();
-    if (!session) return false;
-    return true;
+    return !!getSelectedSession3();
   }
   function clampJoystickPos(pos) {
     var maxRight = Math.max(JOYSTICK_EDGE_MARGIN, window.innerWidth - JOYSTICK_BALL_SIZE - JOYSTICK_EDGE_MARGIN);
@@ -4786,17 +4769,11 @@
       state.joystickBallEl.setPointerCapture(e.pointerId);
     } catch (err) {
     }
-    if (canDirectDrag) {
-      state.joystickMoveHandler = onJoystickPointerMove;
-      state.joystickUpHandler = onJoystickPointerUp;
-      document.addEventListener("pointermove", state.joystickMoveHandler);
-      document.addEventListener("pointerup", state.joystickUpHandler);
-      document.addEventListener("pointercancel", state.joystickUpHandler);
-      return;
+    if (!canDirectDrag) {
+      state.joystickLongPressTimer = setTimeout(function() {
+        if (state.joystickGesture === "pending") enterJoystickMoveMode();
+      }, JOYSTICK_LONG_PRESS_MS);
     }
-    state.joystickLongPressTimer = setTimeout(function() {
-      if (state.joystickGesture === "pending") enterJoystickMoveMode();
-    }, JOYSTICK_LONG_PRESS_MS);
     state.joystickMoveHandler = onJoystickPointerMove;
     state.joystickUpHandler = onJoystickPointerUp;
     document.addEventListener("pointermove", state.joystickMoveHandler);
@@ -4819,31 +4796,25 @@
     state.joystickBallEl.style.bottom = pos.bottom + "px";
   }
   function onJoystickPointerMove(e) {
-    if (e.pointerId !== state.joystickPointerId) return;
-    if (!state.joystickBallEl) return;
+    if (e.pointerId !== state.joystickPointerId || !state.joystickBallEl) return;
     e.preventDefault();
-    var dxStart = e.clientX - state.joystickPressStart.x;
-    var dyStart = e.clientY - state.joystickPressStart.y;
-    if (state.joystickGesture === "pending") {
-      if (Math.sqrt(dxStart * dxStart + dyStart * dyStart) > JOYSTICK_MOVE_THRESHOLD) {
-        if (e.pointerType === "mouse" || e.pointerType === "pen") {
-          enterJoystickMoveMode();
-          moveJoystickBallTo(e.clientX, e.clientY);
-          return;
-        }
-        if (state.joystickLongPressTimer) {
-          clearTimeout(state.joystickLongPressTimer);
-          state.joystickLongPressTimer = null;
-        }
-        state.joystickGesture = "cancelled";
-        return;
-      } else {
-        return;
-      }
-    }
     if (state.joystickGesture === "move") {
       moveJoystickBallTo(e.clientX, e.clientY);
       return;
+    }
+    if (state.joystickGesture !== "pending") return;
+    var dx = e.clientX - state.joystickPressStart.x;
+    var dy = e.clientY - state.joystickPressStart.y;
+    if (Math.sqrt(dx * dx + dy * dy) <= JOYSTICK_MOVE_THRESHOLD) return;
+    if (e.pointerType === "mouse" || e.pointerType === "pen") {
+      enterJoystickMoveMode();
+      moveJoystickBallTo(e.clientX, e.clientY);
+    } else {
+      if (state.joystickLongPressTimer) {
+        clearTimeout(state.joystickLongPressTimer);
+        state.joystickLongPressTimer = null;
+      }
+      state.joystickGesture = "cancelled";
     }
   }
   function onJoystickPointerUp(e) {
@@ -4943,9 +4914,7 @@
         }
       }
     }).catch(function(err) {
-      if (window && window.console && err && err.message) {
-        console.debug("[wand] joystick interrupt no-op:", err.message);
-      }
+      if (err && err.message) console.debug("[wand] joystick interrupt no-op:", err.message);
     });
   }
   function toggleJoystickPanel() {
@@ -5270,9 +5239,7 @@
     function tryFit() {
       if (!state.terminal) return;
       var el = document.getElementById("output");
-      if (el) {
-        void el.offsetHeight;
-      }
+      if (el) void el.offsetHeight;
       if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
         ensureTerminalFit2(reason, { forceReplay });
         return;
@@ -7527,6 +7494,8 @@
         item.classList.toggle("active", index === selectedIndex);
       });
     }
+    function renderBreadcrumb(_path) {
+    }
     function loadFolderSuggestions(query) {
       if (!folderPickerDropdown) return;
       folderPickerDropdown.innerHTML = '<div class="folder-picker-loading">\u52A0\u8F7D\u4E2D...</div>';
@@ -9159,7 +9128,8 @@
     }
   }, 5e3);
   document.addEventListener("click", function(e) {
-    if (e.target.closest("#queue-clear-all")) {
+    var target = e.target;
+    if (target.closest("#queue-clear-all")) {
       e.preventDefault();
       state.crossSessionQueue = [];
       persistCrossSessionQueue();
@@ -9167,13 +9137,13 @@
       showToast2("\u6392\u961F\u5DF2\u6E05\u7A7A\u3002", "info");
       return;
     }
-    var sendNow = e.target.closest(".queue-item-send-now");
+    var sendNow = target.closest(".queue-item-send-now");
     if (sendNow) {
       e.preventDefault();
       sendQueueItemNow(sendNow.dataset.queueId);
       return;
     }
-    var cancel = e.target.closest(".queue-item-cancel");
+    var cancel = target.closest(".queue-item-cancel");
     if (cancel) {
       e.preventDefault();
       cancelQueueItem(cancel.dataset.queueId);
@@ -9916,7 +9886,8 @@
     if (!host || host.__queueDelegated) return;
     host.__queueDelegated = true;
     host.addEventListener("click", function(ev) {
-      var actionEl = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
+      var evTarget = ev.target;
+      var actionEl = evTarget && evTarget.closest ? evTarget.closest("[data-action]") : null;
       if (!actionEl || !host.contains(actionEl)) return;
       var action = actionEl.getAttribute("data-action");
       if (action === "drag") return;
@@ -9935,7 +9906,8 @@
     });
     host.addEventListener("mouseover", function(ev) {
       if (state.queueBarDrag) return;
-      var chip = ev.target && ev.target.closest ? ev.target.closest(".queue-bar-item") : null;
+      var evTarget = ev.target;
+      var chip = evTarget && evTarget.closest ? evTarget.closest(".queue-bar-item") : null;
       if (!chip || !host.contains(chip)) return;
       setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
     });
@@ -9945,8 +9917,9 @@
     });
     host.addEventListener("pointerdown", function(ev) {
       if (ev.button !== void 0 && ev.button !== 0) return;
-      if (ev.target && ev.target.closest && ev.target.closest('[data-action="delete"], [data-action="promote-item"]')) return;
-      var chip = ev.target && ev.target.closest ? ev.target.closest(".queue-bar-item") : null;
+      var evTarget = ev.target;
+      if (evTarget && evTarget.closest && evTarget.closest('[data-action="delete"], [data-action="promote-item"]')) return;
+      var chip = evTarget && evTarget.closest ? evTarget.closest(".queue-bar-item") : null;
       if (!chip) return;
       setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
       queueBarDragStart(ev, chip);
@@ -10714,7 +10687,7 @@
       _swipedItem = null;
     }
   }
-  function initSwipeToDelete() {
+  function initSwipeToDelete(_container) {
     _swipeState = null;
     _swipedItem = null;
   }
@@ -11204,7 +11177,8 @@
     }
     if (chatMessages) {
       chatMessages.addEventListener("click", function(e) {
-        if (e.target.tagName !== "A" && e.target.tagName !== "BUTTON" && !e.target.closest("button") && !e.target.closest("[data-tool-toggle]")) {
+        var target = e.target;
+        if (target.tagName !== "A" && target.tagName !== "BUTTON" && !target.closest("button") && !target.closest("[data-tool-toggle]")) {
           focusInputFromTap();
         }
       });
@@ -11416,7 +11390,7 @@
     var prevMsgCount = state.lastRenderedMsgCount;
     state.lastRenderedMsgCount = msgCount;
     state.lastRenderedHash = outputHash;
-    var chatMessages = ensureChatMessagesContainer(chatOutput);
+    chatMessages = ensureChatMessagesContainer(chatOutput);
     if (!chatMessages) return;
     var renderWasAtBottom = isChatNearBottom(chatMessages);
     var existingCount = chatMessages.querySelectorAll(".chat-message:not(.system-info)").length;
@@ -12276,7 +12250,7 @@
     var currentUserText = null;
     var currentAssistantLines = [];
     for (var i = 0; i < contentLines.length; i++) {
-      var line = contentLines[i];
+      line = contentLines[i];
       if (line.indexOf("\u276F") === 0) {
         var afterPrompt = line.replace(/^❯\s*/, "").trim();
         if (afterPrompt.indexOf('Try"') === 0 || afterPrompt.indexOf('Try "') === 0) continue;
@@ -12312,7 +12286,7 @@
       var fallbackUserText = "";
       var fallbackUserIdx = -1;
       for (var i = 0; i < contentLines.length; i++) {
-        var line = contentLines[i];
+        line = contentLines[i];
         if (line.indexOf('Try"') === 0 || line.indexOf('Try "') === 0) continue;
         if (line.indexOf("Failed to install") !== -1) continue;
         if (line.indexOf("ctrl+g") !== -1) continue;
@@ -15182,7 +15156,7 @@
         try {
           var nativeVol = WandNative.getNotificationVolume();
           state.notifVolume = nativeVol;
-          if (volEl) volEl.value = nativeVol;
+          if (volEl) volEl.value = String(nativeVol);
           if (volValEl) volValEl.textContent = nativeVol + "%";
           if (volEl) {
             try {
@@ -15919,7 +15893,7 @@
       msgEl.classList.add("hidden");
       msgEl.textContent = "";
     }
-    if (!keyFile || !keyFile.files[0] || !certFile || !certFile.files[0]) {
+    if (!keyFile || !keyFile.files || !keyFile.files[0] || !certFile || !certFile.files || !certFile.files[0]) {
       if (msgEl) {
         msgEl.textContent = "\u8BF7\u9009\u62E9\u79C1\u94A5\u548C\u8BC1\u4E66\u6587\u4EF6\u3002";
         msgEl.style.color = "var(--error)";
@@ -16432,7 +16406,7 @@
     var worktreeEnabled = state.sessionCreateWorktree === true;
     hideError2(errorEl);
     var defaultCwd = getEffectiveCwd3();
-    var cwd = cwdEl.value.trim() || defaultCwd;
+    var cwd = (cwdEl ? cwdEl.value.trim() : "") || defaultCwd;
     var selectedMode = getSafeModeForTool(command, state.modeValue);
     if (sessionKind === "structured") {
       startStructuredSessionFromModal(cwd, selectedMode, worktreeEnabled, errorEl);
@@ -16595,7 +16569,7 @@
         el.addEventListener("click", function() {
           var cwdEl = document.getElementById("cwd");
           if (cwdEl) {
-            cwdEl.value = el.dataset.path;
+            cwdEl.value = el.dataset.path || "";
             state.cwdValue = el.dataset.path || "";
           }
         });
@@ -16629,7 +16603,7 @@
     }).join("");
     container.querySelectorAll(".suggestion-item").forEach(function(el) {
       el.addEventListener("click", function() {
-        document.getElementById("cwd").value = el.dataset.path;
+        document.getElementById("cwd").value = el.dataset.path || "";
         state.cwdValue = el.dataset.path || "";
         hidePathSuggestions();
       });
@@ -17069,7 +17043,7 @@
       var elapsedEl = pill.querySelector(".session-status-elapsed");
       if (sig.inFlight) {
         if (!_runningIndicatorsStartTime) {
-          _runningIndicatorsStartTime = state._statusBarStartTime > 0 ? _statusBarStartTime : Date.now();
+          _runningIndicatorsStartTime = state._statusBarStartTime > 0 ? state._statusBarStartTime : Date.now();
         }
         var label = formatElapsedShort3(Date.now() - _runningIndicatorsStartTime);
         if (!elapsedEl) {

@@ -1,27 +1,10 @@
-/**
- * PWA manifest and Service Worker generation.
- */
-
 import { createHash } from "node:crypto";
 import { EMBEDDED_WEB_ASSET_VERSION } from "./web-ui/embedded-assets.js";
 
-/** Cache version: package version + content fingerprint.
- *
- * 之前只用 pkgVersion 派生，本地 dev 时同一个 1.36.0 下改了几次 CSS / scripts，
- * SW 的 cache key 都没变 → 旧的 RUNTIME_CACHE 会一直回放老 HTML 给已安装 PWA，
- * 用户表现是"我明明改了 UI，怎么手机上一点变化都没有"。
- * 把内容 mtime 也喂进 hash，dev iterate 时每次磁盘改动都换 cache key，
- * SW activate 会把不匹配前缀的缓存 keys 删掉，从而强制重拉。
- * 正式发版时由于 pkgVersion 也会变，效果叠加，无副作用。
- */
+// 内容指纹派生 cache key，dev 迭代时磁盘改动即换 key，不用重启进程。
 function buildCacheVersion(): string {
-  const h = createHash("md5").update(EMBEDDED_WEB_ASSET_VERSION);
-  return h.digest("hex").slice(0, 8);
+  return createHash("md5").update(EMBEDDED_WEB_ASSET_VERSION).digest("hex").slice(0, 8);
 }
-// 不 freeze 进模块加载时——SW JS 是每次请求 generateServiceWorker() 现拼的，
-// 这里也对应每次现算，dev 改 CSS 不用重启进程都能 bust 浏览器/PWA 端缓存。
-// 缓存层会自己做 mtime check（styles.ts 的 mtime 缓存模式同思路），这里直接
-// statSync，磁盘命中本地 fs 几十微秒级，可忽略。
 
 export function generatePwaManifest(): string {
   return JSON.stringify({
@@ -42,8 +25,8 @@ export function generatePwaManifest(): string {
     icons: [
       { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
       { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "maskable" },
-      { src: "/icon-192.png", sizes: "192x192", type: "image/svg+xml", purpose: "any" },
-      { src: "/icon-512.png", sizes: "512x512", type: "image/svg+xml", purpose: "any" },
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
     ],
     categories: ["developer tools", "productivity"],
     shortcuts: [
@@ -133,10 +116,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    cacheFirst(request).catch(async () => {
-      const cached = await caches.match(request);
-      return cached || (await caches.match(APP_SHELL)) || Response.error();
-    })
+    cacheFirst(request).catch(async () => (await caches.match(APP_SHELL)) || Response.error())
   );
 });
 `;

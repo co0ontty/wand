@@ -19,8 +19,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function login() {
         if (state.loginPending) return;
 
-        var passwordEl = document.getElementById("password");
-        var loginButton = document.getElementById("login-button");
+        var passwordEl = document.getElementById("password") as HTMLInputElement | null;
+        var loginButton = document.getElementById("login-button") as HTMLButtonElement | null;
         var errorEl = document.getElementById("login-error");
         if (!passwordEl || !loginButton || !errorEl) return;
 
@@ -296,7 +296,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (!pillNode) return;
             var label = pillNode.querySelector(".composer-text-label");
             if (label) label.textContent = value;
-            var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]');
+            var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]') as HTMLSelectElement | null;
             if (!sel) return;
             if (optionsHtml) sel.innerHTML = optionsHtml;
             if (sel.value !== value) sel.value = value;
@@ -480,7 +480,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function refreshAvailableModels() {
         if (state.modelsRefreshing) return Promise.resolve(null);
         state.modelsRefreshing = true;
-        var btn = document.getElementById("cfg-default-model-refresh");
+        var btn = document.getElementById("cfg-default-model-refresh") as HTMLButtonElement | null;
         if (btn) { btn.disabled = true; btn.textContent = "刷新中..."; }
         return fetch("/api/models/refresh", { method: "POST", credentials: "same-origin" })
           .then(function(res) { return res.json(); })
@@ -507,6 +507,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       // ── Environment-variable preview modal ──
+
       // Lazily creates a modal showing the exact env vars wand will inject
       // into PTY / structured child processes (mirrors buildChildEnv()).
       export function openEnvPreviewModal() {
@@ -558,17 +559,17 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           if (closeBtn) closeBtn.addEventListener("click", closeEnvPreviewModal);
           var closeBtn2 = modal.querySelector("#env-preview-close-2");
           if (closeBtn2) closeBtn2.addEventListener("click", closeEnvPreviewModal);
-          var searchEl = modal.querySelector("#env-preview-search");
+          var searchEl = modal.querySelector("#env-preview-search") as HTMLInputElement | null;
           if (searchEl) searchEl.addEventListener("input", function() { renderEnvPreviewList(); });
-          var revealEl = modal.querySelector("#env-preview-reveal-toggle");
+          var revealEl = modal.querySelector("#env-preview-reveal-toggle") as HTMLInputElement | null;
           if (revealEl) revealEl.addEventListener("change", function() { loadEnvPreview(revealEl.checked); });
         }
 
         modal.classList.remove("closing");
         modal.classList.remove("hidden");
-        var revealEl = modal.querySelector("#env-preview-reveal-toggle");
+        var revealEl = modal.querySelector("#env-preview-reveal-toggle") as HTMLInputElement | null;
         if (revealEl) revealEl.checked = false;
-        var searchEl = modal.querySelector("#env-preview-search");
+        var searchEl = modal.querySelector("#env-preview-search") as HTMLInputElement | null;
         if (searchEl) searchEl.value = "";
         loadEnvPreview(false);
       }
@@ -616,7 +617,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           listEl.innerHTML = '<div class="env-preview-empty">尚未加载。</div>';
           return;
         }
-        var searchEl = document.getElementById("env-preview-search");
+        var searchEl = document.getElementById("env-preview-search") as HTMLInputElement | null;
         var query = (searchEl && searchEl.value || "").trim().toLowerCase();
         var html = "";
         var shown = 0;
@@ -643,8 +644,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         listEl.innerHTML = html;
       }
 
-      export function updateSettingsDefaultModelSelect(data) {
-        var select = document.getElementById("cfg-default-model");
+      export function updateSettingsDefaultModelSelect(data?) {
+        var select = document.getElementById("cfg-default-model") as HTMLSelectElement | null;
         if (!select) return;
         var previous = select.value;
         var current = previous || state.configDefaultModel || (state.config && state.config.defaultModel) || "";
@@ -695,7 +696,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         .catch(function() { showToast("切换模型失败", "error"); });
       }
 
-      export function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled) {
+      export function createStructuredSession(prompt?, cwdOverride?, modeOverride?, worktreeEnabled?) {
         var provider = state.sessionTool === "codex" ? "codex" : "claude";
         var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
         var thinkingPref = state.chatThinking || "off";
@@ -973,7 +974,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         return recent ? recent.id : sessions[0].id;
       }
 
-      export function loadSessions(options) {
+      export function loadSessions(options?) {
         var opts = options || {};
         return fetch("/api/sessions", { credentials: "same-origin" })
           .then(function(res) {
@@ -1590,7 +1591,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         updateDrawerState();
         var modal = document.getElementById("session-modal");
         if (modal) {
-          if (modal._wandCloseTimer) { clearTimeout(modal._wandCloseTimer); modal._wandCloseTimer = null; }
+          if ((modal as any)._wandCloseTimer) { clearTimeout((modal as any)._wandCloseTimer); (modal as any)._wandCloseTimer = null; }
           modal.classList.remove("closing");
           modal.classList.remove("hidden");
           state.lastFocusedElement = document.activeElement;
@@ -1642,15 +1643,15 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           return;
         }
         // Cancel any outstanding pending hide on the same node
-        if (modal._wandCloseTimer) {
-          clearTimeout(modal._wandCloseTimer);
-          modal._wandCloseTimer = null;
+        if ((modal as any)._wandCloseTimer) {
+          clearTimeout((modal as any)._wandCloseTimer);
+          (modal as any)._wandCloseTimer = null;
         }
         modal.classList.add("closing");
-        modal._wandCloseTimer = setTimeout(function() {
+        (modal as any)._wandCloseTimer = setTimeout(function() {
           modal.classList.remove("closing");
           modal.classList.add("hidden");
-          modal._wandCloseTimer = null;
+          (modal as any)._wandCloseTimer = null;
         }, 170);
       }
 
@@ -1696,7 +1697,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function renderWorktreeMergeContent() {
         var container = document.getElementById("worktree-merge-content");
-        var confirmBtn = document.getElementById("worktree-merge-confirm-button");
+        var confirmBtn = document.getElementById("worktree-merge-confirm-button") as HTMLButtonElement | null;
         var errorEl = document.getElementById("worktree-merge-error");
         var session = getActiveWorktreeMergeSession();
         var result = state.worktreeMergeCheckResult;
@@ -1850,12 +1851,12 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         closeSessionModal();
         var modal = document.getElementById("settings-modal");
         if (modal) {
-          if (modal._wandCloseTimer) { clearTimeout(modal._wandCloseTimer); modal._wandCloseTimer = null; }
+          if ((modal as any)._wandCloseTimer) { clearTimeout((modal as any)._wandCloseTimer); (modal as any)._wandCloseTimer = null; }
           modal.classList.remove("closing");
           modal.classList.remove("hidden");
           state.lastFocusedElement = document.activeElement;
-          var passEl = document.getElementById("new-password");
-          var confirmEl = document.getElementById("confirm-password");
+          var passEl = document.getElementById("new-password") as HTMLInputElement | null;
+          var confirmEl = document.getElementById("confirm-password") as HTMLInputElement | null;
           if (passEl) passEl.value = "";
           if (confirmEl) confirmEl.value = "";
           hideSettingsMessages();
@@ -1866,11 +1867,11 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           // Load settings data
           loadSettingsData();
           // Sync notification preferences
-          var soundEl = document.getElementById("cfg-notif-sound");
-          var bubbleEl = document.getElementById("cfg-notif-bubble");
+          var soundEl = document.getElementById("cfg-notif-sound") as HTMLInputElement | null;
+          var bubbleEl = document.getElementById("cfg-notif-bubble") as HTMLInputElement | null;
           if (soundEl) soundEl.checked = state.notifSound;
           if (bubbleEl) bubbleEl.checked = state.notifBubble;
-          var volEl = document.getElementById("cfg-notif-volume");
+          var volEl = document.getElementById("cfg-notif-volume") as HTMLInputElement | null;
           var volValEl = document.getElementById("cfg-notif-volume-val");
           if (volEl) {
             volEl.value = state.notifVolume;
@@ -1888,7 +1889,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           // Sync native notification sound selector and volume (APK only)
           if (_hasNativeBridge && typeof WandNative.getNotificationSound === "function") {
             try {
-              var nsSel = document.getElementById("native-sound-select");
+              var nsSel = document.getElementById("native-sound-select") as HTMLSelectElement | null;
               if (nsSel) nsSel.value = WandNative.getNotificationSound();
             } catch (_e) {}
           }
@@ -1896,7 +1897,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             try {
               var nativeVol = WandNative.getNotificationVolume();
               state.notifVolume = nativeVol;
-              if (volEl) volEl.value = nativeVol;
+              if (volEl) volEl.value = String(nativeVol);
               if (volValEl) volValEl.textContent = nativeVol + "%";
               // Sync the iOS-style fill so the orange track matches
               if (volEl) { try { volEl.dispatchEvent(new Event("input", { bubbles: true })); } catch (_e) {} }
@@ -1905,7 +1906,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           }
           if (_hasNativeBridge && typeof WandNative.isHapticEnabled === "function") {
             try {
-              var hapticEl = document.getElementById("cfg-haptic-enabled");
+              var hapticEl = document.getElementById("cfg-haptic-enabled") as HTMLInputElement | null;
               if (hapticEl) hapticEl.checked = WandNative.isHapticEnabled();
             } catch (_e) {}
           }
@@ -1936,8 +1937,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function savePassword() {
-        var newPass = document.getElementById("new-password").value;
-        var confirmPass = document.getElementById("confirm-password").value;
+        var newPass = (document.getElementById("new-password") as HTMLInputElement).value;
+        var confirmPass = (document.getElementById("confirm-password") as HTMLInputElement).value;
         var errorEl = document.getElementById("settings-error");
         var successEl = document.getElementById("settings-success");
 
@@ -1970,8 +1971,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           }
           successEl.textContent = "密码修改成功！";
           successEl.classList.remove("hidden");
-          document.getElementById("new-password").value = "";
-          document.getElementById("confirm-password").value = "";
+          (document.getElementById("new-password") as HTMLInputElement).value = "";
+          (document.getElementById("confirm-password") as HTMLInputElement).value = "";
         })
         .catch(function() {
           errorEl.textContent = "Failed to save password.";
@@ -2126,7 +2127,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (closeBtn) closeBtn.addEventListener("click", close);
       }
 
-      export function copyToClipboard(text, triggerBtn, successCallback) {
+      export function copyToClipboard(text, triggerBtn?, successCallback?) {
         if (!text) return;
         function onSuccess() {
           _vibrate("light");
@@ -2197,17 +2198,17 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             }
 
             // Beta channel toggle
-            var betaChannelToggle = document.getElementById("beta-channel-toggle");
+            var betaChannelToggle = document.getElementById("beta-channel-toggle") as HTMLInputElement | null;
             if (betaChannelToggle) betaChannelToggle.checked = data.updateChannel === "beta";
 
             // Auto-update toggles
             var autoUpdate = data.autoUpdate || {};
-            var autoUpdateWebToggle = document.getElementById("auto-update-web-toggle");
+            var autoUpdateWebToggle = document.getElementById("auto-update-web-toggle") as HTMLInputElement | null;
             if (autoUpdateWebToggle) autoUpdateWebToggle.checked = !!autoUpdate.web;
-            var autoUpdateApkToggle = document.getElementById("auto-update-apk-toggle");
+            var autoUpdateApkToggle = document.getElementById("auto-update-apk-toggle") as HTMLInputElement | null;
             // 自动更新开关只对 APK 壳生效, 浏览器里不绑定状态(该行也保持隐藏), 避免静默写一个看不见的控件。
             if (autoUpdateApkToggle) autoUpdateApkToggle.checked = !!_apkVersion && !!autoUpdate.apk;
-            var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle");
+            var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle") as HTMLInputElement | null;
             if (autoUpdateDmgToggle) autoUpdateDmgToggle.checked = !!_macAppVersion && !!autoUpdate.dmg;
 
             // ── 原生包下载 helper（APK / DMG 共用）──
@@ -2501,25 +2502,25 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
             // Config fields
             var cfg = data.config || {};
-            var hostEl = document.getElementById("cfg-host");
-            var portEl = document.getElementById("cfg-port");
-            var httpsEl = document.getElementById("cfg-https");
-            var modeEl = document.getElementById("cfg-mode");
-            var cwdEl = document.getElementById("cfg-cwd");
-            var shellEl = document.getElementById("cfg-shell");
+            var hostEl = document.getElementById("cfg-host") as HTMLInputElement | null;
+            var portEl = document.getElementById("cfg-port") as HTMLInputElement | null;
+            var httpsEl = document.getElementById("cfg-https") as HTMLInputElement | null;
+            var modeEl = document.getElementById("cfg-mode") as HTMLSelectElement | null;
+            var cwdEl = document.getElementById("cfg-cwd") as HTMLInputElement | null;
+            var shellEl = document.getElementById("cfg-shell") as HTMLInputElement | null;
             if (hostEl) hostEl.value = cfg.host || "";
             if (portEl) portEl.value = cfg.port || "";
             if (httpsEl) httpsEl.checked = cfg.https === true;
             if (modeEl) modeEl.value = cfg.defaultMode || "default";
             if (cwdEl) cwdEl.value = cfg.defaultCwd || "";
             if (shellEl) shellEl.value = cfg.shell || "";
-            var langEl = document.getElementById("cfg-language");
+            var langEl = document.getElementById("cfg-language") as HTMLSelectElement | null;
             if (langEl) langEl.value = cfg.language || "";
 
-            var srEl = document.getElementById("cfg-structured-runner");
+            var srEl = document.getElementById("cfg-structured-runner") as HTMLSelectElement | null;
             if (srEl) srEl.value = cfg.structuredRunner || "cli";
 
-            var inheritEnvEl = document.getElementById("cfg-inherit-env");
+            var inheritEnvEl = document.getElementById("cfg-inherit-env") as HTMLInputElement | null;
             if (inheritEnvEl) inheritEnvEl.checked = cfg.inheritEnv !== false;
 
             // Default model
@@ -2553,11 +2554,11 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
             // Card expand defaults
             var cd = cfg.cardDefaults || {};
-            var cdEditEl = document.getElementById("cfg-card-edit");
-            var cdInlineEl = document.getElementById("cfg-card-inline");
-            var cdTerminalEl = document.getElementById("cfg-card-terminal");
-            var cdThinkingEl = document.getElementById("cfg-card-thinking");
-            var cdToolgroupEl = document.getElementById("cfg-card-toolgroup");
+            var cdEditEl = document.getElementById("cfg-card-edit") as HTMLInputElement | null;
+            var cdInlineEl = document.getElementById("cfg-card-inline") as HTMLInputElement | null;
+            var cdTerminalEl = document.getElementById("cfg-card-terminal") as HTMLInputElement | null;
+            var cdThinkingEl = document.getElementById("cfg-card-thinking") as HTMLInputElement | null;
+            var cdToolgroupEl = document.getElementById("cfg-card-toolgroup") as HTMLInputElement | null;
             if (cdEditEl) cdEditEl.checked = cd.editCards === true;
             if (cdInlineEl) cdInlineEl.checked = cd.inlineTools === true;
             if (cdTerminalEl) cdTerminalEl.checked = cd.terminal === true;
@@ -2572,16 +2573,16 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
 
         var body = {
-          host: (document.getElementById("cfg-host") || {}).value,
-          port: Number((document.getElementById("cfg-port") || {}).value),
-          https: (document.getElementById("cfg-https") || {}).checked,
-          defaultMode: (document.getElementById("cfg-mode") || {}).value,
-          defaultCwd: (document.getElementById("cfg-cwd") || {}).value,
-          shell: (document.getElementById("cfg-shell") || {}).value,
-          language: (document.getElementById("cfg-language") || {}).value || "",
-          defaultModel: (document.getElementById("cfg-default-model") || {}).value || "",
-          structuredRunner: (document.getElementById("cfg-structured-runner") || {}).value || "cli",
-          inheritEnv: (document.getElementById("cfg-inherit-env") || {}).checked !== false,
+          host: (document.getElementById("cfg-host") as HTMLInputElement | null || {} as any).value,
+          port: Number((document.getElementById("cfg-port") as HTMLInputElement | null || {} as any).value),
+          https: (document.getElementById("cfg-https") as HTMLInputElement | null || {} as any).checked,
+          defaultMode: (document.getElementById("cfg-mode") as HTMLSelectElement | null || {} as any).value,
+          defaultCwd: (document.getElementById("cfg-cwd") as HTMLInputElement | null || {} as any).value,
+          shell: (document.getElementById("cfg-shell") as HTMLInputElement | null || {} as any).value,
+          language: (document.getElementById("cfg-language") as HTMLSelectElement | null || {} as any).value || "",
+          defaultModel: (document.getElementById("cfg-default-model") as HTMLSelectElement | null || {} as any).value || "",
+          structuredRunner: (document.getElementById("cfg-structured-runner") as HTMLSelectElement | null || {} as any).value || "cli",
+          inheritEnv: (document.getElementById("cfg-inherit-env") as HTMLInputElement | null || {} as any).checked !== false,
         };
 
         var previousDefaultModel = (state.config && state.config.defaultModel) || "";
@@ -2632,11 +2633,11 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
         var body = {
           cardDefaults: {
-            editCards: !!(document.getElementById("cfg-card-edit") || {}).checked,
-            inlineTools: !!(document.getElementById("cfg-card-inline") || {}).checked,
-            terminal: !!(document.getElementById("cfg-card-terminal") || {}).checked,
-            thinking: !!(document.getElementById("cfg-card-thinking") || {}).checked,
-            toolGroup: !!(document.getElementById("cfg-card-toolgroup") || {}).checked,
+            editCards: !!(document.getElementById("cfg-card-edit") as HTMLInputElement | null || {} as any).checked,
+            inlineTools: !!(document.getElementById("cfg-card-inline") as HTMLInputElement | null || {} as any).checked,
+            terminal: !!(document.getElementById("cfg-card-terminal") as HTMLInputElement | null || {} as any).checked,
+            thinking: !!(document.getElementById("cfg-card-thinking") as HTMLInputElement | null || {} as any).checked,
+            toolGroup: !!(document.getElementById("cfg-card-toolgroup") as HTMLInputElement | null || {} as any).checked,
           }
         };
 
@@ -2673,12 +2674,12 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function uploadCertificates() {
-        var keyFile = document.getElementById("cert-key-file");
-        var certFile = document.getElementById("cert-cert-file");
+        var keyFile = document.getElementById("cert-key-file") as HTMLInputElement | null;
+        var certFile = document.getElementById("cert-cert-file") as HTMLInputElement | null;
         var msgEl = document.getElementById("cert-message");
         if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
 
-        if (!keyFile || !keyFile.files[0] || !certFile || !certFile.files[0]) {
+        if (!keyFile || !keyFile.files || !keyFile.files[0] || !certFile || !certFile.files || !certFile.files[0]) {
           if (msgEl) {
             msgEl.textContent = "请选择私钥和证书文件。";
             msgEl.style.color = "var(--error)";
@@ -2773,7 +2774,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function performUpdate() {
         var msgEl = document.getElementById("update-message");
-        var updateBtn = document.getElementById("do-update-button");
+        var updateBtn = document.getElementById("do-update-button") as HTMLButtonElement | null;
         if (!updateBtn) return;
         updateBtn.disabled = true;
         if (msgEl) {
@@ -2827,7 +2828,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function performSettingsRestart() {
-        var restartBtn = document.getElementById("do-restart-button");
+        var restartBtn = document.getElementById("do-restart-button") as HTMLButtonElement | null;
         var msgEl = document.getElementById("update-message");
         performRestart(restartBtn, msgEl);
       }
@@ -2880,16 +2881,16 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         .then(function(res) { return res.json(); })
         .then(function(data) {
           // Sync toggle state with server response
-          var webToggle = document.getElementById("auto-update-web-toggle");
-          var apkToggle = document.getElementById("auto-update-apk-toggle");
-          var dmgToggle = document.getElementById("auto-update-dmg-toggle");
+          var webToggle = document.getElementById("auto-update-web-toggle") as HTMLInputElement | null;
+          var apkToggle = document.getElementById("auto-update-apk-toggle") as HTMLInputElement | null;
+          var dmgToggle = document.getElementById("auto-update-dmg-toggle") as HTMLInputElement | null;
           if (webToggle) webToggle.checked = !!data.web;
           if (apkToggle) apkToggle.checked = !!data.apk;
           if (dmgToggle) dmgToggle.checked = !!data.dmg;
         })
         .catch(function() {
           // Revert toggle on failure
-          var toggle = document.getElementById("auto-update-" + type + "-toggle");
+          var toggle = document.getElementById("auto-update-" + type + "-toggle") as HTMLInputElement | null;
           if (toggle) toggle.checked = !enabled;
         });
       }
@@ -2903,13 +2904,13 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
-          var toggle = document.getElementById("beta-channel-toggle");
+          var toggle = document.getElementById("beta-channel-toggle") as HTMLInputElement | null;
           if (toggle) toggle.checked = data.channel === "beta";
           // 切换通道后重新检查更新，刷新"最新版本"显示与更新按钮。
           checkForUpdate();
         })
         .catch(function() {
-          var toggle = document.getElementById("beta-channel-toggle");
+          var toggle = document.getElementById("beta-channel-toggle") as HTMLInputElement | null;
           if (toggle) toggle.checked = channel !== "beta";
         });
       }
@@ -3024,7 +3025,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function resetDelayedNotificationButton() {
-        var delayBtn = document.getElementById("notification-test-delay-btn");
+        var delayBtn = document.getElementById("notification-test-delay-btn") as HTMLButtonElement | null;
         if (!delayBtn) return;
         delayBtn.disabled = false;
         delayBtn.textContent = "10 秒后发送";
@@ -3036,7 +3037,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           clearTimeout(state.delayedNotificationTimer);
           state.delayedNotificationTimer = null;
         }
-        var delayBtn = document.getElementById("notification-test-delay-btn");
+        var delayBtn = document.getElementById("notification-test-delay-btn") as HTMLButtonElement | null;
         if (delayBtn) {
           delayBtn.disabled = true;
           delayBtn.textContent = "已安排（10s）";
@@ -3190,7 +3191,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       // initTerminal 失败时 UI 永久卡在"创建会话"按钮。
       export function ensureTerminalReady() {
         if (state.terminal && state.terminal.cols) return Promise.resolve();
-        return new Promise(function(resolve) {
+        return new Promise<void>(function(resolve) {
           var done = false;
           var settle = function() { if (!done) { done = true; resolve(); } };
           var hardTimeout = setTimeout(settle, 2000);
@@ -3242,7 +3243,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function runCommand() {
         if (_sessionCreating) return;
-        var cwdEl = document.getElementById("cwd");
+        var cwdEl = document.getElementById("cwd") as HTMLInputElement | null;
         var errorEl = document.getElementById("modal-error");
         var command = getPreferredTool();
         var sessionKind = state.sessionCreateKind || "structured";
@@ -3251,7 +3252,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         hideError(errorEl);
 
         var defaultCwd = getEffectiveCwd();
-        var cwd = cwdEl.value.trim() || defaultCwd;
+        var cwd = (cwdEl ? cwdEl.value.trim() : "") || defaultCwd;
         var selectedMode = getSafeModeForTool(command, state.modeValue);
 
         if (sessionKind === "structured") {
@@ -3353,7 +3354,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         document.addEventListener("click", function(e) {
           var dropdown = document.getElementById("blank-chat-cwd-dropdown");
           if (!dropdown || dropdown.classList.contains("hidden")) return;
-          if (!e.target.closest(".blank-chat-cwd-wrap")) {
+          if (!(e.target as HTMLElement).closest(".blank-chat-cwd-wrap")) {
             dropdown.classList.add("hidden");
             var arrow = document.getElementById("blank-chat-cwd-arrow");
             if (arrow) arrow.textContent = "▼";
@@ -3401,7 +3402,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             dropdown.querySelectorAll(".blank-chat-cwd-item").forEach(function(el) {
               el.addEventListener("click", function(e) {
                 e.stopPropagation();
-                var path = el.dataset.path;
+                var path = (el as HTMLElement).dataset.path;
                 state.workingDir = path;
                 try { localStorage.setItem("wand-working-dir", path); } catch(e) {}
                 var pathEl = document.getElementById("blank-chat-cwd-path");
@@ -3409,7 +3410,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
                 dropdown.classList.add("hidden");
                 var arrow = document.getElementById("blank-chat-cwd-arrow");
                 if (arrow) arrow.textContent = "▼";
-                var fpInput = document.getElementById("folder-picker-input");
+                var fpInput = document.getElementById("folder-picker-input") as HTMLInputElement | null;
                 if (fpInput) fpInput.value = path;
               });
             });
@@ -3431,10 +3432,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             }).join("");
             container.querySelectorAll(".recent-path-bubble").forEach(function(el) {
               el.addEventListener("click", function() {
-                var cwdEl = document.getElementById("cwd");
+                var cwdEl = document.getElementById("cwd") as HTMLInputElement | null;
                 if (cwdEl) {
-                  cwdEl.value = el.dataset.path;
-                  state.cwdValue = el.dataset.path || "";
+                  cwdEl.value = (el as HTMLElement).dataset.path || "";
+                  state.cwdValue = (el as HTMLElement).dataset.path || "";
                 }
               });
             });
@@ -3453,7 +3454,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           return;
         }
 
-        var cwdEl = document.getElementById("cwd");
+        var cwdEl = document.getElementById("cwd") as HTMLInputElement | null;
         if (!cwdEl) return;
 
         fetch("/api/path-suggestions?q=" + encodeURIComponent(cwdEl.value.trim()), { credentials: "same-origin" })
@@ -3478,8 +3479,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
         container.querySelectorAll(".suggestion-item").forEach(function(el) {
           el.addEventListener("click", function() {
-            document.getElementById("cwd").value = el.dataset.path;
-            state.cwdValue = el.dataset.path || "";
+            (document.getElementById("cwd") as HTMLInputElement).value = (el as HTMLElement).dataset.path || "";
+            state.cwdValue = (el as HTMLElement).dataset.path || "";
             hidePathSuggestions();
           });
         });
@@ -3506,7 +3507,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (event.key === "Enter") {
           if (event.shiftKey) {
             event.preventDefault();
-            var inputBox = document.getElementById("input-box");
+            var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
             if (inputBox) {
               var start = inputBox.selectionStart || 0;
               var current = inputBox.value;
@@ -3531,7 +3532,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (event.key === "Backspace") {
           // Let default behavior handle the deletion, then sync state
           setTimeout(function() {
-            var inputBox = document.getElementById("input-box");
+            var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
             if (inputBox) {
               setDraftValue(inputBox.value, true);
             }
@@ -3541,7 +3542,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
         if (event.key === "Tab") {
           event.preventDefault();
-          var inputBox = document.getElementById("input-box");
+          var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           if (inputBox) {
             var start = inputBox.selectionStart || 0;
             var current = inputBox.value;
@@ -3570,7 +3571,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
           // COPY-2: 有选区（输入框内或终端输出区）时放行浏览器原生复制，而不是发
           // SIGINT。原实现只看输入框选区，漏了文档级终端选区。
-          var inputBoxC = document.getElementById("input-box");
+          var inputBoxC = document.getElementById("input-box") as HTMLTextAreaElement | null;
           var hasSelectionC = (inputBoxC && inputBoxC.selectionStart !== inputBoxC.selectionEnd)
             || hasActiveTerminalSelection();
           if (hasSelectionC) {
@@ -3593,7 +3594,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d") {
           // COPY-2: 有选区（输入框内或终端输出区）时放行浏览器复制。
-          var inputBox2 = document.getElementById("input-box");
+          var inputBox2 = document.getElementById("input-box") as HTMLTextAreaElement | null;
           var hasSelection2 = (inputBox2 && (inputBox2.selectionStart !== inputBox2.selectionEnd))
             || hasActiveTerminalSelection();
           if (hasSelection2) {
@@ -3635,7 +3636,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
         // Cmd+X / Ctrl+X: Cut (let browser handle when text selected)
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "x") {
-          var inputBox = document.getElementById("input-box");
+          var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           var hasSelection = inputBox && (inputBox.selectionStart !== inputBox.selectionEnd);
           if (hasSelection) {
             // Let browser handle cut
@@ -3651,7 +3652,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         // Sync state after default behavior for character keys
         if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
           setTimeout(function() {
-            var inputBox = document.getElementById("input-box");
+            var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
             if (inputBox) {
               setDraftValue(inputBox.value);
             }
@@ -3790,7 +3791,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           queueDirectInput(pasted, "paste").catch(function() {});
           return;
         }
-        var inputBox = document.getElementById("input-box");
+        var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
         if (inputBox) {
           var start = inputBox.selectionStart || 0;
           var end = inputBox.selectionEnd || 0;
@@ -3820,7 +3821,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         return "";
       }
 
-      export function setDraftValue(value, skipDom) {
+      export function setDraftValue(value, skipDom?) {
         if (!state.selectedId) return;
         state.drafts[state.selectedId] = value;
         // Persist to localStorage
@@ -3828,7 +3829,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           localStorage.setItem("wand-draft-" + state.selectedId, value);
         } catch (e) { /* ignore */ }
         if (!skipDom) {
-          var inputBox = document.getElementById("input-box");
+          var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           if (inputBox) inputBox.value = value;
         }
       }
@@ -3836,8 +3837,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export var promptOptimizeInFlight = false;
       export function optimizePromptText() {
         if (promptOptimizeInFlight) return;
-        var inputBox = document.getElementById("input-box");
-        var btn = document.getElementById("prompt-optimize-btn");
+        var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
+        var btn = document.getElementById("prompt-optimize-btn") as HTMLButtonElement | null;
         var composer = document.querySelector(".input-composer");
         if (!inputBox) return;
         var raw = (inputBox.value || "").trim();
@@ -3857,7 +3858,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var prevReadOnly = inputBox.readOnly;
         inputBox.readOnly = true;
 
-        var payload = { text: raw };
+        var payload: any = { text: raw };
         if (state && state.selectedId) payload.sessionId = state.selectedId;
 
         fetch("/api/optimize-prompt", {
@@ -3935,7 +3936,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function syncComposerHasText(el) {
         var composer = document.querySelector(".input-composer");
         if (!composer) return;
-        var inputBox = el || document.getElementById("input-box");
+        var inputBox = (el || document.getElementById("input-box")) as HTMLTextAreaElement | null;
         var hasText = !!(inputBox && inputBox.value && inputBox.value.length > 0);
         composer.classList.toggle("has-text", hasText);
       }

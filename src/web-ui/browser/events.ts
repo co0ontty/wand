@@ -1343,6 +1343,8 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           });
         }
 
+        function renderBreadcrumb(_path: string) {}
+
         function loadFolderSuggestions(query: string) {
           if (!folderPickerDropdown) return;
 

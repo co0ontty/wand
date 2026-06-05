@@ -68,7 +68,7 @@ import { getConfigCwd } from "./chat-scroll";
         // Don't clobber the user's in-progress edit when the input is focused.
         if (cwdEl.tagName === "INPUT") {
           if (document.activeElement !== cwdEl) {
-            cwdEl.value = cwd;
+            (cwdEl as HTMLInputElement).value = cwd;
           }
         } else {
           cwdEl.textContent = cwd;
@@ -153,7 +153,7 @@ import { getConfigCwd } from "./chat-scroll";
 
       // Render a stroke-based 16x16 SVG icon by name. Extra classes get appended
       // to the outer svg, so callers can target specific icons in CSS.
-      export function wandFileIcon(name, opts) {
+      export function wandFileIcon(name, opts?) {
         opts = opts || {};
         var body = WAND_FILE_ICONS[name] || "";
         var size = opts.size || 16;
@@ -251,7 +251,7 @@ import { getConfigCwd } from "./chat-scroll";
         return getConfigCwd();
       }
 
-      export function refreshFileExplorer(opts) {
+      export function refreshFileExplorer(opts?) {
         opts = opts || {};
         var explorer = document.getElementById("file-explorer");
         var cwdEl = document.getElementById("file-explorer-cwd");
@@ -271,7 +271,7 @@ import { getConfigCwd } from "./chat-scroll";
           if (cwdEl.tagName === "INPUT") {
             // Avoid clobbering in-progress text while the user is typing.
             if (document.activeElement !== cwdEl) {
-              cwdEl.value = cwd;
+              (cwdEl as HTMLInputElement).value = cwd;
             }
           } else {
             cwdEl.textContent = cwd;
@@ -347,7 +347,7 @@ import { getConfigCwd } from "./chat-scroll";
         attachFileTreeListeners();
       }
 
-      export function renderFileTreeItem(item, depth) {
+      export function renderFileTreeItem(item, depth?) {
         depth = depth || 0;
         var name = escapeHtml(item.name);
         var isDir = item.type === "dir";
@@ -393,7 +393,7 @@ import { getConfigCwd } from "./chat-scroll";
           });
         });
         tree.querySelectorAll(".tree-item[data-type='file']").forEach(function(item) {
-          var openHandler = function() { openFilePreview(item.dataset.path); };
+          var openHandler = function() { openFilePreview((item as HTMLElement).dataset.path); };
           item.addEventListener("click", openHandler);
           // Keep dblclick for old muscle memory; both work.
           item.addEventListener("dblclick", openHandler);
@@ -404,13 +404,13 @@ import { getConfigCwd } from "./chat-scroll";
         tree.querySelectorAll(".tree-item").forEach(function(item) {
           item.addEventListener("contextmenu", function(e) {
             e.preventDefault();
-            showFileContextMenu(e.clientX, e.clientY, item);
+            showFileContextMenu((e as MouseEvent).clientX, (e as MouseEvent).clientY, item);
           });
           item.addEventListener("touchstart", function(e) {
             pressFired = false;
             pressTimer = setTimeout(function() {
               pressFired = true;
-              var t = e.touches && e.touches[0];
+              var t = (e as TouchEvent).touches && (e as TouchEvent).touches[0];
               showFileContextMenu(t ? t.clientX : 0, t ? t.clientY : 0, item);
             }, 500);
           }, { passive: true });
@@ -477,11 +477,11 @@ import { getConfigCwd } from "./chat-scroll";
       export function appendToComposer(text) {
         var inputBox = document.getElementById("input-box");
         if (!inputBox) return false;
-        var current = inputBox.value || "";
+        var current = (inputBox as HTMLInputElement).value || "";
         var sep = current && !current.endsWith(" ") && !current.endsWith("\n") ? " " : "";
-        inputBox.value = current + sep + text;
+        (inputBox as HTMLInputElement).value = current + sep + text;
         inputBox.dispatchEvent(new Event("input", { bubbles: true }));
-        try { inputBox.focus(); inputBox.setSelectionRange(inputBox.value.length, inputBox.value.length); } catch (e) {}
+        try { inputBox.focus(); (inputBox as HTMLInputElement).setSelectionRange((inputBox as HTMLInputElement).value.length, (inputBox as HTMLInputElement).value.length); } catch (e) {}
         return true;
       }
 
@@ -584,7 +584,7 @@ import { getConfigCwd } from "./chat-scroll";
         menu.querySelectorAll(".file-context-menu-item").forEach(function(btn) {
           btn.addEventListener("click", function(ev) {
             ev.stopPropagation();
-            var idx = parseInt(btn.dataset.idx, 10);
+            var idx = parseInt((btn as HTMLElement).dataset.idx!, 10);
             dismissFileContextMenu();
             if (actions[idx]) actions[idx].run();
           });

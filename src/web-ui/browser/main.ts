@@ -23,11 +23,6 @@ import { t } from "./i18n";
 import { render, renderBootLoading, restoreLoginSession } from "./render";
 import { state } from "./state";
 
-// ── Service Worker registration ──
-// (original scripts.js lines 1-38)
-// Self-signed certificate scenarios: SW registration is rejected by the browser
-// (spec requires secure context + trusted certificate, even after "Advanced → Continue").
-// We degrade gracefully and log the resolution path to console.
 if ('serviceWorker' in navigator) {
   fetch('/sw.js', { cache: 'no-cache' })
     .then(function(response) {
@@ -53,8 +48,6 @@ if ('serviceWorker' in navigator) {
       }
     });
 
-  // Auto-reload when a new service worker takes control (e.g. after update)
-  // But skip reload during initial page load to avoid breaking initialization
   var reloading = false;
   var pageReady = false;
   setTimeout(function() { pageReady = true; }, 3000);
@@ -65,8 +58,6 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// ── PWA display mode detection ──
-// (original scripts.js lines 40-76)
 (function() {
   function detectDisplayMode() {
     var mode = 'browser';
@@ -77,25 +68,17 @@ if ('serviceWorker' in navigator) {
     } else if (window.matchMedia('(display-mode: fullscreen)').matches) {
       mode = 'fullscreen';
     } else if ((navigator as any).standalone === true) {
-      mode = 'standalone'; // iOS Safari
+      mode = 'standalone';
     }
     document.documentElement.setAttribute('data-display-mode', mode);
     document.documentElement.classList.toggle('is-pwa', mode !== 'browser');
     return mode;
   }
   detectDisplayMode();
-  // Re-detect when display mode changes (e.g., user toggles WCO)
   ['standalone', 'window-controls-overlay', 'fullscreen'].forEach(function(m) {
     window.matchMedia('(display-mode: ' + m + ')').addEventListener('change', detectDisplayMode);
   });
 
-  // Wand Android APK detection: the native shell appends "WandApp/<version>"
-  // to the WebView user-agent. On Android (targetSdk >= 35 forces edge-to-edge
-  // rendering) the WebView extends behind the status bar, but Android WebView
-  // doesn't propagate WindowInsets to env(safe-area-inset-*). Tagging the
-  // document root lets CSS apply a sane min top inset so top-pinned drawers
-  // and modals don't sit under the status bar. Newer APK builds also inject
-  // exact pixel values into --app-inset-top via the AndroidInsets bridge.
   try {
     var ua = (navigator && navigator.userAgent) || "";
     if (/WandApp\//.test(ua)) {

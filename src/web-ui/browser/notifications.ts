@@ -5,7 +5,6 @@ import { setFilePanelOpen, isMobileLayout } from "./file-browser";
 import { render } from "./render";
 import { selectSession, closeSettingsModal, closeSessionModal, closeWorktreeMergeModal, closeSessionsDrawer } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
-import { constructor } from "function Object() { [native code] }";
 
 // TODO: import from correct modules when created
 

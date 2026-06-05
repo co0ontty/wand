@@ -169,7 +169,7 @@ import { renderManageCheckbox } from "./sidebar";
         return "";
       }
 
-      export function renderSessionItem(session) {
+      export function renderSessionItem(session, kind?) {
         var activeClass = session.id === state.selectedId ? " active" : "";
         var selectedClass = state.sessionsManageMode && state.selectedSessionIds[session.id] ? " selected" : "";
         var metaStatus = getSessionStatusLabel(session);

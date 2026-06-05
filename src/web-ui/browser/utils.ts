@@ -57,7 +57,7 @@ export function updateRunningIndicators(session: any) {
     if (sig.inFlight) {
       if (!_runningIndicatorsStartTime) {
         // 优先复用 renderStructuredStatusBar 已记录的真实起点
-        _runningIndicatorsStartTime = state._statusBarStartTime > 0 ? _statusBarStartTime : Date.now();
+        _runningIndicatorsStartTime = state._statusBarStartTime > 0 ? state._statusBarStartTime : Date.now();
       }
       var label = formatElapsedShort(Date.now() - _runningIndicatorsStartTime);
       if (!elapsedEl) {

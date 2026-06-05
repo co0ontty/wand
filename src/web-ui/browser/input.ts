@@ -1,3 +1,4 @@
+import type { SendError } from "./types";
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
 import { computeRunningSignal, escapeHtml } from "./utils";
@@ -124,7 +125,7 @@ import { getSessionStatusLabel } from "./session-ui";
       export function commitVoiceTranscript(text) {
         var clean = (text || "").trim();
         if (!clean) return;
-        var box = document.getElementById("input-box");
+        var box = document.getElementById("input-box") as HTMLInputElement | null;
         if (!box) return;
         var existing = box.value || "";
         var joined = existing ? existing.replace(/\s+$/, "") + " " + clean : clean;
@@ -135,7 +136,7 @@ import { getSessionStatusLabel } from "./session-ui";
       }
 
       // v2: 切换语音输入模式（类似微信"按住说话"）
-      export function toggleVoiceMode(force) {
+      export function toggleVoiceMode(force?) {
         var composer = document.querySelector(".input-composer");
         if (!composer) return;
         var willEnable = typeof force === "boolean" ? force : !composer.classList.contains("voice-mode");
@@ -404,7 +405,8 @@ import { getSessionStatusLabel } from "./session-ui";
 
       // Delegate click events for cross-session queue items
       document.addEventListener("click", function(e) {
-        if (e.target.closest("#queue-clear-all")) {
+        var target = e.target as HTMLElement;
+        if (target.closest("#queue-clear-all")) {
           e.preventDefault();
           state.crossSessionQueue = [];
           persistCrossSessionQueue();
@@ -412,13 +414,13 @@ import { getSessionStatusLabel } from "./session-ui";
           showToast("排队已清空。", "info");
           return;
         }
-        var sendNow = e.target.closest(".queue-item-send-now");
+        var sendNow = target.closest(".queue-item-send-now") as HTMLElement | null;
         if (sendNow) {
           e.preventDefault();
           sendQueueItemNow(sendNow.dataset.queueId);
           return;
         }
-        var cancel = e.target.closest(".queue-item-cancel");
+        var cancel = target.closest(".queue-item-cancel") as HTMLElement | null;
         if (cancel) {
           e.preventDefault();
           cancelQueueItem(cancel.dataset.queueId);
@@ -428,7 +430,7 @@ import { getSessionStatusLabel } from "./session-ui";
 
       // Send message from the welcome screen input
       export function welcomeInputSend() {
-        var welcomeInput = document.getElementById("welcome-input");
+        var welcomeInput = document.getElementById("welcome-input") as HTMLInputElement | null;
         var value = welcomeInput ? welcomeInput.value.trim() : "";
         if (!value) return;
 
@@ -492,11 +494,11 @@ import { getSessionStatusLabel } from "./session-ui";
         });
       }
 
-      export function sendOrStart(opts) {
+      export function sendOrStart(opts?) {
         opts = opts || {};
         // Support welcome input as well as the main input box
-        var welcomeInput = document.getElementById("welcome-input");
-        var inputBox = document.getElementById("input-box");
+        var welcomeInput = document.getElementById("welcome-input") as HTMLInputElement | null;
+        var inputBox = document.getElementById("input-box") as HTMLInputElement | null;
         var value = (welcomeInput && welcomeInput.value.trim())
           ? welcomeInput.value.trim()
           : (inputBox ? inputBox.value.trim() : "");
@@ -612,7 +614,7 @@ import { getSessionStatusLabel } from "./session-ui";
           return Promise.resolve();
         }
 
-        var inputBox = document.getElementById("input-box");
+        var inputBox = document.getElementById("input-box") as HTMLInputElement | null;
         var value = inputBox ? inputBox.value : "";
         var selectedSession = getSelectedSession();
         var hasAttachments = state.pendingAttachments.length > 0;
@@ -790,7 +792,7 @@ import { getSessionStatusLabel } from "./session-ui";
         .then(function(res) {
           if (!res.ok) {
             return res.json().catch(function() { return { error: "请求失败" }; }).then(function(payload) {
-              var err = new Error((payload && payload.error) || "无法发送结构化消息。");
+              var err = new Error((payload && payload.error) || "无法发送结构化消息。") as SendError;
               err.errorCode = payload && payload.errorCode;
               err.httpStatus = res.status;
               throw err;
@@ -1005,7 +1007,7 @@ import { getSessionStatusLabel } from "./session-ui";
           if (el.classList.contains("expanded") !== should) {
             el.classList.toggle("expanded", should);
             var del = el.querySelector('.queue-bar-item-delete');
-            if (del) del.tabIndex = should ? 0 : -1;
+            if (del) (del as HTMLElement).tabIndex = should ? 0 : -1;
           }
         }
       }
@@ -1114,7 +1116,7 @@ import { getSessionStatusLabel } from "./session-ui";
           ? crypto.randomUUID()
           : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
 
-        var body = { input: picked, idempotencyKey: idempotencyKey };
+        var body: { input: any; idempotencyKey: string; interrupt?: boolean; preserveQueue?: boolean } = { input: picked, idempotencyKey: idempotencyKey };
         if (inFlight) {
           // 中断 + 保留剩余队列
           body.interrupt = true;
@@ -1324,10 +1326,11 @@ import { getSessionStatusLabel } from "./session-ui";
       // ── 事件代理：所有交互入口都从 #queue-bar-host 起手 ──
       export function attachQueueBarDelegates() {
         var host = document.getElementById("queue-bar-host");
-        if (!host || host.__queueDelegated) return;
-        host.__queueDelegated = true;
+        if (!host || (host as any).__queueDelegated) return;
+        (host as any).__queueDelegated = true;
         host.addEventListener("click", function(ev) {
-          var actionEl = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
+          var evTarget = ev.target as HTMLElement;
+          var actionEl = evTarget && evTarget.closest ? evTarget.closest("[data-action]") : null;
           if (!actionEl || !host.contains(actionEl)) return;
           var action = actionEl.getAttribute("data-action");
           // chip 本体（data-action="drag"）由 pointerdown 走 drag-or-tap 流程；
@@ -1351,7 +1354,8 @@ import { getSessionStatusLabel } from "./session-ui";
         // hover 跟随：鼠标移到哪一条，哪一条就展开（拖拽进行中不响应，免得抢拖拽）
         host.addEventListener("mouseover", function(ev) {
           if (state.queueBarDrag) return;
-          var chip = ev.target && ev.target.closest ? ev.target.closest(".queue-bar-item") : null;
+          var evTarget = ev.target as HTMLElement;
+          var chip = evTarget && evTarget.closest ? evTarget.closest(".queue-bar-item") : null;
           if (!chip || !host.contains(chip)) return;
           setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
         });
@@ -1363,8 +1367,9 @@ import { getSessionStatusLabel } from "./session-ui";
         // 让 click 阶段去处理它们。
         host.addEventListener("pointerdown", function(ev) {
           if (ev.button !== undefined && ev.button !== 0) return;
-          if (ev.target && ev.target.closest && ev.target.closest('[data-action="delete"], [data-action="promote-item"]')) return;
-          var chip = ev.target && ev.target.closest ? ev.target.closest('.queue-bar-item') : null;
+          var evTarget = ev.target as HTMLElement;
+          if (evTarget && evTarget.closest && evTarget.closest('[data-action="delete"], [data-action="promote-item"]')) return;
+          var chip = evTarget && evTarget.closest ? evTarget.closest('.queue-bar-item') : null;
           if (!chip) return;
           // 拖拽前先把这条切到 expanded（鼠标按下时通常已经 hovered，但触屏没 hover）
           setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
@@ -1455,7 +1460,7 @@ import { getSessionStatusLabel } from "./session-ui";
       }
 
       export function buildInputError(payload) {
-        var err = new Error((payload && payload.error) || "会话已结束。");
+        var err = new Error((payload && payload.error) || "会话已结束。") as SendError;
         if (payload && typeof payload === "object") {
           err.errorCode = payload.errorCode || null;
           err.sessionId = payload.sessionId || state.selectedId || null;
@@ -1497,7 +1502,7 @@ import { getSessionStatusLabel } from "./session-ui";
         return !!(session && !isStructuredSession(session) && (session.provider === "claude" || session.provider === "codex") && session.status !== "running" && session.claudeSessionId);
       }
 
-      export function ensureSessionReadyForInput(session, errorEl) {
+      export function ensureSessionReadyForInput(session, errorEl?) {
         if (!session) {
           showToast("会话不存在，请重新选择或新建会话。", "error");
           return Promise.resolve(null);
@@ -1586,7 +1591,7 @@ import { getSessionStatusLabel } from "./session-ui";
         }
       }
 
-      export function queueDirectInput(input, shortcutKey, viewOverride) {
+      export function queueDirectInput(input, shortcutKey?, viewOverride?) {
         if (!input || !state.selectedId) return Promise.resolve();
         _detectAndMarkClear(input);
         state.messageQueue.push(input);
@@ -1648,7 +1653,7 @@ import { getSessionStatusLabel } from "./session-ui";
         .then(function(res) {
           if (!res.ok) {
             return res.json().catch(function() { return { error: "请求失败" }; }).then(function(payload) {
-              var error = buildInputError(payload);
+              var error = buildInputError(payload) as SendError;
               error.httpStatus = res.status;
               console.error("[wand] postInput: request failed", {
                 status: res.status,
@@ -1830,7 +1835,7 @@ import { getSessionStatusLabel } from "./session-ui";
         focusTerminalContainer();
       }
 
-      export function hideMiniKeyboard(clearModifiersOnHide) {
+      export function hideMiniKeyboard(clearModifiersOnHide?) {
         // Just clear modifiers, inline keyboard visibility follows view
         state.keyboardPopupOpen = false;
         if (clearModifiersOnHide !== false) {
@@ -1880,7 +1885,7 @@ import { getSessionStatusLabel } from "./session-ui";
         var isRunning = structured
           ? !!(selectedSession && selectedSession.structuredState && selectedSession.structuredState.inFlight)
           : !!selectedSession && selectedSession.status === "running";
-        var composer = document.getElementById("input-box");
+        var composer = document.getElementById("input-box") as HTMLInputElement | null;
         // 终端交互 toggle 现在挂在加号 popover 内的 menuitem 上。.active 保留兼容；
         // .is-on 给 popover-item 提供独立的"已开启"视觉；同时刷新 aria-checked 与 "开/关" 文本。
         var toggles = ["terminal-interactive-toggle-top"];
@@ -1929,7 +1934,7 @@ import { getSessionStatusLabel } from "./session-ui";
           stopMockRecognition();
           resetVoiceRecordingUI();
         }
-        var sendBtn = document.getElementById("send-input-button");
+        var sendBtn = document.getElementById("send-input-button") as HTMLButtonElement | null;
         var structuredInFlight = structured && isRunning;
         if (sendBtn) {
           sendBtn.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
@@ -2154,7 +2159,7 @@ import { getSessionStatusLabel } from "./session-ui";
         .then(function(res) {
           if (!res.ok) {
             return res.json().catch(function() { return { error: "请求失败" }; }).then(function(payload) {
-              var error = buildInputError(payload);
+              var error = buildInputError(payload) as SendError;
               error.httpStatus = res.status;
               // Don't re-queue on session-unavailable — the session will auto-resume
               // on the user's next message, and stale queue items would cause duplicates
@@ -2293,7 +2298,7 @@ import { getSessionStatusLabel } from "./session-ui";
         }
       }
 
-      export function initSwipeToDelete() {
+      export function initSwipeToDelete(_container?) {
         _swipeState = null;
         _swipedItem = null;
       }
@@ -2331,7 +2336,7 @@ import { getSessionStatusLabel } from "./session-ui";
 
       export var _resumeInProgress = false;
 
-      export function resumeSession(sessionId, errorEl) {
+      export function resumeSession(sessionId, errorEl?) {
         if (!sessionId || _resumeInProgress) return Promise.resolve(null);
         _resumeInProgress = true;
         return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/resume", {
@@ -2442,7 +2447,7 @@ import { getSessionStatusLabel } from "./session-ui";
       }
 
       export function createSessionFromWelcomeInput(value) {
-        var welcomeInput = document.getElementById("welcome-input");
+        var welcomeInput = document.getElementById("welcome-input") as HTMLInputElement | null;
         if (!welcomeInput) return;
         welcomeInput.placeholder = "正在思考…";
         welcomeInput.disabled = true;
@@ -2673,13 +2678,13 @@ import { getSessionStatusLabel } from "./session-ui";
       export function updateInputPanelViewportSpacing() {
         // 键盘空间通过 syncAppViewportHeight 让 body 跟随 visualViewport 收缩处理；
         // 这里清掉历史遗留的 --keyboard-offset 避免双重补偿。
-        var inputPanel = document.querySelector('.input-panel');
+        var inputPanel = document.querySelector('.input-panel') as HTMLElement | null;
         if (!inputPanel) return;
         inputPanel.style.removeProperty('--keyboard-offset');
       }
 
       export function resetInputPanelViewportSpacing() {
-        var inputPanel = document.querySelector('.input-panel');
+        var inputPanel = document.querySelector('.input-panel') as HTMLElement | null;
         if (!inputPanel) return;
         inputPanel.style.removeProperty('--keyboard-offset');
       }
@@ -2837,7 +2842,7 @@ import { getSessionStatusLabel } from "./session-ui";
 
       // Mobile keyboard handling
       export function setupMobileKeyboardHandlers() {
-        var inputPanel = document.querySelector('.input-panel');
+        var inputPanel = document.querySelector('.input-panel') as HTMLElement | null;
         var chatMessages = document.querySelector('.chat-messages');
 
         // Virtual Keyboard API (Chrome/Edge)
@@ -2845,7 +2850,7 @@ import { getSessionStatusLabel } from "./session-ui";
         // syncAppViewportHeight 让 body 跟随可见视口收缩，input-panel
         // 自然上移。这里只把事件留作未来钩子，避免和新方案双重补偿。
         if ('virtualKeyboard' in navigator) {
-          var vk = navigator.virtualKeyboard;
+          var vk = (navigator as any).virtualKeyboard;
           vk.addEventListener('geometrychange', function() {
             if (!inputPanel) return;
             inputPanel.style.removeProperty('padding-bottom');
@@ -2864,7 +2869,8 @@ import { getSessionStatusLabel } from "./session-ui";
         if (chatMessages) {
           chatMessages.addEventListener('click', function(e) {
             // Only focus if not clicking on a link, button, or tool card header
-            if (e.target.tagName !== 'A' && e.target.tagName !== 'BUTTON' && !e.target.closest('button') && !e.target.closest('[data-tool-toggle]')) {
+            var target = e.target as HTMLElement;
+            if (target.tagName !== 'A' && target.tagName !== 'BUTTON' && !target.closest('button') && !target.closest('[data-tool-toggle]')) {
               focusInputFromTap();
             }
           });

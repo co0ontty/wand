@@ -169,7 +169,7 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
           return;
         }
 
-        var item = target.closest(".session-item");
+        var item = target.closest(".session-item") as HTMLElement | null;
         if (item) {
           if (state.sessionsManageMode) {
             if (item.dataset.sessionId) {

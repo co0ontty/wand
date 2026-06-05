@@ -11,7 +11,7 @@ import { renderStructuredStatusBar, updateRunningIndicators } from "./utils";
 import { getCardDefault, snapCollapsedSubagentPanelsToBottom } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
-      export function renderChat(forceFullRender) {
+      export function renderChat(forceFullRender?) {
         if (state.renderPending && !forceFullRender) return;
         state.renderPending = true;
 
@@ -28,7 +28,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
       }
 
       state.chatRenderTimer = null;
-      export function scheduleChatRender(immediate) {
+      export function scheduleChatRender(immediate?) {
         if (state.chatRenderTimer && !immediate) return;
         if (state.chatRenderTimer) clearTimeout(state.chatRenderTimer);
         if (immediate) {
@@ -261,7 +261,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         state.lastRenderedMsgCount = msgCount;
         state.lastRenderedHash = outputHash;
 
-        var chatMessages = ensureChatMessagesContainer(chatOutput);
+        chatMessages = ensureChatMessagesContainer(chatOutput);
         if (!chatMessages) return;
 
         // 在动 DOM 之前先看用户是不是贴在底部——这决定后面我们要不要让视图
@@ -846,7 +846,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var touchStartY = 0;
 
         document.addEventListener("touchstart", function(e) {
-          var msgEl = e.target.closest(".chat-message");
+          var msgEl = (e.target as HTMLElement).closest(".chat-message");
           if (!msgEl) return;
           var bubble = msgEl.querySelector(".chat-message-bubble");
           if (!bubble) return;
@@ -879,7 +879,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
         // Dismiss copy buttons when tapping elsewhere
         document.addEventListener("click", function(e) {
-          if (!e.target.closest(".msg-copy-btn")) {
+          if (!(e.target as HTMLElement).closest(".msg-copy-btn")) {
             document.querySelectorAll(".msg-copy-btn.visible").forEach(function(b) {
               b.classList.remove("visible");
             });
@@ -1377,7 +1377,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var currentAssistantLines = [];
 
         for (var i = 0; i < contentLines.length; i++) {
-          var line = contentLines[i];
+          line = contentLines[i];
 
           if (line.indexOf("❯") === 0) {
             var afterPrompt = line.replace(/^❯\s*/, "").trim();
@@ -1427,7 +1427,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           var fallbackUserText = "";
           var fallbackUserIdx = -1;
           for (var i = 0; i < contentLines.length; i++) {
-            var line = contentLines[i];
+            line = contentLines[i];
             if (line.indexOf('Try"') === 0 || line.indexOf('Try "') === 0) continue;
             if (line.indexOf('Failed to install') !== -1) continue;
             if (line.indexOf('ctrl+g') !== -1) continue;
@@ -1466,7 +1466,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
       // subagent = 一组按 taskId/agentType 哈希选色的备选 palette。同一模板让多个
       // 角色看起来是"同种生物的不同毛色"，群聊感更自然。
       export var _AVATAR_T = "transparent";
-      export function buildPixelSvg(grid, size) {
+      export function buildPixelSvg(grid, size?) {
         var s = size || 3;
         var w = grid[0].length * s;
         var h = grid.length * s;
@@ -1652,7 +1652,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         img.outerHTML = renderAvatarFallback(persona.avatarSvg);
       }
 
-      export function chatAvatar(role, opts) {
+      export function chatAvatar(role, opts?) {
         opts = opts || {};
         var personaRole = role === "user" ? "user" : "assistant";
         var persona = getStructuredChatPersona(personaRole);
@@ -1856,9 +1856,9 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var expanded = el.getAttribute("data-expanded") === "true";
         el.setAttribute("data-expanded", expanded ? "false" : "true");
         var body = el.querySelector(".tool-group-body");
-        if (body) body.style.display = expanded ? "none" : "block";
+        if (body) (body as HTMLElement).style.display = expanded ? "none" : "block";
         var chevron = el.querySelector(".tool-group-chevron");
-        if (chevron) chevron.style.transform = expanded ? "" : "rotate(180deg)";
+        if (chevron) (chevron as HTMLElement).style.transform = expanded ? "" : "rotate(180deg)";
         persistElementExpandState(el, "tool-group");
       };
 
