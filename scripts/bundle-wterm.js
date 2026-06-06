@@ -24,6 +24,27 @@ const stripUnderlinePlugin = {
   },
 };
 
+// The wterm input handler creates an off-screen <textarea> for keystroke
+// capture and marks it with aria-hidden="true". When the terminal is focused
+// the browser warns about a focused element living under an aria-hidden
+// ancestor. Replace the attribute with a screen-reader label instead.
+const fixTextareaAriaPlugin = {
+  name: "fix-textarea-aria",
+  setup(b) {
+    b.onLoad({ filter: /input\.js$/ }, (args) => {
+      const original = readFileSync(args.path, "utf8");
+      const contents = original.replace(
+        /this\.textarea\.setAttribute\("aria-hidden",\s*"true"\);/,
+        'this.textarea.setAttribute("aria-label", "terminal input");'
+      );
+      if (contents === original) {
+        console.warn("WARNING: fix-textarea-aria plugin did not match input.js");
+      }
+      return { contents, loader: "js" };
+    });
+  },
+};
+
 await build({
   entryPoints: [path.join(__dirname, "wterm-entry.js")],
   bundle: true,
@@ -31,9 +52,9 @@ await build({
   globalName: "WTermLib",
   outfile: path.join(outDir, "wterm.bundle.js"),
   minify: true,
-  target: ["es2020"],
+  target: ["es2017"],
   platform: "browser",
-  plugins: [stripUnderlinePlugin],
+  plugins: [stripUnderlinePlugin, fixTextareaAriaPlugin],
 });
 
 cpSync(

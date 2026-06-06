@@ -15,7 +15,7 @@ await build({
   footer: { js: "window.QRCodeLib = QRCodeLib.default || QRCodeLib;" },
   outfile: path.join(outDir, "qrcode.bundle.js"),
   minify: true,
-  target: ["es2020"],
+  target: ["es2017"],
   platform: "browser",
 });
 
