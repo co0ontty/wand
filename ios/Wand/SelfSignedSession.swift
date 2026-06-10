@@ -22,9 +22,12 @@ final class SelfSignedSession: NSObject, URLSessionDelegate {
 
     // MARK: - URLSessionDelegate
 
+    // 注意：completionHandler 不标 @MainActor。协议声明里带它，但标上后在这个
+    // 非隔离同步方法里直接调用会变成 actor 隔离错误；不标只是 Swift 6 模式的
+    // sendability 警告，Swift 5 下无害（macOS 端同款写法编译通过）。
     func urlSession(_ session: URLSession,
                     didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping @MainActor @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+                    completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust else {
             completionHandler(.performDefaultHandling, nil)
