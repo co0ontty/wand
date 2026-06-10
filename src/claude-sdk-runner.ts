@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 
 import {
   query as sdkQuery,
@@ -52,10 +53,43 @@ function isMuslSystem(): boolean {
 }
 
 /**
- * 把 SDK 应使用的 native claude binary 路径解析出来。逻辑与
- * `structured-session-manager.ts` 的 `resolveSdkClaudeBinary` 保持一致。
+ * 在 PATH 上找系统安装的 `claude`。wand 的交互式 PTY 会话本来就 spawn PATH 上的
+ * claude（service 模式下 path-repair 已先把 PATH 补全），SDK 调用对齐同一个 binary
+ * 才能保证两边版本、认证、API 端点兼容性完全一致。
  */
-function resolveSdkClaudeBinary(): string | undefined {
+function findClaudeOnPath(): string | undefined {
+  const dirs = (process.env.PATH || "").split(path.delimiter);
+  for (const dir of dirs) {
+    if (!dir) continue;
+    const candidate = path.join(dir, "claude");
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      // 不存在或不可执行，继续找下一个目录
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 解析 SDK 应使用的 claude binary：**优先系统安装的 claude，回退 SDK 内置 native binary**。
+ *
+ * 优先系统版的原因：node_modules 里的内置 binary 版本在装包那刻就钉死了，会随时间
+ * 越来越旧，最终可能被 API 端拒绝（实测内置 2.1.138 对部分端点持续 502 重试到超时，
+ * 而系统侧日常更新的 2.1.170 正常）。系统 claude 跟交互式 PTY 会话同源，用户平时
+ * 一直在用、一直在更新，是最可靠的选择。
+ *
+ * 内置 binary 仅作兜底（系统没装 claude 时仍可用）。Linux 上必须显式按 libc 选包：
+ * SDK 默认解析在 glibc 系统上可能错选 musl 包直接抛 "native binary not found"。
+ */
+export function resolveSdkClaudeBinary(): string | undefined {
+  // Windows 上 PATH 命中的多是 .cmd shim，spawn 语义不同，维持 SDK 默认解析。
+  if (process.platform !== "win32") {
+    const systemClaude = findClaudeOnPath();
+    if (systemClaude) return systemClaude;
+  }
+
   if (process.platform !== "linux") return undefined;
 
   const musl = isMuslSystem();
@@ -94,15 +128,15 @@ function resolveSdkClaudeBinary(): string | undefined {
  *   - `tools: []` 关掉所有内置工具：这两个调用点（commit message / prompt 优化）
  *     本质就是"纯文本生成"，关掉工具能 (1) 防止 Claude 随手开个工具卡住权限询问；
  *     (2) 避免一次性短调用还顺便加载文件 / 跑 bash 这种副作用。
+ *   - `mcpServers: {}` + `strictMcpConfig: true` 跳过用户配置的全部 MCP 服务器：
+ *     纯文本生成用不上 MCP，但不禁的话每次调用都要连接 MCP（启动慢好几秒）、
+ *     还把所有 MCP 工具 schema 灌进 system prompt（实测一次多写 1.6 万 token 的
+ *     prompt cache，白花钱）。
  *   - `persistSession: false`：这些 ephemeral 调用不应该污染 `~/.claude/projects/`
  *     的会话历史；用户在 wand UI 里也压根看不到这些"虚拟会话"。
  *
- * 选择 SDK 而非以前的 `execFile("claude")`：
- *   - SDK 包内置各平台 native binary，`pathToClaudeCodeExecutable` 直接指到
- *     `node_modules` 里，**零** PATH 依赖。systemd / launchd / 双击图标启动
- *     wand server 时不会再因为 PATH 缺 nvm/npm-global 而报"未找到 claude CLI"。
- *   - 与现有 `structured-session-manager.ts` 的 SDK 调用路径同源，行为/认证/
- *     更新策略统一。
+ * binary 解析见 `resolveSdkClaudeBinary()`：优先系统 claude（与 PTY 会话同源、
+ * 版本新），回退 SDK 内置 native binary（系统没装时的零 PATH 依赖兜底）。
  */
 export async function runClaudePrint(
   prompt: string,
@@ -118,6 +152,8 @@ export async function runClaudePrint(
   const sdkOptions: SdkOptions = {
     abortController,
     tools: [],
+    mcpServers: {},
+    strictMcpConfig: true,
     persistSession: false,
     ...(cwd ? { cwd } : {}),
     ...(sdkClaudeBinary ? { pathToClaudeCodeExecutable: sdkClaudeBinary } : {}),

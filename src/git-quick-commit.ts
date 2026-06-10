@@ -13,7 +13,9 @@ import {
 const GIT_TIMEOUT_MS = 1500;
 const GIT_PUSH_TIMEOUT_MS = 30_000;
 const MAX_FILE_ENTRIES = 200;
-const CLAUDE_MESSAGE_TIMEOUT_MS = 30_000;
+// AI 生成 message/tag 的超时。SDK 链路 = spawn claude + API 调用（带自动重试），
+// 30s 在 API 抖动时不够用，放宽到 60s。
+const CLAUDE_MESSAGE_TIMEOUT_MS = 60_000;
 const MAX_DIFF_FOR_AI = 100_000;
 const GIT_MAX_BUFFER = 16 * 1024 * 1024;
 
@@ -266,8 +268,10 @@ export function getGitStatus(cwd: string): GitStatusResult {
     behind,
     lastCommit,
     latestTag,
-    // 基于全量 allEntries 判定（不受 files 的 200 条 slice 影响），供前端决定是否渲染 Submodule 球。
-    hasSubmodule: allEntries.some((e) => e.isSubmodule),
+    // 供前端决定是否渲染 Submodule 球。status 全量条目（不受 files 的 200 条 slice 影响）
+    // 只能看到「有改动」的 submodule，clean submodule 不会出现在 status 里，所以再用
+    // .gitmodules 声明兜底——只要仓库声明了 submodule 就提供该选项。
+    hasSubmodule: allEntries.some((e) => e.isSubmodule) || repoDeclaresSubmodule(repoRoot),
   };
 }
 
