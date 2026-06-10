@@ -164,32 +164,55 @@ let cachedGitHubApk: GitHubApkInfo | null = null;
 let gitHubApkCacheTs = 0;
 const GITHUB_APK_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
+interface GitHubReleaseAssetHit {
+  tagName: string;
+  body?: string;
+  asset: { name: string; browser_download_url: string; size: number };
+}
+
+// 客户端代码没变时 CI 会跳过该平台的构建，最新 release 上可能没有 .apk/.dmg；
+// 因此不能只查 /releases/latest，要按时间倒序遍历最近的 releases，取第一个带对应产物的。
+async function fetchGitHubReleaseAssetByExt(ext: string): Promise<GitHubReleaseAssetHit | null> {
+  const apiUrl = PKG_REPO_URL.replace("github.com", "api.github.com/repos") + "/releases?per_page=30";
+  const resp = await fetch(apiUrl, {
+    headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "wand-server" },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!resp.ok) return null;
+  const releases = await resp.json() as Array<{
+    tag_name: string;
+    body?: string;
+    draft?: boolean;
+    prerelease?: boolean;
+    assets: Array<{ name: string; browser_download_url: string; size: number }>;
+  }>;
+  for (const release of releases) {
+    if (release.draft || release.prerelease) continue;
+    const asset = release.assets.find(a => a.name.toLowerCase().endsWith(ext));
+    if (asset) return { tagName: release.tag_name, body: release.body, asset };
+  }
+  return null;
+}
+
 async function fetchGitHubLatestApk(forceRefresh = false): Promise<GitHubApkInfo | null> {
   const now = Date.now();
   if (!forceRefresh && cachedGitHubApk && (now - gitHubApkCacheTs < GITHUB_APK_CACHE_TTL)) {
     return cachedGitHubApk;
   }
   try {
-    const apiUrl = PKG_REPO_URL.replace("github.com", "api.github.com/repos") + "/releases/latest";
-    const resp = await fetch(apiUrl, {
-      headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "wand-server" },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!resp.ok) return cachedGitHubApk ?? null;
-    const release = await resp.json() as {
-      tag_name: string;
-      body?: string;
-      assets: Array<{ name: string; browser_download_url: string; size: number }>;
-    };
-    const apkAsset = release.assets.find(a => a.name.toLowerCase().endsWith(".apk"));
-    if (!apkAsset) return cachedGitHubApk ?? null;
-    const version = extractAndroidApkVersion(release.tag_name) ?? release.tag_name.replace(/^v/, "");
+    const hit = await fetchGitHubReleaseAssetByExt(".apk");
+    if (!hit) return cachedGitHubApk ?? null;
+    // 版本号优先从文件名提取：未变化的平台沿用老包，挂它的 release tag 可能更新，
+    // 用 tag 当版本会让客户端「提示新版、下载到旧包」死循环。
+    const version = extractAndroidApkVersion(hit.asset.name)
+      ?? extractAndroidApkVersion(hit.tagName)
+      ?? hit.tagName.replace(/^v/, "");
     cachedGitHubApk = {
       version,
-      downloadUrl: apkAsset.browser_download_url,
-      fileName: apkAsset.name,
-      size: apkAsset.size,
-      releaseNotes: release.body ? release.body.trim().slice(0, 500) : undefined,
+      downloadUrl: hit.asset.browser_download_url,
+      fileName: hit.asset.name,
+      size: hit.asset.size,
+      releaseNotes: hit.body ? hit.body.trim().slice(0, 500) : undefined,
     };
     gitHubApkCacheTs = now;
     return cachedGitHubApk;
@@ -253,24 +276,17 @@ async function fetchGitHubLatestDmg(forceRefresh = false): Promise<GitHubDmgInfo
     return cachedGitHubDmg;
   }
   try {
-    const apiUrl = PKG_REPO_URL.replace("github.com", "api.github.com/repos") + "/releases/latest";
-    const resp = await fetch(apiUrl, {
-      headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "wand-server" },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!resp.ok) return cachedGitHubDmg ?? null;
-    const release = await resp.json() as {
-      tag_name: string;
-      assets: Array<{ name: string; browser_download_url: string; size: number }>;
-    };
-    const dmgAsset = release.assets.find(a => a.name.toLowerCase().endsWith(".dmg"));
-    if (!dmgAsset) return cachedGitHubDmg ?? null;
-    const version = extractMacosDmgVersion(release.tag_name) ?? release.tag_name.replace(/^v/, "");
+    const hit = await fetchGitHubReleaseAssetByExt(".dmg");
+    if (!hit) return cachedGitHubDmg ?? null;
+    // 同 APK：版本号优先从文件名提取，避免沿用老包时把 release tag 当成新版本。
+    const version = extractMacosDmgVersion(hit.asset.name)
+      ?? extractMacosDmgVersion(hit.tagName)
+      ?? hit.tagName.replace(/^v/, "");
     cachedGitHubDmg = {
       version,
-      downloadUrl: dmgAsset.browser_download_url,
-      fileName: dmgAsset.name,
-      size: dmgAsset.size,
+      downloadUrl: hit.asset.browser_download_url,
+      fileName: hit.asset.name,
+      size: hit.asset.size,
     };
     gitHubDmgCacheTs = now;
     return cachedGitHubDmg;

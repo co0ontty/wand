@@ -7,6 +7,9 @@ name: Cleanup Old Release Assets
 # - 保护刚发布的那个 tag：哪怕它的 semver 排不进前 N（例如对老分支的补丁版本），
 #   也会被排除在删除名单外。
 # - 仅删 .apk / .dmg / .ipa，其他 assets 不动。
+# - 每类产物全局至少保住一个：客户端代码连续多版未变时 CI 会跳过构建，
+#   某类产物最后一次真实出包可能掉出保留窗口。服务端 GitHub 回退是向前遍历
+#   release 找包的，所以当保留窗口内完全没有某类产物时，窗口外最新的那一个不删。
 
 on:
   release:
@@ -59,6 +62,57 @@ jobs:
           PRUNE=("${TAGS[@]:$KEEP}")
           echo "Candidates to prune: ${#PRUNE[@]}"
 
+          asset_ext() {
+            case "${1,,}" in
+              *.apk) echo apk ;;
+              *.dmg) echo dmg ;;
+              *.ipa) echo ipa ;;
+            esac
+          }
+
+          # 统计保留窗口内每类产物是否存在
+          declare -A EXT_IN_KEEP=()
+          for tag in "${TAGS[@]:0:$KEEP}"; do
+            while IFS= read -r name; do
+              ext=$(asset_ext "$name")
+              [ -n "$ext" ] && EXT_IN_KEEP["$ext"]=1
+            done < <(
+              gh release view "$tag" --repo "$REPO" --json assets \
+                --jq '.assets[].name' 2>/dev/null || true
+            )
+          done
+
+          # 缓存窗口外每个 release 的产物清单（也避免重复调 API）
+          declare -A PRUNE_ASSETS=()
+          for tag in "${PRUNE[@]}"; do
+            PRUNE_ASSETS["$tag"]=$(
+              gh release view "$tag" --repo "$REPO" --json assets \
+                --jq '.assets[] | select(.name | test("\\.(apk|dmg|ipa)$"; "i")) | .name' \
+                2>/dev/null || true
+            )
+          done
+
+          # 保留窗口内缺失的产物类型：保住窗口外（semver 降序）最新的那一个
+          declare -A PROTECT=()
+          for want in apk dmg ipa; do
+            [ -n "${EXT_IN_KEEP[$want]:-}" ] && continue
+            for tag in "${PRUNE[@]}"; do
+              found=""
+              while IFS= read -r name; do
+                [ -z "$name" ] && continue
+                if [ "$(asset_ext "$name")" = "$want" ]; then
+                  found=1
+                  break
+                fi
+              done <<< "${PRUNE_ASSETS[$tag]}"
+              if [ -n "$found" ]; then
+                PROTECT["$tag $want"]=1
+                echo "Protect last remaining .$want outside keep window: $tag"
+                break
+              fi
+            done
+          done
+
           deleted=0
           skipped=0
 
@@ -71,26 +125,23 @@ jobs:
               continue
             fi
 
-            mapfile -t ASSETS < <(
-              gh release view "$tag" --repo "$REPO" --json assets \
-                --jq '.assets[] | select(.name | test("\\.(apk|dmg|ipa)$"; "i")) | .name' \
-                2>/dev/null || true
-            )
-
-            if [ "${#ASSETS[@]}" -eq 0 ]; then
-              continue
-            fi
-
-            for asset in "${ASSETS[@]}"; do
+            while IFS= read -r asset; do
+              [ -z "$asset" ] && continue
+              ext=$(asset_ext "$asset")
+              if [ -n "$ext" ] && [ -n "${PROTECT["$tag $ext"]:-}" ]; then
+                echo "Skip $tag / $asset (last remaining .$ext)"
+                skipped=$((skipped + 1))
+                continue
+              fi
               echo "Deleting: $tag / $asset"
               if gh release delete-asset "$tag" "$asset" --repo "$REPO" --yes; then
                 deleted=$((deleted + 1))
               else
                 echo "  -> failed, continuing"
               fi
-            done
+            done <<< "${PRUNE_ASSETS[$tag]}"
           done
 
           echo "----"
           echo "Assets deleted: $deleted"
-          echo "Releases skipped (trigger): $skipped"
+          echo "Releases skipped (trigger/protected): $skipped"

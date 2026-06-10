@@ -14,11 +14,37 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      # macos/ 是 submodule：自上一个 tag 以来指针没动过就跳过构建（同 android-release.yml）。
+      - name: Detect macos changes since previous tag
+        id: changed
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PREV_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -Fx -A1 "$TAG" | tail -n +2 | head -1)
+          if [ -z "$PREV_TAG" ]; then
+            echo "没有更早的 tag，按首个 release 处理，执行构建"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CUR=$(git rev-parse "$TAG:macos" 2>/dev/null || echo "missing-cur")
+          PREV=$(git rev-parse "$PREV_TAG:macos" 2>/dev/null || echo "missing-prev")
+          if [ "$CUR" = "$PREV" ]; then
+            echo "macos 自 $PREV_TAG 以来无变化（$CUR），跳过 DMG 构建"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos 有变化：$PREV_TAG=$PREV → $TAG=$CUR"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Select Xcode
+        if: steps.changed.outputs.changed == 'true'
         run: sudo xcode-select -s /Applications/Xcode.app
 
       - name: Extract version from tag
+        if: steps.changed.outputs.changed == 'true'
         id: version
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
@@ -27,6 +53,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build DMG
+        if: steps.changed.outputs.changed == 'true'
         working-directory: macos
         run: |
           chmod +x build.sh
@@ -35,6 +62,7 @@ jobs:
 
       # body 由 .github/workflows/release-notes.yml 单点管理，这里只上传 DMG。
       - name: Upload DMG to GitHub Release
+        if: steps.changed.outputs.changed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: macos/dist/wand-v${{ steps.version.outputs.version }}.dmg
