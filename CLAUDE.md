@@ -204,7 +204,7 @@ App 启动 5 秒后异步调 `/api/macos-dmg-update?currentVersion=<X>` → 弹 
 
 ## iOS IPA Build & Sideload
 
-项目包含一个 iOS WebView 壳应用（SwiftUI + WKWebView），源码在 `ios/` 目录（git submodule → `co0ontty/wand-ios`），结构对称 `macos/`。完整调研结论与安装手册见 `ios/README.md`。
+项目包含一个 iOS **原生 SwiftUI 客户端**（会话列表 / 聊天 / 输入 / 权限审批直连 REST + `/ws`，WKWebView 仅作「网页版」兜底入口），源码在 `ios/` 目录（git submodule → `co0ontty/wand-ios`）。原生化是为了根治 WebView 在移动端的键盘重叠、状态栏错位问题；与 `macos/`（纯 WebView 壳）不再对称。协议对接速查与完整安装手册见 `ios/README.md`。
 
 **编译（产物是未签名 IPA）：**
 ```bash
