@@ -11203,6 +11203,17 @@
         }
       });
     }
+    document.addEventListener("click", function(e) {
+      if (!isTouchDevice()) return;
+      var inputBox = document.getElementById("input-box");
+      if (!inputBox || document.activeElement !== inputBox) return;
+      var target = e.target;
+      if (!target || typeof target.closest !== "function") return;
+      if (target.closest(".input-panel") || target.closest("#mini-keyboard") || target.closest("#mini-keyboard-fab") || target.closest("#mini-keyboard-toggle") || target.closest("#terminal-interactive-toggle") || target.closest(".wand-joystick-root")) {
+        return;
+      }
+      inputBox.blur();
+    }, true);
   }
   function resetRootViewportScroll() {
     try {

@@ -2875,6 +2875,33 @@ import { getSessionStatusLabel } from "./session-ui";
             }
           });
         }
+
+        // 键盘已弹出时，点击输入区以外的区域自动收起（仅触摸设备）。
+        // 只处理聊天输入框 #input-box：终端透传 / wterm 自己的隐藏输入框有
+        // 独立的焦点管理，不能在这里误伤。用 click 而非 pointerdown——滚动
+        // 手势不产生 click，上滑翻历史不会误收键盘；且收起引发的布局位移
+        // 发生在本次点击完成之后，不会造成误点。capture 阶段监听，避免被
+        // 中间层 stopPropagation 吞掉。
+        document.addEventListener("click", function(e) {
+          if (!isTouchDevice()) return;
+          var inputBox = document.getElementById("input-box");
+          if (!inputBox || document.activeElement !== inputBox) return;
+          var target = e.target as HTMLElement | null;
+          if (!target || typeof target.closest !== "function") return;
+          // 输入面板自身（输入框/发送/快捷按钮）、迷你键盘及其开关、
+          // 终端悬浮遥控上的点击不收起键盘。
+          if (
+            target.closest(".input-panel") ||
+            target.closest("#mini-keyboard") ||
+            target.closest("#mini-keyboard-fab") ||
+            target.closest("#mini-keyboard-toggle") ||
+            target.closest("#terminal-interactive-toggle") ||
+            target.closest(".wand-joystick-root")
+          ) {
+            return;
+          }
+          inputBox.blur();
+        }, true);
       }
 
       // ─────────────────────────────────────────────────────────────────────
