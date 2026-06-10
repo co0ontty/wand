@@ -80,7 +80,7 @@ The runtime config file is `~/.wand/config.json` by default.
 
 ## Android APK Build & Deployment
 
-项目包含一个 Android WebView 壳应用，源码在 `android/` 目录（git submodule → `co0ontty/wand-android`）。
+项目包含一个 Android **原生客户端**（Kotlin + Jetpack Compose，会话列表 / 聊天 / 新建会话 / 权限审批 / 设置直连 REST + `/ws`，对称 iOS 原生客户端；WebView 的 MainActivity 仅作设置页「网页版」兜底入口），源码在 `android/` 目录（git submodule → `co0ontty/wand-android`）。原生层结构：`data/`（WandHttp OkHttp 单例 + WandModels org.json 容错解析 + WandApi + WandSocket，合流/重连语义逐行对齐 `ios/Wand/ChatStore.swift` 与 `WandSocket.swift`）、`ui/`（ChatStore 状态机 + Compose 屏幕）。原有 Java 辅助类（ServerStore / NotificationHelper / UpdateManager / WandForegroundService / QR 扫码）原样复用，更新检查迁到 HomeActivity 启动时，图标切换抽取为 `AppIconSwitcher` 供原生与 WebView 桥共用。`updateSessionProgress` 网页驱动的进度通知与任务完成通知（sendNotification）在原生主路径下暂缺，待由原生 WS/前台服务驱动（v1.1）。
 
 **编译 APK：**
 ```bash
