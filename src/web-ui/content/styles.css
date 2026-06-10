@@ -16353,7 +16353,6 @@
     /* ===== 终端悬浮摇杆遥控器（手机端 PTY 遥控） ===== */
     .wand-joystick-root {
       position: fixed;
-      inset: 0;
       z-index: 40;
       pointer-events: none;
       opacity: 0;
@@ -16365,14 +16364,14 @@
       visibility: visible;
     }
     .wand-joystick-backdrop {
-      position: absolute;
+      position: fixed;
       inset: 0;
-      background: rgba(20, 15, 12, 0);
+      background: transparent;
       pointer-events: none;
-      transition: background 0.2s ease;
+      visibility: hidden;
     }
     .wand-joystick-backdrop.active {
-      background: rgba(20, 15, 12, 0.18);
+      visibility: visible;
       pointer-events: auto;
     }
     .wand-joystick-ball {
