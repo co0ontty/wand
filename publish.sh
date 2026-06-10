@@ -21,6 +21,10 @@ fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 "
 echo "==> package.json version 已更新为 $VERSION"
 
+# 客户端目录是 git submodule（wand-android / wand-macos / wand-ios），构建前确保已检出
+echo "==> 同步客户端 submodule..."
+git submodule update --init android macos ios
+
 # 构建
 echo "==> 开始构建..."
 npm run build

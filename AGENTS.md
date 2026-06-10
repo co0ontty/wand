@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`src/` contains the TypeScript source. Key areas are `src/cli.ts` for the CLI entry, `src/server.ts` and `src/server-session-routes.ts` for the HTTP/WebSocket layer, `src/process-manager.ts` and `src/structured-session-manager.ts` for session execution, `src/tui/` for the terminal UI and service commands, `src/web-ui/` for browser assets and SSR helpers, and `src/middleware/` for request guards such as rate limiting and path safety. Build output goes to `dist/`. Utility scripts live in `scripts/`, docs and screenshots in `docs/`, the Android WebView shell in `android/`, and the macOS WebView shell in `macos/`.
+`src/` contains the TypeScript source. Key areas are `src/cli.ts` for the CLI entry, `src/server.ts` and `src/server-session-routes.ts` for the HTTP/WebSocket layer, `src/process-manager.ts` and `src/structured-session-manager.ts` for session execution, `src/tui/` for the terminal UI and service commands, `src/web-ui/` for browser assets and SSR helpers, and `src/middleware/` for request guards such as rate limiting and path safety. Build output goes to `dist/`. Utility scripts live in `scripts/`, docs and screenshots in `docs/`. The Android / macOS / iOS WebView shells live in `android/`, `macos/`, and `ios/` — all three are git submodules pointing at `co0ontty/wand-android`, `co0ontty/wand-macos`, and `co0ontty/wand-ios`; run `git submodule update --init` after cloning.
 
 ## Build, Test, and Development Commands
 Use Node `>=22.5.0`.
@@ -41,8 +41,8 @@ The frontend is server-rendered, not a separate SPA build. `src/web-ui/index.ts`
 
 Do not hand-edit generated vendor bundles under `src/web-ui/content/vendor/`. `scripts/bundle-wterm.js` bundles `@wterm/dom` and copies terminal CSS; `scripts/bundle-qrcode.js` bundles the QR library. `npm run build` runs both bundlers before `tsc`, then copies `src/web-ui/content/` into `dist/web-ui/`. Packaged app behavior depends on that copy step even when dev mode appears to work.
 
-## Android and macOS Shells
-Android sources live in `android/`; macOS sources live in `macos/`. Both shells are self-distributed update artifacts served by the Node app.
+## Android, macOS, and iOS Shells
+Android sources live in `android/`; macOS sources live in `macos/`; iOS sources live in `ios/`. All three directories are git submodules — commit and push changes inside the submodule repo first, then bump the submodule pointer in this repo. Android/macOS shells are self-distributed update artifacts served by the Node app.
 
 - Android APKs are discovered from `config.android.apkDir`, usually `~/.wand/android/` or `/tmp/wand-dev/android/`.
 - macOS DMGs are discovered from `config.macos.dmgDir`, usually `~/.wand/macos/` or `/tmp/wand-dev/macos/`.

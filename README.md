@@ -168,7 +168,17 @@ src/
   session-logger.ts         # 文件日志 ~/.wand/sessions/
   resume-policy.ts          # Claude 历史绑定与恢复策略
   web-ui/                   # 服务端渲染的前端 HTML/CSS/JS
-android/                    # Android WebView 壳应用
+android/                    # Android 壳应用（submodule → co0ontty/wand-android）
+macos/                      # macOS 壳应用（submodule → co0ontty/wand-macos）
+ios/                        # iOS 壳应用（submodule → co0ontty/wand-ios）
+```
+
+三个客户端壳应用是独立仓库，以 git submodule 引用。克隆源码开发时需要带上：
+
+```bash
+git clone --recurse-submodules https://github.com/co0ontty/wand.git
+# 或已克隆后补拉：
+git submodule update --init
 ```
 
 数据存储在 `~/.wand/` 下：`config.json`（配置）、`wand.db`（SQLite）、`sessions/`（日志）。
