@@ -1,0 +1,62 @@
+name: iOS IPA Build
+
+# 云端编译未签名 IPA（不需要本地 Mac）。两种触发：
+#   1) 手动 workflow_dispatch：日常出包用这个，产物作为 Actions artifact 下载，
+#      不打 tag、不发 release，不会触发 npm/android/macos 的正式发布。
+#   2) push tag v*：对称其它平台，把 IPA 一并上传到对应 GitHub Release（不动 release body）。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（如 1.16.0），仅用于文件名与版本字段"
+        required: false
+        default: "0.0.0-dev"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build unsigned IPA
+        working-directory: ios
+        run: |
+          chmod +x build.sh
+          chmod +x scripts/generate-icons.swift
+          ./build.sh "${{ steps.version.outputs.version }}"
+
+      # 手动触发 / 任何情况下都上传为 artifact，方便直接在 Actions run 页面下载。
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wand-ios-ipa-${{ steps.version.outputs.version }}
+          path: ios/dist/wand-v${{ steps.version.outputs.version }}.ipa
+          if-no-files-found: error
+
+      # 仅 tag push 时额外传到 Release（body 由 release-notes.yml 单点管理，这里只放文件）。
+      - name: Upload IPA to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ios/dist/wand-v${{ steps.version.outputs.version }}.ipa

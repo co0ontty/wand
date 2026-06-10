@@ -6,7 +6,7 @@ name: Cleanup Old Release Assets
 # - 排序：按 tag 的 semver 降序（sort -V），不依赖 created_at，避免回填型发布被误删。
 # - 保护刚发布的那个 tag：哪怕它的 semver 排不进前 N（例如对老分支的补丁版本），
 #   也会被排除在删除名单外。
-# - 仅删 .apk / .dmg，其他 assets 不动。
+# - 仅删 .apk / .dmg / .ipa，其他 assets 不动。
 
 on:
   release:
@@ -25,7 +25,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Prune APK/DMG from older releases
+      - name: Prune APK/DMG/IPA from older releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -73,7 +73,7 @@ jobs:
 
             mapfile -t ASSETS < <(
               gh release view "$tag" --repo "$REPO" --json assets \
-                --jq '.assets[] | select(.name | test("\\.(apk|dmg)$"; "i")) | .name' \
+                --jq '.assets[] | select(.name | test("\\.(apk|dmg|ipa)$"; "i")) | .name' \
                 2>/dev/null || true
             )
 

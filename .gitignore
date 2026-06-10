@@ -20,6 +20,12 @@ macos/**/*.dmg
 macos/Wand.xcodeproj/xcuserdata/
 macos/Wand.xcodeproj/project.xcworkspace/
 macos/Wand/Assets.xcassets/AppIcon.appiconset/*.png
+ios/build/
+ios/dist/
+ios/**/*.ipa
+ios/Wand.xcodeproj/xcuserdata/
+ios/Wand.xcodeproj/project.xcworkspace/
+ios/Wand/Assets.xcassets/AppIcon.appiconset/*.png
 avatar-seed.txt
 .wand-uploads/
 .wand-worktrees/

@@ -188,6 +188,22 @@ App 启动 5 秒后异步调 `/api/macos-dmg-update?currentVersion=<X>` → 弹 
 
 对称 Android 的 `Intent.ACTION_VIEW`：把"实际安装"交回系统/用户决策，避免覆盖运行中的 `/Applications/Wand.app` 带来的权限与重启问题。
 
+## iOS IPA Build & Sideload
+
+项目包含一个 iOS WebView 壳应用（SwiftUI + WKWebView），源码在 `ios/` 目录，结构对称 `macos/`。完整调研结论与安装手册见 `ios/README.md`。
+
+**编译（产物是未签名 IPA）：**
+```bash
+cd ios && ./build.sh 1.16.0   # 仅 macOS + Xcode 15+；产物 dist/wand-v1.16.0.ipa
+```
+没有 Mac 时用 GitHub Actions：`.github/workflows/ios-build.yml` 支持 `workflow_dispatch` 手动触发（IPA 作为 artifact 下载）；push `v*` tag 时也会把 IPA 上传到对应 Release。`cleanup-old-releases.yml` 同样清理老 release 的 `.ipa`。
+
+**与 Android/macOS 壳的关键差异：**
+- **不签名**：`build.sh` 用 `CODE_SIGNING_ALLOWED=NO` 出未签名 IPA，签名在**安装时**由 sideload 工具（AltStore / SideStore / Sideloadly / TrollStore）用用户自己的免费 Apple ID 现场完成。免费 Apple ID 限制：证书 7 天过期、同时最多 3 个自签 App。
+- **没有应用内自动更新**：iOS 自签名应用无法自我安装更新（系统限制），所以没有 `UpdateChecker`/`DmgInstaller`，服务端也**没有** iOS 更新端点（不存在 `config.ios`/`ipaDir`，不像 `apkDir`/`dmgDir`）。更新靠 sideload 工具续签或重新安装。
+- **无 entitlements 文件**：刻意保持零特殊权限，最大化免费账号签名兼容性。
+- bundle id `com.wand.app` 与 macOS 端一致；sideload 工具签名时可能改写它，属正常现象。
+
 ## Update Channels & Self-Repair
 
 服务端更新（`src/server.ts` 的 `/api/update`、`performAutoUpdate`，以及 TUI installUpdate）支持两个通道，状态存在 SQLite app_config 的 `updateChannel`（`stable` | `beta`，默认 stable），设置页「Web 端」更新区有「Beta 通道」开关，对应 `GET/POST /api/update-channel`。
