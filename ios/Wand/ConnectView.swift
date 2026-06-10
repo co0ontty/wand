@@ -38,7 +38,7 @@ struct ConnectView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .scrollDismissesKeyboard(.interactively)
+                .interactiveKeyboardDismiss()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -269,5 +269,17 @@ struct ConnectView: View {
             return (decoded.url.absoluteString, true)
         }
         return (raw, false)
+    }
+}
+
+private extension View {
+    /// scrollDismissesKeyboard 是 iOS 16+ API，部署目标是 iOS 15，所以加版本守卫；
+    /// iOS 15 上退化为"无手势收起键盘"，不影响功能。
+    @ViewBuilder func interactiveKeyboardDismiss() -> some View {
+        if #available(iOS 16.0, *) {
+            self.scrollDismissesKeyboard(.interactively)
+        } else {
+            self
+        }
     }
 }
