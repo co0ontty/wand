@@ -325,6 +325,10 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
       // How close (px) the pointer must come to a loose chip's home before that chip is
       // magnetically picked up into the chip currently being dragged.
       var QC_DOCK_PICKUP_R = 58;
+      // Sub 球的拾取判定用「home 矩形外扩 padding」而不是大磁吸半径：它是高成本
+      // scope 修饰符（递归提交 submodule），且宽屏 home 正好在通往发射区的路径上，
+      // 给 58px 半径会被「甩向发射区」误吸。外扩矩形 = 必须真正划过球体才吸上。
+      var QC_DOCK_SUB_HIT_PAD = 10;
 
       // A plain tap on a chip fires its own action directly (tag/push imply a commit too).
       // 返回 {action, sub}：sub 是正交修饰符——单击 Submodule 球 = 提交父仓库 + 递归 submodule。
@@ -354,7 +358,8 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
         // Submodule 球是可选的第 4 个 chip（正交 scope 修饰符），仅在仓库含 submodule 时渲染。
         chips.sub = field.querySelector('[data-chip="sub"]');
         var hasSub = !!chips.sub;
-        // 几何 / 渲染 / 事件 / class 清除遍历全集 ALL；磁吸候选与 action 合成只用 ACTION_ORDER。
+        // 几何 / 渲染 / 事件 / class 清除遍历全集 ALL；action 合成只用 ACTION_ORDER。
+        // 磁吸候选：动作球用大半径（QC_DOCK_PICKUP_R），sub 用窄判定（划过球体才吸上）。
         var ALL = hasSub ? ACTION_ORDER.concat(["sub"]) : ACTION_ORDER;
 
         function cw(id: any) { return chips[id] ? chips[id].offsetWidth : 90; }
@@ -487,8 +492,6 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
           var fr = field!.getBoundingClientRect();
           var fx = e.clientX - fr.left, fy = e.clientY - fr.top;
           // magnetic pickup: any loose chip whose home center is near the pointer joins the cluster.
-          // 只遍历 ACTION_ORDER → sub 永远不会被「路过吸附」误触（实现「默认不纳入」）；
-          // 但 sub 仍可作为 anchor 被显式抓起，反向吸附动作球。
           ACTION_ORDER.forEach(function(id) {
             if (drag.members.indexOf(id) >= 0) return;
             var hx = home[id].x + cw(id) / 2, hy = home[id].y + chH() / 2;
@@ -499,6 +502,18 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
               chips[id].classList.add("is-attached");
             }
           });
+          // Sub 球也可被反向吸附（不只是当 anchor）：判定收窄为 home 矩形外扩
+          // QC_DOCK_SUB_HIT_PAD —— 指针必须真正划过球体才吸上，水平甩向发射区
+          // （从顶点 Commit 或底排 Tag/Push 出发）不会误吸这个高成本 scope 修饰符。
+          if (hasSub && drag.members.indexOf("sub") < 0) {
+            var sx0 = home.sub.x - QC_DOCK_SUB_HIT_PAD, sy0 = home.sub.y - QC_DOCK_SUB_HIT_PAD;
+            var sx1 = home.sub.x + cw("sub") + QC_DOCK_SUB_HIT_PAD, sy1 = home.sub.y + chH() + QC_DOCK_SUB_HIT_PAD;
+            if (fx >= sx0 && fx <= sx1 && fy >= sy0 && fy <= sy1) {
+              drag.members.push("sub");
+              chips.sub.classList.remove("qc-chip--anim");
+              chips.sub.classList.add("is-attached");
+            }
+          }
           var box = layoutCluster(drag.members, fx, fy);
           var hot = pointInLaunch(e.clientX, e.clientY);
           stage!.setAttribute("data-hot", hot ? "1" : "0");

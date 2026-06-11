@@ -2460,6 +2460,7 @@
     return "commit";
   }
   var QC_DOCK_PICKUP_R = 58;
+  var QC_DOCK_SUB_HIT_PAD = 10;
   function qcChipTapIntent(id) {
     if (id === "tag") return { action: "commit-tag", sub: false };
     if (id === "push") return { action: "commit-push", sub: false };
@@ -2616,6 +2617,15 @@
           chips[id].classList.add("is-attached");
         }
       });
+      if (hasSub && drag.members.indexOf("sub") < 0) {
+        var sx0 = home.sub.x - QC_DOCK_SUB_HIT_PAD, sy0 = home.sub.y - QC_DOCK_SUB_HIT_PAD;
+        var sx1 = home.sub.x + cw("sub") + QC_DOCK_SUB_HIT_PAD, sy1 = home.sub.y + chH() + QC_DOCK_SUB_HIT_PAD;
+        if (fx >= sx0 && fx <= sx1 && fy >= sy0 && fy <= sy1) {
+          drag.members.push("sub");
+          chips.sub.classList.remove("qc-chip--anim");
+          chips.sub.classList.add("is-attached");
+        }
+      }
       var box = layoutCluster(drag.members, fx, fy);
       var hot = pointInLaunch(e.clientX, e.clientY);
       stage.setAttribute("data-hot", hot ? "1" : "0");
