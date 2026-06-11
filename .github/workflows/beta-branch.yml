@@ -76,10 +76,27 @@ jobs:
           WAND_PUBLISH_VERSION: ${{ steps.version.outputs.version }}
           WAND_BUILD_CHANNEL: beta
         run: |
-          set -euo pipefail
-          if npm view "@co0ontty/wand@${{ steps.version.outputs.version }}" version >/dev/null 2>&1; then
-            echo "Version ${{ steps.version.outputs.version }} already exists on npm; moving beta dist-tag."
-            npm dist-tag add "@co0ontty/wand@${{ steps.version.outputs.version }}" beta
-          else
-            npm publish --access public --tag beta
+          set -uo pipefail
+          PKG="@co0ontty/wand"
+          VERSION="${{ steps.version.outputs.version }}"
+          published() { npm view "${PKG}@${VERSION}" version >/dev/null 2>&1; }
+          if published; then
+            echo "Version ${VERSION} already exists on npm; moving beta dist-tag."
+            npm dist-tag add "${PKG}@${VERSION}" beta
+            exit 0
           fi
+          # tag push 时正式版 NPM Publish 可能和这里并发写 packument（E409），退避重试。
+          for attempt in 1 2 3 4 5; do
+            if npm publish --access public --tag beta; then
+              exit 0
+            fi
+            if published; then
+              echo "npm publish reported an error but ${VERSION} is live; treating as success."
+              exit 0
+            fi
+            delay=$((attempt * 30))
+            echo "Publish attempt ${attempt} failed (likely E409 race with stable publish); retrying in ${delay}s..."
+            sleep "${delay}"
+          done
+          echo "All publish attempts failed." >&2
+          exit 1
