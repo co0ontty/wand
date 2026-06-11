@@ -83,6 +83,25 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         try { WandNative.switchServer(); } catch (e) {}
       }
 
+      // 「返回 App 原生界面」只对带原生界面的壳开放：
+      // - Android 新壳：WandNative.backToNative()（addJavascriptInterface 注入）
+      // - iOS 新壳：user script 注入的 window.__wandBackToNative()
+      // macOS 壳（纯 WebView、无原生界面）与普通浏览器都不命中。
+      export function hasNativeBackToApp() {
+        if (typeof WandNative !== "undefined" && typeof WandNative.backToNative === "function") return true;
+        return typeof (window as any).__wandBackToNative === "function";
+      }
+
+      export function backToNativeApp() {
+        try {
+          if (typeof WandNative !== "undefined" && typeof WandNative.backToNative === "function") {
+            WandNative.backToNative();
+            return;
+          }
+          if (typeof (window as any).__wandBackToNative === "function") (window as any).__wandBackToNative();
+        } catch (e) {}
+      }
+
       export function logout() {
         fetch("/api/logout", { method: "POST", credentials: "same-origin" }).catch(function() {});
         stopPolling();

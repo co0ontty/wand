@@ -10451,6 +10451,10 @@
         grid-template-columns: repeat(4, 1fr);
         gap: 4px;
       }
+      /* 原生壳内多出「返回App」按钮（Android 共 5 个可见）：改 5 列免得换行剩一个孤儿格 */
+      .sidebar-footer-actions:has(.sidebar-back-to-native):has(.sidebar-switch-server) {
+        grid-template-columns: repeat(5, 1fr);
+      }
       .sidebar-footer-actions .btn {
         min-height: 40px;
         padding: 6px 4px;
@@ -10992,6 +10996,9 @@
 
       .sidebar { top: 0; width: min(240px, calc(100vw - 10px)); }
       .sidebar-footer-actions { grid-template-columns: repeat(4, 1fr); }
+      .sidebar-footer-actions:has(.sidebar-back-to-native):has(.sidebar-switch-server) {
+        grid-template-columns: repeat(5, 1fr);
+      }
       .sidebar-footer-actions .btn span { display: none; }
       .sidebar-footer-actions .btn { min-height: 36px; padding: 6px; }
 

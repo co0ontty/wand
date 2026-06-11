@@ -85,4 +85,8 @@ if ('serviceWorker' in navigator) {
       document.documentElement.classList.add('is-wand-app');
     }
   } catch (e) {}
+
+  // iOS 原生壳据此判断网页是否已支持「侧边栏返回原生界面」按钮：
+  // 旧版网页没有这个标记，壳会回退显示自己的顶部返回栏，避免用户被困在网页版。
+  try { (window as any).__wandNativeBackHooked = true; } catch (e) {}
 })();

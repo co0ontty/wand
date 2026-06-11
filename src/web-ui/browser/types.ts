@@ -45,6 +45,8 @@ export interface WandNativeInterface {
   isHapticEnabled(): boolean;
   setHapticEnabled(enabled: boolean): void;
   switchServer(url?: string): void;
+  /** Android 原生壳（新版）：关闭 WebView 回到原生界面。旧版壳没有该方法。 */
+  backToNative?(): void;
 }
 
 export interface WTermInstance {

@@ -8,7 +8,7 @@ import { shouldShowSessionsBackdrop, isMobileLayout, refreshFileExplorer, render
 import { loadGitStatus, renderTopbarGitBadgeHtml, renderWorktreeMergeModal, renderSettingsModal, renderQuickCommitModal, renderTopbarMoreMenuHtml } from "./git-commit";
 import { getSelectedSession, updateInteractiveControls } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderChatModeTrioHtml, syncComposerModeSelect, syncComposerModelSelect, syncSessionModalUI, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
+import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderChatModeTrioHtml, syncComposerModeSelect, syncComposerModelSelect, syncSessionModalUI, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
 import { renderSessionModal, getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
 import { renderSessionsListContent, renderSessions, loadClaudeHistory, ensureClaudeHistoryLoaded } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
@@ -602,6 +602,13 @@ export function renderAppShell() {
               '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
               '<span>安装</span>' +
             '</button>' +
+            (hasNativeBackToApp() ?
+              '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="返回 App 原生界面">' +
+                '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg>' +
+                '<span>返回App</span>' +
+              '</button>'
+              : ''
+            ) +
             (hasNativeSwitchServer() ?
               '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="切换服务器">' +
                 '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>' +
