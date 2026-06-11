@@ -621,8 +621,17 @@ import { getSessionStatusLabel } from "./session-ui";
 
         if (value || hasAttachments) {
 
+          // 「附件上传失败」的提示只能挂在 uploadAttachments 这一步上。
+          // 旧实现把整条发送链（含纯文字发送）都套进同一个外层 catch，结果
+          // 发送阶段的任何错误都被误报成「附件上传失败: …」，没附件也中招，
+          // 而 PTY 路径还会先 toast 一次真实错误 —— 叠出两条 toast。
           var attachUpload = hasAttachments && state.selectedId
-            ? uploadAttachments(state.selectedId)
+            ? uploadAttachments(state.selectedId).catch(function(err) {
+                showToast("附件上传失败: " + ((err && err.message) || err), "error");
+                var marked: any = err instanceof Error ? err : new Error(String(err));
+                marked.__wandToasted = true;
+                throw marked;
+              })
             : Promise.resolve([]);
 
           return attachUpload.then(function(uploadedFiles) {
@@ -670,10 +679,15 @@ import { getSessionStatusLabel } from "./session-ui";
               });
             }).catch(function(err) {
               showToast(getInputErrorMessage(err), "error");
+              if (err) err.__wandToasted = true;
               throw err;
             });
           }).catch(function(err) {
-            showToast("附件上传失败: " + (err.message || err), "error");
+            // 兜底：只提示「还没人 toast 过」的错误（如 then 链里的同步异常），
+            // 用真实错误文案，绝不再贴「附件上传失败」标签。
+            if (!(err && err.__wandToasted)) {
+              showToast(getInputErrorMessage(err), "error");
+            }
             throw err;
           });
         }

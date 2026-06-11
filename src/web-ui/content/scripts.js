@@ -9340,7 +9340,12 @@
     var selectedSession = getSelectedSession3();
     var hasAttachments = state.pendingAttachments.length > 0;
     if (value || hasAttachments) {
-      var attachUpload = hasAttachments && state.selectedId ? uploadAttachments(state.selectedId) : Promise.resolve([]);
+      var attachUpload = hasAttachments && state.selectedId ? uploadAttachments(state.selectedId).catch(function(err) {
+        showToast2("\u9644\u4EF6\u4E0A\u4F20\u5931\u8D25: " + (err && err.message || err), "error");
+        var marked = err instanceof Error ? err : new Error(String(err));
+        marked.__wandToasted = true;
+        throw marked;
+      }) : Promise.resolve([]);
       return attachUpload.then(function(uploadedFiles) {
         var prefix = buildAttachmentPrefix(uploadedFiles);
         var finalValue = prefix + (value || (uploadedFiles.length ? "\u8BF7\u67E5\u770B\u9644\u4EF6\u3002" : ""));
@@ -9378,10 +9383,13 @@
           });
         }).catch(function(err) {
           showToast2(getInputErrorMessage(err), "error");
+          if (err) err.__wandToasted = true;
           throw err;
         });
       }).catch(function(err) {
-        showToast2("\u9644\u4EF6\u4E0A\u4F20\u5931\u8D25: " + (err.message || err), "error");
+        if (!(err && err.__wandToasted)) {
+          showToast2(getInputErrorMessage(err), "error");
+        }
         throw err;
       });
     }
