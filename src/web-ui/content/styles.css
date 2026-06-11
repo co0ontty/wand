@@ -185,6 +185,16 @@
       --pwa-safe-top: 0px;
     }
 
+    /* iOS 壳（WKWebView 全屏贴状态栏/灵动岛）与旧版 Android 壳（边到边、无原生
+       padding）：.sidebar 是 fixed top:0，脱离 .app-container 的 padding 流，
+       头部必须自己消费安全区（对齐 .is-pwa 的同款规则）。新版 Android
+       native-insets 模式下 --wand-safe-top 已归零，本条退化为原 14px。
+       第二个选择器把 specificity 抬过 .sidebar.pinned.collapsed .sidebar-header。 */
+    .is-wand-app .sidebar-header,
+    html.is-wand-app .sidebar.pinned.collapsed .sidebar-header {
+      padding-top: calc(14px + var(--wand-safe-top));
+    }
+
     /* 在普通移动浏览器 / Android WebView 边到边渲染 / 旋转后地址栏隐藏等场景下,
        .app-container 同样需要消费 safe-area-inset-top, 否则 .main-header-row
        会被状态栏挡住。inset 为 0 的设备上为 0px, 不影响桌面。*/
