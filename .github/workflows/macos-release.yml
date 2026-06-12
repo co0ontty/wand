@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-latest
+    # 钉 macos-26：默认 Xcode 26.x（macOS 26 SDK）。同 ios-build.yml——
+    # Liquid Glass 只对用 26 SDK 链接的 App 生效，macos-latest 迁移完成前还是 Xcode 16.4。
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4

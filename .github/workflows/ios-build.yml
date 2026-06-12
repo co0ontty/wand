@@ -20,7 +20,10 @@ permissions:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    # 钉 macos-26：默认 Xcode 26.x（iOS 26 SDK）。Liquid Glass 等 iOS 26 系统外观
+    # 只对「用 iOS 26 SDK 链接」的 App 生效——macos-latest 在 2026-06 迁移期前
+    # 仍是 macOS 15 + Xcode 16.4（iOS 18 SDK），编出来的包会被系统按旧外观渲染。
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
