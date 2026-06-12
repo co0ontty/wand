@@ -15566,18 +15566,40 @@
       }
       function compareVer(a, b) {
         function parse(v) {
-          return String(v || "").replace(/^v/, "").split("-")[0].split(".").map(function(n) {
-            return parseInt(n, 10) || 0;
-          });
+          var s = String(v || "").replace(/^v/, "");
+          var dash = s.indexOf("-");
+          var main = dash >= 0 ? s.slice(0, dash) : s;
+          var pre = dash >= 0 ? s.slice(dash + 1) : "";
+          return {
+            parts: main.split(".").map(function(n) {
+              return parseInt(n, 10) || 0;
+            }),
+            pre,
+            isDebug: pre.indexOf("debug") === 0
+          };
         }
         var pa = parse(a), pb = parse(b);
         for (var i2 = 0; i2 < 3; i2++) {
-          var d = (pa[i2] || 0) - (pb[i2] || 0);
+          var d = (pa.parts[i2] || 0) - (pb.parts[i2] || 0);
           if (d !== 0) return d > 0 ? 1 : -1;
+        }
+        if (pa.isDebug !== pb.isDebug) return pa.isDebug ? 1 : -1;
+        if (pa.isDebug && pb.isDebug) {
+          var sa = pa.pre.split("."), sb = pb.pre.split(".");
+          for (var j = 0; j < Math.max(sa.length, sb.length); j++) {
+            if (sa[j] === void 0) return -1;
+            if (sb[j] === void 0) return 1;
+            var na = parseInt(sa[j], 10), nb = parseInt(sb[j], 10);
+            if (!isNaN(na) && !isNaN(nb)) {
+              if (na !== nb) return na > nb ? 1 : -1;
+            } else if (sa[j] !== sb[j]) {
+              return sa[j] > sb[j] ? 1 : -1;
+            }
+          }
         }
         return 0;
       }
-      function applyApkButton(btn, cmp, url, fileName, source) {
+      function applyApkButton(btn, cmp, url, fileName, source, allowDowngrade) {
         btn.classList.remove("hidden");
         btn.disabled = false;
         if (cmp > 0) {
@@ -15585,8 +15607,11 @@
         } else if (cmp === 0) {
           btn.textContent = "\u5DF2\u662F\u6700\u65B0";
           btn.disabled = true;
-        } else {
+        } else if (allowDowngrade) {
           btn.textContent = "\u91CD\u65B0\u5B89\u88C5";
+        } else {
+          btn.textContent = "\u7248\u672C\u8F83\u65E7";
+          btn.disabled = true;
         }
         btn.onclick = btn.disabled ? null : function() {
           try {
@@ -15626,7 +15651,7 @@
           apkGithubRow.classList.remove("hidden");
           if (apkGithubBtn) {
             var ghCmp = androidApk.github.version ? compareVer(androidApk.github.version, _apkVersion) : 1;
-            applyApkButton(apkGithubBtn, ghCmp, androidApk.github.downloadUrl, androidApk.github.fileName || "wand-update.apk", "github");
+            applyApkButton(apkGithubBtn, ghCmp, androidApk.github.downloadUrl, androidApk.github.fileName || "wand-update.apk", "github", false);
           }
         }
         if (androidApk.local && apkLocalRow && apkLocalEl) {
@@ -15636,7 +15661,7 @@
           apkLocalRow.classList.remove("hidden");
           if (apkLocalBtn) {
             var lcCmp = androidApk.local.version ? compareVer(androidApk.local.version, _apkVersion) : 1;
-            applyApkButton(apkLocalBtn, lcCmp, androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", "local");
+            applyApkButton(apkLocalBtn, lcCmp, androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", "local", false);
           }
         }
         if (!androidApk.github && !androidApk.local && apkMessageEl) {
@@ -15710,7 +15735,7 @@
           dmgGithubRow.classList.remove("hidden");
           if (dmgGithubBtn) {
             var dghCmp = macosDmg.github.version ? compareVer(macosDmg.github.version, _macAppVersion) : 1;
-            applyApkButton(dmgGithubBtn, dghCmp, macosDmg.github.downloadUrl, macosDmg.github.fileName || "wand-update.dmg", "github");
+            applyApkButton(dmgGithubBtn, dghCmp, macosDmg.github.downloadUrl, macosDmg.github.fileName || "wand-update.dmg", "github", true);
           }
         }
         if (macosDmg.local && dmgLocalRow && dmgLocalEl) {
@@ -15720,7 +15745,7 @@
           dmgLocalRow.classList.remove("hidden");
           if (dmgLocalBtn) {
             var dlcCmp = macosDmg.local.version ? compareVer(macosDmg.local.version, _macAppVersion) : 1;
-            applyApkButton(dmgLocalBtn, dlcCmp, macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", "local");
+            applyApkButton(dmgLocalBtn, dlcCmp, macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", "local", true);
           }
         }
         if (!macosDmg.github && !macosDmg.local && dmgMessageEl) {

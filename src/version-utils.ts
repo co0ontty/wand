@@ -36,8 +36,13 @@ export function compareSemver(a: string, b: string): number {
   if (!pa.pre && pb.pre) return 1;
   if (pa.pre && !pb.pre) return -1;
   if (!pa.pre && !pb.pre) return 0;
-  const segA = pa.pre.split(".");
-  const segB = pb.pre.split(".");
+  return comparePrereleaseSegments(pa.pre, pb.pre);
+}
+
+/** 按 `.` 分段比较 prerelease 后缀：数字段数值比、非数字段字典序、段少者更小。 */
+function comparePrereleaseSegments(preA: string, preB: string): number {
+  const segA = preA.split(".");
+  const segB = preB.split(".");
   const segLen = Math.max(segA.length, segB.length);
   for (let i = 0; i < segLen; i++) {
     const sa = segA[i];
@@ -56,5 +61,38 @@ export function compareSemver(a: string, b: string): number {
       return sa < sb ? -1 : 1;
     }
   }
+  return 0;
+}
+
+/**
+ * Android APK 安装序比较 —— 与 android/app/build.gradle 的 computeVersionCode 镜像一致，
+ * 回答「这个包能否覆盖安装到那个包之上 / 该不该提示升级」。返回正数 = a 比 b 新。
+ *
+ * 与标准 semver（compareSemver）的关键差异：同主版本三段时，带 `-debug` 后缀的包
+ * 【更新】而不是更旧 —— debug 包是 tag 之后的 master 构建（versionCode = base+1，
+ * release 是 base+0），系统安装器只认 versionCode。若在这里沿用 semver 的
+ * 「prerelease < release」规则，就会提示用户从 debug「升级」到同号 release，
+ * 下载后被系统按降级拒装。
+ *
+ * - 三段数值比较优先；
+ * - 同三段：带 -debug > 不带（镜像 versionCode base+1 > base+0）；
+ * - 两个 debug：按后缀分段比较（debug.MMDDHHMM 时间戳数值比），versionCode 相同、
+ *   系统允许互装，比较结果只用于「是否提示更新」。
+ */
+export function compareApkInstallOrder(a: string, b: string): number {
+  const parse = (v: string) => {
+    const [main, ...rest] = v.replace(/^v/, "").split("-");
+    const pre = rest.join("-");
+    const mainParts = main.split(".").map((n) => Number(n) || 0);
+    return { mainParts, pre, isDebug: pre.startsWith("debug") };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa.mainParts[i] || 0) - (pb.mainParts[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  if (pa.isDebug !== pb.isDebug) return pa.isDebug ? 1 : -1;
+  if (pa.isDebug && pb.isDebug) return comparePrereleaseSegments(pa.pre, pb.pre);
   return 0;
 }

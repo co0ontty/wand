@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { compareSemver, extractSemver } from "./version-utils.js";
+import { compareApkInstallOrder, compareSemver, extractSemver } from "./version-utils.js";
 import compression from "compression";
 import express, { NextFunction, Request, Response } from "express";
 import { createReadStream, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -229,30 +229,38 @@ interface ResolvedApkVersion {
 }
 
 async function resolveLatestApkVersion(configDir: string, config: WandConfig): Promise<ResolvedApkVersion | null> {
-  // Priority 1: local APK file
+  // local 与 github 两个来源都看，按安装序取真正更新的那个（持平偏向 local：同源下载更快）。
+  // 旧逻辑是「local 存在就一票否决」——本地目录留着旧包时，会把线上新版压住不提示。
   const localApk = await resolveAndroidApkAsset(configDir, config);
-  if (localApk && localApk.version) {
-    return {
+  const local: ResolvedApkVersion | null = localApk && localApk.version
+    ? {
       version: localApk.version,
       downloadUrl: localApk.downloadUrl,
       fileName: localApk.fileName,
       size: localApk.size,
       source: "local",
-    };
+    }
+    : null;
+  let github: ResolvedApkVersion | null = null;
+  try {
+    const ghApk = await fetchGitHubLatestApk();
+    if (ghApk) {
+      github = {
+        version: ghApk.version,
+        downloadUrl: ghApk.downloadUrl,
+        fileName: ghApk.fileName,
+        size: ghApk.size,
+        source: "github",
+        releaseNotes: ghApk.releaseNotes,
+      };
+    }
+  } catch {
+    // GitHub 不可达时静默回退 local
   }
-  // Priority 2: GitHub Release
-  const ghApk = await fetchGitHubLatestApk();
-  if (ghApk) {
-    return {
-      version: ghApk.version,
-      downloadUrl: ghApk.downloadUrl,
-      fileName: ghApk.fileName,
-      size: ghApk.size,
-      source: "github",
-      releaseNotes: ghApk.releaseNotes,
-    };
+  if (local && github) {
+    return compareApkInstallOrder(github.version, local.version) > 0 ? github : local;
   }
-  return null;
+  return local ?? github;
 }
 
 // ── macOS DMG update check cache ──
@@ -671,13 +679,15 @@ async function resolveAndroidApkAsset(configDir: string, config: WandConfig): Pr
       fileStat,
     };
   }));
-  // 按语义版本选"最新", 而非修改时间 —— cp/rsync/解压/checkout 都可能让低版本号文件的
+  // 按版本号选"最新", 而非修改时间 —— cp/rsync/解压/checkout 都可能让低版本号文件的
   // mtime 更新, 用 mtime 会把旧版本号当成 latest 上报。版本相同或都无版本号时退回 mtime。
+  // 注意用安装序比较（同三段时 debug > release，镜像 versionCode），不是标准 semver：
+  // wand-v1.55.0.apk 与 wand-v1.55.0-debug.x.apk 并存时，debug 才是装得上的更新包。
   candidates.sort((a, b) => {
     const va = extractAndroidApkVersion(a.entry.name);
     const vb = extractAndroidApkVersion(b.entry.name);
     if (va && vb) {
-      const cmp = compareSemver(vb, va);
+      const cmp = compareApkInstallOrder(vb, va);
       if (cmp !== 0) return cmp;
     } else if (va && !vb) {
       return -1;
@@ -1279,7 +1289,9 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null });
       return;
     }
-    const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
+    // 安装序比较（镜像 versionCode），不是标准 semver：只在系统安装器真能装上时才提示，
+    // 避免「提示升级 → 下载 → 被按降级拒装」的死循环（如已装 1.55.0-debug 提示装 1.55.0）。
+    const updateAvailable = compareApkInstallOrder(latest.version, currentVersion) > 0;
     res.json({
       updateAvailable,
       currentVersion,

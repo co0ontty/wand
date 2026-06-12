@@ -85,11 +85,15 @@ The runtime config file is `~/.wand/config.json` by default.
 **编译 APK：**
 ```bash
 cd android
-# 使用最新 git tag 作为版本号，加 debug 时间戳后缀
-# versionCode 由 publish.sh 自动派生（major*10000+minor*100+patch）；手动构建时随便给一个递增整数即可
+# 使用最新 git tag 作为版本号，加 debug 时间戳后缀。
+# versionCode 一律由 build.gradle 从 versionName 派生（唯一真源，不接受 -PAPP_VERSION_CODE 覆盖）：
+#   major*10_000_000 + minor*10_000 + patch*100 + (含 -debug ? 1 : 0)
+# 同三段时 debug(+1) > release(+0)——debug 是 tag 之后的 master 构建，比同号 release 新；
+# 下一个 release（patch+1 = base+100）仍高于任何同段 debug。
+# 历史教训：CI 曾另算一套小数字 versionCode，与本公式并存后，装过本地构建（大 versionCode）
+# 的设备升级任何 CI 包都会被系统按「降级」拒装（INSTALL_FAILED_VERSION_DOWNGRADE）。
 ./gradlew assembleDebug \
-  -PAPP_VERSION_NAME="$(git describe --tags --abbrev=0 | sed 's/^v//')-debug.$(date +%m%d%H%M)" \
-  -PAPP_VERSION_CODE="$(git describe --tags --abbrev=0 | sed 's/^v//' | awk -F. '{printf \"%d%02d%02d\", $1,$2,$3}')"
+  -PAPP_VERSION_NAME="$(git describe --tags --abbrev=0 | sed 's/^v//')-debug.$(date +%m%d%H%M)"
 ```
 产物：`android/app/build/outputs/apk/debug/app-debug.apk`
 

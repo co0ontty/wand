@@ -2268,20 +2268,49 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
                 });
             }
 
-            // 设置页版本比较 (仅主版本三段, 预发布忽略) — 判断该升级 / 已最新 / 更旧。
+            // 设置页版本比较 — 安装序语义，镜像 Android versionCode（build.gradle computeVersionCode）：
+            // 三段数值比较优先；同三段时带 -debug 的包更【新】（debug 是 tag 之后的 master 构建，
+            // versionCode = base+1 > release 的 base+0）；两个 debug 按时间戳后缀分段比。
+            // 不能用标准 semver 的「prerelease < release」——那会诱导从 debug「升级」到同号
+            // release，下载后被系统按降级拒装。
             function compareVer(a, b) {
               function parse(v) {
-                return String(v || "").replace(/^v/, "").split("-")[0].split(".").map(function(n) { return parseInt(n, 10) || 0; });
+                var s = String(v || "").replace(/^v/, "");
+                var dash = s.indexOf("-");
+                var main = dash >= 0 ? s.slice(0, dash) : s;
+                var pre = dash >= 0 ? s.slice(dash + 1) : "";
+                return {
+                  parts: main.split(".").map(function(n) { return parseInt(n, 10) || 0; }),
+                  pre: pre,
+                  isDebug: pre.indexOf("debug") === 0
+                };
               }
               var pa = parse(a), pb = parse(b);
               for (var i = 0; i < 3; i++) {
-                var d = (pa[i] || 0) - (pb[i] || 0);
+                var d = (pa.parts[i] || 0) - (pb.parts[i] || 0);
                 if (d !== 0) return d > 0 ? 1 : -1;
+              }
+              if (pa.isDebug !== pb.isDebug) return pa.isDebug ? 1 : -1;
+              if (pa.isDebug && pb.isDebug) {
+                var sa = pa.pre.split("."), sb = pb.pre.split(".");
+                for (var j = 0; j < Math.max(sa.length, sb.length); j++) {
+                  if (sa[j] === undefined) return -1;
+                  if (sb[j] === undefined) return 1;
+                  var na = parseInt(sa[j], 10), nb = parseInt(sb[j], 10);
+                  if (!isNaN(na) && !isNaN(nb)) {
+                    if (na !== nb) return na > nb ? 1 : -1;
+                  } else if (sa[j] !== sb[j]) {
+                    return sa[j] > sb[j] ? 1 : -1;
+                  }
+                }
               }
               return 0;
             }
-            // 壳内按钮: 据版本比较结果决定文案/可点性, 避免线上比已装旧时仍诱导"下载安装"。
-            function applyApkButton(btn, cmp, url, fileName, source) {
+            // 壳内按钮: 据版本比较结果决定文案/可点性。
+            // allowDowngrade: APK 传 false —— Android 系统安装器会按「降级」拒装更旧的
+            // versionCode，按钮直接禁用，不诱导用户下载一个装不上的包；
+            // DMG 传 true —— macOS 拖装不校验版本，保留「重新安装」。
+            function applyApkButton(btn, cmp, url, fileName, source, allowDowngrade) {
               btn.classList.remove("hidden");
               btn.disabled = false;
               if (cmp > 0) {
@@ -2289,8 +2318,11 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               } else if (cmp === 0) {
                 btn.textContent = "已是最新";
                 btn.disabled = true;
-              } else {
+              } else if (allowDowngrade) {
                 btn.textContent = "重新安装";
+              } else {
+                btn.textContent = "版本较旧";
+                btn.disabled = true;
               }
               btn.onclick = btn.disabled ? null : function() {
                 try {
@@ -2336,7 +2368,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
                 apkGithubRow.classList.remove("hidden");
                 if (apkGithubBtn) {
                   var ghCmp = androidApk.github.version ? compareVer(androidApk.github.version, _apkVersion) : 1;
-                  applyApkButton(apkGithubBtn, ghCmp, androidApk.github.downloadUrl, androidApk.github.fileName || "wand-update.apk", "github");
+                  applyApkButton(apkGithubBtn, ghCmp, androidApk.github.downloadUrl, androidApk.github.fileName || "wand-update.apk", "github", false);
                 }
               }
               // 本地版本
@@ -2347,7 +2379,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
                 apkLocalRow.classList.remove("hidden");
                 if (apkLocalBtn) {
                   var lcCmp = androidApk.local.version ? compareVer(androidApk.local.version, _apkVersion) : 1;
-                  applyApkButton(apkLocalBtn, lcCmp, androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", "local");
+                  applyApkButton(apkLocalBtn, lcCmp, androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", "local", false);
                 }
               }
               // 都没有时
@@ -2429,7 +2461,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
                 dmgGithubRow.classList.remove("hidden");
                 if (dmgGithubBtn) {
                   var dghCmp = macosDmg.github.version ? compareVer(macosDmg.github.version, _macAppVersion) : 1;
-                  applyApkButton(dmgGithubBtn, dghCmp, macosDmg.github.downloadUrl, macosDmg.github.fileName || "wand-update.dmg", "github");
+                  applyApkButton(dmgGithubBtn, dghCmp, macosDmg.github.downloadUrl, macosDmg.github.fileName || "wand-update.dmg", "github", true);
                 }
               }
               if (macosDmg.local && dmgLocalRow && dmgLocalEl) {
@@ -2439,7 +2471,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
                 dmgLocalRow.classList.remove("hidden");
                 if (dmgLocalBtn) {
                   var dlcCmp = macosDmg.local.version ? compareVer(macosDmg.local.version, _macAppVersion) : 1;
-                  applyApkButton(dmgLocalBtn, dlcCmp, macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", "local");
+                  applyApkButton(dmgLocalBtn, dlcCmp, macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", "local", true);
                 }
               }
               if (!macosDmg.github && !macosDmg.local && dmgMessageEl) {

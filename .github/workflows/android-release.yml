@@ -57,21 +57,19 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG#v}"
-          # Generate numeric version code from version string (e.g. 1.10.0 -> 11000)
-          IFS='.' read -r major minor patch <<< "$VERSION"
-          VERSION_CODE=$(( major * 10000 + minor * 100 + ${patch:-0} ))
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
 
+      # versionCode 一律由 android/app/build.gradle 从 versionName 派生（唯一真源）。
+      # 不要在这里另算一套传 -PAPP_VERSION_CODE：两套方案并存会让本地构建装过的设备
+      # 升级 CI 包时被系统按「降级」拒装（INSTALL_FAILED_VERSION_DOWNGRADE）。
       - name: Build APK
         if: steps.changed.outputs.changed == 'true'
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug \
-            -PAPP_VERSION_NAME=${{ steps.version.outputs.version }} \
-            -PAPP_VERSION_CODE=${{ steps.version.outputs.version_code }}
+            -PAPP_VERSION_NAME=${{ steps.version.outputs.version }}
 
       - name: Rename APK
         if: steps.changed.outputs.changed == 'true'
