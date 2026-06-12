@@ -1,6 +1,15 @@
 name: macOS DMG Release
 
+# 两种触发（对称 ios-build.yml）：
+#   1) push tag v*：正式发版，DMG 上传到对应 GitHub Release（不动 release body）。
+#   2) 手动 workflow_dispatch：日常出包/验证用，产物作为 Actions artifact 下载，不发 release。
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（如 1.16.0），仅用于文件名与版本字段"
+        required: false
+        default: "0.0.0-dev"
   push:
     tags:
       - "v*"
@@ -20,10 +29,16 @@ jobs:
           submodules: true
           fetch-depth: 0
 
-      # macos/ 是 submodule：自上一个 tag 以来指针没动过就跳过构建（同 android-release.yml）。
+      # macos/ 是 submodule：tag 触发时若自上一个 tag 以来指针没动过就跳过构建（同 android-release.yml）。
+      # 手动 workflow_dispatch 永远构建——手动触发就是明确要出包。
       - name: Detect macos changes since previous tag
         id: changed
         run: |
+          if [ "${GITHUB_REF}" = "${GITHUB_REF#refs/tags/}" ]; then
+            echo "手动触发，跳过变更检测，直接构建"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           TAG="${GITHUB_REF#refs/tags/}"
           PREV_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -Fx -A1 "$TAG" | tail -n +2 | head -1)
           if [ -z "$PREV_TAG" ]; then
@@ -45,13 +60,16 @@ jobs:
         if: steps.changed.outputs.changed == 'true'
         run: sudo xcode-select -s /Applications/Xcode.app
 
-      - name: Extract version from tag
+      - name: Resolve version
         if: steps.changed.outputs.changed == 'true'
         id: version
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build DMG
@@ -62,9 +80,18 @@ jobs:
           chmod +x scripts/generate-icons.swift
           ./build.sh "${{ steps.version.outputs.version }}"
 
-      # body 由 .github/workflows/release-notes.yml 单点管理，这里只上传 DMG。
-      - name: Upload DMG to GitHub Release
+      # 手动触发 / 任何情况下都上传为 artifact，方便直接在 Actions run 页面下载。
+      - name: Upload DMG artifact
         if: steps.changed.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wand-macos-dmg-${{ steps.version.outputs.version }}
+          path: macos/dist/wand-v${{ steps.version.outputs.version }}.dmg
+          if-no-files-found: error
+
+      # 仅 tag push 时传到 Release（body 由 release-notes.yml 单点管理，这里只放文件）。
+      - name: Upload DMG to GitHub Release
+        if: steps.changed.outputs.changed == 'true' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: macos/dist/wand-v${{ steps.version.outputs.version }}.dmg

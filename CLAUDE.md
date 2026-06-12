@@ -247,10 +247,10 @@ git push origin v1.15.0
 push tag 后四个 workflow 并行触发：
 - `.github/workflows/npm-release.yml`（`ubuntu-latest`）：从 tag 同步版本号到 `package.json` → `npm ci` → `npm run build` → `npm publish --access public`。需要仓库 secret **`NPM_TOKEN`**（npm Automation / Granular Access token，对 `@co0ontty/wand` 有读写权限）。
 - `.github/workflows/android-release.yml`（`ubuntu-latest`）：构建 APK 上传到对应 Release（**不动 release body**）。
-- `.github/workflows/macos-release.yml`（`macos-latest`）：构建 DMG 上传到对应 Release（**不动 release body**）。
+- `.github/workflows/macos-release.yml`（`macos-26`）：构建 DMG 上传到对应 Release（**不动 release body**）；也支持 `workflow_dispatch` 手动出包（产物走 Actions artifact，不发 release）。**iOS/macOS 构建钉在 `macos-26` 跑器**（默认 Xcode 26.x）：Liquid Glass 等 26 系统外观只对「用 26 SDK 链接」的 App 生效，老 SDK 产物会被系统按兼容模式渲染成旧外观；两端 `build.sh` 在 Xcode < 26 时会打印警告。
 - `.github/workflows/release-notes.yml`（`ubuntu-latest`）：**单点负责 release body**——从 `git log <prev-tag>..<current-tag>` 拼真 changelog（项目直接推 master 不走 PR，所以 `generate_release_notes` 拿到的 PR 列表是空的，必须自己从 commits 拼），再附上 Android / macOS 下载说明段落，最后用 `softprops/action-gh-release` 一次性写入 body。其他三个 release 工作流都不再 `append_body`，避免多源写 body 撞车。第一个 release 没有前 tag 时 fallback 成「列出 tag 之前的全部 commits」。
 
-**客户端无改动时跳过构建**：android-release / macos-release / ios-build 三个 workflow 在 tag 触发时会比较当前 tag 与上一个 tag（semver 降序的下一个）的 submodule 指针（`git rev-parse <tag>:<dir>`），指针没动就跳过整个构建、不往本 release 上传产物（ios 的 `workflow_dispatch` 手动触发不受此限制，永远构建）。配套行为：
+**客户端无改动时跳过构建**：android-release / macos-release / ios-build 三个 workflow 在 tag 触发时会比较当前 tag 与上一个 tag（semver 降序的下一个）的 submodule 指针（`git rev-parse <tag>:<dir>`），指针没动就跳过整个构建、不往本 release 上传产物（ios / macos 的 `workflow_dispatch` 手动触发不受此限制，永远构建）。配套行为：
 - 服务端 GitHub 回退（`fetchGitHubReleaseAssetByExt`）不再只查 `/releases/latest`，而是按时间倒序遍历最近 30 个 release，取第一个带 `.apk`/`.dmg` 的；版本号**优先从 asset 文件名提取**（老包挂在老 release 上，用 tag 当版本会造成「提示新版、下载到旧包」的假更新循环）。
 - release-notes.yml 会检测同样的指针变化：客户端无改动的版本，release body 的下载段落指向最后真实出包的那个 release。
 
@@ -266,7 +266,7 @@ push tag 后四个 workflow 并行触发：
 - There is no `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` in this repo.
 - `.github/workflows/npm-release.yml` handles GitHub Actions npm publish on tag push (needs `NPM_TOKEN` secret).
 - `.github/workflows/android-release.yml` handles GitHub Actions APK builds on tag push.
-- `.github/workflows/macos-release.yml` handles GitHub Actions DMG builds on tag push (runs on `macos-latest`).
+- `.github/workflows/macos-release.yml` handles GitHub Actions DMG builds on tag push, plus manual `workflow_dispatch` (runs on `macos-26` for the macOS 26 SDK / Liquid Glass).
 - `.github/workflows/release-notes.yml` owns the release body: generates a real changelog from `git log <prev>..<current>` (PR-based auto-notes are empty for this repo) and appends Android/macOS download sections. Other release workflows must NOT touch the body.
 - `.github/workflows/cleanup-old-releases.yml` prunes `.apk` / `.dmg` from older releases after each `release: published`, keeping the 10 most recent (by semver) intact. Manual `workflow_dispatch` accepts a `keep` input.
 
