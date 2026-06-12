@@ -233,7 +233,7 @@ cd ios && ./build.sh 1.16.0   # 仅 macOS + Xcode 15+；产物 dist/wand-v1.16.0
 
 **更新后服务自修复**（镜像 `install.sh`）：装包成功后调用 `src/service-self-repair.ts` 的 `repairServiceUnitAfterUpdate()` —— 若装了 systemd/launchd 服务，用 `preferGlobalBin` 重写 unit（ExecStart 钉到全局 `dist/cli.js`、`Environment=PATH` 取已被 `path-repair` 修复的 `process.env.PATH`）+ daemon-reload，解决「源码安装升级到 npm/GitHub 版后 ExecStart/PATH 失效、服务找不到」。重启统一走 `src/relaunch.ts` 的 `computeRelaunch()`：systemd 托管（存在 `INVOCATION_ID`）且已装服务时仅退出、交给 `Restart=always` 用新 unit 拉起，避免 detached 子进程与 systemd 抢单实例 pidfile 跑回旧二进制；否则 spawn 一个 detached 子进程（bin 优先全局安装）。
 
-APK / macOS 的 beta 通道尚未实现（仅 server 端）。
+**APK 的 beta 通道已实现**：`GET /api/android-apk-update?currentVersion=X&channel=stable|beta`（不带参默认 stable，兼容老客户端）——stable 只看正式版文件（版本号无 prerelease 后缀），beta 额外包含 `-debug.MMDDHHMM` 构建（本地 apkDir 是 beta 包唯一来源；GitHub 回退只有正式版，两通道共用）。更新提示的下载链接始终带 `?channel=`，保证「提示的版本」和「下载到的文件」同通道；裸 `/android/download`（网页下载页/二维码落地页）默认 beta = 目录里真正最新的包。Android 设置页「更新」区有 Beta 通道开关（SharedPreferences `update_beta_channel`，`ServerStore.isBetaChannel`），`UpdateManager.checkForUpdate` 按它带 channel 参数。`/api/settings`、`/api/android-apk` 管理视图固定 beta 视角（展示目录真实最新文件）。macOS DMG 的 beta 通道尚未实现。
 
 ## Publishing & Release
 

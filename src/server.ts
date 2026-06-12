@@ -228,14 +228,35 @@ interface ResolvedApkVersion {
   releaseNotes?: string;
 }
 
-async function resolveLatestApkVersion(configDir: string, config: WandConfig): Promise<ResolvedApkVersion | null> {
+/**
+ * APK 更新通道：stable 只看正式版（无 prerelease 后缀），beta 额外包含
+ * `-debug.MMDDHHMM` 这类 tag 后 master 构建。镜像 server 自身的 stable/beta 通道语义。
+ */
+type ApkUpdateChannel = "stable" | "beta";
+
+function parseApkChannel(value: unknown): ApkUpdateChannel {
+  return value === "beta" ? "beta" : "stable";
+}
+
+/** 版本号带 prerelease 后缀（如 -debug.06121811）即视为 beta 构建。 */
+function isPrereleaseApkVersion(version: string | null): boolean {
+  return !!version && version.includes("-");
+}
+
+async function resolveLatestApkVersion(
+  configDir: string,
+  config: WandConfig,
+  channel: ApkUpdateChannel
+): Promise<ResolvedApkVersion | null> {
   // local 与 github 两个来源都看，按安装序取真正更新的那个（持平偏向 local：同源下载更快）。
   // 旧逻辑是「local 存在就一票否决」——本地目录留着旧包时，会把线上新版压住不提示。
-  const localApk = await resolveAndroidApkAsset(configDir, config);
+  const localApk = await resolveAndroidApkAsset(configDir, config, channel);
   const local: ResolvedApkVersion | null = localApk && localApk.version
     ? {
       version: localApk.version,
-      downloadUrl: localApk.downloadUrl,
+      // 下载链接始终带通道参数，保证「提示的版本」和「下载到的文件」出自同一套过滤：
+      // 裸 /android/download（网页下载页、二维码落地页）默认 beta = 目录里真正最新的包。
+      downloadUrl: `${localApk.downloadUrl}?channel=${channel}`,
       fileName: localApk.fileName,
       size: localApk.size,
       source: "local",
@@ -641,7 +662,11 @@ function extractAndroidApkVersion(fileName: string): string | null {
   return extractSemver(fileName.replace(/\.apk$/i, ""));
 }
 
-async function resolveAndroidApkAsset(configDir: string, config: WandConfig): Promise<AndroidApkAsset | null> {
+async function resolveAndroidApkAsset(
+  configDir: string,
+  config: WandConfig,
+  channel: ApkUpdateChannel = "beta"
+): Promise<AndroidApkAsset | null> {
   if (config.android?.enabled !== true) return null;
   const apkDir = resolveAndroidApkDir(configDir, config);
   await mkdir(apkDir, { recursive: true });
@@ -670,7 +695,7 @@ async function resolveAndroidApkAsset(configDir: string, config: WandConfig): Pr
   const apkFiles = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".apk"));
   if (apkFiles.length === 0) return null;
 
-  const candidates = await Promise.all(apkFiles.map(async (entry) => {
+  const allCandidates = await Promise.all(apkFiles.map(async (entry) => {
     const filePath = path.join(apkDir, entry.name);
     const fileStat = await stat(filePath);
     return {
@@ -679,6 +704,12 @@ async function resolveAndroidApkAsset(configDir: string, config: WandConfig): Pr
       fileStat,
     };
   }));
+  // 通道过滤：stable 只看正式版文件（无 prerelease 后缀的版本号），beta 全量。
+  // 无版本号的文件两个通道都保留（排序时本来就垫底，仅在只有它时兜底可下载）。
+  const candidates = channel === "beta"
+    ? allCandidates
+    : allCandidates.filter((c) => !isPrereleaseApkVersion(extractAndroidApkVersion(c.entry.name)));
+  if (candidates.length === 0) return null;
   // 按版本号选"最新", 而非修改时间 —— cp/rsync/解压/checkout 都可能让低版本号文件的
   // mtime 更新, 用 mtime 会把旧版本号当成 latest 上报。版本相同或都无版本号时退回 mtime。
   // 注意用安装序比较（同三段时 debug > release，镜像 versionCode），不是标准 semver：
@@ -1284,9 +1315,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.status(400).json({ error: "Missing currentVersion query parameter." });
       return;
     }
-    const latest = await resolveLatestApkVersion(configDir, config);
+    // 更新通道：beta 包含 -debug.* 构建，stable（默认，含不传参的老客户端）只推正式版。
+    const channel = parseApkChannel(req.query.channel);
+    const latest = await resolveLatestApkVersion(configDir, config, channel);
     if (!latest) {
-      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null });
+      res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null, channel });
       return;
     }
     // 安装序比较（镜像 versionCode），不是标准 semver：只在系统安装器真能装上时才提示，
@@ -1300,6 +1333,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       fileName: updateAvailable ? latest.fileName : null,
       size: updateAvailable ? latest.size : null,
       source: latest.source,
+      channel,
       releaseNotes: updateAvailable ? (latest.releaseNotes ?? null) : null,
     });
   });
@@ -1309,7 +1343,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.status(404).json({ error: "Android APK 下载未启用。" });
       return;
     }
-    const androidApk = await resolveAndroidApkAsset(configDir, config);
+    // 更新弹窗的下载链接由 /api/android-apk-update 按通道生成（始终带 ?channel=）。
+    // 裸 /android/download（网页下载页、二维码落地页）不带参时默认 beta ——
+    // 保持「下载页拿到的就是目录里真正最新的包」的旧行为。
+    const channel = req.query.channel === "stable" ? "stable" as const : "beta" as const;
+    const androidApk = await resolveAndroidApkAsset(configDir, config, channel);
     if (!androidApk) {
       res.status(404).json({ error: "当前没有可下载的 APK 文件。" });
       return;
