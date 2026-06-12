@@ -80,7 +80,7 @@ The runtime config file is `~/.wand/config.json` by default.
 
 ## Android APK Build & Deployment
 
-项目包含一个 Android **原生客户端**（Kotlin + Jetpack Compose，会话列表 / 聊天 / 新建会话 / 权限审批 / 设置直连 REST + `/ws`，对称 iOS 原生客户端；WebView 的 MainActivity 仅作设置页「网页版」兜底入口），源码在 `android/` 目录（git submodule → `co0ontty/wand-android`）。原生层结构：`data/`（WandHttp OkHttp 单例 + WandModels org.json 容错解析 + WandApi + WandSocket，合流/重连语义逐行对齐 `ios/Wand/ChatStore.swift` 与 `WandSocket.swift`）、`ui/`（ChatStore 状态机 + Compose 屏幕）。原有 Java 辅助类（ServerStore / NotificationHelper / UpdateManager / WandForegroundService / QR 扫码）原样复用，更新检查迁到 HomeActivity 启动时，图标切换抽取为 `AppIconSwitcher` 供原生与 WebView 桥共用。`updateSessionProgress` 网页驱动的进度通知与任务完成通知（sendNotification）在原生主路径下暂缺，待由原生 WS/前台服务驱动（v1.1）。
+项目包含一个 Android **原生客户端**（Kotlin + Jetpack Compose，会话列表 / 聊天 / 新建会话 / 权限审批 / 设置直连 REST + `/ws`，对称 iOS 原生客户端；WebView 的 MainActivity 仅作设置页「网页版」兜底入口），源码在 `android/` 目录（git submodule → `co0ontty/wand-android`）。原生层结构：`data/`（WandHttp OkHttp 单例 + WandModels org.json 容错解析 + WandApi + WandSocket，合流/重连语义逐行对齐 `ios/Wand/ChatStore.swift` 与 `WandSocket.swift`）、`ui/`（ChatStore 状态机 + Compose 屏幕）。原有 Java 辅助类（ServerStore / NotificationHelper / UpdateManager / WandForegroundService / QR 扫码）原样复用，更新检查迁到 HomeActivity 启动时，图标切换抽取为 `AppIconSwitcher` 供原生与 WebView 桥共用。`updateSessionProgress` 网页驱动的进度通知与任务完成通知（sendNotification）在原生主路径下暂缺，待由原生 WS/前台服务驱动（v1.1）。聊天输入栏带**按住说话端侧语音识别**（`speech/` 模块）：sherpa-onnx 流式中文 CTC 模型优先（按需下载约 26MB，hf-mirror 镜像优先，下载到 `filesDir/asr/`）、系统 SpeechRecognizer 兜底（国产无 GMS ROM 上普遍不可用，所以 sherpa 是主路径）；`app/libs/` 里**提交了** sherpa-onnx static-link AAR（38MB，JitPack 对 k2-fsa 新 tag 构建失败所以钉本地文件），`abiFilters` 仅 arm64-v8a、`useLegacyPackaging=true` 压缩 .so（APK 下载体积约 +9MB）。
 
 **编译 APK：**
 ```bash
@@ -204,7 +204,7 @@ App 启动 5 秒后异步调 `/api/macos-dmg-update?currentVersion=<X>` → 弹 
 
 ## iOS IPA Build & Sideload
 
-项目包含一个 iOS **原生 SwiftUI 客户端**（会话列表 / 聊天 / 输入 / 权限审批直连 REST + `/ws`，WKWebView 仅作「网页版」兜底入口），源码在 `ios/` 目录（git submodule → `co0ontty/wand-ios`）。原生化是为了根治 WebView 在移动端的键盘重叠、状态栏错位问题；与 `macos/`（纯 WebView 壳）不再对称。协议对接速查与完整安装手册见 `ios/README.md`。
+项目包含一个 iOS **原生 SwiftUI 客户端**（会话列表 / 聊天 / 输入 / 权限审批直连 REST + `/ws`，WKWebView 仅作「网页版」兜底入口），源码在 `ios/` 目录（git submodule → `co0ontty/wand-ios`）。原生化是为了根治 WebView 在移动端的键盘重叠、状态栏错位问题；与 `macos/`（纯 WebView 壳）不再对称。协议对接速查与完整安装手册见 `ios/README.md`。聊天输入栏带**按住说话端侧语音识别**（`SpeechRecognizerService.swift`）：SFSpeechRecognizer 端侧听写模型优先（`requiresOnDeviceRecognition`，设备没下载模型时降级 Apple 服务器识别），只需 Info.plist 两条隐私描述、零 entitlement，免费自签不受影响。
 
 **编译（产物是未签名 IPA）：**
 ```bash
