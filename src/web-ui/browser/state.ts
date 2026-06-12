@@ -51,6 +51,16 @@ export function writeStoredBoolean(key: string, value: boolean): void {
 
 export var state: AppState = {
   selectedId: (function() {
+    try {
+      var url = new URL(window.location.href);
+      var requested = url.searchParams.get("session");
+      if (requested) {
+        localStorage.setItem("wand-selected-session", requested);
+        url.searchParams.delete("session");
+        history.replaceState(history.state, "", url.toString());
+        return requested;
+      }
+    } catch (e) {}
     try { return localStorage.getItem("wand-selected-session") || null; } catch (e) { return null; }
   })(),
   pollTimer: null,

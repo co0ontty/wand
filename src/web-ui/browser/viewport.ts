@@ -19,6 +19,7 @@ import { renderChat } from "./websocket";
 
       export function isStandaloneViewportMode() {
         var root = document.documentElement;
+        if (window.__wandIosNative) return true;
         if (root && root.classList && root.classList.contains('is-pwa')) return true;
         try { return navigator.standalone === true; } catch (e) {}
         return false;
@@ -76,6 +77,7 @@ import { renderChat } from "./websocket";
         var vv = window.visualViewport;
         if (!vv) return;
         var root = document.documentElement;
+        root.classList.toggle('is-keyboard-open', !!isKeyboardOpen);
         // APK 原生 IME：MainActivity 已逐帧 setPadding，直接用 vv.height 即可。
         if (window.__wandImeNative) {
           root.style.setProperty('--app-viewport-top', '0px');
@@ -117,6 +119,8 @@ import { renderChat } from "./websocket";
       // Visual viewport handling for better mobile keyboard support
       export function setupVisualViewportHandlers() {
         if (!('visualViewport' in window)) return;
+        if (window.__wandViewportHandlersBound) return;
+        window.__wandViewportHandlersBound = true;
 
         var vv = window.visualViewport;
         var lastHeight = vv.height;
@@ -170,6 +174,18 @@ import { renderChat } from "./websocket";
           viewportSettleTimers = [60, 180, 360, 620, 900].map(function(delay) {
             return setTimeout(function() {
               syncAppViewportHeight(keyboardOpen);
+            }, delay);
+          });
+        }
+
+        function scheduleFocusedInputSettle() {
+          [0, 50, 120, 220, 360, 560].forEach(function(delay) {
+            setTimeout(function() {
+              updateViewport();
+              var inputBox = document.getElementById('input-box');
+              if (inputBox && document.activeElement === inputBox) {
+                syncInputBoxScroll(inputBox);
+              }
             }, delay);
           });
         }
@@ -271,6 +287,18 @@ import { renderChat } from "./websocket";
           }
           setTimeout(debouncedUpdate, 80);
           setTimeout(debouncedUpdate, 420);
+        });
+        document.addEventListener('focusin', function(e) {
+          if (!e || !e.target || !isEditableFocusTarget(e.target)) return;
+          scheduleFocusedInputSettle();
+        });
+        window.addEventListener('wand-ios-ime-state', function(e: any) {
+          var state = e && e.detail && e.detail.state;
+          if (state === 'hidden') {
+            keyboardDismissCooldownUntil = Date.now() + 900;
+          }
+          scheduleFocusedInputSettle();
+          scheduleViewportSettle();
         });
 
         updateViewport();

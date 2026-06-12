@@ -185,6 +185,12 @@
       --pwa-safe-top: 0px;
     }
 
+    /* iOS 原生壳的 WKWebView 会随系统键盘缩小 visual viewport。键盘打开时
+       Home Indicator 已被键盘区域覆盖，输入面板不能再消费一次底部安全区。 */
+    .is-wand-ios.is-keyboard-open {
+      --input-safe-bottom: 0px;
+    }
+
     /* iOS 壳（WKWebView 全屏贴状态栏/灵动岛）与旧版 Android 壳（边到边、无原生
        padding）：.sidebar 是 fixed top:0，脱离 .app-container 的 padding 流，
        头部必须自己消费安全区（对齐 .is-pwa 的同款规则）。新版 Android
@@ -7478,7 +7484,13 @@
     .input-textarea:focus {
       outline: none;
     }
-    .input-textarea::placeholder { color: var(--text-muted); }
+    .input-textarea::placeholder {
+      color: var(--text-tertiary);
+      font-family: var(--font-sans);
+      font-weight: 500;
+      letter-spacing: 0;
+      opacity: 0.62;
+    }
     .input-textarea.has-dir-indicator {
       padding-bottom: 28px;
       min-height: 60px;
@@ -10625,7 +10637,8 @@
       }
 
       .input-composer {
-        border-radius: 10px;
+        border-radius: 14px;
+        box-shadow: 0 3px 14px rgba(89, 58, 32, 0.07);
       }
 
       .input-composer-bar {
@@ -10697,9 +10710,13 @@
 
       .input-textarea {
         min-height: 32px;
-        padding: 6px 30px 3px 8px;
+        padding: 7px 30px 5px 8px;
         font-size: 16px;
         line-height: 1.35;
+      }
+
+      .input-textarea::placeholder {
+        font-size: 15px;
       }
 
       .chat-mode-select {

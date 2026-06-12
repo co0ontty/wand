@@ -78,6 +78,8 @@ declare global {
 
   interface Window {
     __wandImeNative?: boolean;
+    __wandIosNative?: boolean;
+    __wandViewportHandlersBound?: boolean;
     showToast?: (msg: string, opts?: any) => void;
     wandAlert?: (msg: string, opts?: any) => void;
     QRCodeLib?: any;

@@ -84,6 +84,9 @@ if ('serviceWorker' in navigator) {
     if (/WandApp\//.test(ua)) {
       document.documentElement.classList.add('is-wand-app');
     }
+    if (/WandPlatform\/iOS/.test(ua)) {
+      document.documentElement.classList.add('is-wand-ios');
+    }
   } catch (e) {}
 
   // iOS 原生壳据此判断网页是否已支持「侧边栏返回原生界面」按钮：

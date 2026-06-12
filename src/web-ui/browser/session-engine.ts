@@ -151,20 +151,20 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function getComposerPlaceholder(session, terminalInteractive) {
         // Keep placeholders short so they don't wrap on portrait mobile screens.
         // Only show informative state hints; drop the redundant "send to X" labels.
-        if (terminalInteractive) return "终端交互中";
+        if (terminalInteractive) return "键盘输入将发送到终端";
         // 只有真正进入终止态（exited / failed / stopped）才提示"会话已结束"。
         // 结构化会话刚创建或一次回复结束后会回到 "idle"——那是等待下一条输入的
         // 正常状态，不应该被当成结束。
         if (session && (session.status === "exited" || session.status === "failed" || session.status === "stopped")) {
-          if (canAutoResumeSession(session)) return "";
+          if (canAutoResumeSession(session)) return "输入消息以继续会话";
           return "会话已结束";
         }
         // 结构化会话在出 token 时，输入框仍然可用——告诉用户默认行为是排队，
         // 想插队请按气泡上的 ⚡ 按钮。短语尽量短，避免在窄屏手机上换行。
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) {
-          return "回复中…Enter 排队 · ⚡ 立即发送";
+          return "回复中，可继续输入";
         }
-        return "";
+        return "输入消息";
       }
 
       export function getToolModeHint(tool, mode) {

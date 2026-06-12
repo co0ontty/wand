@@ -45,6 +45,17 @@
   var state = {
     selectedId: (function() {
       try {
+        var url = new URL(window.location.href);
+        var requested = url.searchParams.get("session");
+        if (requested) {
+          localStorage.setItem("wand-selected-session", requested);
+          url.searchParams.delete("session");
+          history.replaceState(history.state, "", url.toString());
+          return requested;
+        }
+      } catch (e) {
+      }
+      try {
         return localStorage.getItem("wand-selected-session") || null;
       } catch (e) {
         return null;
@@ -4419,6 +4430,7 @@
   var keyboardDismissCooldownUntil = 0;
   function isStandaloneViewportMode() {
     var root = document.documentElement;
+    if (window.__wandIosNative) return true;
     if (root && root.classList && root.classList.contains("is-pwa")) return true;
     try {
       return navigator.standalone === true;
@@ -4471,6 +4483,7 @@
     var vv = window.visualViewport;
     if (!vv) return;
     var root = document.documentElement;
+    root.classList.toggle("is-keyboard-open", !!isKeyboardOpen);
     if (window.__wandImeNative) {
       root.style.setProperty("--app-viewport-top", "0px");
       root.style.setProperty("--app-viewport-height", Math.round(vv.height) + "px");
@@ -4505,6 +4518,8 @@
   }
   function setupVisualViewportHandlers() {
     if (!("visualViewport" in window)) return;
+    if (window.__wandViewportHandlersBound) return;
+    window.__wandViewportHandlersBound = true;
     var vv = window.visualViewport;
     var lastHeight = vv.height;
     var keyboardOpen = false;
@@ -4548,6 +4563,17 @@
       viewportSettleTimers = [60, 180, 360, 620, 900].map(function(delay) {
         return setTimeout(function() {
           syncAppViewportHeight(keyboardOpen);
+        }, delay);
+      });
+    }
+    function scheduleFocusedInputSettle() {
+      [0, 50, 120, 220, 360, 560].forEach(function(delay) {
+        setTimeout(function() {
+          updateViewport();
+          var inputBox = document.getElementById("input-box");
+          if (inputBox && document.activeElement === inputBox) {
+            syncInputBoxScroll(inputBox);
+          }
         }, delay);
       });
     }
@@ -4637,6 +4663,18 @@
       }
       setTimeout(debouncedUpdate, 80);
       setTimeout(debouncedUpdate, 420);
+    });
+    document.addEventListener("focusin", function(e) {
+      if (!e || !e.target || !isEditableFocusTarget(e.target)) return;
+      scheduleFocusedInputSettle();
+    });
+    window.addEventListener("wand-ios-ime-state", function(e) {
+      var state3 = e && e.detail && e.detail.state;
+      if (state3 === "hidden") {
+        keyboardDismissCooldownUntil = Date.now() + 900;
+      }
+      scheduleFocusedInputSettle();
+      scheduleViewportSettle();
     });
     updateViewport();
   }
@@ -13744,15 +13782,15 @@
     return selected && selected.provider || state.preferredCommand || "claude";
   }
   function getComposerPlaceholder(session, terminalInteractive) {
-    if (terminalInteractive) return "\u7EC8\u7AEF\u4EA4\u4E92\u4E2D";
+    if (terminalInteractive) return "\u952E\u76D8\u8F93\u5165\u5C06\u53D1\u9001\u5230\u7EC8\u7AEF";
     if (session && (session.status === "exited" || session.status === "failed" || session.status === "stopped")) {
-      if (canAutoResumeSession(session)) return "";
+      if (canAutoResumeSession(session)) return "\u8F93\u5165\u6D88\u606F\u4EE5\u7EE7\u7EED\u4F1A\u8BDD";
       return "\u4F1A\u8BDD\u5DF2\u7ED3\u675F";
     }
     if (isStructuredSession2(session) && session.structuredState && session.structuredState.inFlight) {
-      return "\u56DE\u590D\u4E2D\u2026Enter \u6392\u961F \xB7 \u26A1 \u7ACB\u5373\u53D1\u9001";
+      return "\u56DE\u590D\u4E2D\uFF0C\u53EF\u7EE7\u7EED\u8F93\u5165";
     }
-    return "";
+    return "\u8F93\u5165\u6D88\u606F";
   }
   function getToolModeHint2(tool, mode) {
     if (tool === "codex") {
@@ -17259,6 +17297,9 @@
       var ua = navigator && navigator.userAgent || "";
       if (/WandApp\//.test(ua)) {
         document.documentElement.classList.add("is-wand-app");
+      }
+      if (/WandPlatform\/iOS/.test(ua)) {
+        document.documentElement.classList.add("is-wand-ios");
       }
     } catch (e) {
     }
