@@ -2153,7 +2153,7 @@ export class StructuredSessionManager {
           if (sb.finalized && sb.partialInput) {
             try { input = JSON.parse(sb.partialInput) as Record<string, unknown>; } catch { /* partial json */ }
           }
-          block = { type: "tool_use", id: sb.id, name: sb.name, input };
+          block = { type: "tool_use", id: sb.id, name: sb.name, input: this.normalizeToolInput(sb.name, input) };
         }
         if (!block) continue;
         if (sb.parentToolUseId) {
@@ -2510,7 +2510,7 @@ export class StructuredSessionManager {
           id: typedBlock.id,
           name: typedBlock.name,
           description: typeof typedBlock.description === "string" ? typedBlock.description : undefined,
-          input: this.normalizeToolInput(typedBlock.input),
+          input: this.normalizeToolInput(typedBlock.name, typedBlock.input),
         });
       }
     }
@@ -2576,11 +2576,30 @@ export class StructuredSessionManager {
     return current.queuedMessages;
   }
 
-  private normalizeToolInput(input: unknown): Record<string, unknown> {
+  private normalizeToolInput(name: unknown, input: unknown): Record<string, unknown> {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       return {};
     }
-    return input as Record<string, unknown>;
+    const record = input as Record<string, unknown>;
+    // `claude -p --output-format stream-json`（默认结构化 runner）有时把数组型工具参数
+    // 当成 JSON 字符串吐出来——例如 TodoWrite 的 todos 会是 "[{...}]" 而非真正的数组。
+    // 所有客户端（web / iOS / Android）读的都是数组，拿到字符串就解析不出待办，进度条
+    // 与 AskUserQuestion 卡片整段消失。这里按工具名把已知的数组字段反序列化回数组，
+    // 让线上协议恢复成「block.input.todos = [{content,status,activeForm}]」的契约。
+    const arrayFieldsByTool: Record<string, string> = {
+      TodoWrite: "todos",
+      AskUserQuestion: "questions",
+    };
+    const field = typeof name === "string" ? arrayFieldsByTool[name] : undefined;
+    if (field && typeof record[field] === "string") {
+      try {
+        const parsed = JSON.parse(record[field] as string);
+        if (Array.isArray(parsed)) record[field] = parsed;
+      } catch {
+        /* 保留原字符串：宁可不改也不要丢数据 */
+      }
+    }
+    return record;
   }
 
   private normalizeToolResultContent(content: unknown): string | Array<{ type: string; [key: string]: unknown }> {
