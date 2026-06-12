@@ -40,10 +40,6 @@ export interface TurnRequest {
   allowedScopes?: EscalationScope[];
 }
 
-export interface EscalationDecisionRequest {
-  resolution?: Extract<EscalationResolution, "approve_once" | "approve_turn" | "deny">;
-}
-
 export interface CommandPreset {
   label: string;
   command: string;

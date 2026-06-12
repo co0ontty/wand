@@ -120,26 +120,6 @@ async function atomicWriteFile(filePath: string, content: string): Promise<void>
   }
 }
 
-export async function ensureConfig(configPath: string): Promise<WandConfig> {
-  const dir = path.dirname(configPath);
-  await mkdir(dir, { recursive: true });
-
-  try {
-    const raw = await readFile(configPath, "utf8");
-    const merged = mergeWithDefaults(JSON.parse(raw) as Partial<WandConfig>);
-    const normalized = `${JSON.stringify(merged, null, 2)}\n`;
-    // Only write if the file content actually changed
-    if (raw.trimEnd() !== normalized.trimEnd()) {
-      await atomicWriteFile(configPath, normalized);
-    }
-    return merged;
-  } catch {
-    const config = defaultConfig();
-    await atomicWriteFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
-    return config;
-  }
-}
-
 /** saveConfig 写出时去掉偏好字段——这些已经移到 SQLite。 */
 export async function saveConfig(configPath: string, config: WandConfig): Promise<void> {
   await mkdir(path.dirname(configPath), { recursive: true });

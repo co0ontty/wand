@@ -1,5 +1,70 @@
 "use strict";
 (() => {
+  // src/web-ui/browser/legacy-pwa-cleanup.ts
+  var LEGACY_PWA_CLEANUP_KEY = "wand-legacy-pwa-cleanup-v1";
+  var LEGACY_CACHE_PREFIXES = ["wand-static-", "wand-runtime-"];
+  function isLegacyWandServiceWorker(worker) {
+    if (!worker) return false;
+    try {
+      const scriptUrl = new URL(worker.scriptURL, location.href);
+      return scriptUrl.origin === location.origin && scriptUrl.pathname === "/sw.js";
+    } catch {
+      return false;
+    }
+  }
+  function isLegacyWandRegistration(registration) {
+    return isLegacyWandServiceWorker(registration.installing) || isLegacyWandServiceWorker(registration.waiting) || isLegacyWandServiceWorker(registration.active);
+  }
+  function hasCompletedCleanup() {
+    try {
+      return localStorage.getItem(LEGACY_PWA_CLEANUP_KEY) === "done";
+    } catch {
+      return false;
+    }
+  }
+  function markCleanupCompleted() {
+    try {
+      localStorage.setItem(LEGACY_PWA_CLEANUP_KEY, "done");
+    } catch {
+    }
+  }
+  async function unregisterLegacyServiceWorkers() {
+    if (!("serviceWorker" in navigator)) return true;
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      const legacyRegistrations = registrations.filter(isLegacyWandRegistration);
+      await Promise.all(legacyRegistrations.map((registration) => registration.unregister()));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async function deleteLegacyCaches() {
+    if (!("caches" in window)) return true;
+    try {
+      const cacheNames = await caches.keys();
+      const legacyCacheNames = cacheNames.filter(
+        (name) => LEGACY_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix))
+      );
+      await Promise.all(legacyCacheNames.map((name) => caches.delete(name)));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async function cleanupLegacyPwaState() {
+    if (hasCompletedCleanup()) return;
+    const controlledByLegacyWorker = "serviceWorker" in navigator && isLegacyWandServiceWorker(navigator.serviceWorker.controller);
+    const [workersCleaned, cachesCleaned] = await Promise.all([
+      unregisterLegacyServiceWorkers(),
+      deleteLegacyCaches()
+    ]);
+    if (!workersCleaned || !cachesCleaned) return;
+    markCleanupCompleted();
+    if (controlledByLegacyWorker) location.reload();
+  }
+  void cleanupLegacyPwaState();
+
   // src/web-ui/browser/state.ts
   var configPath = "${escapeHtml(configPath)}";
   var CHAT_EXPAND_STATE_STORAGE_KEY = "wand-chat-expand-state-v1";
@@ -415,16 +480,11 @@
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
     shieldCheck: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
     keyboard: '<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="6" y1="14" x2="6" y2="14"/><line x1="18" y1="14" x2="18" y2="14"/><line x1="9" y1="14" x2="15" y2="14"/>',
-    cloud: '<path d="M17.5 19a4.5 4.5 0 1 0-1-8.9 6 6 0 0 0-11.5 1.7A4 4 0 0 0 6 19h11.5z"/>',
     terminal: '<polyline points="4 7 9 12 4 17"/><line x1="12" y1="17" x2="20" y2="17"/>',
     chat: '<path d="M21 12a8 8 0 0 1-12.9 6.3L3 20l1.7-5.1A8 8 0 1 1 21 12z"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
-    folderOpen: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2"/><path d="M3 9h18l-2 8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
-    slash: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
     chevronDown: '<polyline points="6 9 12 15 18 9"/>',
-    chevronUp: '<polyline points="6 15 12 9 18 15"/>',
-    chevronRight: '<polyline points="9 6 15 12 9 18"/>',
     bell: '<path d="M18 16v-5a6 6 0 1 0-12 0v5l-2 2h16z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
     music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
     vibrate: '<rect x="9" y="4" width="6" height="16" rx="1"/><path d="M5 8v8"/><path d="M3 10v4"/><path d="M19 8v8"/><path d="M21 10v4"/>',
@@ -434,15 +494,11 @@
     link: '<path d="M10 14a4.5 4.5 0 0 0 6.36 0l3-3a4.5 4.5 0 1 0-6.36-6.36l-1.42 1.41"/><path d="M14 10a4.5 4.5 0 0 0-6.36 0l-3 3a4.5 4.5 0 1 0 6.36 6.36l1.42-1.41"/>',
     palette: '<circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 3a9 9 0 1 0 0 18 1.5 1.5 0 0 0 1.1-2.5 1.5 1.5 0 0 1 1.1-2.5h2.3A4.5 4.5 0 0 0 21 11.5C21 6.8 16.97 3 12 3z"/>',
     play: '<polygon points="6 4 20 12 6 20 6 4"/>',
-    inbox: '<polyline points="22 13 16 13 14 16 10 16 8 13 2 13"/><path d="M5 5h14l3 8v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
-    zap: '<polygon points="13 2 4 14 11 14 10 22 20 9 13 9 13 2"/>',
     wrench: '<path d="M14.7 6.3a4 4 0 1 1 4 4l-9 9-3.5 1 1-3.5 7.5-7.5z"/>',
     paw: '<circle cx="7.5" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="6.8" r="2" fill="currentColor" stroke="none"/><circle cx="16.5" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="18" cy="13.3" r="1.8" fill="currentColor" stroke="none"/><path d="M7.2 16.3c.5-2.9 2.3-4.8 4.8-4.8s4.3 1.9 4.8 4.8c.3 1.8-.9 3.2-2.6 2.6-.8-.3-1.4-.6-2.2-.6s-1.4.3-2.2.6c-1.7.6-2.9-.8-2.6-2.6z" fill="currentColor" stroke="none"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
-    check: '<polyline points="5 12 10 17 19 7"/>',
     signal: '<path d="M2 12a15 15 0 0 1 20 0"/><path d="M5 16a10 10 0 0 1 14 0"/><path d="M9 20a4 4 0 0 1 6 0"/><circle cx="12" cy="20" r="0.5" fill="currentColor"/>',
     file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="14 3 14 9 20 9"/>',
-    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><polyline points="3 18 9 12 14 17 21 12"/>',
     sigma: '<polyline points="18 4 6 4 13 12 6 20 18 20"/>',
     x: '<path d="M18 6 6 18"/><path d="M6 6l12 12"/>',
     // 「+」：附件入口（替代旧曲别针图标），更直观、与微信/iMessage 习惯一致。

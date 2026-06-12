@@ -865,14 +865,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           // 全量重放在 fresh buffer 上会把 Claude 用相对位移画的菜单帧顺序堆叠
           // （截图 2 的根因之一）。NEW-A（CSI ?2026 同步输出缓冲）已经把菜单帧
           // 渲染原子化，R6（wandTerminalWrite 内的 maybeScheduleResyncForChunk）
-          // 在出现原地重绘序列时兜底。这条翻转触发现在是多余且有害的。
-          // var prevEsc = prevSession && prevSession.pendingEscalation ? 1 : 0;
-          // var nextEsc = updatedSession && updatedSession.pendingEscalation ? 1 : 0;
-          // var prevBlocked = prevSession && prevSession.permissionBlocked ? 1 : 0;
-          // var nextBlocked = updatedSession && updatedSession.permissionBlocked ? 1 : 0;
-          // if (prevEsc !== nextEsc || prevBlocked !== nextBlocked) {
-          //   scheduleSoftResyncTerminal(200);
-          // }
+          // 在出现原地重绘序列时兜底。这条翻转触发现在是多余且有害的，已移除。
         }
         // When a session transitions to a non-running state, try flushing cross-session queue
         if (normalizedSnapshot.status && normalizedSnapshot.status !== "running" && state.crossSessionQueue.length > 0) {

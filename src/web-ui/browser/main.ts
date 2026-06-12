@@ -1,7 +1,8 @@
 // ── Module imports ──
-// Import order matters: state and base utilities first, then business modules.
+// Import order matters: legacy cleanup first, then state/base utilities and business modules.
 // Each import triggers module-level side effects (e.g. localStorage migrations,
 // global assignments, setInterval timers).
+import "./legacy-pwa-cleanup";
 import "./state";        // state initialization + localStorage migrations
 import "./i18n";
 import "./utils";

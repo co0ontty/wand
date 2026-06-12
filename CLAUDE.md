@@ -57,7 +57,7 @@ The runtime config file is `~/.wand/config.json` by default.
 
 **Repo-specific notes:**
 - `npm run dev` already runs `src/cli.ts web`; append CLI flags after `--`. It re-runs `bundle-browser` + `generate-web-assets` on each start, but does **not** rebundle wterm/qrcode.
-- `ensureConfig()` rewrites the config file with defaults merged in, so config-schema changes must also update `src/config.ts`.
+- `loadConfigWithStorage()` rewrites the config file with defaults merged in, so config-schema changes must also update `src/config.ts`.
 - Browser-side code lives in `src/web-ui/browser/*.ts` (entry `main.ts`). `scripts/bundle-browser.js` (esbuild) emits `src/web-ui/content/scripts.js` — that file is **generated, never hand-edit it**. `src/web-ui/content/styles.css` is still hand-edited source.
 - `scripts/generate-web-assets.js` minifies `scripts.js` + `styles.css` and base64-embeds them (plus the wterm/qrcode vendor bundles) into `src/web-ui/embedded-assets.ts` — also generated, never hand-edit. The server serves assets from this module; `styles.ts`/`scripts.ts` add an mtime-based cache so editing files under `dist/` is picked up without restarting.
 - `npm run build` must keep copying `src/web-ui/content/` into `dist/web-ui/`; the packaged app depends on those static assets.
@@ -316,7 +316,7 @@ Before adding a new abstraction, check whether the needed data can fit into an e
 
 ### State and persistence
 
-- Config lives in `~/.wand/config.json`; `ensureConfig()` in `src/config.ts` loads the file, merges defaults, and writes the normalized result back to disk.
+- Config lives in `~/.wand/config.json`; `loadConfigWithStorage()` in `src/config.ts` loads the file, merges defaults (plus SQLite preference overrides), and writes the normalized result back to disk.
 - SQLite lives beside the config (`resolveDatabasePath(configPath)`), usually `~/.wand/wand.db`; `src/storage.ts` stores auth sessions, command sessions, app config overrides, Claude resume metadata, and serialized `ConversationTurn[]`.
 - Schema migration policy is additive only: `ensureCommandSessionSchema()` adds missing columns and never drops old ones.
 - `src/session-logger.ts` writes per-session artifacts under `~/.wand/sessions/<sessionId>/`, including rotating PTY logs, structured messages, metadata, native stream events, and shortcut interaction logs.
@@ -444,7 +444,7 @@ The server exposes login/logout, config, session control, PTY input/resize, file
 ### Naming
 - Files: lowercase kebab-case (`process-manager.ts`)
 - Types/Interfaces: PascalCase (`WandConfig`, `SessionSnapshot`)
-- Functions/Variables: camelCase (`ensureConfig`, `appendWindow`)
+- Functions/Variables: camelCase (`loadConfigWithStorage`, `appendWindow`)
 - Constants: UPPER_SNAKE_CASE (`MAX_SESSIONS`, `OUTPUT_MAX_SIZE`)
 - Classes: PascalCase, use `private` keyword for internals
 

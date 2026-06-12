@@ -63,14 +63,6 @@ export function getStableTagVersion(version: string): string {
   return cleanVersion(version).split("+")[0]?.split("-")[0] ?? cleanVersion(version);
 }
 
-export function isBetaPackageVersion(version: string): boolean {
-  return /(?:^|-)beta(?:[.-]|$)/i.test(cleanVersion(version));
-}
-
-export function isPureStableVersion(version: string): boolean {
-  return /^\d+\.\d+\.\d+$/.test(cleanVersion(version));
-}
-
 function computeUpdateAvailable(currentVersion: string, latestVersion: string | null, channel: UpdateChannel): boolean {
   if (!latestVersion) return false;
 
