@@ -88,8 +88,4 @@ declare global {
     __queueDelegated?: boolean;
     readonly visualViewport: VisualViewport | null;
   }
-
-  interface Navigator {
-    standalone?: boolean;
-  }
 }

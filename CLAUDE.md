@@ -374,7 +374,7 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | File | Role |
 |------|------|
 | `src/cli.ts` | CLI entrypoint and config-related commands |
-| `src/server.ts` | Express server, REST API, WebSocket, PWA/service worker endpoints |
+| `src/server.ts` | Express server, REST API, WebSocket, and web UI endpoints |
 | `src/server-session-routes.ts` | Session/resume/history HTTP routes and shared API error helpers |
 | `src/process-manager.ts` | PTY session orchestration, input/output routing, permission handling, resume/archive logic |
 | `src/structured-session-manager.ts` | Non-PTY runner that spawns `claude -p` and streams JSON output |
@@ -387,7 +387,6 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/auth.ts` | Session token creation, validation, and revocation |
 | `src/cert.ts` | Self-signed HTTPS certificate generation and loading |
 | `src/ws-broadcast.ts` | WebSocket broadcast manager for `/ws` fanout |
-| `src/pwa.ts` | PWA manifest and service worker script generation |
 | `src/git-worktree.ts` | Per-session git worktree create/merge/cleanup, backs `.wand-worktrees/` |
 | `src/upload-routes.ts` | `POST /api/sessions/:id/upload` — multer-backed uploads to `<cwd>/.wand-uploads/` |
 | `src/models.ts` | Built-in Claude model list, `claude --version` probing, model cache |
@@ -411,7 +410,6 @@ WebSocket clients connect to `/ws`, send `{type: "subscribe", sessionId}`, and r
 | `src/middleware/rate-limit.ts` | Login / sensitive endpoint rate limiting |
 | `src/pty-text-utils.ts` | ANSI / control-sequence helpers for terminal output processing |
 | `src/message-truncator.ts` | Long-message truncation for chat persistence and broadcast |
-| `src/avatar.ts` | Pixel-cat avatar generation (赛博虎妞 / 勤劳初二) |
 | `src/web-ui/` | Server-rendered HTML + browser assets. Browser source is `browser/*.ts`; `content/scripts.js`, `embedded-assets.ts`, and `content/vendor/*` bundles are generated — do not hand-edit |
 | `src/types.ts` | Shared contracts across CLI, server, storage, PTY bridge, and UI |
 

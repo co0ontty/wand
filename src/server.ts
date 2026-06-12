@@ -11,7 +11,6 @@ import { promisify } from "node:util";
 import path from "node:path";
 import process from "node:process";
 import { WebSocketServer } from "ws";
-import { ensureAvatarSeed, getAvatarSvg } from "./avatar.js";
 import {
   createSession,
   readSessionCookie,
@@ -36,7 +35,6 @@ import { getCachedModels, refreshModels } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
-import { generatePwaManifest, generateServiceWorker } from "./pwa.js";
 import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
 import {
   checkPackageUpdateAsync,
@@ -1118,7 +1116,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const storage = new WandStorage(resolveDatabasePath(configPath));
   setAuthStorage(storage);
   const configDir = resolveConfigDir(configPath);
-  const avatarSeed = await ensureAvatarSeed(configDir);
   const processes = new ProcessManager(config, storage, configDir);
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger);
@@ -1139,7 +1136,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   app.get("/vendor/wterm/terminal.css", (req, res) => sendEmbeddedVendorAsset("/vendor/wterm/terminal.css", req, res));
   app.get("/vendor/qrcode/qrcode.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/qrcode/qrcode.bundle.js", req, res));
 
-  // ── Web UI and PWA endpoints ──
+  // ── Web UI endpoints ──
 
   app.get("/", (_req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -1192,28 +1189,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     } catch {
       res.status(404).end();
     }
-  });
-
-  app.get("/manifest.json", (_req, res) => {
-    res.setHeader("Content-Type", "application/manifest+json");
-    res.send(generatePwaManifest());
-  });
-
-  for (const [route, size] of [["/icon.svg", 192], ["/icon-192.png", 192], ["/icon-512.png", 512]] as const) {
-    app.get(route, (_req, res) => {
-      res.type("image/svg+xml").send(getAvatarSvg(avatarSeed, size));
-    });
-  }
-
-  app.get("/sw.js", (_req, res) => {
-    res.setHeader("Content-Type", "application/javascript");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.setHeader("Service-Worker-Allowed", "/");
-    res.send(generateServiceWorker());
-  });
-
-  app.get("/offline", (_req, res) => {
-    res.type("html").send(renderApp(configPath));
   });
 
   // ── Auth routes ──

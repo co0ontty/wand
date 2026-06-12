@@ -380,7 +380,7 @@ print_panel() {
   if [[ "$SCOPE" == "user" ]]; then
     echo -e "  ${C_DIM}登出后想保持运行：loginctl enable-linger \$USER${C_RESET}"
   fi
-  echo -e "  ${C_DIM}浏览器刷不到改动: Cmd/Ctrl+Shift+R 硬刷；PWA 还要 DevTools → Application → SW → Unregister${C_RESET}"
+  echo -e "  ${C_DIM}浏览器刷不到改动: Cmd/Ctrl+Shift+R 硬刷${C_RESET}"
   echo
 }
 

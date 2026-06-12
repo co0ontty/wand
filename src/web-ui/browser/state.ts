@@ -167,8 +167,6 @@ export var state: AppState = {
   structuredRunner: "claude-cli-print",
   lastResize: { cols: 0, rows: 0 },
   isOnline: navigator.onLine,
-  deferredPrompt: null,
-  showInstallPrompt: false,
   ws: null,
   wsConnected: false,
   // 上一次从服务器收到任意 WS 消息（包括 ping）的时间戳。心跳 stale 检测

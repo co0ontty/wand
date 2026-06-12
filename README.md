@@ -76,7 +76,6 @@ bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.s
 
 ### 部署与访问
 
-- **PWA 支持** — 可添加到主屏幕作为独立应用使用
 - **Android 客户端** — WebView 壳应用，支持加密连接码分发、APK 自动更新检查、原生通知推送、启动器图标切换
 - **HTTPS** — 可选自签证书，适合远程或移动端访问
 - **版本管理** — 内置更新检查与升级提示

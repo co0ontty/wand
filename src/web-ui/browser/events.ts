@@ -7,7 +7,7 @@ import { adjustTerminalScale, closeFilePanel, dismissFileContextMenu, filterFile
 import { attachQuickCommitModalListeners, closeQuickCommitModal, loadGitStatus, openQuickCommitModal } from "./git-commit";
 import { attachQueueBarDelegates, bindInputTouchScroll, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, handleVoiceMove, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, startVoiceRecording, stopSession, stopVoiceRecording, toggleTerminalInteractive, toggleVoiceMode, updateQueueBar, welcomeInputSend } from "./input";
 import { _doPlaySound, _hasNativeBridge, _vibrate, hideError, showError, showToast, wandAlert, wandConfirm } from "./notifications";
-import { getEffectiveCwd, render, resetChatRenderCache, updateInstallPrompt } from "./render";
+import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
 import { _updateAppIconSelection, addPendingAttachment, backToNativeApp, checkForUpdate, closePlusPopover, closeSessionModal, closeSessionsDrawer, closeSettingsModal, closeWorktreeMergeModal, confirmWorktreeMerge, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, hidePathSuggestions, initBlankChatCwd, isStructuredSession, loadSessions, login, logout, onChatModelChange, onChatThinkingChange, openEnvPreviewModal, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, performSettingsRestart, performUpdate, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, resetNotificationPermission, retryWorktreeCleanup, runCommand, saveConfigSettings, saveDisplaySettings, savePassword, schedulePathSuggestions, scheduleTestNotification, selectSession, setDraftValue, setUpdateChannel, switchServer, switchSettingsTab, syncComposerHasText, syncSessionModalUI, testNotification, toggleAutoUpdate, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin, updateNotificationStatus, uploadCertificates } from "./session-engine";
 import { batchDeleteSelected, clearSelections, confirmDelete, renderSessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { activateSessionItem, addRecentPath, copySelectedSessionField, fetchRecentPaths, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, saveWorkingDir, softResyncTerminal } from "./terminal";
@@ -923,20 +923,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           var toggle = document.getElementById(id);
           if (toggle) toggle.addEventListener("click", toggleTerminalInteractive);
         });
-        // PWA install button
-        var pwaInstallBtn = document.getElementById("pwa-install-button");
-        if (pwaInstallBtn) {
-          pwaInstallBtn.addEventListener("click", function() {
-            if (!state.deferredPrompt) return;
-            state.deferredPrompt.prompt();
-            state.deferredPrompt.userChoice.then(function() {
-              state.deferredPrompt = null;
-              state.showInstallPrompt = false;
-              updateInstallPrompt();
-            });
-          });
-        }
-
         // File panel toggle
         var filePanelToggle = document.getElementById("file-panel-toggle-btn");
         if (filePanelToggle) filePanelToggle.addEventListener("click", toggleFilePanel);

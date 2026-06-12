@@ -82,14 +82,6 @@ export function getEffectiveCwd() {
   return state.workingDir || getConfigCwd();
 }
 
-// PWA install prompt handling
-window.addEventListener('beforeinstallprompt', function(e) {
-  e.preventDefault();
-  state.deferredPrompt = e;
-  state.showInstallPrompt = true;
-  updateInstallPrompt();
-});
-
 window.addEventListener('online', function() {
   state.isOnline = true;
   updateOfflineBanner();
@@ -111,15 +103,6 @@ export function updateOfflineBanner() {
   } else if (state.isOnline && banner) {
     banner.remove();
   }
-}
-
-export function updateInstallPrompt() {
-  // 显示或隐藏菜单栏中的安装按钮
-  var visible = !!(state.showInstallPrompt && state.deferredPrompt);
-  var installBtn = document.getElementById('pwa-install-button');
-  if (installBtn) installBtn.classList.toggle('hidden', !visible);
-  var topbarInstallItem = document.getElementById('topbar-install-item');
-  if (topbarInstallItem) topbarInstallItem.classList.toggle('hidden', !visible);
 }
 
 export function renderBootLoading() {
@@ -597,10 +580,6 @@ export function renderAppShell() {
             '<button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="设置">' +
               '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' +
               '<span>设置</span>' +
-            '</button>' +
-            '<button id="pwa-install-button" class="btn btn-ghost btn-sm hidden" title="安装应用">' +
-              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
-              '<span>安装</span>' +
             '</button>' +
             (hasNativeBackToApp() ?
               '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="返回 App 原生界面">' +

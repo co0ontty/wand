@@ -12,17 +12,13 @@ import { renderChat } from "./websocket";
       export var appViewportBaselineWidth = 0;
       export var appViewportBaselineHeight = 0;
       export var closedViewportBaselineUntil = 0;
-      // iOS PWA 键盘收起冷却：收起动画期间 visualViewport 尺寸抖动会让
+      // iOS 原生壳键盘收起冷却：收起动画期间 visualViewport 尺寸抖动会让
       // detectKeyboardOpen 误判为 "键盘仍打开"，导致 --app-viewport-top
       // 残留正值、输入框偏下。冷却期内抑制弱信号的 "仍打开" 判定。
       export var keyboardDismissCooldownUntil = 0;
 
-      export function isStandaloneViewportMode() {
-        var root = document.documentElement;
-        if (window.__wandIosNative) return true;
-        if (root && root.classList && root.classList.contains('is-pwa')) return true;
-        try { return navigator.standalone === true; } catch (e) {}
-        return false;
+      export function isIosNativeViewportMode() {
+        return window.__wandIosNative === true;
       }
 
       export function markClosedViewportBaselineWindow(durationMs) {
@@ -66,10 +62,10 @@ import { renderChat } from "./websocket";
         return Math.max(1, Math.round(appViewportBaselineHeight || height || 1));
       }
 
-      // iOS PWA 键盘收起后 visualViewport 可能残留偏移或高度不足，
+      // iOS 原生壳键盘收起后 visualViewport 可能残留偏移或高度不足，
       // 用已知基线兜住避免底部留白。
       export function shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight) {
-        if (isKeyboardOpen || !isStandaloneViewportMode()) return false;
+        if (isKeyboardOpen || !isIosNativeViewportMode()) return false;
         return offsetTop > 0 || baselineHeight > height + 1;
       }
 
@@ -87,10 +83,10 @@ import { renderChat } from "./websocket";
         var baselineHeight = refreshAppViewportBaseline(vv);
         var offsetTop = Math.max(0, Math.round(vv.offsetTop || 0));
         var height = Math.max(1, Math.round(vv.height));
-        // iOS PWA standalone 在键盘关闭状态下无条件钉到基线：
+        // iOS 原生壳在键盘关闭状态下无条件钉到基线：
         // 收起动画期间 vv.height/offsetTop 会抖动，若跟随这些中间值会导致
         // --app-viewport-top 残留正值、底部输入框偏到屏幕外。
-        if (!isKeyboardOpen && isStandaloneViewportMode()) {
+        if (!isKeyboardOpen && isIosNativeViewportMode()) {
           offsetTop = 0;
           height = Math.max(height, baselineHeight);
         } else if (shouldUseFullViewport(isKeyboardOpen, offsetTop, height, baselineHeight)) {
@@ -279,7 +275,7 @@ import { renderChat } from "./websocket";
           if (!isEditableFocusTarget(e.target)) return;
           scheduleClosedViewportBaselineWindow(1600, e.target);
           // 即刻启动冷却，避免失焦后 iOS 收起动画抖动误判。
-          if (isStandaloneViewportMode()) {
+          if (isIosNativeViewportMode()) {
             keyboardDismissCooldownUntil = Math.max(
               keyboardDismissCooldownUntil,
               Date.now() + 1200

@@ -2743,7 +2743,7 @@ import { getSessionStatusLabel } from "./session-ui";
         var blurredEl = event && event.target ? event.target : document.getElementById('input-box');
         resetInputPanelViewportSpacing();
         scheduleClosedViewportBaselineWindow(2200, blurredEl);
-        // blur 触发瞬间 vv.height 通常还停在键盘弹起时的旧值——iOS 26 PWA 上动画
+        // blur 触发瞬间 vv.height 通常还停在键盘弹起时的旧值——iOS 上动画
         // 要再跑 ~250ms 才回弹完整。这里铺一串 settle tick 让 syncAppViewportHeight
         // 在 vv 真正稳定后能把 top/height 收敛到正确值。
         var dismissTicks = [80, 200, 380, 620, 900];
@@ -2920,7 +2920,7 @@ import { getSessionStatusLabel } from "./session-ui";
 
       // ─────────────────────────────────────────────────────────────────────
       // 视口锚定：把 .app-container 用 fixed + top/height 钉到 visual viewport，
-      // 让键盘弹起 / 地址栏切换 / iOS PWA 焦点 pan 都自然反映到布局。
+      // 让键盘弹起 / 地址栏切换 / iOS 焦点 pan 都自然反映到布局。
       // ─────────────────────────────────────────────────────────────────────
       //
       // 设计：CSS 里 .app-container 是
@@ -2931,7 +2931,7 @@ import { getSessionStatusLabel } from "./session-ui";
       // 这里把两个变量都写成 vv.offsetTop / vv.height 的实测值：
       //   · iOS Safari 浏览器内：聚焦输入框时 iOS 滚 layout viewport 把焦点入视，
       //     vv.offsetTop ≈ 0，vv.height = 可见高度。top:0 height:vv.height 自然正确。
-      //   · iOS PWA standalone：iOS 改成 pan 「visual viewport」自己（vv.offsetTop > 0），
+      //   · iOS 原生壳：iOS 可能改成 pan「visual viewport」自己（vv.offsetTop > 0），
       //     layout viewport 完全不滚。position:fixed 在 iOS 是相对 layout viewport 的，
       //     必须把 top 写成 vv.offsetTop，容器才会跟着可见区往下走；否则容器仍钉在
       //     layout 顶部 = 被 pan 到可视区外 → 底部 input-panel 落在屏幕下方 = 被键盘挡。
@@ -2939,12 +2939,12 @@ import { getSessionStatusLabel } from "./session-ui";
       //   · 桌面：vv.height ≈ innerHeight，vv.offsetTop = 0，无副作用。
       //
       // 之前的方案是 height = vv.height + vv.pageTop，配合 scrollTo(0,0) 把 layout
-      // 滚回顶；它依赖 iOS 真的滚过 layout viewport，在 PWA standalone 不成立 →
+      // 滚回顶；它依赖 iOS 真的滚过 layout viewport，在原生壳中不一定成立 →
       // height 被膨胀但 top 不动 → 容器底落到可视区之外，就是用户报告的两个症状
       // （键盘弹起遮挡 + 键盘收起后输入框停在半空）。
       export function resetRootViewportScroll() {
-        // 仅在 iOS Safari 浏览器内有意义（layout 真被滚过的场景）。在 iOS PWA
-        // standalone 里 layout 没滚，调用是 no-op；但我们已经不依赖它来对齐布局，
+        // 仅在 iOS Safari 浏览器内有意义（layout 真被滚过的场景）。在 iOS 原生壳
+        // 里 layout 没滚时调用是 no-op；但我们已经不依赖它来对齐布局，
         // 它只是清掉极少数 iOS Safari 把焦点 pan 后忘记复位 layout 的残留滚动。
         try { window.scrollTo(0, 0); } catch (e) {}
         if (document.scrollingElement) document.scrollingElement.scrollTop = 0;

@@ -121,8 +121,8 @@
        messageSlideUser 等) 被压成 0.01ms, 用户看不到"消息已加入排队"这种
        关键反馈, 跟浏览器版表现不一致。
        html.is-wand-app 由 scripts.js 在 UA 含 WandApp/* 时挂到 <html> 上 ——
-       Wand APK 内自己定义动画策略, 不跟 Android 系统级开关绑死; 浏览器 /
-       普通 PWA / 桌面端仍然完整尊重用户偏好 (排除 .is-wand-app 后规则不变)。 */
+       Wand APK 内自己定义动画策略, 不跟 Android 系统级开关绑死; 浏览器和
+       桌面端仍然完整尊重用户偏好 (排除 .is-wand-app 后规则不变)。 */
     @media (prefers-reduced-motion: reduce) {
       html:not(.is-wand-app) *,
       html:not(.is-wand-app) *::before,
@@ -135,7 +135,7 @@
     }
 
     /* ===== 设备安全区 (notch / 状态栏 / 圆角) =====
-       全局 --wand-safe-top/bottom/left/right 在所有上下文(PWA、Android APK 内嵌
+       全局 --wand-safe-top/bottom/left/right 在所有上下文(Android APK 内嵌
        WebView、普通移动浏览器、桌面) 中都可用。在没有 inset 的设备上回退到
        0px,所以不会影响桌面浏览体验。固定定位 (position: fixed) 的顶部元素
        (如文件面板抽屉、各类预览/对话框) 必须自己消费这些 inset,因为它们脱离
@@ -157,8 +157,6 @@
       --wand-safe-right: max(var(--app-inset-right), env(safe-area-inset-right, 0px));
       --safe-bottom: var(--wand-safe-bottom);
       --input-safe-bottom: var(--safe-bottom);
-      /* 默认与 wand-safe-top 等价; PWA / .is-pwa 下被覆盖为 max(inset, 44px) */
-      --pwa-safe-top: var(--wand-safe-top);
     }
 
     /* Wand Android APK (UA 后缀 WandApp/*) 的兜底:
@@ -175,14 +173,13 @@
     }
 
     /* 新版 APK 原生已经 padding 过, 不需要 CSS 再加任何 safe-area。把所有
-       --wand-safe-* / --pwa-safe-top 全部归零, 让顶部抽屉 / 模态 / 顶栏直接顶
+       --wand-safe-* 全部归零, 让顶部抽屉 / 模态 / 顶栏直接顶
        到 WebView 内容上沿 (= 状态栏下沿)。*/
     .is-wand-app-native-insets {
       --wand-safe-top: 0px;
       --wand-safe-bottom: 0px;
       --wand-safe-left: 0px;
       --wand-safe-right: 0px;
-      --pwa-safe-top: 0px;
     }
 
     /* iOS 原生壳的 WKWebView 会随系统键盘缩小 visual viewport。键盘打开时
@@ -193,7 +190,7 @@
 
     /* iOS 壳（WKWebView 全屏贴状态栏/灵动岛）与旧版 Android 壳（边到边、无原生
        padding）：.sidebar 是 fixed top:0，脱离 .app-container 的 padding 流，
-       头部必须自己消费安全区（对齐 .is-pwa 的同款规则）。新版 Android
+       头部必须自己消费安全区。新版 Android
        native-insets 模式下 --wand-safe-top 已归零，本条退化为原 14px。
        第二个选择器把 specificity 抬过 .sidebar.pinned.collapsed .sidebar-header。 */
     .is-wand-app .sidebar-header,
@@ -207,42 +204,6 @@
     .app-container {
       padding-top: var(--wand-safe-top);
     }
-
-    /* PWA 独立窗口模式: iOS 使用 black-translucent status-bar-style +
-       viewport-fit=cover, 内容延伸到状态栏/刘海/灵动岛下方,
-       env(safe-area-inset-top) 会返回正确的 inset 值 (47-59px)。
-       用 44px 作为最小兜底, 覆盖绝大多数 iPhone 机型。 */
-    @media (display-mode: standalone) {
-      :root {
-        --pwa-safe-top: max(env(safe-area-inset-top, 0px), 44px);
-        --input-safe-bottom: min(var(--safe-bottom), 28px);
-      }
-      .app-container {
-        --pwa-top-inset: var(--pwa-safe-top);
-        padding-top: var(--pwa-safe-top);
-      }
-      .sidebar-header {
-        padding-top: calc(14px + var(--pwa-safe-top));
-      }
-      .main-content {
-        padding-top: 0;
-      }
-    }
-
-    /* iOS Safari PWA fallback (navigator.standalone adds .is-pwa via JS) */
-    .is-pwa {
-      --pwa-safe-top: max(env(safe-area-inset-top, 0px), 44px);
-      --input-safe-bottom: min(var(--safe-bottom), 28px);
-    }
-    .is-pwa .app-container {
-      --pwa-top-inset: var(--pwa-safe-top);
-      padding-top: var(--pwa-safe-top);
-    }
-    .is-pwa .sidebar-header {
-      padding-top: calc(14px + var(--pwa-safe-top));
-    }
-
-    /* ===== PWA 窗口控件覆盖模式 (Window Controls Overlay) ===== */
 
     /* ===== 首帧过渡抑制 ===== */
     html.no-transition,
@@ -327,7 +288,7 @@
       --layout-main-file-panel-width: var(--file-panel-width);
       display: flex;
       flex-direction: column;
-      /* iOS PWA 键盘适配核心：scripts.js#syncAppViewportHeight 持续把
+      /* iOS 键盘适配核心：scripts.js#syncAppViewportHeight 持续把
            --app-viewport-top    = visualViewport.offsetTop
            --app-viewport-height = visualViewport.height
          写到 :root 上。容器用 fixed + 这两个变量精确贴合「当前可见视口」。
@@ -335,7 +296,7 @@
          · iOS Safari：键盘弹起时 iOS 滚 layout viewport 让焦点入视，
            vv.offsetTop ≈ 0、vv.height 收缩 → top:0 + 缩短高度，input-panel
            自然贴键盘上沿。
-         · iOS PWA standalone：iOS 改成 pan「visual viewport」自己
+         · iOS 原生壳：iOS 可能改成 pan「visual viewport」自己
            (vv.offsetTop > 0)、layout viewport 完全不滚。position:fixed 在 iOS
            是相对 layout viewport 的，必须把 top 写成 vv.offsetTop 才能让容器
            跟着可见区往下走；否则容器钉在 layout 顶部、被 pan 推出可视区，
@@ -345,7 +306,7 @@
          · 桌面：vv.height ≈ innerHeight、vv.offsetTop = 0，无副作用。
 
          旧实现把 height 膨胀为 vv.height + vv.pageTop 再 scrollTo(0,0) 兜底，
-         在 iOS PWA standalone 失效（layout 没滚过、scrollTo 不影响 vv.offsetTop），
+         在 iOS 原生壳中可能失效（layout 没滚过、scrollTo 不影响 vv.offsetTop），
          造成两种症状：键盘弹起遮挡输入框 / 键盘收起输入框停半空。已切换为直接锚定。
 
          必须用 top/height（而非 transform）——否则内部 position:fixed 的
@@ -2320,8 +2281,8 @@
       background: rgba(255, 251, 245, 0.7);
     }
 
-    /* Auto-fit grid: 3 buttons stretch to fill, extra buttons (PWA install
-       / switch server) drop in without breaking the row. minmax(56px,1fr)
+    /* Auto-fit grid: buttons stretch to fill, and native shell actions can
+       drop in without breaking the row. minmax(56px,1fr)
        guarantees touch-friendly width while not leaving big empty cells. */
     .sidebar-footer-actions {
       display: grid;
@@ -2444,15 +2405,6 @@
       width: 32px;
       padding: 0;
       font-size: 0.875rem;
-    }
-
-    /* PWA install button */
-    #pwa-install-button {
-      color: var(--accent);
-    }
-    #pwa-install-button:hover {
-      background: rgba(197, 101, 61, 0.1);
-      color: var(--accent);
     }
 
     /* Topbar interactive toggle button */
@@ -2846,16 +2798,6 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-    }
-
-    /* PWA 模式额外留出顶部缓冲,避免与 iPadOS Stage Manager 等系统浮动控件视觉粘连 */
-    @media (display-mode: standalone) {
-      .main-header-row {
-        padding-top: 10px;
-      }
-    }
-    .is-pwa .main-header-row {
-      padding-top: 10px;
     }
 
     /* 会话状态徽标（静态） */
@@ -10296,58 +10238,6 @@
     @keyframes slideUp {
       from { opacity: 0; transform: translateX(-50%) translateY(20px); }
       to { opacity: 1; transform: translateX(-50%) translateY(0); }
-    }
-
-    .pwa-install-prompt {
-      position: fixed;
-      bottom: 24px;
-      left: 24px;
-      right: 24px;
-      max-width: 400px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-lg);
-      padding: 16px;
-      box-shadow: var(--shadow-soft);
-      z-index: 100;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .pwa-install-prompt .prompt-icon {
-      width: 48px;
-      height: 48px;
-      background: linear-gradient(135deg, #d77a52 0%, #a95130 100%);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-weight: 700;
-      font-size: 20px;
-      flex-shrink: 0;
-    }
-
-    .pwa-install-prompt .prompt-content {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .pwa-install-prompt .prompt-title {
-      font-weight: 600;
-      font-size: 0.9375rem;
-      margin-bottom: 2px;
-    }
-
-    .pwa-install-prompt .prompt-desc {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-    }
-
-    .pwa-install-prompt .prompt-actions {
-      display: flex;
-      gap: 8px;
     }
 
     ::-webkit-scrollbar { width: 6px; height: 6px; }

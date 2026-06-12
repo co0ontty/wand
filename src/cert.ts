@@ -211,7 +211,7 @@ export function ensureCertificates(
     process.stdout.write(
       `[wand] 证书已写入 ${paths.certPath}\n` +
         `[wand] SHA-256 指纹: ${fingerprint}\n` +
-        `[wand] 注意：自签证书浏览器会标红；PWA / Service Worker 需要把它导入受信任根证书才能工作。\n` +
+        `[wand] 注意：自签证书浏览器会标红；可将它导入受信任根证书以消除警告。\n` +
         `[wand] HTTPS 启用后可通过 GET /cert/server.crt 在客户端下载安装。\n`
     );
     return { ...ssl, certPath: paths.certPath, fingerprint, userProvided: false };
