@@ -28,7 +28,11 @@ export var I18N: Record<string, Record<string, string>> = {
     "ui.expand": "展开",
     "ui.collapse": "收起",
     "ui.expand_panel_aria": "展开子代理输出",
-    "ui.collapse_panel_aria": "收起子代理输出"
+    "ui.collapse_panel_aria": "收起子代理输出",
+    "stop.confirm.title": "停止任务",
+    "stop.confirm.message": "确定要停止当前正在运行的任务吗？",
+    "stop.confirm.ok": "停止",
+    "stop.confirm.cancel": "取消"
   },
   "English": {
     "subagent.tag": "Subagent",
@@ -45,7 +49,11 @@ export var I18N: Record<string, Record<string, string>> = {
     "ui.expand": "Expand",
     "ui.collapse": "Collapse",
     "ui.expand_panel_aria": "Expand subagent output",
-    "ui.collapse_panel_aria": "Collapse subagent output"
+    "ui.collapse_panel_aria": "Collapse subagent output",
+    "stop.confirm.title": "Stop task",
+    "stop.confirm.message": "Stop the task that's currently running?",
+    "stop.confirm.ok": "Stop",
+    "stop.confirm.cancel": "Cancel"
   }
 };
 export function getActiveLang() {

@@ -2206,8 +2206,21 @@ import { getSessionStatusLabel } from "./session-ui";
 
       export function stopSession() {
         if (!state.selectedId) return;
-        fetch("/api/sessions/" + state.selectedId + "/stop", { method: "POST", credentials: "same-origin" })
-          .then(refreshAll);
+        // 二次确认：停止正在运行的任务是不可逆的中断，按钮 / Esc / Ctrl+C 三个入口
+        // 都会走到这里，统一弹一次确认，避免误触取消正在跑的任务。
+        var id = state.selectedId;
+        wandConfirm(t("stop.confirm.message"), {
+          title: t("stop.confirm.title"),
+          danger: true,
+          okLabel: t("stop.confirm.ok"),
+          cancelLabel: t("stop.confirm.cancel"),
+        }).then(function(ok: boolean) {
+          if (!ok) return;
+          // 确认期间用户可能切走会话，沿用确认时捕获的 id，避免停错会话。
+          if (state.selectedId !== id) return;
+          fetch("/api/sessions/" + id + "/stop", { method: "POST", credentials: "same-origin" })
+            .then(refreshAll);
+        });
       }
 
       export function deleteSession(id) {

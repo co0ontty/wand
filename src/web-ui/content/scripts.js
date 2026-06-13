@@ -430,7 +430,11 @@
       "ui.expand": "\u5C55\u5F00",
       "ui.collapse": "\u6536\u8D77",
       "ui.expand_panel_aria": "\u5C55\u5F00\u5B50\u4EE3\u7406\u8F93\u51FA",
-      "ui.collapse_panel_aria": "\u6536\u8D77\u5B50\u4EE3\u7406\u8F93\u51FA"
+      "ui.collapse_panel_aria": "\u6536\u8D77\u5B50\u4EE3\u7406\u8F93\u51FA",
+      "stop.confirm.title": "\u505C\u6B62\u4EFB\u52A1",
+      "stop.confirm.message": "\u786E\u5B9A\u8981\u505C\u6B62\u5F53\u524D\u6B63\u5728\u8FD0\u884C\u7684\u4EFB\u52A1\u5417\uFF1F",
+      "stop.confirm.ok": "\u505C\u6B62",
+      "stop.confirm.cancel": "\u53D6\u6D88"
     },
     "English": {
       "subagent.tag": "Subagent",
@@ -447,7 +451,11 @@
       "ui.expand": "Expand",
       "ui.collapse": "Collapse",
       "ui.expand_panel_aria": "Expand subagent output",
-      "ui.collapse_panel_aria": "Collapse subagent output"
+      "ui.collapse_panel_aria": "Collapse subagent output",
+      "stop.confirm.title": "Stop task",
+      "stop.confirm.message": "Stop the task that's currently running?",
+      "stop.confirm.ok": "Stop",
+      "stop.confirm.cancel": "Cancel"
     }
   };
   function getActiveLang() {
@@ -1309,9 +1317,9 @@
   }
   function formatRelativeTime(iso) {
     if (!iso) return "";
-    var t16 = Date.parse(iso);
-    if (isNaN(t16)) return "";
-    return new Date(t16).toLocaleString();
+    var t15 = Date.parse(iso);
+    if (isNaN(t15)) return "";
+    return new Date(t15).toLocaleString();
   }
   function getEffectiveExplorerCwd() {
     if (state.fileExplorerCwd) return state.fileExplorerCwd;
@@ -1458,8 +1466,8 @@
         pressFired = false;
         pressTimer = setTimeout(function() {
           pressFired = true;
-          var t16 = e.touches && e.touches[0];
-          showFileContextMenu(t16 ? t16.clientX : 0, t16 ? t16.clientY : 0, item);
+          var t15 = e.touches && e.touches[0];
+          showFileContextMenu(t15 ? t15.clientX : 0, t15 ? t15.clientY : 0, item);
         }, 500);
       }, { passive: true });
       item.addEventListener("touchend", function() {
@@ -1564,17 +1572,17 @@
       window.showToast(msg);
       return;
     }
-    var t16 = document.createElement("div");
-    t16.className = "wand-mini-toast";
-    t16.textContent = msg;
-    document.body.appendChild(t16);
+    var t15 = document.createElement("div");
+    t15.className = "wand-mini-toast";
+    t15.textContent = msg;
+    document.body.appendChild(t15);
     setTimeout(function() {
-      t16.classList.add("show");
+      t15.classList.add("show");
     }, 10);
     setTimeout(function() {
-      t16.classList.remove("show");
+      t15.classList.remove("show");
       setTimeout(function() {
-        t16.remove();
+        t15.remove();
       }, 220);
     }, 1600);
   }
@@ -2180,9 +2188,9 @@
     if (!tokens) return escaped;
     var patterns = [];
     for (var category in tokens) {
-      var t16 = tokens[category];
-      if (t16 && t16.pattern) {
-        patterns.push({ pattern: t16.pattern, cls: t16.cls, priority: t16.priority || 5 });
+      var t15 = tokens[category];
+      if (t15 && t15.pattern) {
+        patterns.push({ pattern: t15.pattern, cls: t15.cls, priority: t15.priority || 5 });
       }
     }
     patterns.sort(function(a, b) {
@@ -2643,9 +2651,9 @@
     function clusterIncludesSub(members) {
       return members.indexOf("sub") >= 0;
     }
-    function setLaunchLabel(t16) {
+    function setLaunchLabel(t15) {
       var l = document.getElementById("qc-dock-launch-label");
-      if (l) l.textContent = t16;
+      if (l) l.textContent = t15;
     }
     function pointInLaunch(x, y) {
       var r = launch.getBoundingClientRect();
@@ -3131,8 +3139,8 @@
       if (!msg || msg.role !== "user") continue;
       var content = msg.content;
       if (typeof content === "string") {
-        var t16 = content.trim();
-        if (t16) return t16;
+        var t15 = content.trim();
+        if (t15) return t15;
         continue;
       }
       if (Array.isArray(content)) {
@@ -3298,15 +3306,15 @@
     var entries = [];
     state.sessions.forEach(function(s) {
       if (s.archived) return;
-      var t16 = s.startedAt ? new Date(s.startedAt).getTime() : 0;
-      entries.push({ kind: "session", ref: s, t: isFinite(t16) ? t16 : 0 });
+      var t15 = s.startedAt ? new Date(s.startedAt).getTime() : 0;
+      entries.push({ kind: "session", ref: s, t: isFinite(t15) ? t15 : 0 });
     });
     if (state.claudeHistoryLoaded) {
       getVisibleClaudeHistorySessions().forEach(function(h) {
         if (!h.timestamp) return;
-        var t16 = new Date(h.timestamp).getTime();
-        if (!isFinite(t16) || t16 <= cutoff) return;
-        entries.push({ kind: "history", ref: h, t: t16 });
+        var t15 = new Date(h.timestamp).getTime();
+        if (!isFinite(t15) || t15 <= cutoff) return;
+        entries.push({ kind: "history", ref: h, t: t15 });
       });
     }
     entries.sort(function(a, b) {
@@ -8561,8 +8569,8 @@
   var _PROGRESS_SYNC_DEBOUNCE_MS = 30;
   function _compactNotificationText(text) {
     if (!text) return "";
-    var t16 = String(text).replace(/^#+\s+/gm, "").replace(/\*\*/g, "").replace(/`/g, "").trim();
-    var firstLine = t16.split("\n")[0].trim();
+    var t15 = String(text).replace(/^#+\s+/gm, "").replace(/\*\*/g, "").replace(/`/g, "").trim();
+    var firstLine = t15.split("\n")[0].trim();
     if (firstLine.length > 100) firstLine = firstLine.slice(0, 100) + "\u2026";
     return firstLine;
   }
@@ -10711,7 +10719,17 @@
   }
   function stopSession() {
     if (!state.selectedId) return;
-    fetch("/api/sessions/" + state.selectedId + "/stop", { method: "POST", credentials: "same-origin" }).then(refreshAll);
+    var id = state.selectedId;
+    wandConfirm4(t2("stop.confirm.message"), {
+      title: t2("stop.confirm.title"),
+      danger: true,
+      okLabel: t2("stop.confirm.ok"),
+      cancelLabel: t2("stop.confirm.cancel")
+    }).then(function(ok) {
+      if (!ok) return;
+      if (state.selectedId !== id) return;
+      fetch("/api/sessions/" + id + "/stop", { method: "POST", credentials: "same-origin" }).then(refreshAll);
+    });
   }
   function deleteSession(id) {
     var item = document.querySelector('.session-item[data-session-id="' + id + '"]');
@@ -11867,12 +11885,12 @@
     if (list) {
       var html = "";
       for (var m = 0; m < todos.length; m++) {
-        var t16 = todos[m];
-        var st = t16.status || "pending";
+        var t15 = todos[m];
+        var st = t15.status || "pending";
         var itemClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "";
         var iconClass = st === "in_progress" ? "active" : st === "completed" ? "done" : "pending";
         var icon = st === "completed" ? "\u2713" : st === "in_progress" ? "\u203A" : "\u25CB";
-        html += '<li class="todo-progress-item ' + itemClass + '"><span class="todo-item-icon ' + iconClass + '">' + icon + "</span><span>" + escapeHtml2(t16.content || "") + "</span></li>";
+        html += '<li class="todo-progress-item ' + itemClass + '"><span class="todo-item-icon ' + iconClass + '">' + icon + "</span><span>" + escapeHtml2(t15.content || "") + "</span></li>";
       }
       list.innerHTML = html;
     }
@@ -12434,10 +12452,10 @@
         }
       }
     }
-    for (var t16 = 0; t16 < turns.length; t16++) {
-      messages.push({ role: "user", content: turns[t16].user });
-      if (turns[t16].assistantLines.length > 0) {
-        var formattedContent = formatAssistantResponse(turns[t16].assistantLines.join(newline));
+    for (var t15 = 0; t15 < turns.length; t15++) {
+      messages.push({ role: "user", content: turns[t15].user });
+      if (turns[t15].assistantLines.length > 0) {
+        var formattedContent = formatAssistantResponse(turns[t15].assistantLines.join(newline));
         messages.push({ role: "assistant", content: formattedContent });
       }
     }
@@ -13503,9 +13521,9 @@
         if (/^\|?\s*:?-+:?(\s*\|\s*:?-+:?)+\s*\|?$/.test(sep)) {
           var headers = splitRow(header);
           var aligns = splitRow(sep).map(function(c) {
-            var t16 = c.trim();
-            var L = t16.charAt(0) === ":";
-            var R = t16.charAt(t16.length - 1) === ":";
+            var t15 = c.trim();
+            var L = t15.charAt(0) === ":";
+            var R = t15.charAt(t15.length - 1) === ":";
             if (L && R) return "center";
             if (R) return "right";
             if (L) return "left";
