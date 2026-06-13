@@ -9,7 +9,7 @@ import { loadGitStatus } from "./git-commit";
 import { showToast, wandConfirm, wandAlert, wandPrompt, openWandDialog, showError, hideError, sendBrowserNotification, _syncWakeLock } from "./notifications";
 import { render, resetChatRenderCache, getEffectiveCwd } from "./render";
 import { applyCurrentView, buildAttachmentPrefix, clearAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getComposerTool, getPreferredMessages, getPreferredTool, getSafeModeForTool, isStructuredSession, loadOutput, loadSessions, refreshAll, selectSession, setDraftValue, shouldRequestChatFormat, subscribeToSession, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
-import { renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded } from "./sidebar";
+import { renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, confirmDelete } from "./sidebar";
 import { initTerminal, maybeScheduleResyncForChunk, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, softResyncTerminal, syncTerminalBuffer } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, sendTerminalResize, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
 import { setView, initWebSocket, forceReconnectWebSocket } from "./websocket";
@@ -2587,26 +2587,32 @@ import { getSessionStatusLabel } from "./session-ui";
       export function handleDeleteCodexHistoryAction(actionButton) {
         var threadId = actionButton.dataset.claudeSessionId;
         if (!threadId) return;
-        var item = actionButton.closest(".claude-history-item");
-        if (item) item.style.opacity = "0.5";
-        fetch("/api/codex-history/" + encodeURIComponent(threadId), {
-          method: "DELETE",
-          credentials: "same-origin"
-        })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data && data.ok) {
-              state.codexHistory = state.codexHistory.filter(function(s) {
-                return s.claudeSessionId !== threadId;
-              });
-              updateSessionsList();
-            } else if (item) {
-              item.style.opacity = "1";
-            }
+        confirmDelete("确认隐藏这条 Codex 历史会话吗？", {
+          title: "隐藏 Codex 历史",
+          okLabel: "隐藏"
+        }).then(function(ok) {
+          if (!ok) return;
+          var item = actionButton.closest(".claude-history-item");
+          if (item) item.style.opacity = "0.5";
+          fetch("/api/codex-history/" + encodeURIComponent(threadId), {
+            method: "DELETE",
+            credentials: "same-origin"
           })
-          .catch(function() {
-            if (item) item.style.opacity = "1";
-          });
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+              if (data && data.ok) {
+                state.codexHistory = state.codexHistory.filter(function(s) {
+                  return s.claudeSessionId !== threadId;
+                });
+                updateSessionsList();
+              } else if (item) {
+                item.style.opacity = "1";
+              }
+            })
+            .catch(function() {
+              if (item) item.style.opacity = "1";
+            });
+        });
       }
 
       export function handleResumeHistoryAction(actionButton) {
