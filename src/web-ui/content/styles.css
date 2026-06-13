@@ -6466,8 +6466,10 @@
       font-variant-numeric: tabular-nums;
     }
     /* Horizontal progress fill: the whole header bar fills from left to right
-       as --progress grows. The active step text lives to the right of the
-       counter, inside the unfilled area (handled by .todo-progress-task-wrap). */
+       as --progress grows. The active step text sits on the right (handled by
+       .todo-progress-task-wrap with justify-content: flex-end), so the fill
+       overlays the LEFT portion of the wrap — the text gets a soft white
+       backdrop (see :has rule below) to stay readable when overlapping. */
     .todo-progress-fill {
       position: absolute;
       top: 0;
@@ -6501,17 +6503,34 @@
       min-width: 0;
       display: flex;
       align-items: center;
+      justify-content: flex-end; /* 任务描述贴右，与 chevron 形成"右侧组" */
+      gap: 6px;
       position: relative;
       z-index: 1;
+      padding-left: 8px;
     }
     .todo-progress-task {
       font-size: 0.75rem;
-      color: var(--text-secondary);
+      color: var(--text-primary); /* 提升到主文字色，避免被进度填充背景吃掉 */
+      font-weight: 500;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       flex: 1;
       min-width: 0;
+      text-align: right; /* 长描述截断时优先保留右半（"做什么"） */
+    }
+    /* 当任务文字与进度填充重叠时，加一道半透白底色，提高可读性。 */
+    .todo-progress-header:has(.todo-progress-task:not(:empty)) .todo-progress-task {
+      background: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.55) 12%,
+        rgba(255, 255, 255, 0.55) 88%,
+        rgba(255, 255, 255, 0) 100%
+      );
+      padding: 1px 6px;
+      border-radius: 6px;
     }
     .todo-progress-chevron {
       color: var(--text-muted);

@@ -11869,7 +11869,17 @@
     var counter = document.getElementById("todo-progress-counter");
     if (counter) counter.textContent = completed + "/" + todos.length;
     var task = document.getElementById("todo-progress-task");
-    if (task) task.textContent = activeTask;
+    if (task) {
+      if (!activeTask) {
+        for (var p = 0; p < todos.length; p++) {
+          if (todos[p].status === "pending" && (todos[p].activeForm || todos[p].content)) {
+            activeTask = todos[p].activeForm || todos[p].content;
+            break;
+          }
+        }
+      }
+      task.textContent = activeTask || "\u51C6\u5907\u4E2D\u2026";
+    }
     var ratio = todos.length > 0 ? completed / todos.length : 0;
     var ring = document.getElementById("todo-progress-ring");
     if (ring) {

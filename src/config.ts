@@ -21,6 +21,7 @@ export const PREFERENCE_KEYS = [
   "defaultMode",
   "defaultCwd",
   "defaultModel",
+  "defaultThinkingEffort",
   "structuredRunner",
   "language",
   "cardDefaults",
@@ -55,6 +56,7 @@ export const defaultConfig = (): WandConfig => ({
   macos: defaultMacosDmgConfig(),
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
+  defaultThinkingEffort: "off",
   structuredRunner: "cli" as StructuredRunnerOption,
   inheritEnv: true,
   commandPresets: [
@@ -260,6 +262,10 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultModel"), defaults.defaultModel ?? "");
     if (typeof v === "string") config.defaultModel = v.trim();
   }
+  if (storage.hasPreference(preferenceStorageKey("defaultThinkingEffort"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("defaultThinkingEffort"), defaults.defaultThinkingEffort ?? "off");
+    if (v === "off" || v === "standard" || v === "deep" || v === "max") config.defaultThinkingEffort = v;
+  }
   if (storage.hasPreference(preferenceStorageKey("structuredRunner"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("structuredRunner"), defaults.structuredRunner ?? "cli");
     if (v === "cli" || v === "sdk") config.structuredRunner = v;
@@ -304,6 +310,12 @@ export function writePreferenceToStorage(
       const v = typeof value === "string" ? value.trim() : "";
       storage.setPreference(dbKey, v);
       config.defaultModel = v;
+      break;
+    }
+    case "defaultThinkingEffort": {
+      const v = value === "standard" || value === "deep" || value === "max" ? value : "off";
+      storage.setPreference(dbKey, v);
+      config.defaultThinkingEffort = v;
       break;
     }
     case "structuredRunner": {
@@ -476,6 +488,11 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
+    defaultThinkingEffort: input.defaultThinkingEffort === "standard"
+      || input.defaultThinkingEffort === "deep"
+      || input.defaultThinkingEffort === "max"
+      ? input.defaultThinkingEffort
+      : "off",
     structuredRunner: (input.structuredRunner === "sdk" || input.structuredRunner === "cli") ? input.structuredRunner : defaults.structuredRunner,
     inheritEnv: typeof input.inheritEnv === "boolean" ? input.inheritEnv : (defaults.inheritEnv ?? true),
   };

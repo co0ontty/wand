@@ -721,6 +721,8 @@ export function renderAppShell() {
                   '</span>' +
                   '<span class="todo-progress-counter" id="todo-progress-counter"></span>' +
                 '</div>' +
+                // 右侧任务描述：与展开箭头并排，flex: 1 让它把剩余宽度占满
+                // （进度填充在底层按 --progress 比例从左覆盖，不会与文字冲突）。
                 '<div class="todo-progress-task-wrap">' +
                   '<span class="todo-progress-task" id="todo-progress-task"></span>' +
                 '</div>' +

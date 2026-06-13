@@ -115,6 +115,8 @@ export interface WandConfig {
   cardDefaults?: CardExpandDefaults;
   /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */
   defaultModel?: string;
+  /** 新建会话时默认使用的思考深度。 */
+  defaultThinkingEffort?: "off" | "standard" | "deep" | "max";
   /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */
   structuredRunner?: "cli" | "sdk";
   /**

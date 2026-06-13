@@ -1422,6 +1422,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       port: config.port,
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
+      defaultModel: config.defaultModel ?? "",
+      defaultThinkingEffort: config.defaultThinkingEffort ?? "off",
       commandPresets: config.commandPresets,
       structuredRunner: config.structuredRunner ?? "cli",
       structuredRunners: [
@@ -2314,7 +2316,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           model: effectiveModel,
           cols: reqCols,
           rows: reqRows,
-          thinkingEffort: body.thinkingEffort ?? undefined,
+          thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
         }
       );
       recordRecentPath(storage, body.cwd ?? snapshot.cwd);

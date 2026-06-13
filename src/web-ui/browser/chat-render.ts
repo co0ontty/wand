@@ -767,8 +767,21 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var counter = document.getElementById("todo-progress-counter");
         if (counter) counter.textContent = completed + "/" + todos.length;
 
+        // 右侧任务描述：优先取首个 in_progress 的 activeForm / content，
+        // 没有任何进行中项时（首条 TodoWrite 还没来、模型漏发 activeForm），
+        // 回退到下一条 pending 任务的 content——总比一片空白强。
         var task = document.getElementById("todo-progress-task");
-        if (task) task.textContent = activeTask;
+        if (task) {
+          if (!activeTask) {
+            for (var p = 0; p < todos.length; p++) {
+              if (todos[p].status === "pending" && (todos[p].activeForm || todos[p].content)) {
+                activeTask = todos[p].activeForm || todos[p].content;
+                break;
+              }
+            }
+          }
+          task.textContent = activeTask || "准备中…";
+        }
 
         var ratio = todos.length > 0 ? completed / todos.length : 0;
         var ring = document.getElementById("todo-progress-ring");

@@ -205,10 +205,10 @@ export function registerSessionRoutes(
         provider,
         runner: body.runner ?? (provider === "codex" ? "codex-cli-exec" : "claude-cli-print"),
         worktreeEnabled: body.worktreeEnabled === true,
-        model: typeof body.model === "string" ? body.model.trim() : undefined,
+        model: typeof body.model === "string" ? body.model.trim() : (config.defaultModel ?? "").trim() || undefined,
         thinkingEffort: typeof body.thinkingEffort === "string"
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
-          : undefined,
+          : config.defaultThinkingEffort,
       });
       onSessionCreated?.(body.cwd ?? snapshot.cwd);
       const prompt = body.prompt?.trim();
