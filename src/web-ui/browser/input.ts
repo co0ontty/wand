@@ -17,31 +17,12 @@ import { getSessionStatusLabel } from "./session-ui";
 
       // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
       // ─────────────────────────────────────────────────────────────────
-      export var voiceState = { recording: false, canceling: false, transcript: "", startY: 0, mockTimer: null };
+      export var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
       export var VOICE_CANCEL_THRESHOLD = 60; // 按住后上滑超过该像素进入"松开取消"态
 
-      // === MOCK STT（临时占位）：接入真实语音识别后删除整段 ===
-      export var VOICE_MOCK_SAMPLES = [
-        "帮我把",
-        "帮我把首页的",
-        "帮我把首页的登录按钮",
-        "帮我把首页的登录按钮改成圆角，",
-        "帮我把首页的登录按钮改成圆角，并加一点阴影",
-      ];
-      export function startMockRecognition() {
-        var i = 0;
-        voiceState.mockTimer = setInterval(function() {
-          if (i >= VOICE_MOCK_SAMPLES.length) return;
-          updateVoiceTranscript(VOICE_MOCK_SAMPLES[i]);
-          i++;
-        }, 420);
-      }
-      export function stopMockRecognition() {
-        if (voiceState.mockTimer) { clearInterval(voiceState.mockTimer); voiceState.mockTimer = null; }
-      }
-      // === MOCK STT 段结束 ===
-
       // STT 唯一注入点：写入累积文字并刷新气泡内容。
+      // 网页端目前没有可用的语音识别后端（移动端走原生客户端的端侧 STT）；
+      // 真正接入网页 STT 时，在识别回调里调用本函数累积文本即可，交互层不用动。
       export function updateVoiceTranscript(text) {
         voiceState.transcript = text || "";
         var textEl = document.getElementById("voice-transcript-text");
@@ -74,8 +55,9 @@ import { getSessionStatusLabel } from "./session-ui";
         if (bubble) bubble.classList.remove("hidden", "is-canceling", "has-text");
         updateVoiceTranscript("");
         var status = document.getElementById("voice-transcript-status");
-        if (status) status.textContent = "正在聆听…上滑取消";
-        startMockRecognition();
+        // 网页端暂无语音识别后端：给出明确提示，不再用假样本骗用户。
+        // 语音输入请使用 App（原生客户端走端侧 STT）。
+        if (status) status.textContent = "网页端暂不支持语音输入，请使用 App";
       }
 
       export function handleVoiceMove(e) {
@@ -97,7 +79,6 @@ import { getSessionStatusLabel } from "./session-ui";
         if (!voiceState.recording) return;
         if (e) e.preventDefault();
         voiceState.recording = false;
-        stopMockRecognition();
         var commit = !voiceState.canceling && !!voiceState.transcript.trim();
         var text = voiceState.transcript;
         resetVoiceRecordingUI();
@@ -144,7 +125,6 @@ import { getSessionStatusLabel } from "./session-ui";
         if (!willEnable) {
           // 退出语音模式：停掉可能在跑的录音 + 隐藏气泡，并把焦点交还 textarea
           voiceState.recording = false;
-          stopMockRecognition();
           resetVoiceRecordingUI();
           var inputBox = document.getElementById("input-box");
           if (inputBox && !state.terminalInteractive) {
@@ -1945,7 +1925,6 @@ import { getSessionStatusLabel } from "./session-ui";
           composerEl.classList.remove("voice-mode");
           // 同步停掉可能在跑的录音 + 隐藏气泡
           voiceState.recording = false;
-          stopMockRecognition();
           resetVoiceRecordingUI();
         }
         var sendBtn = document.getElementById("send-input-button") as HTMLButtonElement | null;

@@ -8904,29 +8904,8 @@
   var _macHandler;
 
   // src/web-ui/browser/input.ts
-  var voiceState = { recording: false, canceling: false, transcript: "", startY: 0, mockTimer: null };
+  var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
   var VOICE_CANCEL_THRESHOLD = 60;
-  var VOICE_MOCK_SAMPLES = [
-    "\u5E2E\u6211\u628A",
-    "\u5E2E\u6211\u628A\u9996\u9875\u7684",
-    "\u5E2E\u6211\u628A\u9996\u9875\u7684\u767B\u5F55\u6309\u94AE",
-    "\u5E2E\u6211\u628A\u9996\u9875\u7684\u767B\u5F55\u6309\u94AE\u6539\u6210\u5706\u89D2\uFF0C",
-    "\u5E2E\u6211\u628A\u9996\u9875\u7684\u767B\u5F55\u6309\u94AE\u6539\u6210\u5706\u89D2\uFF0C\u5E76\u52A0\u4E00\u70B9\u9634\u5F71"
-  ];
-  function startMockRecognition() {
-    var i = 0;
-    voiceState.mockTimer = setInterval(function() {
-      if (i >= VOICE_MOCK_SAMPLES.length) return;
-      updateVoiceTranscript(VOICE_MOCK_SAMPLES[i]);
-      i++;
-    }, 420);
-  }
-  function stopMockRecognition() {
-    if (voiceState.mockTimer) {
-      clearInterval(voiceState.mockTimer);
-      voiceState.mockTimer = null;
-    }
-  }
   function updateVoiceTranscript(text) {
     voiceState.transcript = text || "";
     var textEl = document.getElementById("voice-transcript-text");
@@ -8958,8 +8937,7 @@
     if (bubble) bubble.classList.remove("hidden", "is-canceling", "has-text");
     updateVoiceTranscript("");
     var status = document.getElementById("voice-transcript-status");
-    if (status) status.textContent = "\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88";
-    startMockRecognition();
+    if (status) status.textContent = "\u7F51\u9875\u7AEF\u6682\u4E0D\u652F\u6301\u8BED\u97F3\u8F93\u5165\uFF0C\u8BF7\u4F7F\u7528 App";
   }
   function handleVoiceMove(e) {
     if (!voiceState.recording || !e) return;
@@ -8979,7 +8957,6 @@
     if (!voiceState.recording) return;
     if (e) e.preventDefault();
     voiceState.recording = false;
-    stopMockRecognition();
     var commit = !voiceState.canceling && !!voiceState.transcript.trim();
     var text = voiceState.transcript;
     resetVoiceRecordingUI();
@@ -9021,7 +8998,6 @@
     composer.classList.toggle("voice-mode", willEnable);
     if (!willEnable) {
       voiceState.recording = false;
-      stopMockRecognition();
       resetVoiceRecordingUI();
       var inputBox = document.getElementById("input-box");
       if (inputBox && !state.terminalInteractive) {
@@ -10501,7 +10477,6 @@
     if (composerEl && state.terminalInteractive && composerEl.classList.contains("voice-mode")) {
       composerEl.classList.remove("voice-mode");
       voiceState.recording = false;
-      stopMockRecognition();
       resetVoiceRecordingUI();
     }
     var sendBtn = document.getElementById("send-input-button");
