@@ -732,12 +732,11 @@ export function renderAppShell() {
             '<div class="todo-progress-body hidden" id="todo-progress-body">' +
               '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
             '</div>' +
-            // 排队气泡宿主：在 composer-top-row 右端，与 todo 进度同一行。
-            // 收起态：水平排 N 个液态玻璃小气泡；
-            // 点击展开：变垂直列表，每条带立即/删除按钮。updateQueueBar() 在
-            // queuedMessages 非空时去掉 hidden。
-            '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
           '</div>' +
+          // 排队气泡宿主：绝对定位浮在 .input-panel 顶边线「上方」、右侧贴边。
+          // 垂直排列，一行一个液态玻璃气泡（编号 + 文本 + 立即/删除）。
+          // updateQueueBar() 在 queuedMessages 非空时去掉 hidden。
+          '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
           // v2 单行布局：
           //   ┌─────────────────────────────────────────────────────────────────────┐
           //   │ [+] [🎤] [⌨]  ────textarea（空时浮 mode·model·thinking 鬼影）──── [⏹] [➤] │

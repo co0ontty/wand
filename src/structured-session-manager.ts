@@ -704,6 +704,21 @@ export class StructuredSessionManager {
         this.interruptedWith.set(id, prompt);
         if (opts.preserveQueue) {
           this.preserveQueueOnInterrupt.add(id);
+          // 「立即发送」排队条某一条：interrupt 把它作为新输入重发，但该条仍留在
+          // queuedMessages 里。必须在这里把它从队列摘掉一次，否则 preserveQueue 会
+          // 原样保留整条队列，待 interruptPrompt 跑完 flushNextQueuedMessage 会把它
+          // 当成普通排队再发一遍（重复发送）。客户端按 index 乐观删除，服务端这里
+          // 没有 index，只能按文本删第一处匹配（排队文本入队时已 trim，promote 重发
+          // 也会 trim，所以精确匹配可靠；重复文本极少见且语义等价）。
+          const queue = session.queuedMessages ?? [];
+          const removeAt = queue.indexOf(prompt);
+          if (removeAt !== -1) {
+            const trimmedQueue = queue.slice(0, removeAt).concat(queue.slice(removeAt + 1));
+            session = { ...session, queuedMessages: trimmedQueue };
+            this.sessions.set(id, session);
+            this.storage.saveSession(session);
+            this.emitStructuredSnapshot(session);
+          }
         } else {
           this.preserveQueueOnInterrupt.delete(id);
         }
@@ -1040,25 +1055,13 @@ export class StructuredSessionManager {
     return session;
   }
 
-  private buildQueuedPlaceholderTurns(session: SessionSnapshot): ConversationTurn[] {
-    return (session.queuedMessages ?? []).map((text) => ({
-      role: "user",
-      content: [{ type: "text", text, __queued: true } as ContentBlock],
-    }));
-  }
-
-  private buildRenderableMessages(session: SessionSnapshot): ConversationTurn[] {
-    return [
-      ...(session.messages ?? []),
-      ...this.buildQueuedPlaceholderTurns(session),
-    ];
-  }
-
   private emitStructuredSnapshot(session: SessionSnapshot, eventType: "output" | "ended" = "output"): void {
+    // 排队消息只通过 payload.queuedMessages 单独下发，由各端在消息卡片外的「排队条」
+    // 里纵向渲染——绝不再把它们当成 __queued 占位 turn 混进 messages 消息流里，否则会
+    // 和排队条重复显示（旧的「显示异常」根因）。
     const payload = buildStructuredOutputPayload(session) as Record<string, unknown>;
     const data = {
       ...payload,
-      messages: this.buildRenderableMessages(session),
       status: session.status,
       exitCode: session.exitCode,
     };

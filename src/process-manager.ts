@@ -275,7 +275,10 @@ function isClaudeSessionFileAvailable(cwd: string, claudeSessionId: string): boo
  * interpretations and validate with existsSync, falling back to naive replacement.
  */
 function invertNormalizedProjectDir(dirName: string): string {
-  // The normalization is: path.resolve(cwd).replace(/\//g, "-")
+  // The normalization replaces every non-alphanumeric char with "-", so this
+  // inversion is best-effort: "-" most often maps back to "/", but may also be
+  // a literal "-", ".", or "_". We try "/" vs "-" per position and validate with
+  // existsSync; dots/underscores in the original path can't be recovered here.
   const naive = dirName.replace(/-/g, "/");
   if (existsSync(naive)) return naive;
 
@@ -651,7 +654,11 @@ function listClaudeTaskIds(): string[] {
 }
 
 function getClaudeProjectDir(cwd: string): string {
-  const normalized = path.resolve(cwd).replace(/\//g, "-");
+  // Claude Code encodes the project dir by replacing every non-alphanumeric
+  // character (slash, dot, underscore, etc.) with "-", not just "/". Mirroring
+  // only "/" misses paths like ".../vibe_coding/wand" → the scan looks in a
+  // directory Claude never wrote to, so the session ID is never discovered.
+  const normalized = path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, "-");
   return path.join(os.homedir(), ".claude", "projects", normalized);
 }
 

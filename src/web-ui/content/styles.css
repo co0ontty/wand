@@ -6063,9 +6063,9 @@
 
     /* Liquid glass tokens（仅 queue bar 内部使用；避免跟全局变量冲突） */
     .queue-bar {
-      --qb-bg: rgba(255, 255, 255, 0.10);
-      --qb-bg-strong: rgba(255, 255, 255, 0.16);
-      --qb-border: rgba(255, 255, 255, 0.22);
+      --qb-bg: rgba(255, 255, 255, 0.14);
+      --qb-bg-strong: rgba(255, 255, 255, 0.22);
+      --qb-border: rgba(255, 255, 255, 0.24);
       --qb-text: var(--text-primary, #1f1d1a);
       --qb-text-muted: var(--text-muted, #6b655c);
       --qb-shadow: 0 4px 18px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
@@ -6073,140 +6073,130 @@
     }
     [data-theme="dark"] .queue-bar,
     .theme-dark .queue-bar {
-      --qb-bg: rgba(40, 38, 34, 0.55);
-      --qb-bg-strong: rgba(60, 56, 50, 0.70);
-      --qb-border: rgba(255, 255, 255, 0.10);
+      --qb-bg: rgba(40, 38, 34, 0.60);
+      --qb-bg-strong: rgba(60, 56, 50, 0.74);
+      --qb-border: rgba(255, 255, 255, 0.12);
     }
 
-    .composer-top-row > .queue-bar-host {
-      /* 重置原 absolute 定位；作为 flex item 推到右侧 */
-      position: static;
-      right: auto;
-      bottom: auto;
-      max-width: none;
-      z-index: auto;
-      pointer-events: auto;
-      flex: 0 0 auto;
-      align-self: center;
-      margin-left: auto;
-      min-width: 0;
+    /* 宿主：绝对定位浮在 .input-panel 顶边线「上方」、右侧贴边。
+       host 本身不吃指针事件，让聊天流仍可滚动；内部气泡再各自开启 pointer-events。 */
+    .input-panel > .queue-bar-host {
+      position: absolute;
+      right: 10px;
+      left: auto;
+      bottom: calc(100% + 6px);
+      z-index: 30;
+      max-width: min(440px, calc(100% - 20px));
+      pointer-events: none;
     }
     .queue-bar-host[hidden] { display: none; }
 
+    /* 容器：透明、纵向、右对齐——一行一个气泡，自底向上堆叠 */
     .queue-bar {
-      pointer-events: auto;
-      position: relative;
-      display: inline-flex;
-      flex-direction: row;
-      align-items: center;
-      gap: 5px;
-      padding: 5px 7px;
-      max-width: min(50%, calc(100% - 16px));
-      background: var(--qb-bg);
-      backdrop-filter: blur(22px) saturate(180%);
-      -webkit-backdrop-filter: blur(22px) saturate(180%);
-      border: 1px solid var(--qb-border);
-      border-radius: 22px;
-      box-shadow: var(--qb-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.20);
-      cursor: pointer;
-      transition: background 200ms ease, box-shadow 200ms ease, transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), border-radius 220ms ease, padding 220ms ease, max-width 240ms ease;
-      animation: queueBarEnter 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-      overflow: visible;
-    }
-    .queue-bar:hover {
-      background: var(--qb-bg-strong);
-      box-shadow: var(--qb-shadow-hover), inset 0 1px 0 rgba(255, 255, 255, 0.25);
-    }
-    .queue-bar.expanded {
+      pointer-events: none;
+      display: flex;
       flex-direction: column;
-      align-items: stretch;
-      padding: 8px;
-      border-radius: 18px;
-      gap: 6px;
-      max-width: min(420px, calc(100% - 16px));
-      cursor: default;
-    }
-    .queue-bar.expanded:hover {
-      background: var(--qb-bg);
+      align-items: flex-end;
+      gap: 5px;
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      padding: 0;
+      margin: 0;
     }
 
-    @keyframes queueBarEnter {
-      from { opacity: 0; transform: translateY(-4px) scale(0.94); }
+    @keyframes queueBarItemEnter {
+      from { opacity: 0; transform: translateY(6px) scale(0.96); }
       to   { opacity: 1; transform: translateY(0)   scale(1); }
     }
 
+    /* 头部：≥2 条时显示「N 条排队」+「清空」，同样右对齐 */
+    .queue-bar-head {
+      pointer-events: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 6px 3px 10px;
+      background: var(--qb-bg);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid var(--qb-border);
+      border-radius: 13px;
+      box-shadow: var(--qb-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.20);
+      animation: queueBarItemEnter 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+    .queue-bar-head-count {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--qb-text-muted);
+      letter-spacing: 0.02em;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .queue-bar-clear-all {
+      font-size: 11px;
+      padding: 2px 9px;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.20);
+      color: var(--qb-text-muted);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+    }
+    .queue-bar-clear-all:hover {
+      background: rgba(220, 80, 70, 0.12);
+      border-color: rgba(220, 80, 70, 0.35);
+      color: #d8483c;
+    }
+
+    /* 气泡列表：纵向、右对齐 */
     .queue-bar-list {
       list-style: none;
       margin: 0;
       padding: 0;
       display: flex;
-      flex-direction: row;
-      align-items: center;
-      gap: 5px;
-      flex-wrap: nowrap;
-      min-width: 0;
-    }
-    .queue-bar.expanded .queue-bar-list {
       flex-direction: column;
-      align-items: stretch;
+      align-items: flex-end;
       gap: 5px;
+      width: 100%;
     }
 
-    /* 单个排队气泡 —— 收起态：小圆角胶囊；展开态：仿 chat-bubble 不对称圆角 */
+    /* 单个排队气泡 —— 独立液态玻璃胶囊：编号 + 文本 + ⚡ + × */
     .queue-bar-item {
+      pointer-events: auto;
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      padding: 3px 8px 3px 4px;
-      background: rgba(255, 255, 255, 0.16);
-      border: 1px solid rgba(255, 255, 255, 0.20);
-      border-radius: 14px;
-      font-size: 11px;
-      line-height: 1.3;
-      white-space: nowrap;
-      max-width: 140px;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      gap: 6px;
+      padding: 4px 6px 4px 5px;
+      max-width: 100%;
+      box-sizing: border-box;
+      background: var(--qb-bg);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid var(--qb-border);
+      border-radius: 15px;
+      box-shadow: var(--qb-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.20);
+      font-size: 12px;
+      line-height: 1.35;
       color: var(--qb-text);
       cursor: grab;
       user-select: none;
-      transition: background 180ms ease, transform 180ms ease, max-width 220ms ease, border-radius 220ms ease, padding 220ms ease;
-      flex: 0 0 auto;
+      transition: background 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+      animation: queueBarItemEnter 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
     }
     .queue-bar-item:hover {
-      background: rgba(255, 255, 255, 0.24);
+      background: var(--qb-bg-strong);
       transform: translateY(-1px);
+      box-shadow: var(--qb-shadow-hover), inset 0 1px 0 rgba(255, 255, 255, 0.25);
     }
     .queue-bar-item.dragging {
       cursor: grabbing;
       transform: scale(1.04);
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.20);
       z-index: 50;
-      opacity: 0.92;
+      opacity: 0.94;
     }
     .queue-bar-item-sliding { transition: transform 160ms cubic-bezier(0.2, 0.7, 0.2, 1); }
-
-    .queue-bar.expanded .queue-bar-item {
-      /* 展开态：垂直列表，完整文本 + 操作 */
-      max-width: none;
-      width: 100%;
-      padding: 7px 6px 7px 7px;
-      font-size: 12px;
-      line-height: 1.45;
-      white-space: normal;
-      word-break: break-word;
-      border-radius: 12px;
-      border-bottom-right-radius: 4px;
-      background: rgba(255, 255, 255, 0.12);
-      justify-content: flex-start;
-      align-items: center;
-      gap: 6px;
-      cursor: grab;
-    }
-    .queue-bar.expanded .queue-bar-item:hover {
-      background: rgba(255, 255, 255, 0.18);
-      transform: none;
-    }
 
     /* 编号徽章（圆点 + 数字） */
     .queue-bar-item-index {
@@ -6234,120 +6224,56 @@
       color: var(--qb-text);
       font-weight: 500;
     }
-    .queue-bar.expanded .queue-bar-item-text {
-      white-space: normal;
-      word-break: break-word;
-      text-overflow: clip;
-    }
 
-    /* 立即 + 删除 —— 收起态隐藏，展开态显示为圆角按钮 */
+    /* 立即 + 删除 —— 圆形玻璃按钮 */
     .queue-bar-item-promote,
     .queue-bar-item-delete {
-      display: none;
-    }
-    .queue-bar.expanded .queue-bar-item-promote,
-    .queue-bar.expanded .queue-bar-item-delete {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 26px;
-      height: 26px;
+      width: 24px;
+      height: 24px;
       border: none;
       background: rgba(255, 255, 255, 0.16);
       color: var(--qb-text);
       border-radius: 50%;
       cursor: pointer;
       flex: 0 0 auto;
-      transition: background 150ms ease, transform 150ms ease, color 150ms ease;
+      transition: background 150ms ease, transform 150ms ease, color 150ms ease, filter 150ms ease;
       padding: 0;
     }
-    .queue-bar.expanded .queue-bar-item-promote {
+    .queue-bar-item-promote {
       background: var(--accent, #c5653d);
       color: var(--text-inverse, #fff);
     }
-    .queue-bar.expanded .queue-bar-item-delete:hover {
-      background: rgba(220, 80, 70, 0.18);
-      color: #d8483c;
-    }
-    .queue-bar.expanded .queue-bar-item-promote:hover {
+    .queue-bar-item-promote:hover {
       filter: brightness(1.08);
       transform: scale(1.06);
     }
-    .queue-bar.expanded .queue-bar-item-delete:active,
-    .queue-bar.expanded .queue-bar-item-promote:active { transform: scale(0.94); }
+    .queue-bar-item-delete:hover {
+      background: rgba(220, 80, 70, 0.18);
+      color: #d8483c;
+    }
+    .queue-bar-item-delete:active,
+    .queue-bar-item-promote:active { transform: scale(0.94); }
     .queue-bar-item-promote svg,
     .queue-bar-item-delete svg { flex-shrink: 0; }
 
-    /* 收起态：仅在 N>3 时显示的「+N 更多」徽章 */
-    .queue-bar-overflow {
-      display: none;
-      align-items: center;
-      justify-content: center;
-      min-width: 26px;
-      height: 22px;
-      padding: 0 8px;
-      background: rgba(255, 255, 255, 0.10);
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 14px;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--qb-text-muted);
-      cursor: pointer;
-      transition: background 150ms ease;
+    /* 容量满：气泡略带橙色提示（与 inFlight 共存） */
+    .queue-bar.queue-bar-capacity .queue-bar-item {
+      --qb-bg: rgba(220, 120, 60, 0.20);
+      --qb-bg-strong: rgba(220, 120, 60, 0.28);
     }
-    .queue-bar-overflow:hover { background: rgba(255, 255, 255, 0.18); }
-    .queue-bar.has-overflow .queue-bar-overflow { display: inline-flex; }
-    .queue-bar.expanded .queue-bar-overflow { display: none; }
-
-    /* 展开态底部的「全部清空」 */
-    .queue-bar-actions {
-      display: none;
-    }
-    .queue-bar.expanded .queue-bar-actions {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding-top: 5px;
-      margin-top: 2px;
-      border-top: 1px solid rgba(255, 255, 255, 0.12);
-    }
-    .queue-bar-actions-hint {
-      font-size: 10.5px;
-      color: var(--qb-text-muted);
-      letter-spacing: 0.02em;
-      user-select: none;
-    }
-    .queue-bar-clear-all {
-      font-size: 11px;
-      padding: 3px 9px;
-      background: transparent;
-      border: 1px solid rgba(255, 255, 255, 0.20);
-      color: var(--qb-text-muted);
-      border-radius: 12px;
-      cursor: pointer;
-      transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
-    }
-    .queue-bar-clear-all:hover {
-      background: rgba(220, 80, 70, 0.12);
-      border-color: rgba(220, 80, 70, 0.35);
-      color: #d8483c;
-    }
-
-    /* 容量满：整组略暗色提示（与 inFlight 共存） */
-    .queue-bar.queue-bar-capacity {
-      --qb-bg: rgba(220, 120, 60, 0.18);
-      --qb-bg-strong: rgba(220, 120, 60, 0.26);
-    }
-    .queue-bar.queue-bar-inflight {
-      /* 持续连接中：边缘微微脉冲 */
+    .queue-bar.queue-bar-inflight .queue-bar-item {
       box-shadow: var(--qb-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 0 1px rgba(197, 101, 61, 0.18);
     }
 
-    /* 窄屏：稍微压缩 */
+    /* 窄屏：宿主拉宽一点、文本可窄 */
     @media (max-width: 560px) {
-      .queue-bar { max-width: calc(100% - 8px); }
-      .queue-bar.expanded { max-width: calc(100% - 8px); }
-      .queue-bar-item { max-width: 110px; }
+      .input-panel > .queue-bar-host {
+        right: 8px;
+        max-width: calc(100% - 16px);
+      }
     }
 
     /* .chat-message.user.queued 与 .queued-badge 的 CSS 已下线 —— 排队消息现在只在

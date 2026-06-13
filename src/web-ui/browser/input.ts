@@ -893,9 +893,7 @@ import { getSessionStatusLabel } from "./session-ui";
       // ──────────────────────────────────────────────────────────────────────────
 
       export var QUEUE_BAR_MAX = 10;            // 后端硬上限
-      export var QUEUE_CHIP_MAX_TEXT = 18;      // 收起态单气泡字数上限（紧凑）
-      export var QUEUE_EXPANDED_TEXT_MAX = 240; // 展开态单气泡字数上限（防超长撑爆容器）
-      export var QUEUE_BAR_VISIBLE_CHIPS = 3;   // 收起态超过此数折叠成「+N」徽章
+      export var QUEUE_CHIP_MAX_TEXT = 26;      // 单行气泡字数上限（一行一个，右侧贴边）
 
       export function queueChipTruncate(text) {
         if (typeof text !== "string") return "";
@@ -904,14 +902,8 @@ import { getSessionStatusLabel } from "./session-ui";
         return s.slice(0, QUEUE_CHIP_MAX_TEXT) + "…";
       }
 
-      export function queueExpandedTruncate(text) {
-        if (typeof text !== "string") return "";
-        var s = text.replace(/\s+/g, " ").trim();
-        if (s.length <= QUEUE_EXPANDED_TEXT_MAX) return s;
-        return s.slice(0, QUEUE_EXPANDED_TEXT_MAX) + "…";
-      }
-
-      // 当前气泡条是否展开（全局态，跟具体哪条 hover 解耦）。
+      // 旧的「展开/收起」整体态已下线（气泡条改为常驻垂直列表）。保留 setter 供
+      // ESC 兜底调用，确保任何遗留 expanded class 都会被清掉。
       function isQueueBarExpanded() {
         return !!state.queueBarExpanded;
       }
@@ -920,14 +912,7 @@ import { getSessionStatusLabel } from "./session-ui";
         if (!!state.queueBarExpanded === !!expanded) return;
         state.queueBarExpanded = !!expanded;
         var bar = document.querySelector(".queue-bar");
-        if (bar) {
-          bar.classList.toggle("expanded", !!expanded);
-          bar.setAttribute("aria-expanded", expanded ? "true" : "false");
-        }
-      }
-
-      export function toggleQueueBarExpanded() {
-        setQueueBarExpanded(!isQueueBarExpanded());
+        if (bar) bar.classList.toggle("expanded", !!expanded);
       }
 
       export function renderQueueBarHtml(items, inFlight, atCapacity) {
@@ -935,25 +920,22 @@ import { getSessionStatusLabel } from "./session-ui";
         var barClass = "queue-bar";
         if (atCapacity) barClass += " queue-bar-capacity";
         if (inFlight) barClass += " queue-bar-inflight";
-        if (n > QUEUE_BAR_VISIBLE_CHIPS) barClass += " has-overflow";
-        if (isQueueBarExpanded()) barClass += " expanded";
 
-        var expandTitle = inFlight ? "中断当前回复，立即发送这条" : "立即发送这条";
+        var promoteTitle = inFlight ? "中断当前回复，立即发送这条" : "立即发送这条";
+        // 始终垂直列表：一行一个气泡，右侧贴边，浮在输入框顶边线上方。
+        // 每条气泡：编号 + 单行截断文本 + ⚡ 立即 + × 删除。气泡本体可按住拖动调序。
         var chipNodes = "";
-        // 收起态：最多显示前 3 个 + 「+N」徽章；展开态：显示全部
-        var visibleCount = isQueueBarExpanded() ? n : Math.min(n, QUEUE_BAR_VISIBLE_CHIPS);
-        for (var i = 0; i < visibleCount; i++) {
+        for (var i = 0; i < n; i++) {
           var raw = items[i] == null ? "" : String(items[i]);
-          var displayText = isQueueBarExpanded() ? queueExpandedTruncate(raw) : queueChipTruncate(raw);
-          var titleAttr = raw + (isQueueBarExpanded() ? "（按住可拖动调序）" : "");
-          // 注意：气泡本体不带 data-action —— 点气泡本体走默认的"切换展开"流程；
-          // 只有 ⚡ / × / 全部清空 带 data-action，由事件代理单独处理。
+          var displayText = queueChipTruncate(raw);
+          var titleAttr = raw + "（按住可拖动调序）";
           chipNodes +=
-            '<li class="queue-bar-item" data-index="' + i + '" title="' + escapeHtml(titleAttr) + '">' +
+            '<li class="queue-bar-item" data-index="' + i + '" data-action="drag"' +
+                ' title="' + escapeHtml(titleAttr) + '">' +
               '<span class="queue-bar-item-index" aria-hidden="true">' + (i + 1) + '</span>' +
               '<span class="queue-bar-item-text">' + escapeHtml(displayText) + '</span>' +
               '<button type="button" class="queue-bar-item-promote" data-action="promote-item"' +
-                    ' title="' + escapeHtml(expandTitle) + '" aria-label="立即发送第 ' + (i + 1) + ' 条">' +
+                    ' title="' + escapeHtml(promoteTitle) + '" aria-label="立即发送第 ' + (i + 1) + ' 条">' +
                 '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
                   '<path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/>' +
                 '</svg>' +
@@ -967,33 +949,21 @@ import { getSessionStatusLabel } from "./session-ui";
             '</li>';
         }
 
-        // 「+N」收起态徽章 —— 展开时不画
-        var overflowBadge = "";
-        if (!isQueueBarExpanded() && n > QUEUE_BAR_VISIBLE_CHIPS) {
-          overflowBadge =
-            '<button type="button" class="queue-bar-overflow" data-action="expand"' +
-                  ' title="展开剩余 ' + (n - QUEUE_BAR_VISIBLE_CHIPS) + ' 条"' +
-                  ' aria-label="展开剩余排队消息">' +
-              '+' + (n - QUEUE_BAR_VISIBLE_CHIPS) +
-            '</button>';
-        }
-
-        // 展开态底部的「全部清空」
-        var actions = "";
-        if (isQueueBarExpanded()) {
-          actions =
-            '<div class="queue-bar-actions">' +
-              '<span class="queue-bar-actions-hint">' + n + ' 条排队 · 点击气泡可拖动调序</span>' +
+        // 顶部小工具条：仅在 ≥2 条时出现，展示条数 + 「清空」。右侧贴边。
+        var headerBar = "";
+        if (n >= 2) {
+          headerBar =
+            '<div class="queue-bar-head">' +
+              '<span class="queue-bar-head-count">' + n + ' 条排队</span>' +
               '<button type="button" class="queue-bar-clear-all" data-action="clear-all"' +
-                    ' title="清空全部排队" aria-label="清空全部 ' + n + ' 条排队消息">全部清空</button>' +
+                    ' title="清空全部排队" aria-label="清空全部 ' + n + ' 条排队消息">清空</button>' +
             '</div>';
         }
 
         return (
-          '<div class="' + barClass + '" data-queue-bar="1" aria-expanded="' + (isQueueBarExpanded() ? "true" : "false") + '"' +
-              ' title="' + (isQueueBarExpanded() ? "排队 " + n + " 条" : "点击展开排队（" + n + " 条）") + '">' +
-            '<ol class="queue-bar-list" data-queue-list="1">' + chipNodes + overflowBadge + '</ol>' +
-            actions +
+          '<div class="' + barClass + '" data-queue-bar="1" title="排队 ' + n + ' 条（按住气泡可调序）">' +
+            headerBar +
+            '<ol class="queue-bar-list" data-queue-list="1">' + chipNodes + '</ol>' +
           '</div>'
         );
       }
@@ -1327,31 +1297,27 @@ import { getSessionStatusLabel } from "./session-ui";
         host.addEventListener("click", function(ev) {
           var evTarget = ev.target as HTMLElement;
           var actionEl = evTarget && evTarget.closest ? evTarget.closest("[data-action]") : null;
-          if (!actionEl || !host.contains(actionEl)) return;
-          var action = actionEl.getAttribute("data-action");
-          // chip 本体（data-action="drag"）由 pointerdown 走 drag-or-tap 流程；
-          // click 阶段不处理，否则会和拖拽收尾冲突。
-          if (action === "drag") return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          if (action === "promote-item") {
-            var pItem = actionEl.closest(".queue-bar-item");
-            if (pItem) queueBarPromoteIndex(Number(pItem.getAttribute("data-index")));
-          } else if (action === "delete") {
-            var itemEl = actionEl.closest(".queue-bar-item");
-            if (itemEl) queueBarDeleteItem(Number(itemEl.getAttribute("data-index")));
-          } else if (action === "clear-all") {
-            queueBarClearAll();
-          } else if (action === "expand") {
-            // 「+N」徽章：直接展开
-            setQueueBarExpanded(true);
+          if (actionEl && host.contains(actionEl)) {
+            var action = actionEl.getAttribute("data-action");
+            // chip 本体（data-action="drag"）由 pointerdown 走 drag-or-tap 流程；
+            // click 阶段不处理，否则会和拖拽收尾冲突。
+            if (action === "drag") return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (action === "promote-item") {
+              var pItem = actionEl.closest(".queue-bar-item");
+              if (pItem) queueBarPromoteIndex(Number(pItem.getAttribute("data-index")));
+            } else if (action === "delete") {
+              var itemEl = actionEl.closest(".queue-bar-item");
+              if (itemEl) queueBarDeleteItem(Number(itemEl.getAttribute("data-index")));
+            } else if (action === "clear-all") {
+              queueBarClearAll();
+            }
+            return;
           }
-          return;
+          // 点气泡本体（无拖动发生）= 无操作。立即发送 / 删除走各自按钮。
+          // 真正发生过拖动时 pointer 链会吞掉 click，这里只会接到 tap。
         });
-        // 点气泡本体 / 容器空白 / 编号 / 文本 = 切换展开
-        // 拖拽成功 / 取消由 queueBarDragEnd 内 updateQueueBar 重新渲染，click 阶段
-        // 不会进到这里（pointer 链吞掉了 click）。
-        toggleQueueBarExpanded();
         // 整个气泡都是拖拽起手区。⚡ / × / +N / 全部清空 通过 closest 跳过，
         // 让 click 阶段去处理它们。
         host.addEventListener("pointerdown", function(ev) {
