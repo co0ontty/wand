@@ -6052,46 +6052,86 @@
     
 
     /* ─────────────────────────────────────────────────────────────────────
-       排队消息条（.queue-bar）—— 绝对定位在对话显示区域（.chat-container）的右下角，
-       压在 "回复中" 状态线之上。
-       交互：
-         · 默认只展开队首 chip（橙色完整气泡，显示编号 + 文本 + ⚡ 立即 + × 删除）
-         · 其他 chip 收成一根小横杠（橙色细线，宽 32px 高 4px）
-         · 鼠标悬到任一横杠 → 该条展开、原本展开的收回横杠
-         · 悬停期间可按住 chip 本体上下拖拽换序
-         · chip 内部 ⚡ "立即"按钮：把这一条剥下来插队发送（看得见点的是哪一条）
-         · chip 内部 × 按钮：单独删除这一条
+       排队消息条（.queue-bar）—— 放在 .composer-top-row 右端，与 todo 进度同一行。
+       收起态：胶囊容器里水平排 N 个液态玻璃小气泡（编号 + 截断文本），
+               超过 3 条折叠为「前 2 个 + N-2 更多」徽章。
+       展开态：点击容器展开为垂直列表，每条气泡显示完整文本 + ⚡ 立即 + × 删除，
+               容器底部有「全部清空」。
+       视觉：iOS 26 液态玻璃 —— backdrop-filter blur + saturate、半透明浅底、
+             1px 亮边、inset highlight、软阴影；hover 轻微上抬。
        ───────────────────────────────────────────────────────────────────── */
-    .queue-bar-host {
-      position: absolute;
-      right: 14px;
-      bottom: 10px;
-      max-width: calc(100% - 28px);
-      z-index: 14; /* 必须高于 .chat-unread-bubble(z-index 13) 和 ::after fade(z-index 12) */
-      pointer-events: none; /* host 自身不挡点击，bar 内子节点 auto */
-      display: flex;
-      justify-content: flex-end;
-      transition: bottom 220ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+
+    /* Liquid glass tokens（仅 queue bar 内部使用；避免跟全局变量冲突） */
+    .queue-bar {
+      --qb-bg: rgba(255, 255, 255, 0.10);
+      --qb-bg-strong: rgba(255, 255, 255, 0.16);
+      --qb-border: rgba(255, 255, 255, 0.22);
+      --qb-text: var(--text-primary, #1f1d1a);
+      --qb-text-muted: var(--text-muted, #6b655c);
+      --qb-shadow: 0 4px 18px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+      --qb-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.06);
+    }
+    [data-theme="dark"] .queue-bar,
+    .theme-dark .queue-bar {
+      --qb-bg: rgba(40, 38, 34, 0.55);
+      --qb-bg-strong: rgba(60, 56, 50, 0.70);
+      --qb-border: rgba(255, 255, 255, 0.10);
+    }
+
+    .composer-top-row > .queue-bar-host {
+      /* 重置原 absolute 定位；作为 flex item 推到右侧 */
+      position: static;
+      right: auto;
+      bottom: auto;
+      max-width: none;
+      z-index: auto;
+      pointer-events: auto;
+      flex: 0 0 auto;
+      align-self: center;
+      margin-left: auto;
+      min-width: 0;
     }
     .queue-bar-host[hidden] { display: none; }
-    /* 当"回到最新"胶囊也在显示时，把排队气泡条向上抬一截，避免叠在它头上。
-       sibling 选择器走得通是因为 #queue-bar-host 在 DOM 里紧跟在 .chat-unread-bubble 后面。 */
-    .chat-unread-bubble.visible ~ .queue-bar-host {
-      bottom: 52px;
-    }
 
     .queue-bar {
       pointer-events: auto;
       position: relative;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 4px;
-      max-width: min(360px, calc(100vw - 24px));
-      animation: queueBarEnter 220ms ease-out both;
+      display: inline-flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 7px;
+      max-width: min(50%, calc(100% - 16px));
+      background: var(--qb-bg);
+      backdrop-filter: blur(22px) saturate(180%);
+      -webkit-backdrop-filter: blur(22px) saturate(180%);
+      border: 1px solid var(--qb-border);
+      border-radius: 22px;
+      box-shadow: var(--qb-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.20);
+      cursor: pointer;
+      transition: background 200ms ease, box-shadow 200ms ease, transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1), border-radius 220ms ease, padding 220ms ease, max-width 240ms ease;
+      animation: queueBarEnter 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+      overflow: visible;
     }
+    .queue-bar:hover {
+      background: var(--qb-bg-strong);
+      box-shadow: var(--qb-shadow-hover), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+    .queue-bar.expanded {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 8px;
+      border-radius: 18px;
+      gap: 6px;
+      max-width: min(420px, calc(100% - 16px));
+      cursor: default;
+    }
+    .queue-bar.expanded:hover {
+      background: var(--qb-bg);
+    }
+
     @keyframes queueBarEnter {
-      from { opacity: 0; transform: translateY(4px) scale(0.96); }
+      from { opacity: 0; transform: translateY(-4px) scale(0.94); }
       to   { opacity: 1; transform: translateY(0)   scale(1); }
     }
 
@@ -6100,195 +6140,214 @@
       margin: 0;
       padding: 0;
       display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: nowrap;
+      min-width: 0;
+    }
+    .queue-bar.expanded .queue-bar-list {
       flex-direction: column;
-      align-items: flex-end;
-      gap: 3px;
-      width: 100%;
+      align-items: stretch;
+      gap: 5px;
     }
 
-    /* 折叠态 chip：一根小横杠（橙色细线，cursor 提示"可指"） */
+    /* 单个排队气泡 —— 收起态：小圆角胶囊；展开态：仿 chat-bubble 不对称圆角 */
     .queue-bar-item {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      justify-content: flex-end;
-      gap: 0;
-      height: 5px;
-      width: 32px;
-      padding: 0;
-      border: none;
-      border-radius: 999px;
-      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
-      box-shadow: 0 1px 2px rgba(197, 101, 61, 0.25);
-      color: #fff;
-      cursor: pointer;
+      gap: 5px;
+      padding: 3px 8px 3px 4px;
+      background: rgba(255, 255, 255, 0.16);
+      border: 1px solid rgba(255, 255, 255, 0.20);
+      border-radius: 14px;
+      font-size: 11px;
+      line-height: 1.3;
+      white-space: nowrap;
+      max-width: 140px;
       overflow: hidden;
-      position: relative;
-      transition: width 200ms cubic-bezier(0.2, 0.7, 0.2, 1),
-                  height 200ms cubic-bezier(0.2, 0.7, 0.2, 1),
-                  padding 200ms cubic-bezier(0.2, 0.7, 0.2, 1),
-                  gap 200ms cubic-bezier(0.2, 0.7, 0.2, 1),
-                  box-shadow var(--transition-fast),
-                  transform 140ms ease-out;
-      will-change: transform;
-      touch-action: none; /* 防止触屏滚动抢拖拽手势 */
+      text-overflow: ellipsis;
+      color: var(--qb-text);
+      cursor: grab;
+      user-select: none;
+      transition: background 180ms ease, transform 180ms ease, max-width 220ms ease, border-radius 220ms ease, padding 220ms ease;
+      flex: 0 0 auto;
     }
     .queue-bar-item:hover {
-      box-shadow: 0 2px 6px rgba(197, 101, 61, 0.42);
-    }
-
-    /* 展开态：完整气泡（橙色填充 + 编号 + 文本 + × 删除） */
-    .queue-bar-item.expanded,
-    .queue-bar-item.dragging {
-      width: auto;
-      max-width: 100%;
-      height: 24px;
-      padding: 0 4px 0 5px;
-      gap: 5px;
-      box-shadow: 0 2px 6px rgba(197, 101, 61, 0.34);
-      cursor: grab;
+      background: rgba(255, 255, 255, 0.24);
+      transform: translateY(-1px);
     }
     .queue-bar-item.dragging {
-      z-index: 5;
-      box-shadow: 0 6px 16px rgba(197, 101, 61, 0.45), 0 0 0 1.5px rgba(255, 255, 255, 0.4);
-      transition: box-shadow var(--transition-fast); /* dragging 期间禁用 transform 过渡 */
       cursor: grabbing;
+      transform: scale(1.04);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+      z-index: 50;
+      opacity: 0.92;
     }
-    .queue-bar-item.expanded:active { cursor: grabbing; }
-
-    /* 单条排队时不能拖排序，但仍可点击 → 立即发送 */
-    .queue-bar-item-single { cursor: pointer; }
-    .queue-bar-item-single.expanded { cursor: pointer; }
-    .queue-bar-item-single.expanded:active { cursor: pointer; }
-
-    /* sibling 在被拖期间平滑回位 */
     .queue-bar-item-sliding { transition: transform 160ms cubic-bezier(0.2, 0.7, 0.2, 1); }
 
-    /* chip 内部三件：编号 + 文本 + 删除按钮。默认折叠态全部隐起来。 */
-    .queue-bar-item-index {
-      flex-shrink: 0;
-      font-size: 0.6rem;
-      font-weight: 700;
-      color: rgba(255, 255, 255, 0.95);
-      background: rgba(255, 255, 255, 0.22);
-      padding: 0 5px;
-      height: 15px;
-      min-width: 15px;
-      border-radius: 999px;
-      line-height: 15px;
-      text-align: center;
-      letter-spacing: 0.02em;
-      opacity: 0;
-      transform: scale(0.4);
-      transition: opacity 150ms ease, transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
-      pointer-events: none;
+    .queue-bar.expanded .queue-bar-item {
+      /* 展开态：垂直列表，完整文本 + 操作 */
+      max-width: none;
+      width: 100%;
+      padding: 7px 6px 7px 7px;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: normal;
+      word-break: break-word;
+      border-radius: 12px;
+      border-bottom-right-radius: 4px;
+      background: rgba(255, 255, 255, 0.12);
+      justify-content: flex-start;
+      align-items: center;
+      gap: 6px;
+      cursor: grab;
     }
-    .queue-bar-item.expanded .queue-bar-item-index,
-    .queue-bar-item.dragging .queue-bar-item-index {
-      opacity: 1;
-      transform: scale(1);
+    .queue-bar.expanded .queue-bar-item:hover {
+      background: rgba(255, 255, 255, 0.18);
+      transform: none;
     }
 
+    /* 编号徽章（圆点 + 数字） */
+    .queue-bar-item-index {
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--accent, #c5653d);
+      color: var(--text-inverse, #fff);
+      border-radius: 50%;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    /* 文本 */
     .queue-bar-item-text {
       flex: 1 1 auto;
       min-width: 0;
-      font-size: 0.7rem;
-      color: #fff;
-      line-height: 1;
-      white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      letter-spacing: 0.02em;
-      opacity: 0;
-      transition: opacity 120ms ease 50ms;
-      pointer-events: none;
+      white-space: nowrap;
+      color: var(--qb-text);
+      font-weight: 500;
     }
-    .queue-bar-item.expanded .queue-bar-item-text,
-    .queue-bar-item.dragging .queue-bar-item-text {
-      opacity: 1;
+    .queue-bar.expanded .queue-bar-item-text {
+      white-space: normal;
+      word-break: break-word;
+      text-overflow: clip;
     }
 
+    /* 立即 + 删除 —— 收起态隐藏，展开态显示为圆角按钮 */
+    .queue-bar-item-promote,
     .queue-bar-item-delete {
-      flex-shrink: 0;
-      width: 16px;
-      height: 16px;
-      border: none;
-      background: rgba(255, 255, 255, 0.16);
-      color: #fff;
-      cursor: pointer;
-      border-radius: 999px;
+      display: none;
+    }
+    .queue-bar.expanded .queue-bar-item-promote,
+    .queue-bar.expanded .queue-bar-item-delete {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 26px;
+      height: 26px;
+      border: none;
+      background: rgba(255, 255, 255, 0.16);
+      color: var(--qb-text);
+      border-radius: 50%;
+      cursor: pointer;
+      flex: 0 0 auto;
+      transition: background 150ms ease, transform 150ms ease, color 150ms ease;
       padding: 0;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 120ms ease 70ms, background var(--transition-fast);
     }
-    .queue-bar-item.expanded .queue-bar-item-delete,
-    .queue-bar-item.dragging .queue-bar-item-delete {
-      opacity: 1;
-      pointer-events: auto;
+    .queue-bar.expanded .queue-bar-item-promote {
+      background: var(--accent, #c5653d);
+      color: var(--text-inverse, #fff);
     }
-    .queue-bar-item-delete:hover {
-      background: rgba(255, 255, 255, 0.34);
+    .queue-bar.expanded .queue-bar-item-delete:hover {
+      background: rgba(220, 80, 70, 0.18);
+      color: #d8483c;
     }
+    .queue-bar.expanded .queue-bar-item-promote:hover {
+      filter: brightness(1.08);
+      transform: scale(1.06);
+    }
+    .queue-bar.expanded .queue-bar-item-delete:active,
+    .queue-bar.expanded .queue-bar-item-promote:active { transform: scale(0.94); }
+    .queue-bar-item-promote svg,
     .queue-bar-item-delete svg { flex-shrink: 0; }
 
-    /* ⚡ 立即按钮 —— 每个 chip 内部都自带一颗，跟在文本和 × 删除之间。
-       展开态可见、可点；折叠态隐起来不参与 hit-test。 */
-    .queue-bar-item-promote {
-      flex-shrink: 0;
-      display: inline-flex;
+    /* 收起态：仅在 N>3 时显示的「+N 更多」徽章 */
+    .queue-bar-overflow {
+      display: none;
       align-items: center;
-      gap: 3px;
-      height: 18px;
-      padding: 0 7px 0 6px;
-      border: none;
-      border-radius: 999px;
-      cursor: pointer;
-      color: #fff;
-      background: rgba(255, 255, 255, 0.22);
-      font-size: 0.65rem;
+      justify-content: center;
+      min-width: 26px;
+      height: 22px;
+      padding: 0 8px;
+      background: rgba(255, 255, 255, 0.10);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 14px;
+      font-size: 11px;
       font-weight: 600;
+      color: var(--qb-text-muted);
+      cursor: pointer;
+      transition: background 150ms ease;
+    }
+    .queue-bar-overflow:hover { background: rgba(255, 255, 255, 0.18); }
+    .queue-bar.has-overflow .queue-bar-overflow { display: inline-flex; }
+    .queue-bar.expanded .queue-bar-overflow { display: none; }
+
+    /* 展开态底部的「全部清空」 */
+    .queue-bar-actions {
+      display: none;
+    }
+    .queue-bar.expanded .queue-bar-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 5px;
+      margin-top: 2px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .queue-bar-actions-hint {
+      font-size: 10.5px;
+      color: var(--qb-text-muted);
       letter-spacing: 0.02em;
-      line-height: 1;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 120ms ease 60ms, background var(--transition-fast),
-                  box-shadow var(--transition-fast), transform 120ms ease;
+      user-select: none;
     }
-    .queue-bar-item.expanded .queue-bar-item-promote,
-    .queue-bar-item.dragging .queue-bar-item-promote {
-      opacity: 1;
-      pointer-events: auto;
+    .queue-bar-clear-all {
+      font-size: 11px;
+      padding: 3px 9px;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.20);
+      color: var(--qb-text-muted);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
     }
-    .queue-bar-item-promote:hover {
-      background: rgba(255, 255, 255, 0.36);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
-    }
-    .queue-bar-item-promote:active { transform: scale(0.94); }
-    .queue-bar-item-promote:focus-visible {
-      outline: 2px solid #fff;
-      outline-offset: 1px;
-    }
-    .queue-bar-item-promote svg { flex-shrink: 0; }
-    .queue-bar-item-promote-label {
-      display: inline;
+    .queue-bar-clear-all:hover {
+      background: rgba(220, 80, 70, 0.12);
+      border-color: rgba(220, 80, 70, 0.35);
+      color: #d8483c;
     }
 
-    /* 容量满了的视觉提示 —— 整组颜色稍暗 */
-    .queue-bar.queue-bar-capacity .queue-bar-item {
-      background: linear-gradient(180deg, #a8522f 0%, #8e4426 100%);
+    /* 容量满：整组略暗色提示（与 inFlight 共存） */
+    .queue-bar.queue-bar-capacity {
+      --qb-bg: rgba(220, 120, 60, 0.18);
+      --qb-bg-strong: rgba(220, 120, 60, 0.26);
+    }
+    .queue-bar.queue-bar-inflight {
+      /* 持续连接中：边缘微微脉冲 */
+      box-shadow: var(--qb-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 0 1px rgba(197, 101, 61, 0.18);
     }
 
-    /* 窄屏：宽度收紧 + 横杠加粗便于指 + ⚡ 文字省略 */
+    /* 窄屏：稍微压缩 */
     @media (max-width: 560px) {
-      .queue-bar-host { right: 8px; bottom: 8px; }
-      .queue-bar { max-width: calc(100vw - 20px); }
-      .queue-bar-item { width: 40px; height: 6px; }
-      .queue-bar-item-promote-label { display: none; }
-      .queue-bar-item-promote { padding: 0 6px; }
+      .queue-bar { max-width: calc(100% - 8px); }
+      .queue-bar.expanded { max-width: calc(100% - 8px); }
+      .queue-bar-item { max-width: 110px; }
     }
 
     /* .chat-message.user.queued 与 .queued-badge 的 CSS 已下线 —— 排队消息现在只在
@@ -6336,6 +6395,7 @@
       margin-bottom: 0;
     }
     .todo-progress-header {
+      position: relative;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -6354,7 +6414,9 @@
       align-items: center;
       gap: 8px;
       min-width: 0;
-      flex: 1;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 1;
     }
     /* Circular progress ring (replaces the old plain spinner) */
     .todo-progress-ring {
@@ -6403,17 +6465,60 @@
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
     }
+    /* Horizontal progress fill: the whole header bar fills from left to right
+       as --progress grows. The active step text lives to the right of the
+       counter, inside the unfilled area (handled by .todo-progress-task-wrap). */
+    .todo-progress-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: calc(var(--progress, 0) * 100%);
+      background: linear-gradient(
+        to right,
+        rgba(197, 101, 61, 0.28) 0%,
+        rgba(197, 101, 61, 0.10) 100%
+      );
+      border-radius: 10px 0 0 10px;
+      transition: width 0.35s ease;
+      pointer-events: none;
+      z-index: 0;
+    }
+    /* Leading-edge marker at the right end of the fill, makes the progress
+       boundary easy to read at a glance. */
+    .todo-progress-fill::after {
+      content: "";
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      right: -1px;
+      width: 2px;
+      background: rgba(197, 101, 61, 0.6);
+      border-radius: 1px;
+    }
+    .todo-progress-task-wrap {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      position: relative;
+      z-index: 1;
+    }
     .todo-progress-task {
       font-size: 0.75rem;
       color: var(--text-secondary);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      flex: 1;
+      min-width: 0;
     }
     .todo-progress-chevron {
       color: var(--text-muted);
       flex-shrink: 0;
       transition: transform 0.2s ease;
+      position: relative;
+      z-index: 1;
     }
     .todo-progress.expanded .todo-progress-chevron {
       transform: rotate(180deg);

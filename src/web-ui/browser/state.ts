@@ -125,8 +125,14 @@ export var state: AppState = {
   })(), // 跨会话排队消息 [{ id, text, cwd, mode, tool }]
   structuredInputQueue: [], // 结构化会话同会话排队消息
   // 排队条 UI 局部状态 ——
-  //   queueBarHoverIndex: 当前被鼠标悬停的气泡下标（null 时默认展开队首）
-  //   queueBarDrag: 拖拽排序进行中时的临时状态（pointer 捕获、起始坐标、参考 rect）
+  //   queueBarExpanded: 整条气泡条是否处于展开态（true = 展开成垂直详情列表；
+  //     false = 收起成水平小气泡胶囊）。点击胶囊空白 / 气泡本体 / +N 徽章切换。
+  //     ESC / 清空 / 全部 promote 出去时也会被自动收回。
+  //   queueBarDrag: 拖拽排序进行中时的临时状态（pointer 捕获、起始坐标、参考 rect）。
+  //   收起态以前还有"hover 展开某一条"的旧实现，已在 iOS 26 玻璃条改造里一起下线；
+  //   queueBarHoverIndex 不再被任何代码读写，保留 null 占位以免破坏其他模块的
+  //   类型推断。
+  queueBarExpanded: false,
   queueBarHoverIndex: null,
   queueBarDrag: null,
   drafts: {},

@@ -659,7 +659,33 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
             body.classList.remove("expanded");
           }
         }
+        // body 展开/收起后视觉高度变了，触发一次 padding 同步
+        syncChatMessagesPaddingForTodoBody();
       });
+
+      // 同步 .chat-messages 的 padding-bottom 与 .todo-progress-body 的实际高度。
+      // 背景：body 是 position: absolute 浮在 composer 上方，max-height 320px，会盖住
+      // .chat-messages 底部一大块；column-reverse 下新消息永远 prepend 到 DOM 第一个
+      // （也就是视觉底部），结果就是被 body 完全遮住、只在上沿露个头。给 chat-messages
+      // 动态加一段等于 body 高度的 padding-bottom，最新一条消息就会浮在 body 正上方，
+      // 不再渲染在 body 覆盖区。body 收起/隐藏时还原回 CSS 默认的 12px。
+      function syncChatMessagesPaddingForTodoBody() {
+        var chatMessages = document.querySelector("#chat-output .chat-messages");
+        var todoBody = document.getElementById("todo-progress-body");
+        if (!chatMessages || !todoBody) return;
+        // querySelector 返回 Element，但 .style 是 HTMLElement 上的；这里强转。
+        var chatMessagesEl = chatMessages as HTMLElement;
+        var isVisible = !todoBody.classList.contains("hidden");
+        var isExpanded = todoBody.classList.contains("expanded");
+        var bodyHeight = todoBody.offsetHeight;
+        if (isVisible && isExpanded && bodyHeight > 0) {
+          // 8px 是与 body 上方那 6px 间距对应的视觉缓冲，避免最新一条贴脸 body。
+          chatMessagesEl.style.paddingBottom = (bodyHeight + 8) + "px";
+        } else {
+          // 清掉内联样式，回到 .chat-messages CSS 默认的 padding: 20px 4px 12px
+          chatMessagesEl.style.paddingBottom = "";
+        }
+      }
 
       export function updateTodoProgress(messages) {
         // 只看"当前 turn"里的 TodoWrite——即最后一条 user 消息之后的那段。
@@ -694,6 +720,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         if (!todos || todos.length === 0) {
           container.classList.add("hidden");
           if (bodyEl) bodyEl.classList.add("hidden");
+          // body 隐藏（无 todo）→ 还原 chat 底部 padding
+          syncChatMessagesPaddingForTodoBody();
           return;
         }
 
@@ -724,6 +752,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         if (!sessionActive || allDone) {
           container.classList.add("hidden");
           if (bodyEl) bodyEl.classList.add("hidden");
+          // turn 结束 / 全部 done，body 不再展示 → 还原 chat 底部 padding
+          syncChatMessagesPaddingForTodoBody();
           return;
         }
 
@@ -740,10 +770,16 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var task = document.getElementById("todo-progress-task");
         if (task) task.textContent = activeTask;
 
+        var ratio = todos.length > 0 ? completed / todos.length : 0;
         var ring = document.getElementById("todo-progress-ring");
         if (ring) {
-          var ratio = todos.length > 0 ? completed / todos.length : 0;
           ring.style.setProperty("--progress", ratio.toFixed(3));
+        }
+        // 同步把整条横条的进度填充（从左到右生长）也设上同一比例，
+        // 避免额外算一遍 completed/todos.length。
+        var fill = document.getElementById("todo-progress-fill");
+        if (fill) {
+          fill.style.setProperty("--progress", ratio.toFixed(3));
         }
 
         // Render expanded list
@@ -768,6 +804,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         if (state.selectedId) {
           syncSessionProgressToNative(state.selectedId);
         }
+        // 列表条数/状态变了（item 高度变化），同步一次 chat 底部 padding
+        syncChatMessagesPaddingForTodoBody();
       }
 
       export function attachCopyHandler(el) {

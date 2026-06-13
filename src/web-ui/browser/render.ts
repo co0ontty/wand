@@ -680,9 +680,6 @@ export function renderAppShell() {
             '<span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span>' +
             '<span class="chat-unread-bubble-count" aria-hidden="true"></span>' +
           '</button>' +
-          // 排队气泡宿主：贴在对话显示区域的右下角（在"回复中"状态线上方），
-          // 不进输入框 panel。updateQueueBar() 仅在 queuedMessages 非空时显形。
-          '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
         '</div>' +
         '<div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '">' +
           '<div class="blank-chat-inner">' +
@@ -711,10 +708,10 @@ export function renderAppShell() {
           '</div>' +
         '</div>' +
         '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
-          // #queue-bar-host 已搬到 #chat-output 内部（对话区右下角），不在这里了。
           '<div class="composer-top-row">' +
             '<div id="todo-progress" class="todo-progress hidden">' +
               '<div class="todo-progress-header" id="todo-progress-toggle">' +
+                '<div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div>' +
                 '<div class="todo-progress-left">' +
                   '<span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0">' +
                     '<svg width="16" height="16" viewBox="0 0 36 36">' +
@@ -723,6 +720,8 @@ export function renderAppShell() {
                     '</svg>' +
                   '</span>' +
                   '<span class="todo-progress-counter" id="todo-progress-counter"></span>' +
+                '</div>' +
+                '<div class="todo-progress-task-wrap">' +
                   '<span class="todo-progress-task" id="todo-progress-task"></span>' +
                 '</div>' +
                 '<svg class="todo-progress-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>' +
@@ -731,6 +730,11 @@ export function renderAppShell() {
             '<div class="todo-progress-body hidden" id="todo-progress-body">' +
               '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
             '</div>' +
+            // 排队气泡宿主：在 composer-top-row 右端，与 todo 进度同一行。
+            // 收起态：水平排 N 个液态玻璃小气泡；
+            // 点击展开：变垂直列表，每条带立即/删除按钮。updateQueueBar() 在
+            // queuedMessages 非空时去掉 hidden。
+            '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
           '</div>' +
           // v2 单行布局：
           //   ┌─────────────────────────────────────────────────────────────────────┐

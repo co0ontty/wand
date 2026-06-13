@@ -192,8 +192,14 @@
     structuredInputQueue: [],
     // 结构化会话同会话排队消息
     // 排队条 UI 局部状态 ——
-    //   queueBarHoverIndex: 当前被鼠标悬停的气泡下标（null 时默认展开队首）
-    //   queueBarDrag: 拖拽排序进行中时的临时状态（pointer 捕获、起始坐标、参考 rect）
+    //   queueBarExpanded: 整条气泡条是否处于展开态（true = 展开成垂直详情列表；
+    //     false = 收起成水平小气泡胶囊）。点击胶囊空白 / 气泡本体 / +N 徽章切换。
+    //     ESC / 清空 / 全部 promote 出去时也会被自动收回。
+    //   queueBarDrag: 拖拽排序进行中时的临时状态（pointer 捕获、起始坐标、参考 rect）。
+    //   收起态以前还有"hover 展开某一条"的旧实现，已在 iOS 26 玻璃条改造里一起下线；
+    //   queueBarHoverIndex 不再被任何代码读写，保留 null 占位以免破坏其他模块的
+    //   类型推断。
+    queueBarExpanded: false,
     queueBarHoverIndex: null,
     queueBarDrag: null,
     drafts: {},
@@ -9608,40 +9614,61 @@
     updateQueueBar();
   }
   var QUEUE_BAR_MAX = 10;
-  var QUEUE_CHIP_MAX_TEXT = 24;
+  var QUEUE_CHIP_MAX_TEXT = 18;
+  var QUEUE_EXPANDED_TEXT_MAX = 240;
+  var QUEUE_BAR_VISIBLE_CHIPS = 3;
   function queueChipTruncate(text) {
     if (typeof text !== "string") return "";
     var s = text.replace(/\s+/g, " ").trim();
     if (s.length <= QUEUE_CHIP_MAX_TEXT) return s;
     return s.slice(0, QUEUE_CHIP_MAX_TEXT) + "\u2026";
   }
-  function queueBarExpandedIndex(itemsLength) {
-    if (state.queueBarDrag && typeof state.queueBarDrag.origIndex === "number") {
-      return state.queueBarDrag.origIndex;
+  function queueExpandedTruncate(text) {
+    if (typeof text !== "string") return "";
+    var s = text.replace(/\s+/g, " ").trim();
+    if (s.length <= QUEUE_EXPANDED_TEXT_MAX) return s;
+    return s.slice(0, QUEUE_EXPANDED_TEXT_MAX) + "\u2026";
+  }
+  function isQueueBarExpanded() {
+    return !!state.queueBarExpanded;
+  }
+  function setQueueBarExpanded(expanded) {
+    if (!!state.queueBarExpanded === !!expanded) return;
+    state.queueBarExpanded = !!expanded;
+    var bar = document.querySelector(".queue-bar");
+    if (bar) {
+      bar.classList.toggle("expanded", !!expanded);
+      bar.setAttribute("aria-expanded", expanded ? "true" : "false");
     }
-    if (typeof state.queueBarHoverIndex === "number" && state.queueBarHoverIndex >= 0 && state.queueBarHoverIndex < itemsLength) {
-      return state.queueBarHoverIndex;
-    }
-    return 0;
+  }
+  function toggleQueueBarExpanded() {
+    setQueueBarExpanded(!isQueueBarExpanded());
   }
   function renderQueueBarHtml(items, inFlight, atCapacity) {
-    var single = items.length <= 1;
+    var n = items.length;
     var barClass = "queue-bar";
     if (atCapacity) barClass += " queue-bar-capacity";
     if (inFlight) barClass += " queue-bar-inflight";
-    var expandedIdx = queueBarExpandedIndex(items.length);
-    var promoteTip = inFlight ? "\u4E2D\u65AD\u5F53\u524D\u56DE\u590D\uFF0C\u7ACB\u5373\u53D1\u9001\u8FD9\u6761" : "\u7ACB\u5373\u53D1\u9001\u8FD9\u6761";
-    var chips = "";
-    for (var i = 0; i < items.length; i++) {
+    if (n > QUEUE_BAR_VISIBLE_CHIPS) barClass += " has-overflow";
+    if (isQueueBarExpanded()) barClass += " expanded";
+    var expandTitle = inFlight ? "\u4E2D\u65AD\u5F53\u524D\u56DE\u590D\uFF0C\u7ACB\u5373\u53D1\u9001\u8FD9\u6761" : "\u7ACB\u5373\u53D1\u9001\u8FD9\u6761";
+    var chipNodes = "";
+    var visibleCount = isQueueBarExpanded() ? n : Math.min(n, QUEUE_BAR_VISIBLE_CHIPS);
+    for (var i = 0; i < visibleCount; i++) {
       var raw = items[i] == null ? "" : String(items[i]);
-      var isExpanded = i === expandedIdx;
-      var itemClass = "queue-bar-item";
-      if (isExpanded) itemClass += " expanded";
-      if (single) itemClass += " queue-bar-item-single";
-      var titleAttr = isExpanded ? raw + "\uFF08\u6309\u4F4F\u53EF\u62D6\u52A8\u8C03\u5E8F\uFF09" : raw;
-      chips += '<li class="' + itemClass + '" data-index="' + i + '" data-action="drag" title="' + escapeHtml2(titleAttr) + '"><span class="queue-bar-item-index" aria-hidden="true">' + (i + 1) + '</span><span class="queue-bar-item-text">' + escapeHtml2(queueChipTruncate(raw)) + '</span><button type="button" class="queue-bar-item-promote" data-action="promote-item" title="' + escapeHtml2(promoteTip) + '" aria-label="\u7ACB\u5373\u53D1\u9001\u8FD9\u6761" tabindex="' + (isExpanded ? "0" : "-1") + '"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/></svg><span class="queue-bar-item-promote-label">\u7ACB\u5373</span></button><button type="button" class="queue-bar-item-delete" data-action="delete" aria-label="\u5220\u9664\u8FD9\u6761\u6392\u961F\u6D88\u606F" title="\u5220\u9664" tabindex="' + (isExpanded ? "0" : "-1") + '"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg></button></li>';
+      var displayText = isQueueBarExpanded() ? queueExpandedTruncate(raw) : queueChipTruncate(raw);
+      var titleAttr = raw + (isQueueBarExpanded() ? "\uFF08\u6309\u4F4F\u53EF\u62D6\u52A8\u8C03\u5E8F\uFF09" : "");
+      chipNodes += '<li class="queue-bar-item" data-index="' + i + '" title="' + escapeHtml2(titleAttr) + '"><span class="queue-bar-item-index" aria-hidden="true">' + (i + 1) + '</span><span class="queue-bar-item-text">' + escapeHtml2(displayText) + '</span><button type="button" class="queue-bar-item-promote" data-action="promote-item" title="' + escapeHtml2(expandTitle) + '" aria-label="\u7ACB\u5373\u53D1\u9001\u7B2C ' + (i + 1) + ' \u6761"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/></svg></button><button type="button" class="queue-bar-item-delete" data-action="delete" aria-label="\u5220\u9664\u7B2C ' + (i + 1) + ' \u6761\u6392\u961F\u6D88\u606F" title="\u5220\u9664"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg></button></li>';
     }
-    return '<div class="' + barClass + '" data-queue-bar="1"><ol class="queue-bar-list" data-queue-list="1">' + chips + "</ol></div>";
+    var overflowBadge = "";
+    if (!isQueueBarExpanded() && n > QUEUE_BAR_VISIBLE_CHIPS) {
+      overflowBadge = '<button type="button" class="queue-bar-overflow" data-action="expand" title="\u5C55\u5F00\u5269\u4F59 ' + (n - QUEUE_BAR_VISIBLE_CHIPS) + ' \u6761" aria-label="\u5C55\u5F00\u5269\u4F59\u6392\u961F\u6D88\u606F">+' + (n - QUEUE_BAR_VISIBLE_CHIPS) + "</button>";
+    }
+    var actions = "";
+    if (isQueueBarExpanded()) {
+      actions = '<div class="queue-bar-actions"><span class="queue-bar-actions-hint">' + n + ' \u6761\u6392\u961F \xB7 \u70B9\u51FB\u6C14\u6CE1\u53EF\u62D6\u52A8\u8C03\u5E8F</span><button type="button" class="queue-bar-clear-all" data-action="clear-all" title="\u6E05\u7A7A\u5168\u90E8\u6392\u961F" aria-label="\u6E05\u7A7A\u5168\u90E8 ' + n + ' \u6761\u6392\u961F\u6D88\u606F">\u5168\u90E8\u6E05\u7A7A</button></div>';
+    }
+    return '<div class="' + barClass + '" data-queue-bar="1" aria-expanded="' + (isQueueBarExpanded() ? "true" : "false") + '" title="' + (isQueueBarExpanded() ? "\u6392\u961F " + n + " \u6761" : "\u70B9\u51FB\u5C55\u5F00\u6392\u961F\uFF08" + n + " \u6761\uFF09") + '"><ol class="queue-bar-list" data-queue-list="1">' + chipNodes + overflowBadge + "</ol>" + actions + "</div>";
   }
   function updateQueueBar() {
     var host = document.getElementById("queue-bar-host");
@@ -9655,7 +9682,7 @@
     if (!isStructured || queue.length === 0) {
       host.hidden = true;
       host.innerHTML = "";
-      state.queueBarHoverIndex = null;
+      state.queueBarExpanded = false;
       return;
     }
     if (state.queueBarDrag) return;
@@ -9663,29 +9690,6 @@
     var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
     var atCapacity = queue.length >= QUEUE_BAR_MAX;
     host.innerHTML = renderQueueBarHtml(queue, inFlight, atCapacity);
-  }
-  function reflectQueueBarExpansion() {
-    var host = document.getElementById("queue-bar-host");
-    if (!host || host.hidden) return;
-    var list = host.querySelector('[data-queue-list="1"]');
-    if (!list) return;
-    var children = list.children;
-    var expandedIdx = queueBarExpandedIndex(children.length);
-    for (var i = 0; i < children.length; i++) {
-      var el = children[i];
-      var should = i === expandedIdx;
-      if (el.classList.contains("expanded") !== should) {
-        el.classList.toggle("expanded", should);
-        var del = el.querySelector(".queue-bar-item-delete");
-        if (del) del.tabIndex = should ? 0 : -1;
-      }
-    }
-  }
-  function setQueueBarHoverIndex(idx) {
-    var next = idx == null ? null : Number(idx);
-    if (state.queueBarHoverIndex === next) return;
-    state.queueBarHoverIndex = next;
-    reflectQueueBarExpansion();
   }
   function rollbackQueueOptimistic(session, prevQueue) {
     updateSessionSnapshot({ id: session.id, queuedMessages: prevQueue });
@@ -9705,10 +9709,6 @@
     if (index < 0 || index >= queue.length) return;
     var prev = queue.slice();
     var next = queue.slice(0, index).concat(queue.slice(index + 1));
-    if (typeof state.queueBarHoverIndex === "number") {
-      if (state.queueBarHoverIndex === index) state.queueBarHoverIndex = null;
-      else if (state.queueBarHoverIndex > index) state.queueBarHoverIndex -= 1;
-    }
     updateSessionSnapshot({ id: session.id, queuedMessages: next });
     var refreshed = state.sessions.find(function(s) {
       return s.id === session.id;
@@ -9739,7 +9739,7 @@
     if (!session) return;
     var prev = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
     if (prev.length === 0) return;
-    state.queueBarHoverIndex = null;
+    state.queueBarExpanded = false;
     updateSessionSnapshot({ id: session.id, queuedMessages: [] });
     var refreshed = state.sessions.find(function(s) {
       return s.id === session.id;
@@ -9775,9 +9775,8 @@
     var rest = queue.slice(0, index).concat(queue.slice(index + 1));
     var prev = queue.slice();
     var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
-    if (typeof state.queueBarHoverIndex === "number") {
-      if (state.queueBarHoverIndex === index) state.queueBarHoverIndex = null;
-      else if (state.queueBarHoverIndex > index) state.queueBarHoverIndex -= 1;
+    if (rest.length === 0) {
+      state.queueBarExpanded = false;
     }
     updateSessionSnapshot({ id: session.id, queuedMessages: rest });
     var idempotencyKey = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
@@ -9860,7 +9859,6 @@
       queueSnapshot: queue
     };
     chipEl.classList.add("dragging");
-    reflectQueueBarExpansion();
     siblings.forEach(function(el) {
       if (el !== chipEl) el.classList.add("queue-bar-item-sliding");
     });
@@ -9951,7 +9949,6 @@
     var nextQueue = order.map(function(i2) {
       return queueSnapshot[i2];
     });
-    state.queueBarHoverIndex = targetIndex;
     var session = state.sessions.find(function(s) {
       return s.id === state.selectedId;
     });
@@ -9994,33 +9991,32 @@
       if (action === "promote-item") {
         var pItem = actionEl.closest(".queue-bar-item");
         if (pItem) queueBarPromoteIndex(Number(pItem.getAttribute("data-index")));
-        return;
-      }
-      if (action === "delete") {
+      } else if (action === "delete") {
         var itemEl = actionEl.closest(".queue-bar-item");
         if (itemEl) queueBarDeleteItem(Number(itemEl.getAttribute("data-index")));
-        return;
+      } else if (action === "clear-all") {
+        queueBarClearAll();
+      } else if (action === "expand") {
+        setQueueBarExpanded(true);
       }
+      return;
     });
-    host.addEventListener("mouseover", function(ev) {
-      if (state.queueBarDrag) return;
-      var evTarget = ev.target;
-      var chip = evTarget && evTarget.closest ? evTarget.closest(".queue-bar-item") : null;
-      if (!chip || !host.contains(chip)) return;
-      setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
-    });
-    host.addEventListener("mouseleave", function() {
-      if (state.queueBarDrag) return;
-      setQueueBarHoverIndex(null);
-    });
+    toggleQueueBarExpanded();
     host.addEventListener("pointerdown", function(ev) {
       if (ev.button !== void 0 && ev.button !== 0) return;
       var evTarget = ev.target;
-      if (evTarget && evTarget.closest && evTarget.closest('[data-action="delete"], [data-action="promote-item"]')) return;
+      if (evTarget && evTarget.closest && evTarget.closest(
+        '[data-action="delete"], [data-action="promote-item"], [data-action="clear-all"], [data-action="expand"]'
+      )) return;
       var chip = evTarget && evTarget.closest ? evTarget.closest(".queue-bar-item") : null;
       if (!chip) return;
-      setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
       queueBarDragStart(ev, chip);
+    });
+    host.addEventListener("keydown", function(ev) {
+      if (ev.key === "Escape" && isQueueBarExpanded()) {
+        ev.stopPropagation();
+        setQueueBarExpanded(false);
+      }
     });
   }
   function turnContentVolume(turn) {

@@ -881,19 +881,21 @@ import { getSessionStatusLabel } from "./session-ui";
       }
 
       // ──────────────────────────────────────────────────────────────────────────
-      // 排队气泡条（.queue-bar）—— 垂直堆叠，浮在 "回复中" 状态条上方。
-      // 交互参考 iOS 通讯录右侧的字母选择条：
-      //   · 默认只展开队首（即下一个要发的那条），显示编号 + 文本 + × 删除
-      //   · 其他消息收起成一根小横杠（指示存在但不占空间）
-      //   · 鼠标悬到任意小横杠 → 该条展开、原本展开的那条收回小横杠
-      //   · 点一下任意气泡 → 中断当前回复、把这条作为新输入插队发出去
-      //   · 按住任意气泡向上 / 向下拖拽 → 换序
-      // 末尾跟一个 ⚡ 按钮：等价于点队首气泡（保留作为快速插队的视觉提示）。
+      // 排队气泡条（.queue-bar）—— 放在 .composer-top-row 右端，与 todo 进度同
+      // 一行；视觉是 iOS 26 液态玻璃胶囊。
+      // 交互：
+      //   · 收起态：水平排 N 个小气泡（编号 + 截断文本）。>3 条时显示「+N」徽章。
+      //   · 点击胶囊空白处 / 任何气泡本体 → 展开为垂直列表
+      //   · 展开态：每条气泡显示完整文本 + ⚡ 立即 + × 删除；容器底部有「全部清空」
+      //   · 收起 / 展开都可拖拽气泡换序（pointer events）
+      //   · 点击 ⚡ / × / +N / 全部清空：执行对应操作，**不**触发展开切换
       // 数据源：session.queuedMessages（后端 WS + postStructuredInput 乐观更新）。
       // ──────────────────────────────────────────────────────────────────────────
 
       export var QUEUE_BAR_MAX = 10;            // 后端硬上限
-      export var QUEUE_CHIP_MAX_TEXT = 24;      // 单个气泡展开时显示的字数上限
+      export var QUEUE_CHIP_MAX_TEXT = 18;      // 收起态单气泡字数上限（紧凑）
+      export var QUEUE_EXPANDED_TEXT_MAX = 240; // 展开态单气泡字数上限（防超长撑爆容器）
+      export var QUEUE_BAR_VISIBLE_CHIPS = 3;   // 收起态超过此数折叠成「+N」徽章
 
       export function queueChipTruncate(text) {
         if (typeof text !== "string") return "";
@@ -902,61 +904,96 @@ import { getSessionStatusLabel } from "./session-ui";
         return s.slice(0, QUEUE_CHIP_MAX_TEXT) + "…";
       }
 
-      // 当前应该展开的下标：拖拽中 → 被拖的那条（data-index 不变）；hover → 被 hover 的；否则 → 第 0 项
-      export function queueBarExpandedIndex(itemsLength) {
-        if (state.queueBarDrag && typeof state.queueBarDrag.origIndex === "number") {
-          return state.queueBarDrag.origIndex;
+      export function queueExpandedTruncate(text) {
+        if (typeof text !== "string") return "";
+        var s = text.replace(/\s+/g, " ").trim();
+        if (s.length <= QUEUE_EXPANDED_TEXT_MAX) return s;
+        return s.slice(0, QUEUE_EXPANDED_TEXT_MAX) + "…";
+      }
+
+      // 当前气泡条是否展开（全局态，跟具体哪条 hover 解耦）。
+      function isQueueBarExpanded() {
+        return !!state.queueBarExpanded;
+      }
+
+      export function setQueueBarExpanded(expanded) {
+        if (!!state.queueBarExpanded === !!expanded) return;
+        state.queueBarExpanded = !!expanded;
+        var bar = document.querySelector(".queue-bar");
+        if (bar) {
+          bar.classList.toggle("expanded", !!expanded);
+          bar.setAttribute("aria-expanded", expanded ? "true" : "false");
         }
-        if (typeof state.queueBarHoverIndex === "number"
-            && state.queueBarHoverIndex >= 0
-            && state.queueBarHoverIndex < itemsLength) {
-          return state.queueBarHoverIndex;
-        }
-        return 0;
+      }
+
+      export function toggleQueueBarExpanded() {
+        setQueueBarExpanded(!isQueueBarExpanded());
       }
 
       export function renderQueueBarHtml(items, inFlight, atCapacity) {
-        // 底部独立 ⚡ 按钮已下线，每条 chip 内部自带 ⚡ "立即"按钮 ——
-        // 这样用户一眼就能看出"是把哪一条插队"。
-        var single = items.length <= 1;
+        var n = items.length;
         var barClass = "queue-bar";
         if (atCapacity) barClass += " queue-bar-capacity";
         if (inFlight) barClass += " queue-bar-inflight";
-        var expandedIdx = queueBarExpandedIndex(items.length);
-        var promoteTip = inFlight ? "中断当前回复，立即发送这条" : "立即发送这条";
-        var chips = "";
-        for (var i = 0; i < items.length; i++) {
+        if (n > QUEUE_BAR_VISIBLE_CHIPS) barClass += " has-overflow";
+        if (isQueueBarExpanded()) barClass += " expanded";
+
+        var expandTitle = inFlight ? "中断当前回复，立即发送这条" : "立即发送这条";
+        var chipNodes = "";
+        // 收起态：最多显示前 3 个 + 「+N」徽章；展开态：显示全部
+        var visibleCount = isQueueBarExpanded() ? n : Math.min(n, QUEUE_BAR_VISIBLE_CHIPS);
+        for (var i = 0; i < visibleCount; i++) {
           var raw = items[i] == null ? "" : String(items[i]);
-          var isExpanded = i === expandedIdx;
-          var itemClass = "queue-bar-item";
-          if (isExpanded) itemClass += " expanded";
-          if (single) itemClass += " queue-bar-item-single";
-          // chip 本体是"拖拽起手区"；内部 ⚡ 按钮独占 click 用于立即发送、× 用于删除。
-          var titleAttr = isExpanded ? raw + "（按住可拖动调序）" : raw;
-          chips +=
-            '<li class="' + itemClass + '" data-index="' + i + '" data-action="drag"' +
-                ' title="' + escapeHtml(titleAttr) + '">' +
+          var displayText = isQueueBarExpanded() ? queueExpandedTruncate(raw) : queueChipTruncate(raw);
+          var titleAttr = raw + (isQueueBarExpanded() ? "（按住可拖动调序）" : "");
+          // 注意：气泡本体不带 data-action —— 点气泡本体走默认的"切换展开"流程；
+          // 只有 ⚡ / × / 全部清空 带 data-action，由事件代理单独处理。
+          chipNodes +=
+            '<li class="queue-bar-item" data-index="' + i + '" title="' + escapeHtml(titleAttr) + '">' +
               '<span class="queue-bar-item-index" aria-hidden="true">' + (i + 1) + '</span>' +
-              '<span class="queue-bar-item-text">' + escapeHtml(queueChipTruncate(raw)) + '</span>' +
+              '<span class="queue-bar-item-text">' + escapeHtml(displayText) + '</span>' +
               '<button type="button" class="queue-bar-item-promote" data-action="promote-item"' +
-                    ' title="' + escapeHtml(promoteTip) + '" aria-label="立即发送这条"' +
-                    ' tabindex="' + (isExpanded ? "0" : "-1") + '">' +
-                '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+                    ' title="' + escapeHtml(expandTitle) + '" aria-label="立即发送第 ' + (i + 1) + ' 条">' +
+                '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
                   '<path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/>' +
                 '</svg>' +
-                '<span class="queue-bar-item-promote-label">立即</span>' +
               '</button>' +
               '<button type="button" class="queue-bar-item-delete" data-action="delete"' +
-                    ' aria-label="删除这条排队消息" title="删除" tabindex="' + (isExpanded ? "0" : "-1") + '">' +
-                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
-                    ' stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                    ' aria-label="删除第 ' + (i + 1) + ' 条排队消息" title="删除">' +
+                '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+                    ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
                     '<line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>' +
               '</button>' +
             '</li>';
         }
+
+        // 「+N」收起态徽章 —— 展开时不画
+        var overflowBadge = "";
+        if (!isQueueBarExpanded() && n > QUEUE_BAR_VISIBLE_CHIPS) {
+          overflowBadge =
+            '<button type="button" class="queue-bar-overflow" data-action="expand"' +
+                  ' title="展开剩余 ' + (n - QUEUE_BAR_VISIBLE_CHIPS) + ' 条"' +
+                  ' aria-label="展开剩余排队消息">' +
+              '+' + (n - QUEUE_BAR_VISIBLE_CHIPS) +
+            '</button>';
+        }
+
+        // 展开态底部的「全部清空」
+        var actions = "";
+        if (isQueueBarExpanded()) {
+          actions =
+            '<div class="queue-bar-actions">' +
+              '<span class="queue-bar-actions-hint">' + n + ' 条排队 · 点击气泡可拖动调序</span>' +
+              '<button type="button" class="queue-bar-clear-all" data-action="clear-all"' +
+                    ' title="清空全部排队" aria-label="清空全部 ' + n + ' 条排队消息">全部清空</button>' +
+            '</div>';
+        }
+
         return (
-          '<div class="' + barClass + '" data-queue-bar="1">' +
-            '<ol class="queue-bar-list" data-queue-list="1">' + chips + '</ol>' +
+          '<div class="' + barClass + '" data-queue-bar="1" aria-expanded="' + (isQueueBarExpanded() ? "true" : "false") + '"' +
+              ' title="' + (isQueueBarExpanded() ? "排队 " + n + " 条" : "点击展开排队（" + n + " 条）") + '">' +
+            '<ol class="queue-bar-list" data-queue-list="1">' + chipNodes + overflowBadge + '</ol>' +
+            actions +
           '</div>'
         );
       }
@@ -972,7 +1009,8 @@ import { getSessionStatusLabel } from "./session-ui";
         if (!isStructured || queue.length === 0) {
           host.hidden = true;
           host.innerHTML = "";
-          state.queueBarHoverIndex = null;
+          // 队列空时同步把"展开"标志收回，避免下次出现新排队时还是展开态。
+          state.queueBarExpanded = false;
           return;
         }
 
@@ -984,33 +1022,6 @@ import { getSessionStatusLabel } from "./session-ui";
         var atCapacity = queue.length >= QUEUE_BAR_MAX;
 
         host.innerHTML = renderQueueBarHtml(queue, inFlight, atCapacity);
-      }
-
-      // 只切换 .expanded class，不重建 DOM —— 避免鼠标移过去触发的重建
-      // 让拖拽/输入框焦点等丢失。所有同步状态（hoverIndex / drag）的改变都通过这里反映到 DOM。
-      export function reflectQueueBarExpansion() {
-        var host = document.getElementById("queue-bar-host");
-        if (!host || host.hidden) return;
-        var list = host.querySelector('[data-queue-list="1"]');
-        if (!list) return;
-        var children = list.children;
-        var expandedIdx = queueBarExpandedIndex(children.length);
-        for (var i = 0; i < children.length; i++) {
-          var el = children[i];
-          var should = i === expandedIdx;
-          if (el.classList.contains("expanded") !== should) {
-            el.classList.toggle("expanded", should);
-            var del = el.querySelector('.queue-bar-item-delete');
-            if (del) (del as HTMLElement).tabIndex = should ? 0 : -1;
-          }
-        }
-      }
-
-      export function setQueueBarHoverIndex(idx) {
-        var next = (idx == null ? null : Number(idx));
-        if (state.queueBarHoverIndex === next) return;
-        state.queueBarHoverIndex = next;
-        reflectQueueBarExpansion();
       }
 
       // ── 单条删除 / 全部清空 / 队首插队 ──
@@ -1029,11 +1040,6 @@ import { getSessionStatusLabel } from "./session-ui";
         if (index < 0 || index >= queue.length) return;
         var prev = queue.slice();
         var next = queue.slice(0, index).concat(queue.slice(index + 1));
-        // hover 下标也要随之收缩，否则删完后展开的是错位的那条
-        if (typeof state.queueBarHoverIndex === "number") {
-          if (state.queueBarHoverIndex === index) state.queueBarHoverIndex = null;
-          else if (state.queueBarHoverIndex > index) state.queueBarHoverIndex -= 1;
-        }
         updateSessionSnapshot({ id: session.id, queuedMessages: next });
         var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
@@ -1061,7 +1067,8 @@ import { getSessionStatusLabel } from "./session-ui";
         if (!session) return;
         var prev = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
         if (prev.length === 0) return;
-        state.queueBarHoverIndex = null;
+        // 全部清空后收起列表，UX 上更干净（用户不需要盯着一条不剩的展开面板）。
+        state.queueBarExpanded = false;
         updateSessionSnapshot({ id: session.id, queuedMessages: [] });
         var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
@@ -1099,10 +1106,10 @@ import { getSessionStatusLabel } from "./session-ui";
         var prev = queue.slice();
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
 
-        // 乐观：剥掉这一条；hover 下标随之收缩
-        if (typeof state.queueBarHoverIndex === "number") {
-          if (state.queueBarHoverIndex === index) state.queueBarHoverIndex = null;
-          else if (state.queueBarHoverIndex > index) state.queueBarHoverIndex -= 1;
+        // 乐观：剥掉这一条
+        // 如果剩下的队列为空（用户把唯一一条 promote 出去），自动收起气泡条。
+        if (rest.length === 0) {
+          state.queueBarExpanded = false;
         }
         updateSessionSnapshot({ id: session.id, queuedMessages: rest });
 
@@ -1188,8 +1195,6 @@ import { getSessionStatusLabel } from "./session-ui";
         };
 
         chipEl.classList.add("dragging");
-        // 让被拖元素保持 expanded（即便鼠标已经离开它）
-        reflectQueueBarExpansion();
         // 把所有兄弟先标记为"参与平滑动画"
         siblings.forEach(function(el) { if (el !== chipEl) el.classList.add("queue-bar-item-sliding"); });
 
@@ -1290,9 +1295,6 @@ import { getSessionStatusLabel } from "./session-ui";
         order.splice(targetIndex, 0, origIndex);
         var nextQueue = order.map(function(i) { return queueSnapshot[i]; });
 
-        // hover 下标迁移到新位置（拖拽放手时鼠标停在 targetIndex 上）
-        state.queueBarHoverIndex = targetIndex;
-
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) { updateQueueBar(); return; }
         updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
@@ -1333,41 +1335,41 @@ import { getSessionStatusLabel } from "./session-ui";
           ev.preventDefault();
           ev.stopPropagation();
           if (action === "promote-item") {
-            // chip 内部的 ⚡ "立即"按钮：把这一条剥下来插队发送，让用户一眼看到
-            // 自己点的就是哪一条。
             var pItem = actionEl.closest(".queue-bar-item");
             if (pItem) queueBarPromoteIndex(Number(pItem.getAttribute("data-index")));
-            return;
-          }
-          if (action === "delete") {
+          } else if (action === "delete") {
             var itemEl = actionEl.closest(".queue-bar-item");
             if (itemEl) queueBarDeleteItem(Number(itemEl.getAttribute("data-index")));
-            return;
+          } else if (action === "clear-all") {
+            queueBarClearAll();
+          } else if (action === "expand") {
+            // 「+N」徽章：直接展开
+            setQueueBarExpanded(true);
           }
+          return;
         });
-        // hover 跟随：鼠标移到哪一条，哪一条就展开（拖拽进行中不响应，免得抢拖拽）
-        host.addEventListener("mouseover", function(ev) {
-          if (state.queueBarDrag) return;
-          var evTarget = ev.target as HTMLElement;
-          var chip = evTarget && evTarget.closest ? evTarget.closest(".queue-bar-item") : null;
-          if (!chip || !host.contains(chip)) return;
-          setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
-        });
-        host.addEventListener("mouseleave", function() {
-          if (state.queueBarDrag) return;
-          setQueueBarHoverIndex(null);
-        });
-        // 整个气泡都是拖拽起手区。chip 内部的 ⚡ / × 按钮通过 closest 跳过，
+        // 点气泡本体 / 容器空白 / 编号 / 文本 = 切换展开
+        // 拖拽成功 / 取消由 queueBarDragEnd 内 updateQueueBar 重新渲染，click 阶段
+        // 不会进到这里（pointer 链吞掉了 click）。
+        toggleQueueBarExpanded();
+        // 整个气泡都是拖拽起手区。⚡ / × / +N / 全部清空 通过 closest 跳过，
         // 让 click 阶段去处理它们。
         host.addEventListener("pointerdown", function(ev) {
           if (ev.button !== undefined && ev.button !== 0) return;
           var evTarget = ev.target as HTMLElement;
-          if (evTarget && evTarget.closest && evTarget.closest('[data-action="delete"], [data-action="promote-item"]')) return;
-          var chip = evTarget && evTarget.closest ? evTarget.closest('.queue-bar-item') : null;
+          if (evTarget && evTarget.closest && evTarget.closest(
+                '[data-action="delete"], [data-action="promote-item"], ' +
+                '[data-action="clear-all"], [data-action="expand"]')) return;
+          var chip = evTarget && evTarget.closest ? evTarget.closest(".queue-bar-item") : null;
           if (!chip) return;
-          // 拖拽前先把这条切到 expanded（鼠标按下时通常已经 hovered，但触屏没 hover）
-          setQueueBarHoverIndex(Number(chip.getAttribute("data-index")));
           queueBarDragStart(ev, chip);
+        });
+        // ESC 收起 —— 只在已展开时拦截，避免吞掉 input 里的 ESC
+        host.addEventListener("keydown", function(ev) {
+          if (ev.key === "Escape" && isQueueBarExpanded()) {
+            ev.stopPropagation();
+            setQueueBarExpanded(false);
+          }
         });
       }
 
