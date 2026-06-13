@@ -697,16 +697,6 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           return;
         }
 
-        // 之前这里在 turn 结束（结构化 inFlight=false 或 PTY 非 running）时
-        // 把进度条收起来，理由是「模型经常忘了发最后一条全 completed 的
-        // TodoWrite，让用户对着 5/6 干瞪眼很别扭」。但反馈是：在结构化模式下
-        // inFlight 在流间隙会短暂置假，进度条因此跟着闪没；而且 turn 刚结束
-        // 时用户其实想再看一眼最终进度。改回「只要当前 turn 里有 todos 就显
-        // 示，allDone 时再隐藏」，跨 turn 残留交给开头那段「最后一条 user
-        // 消息后才扫 TodoWrite」的 scoping 兜住。
-        container.classList.remove("hidden");
-        if (bodyEl) bodyEl.classList.remove("hidden");
-
         var completed = 0;
         var inProgress = 0;
         var activeTask = "";
@@ -720,31 +710,39 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           }
         }
 
-        // 显示"正在干第 N 个"（1-indexed）：已完成 + 1，封顶到总数
-        // 这样 pending → in_progress → completed 的过渡空档不会出现 0/N 或漏一位的现象
         var allDone = completed === todos.length;
-        var currentStep = allDone ? todos.length : Math.min(completed + 1, todos.length);
-        if (allDone) {
-          // Hide todo when all tasks are completed
+
+        // 当会话不再活跃时（status !== "running"，即 turn 已结束、会话 idle/exited/
+        // archived），隐藏进度条。解决两个问题：
+        //   1. 模型经常忘了发最后一条全 completed 的 TodoWrite，让用户对着 2/4
+        //      干瞪眼——会话结束后直接收起，不展示过期数据。
+        //   2. 旧方案用 inFlight=false 判定 turn 结束，结构化模式下 inFlight 在
+        //      流式间隙短暂置假导致进度条闪烁。改用 session.status（仅在 turn 真正
+        //      结束时从 "running" 变 "idle"）判断，避免闪烁。
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        var sessionActive = !!selectedSession && selectedSession.status === "running";
+        if (!sessionActive || allDone) {
           container.classList.add("hidden");
           if (bodyEl) bodyEl.classList.add("hidden");
           return;
-        } else {
-          container.classList.remove("all-done");
         }
 
+        container.classList.remove("hidden");
+        container.classList.remove("all-done");
+        if (bodyEl) bodyEl.classList.remove("hidden");
+
+        // 计数器直接展示"已完成 / 总数"，与展开列表的 ✓ 勾选一致。
+        // 旧方案用 completed+1 试图表达"正在干第 N 个"，但列表只有 completed 个
+        // 勾，造成计数器和列表不匹配（如计数器 3/4、列表只 2 个 ✓）。
         var counter = document.getElementById("todo-progress-counter");
-        if (counter) counter.textContent = currentStep + "/" + todos.length;
+        if (counter) counter.textContent = completed + "/" + todos.length;
 
         var task = document.getElementById("todo-progress-task");
         if (task) task.textContent = activeTask;
 
-        // Keep the ring aligned with the counter text: both reflect the 1-indexed
-        // "current step" (completed + 1, capped at total). Otherwise the ring lags
-        // one step behind whenever a task is in_progress (e.g. text "6/6" but ring 5/6).
         var ring = document.getElementById("todo-progress-ring");
         if (ring) {
-          var ratio = todos.length > 0 ? currentStep / todos.length : 0;
+          var ratio = todos.length > 0 ? completed / todos.length : 0;
           ring.style.setProperty("--progress", ratio.toFixed(3));
         }
 

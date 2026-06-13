@@ -11829,8 +11829,6 @@
       if (bodyEl) bodyEl.classList.add("hidden");
       return;
     }
-    container.classList.remove("hidden");
-    if (bodyEl) bodyEl.classList.remove("hidden");
     var completed = 0;
     var inProgress = 0;
     var activeTask = "";
@@ -11844,21 +11842,25 @@
       }
     }
     var allDone = completed === todos.length;
-    var currentStep = allDone ? todos.length : Math.min(completed + 1, todos.length);
-    if (allDone) {
+    var selectedSession = state.sessions.find(function(s) {
+      return s.id === state.selectedId;
+    });
+    var sessionActive = !!selectedSession && selectedSession.status === "running";
+    if (!sessionActive || allDone) {
       container.classList.add("hidden");
       if (bodyEl) bodyEl.classList.add("hidden");
       return;
-    } else {
-      container.classList.remove("all-done");
     }
+    container.classList.remove("hidden");
+    container.classList.remove("all-done");
+    if (bodyEl) bodyEl.classList.remove("hidden");
     var counter = document.getElementById("todo-progress-counter");
-    if (counter) counter.textContent = currentStep + "/" + todos.length;
+    if (counter) counter.textContent = completed + "/" + todos.length;
     var task = document.getElementById("todo-progress-task");
     if (task) task.textContent = activeTask;
     var ring = document.getElementById("todo-progress-ring");
     if (ring) {
-      var ratio = todos.length > 0 ? currentStep / todos.length : 0;
+      var ratio = todos.length > 0 ? completed / todos.length : 0;
       ring.style.setProperty("--progress", ratio.toFixed(3));
     }
     var list = document.getElementById("todo-progress-list");
