@@ -168,8 +168,8 @@ interface GitHubReleaseAssetHit {
   asset: { name: string; browser_download_url: string; size: number };
 }
 
-// 客户端代码没变时 CI 会跳过该平台的构建，最新 release 上可能没有 .apk/.dmg；
-// 因此不能只查 /releases/latest，要按时间倒序遍历最近的 releases，取第一个带对应产物的。
+// 按时间倒序遍历最近的 releases，取第一个带对应产物的。正常 tag release
+// 会为每个平台出包；这里保留回退以兼容旧 release 或某次平台构建失败。
 async function fetchGitHubReleaseAssetByExt(ext: string): Promise<GitHubReleaseAssetHit | null> {
   const apiUrl = PKG_REPO_URL.replace("github.com", "api.github.com/repos") + "/releases?per_page=30";
   const resp = await fetch(apiUrl, {
@@ -200,8 +200,8 @@ async function fetchGitHubLatestApk(forceRefresh = false): Promise<GitHubApkInfo
   try {
     const hit = await fetchGitHubReleaseAssetByExt(".apk");
     if (!hit) return cachedGitHubApk ?? null;
-    // 版本号优先从文件名提取：未变化的平台沿用老包，挂它的 release tag 可能更新，
-    // 用 tag 当版本会让客户端「提示新版、下载到旧包」死循环。
+    // 版本号优先从文件名提取；回退到旧 release asset 时不能把当前 release tag
+    // 误当成产物版本。
     const version = extractAndroidApkVersion(hit.asset.name)
       ?? extractAndroidApkVersion(hit.tagName)
       ?? hit.tagName.replace(/^v/, "");
@@ -305,7 +305,7 @@ async function fetchGitHubLatestDmg(forceRefresh = false): Promise<GitHubDmgInfo
   try {
     const hit = await fetchGitHubReleaseAssetByExt(".dmg");
     if (!hit) return cachedGitHubDmg ?? null;
-    // 同 APK：版本号优先从文件名提取，避免沿用老包时把 release tag 当成新版本。
+    // 同 APK：版本号优先从文件名提取，避免回退到旧 asset 时把 release tag 当成新版本。
     const version = extractMacosDmgVersion(hit.asset.name)
       ?? extractMacosDmgVersion(hit.tagName)
       ?? hit.tagName.replace(/^v/, "");

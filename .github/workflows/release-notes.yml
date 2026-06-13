@@ -3,10 +3,10 @@ name: Release Notes
 # 由这个 workflow 单点负责 release body：
 # - 从 git log 生成 changelog（项目直接推 master 不走 PR，所以 generate_release_notes
 #   的自动 PR 列表为空，必须自己从 commits 拼）
-# - 拼接 Android / macOS 下载说明段落
+# - 拼接 Android / macOS / iOS 下载说明段落
 # - 用 softprops/action-gh-release 创建或更新 release，body 一次性写好
 #
-# android-release.yml / macos-release.yml 只负责上传二进制 assets，不再操作 body，
+# android-release.yml / macos-release.yml / ios-build.yml 只负责上传二进制 assets，不再操作 body，
 # 避免多 workflow 竞争写 body 产生的重复 / 顺序混乱。
 
 on:
@@ -48,34 +48,6 @@ jobs:
           echo "Current : $CURRENT_TAG"
           echo "Previous: ${PREV_TAG:-<none>}"
 
-          # android/ macos/ 是 submodule，客户端代码没变时对应 workflow 会跳过构建、
-          # 不往本 release 传产物。这里沿 semver 降序往回找「最后一次指针变化」的 tag，
-          # 即本版本实际沿用的安装包所在的 release，下载说明指过去。
-          detect_last_built() {
-            local prefix="$1"
-            local cur_ptr last seen t
-            cur_ptr=$(git rev-parse "${CURRENT_TAG}:${prefix}" 2>/dev/null || echo "missing")
-            last="$CURRENT_TAG"
-            seen=""
-            for t in $(git tag --list 'v*' --sort=-v:refname); do
-              if [ -z "$seen" ]; then
-                [ "$t" = "$CURRENT_TAG" ] && seen=1
-                continue
-              fi
-              if [ "$(git rev-parse "${t}:${prefix}" 2>/dev/null || echo none)" = "$cur_ptr" ]; then
-                last="$t"
-              else
-                break
-              fi
-            done
-            echo "$last"
-          }
-
-          ANDROID_TAG=$(detect_last_built android)
-          MACOS_TAG=$(detect_last_built macos)
-          echo "Android APK release: $ANDROID_TAG"
-          echo "macOS DMG release:   $MACOS_TAG"
-
           {
             if [ -n "$PREV_TAG" ]; then
               echo "## 更新内容（自 ${PREV_TAG}）"
@@ -98,28 +70,24 @@ jobs:
             echo ""
             echo "## Android APK"
             echo ""
-            if [ "$ANDROID_TAG" = "$CURRENT_TAG" ]; then
-              echo "下载 \`wand-${CURRENT_TAG}.apk\` 安装到 Android 设备。"
-            else
-              echo "本版本 Android 客户端无改动，最新安装包见 [${ANDROID_TAG}](https://github.com/${REPO}/releases/tag/${ANDROID_TAG}) 的 \`wand-${ANDROID_TAG}.apk\`。"
-            fi
+            echo "下载 \`wand-${CURRENT_TAG}.apk\` 安装到 Android 设备。"
             echo ""
             echo "- 最低 Android 版本: 7.0 (API 24)"
             echo "- 在 App 中粘贴 Web 端设置页的连接码即可使用"
             echo ""
             echo "## macOS DMG"
             echo ""
-            if [ "$MACOS_TAG" = "$CURRENT_TAG" ]; then
-              echo "下载 \`wand-${CURRENT_TAG}.dmg\`，挂载后拖拽 Wand.app 到 Applications 即可。"
-            else
-              echo "本版本 macOS 客户端无改动，最新安装包见 [${MACOS_TAG}](https://github.com/${REPO}/releases/tag/${MACOS_TAG}) 的 \`wand-${MACOS_TAG}.dmg\`。"
-            fi
+            echo "下载 \`wand-${CURRENT_TAG}.dmg\`，挂载后拖拽 Wand.app 到 Applications 即可。"
             echo ""
             echo "**首次打开请右键 → 打开**（系统会提示\"无法验证开发者\"，点\"打开\"即可），之后双击即可正常使用。"
             echo ""
             echo "- 最低系统版本: macOS 12 (Monterey)"
             echo "- 架构: Universal Binary (arm64 + x86_64)"
             echo "- 在 App 中粘贴 Web 端设置页的连接码即可使用"
+            echo ""
+            echo "## iOS IPA"
+            echo ""
+            echo "下载 \`wand-v${CURRENT_TAG#v}.ipa\`，按自己的签名/侧载流程安装。"
           } > release-body.md
 
           echo "---- preview ----"

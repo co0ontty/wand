@@ -29,39 +29,10 @@ jobs:
           submodules: true
           fetch-depth: 0
 
-      # macos/ 是 submodule：tag 触发时若自上一个 tag 以来指针没动过就跳过构建（同 android-release.yml）。
-      # 手动 workflow_dispatch 永远构建——手动触发就是明确要出包。
-      - name: Detect macos changes since previous tag
-        id: changed
-        run: |
-          if [ "${GITHUB_REF}" = "${GITHUB_REF#refs/tags/}" ]; then
-            echo "手动触发，跳过变更检测，直接构建"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          TAG="${GITHUB_REF#refs/tags/}"
-          PREV_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -Fx -A1 "$TAG" | tail -n +2 | head -1)
-          if [ -z "$PREV_TAG" ]; then
-            echo "没有更早的 tag，按首个 release 处理，执行构建"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          CUR=$(git rev-parse "$TAG:macos" 2>/dev/null || echo "missing-cur")
-          PREV=$(git rev-parse "$PREV_TAG:macos" 2>/dev/null || echo "missing-prev")
-          if [ "$CUR" = "$PREV" ]; then
-            echo "macos 自 $PREV_TAG 以来无变化（$CUR），跳过 DMG 构建"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "macos 有变化：$PREV_TAG=$PREV → $TAG=$CUR"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Select Xcode
-        if: steps.changed.outputs.changed == 'true'
         run: sudo xcode-select -s /Applications/Xcode.app
 
       - name: Resolve version
-        if: steps.changed.outputs.changed == 'true'
         id: version
         run: |
           if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
@@ -73,7 +44,6 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build DMG
-        if: steps.changed.outputs.changed == 'true'
         working-directory: macos
         run: |
           chmod +x build.sh
@@ -82,7 +52,6 @@ jobs:
 
       # 手动触发 / 任何情况下都上传为 artifact，方便直接在 Actions run 页面下载。
       - name: Upload DMG artifact
-        if: steps.changed.outputs.changed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wand-macos-dmg-${{ steps.version.outputs.version }}
@@ -91,7 +60,7 @@ jobs:
 
       # 仅 tag push 时传到 Release（body 由 release-notes.yml 单点管理，这里只放文件）。
       - name: Upload DMG to GitHub Release
-        if: steps.changed.outputs.changed == 'true' && startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: macos/dist/wand-v${{ steps.version.outputs.version }}.dmg
