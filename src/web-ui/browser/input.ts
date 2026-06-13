@@ -1067,6 +1067,7 @@ import { getSessionStatusLabel } from "./session-ui";
       // - 非 inFlight：当作普通新消息发出去
       // 用户路径：点输入框上方的气泡（chip）→ 这里。
       export function queueBarPromoteIndex(index) {
+        if (state.queueBarPromoting) return;
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) return;
         var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
@@ -1075,6 +1076,7 @@ import { getSessionStatusLabel } from "./session-ui";
         var rest = queue.slice(0, index).concat(queue.slice(index + 1));
         var prev = queue.slice();
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
+        state.queueBarPromoting = true;
 
         // 乐观：剥掉这一条
         // 如果剩下的队列为空（用户把唯一一条 promote 出去），自动收起气泡条。
@@ -1087,20 +1089,14 @@ import { getSessionStatusLabel } from "./session-ui";
           ? crypto.randomUUID()
           : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
 
-        var body: { input: any; idempotencyKey: string; interrupt?: boolean; preserveQueue?: boolean } = { input: picked, idempotencyKey: idempotencyKey };
-        if (inFlight) {
-          // 中断 + 保留剩余队列
-          body.interrupt = true;
-          body.preserveQueue = true;
-        }
         // 给一个乐观 toast，让用户瞬间知道点击生效了
         showToast(inFlight ? "已请求中断当前回复，立即发送这条。" : "已立即发送这条消息。", "info");
 
-        fetch("/api/structured-sessions/" + session.id + "/messages", {
+        fetch("/api/structured-sessions/" + session.id + "/queued/" + index + "/promote", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify(body),
+          body: JSON.stringify({ expectedText: picked, idempotencyKey: idempotencyKey }),
         })
         .then(function(res) {
           if (!res.ok) {
@@ -1120,8 +1116,10 @@ import { getSessionStatusLabel } from "./session-ui";
               updateQueueBar();
             }
           }
+          state.queueBarPromoting = false;
         })
         .catch(function(err) {
+          state.queueBarPromoting = false;
           rollbackQueueOptimistic(session, prev);
           showToast((err && err.message) || "立即发送失败。", "error");
         });

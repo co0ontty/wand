@@ -202,6 +202,7 @@
     queueBarExpanded: false,
     queueBarHoverIndex: null,
     queueBarDrag: null,
+    queueBarPromoting: false,
     drafts: {},
     isSyncingInputBox: false,
     loginPending: false,
@@ -9744,6 +9745,7 @@
     });
   }
   function queueBarPromoteIndex(index) {
+    if (state.queueBarPromoting) return;
     var session = state.sessions.find(function(s) {
       return s.id === state.selectedId;
     });
@@ -9754,22 +9756,18 @@
     var rest = queue.slice(0, index).concat(queue.slice(index + 1));
     var prev = queue.slice();
     var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
+    state.queueBarPromoting = true;
     if (rest.length === 0) {
       state.queueBarExpanded = false;
     }
     updateSessionSnapshot({ id: session.id, queuedMessages: rest });
     var idempotencyKey = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
-    var body = { input: picked, idempotencyKey };
-    if (inFlight) {
-      body.interrupt = true;
-      body.preserveQueue = true;
-    }
     showToast2(inFlight ? "\u5DF2\u8BF7\u6C42\u4E2D\u65AD\u5F53\u524D\u56DE\u590D\uFF0C\u7ACB\u5373\u53D1\u9001\u8FD9\u6761\u3002" : "\u5DF2\u7ACB\u5373\u53D1\u9001\u8FD9\u6761\u6D88\u606F\u3002", "info");
-    fetch("/api/structured-sessions/" + session.id + "/messages", {
+    fetch("/api/structured-sessions/" + session.id + "/queued/" + index + "/promote", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify(body)
+      body: JSON.stringify({ expectedText: picked, idempotencyKey })
     }).then(function(res) {
       if (!res.ok) {
         return res.json().catch(function() {
@@ -9791,7 +9789,9 @@
           updateQueueBar();
         }
       }
+      state.queueBarPromoting = false;
     }).catch(function(err) {
+      state.queueBarPromoting = false;
       rollbackQueueOptimistic(session, prev);
       showToast2(err && err.message || "\u7ACB\u5373\u53D1\u9001\u5931\u8D25\u3002", "error");
     });

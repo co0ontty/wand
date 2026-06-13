@@ -660,7 +660,7 @@ export class StructuredSessionManager {
   async sendMessage(
     id: string,
     input: string,
-    opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean },
+    opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean; queueAlreadyRemoved?: boolean },
   ): Promise<SessionSnapshot> {
     let session = this.requireSession(id);
     const prompt = input.trim();
@@ -707,17 +707,18 @@ export class StructuredSessionManager {
           // 「立即发送」排队条某一条：interrupt 把它作为新输入重发，但该条仍留在
           // queuedMessages 里。必须在这里把它从队列摘掉一次，否则 preserveQueue 会
           // 原样保留整条队列，待 interruptPrompt 跑完 flushNextQueuedMessage 会把它
-          // 当成普通排队再发一遍（重复发送）。客户端按 index 乐观删除，服务端这里
-          // 没有 index，只能按文本删第一处匹配（排队文本入队时已 trim，promote 重发
-          // 也会 trim，所以精确匹配可靠；重复文本极少见且语义等价）。
-          const queue = session.queuedMessages ?? [];
-          const removeAt = queue.indexOf(prompt);
-          if (removeAt !== -1) {
-            const trimmedQueue = queue.slice(0, removeAt).concat(queue.slice(removeAt + 1));
-            session = { ...session, queuedMessages: trimmedQueue };
-            this.sessions.set(id, session);
-            this.storage.saveSession(session);
-            this.emitStructuredSnapshot(session);
+          // 当成普通排队再发一遍（重复发送）。旧客户端没有走 promote endpoint，
+          // 服务端只能按文本删第一处匹配；新客户端会带 queueAlreadyRemoved 跳过这里。
+          if (!opts.queueAlreadyRemoved) {
+            const queue = session.queuedMessages ?? [];
+            const removeAt = queue.indexOf(prompt);
+            if (removeAt !== -1) {
+              const trimmedQueue = queue.slice(0, removeAt).concat(queue.slice(removeAt + 1));
+              session = { ...session, queuedMessages: trimmedQueue };
+              this.sessions.set(id, session);
+              this.storage.saveSession(session);
+              this.emitStructuredSnapshot(session);
+            }
           }
         } else {
           this.preserveQueueOnInterrupt.delete(id);
@@ -880,6 +881,51 @@ export class StructuredSessionManager {
     this.storage.saveSession(updated);
     this.emitStructuredSnapshot(updated);
     return updated;
+  }
+
+  /**
+   * Remove one queued message by index before sending it. Keeping this operation
+   * on the server prevents clients from re-sending the text while the original
+   * queue entry remains available for the automatic flush path.
+   */
+  async promoteQueuedMessage(
+    sessionId: string,
+    index: number,
+    expectedText?: string,
+    idempotencyKey?: string,
+  ): Promise<SessionSnapshot> {
+    const session = this.requireSession(sessionId);
+    if (idempotencyKey && this.seenIdempotencyKeys.has(`${sessionId}:${idempotencyKey}`)) {
+      return session;
+    }
+    const queue = session.queuedMessages ?? [];
+    if (!Number.isInteger(index) || index < 0 || index >= queue.length) {
+      throw new Error("队列中没有该条消息（可能已被处理）。");
+    }
+    if (expectedText !== undefined && queue[index] !== expectedText) {
+      throw new Error("排队消息已变化，请按最新顺序重试。");
+    }
+
+    const prompt = queue[index];
+    const remaining = queue.slice(0, index).concat(queue.slice(index + 1));
+    const inFlight = session.status === "running" && session.structuredState?.inFlight === true;
+    const updated: SessionSnapshot = { ...session, queuedMessages: remaining };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    this.emitStructuredSnapshot(updated);
+
+    try {
+      return await this.sendMessage(sessionId, prompt, {
+        interrupt: inFlight,
+        preserveQueue: inFlight,
+        queueAlreadyRemoved: true,
+        idempotencyKey,
+      });
+    } catch {
+      // Once the item has been promoted it must not return to the queue: the
+      // send path may have already persisted its user turn before a runner error.
+      return this.requireSession(sessionId);
+    }
   }
 
   /** Clear all queued messages. No-op when queue is already empty. */

@@ -135,6 +135,7 @@ export var state: AppState = {
   queueBarExpanded: false,
   queueBarHoverIndex: null,
   queueBarDrag: null,
+  queueBarPromoting: false,
   drafts: {},
   isSyncingInputBox: false,
   loginPending: false,

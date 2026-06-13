@@ -299,7 +299,7 @@ export function registerSessionRoutes(
   });
 
   // ── Structured queued-messages management ──
-  // 三个端点构成"排队消息条"的后端操作面：reorder（拖拽换序）、单条删除、全部清空。
+  // 这些端点构成"排队消息条"的后端操作面：reorder、立即发送、单条删除、全部清空。
   // 全部走乐观更新模型，失败时前端会回滚到上一次 WS 推送的 queuedMessages。
   app.patch("/api/structured-sessions/:id/queued", express.json(), (req, res) => {
     const rawOrder = req.body?.order;
@@ -326,6 +326,27 @@ export function registerSessionRoutes(
       res.json(snapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法删除排队消息。") });
+    }
+  });
+
+  app.post("/api/structured-sessions/:id/queued/:index/promote", express.json(), async (req, res) => {
+    const index = Number(req.params.index);
+    if (!Number.isInteger(index)) {
+      res.status(400).json({ error: "下标无效。" });
+      return;
+    }
+    const expectedText = typeof req.body?.expectedText === "string" ? req.body.expectedText : undefined;
+    const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
+    try {
+      const snapshot = await structured.promoteQueuedMessage(req.params.id, index, expectedText, idempotencyKey);
+      res.json(snapshot);
+    } catch (error) {
+      const errorCode = (error as { code?: string } | null | undefined)?.code;
+      const status = errorCode === "duplicate_idempotency_key" ? 409 : 400;
+      res.status(status).json({
+        error: getErrorMessage(error, "无法立即发送排队消息。"),
+        errorCode,
+      });
     }
   });
 
