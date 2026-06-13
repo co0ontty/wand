@@ -196,9 +196,9 @@ import { renderManageCheckbox } from "./sidebar";
         var deleteButton = state.sessionsManageMode ? '' : '<button class="session-action-btn delete-btn" data-action="delete-session" data-session-id="' + session.id + '" type="button" aria-label="删除会话" title="删除此会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
         var actionsHtml = '<span class="session-actions">' + resumeButton + mergeButton + deleteButton + '</span>';
 
-        // Title: summary or command
-        var titleHtml = session.summary
-          ? '<div class="session-title">' + escapeHtml(session.summary) + '</div>'
+        // Model-generated topic, with legacy summary/command fallbacks.
+        var titleHtml = session.title || session.summary
+          ? '<div class="session-title">' + escapeHtml(session.title || session.summary) + '</div>'
           : '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '').replace(/\s+resume\s+[0-9a-f-]+/, '') : session.command) + '</div>';
 
         // Activity description for running sessions
@@ -207,6 +207,9 @@ import { renderManageCheckbox } from "./sidebar";
         if (session.status === "running" && activityDesc) {
           activityHtml = '<div class="session-activity">' + escapeHtml(activityDesc) + '</div>';
         }
+        var descriptionHtml = session.description
+          ? '<div class="session-description">' + escapeHtml(session.description) + '</div>'
+          : '';
 
         // Time display
         var timeDisplay = "";
@@ -233,6 +236,7 @@ import { renderManageCheckbox } from "./sidebar";
                   titleHtml +
                   timeDisplay +
                 '</div>' +
+                descriptionHtml +
                 activityHtml +
                 '<div class="session-meta">' +
                   '<span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + '</span>' +

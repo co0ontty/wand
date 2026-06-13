@@ -72,7 +72,7 @@ import { renderSessionItem } from "./session-ui";
           if (e.kind === "session") {
             var s = e.ref;
             var activeCls = s.id === state.selectedId ? " active" : "";
-            var title = s.summary || s.command || ("会话 " + idx);
+            var title = s.title || s.description || s.summary || s.command || ("会话 " + idx);
             return '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + idx + '</button>';
           }
           var h = e.ref;

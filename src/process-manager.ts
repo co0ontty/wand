@@ -18,6 +18,8 @@ import { buildLanguageDirective, buildManagedAutonomyDirective } from "./languag
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./resume-policy.js";
 import { applyThinkingEffortToPrompt, normalizeThinkingEffort } from "./structured-session-manager.js";
+import { generateSessionTopic } from "./session-topic.js";
+import { getErrorMessage } from "./error-utils.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {
   return /^codex\b/.test(command.trim()) ? "codex" : "claude";
@@ -733,6 +735,7 @@ export class ProcessManager extends EventEmitter {
   private readonly lastPersistedMessageState = new Map<string, PersistedMessageState>();
   /** 启动时被识别为孤儿 PTY 并标记为 exited 的旧会话数（旧服务器进程已死） */
   private orphanRecoveredCount = 0;
+  private readonly topicRequests = new Set<string>();
 
   constructor(
     private readonly config: WandConfig,
@@ -1108,6 +1111,7 @@ export class ProcessManager extends EventEmitter {
     }
 
     this.emitEvent({ type: "started", sessionId: id, data: this.snapshot(record) });
+    if (initialInput) this.maybeGenerateSessionTopic(id, initialInput);
 
     let initialInputSent = false;
     const sendInitialInput = () => {
@@ -1446,6 +1450,7 @@ export class ProcessManager extends EventEmitter {
       console.error(`[ProcessManager] Rejecting input: session ${id} has no PTY`);
       throw new SessionInputError("Session is not running.", "SESSION_NO_PTY", id, record.status);
     }
+    if (view !== "terminal") this.maybeGenerateSessionTopic(id, input);
 
     // Log shortcut key interactions for auto-confirm and mode analysis
     if (shortcutKey) {
@@ -1757,7 +1762,9 @@ export class ProcessManager extends EventEmitter {
       autoRecovered: record.autoRecovered ?? false,
       autoApprovePermissions: record.autoApprovePermissions || undefined,
       approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined,
-      summary: deriveSessionSummary(messages, record.currentTask?.title ?? null),
+      summary: record.description ?? deriveSessionSummary(messages, record.currentTask?.title ?? null),
+      title: record.title,
+      description: record.description,
       currentTaskTitle: record.status === "running" ? record.currentTask?.title ?? undefined : undefined,
       selectedModel: record.selectedModel ?? null,
       thinkingEffort: record.thinkingEffort ?? null,
@@ -1778,6 +1785,29 @@ export class ProcessManager extends EventEmitter {
 
   private isPermissionBlocked(record: SessionRecord): boolean {
     return record.ptyPermissionBlocked || record.pendingEscalation !== null;
+  }
+
+  setSessionTopic(id: string, title: string, description: string): SessionSnapshot {
+    const record = this.mustGet(id);
+    record.title = title;
+    record.description = description;
+    const snapshot = this.snapshot(record);
+    this.storage.saveSessionMetadata(snapshot);
+    this.emitEvent({ type: "output", sessionId: id, data: { title, description, summary: description } });
+    return snapshot;
+  }
+
+  private maybeGenerateSessionTopic(id: string, input: string): void {
+    const prompt = input.trim();
+    const record = this.sessions.get(id);
+    if (!prompt || !record || record.title || this.topicRequests.has(id)) return;
+    this.topicRequests.add(id);
+    void generateSessionTopic(prompt, record.cwd, this.config.language)
+      .then(({ title, description }) => {
+        if (this.sessions.has(id)) this.setSessionTopic(id, title, description);
+      })
+      .catch((error) => console.error(`[ProcessManager] Failed to generate session topic ${id}:`, getErrorMessage(error)))
+      .finally(() => this.topicRequests.delete(id));
   }
 
   private defaultAutonomyPolicy(mode: ExecutionMode): AutonomyPolicy {

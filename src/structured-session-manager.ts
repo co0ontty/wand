@@ -19,6 +19,7 @@ import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
+import { generateSessionTopic } from "./session-topic.js";
 
 interface CreateStructuredSessionOptions {
   cwd: string;
@@ -424,6 +425,9 @@ function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["
     queuedMessages: snapshot.queuedMessages,
     sessionKind: "structured",
     structuredState: snapshot.structuredState,
+    title: snapshot.title,
+    description: snapshot.description,
+    summary: snapshot.description ?? snapshot.summary,
   };
 }
 
@@ -478,6 +482,7 @@ export class StructuredSessionManager {
   private readonly seenIdempotencyKeys = new Map<string, number>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   private archiveTimer: NodeJS.Timeout | null = null;
+  private readonly topicRequests = new Set<string>();
 
   constructor(
     private readonly storage: WandStorage,
@@ -573,6 +578,27 @@ export class StructuredSessionManager {
     return s ? withSummary(s) : null;
   }
 
+  setSessionTopic(id: string, title: string, description: string): SessionSnapshot {
+    const current = this.requireSession(id);
+    const updated: SessionSnapshot = { ...current, title, description, summary: description };
+    this.sessions.set(id, updated);
+    this.storage.saveSessionMetadata(updated);
+    this.emitStructuredSnapshot(updated);
+    return updated;
+  }
+
+  private maybeGenerateSessionTopic(id: string, input: string): void {
+    const session = this.sessions.get(id);
+    if (!session || session.title || this.topicRequests.has(id)) return;
+    this.topicRequests.add(id);
+    void generateSessionTopic(input, session.cwd, this.config.language)
+      .then(({ title, description }) => {
+        if (this.sessions.has(id)) this.setSessionTopic(id, title, description);
+      })
+      .catch((error) => console.error(`[StructuredSessionManager] Failed to generate session topic ${id}:`, getErrorMessage(error)))
+      .finally(() => this.topicRequests.delete(id));
+  }
+
   createSession(options: CreateStructuredSessionOptions): SessionSnapshot {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
@@ -639,6 +665,7 @@ export class StructuredSessionManager {
     let session = this.requireSession(id);
     const prompt = input.trim();
     if (!prompt) return session;
+    this.maybeGenerateSessionTopic(id, prompt);
     if (opts?.idempotencyKey) {
       const mapKey = `${id}:${opts.idempotencyKey}`;
       if (this.seenIdempotencyKeys.has(mapKey)) {

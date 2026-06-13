@@ -28,6 +28,8 @@ interface SessionRow {
   worktree_info: string | null;
   worktree_merge_status: SessionSnapshot["worktreeMergeStatus"] | null;
   worktree_merge_info: string | null;
+  title: string | null;
+  description: string | null;
 }
 
 function safeJsonParse<T>(raw: string | null): T | undefined {
@@ -92,13 +94,13 @@ function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktre
 
 function sessionSelectFields(): string {
   return `id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
-             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info`;
+             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description`;
 }
 
 function sessionPersistFields(): string {
   return `id, command, cwd, mode, status, exit_code, started_at, ended_at, output
              , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, structured_state
-             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info`;
+             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description`;
 }
 
 function sessionPersistAssignments(): string {
@@ -124,7 +126,9 @@ function sessionPersistAssignments(): string {
              worktree_enabled = excluded.worktree_enabled,
              worktree_info = excluded.worktree_info,
              worktree_merge_status = excluded.worktree_merge_status,
-             worktree_merge_info = excluded.worktree_merge_info`;
+             worktree_merge_info = excluded.worktree_merge_info,
+             title = excluded.title,
+             description = excluded.description`;
 }
 
 function sessionMetadataAssignments(): string {
@@ -133,7 +137,8 @@ function sessionMetadataAssignments(): string {
            archived = ?, archived_at = ?, claude_session_id = ?,
            provider = ?, session_kind = ?, runner = ?, structured_state = ?,
            resumed_from_session_id = ?, auto_recovered = ?,
-           worktree_enabled = ?, worktree_info = ?, worktree_merge_status = ?, worktree_merge_info = ?`;
+           worktree_enabled = ?, worktree_info = ?, worktree_merge_status = ?, worktree_merge_info = ?,
+           title = ?, description = ?`;
 }
 
 function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number | null> {
@@ -162,6 +167,8 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     serializeWorktreeInfo(snapshot.worktree),
     snapshot.worktreeMergeStatus ?? null,
     serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo),
+    snapshot.title ?? null,
+    snapshot.description ?? null,
   ];
 }
 
@@ -188,6 +195,8 @@ function sessionMetadataValues(snapshot: SessionSnapshot): Array<string | number
     serializeWorktreeInfo(snapshot.worktree),
     snapshot.worktreeMergeStatus ?? null,
     serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo),
+    snapshot.title ?? null,
+    snapshot.description ?? null,
     snapshot.id,
   ];
 }
@@ -217,6 +226,8 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     autoRecovered: Boolean(row.auto_recovered),
     worktreeEnabled: Boolean(row.worktree_enabled),
     worktree: parseWorktreeInfo(row.worktree_info) ?? null,
+    title: row.title ?? undefined,
+    description: row.description ?? undefined,
     ...mapWorktreeMergeFields(row),
   };
 }
@@ -267,7 +278,9 @@ const INIT_SQL = `
     worktree_enabled INTEGER NOT NULL DEFAULT 0,
     worktree_info TEXT,
     worktree_merge_status TEXT,
-    worktree_merge_info TEXT
+    worktree_merge_info TEXT,
+    title TEXT,
+    description TEXT
   );
 
   CREATE TABLE IF NOT EXISTS app_config (
@@ -423,7 +436,7 @@ export class WandStorage {
         .prepare(
           `INSERT INTO command_sessions (
            ${sessionPersistFields()}
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              ${sessionPersistAssignments()}`
         )
@@ -528,6 +541,8 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["worktree_info", "ALTER TABLE command_sessions ADD COLUMN worktree_info TEXT"],
   ["worktree_merge_status", "ALTER TABLE command_sessions ADD COLUMN worktree_merge_status TEXT"],
   ["worktree_merge_info", "ALTER TABLE command_sessions ADD COLUMN worktree_merge_info TEXT"],
+  ["title", "ALTER TABLE command_sessions ADD COLUMN title TEXT"],
+  ["description", "ALTER TABLE command_sessions ADD COLUMN description TEXT"],
 ];
 
 function ensureCommandSessionSchema(db: DatabaseSync): void {

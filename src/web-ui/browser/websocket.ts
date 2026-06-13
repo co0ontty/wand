@@ -252,6 +252,7 @@ import { render, restoreLoginSession } from "./render";
             if (msg.data && msg.sessionId) {
               var isIncremental = !!msg.data.incremental;
               var snapshot: any = { id: msg.sessionId };
+              var topicMetadataChanged = false;
 
               // Carry over small metadata fields present in both modes
               if (!isIncremental && msg.data.output !== undefined) {
@@ -269,6 +270,17 @@ import { render, restoreLoginSession } from "./render";
               }
               if (msg.data.sessionKind) {
                 snapshot.sessionKind = msg.data.sessionKind;
+              }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'title')) {
+                snapshot.title = msg.data.title;
+                topicMetadataChanged = true;
+              }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'description')) {
+                snapshot.description = msg.data.description;
+                topicMetadataChanged = true;
+              }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'summary')) {
+                snapshot.summary = msg.data.summary;
               }
 
               // 优先级修正：若同一事件里同时带 messages（全量）和 lastMessage（增量），
@@ -312,8 +324,9 @@ import { render, restoreLoginSession } from "./render";
                     if (msg.sessionId === state.selectedId) updateTaskDisplay();
                   }
                 }
-              } else if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined) {
+              } else if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined || snapshot.title || snapshot.description) {
                 updateSessionSnapshot(snapshot);
+                if (topicMetadataChanged) scheduleSessionListUpdate();
                 if (msg.sessionId === state.selectedId) {
                   var updatedSession = state.sessions.find(function(s: any) { return s.id === msg.sessionId; }) || snapshot;
                   state.currentMessages = buildMessagesForRender(updatedSession, getPreferredMessages(updatedSession, updatedSession.output, false));

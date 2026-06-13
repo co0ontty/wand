@@ -1103,6 +1103,13 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var summaryEl = document.querySelector(".session-summary-value");
         var titleEl = document.getElementById("terminal-title");
         var infoEl = document.getElementById("terminal-info");
+        var topbarTitleEl = document.querySelector(".topbar-session-title, .topbar-tagline");
+        if (topbarTitleEl && selectedSession) {
+          topbarTitleEl.classList.remove("topbar-tagline");
+          topbarTitleEl.classList.add("topbar-session-title");
+          topbarTitleEl.textContent = selectedSession.title || shortCommand(selectedSession.command);
+          topbarTitleEl.setAttribute("title", selectedSession.description || selectedSession.command || "");
+        }
         var blankChat = document.getElementById("blank-chat");
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
