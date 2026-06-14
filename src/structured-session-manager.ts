@@ -1777,6 +1777,24 @@ export class StructuredSessionManager {
         this.saveStreamingSnapshot(patched);
       };
 
+      // 关键修复：claude -p 的 session_id 出现在 system(init) / assistant / user /
+      // result 全部事件里，并非只在最终的 result。若本轮被中断（用户打断、
+      // AskUserQuestion 主动 kill、ExitPlanMode 自续接）或进程异常退出而没走到
+      // result，旧逻辑只在 result 里取 session_id 会让 claudeSessionId 一直为 null，
+      // 下一轮（含排队消息续接）就不带 --resume → 丢掉全部历史上下文。这里从任何带
+      // session_id 的事件即时捕获并落库，保证 resume 链不因缺少 result 事件而断裂。
+      const captureSessionId = (sid: unknown): void => {
+        if (typeof sid !== "string" || !sid) return;
+        if (turnState.sessionId === sid) return;
+        turnState.sessionId = sid;
+        const current = this.sessions.get(sessionId);
+        if (current && current.claudeSessionId !== sid) {
+          const patched: SessionSnapshot = { ...current, claudeSessionId: sid };
+          this.sessions.set(sessionId, patched);
+          this.saveStreamingSnapshot(patched);
+        }
+      };
+
       const processLine = (line: string): void => {
         const trimmed = line.trim();
         if (!trimmed) return;
@@ -1788,6 +1806,8 @@ export class StructuredSessionManager {
           return;
         }
         this.logger?.appendStreamEvent(sessionId, parsed);
+        // 所有事件都可能带顶层 session_id（含 system init）；立即捕获，不等 result。
+        captureSessionId(parsed?.session_id);
 
         if (parsed && parsed.type === "assistant" && parsed.message) {
           const extracted = this.extractAssistantMessage(parsed.message);
@@ -1867,9 +1887,7 @@ export class StructuredSessionManager {
           if (typeof parsed.result === "string") {
             turnState.result = parsed.result.trim();
           }
-          if (typeof parsed.session_id === "string") {
-            turnState.sessionId = parsed.session_id;
-          }
+          // session_id 已由顶部 captureSessionId 统一捕获，这里不再重复赋值。
           turnState.model = this.extractModelName(parsed.modelUsage) ?? turnState.model;
           turnState.usage = this.extractUsage(parsed) ?? turnState.usage;
           syncSnapshot();
@@ -2335,6 +2353,21 @@ export class StructuredSessionManager {
     try {
       for await (const msg of queryHandle as AsyncIterable<SDKMessage>) {
         if (abortController.signal.aborted) break;
+
+        // 同 CLI runner 的关键修复：从任何带 session_id 的 SDK 消息（system / assistant /
+        // user / result）即时捕获并落库。AskUserQuestion 的 interrupt 发生在 assistant
+        // 之后、result 之前，若只在 result 捕获，被 interrupt 的轮次会丢掉 session_id，
+        // 续接时不 resume → 上下文丢失。stream_event 等无 session_id 的消息被 guard 跳过。
+        const msgSessionId = (msg as { session_id?: unknown }).session_id;
+        if (typeof msgSessionId === "string" && msgSessionId && turnState.sessionId !== msgSessionId) {
+          turnState.sessionId = msgSessionId;
+          const cur = this.sessions.get(sessionId);
+          if (cur && cur.claudeSessionId !== msgSessionId) {
+            const patched: SessionSnapshot = { ...cur, claudeSessionId: msgSessionId };
+            this.sessions.set(sessionId, patched);
+            this.saveStreamingSnapshot(patched);
+          }
+        }
 
         // Incremental streaming events (opt-in via includePartialMessages: true)
         if (msg.type === "stream_event") {
