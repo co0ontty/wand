@@ -687,6 +687,93 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         }
       }
 
+      // 把一个 tool_result 的 content 拍平成纯字符串（可能是 string，也可能是
+      // [{type:"text",text}] 数组）。TaskCreate 的结果文本形如
+      // "Task #1 created successfully: 检查工作目录"，需要从中抠出任务 id。
+      function flattenToolResultContent(content) {
+        if (typeof content === "string") return content;
+        if (Array.isArray(content)) {
+          var parts = [];
+          for (var i = 0; i < content.length; i++) {
+            var piece = content[i];
+            if (typeof piece === "string") parts.push(piece);
+            else if (piece && typeof piece.text === "string") parts.push(piece.text);
+          }
+          return parts.join("");
+        }
+        return "";
+      }
+
+      // 从本 turn 的 TaskCreate / TaskUpdate 增量调用还原出 TodoWrite 形态的列表。
+      // 返回 null 表示这个 turn 根本没用 Task* 工具（让上层维持旧行为/隐藏进度条）。
+      export function reconstructTodosFromTaskTools(messages, startIdx) {
+        // 先按 tool_use_id 收集所有 tool_result 文本——TaskCreate 分配的任务 id
+        // 只在结果文本里（"Task #N created successfully: …"），input 里没有。
+        var resultById = {};
+        for (var i = startIdx; i < messages.length; i++) {
+          var msg = messages[i];
+          if (!msg || !Array.isArray(msg.content)) continue;
+          for (var j = 0; j < msg.content.length; j++) {
+            var b = msg.content[j];
+            if (b && b.type === "tool_result" && b.tool_use_id) {
+              resultById[b.tool_use_id] = flattenToolResultContent(b.content);
+            }
+          }
+        }
+
+        // 再按调用顺序重放 TaskCreate（新建）/ TaskUpdate（改状态/标题），
+        // 用 order 记录首次出现顺序以保持列表稳定排序。
+        var taskMap = {};
+        var order = 0;
+        var createFallback = 0;
+        var sawTaskTool = false;
+        for (var m = startIdx; m < messages.length; m++) {
+          var msg2 = messages[m];
+          if (!msg2 || !Array.isArray(msg2.content)) continue;
+          for (var k = 0; k < msg2.content.length; k++) {
+            var blk = msg2.content[k];
+            if (!blk || blk.type !== "tool_use") continue;
+            var input = blk.input || {};
+            if (blk.name === "TaskCreate") {
+              sawTaskTool = true;
+              createFallback++;
+              var res = resultById[blk.id] || "";
+              var match = res.match(/#(\d+)/);
+              var cid = match ? match[1] : String(createFallback);
+              taskMap[cid] = {
+                id: cid,
+                content: input.subject || "",
+                activeForm: input.activeForm || "",
+                status: "pending",
+                order: order++,
+              };
+            } else if (blk.name === "TaskUpdate") {
+              sawTaskTool = true;
+              var uid = String(input.taskId);
+              var task = taskMap[uid];
+              if (!task) {
+                task = { id: uid, content: "", activeForm: "", status: "pending", order: order++ };
+                taskMap[uid] = task;
+              }
+              if (input.status) task.status = input.status;
+              if (input.subject) task.content = input.subject;
+              if (input.activeForm) task.activeForm = input.activeForm;
+            }
+          }
+        }
+
+        if (!sawTaskTool) return null;
+
+        var list = [];
+        for (var key in taskMap) {
+          if (!Object.prototype.hasOwnProperty.call(taskMap, key)) continue;
+          if (taskMap[key].status === "deleted") continue;
+          list.push(taskMap[key]);
+        }
+        list.sort(function(a, b) { return a.order - b.order; });
+        return list.length ? list : null;
+      }
+
       export function updateTodoProgress(messages) {
         // 只看"当前 turn"里的 TodoWrite——即最后一条 user 消息之后的那段。
         // 不限制范围的话，上一轮留下的进度条会在新一轮（哪怕新一轮根本没用
@@ -711,6 +798,14 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
             }
           }
           if (todos) break;
+        }
+
+        // 新版 Claude Code 把 TodoWrite 换成了 TaskCreate / TaskUpdate / TaskList
+        // 这套增量式任务工具（TodoWrite 一次给全量快照，Task* 是一条条增量）。
+        // 没扫到 TodoWrite 时，从本 turn 的 TaskCreate/TaskUpdate 还原出等价的
+        // todos 列表（{content, activeForm, status}），让进度条对两种工具都生效。
+        if (!todos) {
+          todos = reconstructTodosFromTaskTools(messages, startIdx);
         }
 
         var container = document.getElementById("todo-progress");

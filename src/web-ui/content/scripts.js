@@ -2623,19 +2623,20 @@
     layoutHome(false);
     var drag = null;
     function layoutCluster(members, cx, cy) {
-      var H = chH(), gapIn = 5;
+      var H = chH(), stackStep = 24;
       var ids = ALL.filter(function(id) {
         return members.indexOf(id) >= 0;
       });
-      var total = ids.reduce(function(s, id) {
-        return s + cw(id);
-      }, 0) + Math.max(0, ids.length - 1) * gapIn;
+      var widest = ids.reduce(function(w, id) {
+        return Math.max(w, cw(id));
+      }, 0);
+      var total = widest + Math.max(0, ids.length - 1) * stackStep;
       var fh = field.clientHeight;
       var x = cx - total / 2;
       var y = Math.max(2, Math.min(fh - H - 2, cy - H / 2));
       ids.forEach(function(id) {
         placeChip(id, x, y);
-        x += cw(id) + gapIn;
+        x += stackStep;
       });
       return { x: cx - total / 2 - 7, y: y - 7, w: total + 14, h: H + 14 };
     }
@@ -11787,6 +11788,81 @@
       chatMessagesEl.style.paddingBottom = "";
     }
   }
+  function flattenToolResultContent(content) {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      var parts = [];
+      for (var i = 0; i < content.length; i++) {
+        var piece = content[i];
+        if (typeof piece === "string") parts.push(piece);
+        else if (piece && typeof piece.text === "string") parts.push(piece.text);
+      }
+      return parts.join("");
+    }
+    return "";
+  }
+  function reconstructTodosFromTaskTools(messages, startIdx) {
+    var resultById = {};
+    for (var i = startIdx; i < messages.length; i++) {
+      var msg = messages[i];
+      if (!msg || !Array.isArray(msg.content)) continue;
+      for (var j = 0; j < msg.content.length; j++) {
+        var b = msg.content[j];
+        if (b && b.type === "tool_result" && b.tool_use_id) {
+          resultById[b.tool_use_id] = flattenToolResultContent(b.content);
+        }
+      }
+    }
+    var taskMap = {};
+    var order = 0;
+    var createFallback = 0;
+    var sawTaskTool = false;
+    for (var m = startIdx; m < messages.length; m++) {
+      var msg2 = messages[m];
+      if (!msg2 || !Array.isArray(msg2.content)) continue;
+      for (var k = 0; k < msg2.content.length; k++) {
+        var blk = msg2.content[k];
+        if (!blk || blk.type !== "tool_use") continue;
+        var input = blk.input || {};
+        if (blk.name === "TaskCreate") {
+          sawTaskTool = true;
+          createFallback++;
+          var res = resultById[blk.id] || "";
+          var match = res.match(/#(\d+)/);
+          var cid = match ? match[1] : String(createFallback);
+          taskMap[cid] = {
+            id: cid,
+            content: input.subject || "",
+            activeForm: input.activeForm || "",
+            status: "pending",
+            order: order++
+          };
+        } else if (blk.name === "TaskUpdate") {
+          sawTaskTool = true;
+          var uid = String(input.taskId);
+          var task = taskMap[uid];
+          if (!task) {
+            task = { id: uid, content: "", activeForm: "", status: "pending", order: order++ };
+            taskMap[uid] = task;
+          }
+          if (input.status) task.status = input.status;
+          if (input.subject) task.content = input.subject;
+          if (input.activeForm) task.activeForm = input.activeForm;
+        }
+      }
+    }
+    if (!sawTaskTool) return null;
+    var list = [];
+    for (var key in taskMap) {
+      if (!Object.prototype.hasOwnProperty.call(taskMap, key)) continue;
+      if (taskMap[key].status === "deleted") continue;
+      list.push(taskMap[key]);
+    }
+    list.sort(function(a, b2) {
+      return a.order - b2.order;
+    });
+    return list.length ? list : null;
+  }
   function updateTodoProgress(messages) {
     var startIdx = 0;
     for (var ui = messages.length - 1; ui >= 0; ui--) {
@@ -11807,6 +11883,9 @@
         }
       }
       if (todos) break;
+    }
+    if (!todos) {
+      todos = reconstructTodosFromTaskTools(messages, startIdx);
     }
     var container = document.getElementById("todo-progress");
     var bodyEl = document.getElementById("todo-progress-body");

@@ -436,15 +436,18 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
 
         var drag: any = null;
 
-        // Lay the current cluster members in a tight row centered on (cx, cy) within the field.
+        // Stack travelling members so a four-chip cluster stays compact near the pointer.
+        // Labels do not need to remain fully readable while dragging; the exposed leading
+        // edge is enough to show that another action has joined the cluster.
         function layoutCluster(members: any, cx: any, cy: any) {
-          var H = chH(), gapIn = 5;
+          var H = chH(), stackStep = 24;
           var ids = ALL.filter(function(id) { return members.indexOf(id) >= 0; });
-          var total = ids.reduce(function(s: any, id: any) { return s + cw(id); }, 0) + Math.max(0, ids.length - 1) * gapIn;
+          var widest = ids.reduce(function(w: any, id: any) { return Math.max(w, cw(id)); }, 0);
+          var total = widest + Math.max(0, ids.length - 1) * stackStep;
           var fh = field!.clientHeight;
           var x = cx - total / 2;
           var y = Math.max(2, Math.min(fh - H - 2, cy - H / 2));
-          ids.forEach(function(id) { placeChip(id, x, y); x += cw(id) + gapIn; });
+          ids.forEach(function(id) { placeChip(id, x, y); x += stackStep; });
           return { x: cx - total / 2 - 7, y: y - 7, w: total + 14, h: H + 14 };
         }
         function showCluster(box: any) {

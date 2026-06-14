@@ -1634,30 +1634,73 @@ export class StructuredSessionManager {
         // 二条事件里的 tool_use 直接被丢掉——表现是 Agent / Read 等 tool_use 永远
         // 不出现在 messages 里，subagent 多角色无法关联 agentType 到父 Task。
         //
-        // 新规则：当类型不一致时，把新 block **追加**到 merged 末尾而非覆盖 prev。
-        // 既兼容 a)（同位置同类型仍按累积取大），又兼容 b)（拼接的新类型 block
-        // 进入末尾），还能挡住 b 早期版本里"短回退"的异常 frame（blocks.length
-        // < prev.length 时直接拒绝）。
-        if (blocks.length < prev.length) return;
-        const merged: ContentBlock[] = [];
-        const appendix: ContentBlock[] = [];
-        for (let i = 0; i < blocks.length; i++) {
-          const a = prev[i];
-          const b = blocks[i];
-          if (a && !b) { merged.push(a); continue; }
-          if (!a && b) { merged.push(b); continue; }
-          if (a && b) {
-            if (a.type === b.type) {
-              // 同类型：取信息量大者，避免短回退覆盖已经累积的内容。
-              merged.push(blockVolume(b) >= blockVolume(a) ? b : a);
-            } else {
-              // 类型变了：保留 prev[i]，把 incoming block 追加到末尾。
-              merged.push(a);
-              appendix.push(b);
-            }
+        // 先判定 incoming 是不是 prev 的"累积超集"（mode a）：长度不短于 prev，
+        // 且前 prev.length 个 block 类型逐位一致。是 → 走逐位取大 + 末尾追加。
+        let cumulative = blocks.length >= prev.length;
+        if (cumulative) {
+          for (let i = 0; i < prev.length; i++) {
+            const a = prev[i];
+            const b = blocks[i];
+            if (a && b && a.type !== b.type) { cumulative = false; break; }
           }
         }
-        for (const b of appendix) merged.push(b);
+
+        if (cumulative) {
+          const merged: ContentBlock[] = [];
+          const appendix: ContentBlock[] = [];
+          for (let i = 0; i < blocks.length; i++) {
+            const a = prev[i];
+            const b = blocks[i];
+            if (a && !b) { merged.push(a); continue; }
+            if (!a && b) { merged.push(b); continue; }
+            if (a && b) {
+              if (a.type === b.type) {
+                // 同类型：取信息量大者，避免短回退覆盖已经累积的内容。
+                merged.push(blockVolume(b) >= blockVolume(a) ? b : a);
+              } else {
+                // 类型变了：保留 prev[i]，把 incoming block 追加到末尾。
+                merged.push(a);
+                appendix.push(b);
+              }
+            }
+          }
+          for (const b of appendix) merged.push(b);
+          blocksByKey.set(key, merged);
+          return;
+        }
+
+        // mode b（拼接/splice）：incoming 不是累积超集——SDK 把同一 msg.id 的
+        // thinking / text / 多个 tool_use 拆成一条条「只带新 block」的事件发出
+        // （新版 claude 连发 4 个 TaskCreate 就是这样）。老逻辑 `blocks.length <
+        // prev.length 直接 return` 会把这些单 block 事件整段丢弃，导致 TaskCreate /
+        // Agent / Read 等永远进不了 messages。这里保留 prev 全部，按 block 身份
+        // 增量合并：tool_use 用 id 去重（已存在则取信息量大的就地更新，否则追加）；
+        // text / thinking 仅在没有完全相同内容时追加，挡住「短回退」的重复 frame。
+        const merged: ContentBlock[] = [...prev];
+        const idIndex = new Map<string, number>();
+        merged.forEach((b, i) => {
+          const anyB = b as any;
+          if (b.type === "tool_use" && typeof anyB.id === "string") idIndex.set(anyB.id, i);
+        });
+        for (const b of blocks) {
+          const anyB = b as any;
+          if (b.type === "tool_use" && typeof anyB.id === "string") {
+            const at = idIndex.get(anyB.id);
+            if (at !== undefined) {
+              if (blockVolume(b) >= blockVolume(merged[at])) merged[at] = b;
+            } else {
+              idIndex.set(anyB.id, merged.length);
+              merged.push(b);
+            }
+            continue;
+          }
+          if (b.type === "tool_result") { merged.push(b); continue; }
+          // text / thinking：同类型且文本完全一致视为重复回退，跳过。
+          const dup = merged.some((x) => x.type === b.type
+            && (x as any).text === anyB.text
+            && (x as any).thinking === anyB.thinking);
+          if (!dup) merged.push(b);
+        }
         blocksByKey.set(key, merged);
       };
       const rebuildTurnBlocks = (): void => {
