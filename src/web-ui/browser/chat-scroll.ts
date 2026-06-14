@@ -1,5 +1,6 @@
 import { state, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
 import { renderChat } from "./chat-render";
+import { fetchEarlierMessages } from "./session-engine";
 import { snapCollapsedSubagentPanelsToBottom } from "./events";
 import { render } from "./render";
 // import { iconSvg } from "./i18n";
@@ -216,11 +217,19 @@ export function bindChatScrollListener() {
   updateChatUnreadBubble();
 }
 
-/** Load older messages by expanding the visible window */
+/** Load older messages: first expand the local window, then fetch earlier pages from the server. */
 export function loadMoreChatMessages() {
-  if (state.chatRenderedCount >= state.currentMessages.length) return;
-  state.chatRenderedCount += state.chatPageSize;
-  renderChat(true);
+  // 本地还有没展开的：先扩大渲染窗口。
+  if (state.chatRenderedCount < state.currentMessages.length) {
+    state.chatRenderedCount += state.chatPageSize;
+    renderChat(true);
+    return;
+  }
+  // 本地已全展开，但服务端还有更早的（窗口化）：拉下一页。
+  var sess = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
+  if (sess && typeof sess.messageOffset === "number" && sess.messageOffset > 0) {
+    fetchEarlierMessages();
+  }
 }
 
 // Observe the "load more" sentinel for auto-loading when scrolled into view

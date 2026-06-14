@@ -5,6 +5,7 @@ import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
 import { normalizeMode } from "./config.js";
+import { truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
 import {
   getGitStatus,
@@ -651,11 +652,37 @@ export function registerSessionRoutes(
       ? processes.getPtyTranscript(snapshot.id) ?? snapshot.output
       : snapshot.output;
     if (req.query.format === "chat") {
-      const messages = snapshot.messages ?? [];
-      res.json({ ...snapshot, output: transcriptOutput, messages });
+      // 与 WS init 对齐：只回最近一窗 turn + offset/total，更早的走 /messages 翻页。
+      const windowed = windowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {});
+      res.json({
+        ...snapshot,
+        output: transcriptOutput,
+        messages: windowed.messages,
+        messageOffset: windowed.messageOffset,
+        messageTotal: windowed.messageTotal,
+      });
     } else {
       res.json({ ...snapshot, output: transcriptOutput });
     }
+  });
+
+  // 历史消息分页拉取：客户端滚动到顶时按绝对下标往前翻。
+  // 返回 messages = 完整历史的 [offset, offset+limit)（已做 transport 截断）+ total。
+  app.get("/api/sessions/:id/messages", (req, res) => {
+    const snapshot = getSessionById(processes, structured, req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: "未找到该会话，可能已被删除。" });
+      return;
+    }
+    const all = snapshot.messages ?? [];
+    const total = all.length;
+    const rawLimit = parseInt(String(req.query.limit ?? ""), 10);
+    const rawOffset = parseInt(String(req.query.offset ?? ""), 10);
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 40, 1), 200);
+    const offset = Math.min(Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0), total);
+    const end = Math.min(offset + limit, total);
+    const slice = truncateMessagesForTransport(all.slice(offset, end), config.cardDefaults ?? {});
+    res.json({ messages: slice, offset, total });
   });
 
   app.post("/api/sessions/:id/resume", (req, res) => {

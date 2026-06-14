@@ -287,14 +287,19 @@ import { render, restoreLoginSession } from "./render";
               // 让全量赢。WS 端的 debounce 已经会在跨形状时 flush，但保留这层
               // 客户端兜底，避免任何上游再合并出双载体事件时再次丢消息。
               if (msg.data.messages) {
-                // Full mode (authoritative)
+                // Full mode (authoritative)。窗口化：带上 offset/total，由 updateSessionSnapshot
+                // 做窗口合并（保留已加载的更早前缀、空不覆盖非空）。
                 snapshot.messages = msg.data.messages;
+                if (typeof msg.data.messageOffset === "number") snapshot.messageOffset = msg.data.messageOffset;
+                if (typeof msg.data.messageTotal === "number") snapshot.messageTotal = msg.data.messageTotal;
               } else if (isIncremental && msg.data.lastMessage) {
                 // Incremental mode: merge lastMessage into existing session messages
                 var existingSession = state.sessions.find(function(s: any) { return s.id === msg.sessionId; });
                 if (existingSession) {
                   var msgs = Array.isArray(existingSession.messages) ? existingSession.messages.slice() : [];
                   var expectedCount = msg.data.messageCount || 0;
+                  // 窗口化：本地是后缀，绝对条数 = messageOffset + msgs.length。
+                  var baseOffset = (typeof existingSession.messageOffset === "number") ? existingSession.messageOffset : 0;
                   // 防御性合并：lastMessage 应当至少和本地最后一条一样长。如果服务端
                   // 因为上游 bug（如 upsertBlocks 整段覆盖）回退发来一条更短的同 role
                   // 消息，保留本地版本——文字会被刷新或下一次 emit 修正。
@@ -302,10 +307,11 @@ import { render, restoreLoginSession } from "./render";
                   var incoming = msg.data.lastMessage;
                   if (localLast && incoming.role && localLast.role === incoming.role) {
                     msgs[msgs.length - 1] = mergeAssistantTurn(localLast, incoming);
-                  } else if (msgs.length < expectedCount) {
+                  } else if (baseOffset + msgs.length < expectedCount) {
                     msgs.push(incoming);
                   }
                   snapshot.messages = msgs;
+                  if (expectedCount > 0) snapshot.messageTotal = expectedCount;
                 }
               }
 
@@ -387,6 +393,8 @@ import { render, restoreLoginSession } from "./render";
             var endedSnapshot: any = { id: msg.sessionId, status: endedStatus, permissionBlocked: endedPermBlocked };
             if (msg.data && msg.data.messages) {
               endedSnapshot.messages = msg.data.messages;
+              if (typeof msg.data.messageOffset === "number") endedSnapshot.messageOffset = msg.data.messageOffset;
+              if (typeof msg.data.messageTotal === "number") endedSnapshot.messageTotal = msg.data.messageTotal;
             }
             if (msg.data && msg.data.structuredState) {
               endedSnapshot.structuredState = msg.data.structuredState;

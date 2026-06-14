@@ -832,10 +832,38 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (modeHint) modeHint.textContent = getToolModeHint(tool, state.modeValue);
       }
 
+      // 窗口化合并：incoming.messages 是完整历史的「最近一窗」（带 offset/total）。
+      // 约束同 iOS：空不覆盖非空；保留本地已翻页加载的、比该窗口更早的前缀。
+      export function mergeWindowedMessages(prev, incoming, offset, total) {
+        var snapOffset = offset || 0;
+        var snapTotal = (typeof total === "number") ? total : Math.max(snapOffset + incoming.length, incoming.length);
+        var prevMsgs = (prev && Array.isArray(prev.messages)) ? prev.messages : [];
+        var prevOffset = (prev && typeof prev.messageOffset === "number") ? prev.messageOffset : 0;
+        if (incoming.length === 0 && prevMsgs.length > 0 && snapTotal === 0) {
+          return { messages: prevMsgs, messageOffset: prevOffset, messageTotal: (prev && prev.messageTotal) || prevMsgs.length };
+        }
+        if (prevMsgs.length === 0) {
+          return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
+        }
+        if (prevOffset <= snapOffset) {
+          var keep = Math.min(Math.max(snapOffset - prevOffset, 0), prevMsgs.length);
+          var merged = prevMsgs.slice(0, keep).concat(incoming);
+          return { messages: merged, messageOffset: prevOffset, messageTotal: Math.max(snapTotal, prevOffset + merged.length) };
+        }
+        return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
+      }
+
       export function updateSessionSnapshot(snapshot) {
         if (!snapshot || !snapshot.id) return;
         var currentSession = state.sessions.find(function(session) { return session.id === snapshot.id; }) || null;
         var normalizedSnapshot = normalizeStructuredSnapshot(snapshot, currentSession);
+        // 全量 messages（带 messageOffset）走窗口合并，避免尾部窗口清掉已加载的更早消息。
+        if (Array.isArray(normalizedSnapshot.messages) && typeof normalizedSnapshot.messageOffset === "number") {
+          var mw = mergeWindowedMessages(currentSession, normalizedSnapshot.messages, normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal);
+          normalizedSnapshot.messages = mw.messages;
+          normalizedSnapshot.messageOffset = mw.messageOffset;
+          normalizedSnapshot.messageTotal = mw.messageTotal;
+        }
         var updated = false;
         var prevSession = null;
         state.sessions = state.sessions.map(function(session) {
@@ -1233,6 +1261,44 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
             renderChat(false);
           });
+      }
+
+      // 窗口化：从服务端拉「更早的一页」消息并 prepend 到当前会话。
+      // 返回 true 表示发起了请求（本地全展开后由「加载更早」触底调用）。
+      var _fetchingEarlierMessages = false;
+      export function fetchEarlierMessages() {
+        if (_fetchingEarlierMessages) return false;
+        var id = state.selectedId;
+        if (!id) return false;
+        var sess = state.sessions.find(function(s) { return s.id === id; });
+        if (!sess) return false;
+        var offset = (typeof sess.messageOffset === "number") ? sess.messageOffset : 0;
+        if (offset <= 0) return false; // 已经到最早一条
+        var pageSize = 40;
+        var newOffset = Math.max(0, offset - pageSize);
+        var limit = offset - newOffset;
+        _fetchingEarlierMessages = true;
+        fetch("/api/sessions/" + encodeURIComponent(id) + "/messages?offset=" + newOffset + "&limit=" + limit,
+          { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            // 仅当起点未被其它更新改动时才 prepend，避免错位重复。
+            if (data && Array.isArray(data.messages) && sess.messageOffset === offset) {
+              var existing = Array.isArray(sess.messages) ? sess.messages : [];
+              sess.messages = data.messages.concat(existing);
+              sess.messageOffset = newOffset;
+              if (typeof data.total === "number") sess.messageTotal = data.total;
+              if (id === state.selectedId) {
+                state.currentMessages = buildMessagesForRender(sess, getPreferredMessages(sess, sess.output, false));
+                // 已加载的全部展开（新拉的更早消息也要可见）。
+                state.chatRenderedCount = state.currentMessages.length;
+                renderChat(true);
+              }
+            }
+          })
+          .catch(function() { /* 静默：下次触底重试 */ })
+          .finally(function() { _fetchingEarlierMessages = false; });
+        return true;
       }
 
       export function selectSession(id) {

@@ -210,7 +210,10 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         }
         var visibleOffset = Math.max(0, totalMsgCount - state.chatRenderedCount);
         var messages = visibleOffset > 0 ? allMessages.slice(visibleOffset) : allMessages;
-        var hasOlderMessages = visibleOffset > 0;
+        // 窗口化：本地还有没展开的（visibleOffset>0），或服务端还有更早的（messageOffset>0），
+        // 都要保留「加载更早」哨兵。后者触底时会从服务端拉下一页。
+        var hasServerOlder = (typeof selectedSession.messageOffset === "number") && selectedSession.messageOffset > 0;
+        var hasOlderMessages = visibleOffset > 0 || hasServerOlder;
 
         // Check if messages actually changed
         var msgCount = messages.length;
@@ -319,8 +322,11 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
           // Add sentinel for loading older messages (DOM end = visual top in column-reverse)
           if (hasOlderMessages) {
+            var loadMoreLabel = visibleOffset > 0
+              ? ('加载更早的 ' + Math.min(state.chatPageSize, visibleOffset) + ' 条消息')
+              : '加载更早的消息';
             html += '<div class="chat-load-more" id="chat-load-more-sentinel">' +
-              '<button class="chat-load-more-btn" type="button">加载更早的 ' + Math.min(state.chatPageSize, visibleOffset) + ' 条消息</button>' +
+              '<button class="chat-load-more-btn" type="button">' + loadMoreLabel + '</button>' +
             '</div>';
           }
 

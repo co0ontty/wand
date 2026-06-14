@@ -1502,6 +1502,44 @@
       background: linear-gradient(180deg, rgba(255, 252, 247, 0.96) 0%, rgba(252, 246, 237, 0.94) 100%);
     }
 
+    .session-swipe-bg {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      display: flex;
+      align-items: stretch;
+      justify-content: flex-end;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.18s ease;
+    }
+
+    .session-item.swiped .session-swipe-bg {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .session-swipe-delete {
+      width: 72px;
+      border: 0;
+      border-radius: 0;
+      background: var(--danger);
+      color: var(--text-inverse);
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      font: inherit;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .session-swipe-delete svg {
+      flex-shrink: 0;
+    }
+
     .session-manage-check {
       display: inline-flex;
       align-items: center;

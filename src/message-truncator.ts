@@ -9,6 +9,41 @@ import type { CardExpandDefaults, ContentBlock, ConversationTurn, ToolResultBloc
 const TRUNCATION_THRESHOLD = 200;
 const SUMMARY_LENGTH = 100;
 
+/**
+ * 默认窗口大小：init/resync/快照/REST 默认只下发最近这么多条 turn，更早的由客户端
+ * 滚动到顶时按需分页拉取。移动端 WebSocket 单帧上限（iOS 默认 1 MiB）下，长会话一次
+ * 全量下发会撑爆帧导致反复断连——窗口化是根治手段，64MB 提帧只是兜底。
+ */
+export const MESSAGE_WINDOW_SIZE = 40;
+
+export interface WindowedMessages {
+  /** 已截断 + 窗口化后的 turn 列表（最近 windowSize 条）。 */
+  messages: ConversationTurn[];
+  /** messages[0] 在完整历史里的绝对下标（0 表示已含最早一条）。 */
+  messageOffset: number;
+  /** 完整历史的 turn 总数（客户端据此判断是否还有更早的可加载）。 */
+  messageTotal: number;
+}
+
+/**
+ * 取完整历史的「最近 windowSize 条」并对其做 transport 截断，附带 offset/total 元数据。
+ * 客户端持有的永远是一段连续的「后缀」（最近的若干条），更早的按 offset 往前翻页。
+ */
+export function windowMessagesForTransport(
+  all: ConversationTurn[] | undefined,
+  cardDefaults: CardExpandDefaults,
+  windowSize: number = MESSAGE_WINDOW_SIZE,
+): WindowedMessages {
+  const total = all?.length ?? 0;
+  const offset = Math.max(0, total - windowSize);
+  const slice = all ? all.slice(offset) : [];
+  return {
+    messages: truncateMessagesForTransport(slice, cardDefaults),
+    messageOffset: offset,
+    messageTotal: total,
+  };
+}
+
 /** Tool name → cardDefaults field mapping */
 function isToolDefaultCollapsed(toolName: string, defaults: CardExpandDefaults): boolean {
   switch (toolName) {

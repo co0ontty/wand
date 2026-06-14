@@ -719,9 +719,17 @@
     updateChatUnreadBubble();
   }
   function loadMoreChatMessages() {
-    if (state.chatRenderedCount >= state.currentMessages.length) return;
-    state.chatRenderedCount += state.chatPageSize;
-    renderChat(true);
+    if (state.chatRenderedCount < state.currentMessages.length) {
+      state.chatRenderedCount += state.chatPageSize;
+      renderChat(true);
+      return;
+    }
+    var sess = state.sessions.find(function(s) {
+      return s.id === state.selectedId;
+    });
+    if (sess && typeof sess.messageOffset === "number" && sess.messageOffset > 0) {
+      fetchEarlierMessages();
+    }
   }
   var _loadMoreObserver = null;
   function observeLoadMoreSentinel() {
@@ -3972,6 +3980,8 @@
           }
           if (msg.data.messages) {
             snapshot.messages = msg.data.messages;
+            if (typeof msg.data.messageOffset === "number") snapshot.messageOffset = msg.data.messageOffset;
+            if (typeof msg.data.messageTotal === "number") snapshot.messageTotal = msg.data.messageTotal;
           } else if (isIncremental && msg.data.lastMessage) {
             var existingSession = state.sessions.find(function(s) {
               return s.id === msg.sessionId;
@@ -3979,14 +3989,16 @@
             if (existingSession) {
               var msgs = Array.isArray(existingSession.messages) ? existingSession.messages.slice() : [];
               var expectedCount = msg.data.messageCount || 0;
+              var baseOffset = typeof existingSession.messageOffset === "number" ? existingSession.messageOffset : 0;
               var localLast = msgs.length > 0 ? msgs[msgs.length - 1] : null;
               var incoming = msg.data.lastMessage;
               if (localLast && incoming.role && localLast.role === incoming.role) {
                 msgs[msgs.length - 1] = mergeAssistantTurn(localLast, incoming);
-              } else if (msgs.length < expectedCount) {
+              } else if (baseOffset + msgs.length < expectedCount) {
                 msgs.push(incoming);
               }
               snapshot.messages = msgs;
+              if (expectedCount > 0) snapshot.messageTotal = expectedCount;
             }
           }
           var isChunkOnly = isIncremental && msg.data.chunk && !msg.data.lastMessage && !snapshot.messages && snapshot.output === void 0 && !msg.data.structuredState && !msg.data.sessionKind;
@@ -4045,6 +4057,8 @@
         var endedSnapshot = { id: msg.sessionId, status: endedStatus, permissionBlocked: endedPermBlocked };
         if (msg.data && msg.data.messages) {
           endedSnapshot.messages = msg.data.messages;
+          if (typeof msg.data.messageOffset === "number") endedSnapshot.messageOffset = msg.data.messageOffset;
+          if (typeof msg.data.messageTotal === "number") endedSnapshot.messageTotal = msg.data.messageTotal;
         }
         if (msg.data && msg.data.structuredState) {
           endedSnapshot.structuredState = msg.data.structuredState;
@@ -11510,7 +11524,8 @@
     }
     var visibleOffset = Math.max(0, totalMsgCount - state.chatRenderedCount);
     var messages = visibleOffset > 0 ? allMessages.slice(visibleOffset) : allMessages;
-    var hasOlderMessages = visibleOffset > 0;
+    var hasServerOlder = typeof selectedSession.messageOffset === "number" && selectedSession.messageOffset > 0;
+    var hasOlderMessages = visibleOffset > 0 || hasServerOlder;
     var msgCount = messages.length;
     var outputHash = selectedSession.output ? selectedSession.output.length : 0;
     if (selectedSession.messages && selectedSession.messages.length > 0) {
@@ -11577,7 +11592,8 @@
         html += renderChatMessage(msg, roundUsageByIndex[originalIndex] || null, originalIndex, legacyTaskMap);
       }
       if (hasOlderMessages) {
-        html += '<div class="chat-load-more" id="chat-load-more-sentinel"><button class="chat-load-more-btn" type="button">\u52A0\u8F7D\u66F4\u65E9\u7684 ' + Math.min(state.chatPageSize, visibleOffset) + " \u6761\u6D88\u606F</button></div>";
+        var loadMoreLabel = visibleOffset > 0 ? "\u52A0\u8F7D\u66F4\u65E9\u7684 " + Math.min(state.chatPageSize, visibleOffset) + " \u6761\u6D88\u606F" : "\u52A0\u8F7D\u66F4\u65E9\u7684\u6D88\u606F";
+        html += '<div class="chat-load-more" id="chat-load-more-sentinel"><button class="chat-load-more-btn" type="button">' + loadMoreLabel + "</button></div>";
       }
       var anchorMsgIndex = -1;
       var anchorOffset = 0;
@@ -14554,12 +14570,36 @@
     if (kindHint) kindHint.textContent = getSessionKindHint(sessionKind);
     if (modeHint) modeHint.textContent = getToolModeHint2(tool, state.modeValue);
   }
+  function mergeWindowedMessages(prev, incoming, offset, total) {
+    var snapOffset = offset || 0;
+    var snapTotal = typeof total === "number" ? total : Math.max(snapOffset + incoming.length, incoming.length);
+    var prevMsgs = prev && Array.isArray(prev.messages) ? prev.messages : [];
+    var prevOffset = prev && typeof prev.messageOffset === "number" ? prev.messageOffset : 0;
+    if (incoming.length === 0 && prevMsgs.length > 0 && snapTotal === 0) {
+      return { messages: prevMsgs, messageOffset: prevOffset, messageTotal: prev && prev.messageTotal || prevMsgs.length };
+    }
+    if (prevMsgs.length === 0) {
+      return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
+    }
+    if (prevOffset <= snapOffset) {
+      var keep = Math.min(Math.max(snapOffset - prevOffset, 0), prevMsgs.length);
+      var merged = prevMsgs.slice(0, keep).concat(incoming);
+      return { messages: merged, messageOffset: prevOffset, messageTotal: Math.max(snapTotal, prevOffset + merged.length) };
+    }
+    return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
+  }
   function updateSessionSnapshot(snapshot) {
     if (!snapshot || !snapshot.id) return;
     var currentSession = state.sessions.find(function(session) {
       return session.id === snapshot.id;
     }) || null;
     var normalizedSnapshot = normalizeStructuredSnapshot(snapshot, currentSession);
+    if (Array.isArray(normalizedSnapshot.messages) && typeof normalizedSnapshot.messageOffset === "number") {
+      var mw = mergeWindowedMessages(currentSession, normalizedSnapshot.messages, normalizedSnapshot.messageOffset, normalizedSnapshot.messageTotal);
+      normalizedSnapshot.messages = mw.messages;
+      normalizedSnapshot.messageOffset = mw.messageOffset;
+      normalizedSnapshot.messageTotal = mw.messageTotal;
+    }
     var updated = false;
     var prevSession = null;
     state.sessions = state.sessions.map(function(session) {
@@ -14872,6 +14912,44 @@
       state.currentMessages = buildMessagesForRender(selectedSession, getPreferredMessages(selectedSession, data.output, false));
       renderChat(false);
     });
+  }
+  var _fetchingEarlierMessages = false;
+  function fetchEarlierMessages() {
+    if (_fetchingEarlierMessages) return false;
+    var id = state.selectedId;
+    if (!id) return false;
+    var sess = state.sessions.find(function(s) {
+      return s.id === id;
+    });
+    if (!sess) return false;
+    var offset = typeof sess.messageOffset === "number" ? sess.messageOffset : 0;
+    if (offset <= 0) return false;
+    var pageSize = 40;
+    var newOffset = Math.max(0, offset - pageSize);
+    var limit = offset - newOffset;
+    _fetchingEarlierMessages = true;
+    fetch(
+      "/api/sessions/" + encodeURIComponent(id) + "/messages?offset=" + newOffset + "&limit=" + limit,
+      { credentials: "same-origin" }
+    ).then(function(res) {
+      return res.json();
+    }).then(function(data) {
+      if (data && Array.isArray(data.messages) && sess.messageOffset === offset) {
+        var existing = Array.isArray(sess.messages) ? sess.messages : [];
+        sess.messages = data.messages.concat(existing);
+        sess.messageOffset = newOffset;
+        if (typeof data.total === "number") sess.messageTotal = data.total;
+        if (id === state.selectedId) {
+          state.currentMessages = buildMessagesForRender(sess, getPreferredMessages(sess, sess.output, false));
+          state.chatRenderedCount = state.currentMessages.length;
+          renderChat(true);
+        }
+      }
+    }).catch(function() {
+    }).finally(function() {
+      _fetchingEarlierMessages = false;
+    });
+    return true;
   }
   function selectSession(id) {
     var foundSession = state.sessions.find(function(item) {

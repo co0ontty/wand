@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { EventEmitter } from "node:events";
 import type { CardExpandDefaults, SessionSnapshot, ProcessEvent } from "./types.js";
 import { readSessionCookie, validateSession } from "./auth.js";
-import { truncateMessagesForTransport } from "./message-truncator.js";
+import { truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 
 export type { ProcessEvent } from "./types.js";
 
@@ -261,9 +261,10 @@ export class WsBroadcastManager {
    * and the first incremental update.
    */
   private sendInit(client: WsClient, sessionId: string, snapshot: SessionSnapshot, resync: boolean): void {
-    const truncatedMessages = snapshot.messages
-      ? truncateMessagesForTransport(snapshot.messages, this.getCardDefaults())
-      : undefined;
+    // 只下发最近 MESSAGE_WINDOW_SIZE 条 turn，附 offset/total；更早的客户端按需翻页。
+    const windowed = snapshot.messages
+      ? windowMessagesForTransport(snapshot.messages, this.getCardDefaults())
+      : { messages: undefined as SessionSnapshot["messages"], messageOffset: 0, messageTotal: 0 };
     const seq = (client.outputSeqBySession.get(sessionId) ?? 0) + 1;
     client.outputSeqBySession.set(sessionId, seq);
     client.pendingResyncSessions.delete(sessionId);
@@ -272,11 +273,36 @@ export class WsBroadcastManager {
       sessionId,
       seq,
       ...(resync ? { resync: true } : {}),
-      data: { ...snapshot, messages: truncatedMessages, output: snapshot.output },
+      data: {
+        ...snapshot,
+        messages: windowed.messages,
+        messageOffset: windowed.messageOffset,
+        messageTotal: windowed.messageTotal,
+        output: snapshot.output,
+      },
     }));
   }
 
   private broadcast(event: ProcessEvent): void {
+    // 非增量事件若带完整 messages（结构化 output/ended 快照、PTY 非流式 chat 快照），
+    // 在这个统一出口窗口化——避免逐个 emit 点各自处理、也防止超大帧撑爆移动端 WS。
+    // 增量事件只带 lastMessage，不含 messages 数组，不受影响。
+    const data = event.data as Record<string, unknown> | undefined;
+    if (data && !data.incremental && Array.isArray(data.messages)) {
+      const windowed = windowMessagesForTransport(
+        data.messages as SessionSnapshot["messages"],
+        this.getCardDefaults(),
+      );
+      event = {
+        ...event,
+        data: {
+          ...data,
+          messages: windowed.messages,
+          messageOffset: windowed.messageOffset,
+          messageTotal: windowed.messageTotal,
+        },
+      } as ProcessEvent;
+    }
     for (const client of this.clients) {
       if (client.ws.readyState !== WebSocket.OPEN) continue;
 
