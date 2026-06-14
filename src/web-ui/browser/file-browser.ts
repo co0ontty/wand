@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml } from "./utils";
+import { escapeHtml, scrollInputToEnd, scrollPathElementToEnd } from "./utils";
 import { getSelectedSession, focusInputBox } from "./input";
 import { hideError, openWandDialog, showError, showToast } from "./notifications";
 import { render, getEffectiveCwd } from "./render";
@@ -69,11 +69,18 @@ import { getConfigCwd } from "./chat-scroll";
         if (cwdEl.tagName === "INPUT") {
           if (document.activeElement !== cwdEl) {
             (cwdEl as HTMLInputElement).value = cwd;
+            scrollInputToEnd(cwdEl as HTMLInputElement);
           }
         } else {
           cwdEl.textContent = cwd;
         }
         cwdEl.title = cwd;
+        // 长路径场景：把父级 file-explorer-header 横向滚到最右，
+        // 让 input 的末尾（含最后一个目录名）默认可见。
+        var headerEl = cwdEl.closest(".file-explorer-header");
+        if (headerEl) {
+          scrollPathElementToEnd(headerEl);
+        }
       }
 
       export function closeFilePanel() {

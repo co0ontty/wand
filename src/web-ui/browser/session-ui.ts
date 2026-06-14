@@ -1,6 +1,6 @@
 import { state, readStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml } from "./utils";
+import { escapeHtml, scrollPathElementToEnd } from "./utils";
 import { isMobileLayout } from "./file-browser";
 import { getSelectedSession } from "./input";
 import { showToast } from "./notifications";
@@ -44,15 +44,10 @@ import { renderManageCheckbox } from "./sidebar";
           displayDir = selectedSession && selectedSession.cwd ? selectedSession.cwd : currentDir;
         }
 
-        // 截断显示的路径
-        var displayPath = displayDir;
-        if (displayPath.length > 28) {
-          displayPath = "..." + displayPath.slice(-25);
-        }
 
         return '<div class="working-dir-indicator" id="working-dir-indicator" title="' + escapeHtml(displayDir) + '" data-path="' + escapeHtml(displayDir) + '">' +
           '<span class="working-dir-indicator-icon">' + iconSvg("folder", { size: 12, strokeWidth: 1.7 }) + '</span>' +
-          '<span class="working-dir-indicator-path">' + escapeHtml(displayPath) + '</span>' +
+          '<span class="working-dir-indicator-path" id="working-dir-indicator-path">' + escapeHtml(displayDir) + '</span>' +
         '</div>';
       }
 
@@ -227,7 +222,17 @@ import { renderManageCheckbox } from "./sidebar";
         // Recovery hint
         var recoveryHtml = session.autoRecovered ? '<span class="session-recovery-hint">自动恢复</span>' : '';
 
+        // Swipe-to-delete 红色背板（管理模式下不显示，避免与多选 UI 冲突）
+        var swipeBgHtml = state.sessionsManageMode ? '' :
+          '<div class="session-swipe-bg" aria-hidden="true">' +
+            '<button class="session-swipe-delete" data-action="swipe-delete-session" data-session-id="' + session.id + '" type="button" tabindex="-1" aria-label="删除会话">' +
+              '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>' +
+              '<span>删除</span>' +
+            '</button>' +
+          '</div>';
+
         return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
+          swipeBgHtml +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +
               checkbox +

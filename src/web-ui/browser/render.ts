@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { computeRunningSignal, escapeHtml, updateRunningIndicators } from "./utils";
+import { computeRunningSignal, escapeHtml, scrollPathElementToEnd, scrollInputToEnd, updateRunningIndicators } from "./utils";
 import { getConfigCwd } from "./chat-scroll";
 import { renderChatEmptyState, shortCommand } from "./chat-render";
 import { attachEventListeners } from "./events";
@@ -429,6 +429,12 @@ export function render(options?: any) {
     var __sel = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
     updateRunningIndicators(__sel);
   }
+
+  // 长路径元素（topbar / blank-chat 的 cwd）滚到末尾展示末尾目录。
+  // 渲染刚完成，元素可能尚未完成布局，scrollPathElementToEnd 内部用 rAF 兜底。
+  scrollPathElementToEnd(document.getElementById("topbar-cwd"));
+  scrollPathElementToEnd(document.getElementById("blank-chat-cwd-path"));
+  scrollPathElementToEnd(document.getElementById("working-dir-indicator-path"));
 }
 
 export function renderApprovalStatsBadge() {

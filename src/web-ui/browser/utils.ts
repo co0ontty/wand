@@ -176,3 +176,64 @@ export function escapeHtml(value: any) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
+// 是否是浏览器可内联渲染的图片路径。和服务端 IMAGE_EXTS（src/server.ts）
+// 保持一致：Read 工具读到这些后缀时，聊天里直出缩略图预览。
+var IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|heic|heif)$/i;
+
+export function isImagePath(value: any) {
+  if (typeof value !== "string") return false;
+  // 去掉可能的 ?query / #hash 再判后缀
+  var clean = value.trim().split(/[?#]/)[0];
+  return IMAGE_PATH_RE.test(clean);
+}
+
+// ── Path display scroll helpers ──
+//
+// 长路径展示的几个小元素（topbar-cwd / file-explorer-cwd / working-dir-indicator
+// / blank-chat-cwd-path）都有一个老问题：内容比可视宽度长时被 CSS
+// `text-overflow: ellipsis` 截掉，用户看不见最后一段目录名；topbar 那条
+// 还用过 `direction: rtl` hack 来"优先显示尾段"，副作用是首字符 "/" 也被
+// 吃掉，导致显示文本跟实际 data-path / value 字符串对不上。
+//
+// 这里把统一行为抽成两个小工具：
+//   1) scrollPathElementToEnd —— 横向 overflow 容器，scrollLeft 推到末尾
+//   2) scrollInputToEnd —— input 元素专用，setSelectionRange 把光标放末尾
+//      再补一刀 scrollLeft，兼容各浏览器
+//
+// 调用方更新 path 后调一次即可。
+
+export function scrollPathElementToEnd(el: any) {
+  if (!el) return;
+  // 容器可能刚被 setHTML 进来，等浏览器把布局跑完再算 scrollWidth
+  var apply = function() {
+    try {
+      if (el.scrollWidth > el.clientWidth) {
+        el.scrollLeft = el.scrollWidth;
+      }
+    } catch (e) { /* read-only scroll container 等 */ }
+  };
+  apply();
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(apply);
+  }
+}
+
+export function scrollInputToEnd(input: any) {
+  if (!input) return;
+  var apply = function() {
+    try {
+      if (typeof input.setSelectionRange === "function" && input.value != null) {
+        var len = input.value.length;
+        try { input.setSelectionRange(len, len); } catch (e) { /* type=email/number 等会抛 */ }
+      }
+      if (input.scrollWidth > input.clientWidth) {
+        input.scrollLeft = input.scrollWidth;
+      }
+    } catch (e) { /* defensive */ }
+  };
+  apply();
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(apply);
+  }
+}

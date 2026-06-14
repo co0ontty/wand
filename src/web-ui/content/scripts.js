@@ -1108,11 +1108,16 @@
     if (cwdEl.tagName === "INPUT") {
       if (document.activeElement !== cwdEl) {
         cwdEl.value = cwd;
+        scrollInputToEnd(cwdEl);
       }
     } else {
       cwdEl.textContent = cwd;
     }
     cwdEl.title = cwd;
+    var headerEl = cwdEl.closest(".file-explorer-header");
+    if (headerEl) {
+      scrollPathElementToEnd(headerEl);
+    }
   }
   function closeFilePanel() {
     if (!state.filePanelOpen) return;
@@ -3075,11 +3080,7 @@
       });
       displayDir = selectedSession && selectedSession.cwd ? selectedSession.cwd : currentDir;
     }
-    var displayPath = displayDir;
-    if (displayPath.length > 28) {
-      displayPath = "..." + displayPath.slice(-25);
-    }
-    return '<div class="working-dir-indicator" id="working-dir-indicator" title="' + escapeHtml2(displayDir) + '" data-path="' + escapeHtml2(displayDir) + '"><span class="working-dir-indicator-icon">' + iconSvg("folder", { size: 12, strokeWidth: 1.7 }) + '</span><span class="working-dir-indicator-path">' + escapeHtml2(displayPath) + "</span></div>";
+    return '<div class="working-dir-indicator" id="working-dir-indicator" title="' + escapeHtml2(displayDir) + '" data-path="' + escapeHtml2(displayDir) + '"><span class="working-dir-indicator-icon">' + iconSvg("folder", { size: 12, strokeWidth: 1.7 }) + '</span><span class="working-dir-indicator-path" id="working-dir-indicator-path">' + escapeHtml2(displayDir) + "</span></div>";
   }
   function timeAgo(isoString) {
     if (!isoString) return "";
@@ -3218,7 +3219,8 @@
     }
     var badgesHtml = renderWorktreeBadge(session);
     var recoveryHtml = session.autoRecovered ? '<span class="session-recovery-hint">\u81EA\u52A8\u6062\u590D</span>' : "";
-    return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0"><div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-title-row">' + titleHtml + timeDisplay + "</div>" + descriptionHtml + activityHtml + '<div class="session-meta"><span class="session-status ' + metaStatusClass + '">' + escapeHtml2(metaStatus) + "</span>" + badgesHtml + recoveryHtml + "</div></div>" + actionsHtml + "</div></div></div>";
+    var swipeBgHtml = state.sessionsManageMode ? "" : '<div class="session-swipe-bg" aria-hidden="true"><button class="session-swipe-delete" data-action="swipe-delete-session" data-session-id="' + session.id + '" type="button" tabindex="-1" aria-label="\u5220\u9664\u4F1A\u8BDD"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg><span>\u5220\u9664</span></button></div>';
+    return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' + swipeBgHtml + '<div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-title-row">' + titleHtml + timeDisplay + "</div>" + descriptionHtml + activityHtml + '<div class="session-meta"><span class="session-status ' + metaStatusClass + '">' + escapeHtml2(metaStatus) + "</span>" + badgesHtml + recoveryHtml + "</div></div>" + actionsHtml + "</div></div></div>";
   }
   function getWorktreeMergeStatusLabel(session) {
     if (!session || !session.worktreeMergeStatus) return "";
@@ -6514,6 +6516,9 @@
       body.scrollTop = body.scrollHeight;
     }
   }
+  window.__openFilePreview = function(p) {
+    if (p) openFilePreview(p);
+  };
   window.__inlineToolToggle = function(el) {
     var expanded = el.classList.toggle("inline-tool-open");
     var body = el.querySelector(".inline-tool-expanded");
@@ -8016,6 +8021,9 @@
       });
       updateRunningIndicators(__sel);
     }
+    scrollPathElementToEnd(document.getElementById("topbar-cwd"));
+    scrollPathElementToEnd(document.getElementById("blank-chat-cwd-path"));
+    scrollPathElementToEnd(document.getElementById("working-dir-indicator-path"));
   }
   function renderApprovalStatsBadge() {
     var selectedSession = state.sessions.find(function(s) {
@@ -9056,15 +9064,70 @@
     return !!selectedSession && selectedSession.status === "running";
   }
   var _queueLaunching = false;
+  function sessionIsBusyForQueue(s) {
+    if (!s || s.archived) return false;
+    if (isStructuredSession2(s)) {
+      return !!(s.structuredState && s.structuredState.inFlight);
+    }
+    return s.status === "running";
+  }
   function hasAnyBusySession() {
-    return state.sessions.some(function(s) {
-      if (isStructuredSession2(s)) {
-        return !!(s.structuredState && s.structuredState.inFlight) && !s.archived;
+    return state.sessions.some(sessionIsBusyForQueue);
+  }
+  function getContinuationTargetSession() {
+    var candidates = state.sessions.filter(sessionIsBusyForQueue);
+    if (candidates.length === 0) return null;
+    if (state.selectedId) {
+      var sel = candidates.find(function(s) {
+        return s.id === state.selectedId;
+      });
+      if (sel) return sel;
+    }
+    candidates.sort(function(a, b) {
+      return (Date.parse(b.startedAt) || 0) - (Date.parse(a.startedAt) || 0);
+    });
+    return candidates[0];
+  }
+  function continueStructuredSession(session, text) {
+    var idempotencyKey = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+    var prevQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+    var nextQueue = prevQueue.slice();
+    nextQueue.push(text);
+    updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
+    if (session.id === state.selectedId) updateQueueBar();
+    var label = session.title || shortCommand(session.command) || "\u5F53\u524D\u4F1A\u8BDD";
+    showToast2("\u5DF2\u52A0\u5165\u300C" + label + "\u300D\u7684\u6392\u961F\uFF0C\u56DE\u590D\u7ED3\u675F\u540E\u81EA\u52A8\u53D1\u9001\uFF08\u542B\u4E0A\u4E0B\u6587\uFF09\u3002", "info");
+    return fetch("/api/structured-sessions/" + session.id + "/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ input: text, idempotencyKey })
+    }).then(function(res) {
+      if (!res.ok) {
+        return res.json().catch(function() {
+          return { error: "\u8BF7\u6C42\u5931\u8D25" };
+        }).then(function(p) {
+          throw new Error(p && p.error || "\u65E0\u6CD5\u6392\u961F\u6D88\u606F\u3002");
+        });
       }
-      return s.status === "running" && !s.archived;
+      return res.json();
+    }).then(function(snapshot) {
+      if (snapshot && snapshot.id) {
+        updateSessionSnapshot(snapshot);
+        if (snapshot.id === state.selectedId) updateQueueBar();
+      }
+    }).catch(function(err) {
+      updateSessionSnapshot({ id: session.id, queuedMessages: prevQueue });
+      if (session.id === state.selectedId) updateQueueBar();
+      showToast2(err && err.message || "\u6392\u961F\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5\u3002", "error");
     });
   }
   function enqueueCrossSessionMessage(text) {
+    var target = getContinuationTargetSession();
+    if (target && isStructuredSession2(target)) {
+      continueStructuredSession(target, text);
+      return;
+    }
     if (state.crossSessionQueue.length >= 10) {
       showToast2("\u6392\u961F\u6D88\u606F\u5DF2\u6EE1\uFF08\u6700\u591A 10 \u6761\uFF09\uFF0C\u8BF7\u7B49\u5F85\u5F53\u524D\u4F1A\u8BDD\u5B8C\u6210\u3002", "warning");
       return;
@@ -9080,6 +9143,7 @@
     });
     persistCrossSessionQueue();
     renderCrossSessionQueue();
+    showToast2("\u5DF2\u6392\u961F\uFF0C\u5C06\u5728\u7A7A\u95F2\u540E\u81EA\u52A8\u5F00\u59CB\u65B0\u4F1A\u8BDD\u3002", "info");
   }
   function launchQueueItem(item) {
     if (_queueLaunching) return;
@@ -9255,7 +9319,6 @@
     if (hasAnyBusySession()) {
       welcomeInput.value = "";
       enqueueCrossSessionMessage(value);
-      showToast2("\u5DF2\u6392\u961F\uFF0C\u5C06\u5728\u5F53\u524D\u4F1A\u8BDD\u5B8C\u6210\u540E\u81EA\u52A8\u53D1\u9001\u3002", "info");
       return;
     }
     var todoEl = document.getElementById("todo-progress");
@@ -9321,7 +9384,6 @@
       if (welcomeInput) welcomeInput.value = "";
       syncComposerHasText(inputBox);
       enqueueCrossSessionMessage(value);
-      showToast2("\u5DF2\u6392\u961F\uFF0C\u5C06\u5728\u5F53\u524D\u4F1A\u8BDD\u5B8C\u6210\u540E\u81EA\u52A8\u53D1\u9001\u3002", "info");
       return;
     }
     var mode = state.chatMode || "managed";
@@ -12717,7 +12779,7 @@
       return renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap);
     }
     var avatar = chatAvatar(msg.role);
-    var bubbleContent = msg.role === "assistant" ? renderMarkdown(msg.content) : escapeHtml2(msg.content);
+    var bubbleContent = msg.role === "assistant" ? renderMarkdown(msg.content) : msg.role === "user" ? renderUserText(msg.content) : escapeHtml2(msg.content);
     return '<div class="chat-message ' + msg.role + '">' + avatar + '<div class="chat-message-bubble">' + bubbleContent + "</div></div>";
   }
   function buildToolResultMap(contentBlocks) {
@@ -12760,6 +12822,14 @@
     return '<div class="structured-tool-hint">\u5DF2\u81EA\u52A8\u6062\u590D\u4E00\u6B21 ' + escapeHtml2(getToolDisplayName(toolName)) + " \u53C2\u6570\u95EE\u9898</div>";
   }
   var GROUPABLE_TOOLS = { Read: 1, Glob: 1, Grep: 1, WebFetch: 1, WebSearch: 1, TodoRead: 1 };
+  function isGroupableToolBlock(block) {
+    if (!block || block.type !== "tool_use" || !GROUPABLE_TOOLS[block.name]) return false;
+    if (block.name === "Read") {
+      var input = block.input || {};
+      if (isImagePath(input.file_path || input.path || "")) return false;
+    }
+    return true;
+  }
   function groupConsecutiveTools(content) {
     var groups = [];
     var i = 0;
@@ -12769,7 +12839,7 @@
         i++;
         continue;
       }
-      if (block.type === "tool_use" && GROUPABLE_TOOLS[block.name]) {
+      if (isGroupableToolBlock(block)) {
         var run = [{ block, index: i }];
         var j = i + 1;
         while (j < content.length) {
@@ -12777,7 +12847,7 @@
             j++;
             continue;
           }
-          if (content[j].type === "tool_use" && GROUPABLE_TOOLS[content[j].name]) {
+          if (isGroupableToolBlock(content[j])) {
             run.push({ block: content[j], index: j });
             j++;
           } else {
@@ -13039,6 +13109,31 @@
     multiHtml += "</div>";
     return multiHtml;
   }
+  var ATTACHMENT_PREFIX_RE = /^\s*\[附件已上传，请查看以下文件:\n([\s\S]*?)\]\n+/;
+  function renderUserAttachmentBlock(rawPath) {
+    var p = (rawPath || "").trim();
+    if (!p) return "";
+    var name = p.split("/").pop() || p;
+    if (isImagePath(p)) {
+      var src = "/api/file-raw?path=" + encodeURIComponent(p);
+      return '<div class="user-attachment-image"><img class="user-attachment-thumb" loading="lazy" src="' + src + '" alt="' + escapeHtml2(name) + '" data-path="' + escapeHtml2(p) + `" onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute('data-path'));" onerror="var w=this.closest('.user-attachment-image'); if(w)w.style.display='none';" /></div>`;
+    }
+    return '<div class="user-attachment-file" data-path="' + escapeHtml2(p) + `" onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute('data-path'));"><span class="user-attachment-file-icon"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9 1.5z"/><path d="M9 1.5V5.5h4"/></svg></span><span class="user-attachment-file-name">` + escapeHtml2(name) + "</span></div>";
+  }
+  function renderUserText(text) {
+    var raw = text || "";
+    var m = raw.match(ATTACHMENT_PREFIX_RE);
+    if (!m) return escapeHtml2(raw);
+    var attachHtml = "";
+    var lines = m[1].split("\n");
+    for (var i = 0; i < lines.length; i++) {
+      attachHtml += renderUserAttachmentBlock(lines[i]);
+    }
+    var rest = raw.slice(m[0].length);
+    var wrap = attachHtml ? '<div class="user-attachments">' + attachHtml + "</div>" : "";
+    var body = rest.trim() ? '<div class="user-attachment-text">' + escapeHtml2(rest) + "</div>" : "";
+    return wrap + body;
+  }
   function renderContentBlock(block, role, toolResults, index, messageKey) {
     if (!block || !block.type) return "";
     if (block.type === "tool_use" && block.__subagent && block.__subagent.taskId === block.id) {
@@ -13052,7 +13147,7 @@
         if (role === "assistant" && block.__processing) {
           return '<div class="typing-indicator"><span></span><span></span><span></span></div>';
         }
-        return role === "assistant" ? renderMarkdown(block.text || "") : escapeHtml2(block.text || "");
+        return role === "assistant" ? renderMarkdown(block.text || "") : renderUserText(block.text || "");
       case "thinking":
         var thinkingText = block.thinking || "";
         var isStreaming = block.thinking === void 0 && block.type === "thinking";
@@ -13160,11 +13255,19 @@
       expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? "block" : "none") + ';"><div class="inline-tool-loading">\u7B49\u5F85\u54CD\u5E94\u2026</div></div>';
     }
     var isTruncated = toolResult && toolResult._truncated === true;
+    var imageHtml = "";
+    if (toolName === "Read") {
+      var imgPath = inputData.file_path || inputData.path || fileInfo || "";
+      if (imgPath && isImagePath(imgPath)) {
+        var imgSrc = "/api/file-raw?path=" + encodeURIComponent(imgPath);
+        imageHtml = '<div class="inline-tool-image" onclick="event.stopPropagation();"><img class="inline-tool-image-thumb" loading="lazy" src="' + imgSrc + '" alt="' + escapeHtml2(path) + '" data-path="' + escapeHtml2(imgPath) + `" onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute('data-path'));" onerror="var w=this.closest('.inline-tool-image'); if(w)w.style.display='none';" /></div>`;
+      }
+    }
     var extraInfoHtml = meta ? '<span class="inline-tool-meta">' + escapeHtml2(meta) + "</span>" : "";
     var extraClass = isError ? "inline-tool-error-inline" : "";
     if (shouldExpand) extraClass += " inline-tool-open";
     var truncatedAttrs = isTruncated ? 'data-truncated="true" data-tool-use-id="' + escapeHtml2(block.id || "") + '" ' : "";
-    return '<div class="inline-tool ' + extraClass + '" data-expand-kind="inline-tool" data-expand-key="' + escapeHtml2(expandKey) + '" data-result="' + escapeHtml2(fullResult) + '" data-preview="' + previewDataAttr + '" data-status="' + (isError ? "error" : hasResult ? "done" : "pending") + '" ' + truncatedAttrs + 'onclick="__inlineToolToggle(this)"><div class="inline-tool-row"><span class="inline-tool-status">' + statusIcon + "</span>" + icon + '<span class="inline-tool-title">' + escapeHtml2(title) + "</span>" + extraInfoHtml + "</div>" + expandedHtml + "</div>";
+    return '<div class="inline-tool ' + extraClass + '" data-expand-kind="inline-tool" data-expand-key="' + escapeHtml2(expandKey) + '" data-result="' + escapeHtml2(fullResult) + '" data-preview="' + previewDataAttr + '" data-status="' + (isError ? "error" : hasResult ? "done" : "pending") + '" ' + truncatedAttrs + 'onclick="__inlineToolToggle(this)"><div class="inline-tool-row"><span class="inline-tool-status">' + statusIcon + "</span>" + icon + '<span class="inline-tool-title">' + escapeHtml2(title) + "</span>" + extraInfoHtml + "</div>" + imageHtml + expandedHtml + "</div>";
   }
   function renderTerminalTool(block, toolResult, toolName, messageKey, index) {
     var inputData = block.input || {};
@@ -17392,6 +17495,49 @@
   }
   function escapeHtml2(value) {
     return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  var IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|heic|heif)$/i;
+  function isImagePath(value) {
+    if (typeof value !== "string") return false;
+    var clean = value.trim().split(/[?#]/)[0];
+    return IMAGE_PATH_RE.test(clean);
+  }
+  function scrollPathElementToEnd(el) {
+    if (!el) return;
+    var apply = function() {
+      try {
+        if (el.scrollWidth > el.clientWidth) {
+          el.scrollLeft = el.scrollWidth;
+        }
+      } catch (e) {
+      }
+    };
+    apply();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(apply);
+    }
+  }
+  function scrollInputToEnd(input) {
+    if (!input) return;
+    var apply = function() {
+      try {
+        if (typeof input.setSelectionRange === "function" && input.value != null) {
+          var len = input.value.length;
+          try {
+            input.setSelectionRange(len, len);
+          } catch (e) {
+          }
+        }
+        if (input.scrollWidth > input.clientWidth) {
+          input.scrollLeft = input.scrollWidth;
+        }
+      } catch (e) {
+      }
+    };
+    apply();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(apply);
+    }
   }
 
   // src/web-ui/browser/main.ts

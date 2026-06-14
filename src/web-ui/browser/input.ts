@@ -179,16 +179,91 @@ import { getSessionStatusLabel } from "./session-ui";
 
       export var _queueLaunching = false; // 防止并发 launch
 
+      export function sessionIsBusyForQueue(s) {
+        if (!s || s.archived) return false;
+        if (isStructuredSession(s)) {
+          return !!(s.structuredState && s.structuredState.inFlight);
+        }
+        return s.status === "running";
+      }
+
       export function hasAnyBusySession() {
-        return state.sessions.some(function(s) {
-          if (isStructuredSession(s)) {
-            return !!(s.structuredState && s.structuredState.inFlight) && !s.archived;
-          }
-          return s.status === "running" && !s.archived;
+        return state.sessions.some(sessionIsBusyForQueue);
+      }
+
+      // 选出用户「想继续的那个会话」：当前选中且仍在忙的优先，否则取最近启动、
+      // 仍在忙的那个。enqueueCrossSessionMessage 只在 hasAnyBusySession() 为真时
+      // 被调用，所以这里几乎总能拿到一个目标。
+      export function getContinuationTargetSession() {
+        var candidates = state.sessions.filter(sessionIsBusyForQueue);
+        if (candidates.length === 0) return null;
+        if (state.selectedId) {
+          var sel = candidates.find(function(s) { return s.id === state.selectedId; });
+          if (sel) return sel;
+        }
+        candidates.sort(function(a, b) {
+          return (Date.parse(b.startedAt) || 0) - (Date.parse(a.startedAt) || 0);
         });
+        return candidates[0];
+      }
+
+      // 把一条消息送进某个结构化会话的服务端排队。沿用 inFlight→排队、当前回复
+      // 结束后自动 --resume 续接的既有路径（与输入框上方「排队发送」按钮同一条
+      // 链路），因此排队的这条消息天然带着该会话之前所有轮次的上下文。
+      export function continueStructuredSession(session, text) {
+        var idempotencyKey = (typeof crypto !== "undefined" && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
+        var prevQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+        var nextQueue = prevQueue.slice();
+        nextQueue.push(text);
+        // 乐观更新目标会话的排队，让侧栏 / 已打开的该会话视图立即有反馈。
+        updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
+        if (session.id === state.selectedId) updateQueueBar();
+        var label = session.title || shortCommand(session.command) || "当前会话";
+        showToast("已加入「" + label + "」的排队，回复结束后自动发送（含上下文）。", "info");
+        return fetch("/api/structured-sessions/" + session.id + "/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ input: text, idempotencyKey: idempotencyKey })
+        })
+          .then(function(res) {
+            if (!res.ok) {
+              return res.json().catch(function() { return { error: "请求失败" }; }).then(function(p) {
+                throw new Error((p && p.error) || "无法排队消息。");
+              });
+            }
+            return res.json();
+          })
+          .then(function(snapshot) {
+            if (snapshot && snapshot.id) {
+              updateSessionSnapshot(snapshot);
+              if (snapshot.id === state.selectedId) updateQueueBar();
+            }
+          })
+          .catch(function(err) {
+            // 失败回滚乐观排队，避免 UI 上残留一条永远不会发出的排队。
+            updateSessionSnapshot({ id: session.id, queuedMessages: prevQueue });
+            if (session.id === state.selectedId) updateQueueBar();
+            showToast((err && err.message) || "排队失败，请重试。", "error");
+          });
       }
 
       export function enqueueCrossSessionMessage(text) {
+        // 关键修复：以前这里无脑把消息塞进 crossSessionQueue，等空闲后用
+        // /api/commands 起一个「全新会话」发送 —— 新会话不带任何历史，于是
+        // 「第 2 条消息没有第 1 条的上下文」。正确做法是把它送回「正在忙的那个
+        // 会话」继续对话。结构化会话直接进它的服务端排队（结束后 --resume 续接，
+        // 上下文完整）。
+        var target = getContinuationTargetSession();
+        if (target && isStructuredSession(target)) {
+          continueStructuredSession(target, text);
+          return;
+        }
+
+        // 兜底：目标是 PTY 会话或没有可续接的目标时，仍走「忙完后开新会话」的旧
+        // 逻辑。新会话本就没有上下文可继承，所以这条路径不存在上下文丢失问题。
         if (state.crossSessionQueue.length >= 10) {
           showToast("排队消息已满（最多 10 条），请等待当前会话完成。", "warning");
           return;
@@ -204,6 +279,7 @@ import { getSessionStatusLabel } from "./session-ui";
         });
         persistCrossSessionQueue();
         renderCrossSessionQueue();
+        showToast("已排队，将在空闲后自动开始新会话。", "info");
       }
 
       export function launchQueueItem(item) {
@@ -414,11 +490,12 @@ import { getSessionStatusLabel } from "./session-ui";
         var value = welcomeInput ? welcomeInput.value.trim() : "";
         if (!value) return;
 
-        // Cross-session queue: if any session is busy, queue instead of creating
+        // Cross-session queue: if any session is busy, send the message back into
+        // that busy conversation (context-preserving) instead of starting fresh.
+        // enqueueCrossSessionMessage owns the user feedback toast for both paths.
         if (hasAnyBusySession()) {
           welcomeInput.value = "";
           enqueueCrossSessionMessage(value);
-          showToast("已排队，将在当前会话完成后自动发送。", "info");
           return;
         }
 
@@ -491,13 +568,13 @@ import { getSessionStatusLabel } from "./session-ui";
           return;
         }
 
-        // No selected session, create a new one (or queue if busy)
+        // No selected session, create a new one (or continue the busy one if any).
+        // enqueueCrossSessionMessage owns the user feedback toast for both paths.
         if (value && hasAnyBusySession()) {
           if (inputBox) inputBox.value = "";
           if (welcomeInput) welcomeInput.value = "";
           syncComposerHasText(inputBox);
           enqueueCrossSessionMessage(value);
-          showToast("已排队，将在当前会话完成后自动发送。", "info");
           return;
         }
         var mode = state.chatMode || "managed";

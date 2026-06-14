@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
 import { t, getActiveLang, iconSvg, I18N_DEFAULT_LANG } from "./i18n";
-import { escapeHtml, formatElapsedShort } from "./utils";
+import { escapeHtml, formatElapsedShort, isImagePath } from "./utils";
 import { applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getElementExpandKey, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, scrollChatToBottom, setChatStickToBottom, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
 import { copyTextSafely, showToastIfPossible, openFilePreview, appendToComposer, isMobileLayout } from "./file-browser";
 import { buildMessagesForRender, focusInputBox, getSelectedSession } from "./input";
@@ -1858,7 +1858,9 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
         // Legacy string content (from PTY parsing)
         var avatar = chatAvatar(msg.role);
-        var bubbleContent = msg.role === "assistant" ? renderMarkdown(msg.content) : escapeHtml(msg.content);
+        var bubbleContent = msg.role === "assistant"
+          ? renderMarkdown(msg.content)
+          : (msg.role === "user" ? renderUserText(msg.content) : escapeHtml(msg.content));
         return '<div class="chat-message ' + msg.role + '">' +
           avatar +
           '<div class="chat-message-bubble">' + bubbleContent + '</div>' +
@@ -1913,18 +1915,30 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
       // 加入分组会导致空 group 包裹一堆空字符串，留下视觉空盒子。
       export var GROUPABLE_TOOLS = { Read: 1, Glob: 1, Grep: 1, WebFetch: 1, WebSearch: 1, TodoRead: 1 };
 
+      // 图片相关的操作不并入 tool-group：并到默认折叠的 group 里，body 整体
+      // display:none 会把内联缩略图一起藏掉。单独成卡时缩略图常驻可见，符合
+      // “对话里的图片操作默认直接显示、不折叠”。
+      export function isGroupableToolBlock(block) {
+        if (!block || block.type !== "tool_use" || !GROUPABLE_TOOLS[block.name]) return false;
+        if (block.name === "Read") {
+          var input = block.input || {};
+          if (isImagePath(input.file_path || input.path || "")) return false;
+        }
+        return true;
+      }
+
       export function groupConsecutiveTools(content) {
         var groups = [];
         var i = 0;
         while (i < content.length) {
           var block = content[i];
           if (block.type === "tool_result") { i++; continue; }
-          if (block.type === "tool_use" && GROUPABLE_TOOLS[block.name]) {
+          if (isGroupableToolBlock(block)) {
             var run = [{ block: block, index: i }];
             var j = i + 1;
             while (j < content.length) {
               if (content[j].type === "tool_result") { j++; continue; }
-              if (content[j].type === "tool_use" && GROUPABLE_TOOLS[content[j].name]) {
+              if (isGroupableToolBlock(content[j])) {
                 run.push({ block: content[j], index: j });
                 j++;
               } else { break; }
@@ -2317,6 +2331,53 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         multiHtml += '</div>';
         return multiHtml;
       }
+      // 用户上传附件时，客户端用 buildAttachmentPrefix 在 prompt 前注入一段
+      //   [附件已上传，请查看以下文件:\n<path1>\n<path2>]\n\n<正文>
+      // 文字前缀。聊天里把这段路径文字念出来既冗长又没用——解析它，图片附件
+      // 渲染成内联缩略图（同 Read 读图同款 /api/file-raw，点击放大走文件预览），
+      // 其余路径给个可点的小文件块，正文保持原样转义。
+      var ATTACHMENT_PREFIX_RE = /^\s*\[附件已上传，请查看以下文件:\n([\s\S]*?)\]\n+/;
+
+      export function renderUserAttachmentBlock(rawPath) {
+        var p = (rawPath || "").trim();
+        if (!p) return "";
+        var name = p.split("/").pop() || p;
+        if (isImagePath(p)) {
+          var src = "/api/file-raw?path=" + encodeURIComponent(p);
+          return '<div class="user-attachment-image">' +
+            '<img class="user-attachment-thumb" loading="lazy" ' +
+              'src="' + src + '" ' +
+              'alt="' + escapeHtml(name) + '" ' +
+              'data-path="' + escapeHtml(p) + '" ' +
+              'onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));" ' +
+              'onerror="var w=this.closest(\'.user-attachment-image\'); if(w)w.style.display=\'none\';" />' +
+          '</div>';
+        }
+        return '<div class="user-attachment-file" data-path="' + escapeHtml(p) + '" ' +
+          'onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));">' +
+          '<span class="user-attachment-file-icon">' +
+            '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9 1.5z"/><path d="M9 1.5V5.5h4"/></svg>' +
+          '</span>' +
+          '<span class="user-attachment-file-name">' + escapeHtml(name) + '</span>' +
+        '</div>';
+      }
+
+      // 渲染用户文本：剥离附件前缀，附件渲染成缩略图 / 文件块（在上），正文转义（在下）。
+      export function renderUserText(text) {
+        var raw = text || "";
+        var m = raw.match(ATTACHMENT_PREFIX_RE);
+        if (!m) return escapeHtml(raw);
+        var attachHtml = "";
+        var lines = m[1].split("\n");
+        for (var i = 0; i < lines.length; i++) {
+          attachHtml += renderUserAttachmentBlock(lines[i]);
+        }
+        var rest = raw.slice(m[0].length);
+        var wrap = attachHtml ? '<div class="user-attachments">' + attachHtml + '</div>' : "";
+        var body = rest.trim() ? '<div class="user-attachment-text">' + escapeHtml(rest) + '</div>' : "";
+        return wrap + body;
+      }
+
       export function renderContentBlock(block, role, toolResults, index, messageKey) {
         if (!block || !block.type) return "";
 
@@ -2337,7 +2398,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
             if (role === "assistant" && block.__processing) {
               return '<div class="typing-indicator"><span></span><span></span><span></span></div>';
             }
-            return role === "assistant" ? renderMarkdown(block.text || "") : escapeHtml(block.text || "");
+            return role === "assistant" ? renderMarkdown(block.text || "") : renderUserText(block.text || "");
 
           case "thinking":
             var thinkingText = block.thinking || "";
@@ -2483,6 +2544,24 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
         var isTruncated = toolResult && toolResult._truncated === true;
 
+        // Read 读到图片时，直接在卡片里内联缩略图预览（点击放大用文件预览弹层）。
+        // 走的是文件浏览器同款 /api/file-raw 端点；加载失败（被删/超限 413）则隐藏整块。
+        var imageHtml = "";
+        if (toolName === "Read") {
+          var imgPath = inputData.file_path || inputData.path || fileInfo || "";
+          if (imgPath && isImagePath(imgPath)) {
+            var imgSrc = "/api/file-raw?path=" + encodeURIComponent(imgPath);
+            imageHtml = '<div class="inline-tool-image" onclick="event.stopPropagation();">' +
+              '<img class="inline-tool-image-thumb" loading="lazy" ' +
+                'src="' + imgSrc + '" ' +
+                'alt="' + escapeHtml(path) + '" ' +
+                'data-path="' + escapeHtml(imgPath) + '" ' +
+                'onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));" ' +
+                'onerror="var w=this.closest(\'.inline-tool-image\'); if(w)w.style.display=\'none\';" />' +
+            '</div>';
+          }
+        }
+
         var extraInfoHtml = meta ? '<span class="inline-tool-meta">' + escapeHtml(meta) + '</span>' : '';
         var extraClass = isError ? 'inline-tool-error-inline' : '';
         if (shouldExpand) extraClass += ' inline-tool-open';
@@ -2505,6 +2584,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
             '<span class="inline-tool-title">' + escapeHtml(title) + '</span>' +
             extraInfoHtml +
           '</div>' +
+          imageHtml +
           expandedHtml +
         '</div>';
       }

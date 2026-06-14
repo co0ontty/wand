@@ -141,6 +141,10 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           body.scrollTop = body.scrollHeight;
         }
       }
+      // 聊天里内联图片缩略图点击 → 打开文件预览弹层（复用文件浏览器同款模态）。
+      (window as any).__openFilePreview = function(p: any) {
+        if (p) openFilePreview(p);
+      };
       // Toggle function for inline tool rows (Read, Glob, Grep, etc.)
       (window as any).__inlineToolToggle = function(el: any) {
         var expanded = el.classList.toggle("inline-tool-open");
