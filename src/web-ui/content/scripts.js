@@ -8051,7 +8051,7 @@
     if (!state.loginChecked) {
       return '<div class="login-container"><div class="login-card login-card-loading"><div class="login-header"><div class="login-logo"><div class="login-logo-icon">W</div><span class="login-logo-text">Wand</span></div><div class="login-subtitle">\u6B63\u5728\u6062\u590D\u767B\u5F55\u72B6\u6001</div></div><div class="login-body"><div class="login-status"><span class="login-spinner" aria-hidden="true"></span><div><p class="login-hint">\u6B63\u5728\u68C0\u67E5\u672C\u5730\u767B\u5F55\u4F1A\u8BDD\uFF0C\u8BF7\u7A0D\u5019\u3002</p><p class="login-muted">\u5982\u679C\u4F60\u521A\u5237\u65B0\u9875\u9762\uFF0C\u8FD9\u662F\u6B63\u5E38\u73B0\u8C61\u3002</p></div></div></div></div></div>';
     }
-    return '<div class="login-container"><div class="login-card"><div class="login-header"><div class="login-logo"><div class="login-logo-icon">W</div><span class="login-logo-text">Wand</span></div><div class="login-subtitle">\u5728\u6D4F\u89C8\u5668\u4E2D\u8FD0\u884C\u672C\u673A\u7EC8\u7AEF</div></div><form id="login-form" class="login-body" autocomplete="on"><input type="text" name="username" autocomplete="username" value="wand" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" readonly /><p class="login-hint">\u8F93\u5165 Wand \u8BBF\u95EE\u5BC6\u7801\u4EE5\u8FDB\u5165\u63A7\u5236\u53F0\u3002</p><div class="field"><label class="field-label" for="password">\u5BC6\u7801</label><div class="password-field"><input id="password" type="password" class="field-input password-input" placeholder="\u8F93\u5165\u8BBF\u95EE\u5BC6\u7801" autocomplete="current-password" data-error="false" aria-describedby="password-hint login-error" aria-invalid="false" /><button id="toggle-password-button" type="button" class="password-toggle" aria-label="\u663E\u793A\u5BC6\u7801" aria-pressed="false">\u663E\u793A</button></div><p id="password-hint" class="hint">\u4F7F\u7528\u4F60\u5728 Wand \u4E2D\u8BBE\u7F6E\u7684\u8BBF\u95EE\u5BC6\u7801\u3002</p><p id="login-error" class="error-message hidden" role="alert"></p></div><button id="login-button" type="submit" class="btn btn-primary btn-block">\u8FDB\u5165\u63A7\u5236\u53F0</button>' + (hasNativeSwitchServer() ? '<button id="login-switch-server-button" class="btn btn-ghost btn-block login-switch-server" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362\u670D\u52A1\u5668</span></button>' : "") + "</form></div></div>";
+    return '<div class="login-container"><div class="login-card"><div class="login-header"><div class="login-logo"><div class="login-logo-icon">W</div><span class="login-logo-text">Wand</span></div><div class="login-subtitle">\u5728\u6D4F\u89C8\u5668\u4E2D\u8FD0\u884C\u672C\u673A\u7EC8\u7AEF</div></div><form id="login-form" class="login-body" autocomplete="on"><input type="text" name="username" autocomplete="username" value="wand" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" readonly /><p class="login-hint">\u8F93\u5165 Wand \u8BBF\u95EE\u5BC6\u7801\u4EE5\u8FDB\u5165\u63A7\u5236\u53F0\u3002</p><div class="field"><label class="field-label" for="password">\u5BC6\u7801</label><div class="password-field"><input id="password" type="password" class="field-input password-input" placeholder="\u8F93\u5165\u8BBF\u95EE\u5BC6\u7801" autocomplete="current-password" data-error="false" aria-describedby="password-hint login-error" aria-invalid="false" /><button id="toggle-password-button" type="button" class="password-toggle" aria-label="\u663E\u793A\u5BC6\u7801" aria-pressed="false">\u663E\u793A</button></div><p id="password-hint" class="hint">\u4F7F\u7528\u4F60\u5728 Wand \u4E2D\u8BBE\u7F6E\u7684\u8BBF\u95EE\u5BC6\u7801\u3002</p><p id="login-error" class="error-message hidden" role="alert"></p></div><div id="login-cert-hint" class="login-cert-hint hidden" role="alert"><div class="login-cert-hint-title">\u8BC1\u4E66\u4E0D\u53D7\u4FE1\u4EFB\uFF0C\u767B\u5F55\u6001\u65E0\u6CD5\u4FDD\u5B58</div><p class="login-cert-hint-body">\u5BC6\u7801\u662F\u5BF9\u7684\uFF0C\u4F46\u5F53\u524D HTTPS \u8BC1\u4E66\u4E0D\u53D7\u6D4F\u89C8\u5668\u4FE1\u4EFB\uFF0C\u6D4F\u89C8\u5668\u56E0\u6B64\u62D2\u7EDD\u4FDD\u5B58\u767B\u5F55 Cookie\uFF0C\u6240\u4EE5\u8FDB\u4E0D\u4E86\u63A7\u5236\u53F0\u3002<br/>\u89E3\u51B3\u529E\u6CD5\uFF08\u4EFB\u9009\u5176\u4E00\uFF09\uFF1A\u6539\u7528 HTTP \u8BBF\u95EE\u672C\u670D\u52A1\uFF1B\u6216\u628A\u672C\u670D\u52A1\u8BC1\u4E66\u8BBE\u4E3A\u300C\u53D7\u4FE1\u4EFB\u300D\uFF08\u63A8\u8350 mkcert\uFF09\uFF1B\u6216\u5728\u672C\u673A\u5C06\u8BE5\u81EA\u7B7E\u8BC1\u4E66\u8BBE\u4E3A\u5B8C\u5168\u4FE1\u4EFB\u540E\u91CD\u8BD5\u3002</p><a id="login-cert-http-link" class="btn btn-ghost btn-block" href="#" rel="noopener">\u6539\u7528 HTTP \u8BBF\u95EE</a></div><button id="login-button" type="submit" class="btn btn-primary btn-block">\u8FDB\u5165\u63A7\u5236\u53F0</button>' + (hasNativeSwitchServer() ? '<button id="login-switch-server-button" class="btn btn-ghost btn-block login-switch-server" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362\u670D\u52A1\u5668</span></button>' : "") + "</form></div></div>";
   }
   function renderAppShell() {
     var scriptClose = String.fromCharCode(60) + String.fromCharCode(47) + "script>";
@@ -13913,6 +13913,19 @@
   }
 
   // src/web-ui/browser/session-engine.ts
+  function showLoginCertHint() {
+    var hint = document.getElementById("login-cert-hint");
+    if (hint) hint.classList.remove("hidden");
+    var httpLink = document.getElementById("login-cert-http-link");
+    if (httpLink) {
+      httpLink.href = "http://" + location.host + location.pathname;
+      httpLink.style.display = location.protocol === "https:" ? "" : "none";
+    }
+  }
+  function hideLoginCertHint() {
+    var hint = document.getElementById("login-cert-hint");
+    if (hint) hint.classList.add("hidden");
+  }
   function login() {
     if (state.loginPending) return;
     var passwordEl = document.getElementById("password");
@@ -13920,6 +13933,7 @@
     var errorEl = document.getElementById("login-error");
     if (!passwordEl || !loginButton || !errorEl) return;
     hideError2(errorEl);
+    hideLoginCertHint();
     passwordEl.dataset.error = "false";
     passwordEl.setAttribute("aria-invalid", "false");
     state.loginPending = true;
@@ -13931,14 +13945,26 @@
       body: JSON.stringify({ password: passwordEl.value }),
       credentials: "same-origin"
     }).then(function(res) {
+      if (res.status === 429) {
+        showError2(errorEl, "\u767B\u5F55\u5C1D\u8BD5\u6B21\u6570\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u3002");
+        return Promise.reject("handled");
+      }
       if (!res.ok) {
         passwordEl.dataset.error = "true";
         passwordEl.setAttribute("aria-invalid", "true");
         showError2(errorEl, "\u5BC6\u7801\u9519\u8BEF\uFF0C\u8BF7\u91CD\u8BD5\u3002");
-        return Promise.reject("Invalid password");
+        return Promise.reject("handled");
       }
       return fetch("/api/config", { credentials: "same-origin" });
     }).then(function(res) {
+      if (!res.ok) {
+        if (location.protocol === "https:") {
+          showLoginCertHint();
+        } else {
+          showError2(errorEl, "\u767B\u5F55\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5\u3002");
+        }
+        return Promise.reject("handled");
+      }
       return res.json();
     }).then(function(config) {
       state.config = config;
@@ -13951,12 +13977,9 @@
       startPolling();
       render8();
     }).catch(function(error) {
+      if (error === "handled") return;
       console.error("[wand] Login error:", error);
-      if (error !== "Invalid password") {
-        passwordEl.dataset.error = "true";
-        passwordEl.setAttribute("aria-invalid", "true");
-        showError2(errorEl, "\u767B\u5F55\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5\u3002");
-      }
+      showError2(errorEl, "\u767B\u5F55\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5\u3002");
     }).finally(function() {
       state.loginPending = false;
       loginButton.disabled = false;

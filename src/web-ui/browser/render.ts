@@ -501,6 +501,11 @@ export function renderLogin() {
           '<p id="password-hint" class="hint">使用你在 Wand 中设置的访问密码。</p>' +
           '<p id="login-error" class="error-message hidden" role="alert"></p>' +
         '</div>' +
+        '<div id="login-cert-hint" class="login-cert-hint hidden" role="alert">' +
+          '<div class="login-cert-hint-title">证书不受信任，登录态无法保存</div>' +
+          '<p class="login-cert-hint-body">密码是对的，但当前 HTTPS 证书不受浏览器信任，浏览器因此拒绝保存登录 Cookie，所以进不了控制台。<br/>解决办法（任选其一）：改用 HTTP 访问本服务；或把本服务证书设为「受信任」（推荐 mkcert）；或在本机将该自签证书设为完全信任后重试。</p>' +
+          '<a id="login-cert-http-link" class="btn btn-ghost btn-block" href="#" rel="noopener">改用 HTTP 访问</a>' +
+        '</div>' +
         '<button id="login-button" type="submit" class="btn btn-primary btn-block">进入控制台</button>' +
         (hasNativeSwitchServer() ?
           '<button id="login-switch-server-button" class="btn btn-ghost btn-block login-switch-server" type="button">' +

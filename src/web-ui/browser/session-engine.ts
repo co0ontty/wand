@@ -16,6 +16,23 @@ import { ensureTerminalFit, ensureTerminalFitWithRetry, scheduleTerminalResize, 
 import { forceReconnectWebSocket, initWebSocket, setView, startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
 import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } from "./session-ui";
 
+      // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
+      // 这里揭示专用提示，并把「改用 HTTP」按钮指向同 host 的 http:// 地址。
+      function showLoginCertHint() {
+        var hint = document.getElementById("login-cert-hint");
+        if (hint) hint.classList.remove("hidden");
+        var httpLink = document.getElementById("login-cert-http-link") as HTMLAnchorElement | null;
+        if (httpLink) {
+          httpLink.href = "http://" + location.host + location.pathname;
+          // 已经是 HTTP 还能走到这里只能是别的故障，藏掉无意义的跳转入口。
+          httpLink.style.display = location.protocol === "https:" ? "" : "none";
+        }
+      }
+      function hideLoginCertHint() {
+        var hint = document.getElementById("login-cert-hint");
+        if (hint) hint.classList.add("hidden");
+      }
+
       export function login() {
         if (state.loginPending) return;
 
@@ -25,6 +42,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (!passwordEl || !loginButton || !errorEl) return;
 
         hideError(errorEl);
+        hideLoginCertHint();
         passwordEl.dataset.error = "false";
         passwordEl.setAttribute("aria-invalid", "false");
         state.loginPending = true;
@@ -38,15 +56,32 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           credentials: "same-origin"
         })
         .then(function(res) {
+          if (res.status === 429) {
+            showError(errorEl, "登录尝试次数过多，请稍后再试。");
+            return Promise.reject("handled");
+          }
           if (!res.ok) {
             passwordEl.dataset.error = "true";
             passwordEl.setAttribute("aria-invalid", "true");
             showError(errorEl, "密码错误，请重试。");
-            return Promise.reject("Invalid password");
+            return Promise.reject("handled");
           }
+          // 登录 POST 成功（密码正确）。立刻打一个需要鉴权的请求验证登录态是否
+          // 真的保存住 —— 不受信任证书下浏览器会拒存 Secure Cookie，这里就会 401。
           return fetch("/api/config", { credentials: "same-origin" });
         })
-        .then(function(res) { return res.json(); })
+        .then(function(res) {
+          if (!res.ok) {
+            // 密码对、却没带回 Cookie = 登录态没存住，几乎必然是证书信任问题。
+            if (location.protocol === "https:") {
+              showLoginCertHint();
+            } else {
+              showError(errorEl, "登录失败，请重试。");
+            }
+            return Promise.reject("handled");
+          }
+          return res.json();
+        })
         .then(function(config) {
           state.config = config;
           var statusDot = document.getElementById("status-dot");
@@ -60,12 +95,9 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           render();
         })
         .catch(function(error) {
+          if (error === "handled") return;
           console.error("[wand] Login error:", error);
-          if (error !== "Invalid password") {
-            passwordEl.dataset.error = "true";
-            passwordEl.setAttribute("aria-invalid", "true");
-            showError(errorEl, "登录失败，请重试。");
-          }
+          showError(errorEl, "登录失败，请重试。");
         })
         .finally(function() {
           state.loginPending = false;
