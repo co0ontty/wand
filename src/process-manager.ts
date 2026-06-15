@@ -1443,6 +1443,30 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
+  /**
+   * Switch the execution mode of a PTY session mid-flight. The already-launched
+   * claude/codex process keeps its original CLI flags, but wand's own permission
+   * auto-approval (shouldAutoApprovePermissions / escalation handling) reads
+   * record.mode, so this changes the permission posture for subsequent prompts.
+   * Mirrors setSessionModel/setSessionThinkingEffort.
+   */
+  setSessionMode(id: string, mode: ExecutionMode): SessionSnapshot {
+    const record = this.mustGet(id);
+    record.mode = mode;
+    record.autoApprovePermissions = this.shouldAutoApprovePermissions(
+      record.command,
+      mode,
+      record.provider ?? "claude",
+    );
+    this.persist(record);
+    this.emitEvent({
+      type: "status",
+      sessionId: id,
+      data: { mode, autoApprovePermissions: record.autoApprovePermissions },
+    });
+    return this.snapshot(record);
+  }
+
   sendInput(id: string, input: string, view?: "chat" | "terminal", shortcutKey?: string): SessionSnapshot {
     const record = this.mustGet(id);
 

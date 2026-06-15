@@ -747,6 +747,40 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         .catch(function() { showToast("切换模型失败", "error"); });
       }
 
+      // 模式切换：与 model / thinking 三件套对称。没有选中会话时只改"下次新会话"的默认；
+      // 选中了进行中的结构化会话时，POST /mode 让它中途生效（结构化下一轮，对齐 iOS / Android）。
+      export function onChatModeChange(value) {
+        var normalized = getSafeModeForTool(getPreferredTool(), (value || "default").trim());
+        state.chatMode = normalized;
+        refreshAllChatModeTrios();
+        var session = getSelectedSession();
+        if (!session || !session.id || session.sessionKind !== "structured") {
+          showToast && showToast("新会话模式：" + normalized, "info");
+          return;
+        }
+        fetch("/api/sessions/" + encodeURIComponent(session.id) + "/mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ mode: normalized })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data && data.error) {
+            showToast(data.error, "error");
+            return;
+          }
+          if (data && data.id) {
+            updateSessionSnapshot(data);
+            if (typeof showToast === "function") {
+              var hint = session.provider === "codex" ? "（Codex 固定全权限）" : "";
+              showToast("已切换模式 → " + normalized + hint, "success");
+            }
+          }
+        })
+        .catch(function() { showToast("切换模式失败", "error"); });
+      }
+
       export function createStructuredSession(prompt?, cwdOverride?, modeOverride?, worktreeEnabled?) {
         var provider = state.sessionTool === "codex" ? "codex" : "claude";
         var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";

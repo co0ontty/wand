@@ -7,6 +7,7 @@ import { lstat, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { exec, spawn } from "node:child_process";
+import os from "node:os";
 import { promisify } from "node:util";
 import path from "node:path";
 import process from "node:process";
@@ -612,6 +613,52 @@ function normalizePublicOrigin(value: string | undefined): string | undefined {
     return parsed.origin;
   } catch {
     return undefined;
+  }
+}
+
+function isPrivateIpv4(address: string): boolean {
+  if (address.startsWith("10.") || address.startsWith("192.168.")) return true;
+  const match = address.match(/^172\.(\d+)\./);
+  return match ? Number(match[1]) >= 16 && Number(match[1]) <= 31 : false;
+}
+
+function preferredLanIpv4(): string | undefined {
+  const candidates: Array<{ address: string; score: number }> = [];
+  for (const [name, entries] of Object.entries(os.networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      const family = entry.family as unknown;
+      if (entry.internal || (family !== "IPv4" && family !== 4)) continue;
+      let score = isPrivateIpv4(entry.address) ? 10 : 0;
+      if (/^(en|eth|wlan)\d+$/i.test(name)) score += 10;
+      candidates.push({ address: entry.address, score });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score || a.address.localeCompare(b.address));
+  return candidates[0]?.address;
+}
+
+/**
+ * App 连接码用于另一台设备。设置页若从 localhost 打开，直接编码浏览器 origin
+ * 会让客户端连接它自己；监听 0.0.0.0 时自动换成本机优先 LAN IPv4。
+ */
+function resolveAppConnectOrigin(origin: string, config: WandConfig): string {
+  if (config.host !== "0.0.0.0") return origin;
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    const isLocalOnly = hostname === "localhost"
+      || hostname === "127.0.0.1"
+      || hostname === "[::1]"
+      || hostname === "::1"
+      || hostname === "0.0.0.0"
+      || hostname === "[::]";
+    if (!isLocalOnly) return parsed.origin;
+    const lanIp = preferredLanIpv4();
+    if (!lanIp) return parsed.origin;
+    parsed.hostname = lanIp;
+    return parsed.origin;
+  } catch {
+    return origin;
   }
 }
 
@@ -1610,11 +1657,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     const protocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
     const host = getPublicRequestHost(req, config);
     const browserOrigin = normalizePublicOrigin(firstQueryStringValue(req.query.origin));
-    const serverUrl = browserOrigin ?? `${protocol}://${host}`;
+    const serverUrl = resolveAppConnectOrigin(browserOrigin ?? `${protocol}://${host}`, config);
     const appSecret = config.appSecret ?? "";
     const token = generateAppToken(effectivePassword, appSecret);
     const code = encodeConnectCode(serverUrl, token);
-    res.json({ code });
+    res.json({ code, url: serverUrl });
   });
 
   app.post("/api/settings/config", async (req, res) => {

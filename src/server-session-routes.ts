@@ -270,6 +270,38 @@ export function registerSessionRoutes(
     }
   });
 
+  // 执行模式切换：与 /model、/thinking-effort 路由对称。结构化会话立即影响下一条
+  // prompt（权限策略 / 系统提示 / CLI flag 都按 session.mode 逐轮重新派生）；PTY 会话
+  // 仅更新 wand 自身的权限自动放行判定，已启动的 claude 进程命令行 flag 不变。codex 锁 full-access。
+  app.post("/api/sessions/:id/mode", express.json(), (req, res) => {
+    const body = req.body as { mode?: string };
+    const raw = typeof body?.mode === "string" ? body.mode.trim() : "";
+    if (!raw) {
+      res.status(400).json({ error: "缺少 mode。" });
+      return;
+    }
+    const mode = normalizeMode(raw, "managed");
+    const id = req.params.id;
+    try {
+      const structuredSnapshot = structured.get(id);
+      if (structuredSnapshot) {
+        const provider = structuredSnapshot.provider ?? "claude";
+        const effective = provider === "codex" ? "full-access" : mode;
+        res.json(structured.setSessionMode(id, effective));
+        return;
+      }
+      const ptySnapshot = processes.get(id);
+      if (!ptySnapshot) {
+        res.status(404).json({ error: "未找到该会话。" });
+        return;
+      }
+      const effective = (ptySnapshot.provider ?? "claude") === "codex" ? "full-access" : mode;
+      res.json(processes.setSessionMode(id, effective));
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "切换模式失败。") });
+    }
+  });
+
   app.get("/api/structured-sessions/:id/messages", (req, res) => {
     const snapshot = structured.get(req.params.id);
     if (!snapshot) {

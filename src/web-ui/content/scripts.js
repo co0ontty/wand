@@ -6729,9 +6729,7 @@
       var ctrl = target.getAttribute("data-mode-control");
       var value = target.value;
       if (ctrl === "mode") {
-        state.chatMode = value;
-        refreshAllChatModeTrios();
-        showToast2 && showToast2("\u65B0\u4F1A\u8BDD\u6A21\u5F0F\uFF1A" + value, "info");
+        onChatModeChange(value);
       } else if (ctrl === "model") {
         onChatModelChange(value);
       } else if (ctrl === "thinking") {
@@ -14132,7 +14130,7 @@
     state.chatMode = getSafeModeForTool("claude", state.chatMode);
     var modeHint = document.getElementById("mode-hint");
     if (modeHint) modeHint.textContent = getModeHint(state.chatMode);
-    refreshAllChatModeTrios();
+    refreshAllChatModeTrios2();
   }
   function renderChatModeTrioHtml(session, opts) {
     opts = opts || {};
@@ -14147,7 +14145,7 @@
     }
     return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelText, renderChatModelOptionsRaw(modelText, session)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("thinking", "\u601D\u8003", thinkingText, renderChatThinkingOptionsRaw(thinkingText)) + "</div>";
   }
-  function refreshAllChatModeTrios() {
+  function refreshAllChatModeTrios2() {
     var session = getSelectedSession5();
     var preferredTool = getPreferredTool();
     var mode = state.chatMode || "default";
@@ -14216,7 +14214,7 @@
     return html;
   }
   function syncComposerModelSelect(session) {
-    refreshAllChatModeTrios();
+    refreshAllChatModeTrios2();
   }
   var THINKING_LEVELS = [
     { id: "off", label: "off", hint: "\u4E0D\u542F\u7528\u601D\u8003\uFF08CLI \u65E0\u524D\u7F00\uFF1BSDK \u5173\u95ED thinking\uFF1BCodex minimal\uFF09" },
@@ -14254,7 +14252,7 @@
     return html;
   }
   function syncComposerThinkingSelect(session) {
-    refreshAllChatModeTrios();
+    refreshAllChatModeTrios2();
   }
   function onChatThinkingChange(value) {
     var normalized = (value || "off").trim();
@@ -14266,7 +14264,7 @@
       localStorage.setItem("wand-thinking-effort", normalized);
     } catch (e) {
     }
-    refreshAllChatModeTrios();
+    refreshAllChatModeTrios2();
     var session = getSelectedSession5();
     if (!session) return;
     fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
@@ -14461,7 +14459,7 @@
       localStorage.setItem("wand-chat-model", normalized);
     } catch (e) {
     }
-    refreshAllChatModeTrios();
+    refreshAllChatModeTrios2();
     var session = getSelectedSession5();
     if (!session) return;
     fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
@@ -14486,6 +14484,38 @@
       }
     }).catch(function() {
       showToast2("\u5207\u6362\u6A21\u578B\u5931\u8D25", "error");
+    });
+  }
+  function onChatModeChange(value) {
+    var normalized = getSafeModeForTool(getPreferredTool(), (value || "default").trim());
+    state.chatMode = normalized;
+    refreshAllChatModeTrios2();
+    var session = getSelectedSession5();
+    if (!session || !session.id || session.sessionKind !== "structured") {
+      showToast2 && showToast2("\u65B0\u4F1A\u8BDD\u6A21\u5F0F\uFF1A" + normalized, "info");
+      return;
+    }
+    fetch("/api/sessions/" + encodeURIComponent(session.id) + "/mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ mode: normalized })
+    }).then(function(res) {
+      return res.json();
+    }).then(function(data) {
+      if (data && data.error) {
+        showToast2(data.error, "error");
+        return;
+      }
+      if (data && data.id) {
+        updateSessionSnapshot(data);
+        if (typeof showToast2 === "function") {
+          var hint = session.provider === "codex" ? "\uFF08Codex \u56FA\u5B9A\u5168\u6743\u9650\uFF09" : "";
+          showToast2("\u5DF2\u5207\u6362\u6A21\u5F0F \u2192 " + normalized + hint, "success");
+        }
+      }
+    }).catch(function() {
+      showToast2("\u5207\u6362\u6A21\u5F0F\u5931\u8D25", "error");
     });
   }
   function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled) {

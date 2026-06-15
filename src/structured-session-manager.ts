@@ -988,6 +988,30 @@ export class StructuredSessionManager {
     return updated;
   }
 
+  /**
+   * Switch the execution mode of a structured session mid-flight. Takes effect on
+   * the next message/query — permission policy, append-system-prompt and CLI flags
+   * are all re-derived from session.mode per turn. Mirrors setSessionModel; also
+   * re-syncs autoApprovePermissions so the permission posture matches the new mode.
+   */
+  setSessionMode(sessionId: string, mode: ExecutionMode): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const autoApprove = shouldAutoApproveForMode(mode);
+    const updated: SessionSnapshot = {
+      ...session,
+      mode,
+      autoApprovePermissions: autoApprove,
+    };
+    this.sessions.set(sessionId, updated);
+    this.storage.saveSession(updated);
+    this.emit({
+      type: "status",
+      sessionId,
+      data: { sessionKind: "structured", mode, autoApprovePermissions: autoApprove },
+    });
+    return updated;
+  }
+
   /** Toggle auto-approve for the session. */
   toggleAutoApprove(sessionId: string): SessionSnapshot {
     const session = this.requireSession(sessionId);
