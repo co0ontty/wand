@@ -5,7 +5,7 @@ import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
 import { normalizeMode } from "./config.js";
-import { truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
+import { blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
 import {
   getGitStatus,
@@ -652,6 +652,22 @@ export function registerSessionRoutes(
       ? processes.getPtyTranscript(snapshot.id) ?? snapshot.output
       : snapshot.output;
     if (req.query.format === "chat") {
+      // 客户端带 blockBudget（iOS）走块级窗口：只回最近 N 个块（必要时切掉最旧 turn 的头部），
+      // 根治「单条 turn 上百块/1MB」的长任务打开慢。Web/Android 不带该参数，走原 turn 级窗口。
+      const rawBudget = parseInt(String(req.query.blockBudget ?? ""), 10);
+      if (Number.isFinite(rawBudget) && rawBudget > 0) {
+        const windowed = blockWindowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {}, rawBudget);
+        res.json({
+          ...snapshot,
+          output: transcriptOutput,
+          messages: windowed.messages,
+          messageOffset: windowed.messageOffset,
+          messageTotal: windowed.messageTotal,
+          leadingBlockOffset: windowed.leadingBlockOffset,
+          leadingBlockTotal: windowed.leadingBlockTotal,
+        });
+        return;
+      }
       // 与 WS init 对齐：只回最近一窗 turn + offset/total，更早的走 /messages 翻页。
       const windowed = windowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {});
       res.json({
@@ -676,6 +692,28 @@ export function registerSessionRoutes(
     }
     const all = snapshot.messages ?? [];
     const total = all.length;
+
+    // 块级翻页（iOS）：?turn=<i>&blockOffset=<当前 leading 偏移>&blockLimit=<N>
+    // 取该 turn 的 [start, blockOffset) 段（start = max(0, blockOffset - blockLimit)）。
+    const rawTurn = parseInt(String(req.query.turn ?? ""), 10);
+    if (Number.isFinite(rawTurn)) {
+      const turnIndex = Math.min(Math.max(rawTurn, 0), Math.max(total - 1, 0));
+      const turn = all[turnIndex];
+      if (!turn) {
+        res.json({ turnIndex, blocks: [], blockOffset: 0, blockTotal: 0 });
+        return;
+      }
+      const blockTotal = turn.content.length;
+      const rawBlockLimit = parseInt(String(req.query.blockLimit ?? ""), 10);
+      const rawBlockOffset = parseInt(String(req.query.blockOffset ?? ""), 10);
+      const blockLimit = Math.min(Math.max(Number.isFinite(rawBlockLimit) ? rawBlockLimit : 40, 1), 200);
+      const blockEnd = Math.min(Math.max(Number.isFinite(rawBlockOffset) ? rawBlockOffset : blockTotal, 0), blockTotal);
+      const blockStart = Math.max(0, blockEnd - blockLimit);
+      const blocks = sliceTurnBlocksForTransport(turn, blockStart, blockEnd, config.cardDefaults ?? {});
+      res.json({ turnIndex, blocks, blockOffset: blockStart, blockTotal });
+      return;
+    }
+
     const rawLimit = parseInt(String(req.query.limit ?? ""), 10);
     const rawOffset = parseInt(String(req.query.offset ?? ""), 10);
     const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 40, 1), 200);

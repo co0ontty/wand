@@ -7,7 +7,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { EventEmitter } from "node:events";
 import type { CardExpandDefaults, SessionSnapshot, ProcessEvent } from "./types.js";
 import { readSessionCookie, validateSession } from "./auth.js";
-import { truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
+import { blockWindowMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 
 export type { ProcessEvent } from "./types.js";
 
@@ -39,6 +39,12 @@ interface WsClient {
   outputSeqBySession: Map<string, number>;
   /** Sessions for which we owe the client a resync notice. */
   pendingResyncSessions: Set<string>;
+  /**
+   * 块级窗口预算：客户端在 subscribe 时带上（iOS）。设置后 init/resync/全量快照
+   * 只下发最近这么多个内容块（必要时切掉最旧 turn 的头部），更早的按需翻页。
+   * undefined 表示走原有 turn 级窗口（Web/Android），行为与改动前完全一致。
+   */
+  blockBudget?: number;
   /**
    * 上次收到该客户端任意消息（应用层 message / protocol pong / 任何 frame）的
    * 时间戳。心跳 tick 用它来判断半开连接。
@@ -110,6 +116,11 @@ export class WsBroadcastManager {
         try {
           const msg = JSON.parse(data.toString());
           if (msg.type === "subscribe" && msg.sessionId) {
+            // 客户端可在 subscribe 时声明块级窗口预算（iOS）；后续 init/resync/广播
+            // 全量快照都按它块级窗口化。不带则保持 turn 级（Web/Android）。
+            if (typeof msg.blockBudget === "number" && msg.blockBudget > 0) {
+              client.blockBudget = msg.blockBudget;
+            }
             const snapshot = getSession(msg.sessionId);
             if (snapshot) {
               this.sendInit(client, msg.sessionId, snapshot, false);
@@ -261,10 +272,9 @@ export class WsBroadcastManager {
    * and the first incremental update.
    */
   private sendInit(client: WsClient, sessionId: string, snapshot: SessionSnapshot, resync: boolean): void {
-    // 只下发最近 MESSAGE_WINDOW_SIZE 条 turn，附 offset/total；更早的客户端按需翻页。
-    const windowed = snapshot.messages
-      ? windowMessagesForTransport(snapshot.messages, this.getCardDefaults())
-      : { messages: undefined as SessionSnapshot["messages"], messageOffset: 0, messageTotal: 0 };
+    // 块级窗口客户端（iOS）只下发最近 blockBudget 个块；其余走 turn 级窗口。
+    // 两种都附 offset/total，更早的客户端按需翻页。
+    const windowed = this.windowForClient(client, snapshot.messages);
     const seq = (client.outputSeqBySession.get(sessionId) ?? 0) + 1;
     client.outputSeqBySession.set(sessionId, seq);
     client.pendingResyncSessions.delete(sessionId);
@@ -275,44 +285,82 @@ export class WsBroadcastManager {
       ...(resync ? { resync: true } : {}),
       data: {
         ...snapshot,
-        messages: windowed.messages,
-        messageOffset: windowed.messageOffset,
-        messageTotal: windowed.messageTotal,
+        ...windowed,
         output: snapshot.output,
       },
     }));
+  }
+
+  /**
+   * 按客户端偏好窗口化一段完整 messages：opted-in 的块级窗口（iOS）会附带
+   * leadingBlockOffset/leadingBlockTotal；否则 turn 级窗口（字段与改动前一致）。
+   */
+  private windowForClient(
+    client: WsClient,
+    messages: SessionSnapshot["messages"],
+  ): Record<string, unknown> {
+    if (!messages) {
+      return { messages: undefined, messageOffset: 0, messageTotal: 0 };
+    }
+    if (client.blockBudget && client.blockBudget > 0) {
+      const w = blockWindowMessagesForTransport(messages, this.getCardDefaults(), client.blockBudget);
+      return {
+        messages: w.messages,
+        messageOffset: w.messageOffset,
+        messageTotal: w.messageTotal,
+        leadingBlockOffset: w.leadingBlockOffset,
+        leadingBlockTotal: w.leadingBlockTotal,
+      };
+    }
+    const w = windowMessagesForTransport(messages, this.getCardDefaults());
+    return { messages: w.messages, messageOffset: w.messageOffset, messageTotal: w.messageTotal };
   }
 
   private broadcast(event: ProcessEvent): void {
     // 非增量事件若带完整 messages（结构化 output/ended 快照、PTY 非流式 chat 快照），
     // 在这个统一出口窗口化——避免逐个 emit 点各自处理、也防止超大帧撑爆移动端 WS。
     // 增量事件只带 lastMessage，不含 messages 数组，不受影响。
+    // 块级窗口客户端（iOS）需按各自预算切，所以这里改为「按客户端」窗口化；
+    // turn 级（Web/Android）的结果跨客户端一致，缓存一次复用，避免重复计算。
     const data = event.data as Record<string, unknown> | undefined;
-    if (data && !data.incremental && Array.isArray(data.messages)) {
-      const windowed = windowMessagesForTransport(
-        data.messages as SessionSnapshot["messages"],
-        this.getCardDefaults(),
-      );
-      event = {
-        ...event,
-        data: {
-          ...data,
-          messages: windowed.messages,
-          messageOffset: windowed.messageOffset,
-          messageTotal: windowed.messageTotal,
-        },
-      } as ProcessEvent;
-    }
+    const hasFullMessages = !!(data && !data.incremental && Array.isArray(data.messages));
+    const rawMessages = hasFullMessages
+      ? (data!.messages as SessionSnapshot["messages"])
+      : undefined;
+    let turnWindowedEvent: ProcessEvent | undefined;
+    const eventForClient = (client: WsClient): ProcessEvent => {
+      if (!hasFullMessages) return event;
+      if (client.blockBudget && client.blockBudget > 0) {
+        return {
+          ...event,
+          data: { ...data, ...this.windowForClient(client, rawMessages) },
+        } as ProcessEvent;
+      }
+      if (!turnWindowedEvent) {
+        const w = windowMessagesForTransport(rawMessages, this.getCardDefaults());
+        turnWindowedEvent = {
+          ...event,
+          data: {
+            ...data,
+            messages: w.messages,
+            messageOffset: w.messageOffset,
+            messageTotal: w.messageTotal,
+          },
+        } as ProcessEvent;
+      }
+      return turnWindowedEvent;
+    };
     for (const client of this.clients) {
       if (client.ws.readyState !== WebSocket.OPEN) continue;
 
+      const clientEvent = eventForClient(client);
       // Stamp output events with a per-(client, session) sequence number so
       // the client can detect a gap caused by backpressure drops.
-      let outgoing: ProcessEvent = event;
+      let outgoing: ProcessEvent = clientEvent;
       if (event.type === "output") {
         const seq = (client.outputSeqBySession.get(event.sessionId) ?? 0) + 1;
         client.outputSeqBySession.set(event.sessionId, seq);
-        outgoing = { ...event, seq } as ProcessEvent;
+        outgoing = { ...clientEvent, seq } as ProcessEvent;
       }
 
       // Apply backpressure if queue is too large. We mark the session as
