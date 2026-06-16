@@ -14,6 +14,7 @@ import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
+import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./resume-policy.js";
@@ -1049,6 +1050,10 @@ export class ProcessManager extends EventEmitter {
 
 
     const shellArgs = this.buildShellArgs(processedCommand);
+    // Self-heal node-pty's spawn-helper +x bit before every spawn: a self-update
+    // can re-drop it after this server already ran its startup chmod, which would
+    // otherwise make every PTY launch throw "posix_spawnp failed." until restart.
+    ensureNodePtyHelperExecutable();
     let child: import("node-pty").IPty;
     try {
       child = pty.spawn(this.config.shell, shellArgs, {
