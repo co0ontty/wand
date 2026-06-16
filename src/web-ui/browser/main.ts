@@ -35,6 +35,15 @@ import { state } from "./state";
     }
   } catch (e) {}
 
+  // 嵌入终端模式：原生壳（iOS）把 PTY 会话套在原生头部里，只需网页展示
+  // 终端黑窗 + 输入栏，隐藏侧边栏 / 顶栏 / 空白欢迎页。由 ?embed=terminal 触发，
+  // 标记挂到 <html> 上让 CSS 接管布局（见 styles.css .is-wand-embed-terminal）。
+  try {
+    if (new URL(window.location.href).searchParams.get("embed") === "terminal") {
+      document.documentElement.classList.add('is-wand-embed-terminal');
+    }
+  } catch (e) {}
+
   // iOS 原生壳据此判断网页是否已支持「侧边栏返回原生界面」按钮：
   // 旧版网页没有这个标记，壳会回退显示自己的顶部返回栏，避免用户被困在网页版。
   try { (window as any).__wandNativeBackHooked = true; } catch (e) {}

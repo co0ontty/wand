@@ -17684,6 +17684,12 @@
     } catch (e) {
     }
     try {
+      if (new URL(window.location.href).searchParams.get("embed") === "terminal") {
+        document.documentElement.classList.add("is-wand-embed-terminal");
+      }
+    } catch (e) {
+    }
+    try {
       window.__wandNativeBackHooked = true;
     } catch (e) {
     }

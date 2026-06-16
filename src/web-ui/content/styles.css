@@ -205,6 +205,26 @@
       padding-top: var(--wand-safe-top);
     }
 
+    /* ===== 嵌入终端模式（iOS 原生壳把 PTY 套在原生头部里） =====
+       由 ?embed=terminal 触发，main.ts 给 <html> 挂 .is-wand-embed-terminal。
+       只保留 #output 终端黑窗 + .input-panel 输入栏；侧边栏 / 顶栏 / 空白欢迎页
+       全部隐藏，顶部安全区交给原生导航条消费（这里归零，让终端贴在头部下沿）。 */
+    .is-wand-embed-terminal .sidebar,
+    .is-wand-embed-terminal .main-header-row,
+    .is-wand-embed-terminal .blank-chat,
+    .is-wand-embed-terminal .drawer-backdrop,
+    .is-wand-embed-terminal .file-panel-backdrop {
+      display: none !important;
+    }
+    .is-wand-embed-terminal .app-container {
+      padding-top: 0;
+    }
+    .is-wand-embed-terminal .main-layout,
+    .is-wand-embed-terminal .main-layout.sidebar-pinned,
+    .is-wand-embed-terminal .main-layout.sidebar-pinned.sidebar-collapsed {
+      padding-left: 0;
+    }
+
     /* ===== 首帧过渡抑制 ===== */
     html.no-transition,
     html.no-transition *,
