@@ -75,6 +75,9 @@ export function resetChatRenderCache(options?: any) {
     state.chatUnreadStartIndex = -1;
     // 真正换会话时才允许首帧贴底；preserve 路径下保留旧 initial 状态。
     state.chatInitialRenderDone = false;
+    // 切会话退出顶置模式；preserve 路径（刷新/重连）保留 pin。
+    state.chatPinTurnToTop = false;
+    state.chatPinMinUserIndex = 0;
   }
 }
 

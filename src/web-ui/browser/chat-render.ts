@@ -1,7 +1,7 @@
 import { state, readStoredBoolean, writeStoredBoolean, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
 import { t, getActiveLang, iconSvg, I18N_DEFAULT_LANG } from "./i18n";
 import { escapeHtml, formatElapsedShort, isImagePath } from "./utils";
-import { applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getElementExpandKey, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, scrollChatToBottom, setChatStickToBottom, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
+import { applyChatTurnPin, applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getElementExpandKey, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, scrollChatToBottom, setChatStickToBottom, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
 import { copyTextSafely, showToastIfPossible, openFilePreview, appendToComposer, isMobileLayout } from "./file-browser";
 import { buildMessagesForRender, focusInputBox, getSelectedSession } from "./input";
 import { showToast, syncSessionProgressToNative, wandConfirm } from "./notifications";
@@ -275,6 +275,10 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // 把已经上滚阅读的用户误判回贴底状态。
         var renderWasAtBottom = isChatNearBottom(chatMessages);
 
+        // ChatGPT 风格"顶置最新轮次"模式开启时，停掉所有贴底/锚点/未读分支，
+        // 改由本函数末尾的 applyChatTurnPin 统一把最新用户消息钉到视口顶部。
+        var pinningTurn = state.chatPinTurnToTop;
+
         // 把 .system-info 卡片从计数里剔除——它由 extractPtySystemInfo 在
         // fullRenderChat 里穿插注入，不存在于 messages 数组中，混进 existingCount
         // 会让 msgCount !== existingCount 永远为真，每帧都走 fullRenderChat，从而
@@ -374,7 +378,11 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           // 才执行这个强制贴底；之后即便 prevMsgCount===0（page-refresh /
           // ws 重连等保留 sticky 的 reset 路径），也尊重 chatStickToBottom，
           // 不再把上滚的用户拽回去。
-          if (prevMsgCount === 0 && !state.chatInitialRenderDone) {
+          if (pinningTurn) {
+            // 顶置模式：位置交给末尾的 applyChatTurnPin，这里只清未读、标记已渲染。
+            clearChatUnread({ removeDivider: true });
+            state.chatInitialRenderDone = true;
+          } else if (prevMsgCount === 0 && !state.chatInitialRenderDone) {
             chatMessages.scrollTop = 0;
             state.chatStickToBottom = true;
             clearChatUnread({ removeDivider: true });
@@ -535,7 +543,11 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           //   但浏览器的 scroll anchoring 在某些边界场景会把 scrollTop 调成非 0；
           //   这里显式拉回 0 做兜底，不用动画，不会让用户感觉"被甩"）。
           // - 用户已经滚上去 → 一根毛都不动他的视图，只把未读累到气泡里。
-          if (renderWasAtBottom) {
+          if (pinningTurn) {
+            // 顶置模式：新到的助手消息不累计未读，位置交给末尾的 applyChatTurnPin。
+            clearChatUnread({ removeDivider: true });
+            updateChatUnreadBubble();
+          } else if (renderWasAtBottom) {
             requestAnimationFrame(function() {
               if (chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
                 state.chatIsProgrammaticScroll = true;
@@ -597,7 +609,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
             // 自然出现在底部，用户上滚时视图也不受打扰——不需要再 smartScroll。
             requestAnimationFrame(function() {
               // 兜底：用户贴底时如果浏览器把 scrollTop 调成非零，拉回来。
-              if (renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
+              // 顶置模式下不碰 scrollTop，位置交给末尾的 applyChatTurnPin。
+              if (!pinningTurn && renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
                 state.chatIsProgrammaticScroll = true;
                 chatMessages.scrollTop = 0;
                 requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
@@ -632,6 +645,12 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
         // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
         applyHistoryCollapse(chatMessages);
+
+        // 顶置模式：在折叠历史、DOM diff 全部落定后，把最新用户消息钉到视口顶部。
+        // column-reverse 下助手回复增长会把锚点往上推，所以每帧渲染后都要重钉。
+        if (pinningTurn) {
+          requestAnimationFrame(function() { applyChatTurnPin(chatMessages); });
+        }
 
         // Update structured session status bar (in-flight / completed indicator)
         renderStructuredStatusBar(chatMessages, selectedSession);

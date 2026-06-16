@@ -236,12 +236,22 @@ export var state: AppState = {
   // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
   // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
   chatStickToBottom: true,
+  // ChatGPT 风格的"顶置最新轮次"：true = 把最新一条用户消息钉到视口顶部，
+  // 助手回复在其下方流式展开，更早的历史折叠成摘要卡。用户一旦手动滚动/滚轮/触摸
+  // 即释放此模式回到贴底。chatPinMinUserIndex 防止钉到比发送时更早的用户消息。
+  chatPinTurnToTop: false,
+  chatPinMinUserIndex: 0,
   chatUnreadCount: 0,
   // state.currentMessages 中第一条未读消息的 index，-1 表示没有未读。
   chatUnreadStartIndex: -1,
   // 业界共识 150-180px：120px 在触控板/移动端惯性下边界来回弹。
   chatScrollThreshold: 160,
   chatIsProgrammaticScroll: false,
+  // 程序触发滚动的"宽限期"时间戳：scrollTop 赋值后浏览器的 scroll 事件
+  // 往往晚于单个 rAF 才派发，单靠 chatIsProgrammaticScroll 在 rAF 里复位会
+  // 太早，导致 pin 自己的重定位被 scroll handler 误判成用户滚动而释放。
+  // 在此时间戳之前到达的 scroll 事件一律当作程序滚动忽略。
+  chatProgrammaticScrollUntil: 0,
   chatScrollElement: null,
   chatScrollHandler: null,
   chatScrollWheelHandler: null,

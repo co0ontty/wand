@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
+import { isRunningAsRoot } from "./env-utils.js";
 type StructuredRunnerOption = WandConfig["structuredRunner"];
 
 const DEFAULT_CONFIG_DIR = ".wand";
@@ -45,7 +46,12 @@ export const defaultConfig = (): WandConfig => ({
   port: 8443,
   https: false,
   password: "change-me",
-  defaultMode: "default",
+  // 非 root 启动时才有资格用 Claude 的 permission-bypass（root 会被 Claude CLI 拒绝），
+  // 所以这种环境下把默认执行模式抬到「托管」——开箱即得自动确认权限的全自主体验。
+  // root 启动则保守回落到「default」（托管在 root 下也只能降级成 acceptEdits）。
+  // 注意：defaultMode 是偏好字段，只存 SQLite、不写 config.json（见 stripPreferenceFields），
+  // 这里仅作为「用户从未在设置里显式选过模式」时的回落值——显式选择始终优先。
+  defaultMode: isRunningAsRoot() ? "default" : "managed",
   shell: process.env.SHELL || "/bin/bash",
   defaultCwd: process.cwd(),
   startupCommands: [],

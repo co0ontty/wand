@@ -3,7 +3,7 @@ import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
 import { computeRunningSignal, escapeHtml } from "./utils";
 import { renderChat, scheduleChatRender, shortCommand } from "./chat-render";
-import { bindChatScrollListener, clearStructuredQueuePersistence, getConfigCwd, getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, scrollChatToBottom, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
+import { bindChatScrollListener, clearStructuredQueuePersistence, getConfigCwd, getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, scrollChatToBottom, startChatTurnPin, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
 import { isMobileLayout, updateFilePanelCwd } from "./file-browser";
 import { loadGitStatus } from "./git-commit";
 import { showToast, wandConfirm, wandAlert, wandPrompt, openWandDialog, showError, hideError, sendBrowserNotification, _syncWakeLock } from "./notifications";
@@ -717,6 +717,11 @@ import { getSessionStatusLabel } from "./session-ui";
               return Promise.resolve();
             }
 
+            // ChatGPT 风格：PTY 路径下用户消息要等 ClaudePtyBridge 解析后才进
+            // currentMessages，所以用当前长度做下界——新回显到达后才会被钉，不会
+            // 误钉上一轮的旧用户消息。
+            startChatTurnPin(state.currentMessages.length);
+
             return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
               if (!readySession) {
                 // ensureSessionReadyForInput / resumeSession 已经在失败路径里
@@ -825,6 +830,12 @@ import { getSessionStatusLabel } from "./session-ui";
             structuredState: optimisticStructuredState,
           }), userMsgs);
           updateInputHint(isInterrupting ? "已中断，正在处理新消息…" : "思考中…");
+          // ChatGPT 风格：把刚发的用户消息钉到视口顶部，助手回复在其下方展开。
+          var pinUserIdx = -1;
+          for (var pi = state.currentMessages.length - 1; pi >= 0; pi--) {
+            if (state.currentMessages[pi] && state.currentMessages[pi].role === "user") { pinUserIdx = pi; break; }
+          }
+          startChatTurnPin(pinUserIdx >= 0 ? pinUserIdx : state.currentMessages.length);
           renderChat(true);
           // 中断模式：乐观给一条提示，让用户立刻知道"中断成功了"，否则跟 queue 一样会
           // 觉得"点了没反应"。原 toast 在 then() 里，等 SIGTERM/HTTP roundtrip 完才出。

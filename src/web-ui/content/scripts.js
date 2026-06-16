@@ -324,12 +324,22 @@
     // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
     // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
     chatStickToBottom: true,
+    // ChatGPT 风格的"顶置最新轮次"：true = 把最新一条用户消息钉到视口顶部，
+    // 助手回复在其下方流式展开，更早的历史折叠成摘要卡。用户一旦手动滚动/滚轮/触摸
+    // 即释放此模式回到贴底。chatPinMinUserIndex 防止钉到比发送时更早的用户消息。
+    chatPinTurnToTop: false,
+    chatPinMinUserIndex: 0,
     chatUnreadCount: 0,
     // state.currentMessages 中第一条未读消息的 index，-1 表示没有未读。
     chatUnreadStartIndex: -1,
     // 业界共识 150-180px：120px 在触控板/移动端惯性下边界来回弹。
     chatScrollThreshold: 160,
     chatIsProgrammaticScroll: false,
+    // 程序触发滚动的"宽限期"时间戳：scrollTop 赋值后浏览器的 scroll 事件
+    // 往往晚于单个 rAF 才派发，单靠 chatIsProgrammaticScroll 在 rAF 里复位会
+    // 太早，导致 pin 自己的重定位被 scroll handler 误判成用户滚动而释放。
+    // 在此时间戳之前到达的 scroll 事件一律当作程序滚动忽略。
+    chatProgrammaticScrollUntil: 0,
     chatScrollElement: null,
     chatScrollHandler: null,
     chatScrollWheelHandler: null,
@@ -649,9 +659,87 @@
     var chatContainer = document.getElementById("chat-output");
     if (chatContainer) chatContainer.classList.toggle("has-jump-btn", shouldShow);
   }
+  function startChatTurnPin(minUserIndex) {
+    state.chatPinTurnToTop = true;
+    state.chatPinMinUserIndex = typeof minUserIndex === "number" ? minUserIndex : 0;
+    state.chatStickToBottom = false;
+    clearChatUnread({ removeDivider: true });
+  }
+  function releaseChatTurnPin() {
+    if (!state.chatPinTurnToTop) return;
+    state.chatPinTurnToTop = false;
+    state.chatPinMinUserIndex = 0;
+    removeChatPinSpacer();
+  }
+  function getChatPinSpacer(el, create) {
+    var spacer = el.querySelector(".chat-pin-spacer");
+    if (!spacer && create) {
+      spacer = document.createElement("div");
+      spacer.className = "chat-pin-spacer";
+      spacer.setAttribute("aria-hidden", "true");
+      spacer.style.flex = "0 0 auto";
+      spacer.style.width = "100%";
+      spacer.style.height = "0px";
+      spacer.style.pointerEvents = "none";
+      el.insertBefore(spacer, el.firstChild);
+    }
+    return spacer || null;
+  }
+  function removeChatPinSpacer(chatMsgs) {
+    var el = chatMsgs || getChatScrollElement();
+    if (!el) return;
+    var spacer = el.querySelector(".chat-pin-spacer");
+    if (spacer && spacer.parentNode) spacer.parentNode.removeChild(spacer);
+  }
+  function applyChatTurnPin(chatMsgs) {
+    if (!state.chatPinTurnToTop) return false;
+    var el = chatMsgs || getChatScrollElement();
+    if (!el || !el.isConnected) return false;
+    var msgs = state.currentMessages || [];
+    var targetIdx = -1;
+    for (var i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i] && msgs[i].role === "user") {
+        targetIdx = i;
+        break;
+      }
+    }
+    if (targetIdx < 0 || targetIdx < state.chatPinMinUserIndex) return false;
+    var userEl = el.querySelector('.chat-message[data-msg-index="' + targetIdx + '"]');
+    if (!userEl) return false;
+    var PIN_TOP_OFFSET = 12;
+    var spacer = getChatPinSpacer(el, true);
+    if (spacer) spacer.style.height = "0px";
+    var bottomEl = null;
+    var children = el.children;
+    for (var c = 0; c < children.length; c++) {
+      if (!children[c].classList || !children[c].classList.contains("chat-pin-spacer")) {
+        bottomEl = children[c];
+        break;
+      }
+    }
+    if (bottomEl) {
+      var available = bottomEl.getBoundingClientRect().bottom - userEl.getBoundingClientRect().top;
+      var needed = el.clientHeight - PIN_TOP_OFFSET;
+      var spacerHeight = needed - available;
+      if (spacer) spacer.style.height = (spacerHeight > 0 ? Math.ceil(spacerHeight) : 0) + "px";
+    }
+    var containerTop = el.getBoundingClientRect().top;
+    var delta = userEl.getBoundingClientRect().top - containerTop - PIN_TOP_OFFSET;
+    if (Math.abs(delta) > 0.5) {
+      state.chatIsProgrammaticScroll = true;
+      state.chatProgrammaticScrollUntil = Date.now() + 350;
+      el.scrollTop += delta;
+      requestAnimationFrame(function() {
+        state.chatIsProgrammaticScroll = false;
+      });
+    }
+    return true;
+  }
   function scrollChatToBottom(smooth) {
     var chatMsgs = getChatScrollElement();
     if (!chatMsgs || !chatMsgs.isConnected) return;
+    releaseChatTurnPin();
+    removeChatPinSpacer(chatMsgs);
     state.chatIsProgrammaticScroll = true;
     var done = function() {
       state.chatIsProgrammaticScroll = false;
@@ -691,10 +779,11 @@
     state.chatScrollElement = chatMsgs;
     state.chatScrollHandler = function() {
       if (!chatMsgs.isConnected) return;
-      if (state.chatIsProgrammaticScroll) {
+      if (state.chatIsProgrammaticScroll || Date.now() < state.chatProgrammaticScrollUntil) {
         updateChatUnreadBubble();
         return;
       }
+      releaseChatTurnPin();
       var atBottom = isChatNearBottom(chatMsgs);
       if (atBottom) {
         state.chatStickToBottom = true;
@@ -707,6 +796,7 @@
     state.chatScrollWheelHandler = function(e) {
       if (state.chatIsProgrammaticScroll) return;
       if (e.deltaY < 0) {
+        releaseChatTurnPin();
         state.chatStickToBottom = false;
         updateChatUnreadBubble();
       }
@@ -720,6 +810,7 @@
       if (!e.touches || e.touches.length === 0) return;
       var deltaY = e.touches[0].clientY - state.chatTouchStartY;
       if (deltaY > 4) {
+        releaseChatTurnPin();
         state.chatStickToBottom = false;
         updateChatUnreadBubble();
       }
@@ -7804,6 +7895,8 @@
       state.chatUnreadCount = 0;
       state.chatUnreadStartIndex = -1;
       state.chatInitialRenderDone = false;
+      state.chatPinTurnToTop = false;
+      state.chatPinMinUserIndex = 0;
     }
   }
   function getEffectiveCwd3() {
@@ -9520,6 +9613,7 @@
           setDraftValue("");
           return Promise.resolve();
         }
+        startChatTurnPin(state.currentMessages.length);
         return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
           if (!readySession) {
             return null;
@@ -9603,6 +9697,14 @@
         structuredState: optimisticStructuredState
       }), userMsgs);
       updateInputHint(isInterrupting ? "\u5DF2\u4E2D\u65AD\uFF0C\u6B63\u5728\u5904\u7406\u65B0\u6D88\u606F\u2026" : "\u601D\u8003\u4E2D\u2026");
+      var pinUserIdx = -1;
+      for (var pi = state.currentMessages.length - 1; pi >= 0; pi--) {
+        if (state.currentMessages[pi] && state.currentMessages[pi].role === "user") {
+          pinUserIdx = pi;
+          break;
+        }
+      }
+      startChatTurnPin(pinUserIdx >= 0 ? pinUserIdx : state.currentMessages.length);
       renderChat(true);
       if (isInterrupting) {
         showToast2("\u5DF2\u4E2D\u65AD\u4E0A\u4E00\u6761\u56DE\u590D\uFF0C\u6B63\u5728\u5904\u7406\u65B0\u6D88\u606F\u2026", "info");
@@ -11578,6 +11680,7 @@
     chatMessages = ensureChatMessagesContainer(chatOutput);
     if (!chatMessages) return;
     var renderWasAtBottom = isChatNearBottom(chatMessages);
+    var pinningTurn = state.chatPinTurnToTop;
     var existingCount = chatMessages.querySelectorAll(".chat-message:not(.system-info)").length;
     var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
     function fullRenderChat() {
@@ -11630,7 +11733,10 @@
           msgEls[idx].setAttribute("data-msg-index", String(visibleOffset + totalVisible - 1 - idx));
         }
       })();
-      if (prevMsgCount === 0 && !state.chatInitialRenderDone) {
+      if (pinningTurn) {
+        clearChatUnread({ removeDivider: true });
+        state.chatInitialRenderDone = true;
+      } else if (prevMsgCount === 0 && !state.chatInitialRenderDone) {
         chatMessages.scrollTop = 0;
         state.chatStickToBottom = true;
         clearChatUnread({ removeDivider: true });
@@ -11761,7 +11867,10 @@
       attachAllCopyHandlers(chatMessages);
       applyPersistedExpandState(chatMessages);
       collapseOldToolCards(chatMessages, insertedEls);
-      if (renderWasAtBottom) {
+      if (pinningTurn) {
+        clearChatUnread({ removeDivider: true });
+        updateChatUnreadBubble();
+      } else if (renderWasAtBottom) {
         requestAnimationFrame(function() {
           if (chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
             state.chatIsProgrammaticScroll = true;
@@ -11808,7 +11917,7 @@
         bindChatScrollListener();
         applyPersistedExpandState(chatMessages);
         requestAnimationFrame(function() {
-          if (renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
+          if (!pinningTurn && renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
             state.chatIsProgrammaticScroll = true;
             chatMessages.scrollTop = 0;
             requestAnimationFrame(function() {
@@ -11838,6 +11947,11 @@
     }
     snapCollapsedSubagentPanelsToBottom2(chatMessages);
     applyHistoryCollapse(chatMessages);
+    if (pinningTurn) {
+      requestAnimationFrame(function() {
+        applyChatTurnPin(chatMessages);
+      });
+    }
     renderStructuredStatusBar(chatMessages, selectedSession);
     updateTodoProgress(allMessages);
   }

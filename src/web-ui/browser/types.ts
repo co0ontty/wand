@@ -13,6 +13,9 @@ export interface AppState {
   ws: WebSocket | null;
   wsConnected: boolean;
   chatStickToBottom: boolean;
+  chatPinTurnToTop: boolean;
+  chatPinMinUserIndex: number;
+  chatProgrammaticScrollUntil: number;
   chatUnreadCount: number;
   chatUnreadStartIndex: number;
   chatInitialRenderDone: boolean;
