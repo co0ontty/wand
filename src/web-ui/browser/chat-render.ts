@@ -630,6 +630,9 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // 展开态有自己的 scrollTop=0 逻辑（applyExpandedState），这里不会动它。
         snapCollapsedSubagentPanelsToBottom(chatMessages);
 
+        // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
+        applyHistoryCollapse(chatMessages);
+
         // Update structured session status bar (in-flight / completed indicator)
         renderStructuredStatusBar(chatMessages, selectedSession);
 
@@ -2024,6 +2027,162 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var chevron = el.querySelector(".tool-group-chevron");
         if (chevron) (chevron as HTMLElement).style.transform = expanded ? "" : "rotate(180deg)";
         persistElementExpandState(el, "tool-group");
+      };
+
+      // ── 历史折叠 ──
+      // 发新消息后，把"最后一条用户消息"之前的历史折叠成一张摘要卡，展示被折叠区间
+      // 里的轮次 / 工具调用 / 子代理 / 失败数量，点一下展开。做成 render 之后的「后处理」
+      // 而非改 fullRenderChat 的拼串逻辑——后者那套 column-reverse + 增量/流式 DOM diff
+      // 很脆弱。摘要卡不是 .chat-message，现有 querySelectorAll(".chat-message:not(.system-info)")
+      // 天然忽略它，计数 / 锚点 / 流式替换都不受影响。
+      export function computeHistoryStats(allMessages, historyIndices) {
+        var rounds = 0, tools = 0, errors = 0;
+        var agentIds = {};
+        for (var i = 0; i < historyIndices.length; i++) {
+          var msg = allMessages[historyIndices[i]];
+          if (!msg) continue;
+          if (msg.role === "user") rounds++;
+          var content = msg.content;
+          if (!Array.isArray(content)) continue;
+          for (var j = 0; j < content.length; j++) {
+            var block = content[j];
+            if (!block) continue;
+            if (block.__subagent && block.__subagent.taskId) agentIds[block.__subagent.taskId] = 1;
+            if (block.type === "tool_use") {
+              tools++;
+              var legacy = deriveLegacySubagent(block);
+              if (legacy && legacy.taskId) agentIds[legacy.taskId] = 1;
+            } else if (block.type === "tool_result" && block.is_error) {
+              errors++;
+            }
+          }
+        }
+        var agents = 0;
+        for (var k in agentIds) { if (Object.prototype.hasOwnProperty.call(agentIds, k)) agents++; }
+        return { rounds: rounds, tools: tools, agents: agents, errors: errors };
+      }
+
+      export function buildHistorySummaryMetaText(stats) {
+        var parts = [];
+        parts.push(t("history.rounds", { n: String(stats.rounds) }));
+        if (stats.tools > 0) parts.push(t("history.tools", { n: String(stats.tools) }));
+        if (stats.agents > 0) parts.push(t("history.agents", { n: String(stats.agents) }));
+        if (stats.errors > 0) parts.push(t("history.errors", { n: String(stats.errors) }));
+        return parts.join(" · ");
+      }
+
+      // 折叠态：隐藏摘要卡之后的所有兄弟（DOM 顺序 newest→oldest，摘要卡之后 = 历史区），
+      // 但保留「加载更早」哨兵可见。
+      export function applyHistoryHiddenState(summaryEl, expanded) {
+        var node = summaryEl.nextElementSibling;
+        while (node) {
+          if (!node.classList.contains("chat-load-more")) {
+            if (expanded) node.classList.remove("chat-history-hidden");
+            else node.classList.add("chat-history-hidden");
+          }
+          node = node.nextElementSibling;
+        }
+      }
+
+      export function applyHistoryCollapse(chatMessages) {
+        if (!chatMessages) return;
+        var allMessages = state.currentMessages || [];
+        var lastUserIdx = -1;
+        for (var i = allMessages.length - 1; i >= 0; i--) {
+          if (allMessages[i] && allMessages[i].role === "user") { lastUserIdx = i; break; }
+        }
+
+        function clearAll() {
+          var prev = chatMessages.querySelector(".chat-history-summary");
+          if (prev) prev.remove();
+          var hidden = chatMessages.querySelectorAll(".chat-history-hidden");
+          for (var h = 0; h < hidden.length; h++) hidden[h].classList.remove("chat-history-hidden");
+          chatMessages.removeAttribute("data-history-sig");
+        }
+
+        // 没有"最后一条用户消息之前的历史"就不折叠。
+        if (lastUserIdx < 1) { clearAll(); return; }
+
+        // 收集已渲染的历史消息元素（data-msg-index < boundary）。
+        var msgEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
+        var historyIndices = [];
+        var firstHistoryEl = null;
+        for (var m = 0; m < msgEls.length; m++) {
+          var idxAttr = msgEls[m].getAttribute("data-msg-index");
+          if (idxAttr == null) continue;
+          var idx = parseInt(idxAttr, 10);
+          if (isNaN(idx)) continue;
+          if (idx < lastUserIdx) {
+            historyIndices.push(idx);
+            // DOM 顺序 newest→oldest：第一个命中的就是 DOM 里最靠前的历史元素。
+            if (!firstHistoryEl) firstHistoryEl = msgEls[m];
+          }
+        }
+        // 至少折叠一整轮（≥2 条历史 turn）才值得出摘要，避免折叠孤零零一条短消息。
+        if (historyIndices.length < 2 || !firstHistoryEl) { clearAll(); return; }
+
+        var stats = computeHistoryStats(allMessages, historyIndices);
+        var key = buildExpandKey("history-summary", [lastUserIdx]);
+        var expanded = getPersistedExpandState(key) === true;
+        var sig = lastUserIdx + ":" + historyIndices.length + ":" + (expanded ? 1 : 0) +
+          ":" + stats.rounds + ":" + stats.tools + ":" + stats.agents + ":" + stats.errors;
+
+        // 签名未变且摘要卡还在 → 跳过，避免流式高频重建闪烁。
+        if (chatMessages.getAttribute("data-history-sig") === sig &&
+            chatMessages.querySelector(".chat-history-summary")) {
+          return;
+        }
+
+        // 重建：移除旧卡 + 清隐藏标记。
+        var prevCard = chatMessages.querySelector(".chat-history-summary");
+        if (prevCard) prevCard.remove();
+        var prevHidden = chatMessages.querySelectorAll(".chat-history-hidden");
+        for (var ph = 0; ph < prevHidden.length; ph++) prevHidden[ph].classList.remove("chat-history-hidden");
+
+        var metaText = buildHistorySummaryMetaText(stats);
+        var titleText = expanded ? t("history.collapse") : t("history.expand");
+        var summary = document.createElement("div");
+        summary.className = "chat-history-summary";
+        summary.setAttribute("data-expand-key", key);
+        summary.setAttribute("data-expanded", expanded ? "true" : "false");
+        summary.innerHTML =
+          '<button class="chat-history-summary-btn" type="button" onclick="window.__historySummaryToggle(this)" aria-expanded="' + (expanded ? "true" : "false") + '">' +
+            '<span class="chat-history-summary-icon">' + iconSvg("folder", { size: 15 }) + '</span>' +
+            '<span class="chat-history-summary-body">' +
+              '<span class="chat-history-summary-title">' + escapeHtml(titleText) + '</span>' +
+              '<span class="chat-history-summary-meta">' + escapeHtml(metaText) + '</span>' +
+            '</span>' +
+            '<span class="chat-history-summary-chevron">' + iconSvg("chevronDown", { size: 16 }) + '</span>' +
+          '</button>';
+
+        chatMessages.insertBefore(summary, firstHistoryEl);
+        applyHistoryHiddenState(summary, expanded);
+        chatMessages.setAttribute("data-history-sig", sig);
+      }
+
+      window.__historySummaryToggle = function(btn) {
+        var wrap = btn && btn.closest ? btn.closest(".chat-history-summary") : null;
+        if (!wrap) return;
+        var key = wrap.getAttribute("data-expand-key");
+        var nowExpanded = wrap.getAttribute("data-expanded") !== "true";
+        wrap.setAttribute("data-expanded", nowExpanded ? "true" : "false");
+        btn.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
+        var title = wrap.querySelector(".chat-history-summary-title");
+        if (title) title.textContent = nowExpanded ? t("history.collapse") : t("history.expand");
+        if (key) setPersistedExpandState(key, nowExpanded);
+        applyHistoryHiddenState(wrap, nowExpanded);
+        // 同步父容器签名里的 expanded 段，避免下一次 render 因签名不符整卡重建（会闪一下）。
+        var container = wrap.parentElement;
+        if (container) {
+          var sig = container.getAttribute("data-history-sig");
+          if (sig) {
+            var segs = sig.split(":");
+            if (segs.length >= 3) {
+              segs[2] = nowExpanded ? "1" : "0";
+              container.setAttribute("data-history-sig", segs.join(":"));
+            }
+          }
+        }
       };
 
       // 老消息（SQLite 历史 turn）后端还没盖章。前端给 name === "Task"/"Agent"

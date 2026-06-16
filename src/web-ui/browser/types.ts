@@ -85,6 +85,7 @@ declare global {
     QRCodeLib?: any;
     _onNativePermissionResult?: (result: string) => void;
     __toolGroupToggle?: (el: HTMLElement) => void;
+    __historySummaryToggle?: (btn: HTMLElement) => void;
     __queueDelegated?: boolean;
     readonly visualViewport: VisualViewport | null;
   }

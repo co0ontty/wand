@@ -438,6 +438,12 @@
       "ui.collapse": "\u6536\u8D77",
       "ui.expand_panel_aria": "\u5C55\u5F00\u5B50\u4EE3\u7406\u8F93\u51FA",
       "ui.collapse_panel_aria": "\u6536\u8D77\u5B50\u4EE3\u7406\u8F93\u51FA",
+      "history.expand": "\u5C55\u5F00\u5386\u53F2\u5BF9\u8BDD",
+      "history.collapse": "\u6536\u8D77\u5386\u53F2\u5BF9\u8BDD",
+      "history.rounds": "{n} \u8F6E\u5BF9\u8BDD",
+      "history.tools": "{n} \u6B21\u5DE5\u5177\u8C03\u7528",
+      "history.agents": "{n} \u4E2A\u5B50\u4EE3\u7406",
+      "history.errors": "{n} \u4E2A\u5931\u8D25",
       "stop.confirm.title": "\u505C\u6B62\u4EFB\u52A1",
       "stop.confirm.message": "\u786E\u5B9A\u8981\u505C\u6B62\u5F53\u524D\u6B63\u5728\u8FD0\u884C\u7684\u4EFB\u52A1\u5417\uFF1F",
       "stop.confirm.ok": "\u505C\u6B62",
@@ -459,6 +465,12 @@
       "ui.collapse": "Collapse",
       "ui.expand_panel_aria": "Expand subagent output",
       "ui.collapse_panel_aria": "Collapse subagent output",
+      "history.expand": "Show earlier conversation",
+      "history.collapse": "Hide earlier conversation",
+      "history.rounds": "{n} rounds",
+      "history.tools": "{n} tool calls",
+      "history.agents": "{n} subagents",
+      "history.errors": "{n} failed",
       "stop.confirm.title": "Stop task",
       "stop.confirm.message": "Stop the task that's currently running?",
       "stop.confirm.ok": "Stop",
@@ -11825,6 +11837,7 @@
       fullRenderChat();
     }
     snapCollapsedSubagentPanelsToBottom2(chatMessages);
+    applyHistoryCollapse(chatMessages);
     renderStructuredStatusBar(chatMessages, selectedSession);
     updateTodoProgress(allMessages);
   }
@@ -12928,6 +12941,135 @@
     var chevron = el.querySelector(".tool-group-chevron");
     if (chevron) chevron.style.transform = expanded ? "" : "rotate(180deg)";
     persistElementExpandState(el, "tool-group");
+  };
+  function computeHistoryStats(allMessages, historyIndices) {
+    var rounds = 0, tools = 0, errors = 0;
+    var agentIds = {};
+    for (var i = 0; i < historyIndices.length; i++) {
+      var msg = allMessages[historyIndices[i]];
+      if (!msg) continue;
+      if (msg.role === "user") rounds++;
+      var content = msg.content;
+      if (!Array.isArray(content)) continue;
+      for (var j = 0; j < content.length; j++) {
+        var block = content[j];
+        if (!block) continue;
+        if (block.__subagent && block.__subagent.taskId) agentIds[block.__subagent.taskId] = 1;
+        if (block.type === "tool_use") {
+          tools++;
+          var legacy = deriveLegacySubagent(block);
+          if (legacy && legacy.taskId) agentIds[legacy.taskId] = 1;
+        } else if (block.type === "tool_result" && block.is_error) {
+          errors++;
+        }
+      }
+    }
+    var agents = 0;
+    for (var k in agentIds) {
+      if (Object.prototype.hasOwnProperty.call(agentIds, k)) agents++;
+    }
+    return { rounds, tools, agents, errors };
+  }
+  function buildHistorySummaryMetaText(stats) {
+    var parts = [];
+    parts.push(t2("history.rounds", { n: String(stats.rounds) }));
+    if (stats.tools > 0) parts.push(t2("history.tools", { n: String(stats.tools) }));
+    if (stats.agents > 0) parts.push(t2("history.agents", { n: String(stats.agents) }));
+    if (stats.errors > 0) parts.push(t2("history.errors", { n: String(stats.errors) }));
+    return parts.join(" \xB7 ");
+  }
+  function applyHistoryHiddenState(summaryEl, expanded) {
+    var node = summaryEl.nextElementSibling;
+    while (node) {
+      if (!node.classList.contains("chat-load-more")) {
+        if (expanded) node.classList.remove("chat-history-hidden");
+        else node.classList.add("chat-history-hidden");
+      }
+      node = node.nextElementSibling;
+    }
+  }
+  function applyHistoryCollapse(chatMessages) {
+    if (!chatMessages) return;
+    var allMessages = state.currentMessages || [];
+    var lastUserIdx = -1;
+    for (var i = allMessages.length - 1; i >= 0; i--) {
+      if (allMessages[i] && allMessages[i].role === "user") {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    function clearAll() {
+      var prev = chatMessages.querySelector(".chat-history-summary");
+      if (prev) prev.remove();
+      var hidden = chatMessages.querySelectorAll(".chat-history-hidden");
+      for (var h = 0; h < hidden.length; h++) hidden[h].classList.remove("chat-history-hidden");
+      chatMessages.removeAttribute("data-history-sig");
+    }
+    if (lastUserIdx < 1) {
+      clearAll();
+      return;
+    }
+    var msgEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
+    var historyIndices = [];
+    var firstHistoryEl = null;
+    for (var m = 0; m < msgEls.length; m++) {
+      var idxAttr = msgEls[m].getAttribute("data-msg-index");
+      if (idxAttr == null) continue;
+      var idx = parseInt(idxAttr, 10);
+      if (isNaN(idx)) continue;
+      if (idx < lastUserIdx) {
+        historyIndices.push(idx);
+        if (!firstHistoryEl) firstHistoryEl = msgEls[m];
+      }
+    }
+    if (historyIndices.length < 2 || !firstHistoryEl) {
+      clearAll();
+      return;
+    }
+    var stats = computeHistoryStats(allMessages, historyIndices);
+    var key = buildExpandKey("history-summary", [lastUserIdx]);
+    var expanded = getPersistedExpandState(key) === true;
+    var sig = lastUserIdx + ":" + historyIndices.length + ":" + (expanded ? 1 : 0) + ":" + stats.rounds + ":" + stats.tools + ":" + stats.agents + ":" + stats.errors;
+    if (chatMessages.getAttribute("data-history-sig") === sig && chatMessages.querySelector(".chat-history-summary")) {
+      return;
+    }
+    var prevCard = chatMessages.querySelector(".chat-history-summary");
+    if (prevCard) prevCard.remove();
+    var prevHidden = chatMessages.querySelectorAll(".chat-history-hidden");
+    for (var ph = 0; ph < prevHidden.length; ph++) prevHidden[ph].classList.remove("chat-history-hidden");
+    var metaText = buildHistorySummaryMetaText(stats);
+    var titleText = expanded ? t2("history.collapse") : t2("history.expand");
+    var summary = document.createElement("div");
+    summary.className = "chat-history-summary";
+    summary.setAttribute("data-expand-key", key);
+    summary.setAttribute("data-expanded", expanded ? "true" : "false");
+    summary.innerHTML = '<button class="chat-history-summary-btn" type="button" onclick="window.__historySummaryToggle(this)" aria-expanded="' + (expanded ? "true" : "false") + '"><span class="chat-history-summary-icon">' + iconSvg("folder", { size: 15 }) + '</span><span class="chat-history-summary-body"><span class="chat-history-summary-title">' + escapeHtml2(titleText) + '</span><span class="chat-history-summary-meta">' + escapeHtml2(metaText) + '</span></span><span class="chat-history-summary-chevron">' + iconSvg("chevronDown", { size: 16 }) + "</span></button>";
+    chatMessages.insertBefore(summary, firstHistoryEl);
+    applyHistoryHiddenState(summary, expanded);
+    chatMessages.setAttribute("data-history-sig", sig);
+  }
+  window.__historySummaryToggle = function(btn) {
+    var wrap = btn && btn.closest ? btn.closest(".chat-history-summary") : null;
+    if (!wrap) return;
+    var key = wrap.getAttribute("data-expand-key");
+    var nowExpanded = wrap.getAttribute("data-expanded") !== "true";
+    wrap.setAttribute("data-expanded", nowExpanded ? "true" : "false");
+    btn.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
+    var title = wrap.querySelector(".chat-history-summary-title");
+    if (title) title.textContent = nowExpanded ? t2("history.collapse") : t2("history.expand");
+    if (key) setPersistedExpandState(key, nowExpanded);
+    applyHistoryHiddenState(wrap, nowExpanded);
+    var container = wrap.parentElement;
+    if (container) {
+      var sig = container.getAttribute("data-history-sig");
+      if (sig) {
+        var segs = sig.split(":");
+        if (segs.length >= 3) {
+          segs[2] = nowExpanded ? "1" : "0";
+          container.setAttribute("data-history-sig", segs.join(":"));
+        }
+      }
+    }
   };
   function deriveLegacySubagent(block) {
     if (!block || block.type !== "tool_use") return null;

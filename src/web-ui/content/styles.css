@@ -5146,6 +5146,82 @@
     }
 
     /* ──────────────────────────────────────────────────────────────
+       History collapse — summary divider folding earlier rounds
+       发新消息后，"最后一条用户消息"之前的历史折叠成这张摘要卡。
+       折叠的历史消息元素挂 .chat-history-hidden（display:none）。
+       ────────────────────────────────────────────────────────────── */
+    .chat-history-hidden { display: none !important; }
+    .chat-history-summary {
+      width: 100%;
+      max-width: var(--chat-card-max-width, 720px);
+      margin: 10px auto;
+      box-sizing: border-box;
+    }
+    .chat-history-summary-btn {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      padding: 7px 12px;
+      box-sizing: border-box;
+      border-radius: var(--radius-full, 999px);
+      border: 1px solid var(--border-subtle);
+      background: linear-gradient(180deg, rgba(255, 251, 245, 0.9) 0%, rgba(255, 247, 236, 0.78) 100%);
+      box-shadow: 0 1px 2px rgba(89, 58, 32, 0.04);
+      cursor: pointer;
+      text-align: left;
+      color: var(--text-secondary);
+      font: inherit;
+      transition: border-color 0.18s ease, box-shadow 0.22s ease, background 0.18s ease;
+    }
+    .chat-history-summary-btn:hover {
+      border-color: rgba(125, 91, 57, 0.2);
+      box-shadow: 0 2px 8px rgba(89, 58, 32, 0.06);
+      background: linear-gradient(180deg, rgba(255, 250, 243, 0.95) 0%, rgba(255, 245, 232, 0.85) 100%);
+    }
+    .chat-history-summary-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: var(--text-muted);
+      opacity: 0.75;
+    }
+    .chat-history-summary-body {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      flex: 1;
+      min-width: 0;
+    }
+    .chat-history-summary-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.005em;
+    }
+    .chat-history-summary-meta {
+      font-size: 0.6875rem;
+      color: var(--text-tertiary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .chat-history-summary-chevron {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      color: var(--text-muted);
+      opacity: 0.6;
+      transition: transform 0.25s var(--ease-out-expo);
+    }
+    .chat-history-summary-btn:hover .chat-history-summary-chevron { opacity: 1; }
+    .chat-history-summary[data-expanded="true"] .chat-history-summary-chevron {
+      transform: rotate(180deg);
+    }
+
+    /* ──────────────────────────────────────────────────────────────
        Inline Tool — single read-only row (Read / Glob / Grep / Web*)
        Clean two-column layout: icon + title | meta. Hover lifts subtly.
        ────────────────────────────────────────────────────────────── */
