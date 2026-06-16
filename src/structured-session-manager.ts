@@ -463,6 +463,12 @@ export class StructuredSessionManager {
   private readonly pendingSdkQueries = new Map<string, { interrupt(): Promise<void> }>();
   private readonly interruptedWith = new Map<string, string>();
   /**
+   * 用户主动点了「停止」的会话。异步收尾（claude -p / codex 的 close、SDK 的 abort）
+   * 据此跳过"结构化会话执行失败"路径——主动停止不是失败，按正常 idle 收尾、保留历史内容。
+   * 用 Set.delete 消费：读取的同时清除，下一轮真失败不会被旧标记误抑制。
+   */
+  private readonly userStopped = new Set<string>();
+  /**
    * Sessions where the current interrupt is a "queue promote" (用户从排队条点了「立即」
    * 把队首插队到 now)。退出处理三个分支默认会把 queuedMessages 清空——因为常规的
    * interrupt 语义是"算了，做这个"，把队列也作废。但 queue-promote 的语义是
@@ -1054,6 +1060,9 @@ export class StructuredSessionManager {
     const session = this.requireSession(id);
     this.interruptedWith.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
+    // 标记本会话为「用户主动停止」，让被 kill 的子进程 close / SDK abort 收尾时
+    // 走正常 idle 收尾而不是失败路径。
+    this.userStopped.add(id);
     const child = this.pendingChildren.get(id);
     if (child) {
       child.kill();
@@ -1071,22 +1080,27 @@ export class StructuredSessionManager {
       sdkAbort.abort();
       this.pendingSdkAbort.delete(id);
     }
-    const stopped: SessionSnapshot = {
+    // 主动停止只是取消「当前回合」，结构化会话本身并没有结束——置为 idle 而非 stopped。
+    // 这样前端不会进入"会话已结束/恢复会话"终止态，输入框保持可用，直接展示历史内容。
+    const cancelled: SessionSnapshot = {
       ...session,
-      status: "stopped",
-      endedAt: new Date().toISOString(),
+      status: "idle",
+      exitCode: null,
+      endedAt: null,
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
         ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
         inFlight: false,
         activeRequestId: null,
+        lastError: null,
       },
     };
-    this.sessions.set(id, stopped);
-    this.storage.saveSession(stopped);
-      this.emitStructuredSnapshot(stopped, "ended");
-    return stopped;
+    this.sessions.set(id, cancelled);
+    this.storage.saveSession(cancelled);
+    // 仍发 "ended" 事件让各端停掉"回复中"指示 / 灵动岛，但携带的 status 是 idle。
+    this.emitStructuredSnapshot(cancelled, "ended");
+    return cancelled;
   }
 
   delete(id: string): void {
@@ -1240,6 +1254,7 @@ export class StructuredSessionManager {
   // ---------------------------------------------------------------------------
 
   private runCodexStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
+    this.userStopped.delete(sessionId);
     return new Promise<void>((resolve, reject) => {
       const args = this.buildCodexArgs(session);
       const spawnedAt = new Date().toISOString();
@@ -1439,10 +1454,12 @@ export class StructuredSessionManager {
         // 主动中断时（interruptedWith 里有新消息），不走失败路径
         const interruptedByUser = this.interruptedWith.has(sessionId);
         const interruptPrompt = this.interruptedWith.get(sessionId);
+        // 用户点「停止」kill 掉 codex 后会非零退出，但这不是失败——按正常 idle 收尾。
+        const userStopped = this.userStopped.delete(sessionId);
         // codex 把模型/网络/沙箱等错误写到 stdout 的 NDJSON 流（type: error / turn.failed），
         // 而不是 stderr。我们以 turn.failed 的 message 为准，其次是最后一个 error 事件。
         const codexFailed = codexTurnFailed !== null;
-        if ((codexFailed || (code !== 0 && code !== null) || signal) && !interruptedByUser) {
+        if ((codexFailed || (code !== 0 && code !== null) || signal) && !interruptedByUser && !userStopped) {
           const errorText = this.formatStructuredExitError("codex exec", code, signal, {
             stderr,
             primary: codexTurnFailed,
@@ -1538,6 +1555,7 @@ export class StructuredSessionManager {
    *   outside CWD). stdin is always "ignore" — no ACP bidirectional control.
    */
   private runClaudeStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
+    this.userStopped.delete(sessionId);
     return new Promise<void>((resolve, reject) => {
       const args = ["-p", "--verbose", "--output-format", "stream-json"];
 
@@ -1996,8 +2014,10 @@ export class StructuredSessionManager {
         // 可能以非零 exit code 退出（内部 handler 调了 exit(1)）。这种情况属于正常
         // 中断流程，不应走失败路径——后续 interruptedWith 逻辑会发送新消息。
         const interruptedByUser = this.interruptedWith.has(sessionId);
+        // 用户点「停止」kill 掉 claude -p 后会非零退出，但这不是失败——按正常 idle 收尾。
+        const userStopped = this.userStopped.delete(sessionId);
         const failedExit = (code !== null && code !== 0) || signal !== null;
-        if (failedExit && !interruptedByUser) {
+        if (failedExit && !interruptedByUser && !userStopped) {
           const errorText = this.formatStructuredExitError("claude -p", code, signal, {
             stderr,
             // claude -p 没有 codex 那种独立的 turn.failed 事件，所以 primary 留空；
@@ -2156,6 +2176,7 @@ export class StructuredSessionManager {
    * SDKAssistantMessage with the authoritative complete content.
    */
   private async runClaudeSdkStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
+    this.userStopped.delete(sessionId);
     const abortController = new AbortController();
     this.pendingSdkAbort.set(sessionId, abortController);
 
@@ -2568,6 +2589,8 @@ export class StructuredSessionManager {
     this.pendingSdkAbort.delete(sessionId);
     this.pendingSdkQueries.delete(sessionId);
     this.lastStreamSaveAt.delete(sessionId);
+    // SDK abort 收尾本就走 idle（不产生失败串），这里只是顺手清掉用户停止标记避免泄漏。
+    this.userStopped.delete(sessionId);
     if (emitTimer) clearTimeout(emitTimer);
     flushEmit();
 

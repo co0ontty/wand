@@ -1296,6 +1296,21 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
           // time (hard-coded 120x36). Remeasure against the real container
           // so wterm reflows the just-written history to the correct cols.
           ensureTerminalFit("mount", { forceReplay: true });
+
+          // 原生壳（embed=terminal）直接打开 PTY 时，WebView 的最终布局尺寸常常在
+          // 首屏 mount 之后才稳定下来（Compose padding / 安全区 inset / webfont 落地）。
+          // 那次 "mount" fit 可能量到的是过渡尺寸；之后窗口尺寸不再变化，window.resize /
+          // visualViewport / ResizeObserver 都不会再 fire——首屏 cols 就卡在错值上，
+          // 表现为"刚进终端列宽错乱、要弹键盘/转屏才正常"。这里在 embed 模式下补几拍
+          // 延迟重测，把 bridge 校准到稳定后的真实尺寸。ensureTerminalFit 自带"尺寸没变
+          // 就不动"的护栏，量到正确值后这些补测都是 no-op，不会额外闪烁。仅 embed 生效。
+          if (document.documentElement.classList.contains("is-wand-embed-terminal")) {
+            [120, 350, 700].forEach(function(delay: number) {
+              setTimeout(function() {
+                if (state.terminal) ensureTerminalFit("embed-settle");
+              }, delay);
+            });
+          }
         }).catch(function(err) {
           state.terminalInitializing = false;
           console.error("[wand] wterm init failed:", err);

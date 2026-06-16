@@ -6512,6 +6512,13 @@
       observeTerminalResize();
       startTerminalHealthCheck();
       ensureTerminalFit2("mount", { forceReplay: true });
+      if (document.documentElement.classList.contains("is-wand-embed-terminal")) {
+        [120, 350, 700].forEach(function(delay) {
+          setTimeout(function() {
+            if (state.terminal) ensureTerminalFit2("embed-settle");
+          }, delay);
+        });
+      }
     }).catch(function(err) {
       state.terminalInitializing = false;
       console.error("[wand] wterm init failed:", err);
