@@ -5146,6 +5146,89 @@
     }
 
     /* ──────────────────────────────────────────────────────────────
+       Auto-fold bar — compact latest-turn preview above chat messages.
+       内容超出一屏时，最新用户消息和最新回复的预览固定在顶部；真实消息仍留在
+       .chat-messages 里，避免破坏滚动锚点和增量渲染。
+       ────────────────────────────────────────────────────────────── */
+    .chat-fold-bar {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 112px;
+      overflow: hidden;
+      padding: 8px 4px 7px;
+      box-sizing: border-box;
+      border-bottom: 1px solid var(--border-subtle);
+      background: linear-gradient(180deg, rgba(255, 252, 248, 0.96) 0%, rgba(255, 250, 244, 0.92) 100%);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 4px 12px -8px rgba(89, 58, 32, 0.18);
+    }
+    .chat-fold-bar.hidden { display: none; }
+    .chat-fold-row {
+      width: min(100%, var(--chat-card-max-width, 720px));
+      min-height: 30px;
+      margin: 0 auto;
+      padding: 5px 10px;
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      border-radius: var(--radius-md, 8px);
+      background: rgba(255, 255, 255, 0.62);
+      color: var(--text-primary);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      box-sizing: border-box;
+    }
+    .chat-fold-row:hover {
+      border-color: rgba(125, 91, 57, 0.2);
+      background: rgba(255, 255, 255, 0.82);
+    }
+    .chat-fold-role {
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .chat-fold-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.78rem;
+      line-height: 1.25;
+    }
+    .chat-container.auto-fold .chat-messages {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    @media (max-width: 768px) {
+      .chat-fold-bar {
+        max-height: 96px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+      }
+      .chat-fold-row {
+        min-height: 28px;
+        grid-template-columns: 44px minmax(0, 1fr);
+        padding: 4px 8px;
+      }
+      .chat-fold-role {
+        font-size: 0.68rem;
+      }
+      .chat-fold-text {
+        font-size: 0.74rem;
+      }
+    }
+    /* 自动折叠的横条里"虚拟占位条"：当最新一轮还没有内容时不挂横条但保留一根 0 高的
+       元素，方便 JS 计算何时触发折叠。 */
+    .chat-fold-bar-spacer { display: none; }
+
+    /* ──────────────────────────────────────────────────────────────
        History collapse — summary divider folding earlier rounds
        发新消息后，"最后一条用户消息"之前的历史折叠成这张摘要卡。
        折叠的历史消息元素挂 .chat-history-hidden（display:none）。

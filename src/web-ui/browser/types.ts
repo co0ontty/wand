@@ -15,6 +15,8 @@ export interface AppState {
   chatStickToBottom: boolean;
   chatPinTurnToTop: boolean;
   chatPinMinUserIndex: number;
+  chatAutoFoldEnabled: boolean;
+  chatAutoFoldSnapshot: { userIdx: number; assistantIdx: number } | null;
   chatProgrammaticScrollUntil: number;
   chatUnreadCount: number;
   chatUnreadStartIndex: number;

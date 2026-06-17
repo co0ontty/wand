@@ -241,6 +241,18 @@ export var state: AppState = {
   // 即释放此模式回到贴底。chatPinMinUserIndex 防止钉到比发送时更早的用户消息。
   chatPinTurnToTop: false,
   chatPinMinUserIndex: 0,
+  // ===== 自动折叠（"横条 + 一屏"）=====
+  // true（默认）= 当聊天内容超出一屏时，把"最后一条用户消息 + 最新一条助手消息"
+  // 的紧凑预览固定在输出框顶部，下方滚动区填满剩余屏幕。
+  // 持久化到 localStorage（键 wand-chat-auto-fold）。
+  chatAutoFoldEnabled: (function() {
+    try {
+      var v = localStorage.getItem("wand-chat-auto-fold");
+      return v === null ? true : v === "true";
+    } catch (e) { return true; }
+  })(),
+  // 当前会话视图里"激活的折叠快照"，记录顶部预览对应的最新 user / assistant 索引。
+  chatAutoFoldSnapshot: null,
   chatUnreadCount: 0,
   // state.currentMessages 中第一条未读消息的 index，-1 表示没有未读。
   chatUnreadStartIndex: -1,

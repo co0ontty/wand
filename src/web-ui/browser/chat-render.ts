@@ -36,6 +36,9 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           renderChat();
           return;
         }
+        // 暴露给 chat-scroll 在用户滚动时主动触发一次 render
+        // （用来让 applyAutoFoldBar 重新决定是否折叠）。
+        try { (window as any).__scheduleChatRender = function() { scheduleChatRender(true); }; } catch (e) {}
         var selectedForDelay = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var isActiveStream = selectedForDelay && selectedForDelay.status === "running"
           && selectedForDelay.sessionKind !== "structured";
@@ -50,7 +53,6 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           renderChat();
         }, delay);
       }
-
       // Extract system info from PTY output that's not in structured messages
       export function extractPtySystemInfo(output, messages) {
         if (!output || !messages || messages.length === 0) return [];
@@ -645,6 +647,11 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
         // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
         applyHistoryCollapse(chatMessages);
+
+        // 自动折叠（"横条 + 一屏"）：当内容高度 > 一屏时，把最新一轮 user+assistant
+        // 的紧凑预览固定到输出框顶部。不要移动真实消息 DOM；滚动锚点、增量 diff、
+        // 未读分割线和历史折叠都依赖 .chat-messages 内的节点稳定存在。
+        applyAutoFoldBar(chatOutput, chatMessages, selectedSession, allMessages, renderWasAtBottom);
 
         // 顶置模式：在折叠历史、DOM diff 全部落定后，把最新用户消息钉到视口顶部。
         // column-reverse 下助手回复增长会把锚点往上推，所以每帧渲染后都要重钉。
@@ -2102,6 +2109,123 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           node = node.nextElementSibling;
         }
       }
+
+      // ===== 自动折叠横条（"横条 + 一屏"）=====
+      // 触发条件：聊天内容超出当前消息视口，且存在最新用户消息。顶部横条只渲染
+      // 最新一轮的紧凑预览，不搬动真实消息 DOM。这样最新输入/回复的入口常驻在
+      // 屏幕上方，下方 .chat-messages 继续负责一屏内容和真实滚动。
+      export function applyAutoFoldBar(chatOutput, chatMessages, selectedSession, allMessages, renderWasAtBottom) {
+        if (!chatOutput || !chatMessages) return;
+        if (!state.chatAutoFoldEnabled) {
+          setAutoFoldMode(chatOutput, chatMessages, false);
+          clearAutoFoldBar(chatOutput);
+          return;
+        }
+        var msgs = allMessages || state.currentMessages || [];
+        if (!msgs || msgs.length === 0) {
+          setAutoFoldMode(chatOutput, chatMessages, false);
+          clearAutoFoldBar(chatOutput);
+          return;
+        }
+
+        var lastUserIdx = -1;
+        for (var i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i] && msgs[i].role === "user") { lastUserIdx = i; break; }
+        }
+        if (lastUserIdx < 0) {
+          setAutoFoldMode(chatOutput, chatMessages, false);
+          clearAutoFoldBar(chatOutput);
+          return;
+        }
+
+        var assistantIdx = -1;
+        for (var j = msgs.length - 1; j > lastUserIdx; j--) {
+          if (msgs[j] && msgs[j].role === "assistant") { assistantIdx = j; break; }
+        }
+
+        var hostHeight = chatOutput.clientHeight || 0;
+        var viewportHeight = chatMessages.clientHeight || hostHeight;
+        var totalContentHeight = chatMessages.scrollHeight || 0;
+        var needsFold = hostHeight > 0 && totalContentHeight > viewportHeight + 24;
+        if (!needsFold) {
+          clearAutoFoldBar(chatOutput);
+          setAutoFoldMode(chatOutput, chatMessages, false);
+          return;
+        }
+
+        var foldBar = ensureFoldBar(chatOutput);
+        foldBar.innerHTML = buildAutoFoldBarHtml(msgs[lastUserIdx], assistantIdx >= 0 ? msgs[assistantIdx] : null);
+        foldBar.classList.remove("hidden");
+        setAutoFoldMode(chatOutput, chatMessages, true);
+        state.chatAutoFoldSnapshot = { userIdx: lastUserIdx, assistantIdx: assistantIdx };
+      }
+
+      function ensureFoldBar(chatOutput) {
+        var bar = chatOutput.querySelector("#chat-fold-bar");
+        if (bar) return bar;
+        bar = document.createElement("div");
+        bar.id = "chat-fold-bar";
+        bar.className = "chat-fold-bar hidden";
+        // 插到 chatOutput 的最前面（在 chat-unread-bubble 之前）
+        chatOutput.insertBefore(bar, chatOutput.firstChild);
+        return bar;
+      }
+
+      function setAutoFoldMode(chatOutput, chatMessages, enabled) {
+        if (!chatOutput) return;
+        chatOutput.classList.toggle("auto-fold", !!enabled);
+      }
+
+      function clearAutoFoldBar(chatOutput) {
+        if (!chatOutput) return;
+        var bar = chatOutput.querySelector("#chat-fold-bar");
+        if (!bar) return;
+        bar.innerHTML = "";
+        bar.classList.add("hidden");
+        state.chatAutoFoldSnapshot = null;
+      }
+
+      function buildAutoFoldBarHtml(userMsg, assistantMsg) {
+        var userPreview = getMessagePreviewText(userMsg) || "新消息";
+        var assistantPreview = assistantMsg ? getMessagePreviewText(assistantMsg) : "等待回复...";
+        return '<button type="button" class="chat-fold-row user" onclick="window.__chatFoldJumpToLatest && window.__chatFoldJumpToLatest()" title="定位到最新消息">' +
+            '<span class="chat-fold-role">我</span>' +
+            '<span class="chat-fold-text">' + escapeHtml(userPreview) + '</span>' +
+          '</button>' +
+          '<button type="button" class="chat-fold-row assistant" onclick="window.__chatFoldJumpToLatest && window.__chatFoldJumpToLatest()" title="定位到最新回复">' +
+            '<span class="chat-fold-role">Claude</span>' +
+            '<span class="chat-fold-text">' + escapeHtml(assistantPreview) + '</span>' +
+          '</button>';
+      }
+
+      function getMessagePreviewText(msg) {
+        if (!msg) return "";
+        var parts = [];
+        function pushText(value) {
+          if (typeof value !== "string") return;
+          var cleaned = value.replace(/\s+/g, " ").trim();
+          if (cleaned) parts.push(cleaned);
+        }
+        if (typeof msg.content === "string") {
+          pushText(msg.content);
+        } else if (Array.isArray(msg.content)) {
+          for (var i = 0; i < msg.content.length && parts.join(" ").length < 180; i++) {
+            var block = msg.content[i];
+            if (!block) continue;
+            if (block.type === "text") pushText(block.text);
+            else if (block.type === "thinking") pushText(block.thinking);
+            else if (block.type === "tool_use") pushText(block.name ? ("调用 " + block.name) : "工具调用");
+            else if (block.type === "tool_result") pushText(block.is_error ? "工具返回错误" : "工具返回结果");
+            else if (block.text) pushText(block.text);
+          }
+        }
+        var text = parts.join(" · ");
+        return text.length > 180 ? text.slice(0, 177) + "..." : text;
+      }
+
+      (window as any).__chatFoldJumpToLatest = function() {
+        scrollChatToBottom(true);
+      };
 
       export function applyHistoryCollapse(chatMessages) {
         if (!chatMessages) return;

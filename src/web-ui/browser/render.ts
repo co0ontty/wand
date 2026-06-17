@@ -690,6 +690,7 @@ export function renderAppShell() {
           '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
         '</div>' +
         '<div id="chat-output" class="chat-container hidden">' +
+          '<div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div>' +
           '<button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="回到最新消息" aria-label="回到最新消息">' +
             '<span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span>' +
             '<span class="chat-unread-bubble-count" aria-hidden="true"></span>' +
