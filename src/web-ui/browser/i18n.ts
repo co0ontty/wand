@@ -103,6 +103,8 @@ export var ICON_PATHS: Record<string, string> = {
   // shape sets — 24x24 viewbox, currentColor stroke
   shield:    '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   shieldCheck: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
+  cpu:       '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 15h3"/><path d="M1 9h3"/><path d="M1 15h3"/><rect x="10" y="10" width="4" height="4" rx="1"/>',
+  brain:     '<path d="M9.5 4.5a3 3 0 0 0-4.7 3.1 3.3 3.3 0 0 0 .3 6.1A3 3 0 0 0 8 19h1.5V4.5z"/><path d="M14.5 4.5a3 3 0 0 1 4.7 3.1 3.3 3.3 0 0 1-.3 6.1A3 3 0 0 1 16 19h-1.5V4.5z"/><path d="M9.5 8H7.8"/><path d="M14.5 8h1.7"/><path d="M9.5 13H7.6"/><path d="M14.5 13h1.9"/>',
   keyboard:  '<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="6" y1="14" x2="6" y2="14"/><line x1="18" y1="14" x2="18" y2="14"/><line x1="9" y1="14" x2="15" y2="14"/>',
   terminal:  '<polyline points="4 7 9 12 4 17"/><line x1="12" y1="17" x2="20" y2="17"/>',
   chat:      '<path d="M21 12a8 8 0 0 1-12.9 6.3L3 20l1.7-5.1A8 8 0 1 1 21 12z"/>',

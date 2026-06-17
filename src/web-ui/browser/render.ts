@@ -8,7 +8,7 @@ import { shouldShowSessionsBackdrop, isMobileLayout, refreshFileExplorer, render
 import { loadGitStatus, renderTopbarGitBadgeHtml, renderWorktreeMergeModal, renderSettingsModal, renderQuickCommitModal, renderTopbarMoreMenuHtml } from "./git-commit";
 import { getSelectedSession, updateInteractiveControls } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderChatModeTrioHtml, syncComposerModeSelect, syncComposerModelSelect, syncSessionModalUI, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
+import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, syncSessionModalUI, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
 import { renderSessionModal, getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
 import { renderSessionsListContent, renderSessions, loadClaudeHistory, ensureClaudeHistoryLoaded } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
@@ -786,6 +786,9 @@ export function renderAppShell() {
                 '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
                 // 语音按钮已暂时隐藏（按住说话交互保留，等接 STT 后再放出）；终端交互按钮搬进了 popover。
               '</div>' +
+              '<div class="composer-inline-config">' +
+                renderComposerConfigControlsHtml(selectedSession) +
+              '</div>' +
               '<div class="composer-input-wrap">' +
                 '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
                 // 提示词优化按钮 —— 浮在输入区右侧（在 send 按钮的「左边」，不再撞车）。
@@ -841,14 +844,13 @@ export function renderAppShell() {
               '<span class="plus-popover-label">终端交互</span>' +
               '<span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "开" : "关") + '</span>' +
             '</button>' +
-            // 三件套：复用 renderChatModeTrioHtml 的 select 委托链，
-            // 用 kind:"popover" 由 CSS 切到纵向列表。对所有会话都展示——
+            // 模式 + 模型/思考：复用 data-mode-control 的 select 委托链。
+            // 对所有会话都展示——
             // PTY 会话当前进程的 mode/model/thinking 改不了，但 state 变更会
-            // 影响"新建会话"的默认值，所以露出来仍有意义；省去的话用户会困惑
-            // "为什么我点开加号没看到这三个开关"。
+            // 影响"新建会话"的默认值，所以露出来仍有意义。
             '<div class="plus-popover-sep" aria-hidden="true"></div>' +
             '<div class="plus-popover-trio-wrap">' +
-              renderChatModeTrioHtml(selectedSession, { kind: "popover" }) +
+              renderComposerConfigControlsHtml(selectedSession) +
             '</div>' +
           '</div>' +
           // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。

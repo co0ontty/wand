@@ -332,6 +332,95 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         '</div>';
       }
 
+      export function getThinkingCompactLabel(id) {
+        if (id === "standard") return "低";
+        if (id === "deep") return "中";
+        if (id === "max") return "高";
+        return "关";
+      }
+
+      export function getThinkingMenuLabel(id) {
+        if (id === "standard") return "低";
+        if (id === "deep") return "中";
+        if (id === "max") return "高";
+        return "关闭";
+      }
+
+      export function getModelDisplayLabel(model, session) {
+        var selected = model || "";
+        if (!selected || selected === "default") return "默认";
+        var models = getModelsForCurrentProvider(session);
+        for (var i = 0; i < models.length; i++) {
+          if (models[i].id === selected) return models[i].label || models[i].id;
+        }
+        return selected;
+      }
+
+      export function getShortModelLabel(model, session) {
+        var label = getModelDisplayLabel(model, session);
+        if (!label || label === "跟随服务端默认") return "默认";
+        var cutAt = label.search(/[（(]/);
+        if (cutAt > 0) label = label.slice(0, cutAt).trim();
+        var slash = label.lastIndexOf("/");
+        if (slash >= 0 && slash < label.length - 1) label = label.slice(slash + 1).trim();
+        var lower = label.toLowerCase();
+        if (lower.indexOf("opus") !== -1) return "Opus";
+        if (lower.indexOf("sonnet") !== -1) return "Sonnet";
+        if (lower.indexOf("haiku") !== -1) return "Haiku";
+        if (lower.indexOf("gpt-5") !== -1) return "GPT-5";
+        if (lower.indexOf("gpt-4") !== -1) return "GPT-4";
+        if (label.length > 12) return label.slice(0, 10) + "…";
+        return label;
+      }
+
+      export function renderChatThinkingOptionsCompact(selected) {
+        var v = selected || "off";
+        var html = "";
+        for (var i = 0; i < THINKING_LEVELS.length; i++) {
+          var lvl = THINKING_LEVELS[i];
+          html += '<option value="' + escapeHtml(lvl.id) + '"' + (lvl.id === v ? ' selected' : '') + ' title="' + escapeHtml(lvl.hint) + '">' +
+            escapeHtml(getThinkingMenuLabel(lvl.id)) +
+          '</option>';
+        }
+        return html;
+      }
+
+      export function renderComposerConfigControlsHtml(session) {
+        var preferredTool = getPreferredTool();
+        var mode = state.chatMode || "default";
+        var model = getEffectiveModel(session) || "";
+        var thinking = getEffectiveThinking(session);
+        var modeLabel = getModeLabel(mode);
+        var modelLabel = getShortModelLabel(model, session);
+        var thinkingLabel = getThinkingCompactLabel(thinking);
+        var title = "模式 " + modeLabel + " · 模型 " + modelLabel + " · 思考 " + thinkingLabel;
+        return '<div class="composer-config-controls" role="group" aria-label="会话设置" title="' + escapeHtml(title) + '">' +
+          '<span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="模式：' + escapeHtml(modeLabel) + '">' +
+            iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
+            '<span class="composer-config-label">' + escapeHtml(modeLabel) + '</span>' +
+            '<select class="composer-text-hidden-select" data-mode-control="mode" tabindex="-1" aria-label="模式">' +
+              renderChatModeOptionsRaw(preferredTool, mode) +
+            '</select>' +
+          '</span>' +
+          '<span class="composer-config-model-thinking" data-thinking="' + escapeHtml(thinking) + '" title="模型与思考深度">' +
+            '<span class="composer-config-part composer-config-model" data-mode-control-pill="model">' +
+              iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
+              '<span class="composer-config-label">' + escapeHtml(modelLabel) + '</span>' +
+              '<select class="composer-text-hidden-select" data-mode-control="model" tabindex="-1" aria-label="模型">' +
+                renderChatModelOptions(model, session) +
+              '</select>' +
+            '</span>' +
+            '<span class="composer-config-part composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '">' +
+              iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
+              '<span class="composer-config-label">' + escapeHtml(thinkingLabel) + '</span>' +
+              '<select class="composer-text-hidden-select" data-mode-control="thinking" tabindex="-1" aria-label="思考深度">' +
+                renderChatThinkingOptionsCompact(thinking) +
+              '</select>' +
+            '</span>' +
+          '</span>' +
+        '</div>';
+      }
+
       // 改完任何一处 trio 的 select 后，把所有 trio 实例的 label / select.value 同步刷新。
       // 同时重建 model select 的 options，保证异步 fetchAvailableModels 到达后选项列表完整。
       export function refreshAllChatModeTrios() {
@@ -355,6 +444,47 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           setPair("mode", mode, renderChatModeOptionsRaw(preferredTool, mode));
           setPair("model", model, renderChatModelOptionsRaw(model, session));
           setPair("thinking", thinking, renderChatThinkingOptionsRaw(thinking));
+        });
+        refreshComposerConfigControls(session, mode, getEffectiveModel(session) || "", thinking);
+      }
+
+      export function refreshComposerConfigControls(session, mode, model, thinking) {
+        var preferredTool = getPreferredTool();
+        var modeLabel = getModeLabel(mode);
+        var modelLabel = getShortModelLabel(model, session);
+        var thinkingLabel = getThinkingCompactLabel(thinking);
+        var controls = document.querySelectorAll(".composer-config-controls");
+        controls.forEach(function(control) {
+          var title = "模式 " + modeLabel + " · 模型 " + modelLabel + " · 思考 " + thinkingLabel;
+          control.setAttribute("title", title);
+          function updateSelect(part, value, optionsHtml) {
+            var sel = part.querySelector("[data-mode-control]") as HTMLSelectElement | null;
+            if (!sel) return;
+            sel.innerHTML = optionsHtml;
+            sel.value = value;
+          }
+          var modePart = control.querySelector('[data-mode-control-pill="mode"]');
+          if (modePart) {
+            var modeText = modePart.querySelector(".composer-config-label");
+            if (modeText) modeText.textContent = modeLabel;
+            modePart.setAttribute("title", "模式：" + modeLabel);
+            updateSelect(modePart, mode, renderChatModeOptionsRaw(preferredTool, mode));
+          }
+          var modelPart = control.querySelector('[data-mode-control-pill="model"]');
+          if (modelPart) {
+            var modelText = modelPart.querySelector(".composer-config-label");
+            if (modelText) modelText.textContent = modelLabel;
+            updateSelect(modelPart, model, renderChatModelOptions(model, session));
+          }
+          var thinkingPart = control.querySelector('[data-mode-control-pill="thinking"]');
+          if (thinkingPart) {
+            var thinkingText = thinkingPart.querySelector(".composer-config-label");
+            if (thinkingText) thinkingText.textContent = thinkingLabel;
+            thinkingPart.setAttribute("data-thinking", thinking);
+            updateSelect(thinkingPart, thinking, renderChatThinkingOptionsCompact(thinking));
+          }
+          var pair = control.querySelector(".composer-config-model-thinking");
+          if (pair) pair.setAttribute("data-thinking", thinking);
         });
       }
 

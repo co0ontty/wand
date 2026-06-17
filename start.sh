@@ -1,50 +1,34 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
-# start.sh — 用 npm link 把仓库符号链接到全局，并通过 system-wide systemd 管理。
+# start.sh - build a local npm package, install it into the active wand prefix,
+# then restart the current service.
 #
-# 流程（默认）：
-#   1) npm run build                                   # 构建 dist/
-#   2) npm link                                        # 全局 wand → 本仓库（符号链接，无需打包）
-#   3) wand service:install / service:restart          # 走 src/tui/commands.ts，写 /etc/systemd/system/wand.service
-#   4) 打印面板（脚本退出后 service 继续在 systemd 下跑）
+# Usage:
+#   ./start.sh                # build -> npm pack/install -> restart current service
+#   ./start.sh --user         # force user service scope
+#   ./start.sh --system       # force system service scope
+#   ./start.sh --attach       # attach to the running instance TUI
+#   ./start.sh --no-build     # skip build, use existing dist/
+#   ./start.sh --skip-install # skip npm install, only restart
+#   ./start.sh --restart      # only restart current service
+#   ./start.sh --status       # print status
+#   ./start.sh --logs         # follow service logs where supported
+#   ./start.sh --stop         # stop service
+#   ./start.sh --uninstall    # uninstall service and global package
+#   ./start.sh --port 8443    # update config port before restart
 #
-# 用 system-wide systemd（/etc/systemd/system/wand.service）的原因：
-#   - 开机自启，不依赖 login session，不需要 enable-linger
-#   - service wand start / systemctl status wand 等老命令都好使
-#   - 多用户场景下也能复用同一个实例
-#
-# 代价：装/卸需要 root。脚本会自动 sudo 包裹要 root 的命令，已经是 root 就直接来。
-# 如果你**确实**想要 user-level（不需要 root，但登出会被回收），传 --user。
-#
-# 用法：
-#   ./start.sh                # 默认：build → pack → install → service:install/restart（system）
-#   ./start.sh --user         # 改装 user-level service（~/.config/systemd/user/wand.service）
-#   ./start.sh --attach       # 不动 service，直接 attach 到运行中的实例的 TUI
-#   ./start.sh --no-build     # 跳过构建（dist/ 你已确认是新的）
-#   ./start.sh --skip-install # 跳过 pack + install，只 restart
-#   ./start.sh --restart      # 只 restart 现有服务（不重新打包）
-#   ./start.sh --status       # 打印面板（不动 service）
-#   ./start.sh --logs         # journalctl -u wand -f
-#   ./start.sh --stop         # 停 service（不卸载）
-#   ./start.sh --uninstall    # 完整卸载：wand service:uninstall + npm uninstall -g
-#   ./start.sh --port 8443    # 改服务端口（写进 ~/.wand/config.json 再 restart）
-#
-# 安全保证：
-#   - service 跑在 systemd 下，本脚本退出/Ctrl-C 都不会停 service。
-#   - install 阶段 Ctrl-C 中断：当前 service 仍用旧二进制继续跑。
-#   - 重启阶段 Ctrl-C 中断：service 可能进入未定义状态，重跑 ./start.sh --restart 修复。
-#
+# Scope defaults to "auto": use the running service first, then an installed
+# service, then system scope for a first install.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
-# ── 常量 ─────────────────────────────────────────────────────────────
 SERVICE_NAME="wand"
+LAUNCHD_LABEL="com.wand.web"
 CONFIG_PATH="${WAND_CONFIG:-$HOME/.wand/config.json}"
 
-# ── 颜色 ─────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
   C_DIM="\033[2m"; C_RED="\033[31m"; C_GREEN="\033[32m"
   C_YELLOW="\033[33m"; C_CYAN="\033[36m"; C_MAGENTA="\033[35m"
@@ -52,38 +36,24 @@ if [[ -t 1 ]]; then
 else
   C_DIM=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_CYAN=""; C_MAGENTA=""; C_BOLD=""; C_RESET=""
 fi
-msg()  { echo -e "${C_CYAN}→${C_RESET} $*"; }
+msg()  { echo -e "${C_CYAN}->${C_RESET} $*"; }
 ok()   { echo -e "${C_GREEN}✓${C_RESET} $*"; }
 warn() { echo -e "${C_YELLOW}!${C_RESET} $*"; }
-die()  { echo -e "${C_RED}✗${C_RESET} $*" >&2; exit 1; }
+die()  { echo -e "${C_RED}x${C_RESET} $*" >&2; exit 1; }
 
-# ── 终端宽度 ─────────────────────────────────────────────────────────
-TERM_COLS="$(tput cols 2>/dev/null || echo 78)"
-[[ "$TERM_COLS" -lt 60 ]] && TERM_COLS=60
-[[ "$TERM_COLS" -gt 100 ]] && TERM_COLS=100
-rep() { printf '%.0s─' $(seq 1 "$1"); }
-section() {
-  local title="$1"
-  local title_len=${#title}
-  local left=3
-  local right=$((TERM_COLS - left - title_len - 2))
-  [[ $right -lt 3 ]] && right=3
-  echo -e "${C_DIM}$(rep $left) ${C_RESET}${C_BOLD}${title}${C_RESET}${C_DIM} $(rep $right)${C_RESET}"
-}
-row() {
-  local label="$1" value="$2"
-  printf "  ${C_DIM}%-11s${C_RESET}  %b\n" "$label" "$value"
-}
-
-# ── 参数 ─────────────────────────────────────────────────────────────
-ACTION="install-and-restart"   # 默认动作
+ACTION="install-and-restart"
 DO_BUILD=1
 DO_INSTALL=1
 PORT_OVERRIDE=""
-SCOPE="system"   # 默认 system；--user 切到 user
+SCOPE="auto"
 
 print_help() {
-  awk 'NR==1 && /^#!/ {next} /^[^#[:space:]]/ || NR>60 {exit} {print}' "$0"
+  awk '
+    NR == 1 { next }
+    /^#($| )/ { sub(/^# ?/, ""); print; next }
+    /^$/ { print; next }
+    { exit }
+  ' "$0"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -96,7 +66,7 @@ while [[ $# -gt 0 ]]; do
     --stop)         ACTION="stop"; shift ;;
     --restart)      ACTION="restart-only"; shift ;;
     --uninstall)    ACTION="uninstall"; shift ;;
-    --port)         PORT_OVERRIDE="$2"; shift 2 ;;
+    --port)         PORT_OVERRIDE="${2:-}"; [[ -n "$PORT_OVERRIDE" ]] || die "--port 需要端口值"; shift 2 ;;
     --user)         SCOPE="user"; shift ;;
     --system)       SCOPE="system"; shift ;;
     -h|--help)      print_help; exit 0 ;;
@@ -104,363 +74,389 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ── 系统前置检查 ─────────────────────────────────────────────────────
-command -v systemctl >/dev/null 2>&1 || die "未找到 systemctl，本机不是 systemd 系统。"
+OS_NAME="$(uname -s)"
+case "$OS_NAME" in
+  Linux)  BACKEND="systemd"; command -v systemctl >/dev/null 2>&1 || die "未找到 systemctl。" ;;
+  Darwin) BACKEND="launchd"; command -v launchctl >/dev/null 2>&1 || die "未找到 launchctl。" ;;
+  *)      die "当前平台 $OS_NAME 暂不支持 service 管理。" ;;
+esac
 
-# UNIT 路径跟 scope 走
-if [[ "$SCOPE" == "user" ]]; then
-  UNIT_FILE="${HOME}/.config/systemd/user/${SERVICE_NAME}.service"
-  SYSTEMCTL=(systemctl --user)
-  JOURNALCTL=(journalctl --user -u "$SERVICE_NAME")
-  SCOPE_FLAG="--user"
-else
-  UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-  SYSTEMCTL=(systemctl)
-  JOURNALCTL=(journalctl -u "$SERVICE_NAME")
-  SCOPE_FLAG="--system"
-fi
-
-# sudo 自动决策：system scope 且非 root → 需要 sudo
-SUDO=""
-if [[ "$SCOPE" == "system" ]] && [[ "$(id -u)" -ne 0 ]]; then
-  if command -v sudo >/dev/null 2>&1; then
-    SUDO="sudo"
-    warn "当前不是 root，会用 sudo 跑需要权限的命令"
-  else
-    die "system scope 需要 root 但找不到 sudo。要么用 sudo 重跑，要么 ./start.sh --user 走 user 级。"
-  fi
-fi
-
-# 全局 wand 安装后会出现的路径；动态查
-detect_wand_bin() { command -v wand 2>/dev/null || true; }
 NODE_BIN="$(command -v node 2>/dev/null || true)"
+NPM_BIN="$(command -v npm 2>/dev/null || true)"
 [[ -n "$NODE_BIN" ]] || die "未找到 node。"
+[[ -n "$NPM_BIN" ]] || die "未找到 npm。"
 
-# user systemd / system systemd 是否安装了 wand.service
-service_installed() { [[ -f "$UNIT_FILE" ]]; }
-
-# ── 清残：把所有可能阻塞新实例启动的旧进程 / socket 收掉 ─────────────
-cleanup_stale_wand() {
-  local target_port="${PORT_OVERRIDE:-}"
-  if [[ -z "$target_port" ]] && [[ -f "$CONFIG_PATH" ]]; then
-    target_port="$(node -e "
-      try { process.stdout.write(String(require('$CONFIG_PATH').port ?? '')); }
-      catch(e) { process.stdout.write(''); }
-    " 2>/dev/null)"
+service_file_for() {
+  local scope="$1"
+  if [[ "$BACKEND" == "systemd" ]]; then
+    [[ "$scope" == "user" ]] && echo "$HOME/.config/systemd/user/${SERVICE_NAME}.service" || echo "/etc/systemd/system/${SERVICE_NAME}.service"
+  else
+    [[ "$scope" == "user" ]] && echo "$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist" || echo "/Library/LaunchDaemons/${LAUNCHD_LABEL}.plist"
   fi
-  target_port="${target_port:-8443}"
+}
 
-  # ── A) 端口占用者 ──
+is_scope_running() {
+  local scope="$1"
+  if [[ "$BACKEND" == "systemd" ]]; then
+    if [[ "$scope" == "user" ]]; then
+      systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null
+    else
+      systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null
+    fi
+  else
+    local domain
+    [[ "$scope" == "user" ]] && domain="gui/$(id -u)/${LAUNCHD_LABEL}" || domain="system/${LAUNCHD_LABEL}"
+    launchctl print "$domain" 2>/dev/null | grep -q "state = running"
+  fi
+}
+
+resolve_scope() {
+  if [[ "$SCOPE" != "auto" ]]; then
+    echo "$SCOPE"
+    return
+  fi
+  if is_scope_running "user"; then echo "user"; return; fi
+  if is_scope_running "system"; then echo "system"; return; fi
+  if [[ -f "$(service_file_for "user")" ]]; then echo "user"; return; fi
+  if [[ -f "$(service_file_for "system")" ]]; then echo "system"; return; fi
+  echo "system"
+}
+
+SCOPE="$(resolve_scope)"
+SCOPE_FLAG="--${SCOPE}"
+UNIT_FILE="$(service_file_for "$SCOPE")"
+
+USE_SUDO=0
+if [[ "$SCOPE" == "system" ]] && [[ "$(id -u)" -ne 0 ]]; then
+  command -v sudo >/dev/null 2>&1 || die "system scope 需要 root，但找不到 sudo。可用 --user。"
+  USE_SUDO=1
+  warn "当前不是 root，system scope 会用 sudo"
+fi
+
+if [[ "$USE_SUDO" == "1" && "$ACTION" != "status" && "$ACTION" != "logs" && "$ACTION" != "attach" && ! -t 0 ]]; then
+  sudo -n true 2>/dev/null || die "system scope 需要 sudo，但当前没有可交互终端。请在终端里运行，或加 --user。"
+fi
+
+sudo_prefix() {
+  [[ "$USE_SUDO" == "1" ]] && printf "sudo "
+  return 0
+}
+
+run_privileged() {
+  if [[ "$USE_SUDO" == "1" ]]; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
+service_installed() { [[ -f "$UNIT_FILE" ]]; }
+detect_wand_bin() { command -v wand 2>/dev/null || true; }
+
+prefix_from_wand_bin() {
+  local bin="$1"
+  if [[ "$bin" == */bin/wand ]]; then
+    dirname "$(dirname "$bin")"
+  else
+    npm prefix -g
+  fi
+}
+
+node_for_prefix() {
+  local prefix="$1"
+  if [[ -x "$prefix/bin/node" ]]; then
+    echo "$prefix/bin/node"
+  else
+    echo "$NODE_BIN"
+  fi
+}
+
+refresh_wand_runtime() {
+  WAND_BIN="$(detect_wand_bin)"
+  if [[ -n "$WAND_BIN" ]]; then
+    WAND_PREFIX="$(prefix_from_wand_bin "$WAND_BIN")"
+  else
+    WAND_PREFIX="$(npm prefix -g)"
+    WAND_BIN="$WAND_PREFIX/bin/wand"
+  fi
+  NODE_FOR_WAND="$(node_for_prefix "$WAND_PREFIX")"
+}
+
+run_wand() {
+  "$NODE_FOR_WAND" "$WAND_BIN" "$@"
+}
+
+latest_tag_version() {
+  local tag
+  tag="$(git tag --sort=-v:refname --list 'v*' | head -1 | sed 's/^v//' || true)"
+  if [[ -z "$tag" ]]; then
+    tag="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+  fi
+  echo "$tag"
+}
+
+config_value() {
+  local key="$1" fallback="$2"
+  "$NODE_BIN" -e '
+    const fs = require("fs");
+    const [file, key, fallback] = process.argv.slice(1);
+    try {
+      const data = JSON.parse(fs.readFileSync(file, "utf8"));
+      process.stdout.write(String(data[key] ?? fallback));
+    } catch {
+      process.stdout.write(String(fallback));
+    }
+  ' "$CONFIG_PATH" "$key" "$fallback"
+}
+
+cleanup_stale_wand() {
+  local target_port="${PORT_OVERRIDE:-$(config_value port 8443)}"
   if command -v lsof >/dev/null 2>&1; then
     local port_pids
-    port_pids="$(lsof -ti :"$target_port" 2>/dev/null || true)"
+    port_pids="$(lsof -nP -tiTCP:"$target_port" -sTCP:LISTEN 2>/dev/null || true)"
     if [[ -n "$port_pids" ]]; then
-      warn "端口 $target_port 被占用，kill: $(echo $port_pids | tr '\n' ' ')"
-      $SUDO kill $port_pids 2>/dev/null || true
-      for _ in 1 2 3 4 5; do
-        sleep 1
-        [[ -z "$(lsof -ti :"$target_port" 2>/dev/null)" ]] && break
-      done
-      if [[ -n "$(lsof -ti :"$target_port" 2>/dev/null)" ]]; then
-        warn "$target_port 仍被占，SIGKILL"
-        $SUDO kill -9 $(lsof -ti :"$target_port" 2>/dev/null) 2>/dev/null || true
-        sleep 1
-      fi
+      warn "端口 $target_port 被占用，kill: $(echo "$port_pids" | tr '\n' ' ')"
+      run_privileged kill $port_pids 2>/dev/null || true
+      sleep 1
     fi
   fi
 
-  # ── B) 残留 wand 进程 ──
-  local pat='(^|/)wand[[:space:]]+web|/cli\.js[[:space:]]+web|tsx[^[:space:]]*[[:space:]]+src/cli\.ts[[:space:]]+web'
   local stale_pids
-  stale_pids="$(pgrep -af "$pat" 2>/dev/null | awk '{print $1}' | grep -vx "$$" || true)"
+  stale_pids="$(ps ax -o pid= -o command= | awk -v self="$$" -v cfg="$CONFIG_PATH" '
+    $1 == self { next }
+    !($0 ~ /\/wand web/ || $0 ~ /\/cli\.js web/ || $0 ~ /src\/cli\.ts web/) { next }
+    index($0, "-c " cfg) || index($0, "--config " cfg) || $0 !~ /(^|[[:space:]])(-c|--config)[[:space:]]/ { print $1 }
+  ' || true)"
   if [[ -n "$stale_pids" ]]; then
-    warn "残留 wand 进程，kill: $(echo $stale_pids | tr '\n' ' ')"
-    echo "$stale_pids" | xargs -r $SUDO kill 2>/dev/null || true
+    warn "残留 wand 进程，kill: $(echo "$stale_pids" | tr '\n' ' ')"
+    run_privileged kill $stale_pids 2>/dev/null || true
     sleep 1
-    stale_pids="$(pgrep -af "$pat" 2>/dev/null | awk '{print $1}' | grep -vx "$$" || true)"
-    [[ -n "$stale_pids" ]] && {
-      warn "仍有残留，SIGKILL: $(echo $stale_pids | tr '\n' ' ')"
-      echo "$stale_pids" | xargs -r $SUDO kill -9 2>/dev/null || true
-    }
   fi
-
-  # ── C) 崩溃残留的 unix socket 文件 ──
   [[ -S "$HOME/.wand/wand.sock" ]] && rm -f "$HOME/.wand/wand.sock"
+  return 0
 }
 
-# ── 装服务 / 重启服务 ────────────────────────────────────────────────
-# 走 `wand service:install / restart` (= installService in src/tui/commands.ts:382)
-# system scope 默认；如果脚本 --user 启动会传 --user 给 CLI
+repair_global_package_permissions() {
+  local scope_dir="$WAND_PREFIX/lib/node_modules/@co0ontty"
+  [[ -e "$scope_dir" ]] || return 0
+  if ! find "$scope_dir" -maxdepth 3 \( ! -user "$(id -u)" -o ! -group "$(id -g)" \) -print -quit | grep -q .; then
+    return 0
+  fi
+  if ! command -v sudo >/dev/null 2>&1; then
+    die "$scope_dir 含有非当前用户拥有的 npm 文件，但找不到 sudo。请手动执行: chown -R $(id -un):$(id -gn) $scope_dir"
+  fi
+  if [[ ! -t 0 ]] && ! sudo -n true 2>/dev/null; then
+    die "$scope_dir 含有非当前用户拥有的 npm 文件，当前环境不能输入 sudo 密码。请在终端执行: sudo chown -R $(id -un):$(id -gn) $scope_dir"
+  fi
+  warn "修复 npm 全局包目录权限: $scope_dir"
+  sudo chown -R "$(id -u):$(id -g)" "$scope_dir"
+}
+
+cleanup_npm_package_temps() {
+  local scope_dir="$WAND_PREFIX/lib/node_modules/@co0ontty"
+  [[ -d "$scope_dir" ]] || return 0
+  local temp
+  for temp in "$scope_dir"/.wand-*; do
+    [[ -e "$temp" ]] || continue
+    [[ "$(basename "$temp")" == .wand-* ]] || continue
+    warn "清理 npm 残留临时目录: $temp"
+    rm -rf "$temp"
+  done
+}
+
 ensure_service_installed_and_running() {
-  local wand_bin="${1:-}"
-  [[ -z "$wand_bin" ]] && wand_bin="$(detect_wand_bin)"
-  [[ -n "$wand_bin" ]] || die "找不到 wand 二进制，无法装/重启服务。"
+  [[ -x "$WAND_BIN" || -f "$WAND_BIN" ]] || die "找不到 wand: $WAND_BIN"
 
   if service_installed; then
-    msg "$SUDO $wand_bin service:restart $SCOPE_FLAG"
-    if $SUDO "$wand_bin" service:restart "$SCOPE_FLAG"; then
+    msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:restart $SCOPE_FLAG"
+    if run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:restart "$SCOPE_FLAG"; then
       ok "服务已重启"
     else
-      warn "service:restart 失败，尝试兜底：service:stop → cleanup → service:start"
-      $SUDO "$wand_bin" service:stop "$SCOPE_FLAG" >/dev/null 2>&1 || true
+      warn "service:restart 失败，尝试 stop -> cleanup -> start"
+      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" >/dev/null 2>&1 || true
       cleanup_stale_wand
-      $SUDO "$wand_bin" service:start "$SCOPE_FLAG" || die "service:start 也失败了，看上面输出"
+      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:start "$SCOPE_FLAG" || die "service:start 也失败了"
       ok "兜底 start 成功"
     fi
   else
-    msg "未发现已注册的 $SCOPE systemd service，开始首次注册"
-    msg "$SUDO $wand_bin service:install $SCOPE_FLAG"
-    $SUDO "$wand_bin" service:install "$SCOPE_FLAG" || die "service:install 失败"
+    msg "未发现 $BACKEND $SCOPE service，开始首次注册"
+    msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:install $SCOPE_FLAG"
+    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" || die "service:install 失败"
     ok "已注册并启动 wand $SCOPE service"
   fi
 }
 
-# ── attach：把当前终端接到运行中的 wand TUI ──────────────────────────
 attach_to_running_service() {
-  local wand_bin; wand_bin="$(detect_wand_bin)"
-  [[ -z "$wand_bin" ]] && die "未找到全局 wand 命令；先跑 ./start.sh 安装一次。"
-
-  local pid="?"
-  if service_installed && "${SYSTEMCTL[@]}" is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-    pid="$("${SYSTEMCTL[@]}" show -p MainPID --value "$SERVICE_NAME" 2>/dev/null || echo '?')"
-  fi
+  refresh_wand_runtime
+  [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]] || die "未找到 wand 命令；先跑 ./start.sh 安装一次。"
   echo
-  echo -e "${C_BOLD}${C_YELLOW}⚠ 正在 attach 到运行中的 wand 实例${C_RESET}"
-  echo -e "  ${C_DIM}scope: $SCOPE    service PID: ${pid}    socket: $HOME/.wand/wand.sock${C_RESET}"
+  echo -e "${C_BOLD}${C_YELLOW}! 正在 attach 到运行中的 wand 实例${C_RESET}"
+  echo -e "  ${C_DIM}backend: $BACKEND    scope: $SCOPE    config: $CONFIG_PATH${C_RESET}"
+  echo -e "  ${C_GREEN}Ctrl-C 只退出本 TUI，不会停掉 service${C_RESET}"
   echo
-  echo -e "  ${C_GREEN}Ctrl-C 只会退出本 TUI，不会停掉 service${C_RESET}"
-  echo -e "  要操作 service，用："
-  echo -e "    ${C_CYAN}./start.sh --restart${C_RESET}     重启（不重装）"
-  echo -e "    ${C_CYAN}./start.sh${C_RESET}               重装最新代码 + 重启"
-  echo -e "    ${C_CYAN}./start.sh --stop${C_RESET}        停 service"
-  echo -e "    ${C_CYAN}./start.sh --logs${C_RESET}        看日志"
-  echo
-  msg "exec $wand_bin web -c $CONFIG_PATH"
-  exec "$wand_bin" web -c "$CONFIG_PATH"
+  exec "$NODE_FOR_WAND" "$WAND_BIN" web -c "$CONFIG_PATH"
 }
 
-# ── 实时信息收集 ─────────────────────────────────────────────────────
-collect_runtime() {
-  SVC_ACTIVE="$("${SYSTEMCTL[@]}" is-active "$SERVICE_NAME" 2>/dev/null || echo 'unknown')"
-  SVC_ENABLED="$("${SYSTEMCTL[@]}" is-enabled "$SERVICE_NAME" 2>/dev/null || echo 'unknown')"
-  SVC_PID="$("${SYSTEMCTL[@]}" show -p MainPID --value "$SERVICE_NAME" 2>/dev/null || echo '0')"
-  SVC_MEM_RAW="$("${SYSTEMCTL[@]}" show -p MemoryCurrent --value "$SERVICE_NAME" 2>/dev/null || echo '0')"
-  SVC_SINCE_RAW="$("${SYSTEMCTL[@]}" show -p ActiveEnterTimestamp --value "$SERVICE_NAME" 2>/dev/null || true)"
-
-  if [[ "$SVC_MEM_RAW" =~ ^[0-9]+$ ]] && [[ "$SVC_MEM_RAW" -gt 0 ]]; then
-    SVC_MEM="$(numfmt --to=iec --suffix=B "$SVC_MEM_RAW" 2>/dev/null || echo "${SVC_MEM_RAW}B")"
+service_state() {
+  if [[ "$BACKEND" == "systemd" ]]; then
+    local base=()
+    [[ "$SCOPE" == "user" ]] && base=(--user)
+    systemctl "${base[@]}" is-active "$SERVICE_NAME" 2>/dev/null || echo "unknown"
   else
-    SVC_MEM="-"
-  fi
-
-  if [[ -n "$SVC_SINCE_RAW" ]] && [[ "$SVC_SINCE_RAW" != "n/a" ]]; then
-    local since_epoch now_epoch delta
-    since_epoch="$(date -d "$SVC_SINCE_RAW" +%s 2>/dev/null || echo 0)"
-    now_epoch="$(date +%s)"
-    delta=$(( now_epoch - since_epoch ))
-    if [[ $delta -lt 60 ]]; then SVC_UPTIME="${delta}s"
-    elif [[ $delta -lt 3600 ]]; then SVC_UPTIME="$((delta/60))m $((delta%60))s"
-    elif [[ $delta -lt 86400 ]]; then SVC_UPTIME="$((delta/3600))h $(((delta%3600)/60))m"
-    else SVC_UPTIME="$((delta/86400))d $(((delta%86400)/3600))h"
-    fi
-  else
-    SVC_UPTIME="-"
-  fi
-
-  PORT="$(node -e "try{process.stdout.write(String(require('$CONFIG_PATH').port??''))}catch(e){process.stdout.write('?')}" 2>/dev/null)"
-  HTTPS="$(node -e "try{process.stdout.write(String(require('$CONFIG_PATH').https===true))}catch(e){process.stdout.write('false')}" 2>/dev/null)"
-  PROTO="http"; [[ "$HTTPS" == "true" ]] && PROTO="https"
-
-  LAN_IP="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.' | grep -vE '^(127\.|169\.254\.)' | head -1)"
-  [[ -z "$LAN_IP" ]] && LAN_IP=""
-
-  DB_FILE="$(dirname "$CONFIG_PATH")/wand.db"
-  DB_PASSWORD=""
-  DB_SIZE="-"
-  SESSIONS_TOTAL="-"
-  SESSIONS_ACTIVE="-"
-  if [[ -f "$DB_FILE" ]]; then
-    DB_SIZE="$(du -h "$DB_FILE" 2>/dev/null | cut -f1)"
-    if command -v sqlite3 >/dev/null 2>&1; then
-      DB_PASSWORD="$(sqlite3 "$DB_FILE" "SELECT value FROM app_config WHERE key='password';" 2>/dev/null || true)"
-      SESSIONS_TOTAL="$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM command_sessions;" 2>/dev/null || echo '-')"
-      SESSIONS_ACTIVE="$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM command_sessions WHERE archived=0;" 2>/dev/null || echo '-')"
+    local domain out
+    [[ "$SCOPE" == "user" ]] && domain="gui/$(id -u)/${LAUNCHD_LABEL}" || domain="system/${LAUNCHD_LABEL}"
+    out="$(launchctl print "$domain" 2>/dev/null || true)"
+    if grep -q "state = running" <<<"$out"; then
+      echo "active"
+    elif [[ -n "$out" ]]; then
+      echo "inactive"
+    else
+      echo "unknown"
     fi
   fi
-
-  local sess_dir="$(dirname "$CONFIG_PATH")/sessions"
-  if [[ -d "$sess_dir" ]]; then
-    SESSIONS_DISK="$(du -sh "$sess_dir" 2>/dev/null | cut -f1)"
-  else
-    SESSIONS_DISK="-"
-  fi
-
-  if [[ -n "${WAND_BIN:-}" ]] && [[ -x "$WAND_BIN" ]]; then
-    local global_pkg_json="$(dirname "$(dirname "$WAND_BIN")")/lib/node_modules/@co0ontty/wand/package.json"
-    if [[ -f "$global_pkg_json" ]]; then
-      INSTALLED_VERSION="$(node -e "process.stdout.write(require('$global_pkg_json').version)" 2>/dev/null || echo '?')"
-    fi
-  fi
-  REPO_VERSION="$(node -e "process.stdout.write(require('$REPO_ROOT/package.json').version)" 2>/dev/null || echo '?')"
-  INSTALLED_VERSION="${INSTALLED_VERSION:-未安装}"
 }
 
-# ── TUI 主面板 ───────────────────────────────────────────────────────
+service_pid() {
+  if [[ "$BACKEND" == "systemd" ]]; then
+    local base=()
+    [[ "$SCOPE" == "user" ]] && base=(--user)
+    systemctl "${base[@]}" show -p MainPID --value "$SERVICE_NAME" 2>/dev/null || echo "0"
+  else
+    local domain
+    [[ "$SCOPE" == "user" ]] && domain="gui/$(id -u)/${LAUNCHD_LABEL}" || domain="system/${LAUNCHD_LABEL}"
+    launchctl print "$domain" 2>/dev/null | awk '/pid = / { print $3; exit }' || echo "0"
+  fi
+}
+
+installed_version() {
+  local pkg="$WAND_PREFIX/lib/node_modules/@co0ontty/wand/package.json"
+  [[ -f "$pkg" ]] || { echo "未安装"; return; }
+  "$NODE_BIN" -e 'process.stdout.write(require(process.argv[1]).version)' "$pkg" 2>/dev/null || echo "?"
+}
+
+lan_ip() {
+  if [[ "$BACKEND" == "systemd" ]]; then
+    hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.' | grep -vE '^(127\.|169\.254\.)' | head -1
+  else
+    ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true
+  fi
+}
+
+print_recent_logs() {
+  if [[ "$BACKEND" == "systemd" ]]; then
+    local base=()
+    [[ "$SCOPE" == "user" ]] && base=(--user)
+    journalctl "${base[@]}" -u "$SERVICE_NAME" -n 6 --no-pager -o cat 2>/dev/null | sed "s/^/  /" || true
+  else
+    echo "  launchd 日志请用 Console.app；脚本 --logs 会打开 log stream。"
+  fi
+}
+
 print_panel() {
-  collect_runtime
-
-  local status_dot status_text
-  case "$SVC_ACTIVE" in
-    active)   status_dot="${C_GREEN}●${C_RESET}"; status_text="${C_GREEN}active${C_RESET}" ;;
-    failed)   status_dot="${C_RED}●${C_RESET}";   status_text="${C_RED}failed${C_RESET}" ;;
-    inactive) status_dot="${C_DIM}○${C_RESET}";   status_text="${C_DIM}inactive${C_RESET}" ;;
-    *)        status_dot="${C_YELLOW}●${C_RESET}"; status_text="${C_YELLOW}${SVC_ACTIVE}${C_RESET}" ;;
-  esac
-  local enabled_text
-  case "$SVC_ENABLED" in
-    enabled)  enabled_text="${C_GREEN}✓ enabled${C_RESET} ${C_DIM}(开机自启)${C_RESET}" ;;
-    disabled) enabled_text="${C_YELLOW}✗ disabled${C_RESET}" ;;
-    *)        enabled_text="${C_DIM}${SVC_ENABLED}${C_RESET}" ;;
-  esac
-
-  local version_line="${C_BOLD}${REPO_VERSION}${C_RESET}"
-  if [[ "$INSTALLED_VERSION" != "$REPO_VERSION" ]] && [[ "$INSTALLED_VERSION" != "未安装" ]]; then
-    version_line="${C_BOLD}${REPO_VERSION}${C_RESET}  ${C_DIM}(repo)${C_RESET}  ←  ${C_YELLOW}${INSTALLED_VERSION}${C_RESET} ${C_DIM}(installed, 待 ./start.sh)${C_RESET}"
-  elif [[ "$INSTALLED_VERSION" == "$REPO_VERSION" ]]; then
-    version_line="${C_BOLD}${REPO_VERSION}${C_RESET}  ${C_DIM}(repo == installed)${C_RESET}"
-  else
-    version_line="${C_BOLD}${REPO_VERSION}${C_RESET}  ${C_YELLOW}(repo, 尚未 install)${C_RESET}"
-  fi
+  refresh_wand_runtime
+  local state pid port https proto ip repo_ver inst_ver db_file
+  state="$(service_state)"
+  pid="$(service_pid)"
+  port="$(config_value port 8443)"
+  https="$(config_value https false)"
+  proto="http"; [[ "$https" == "true" ]] && proto="https"
+  ip="$(lan_ip)"
+  repo_ver="$("$NODE_BIN" -e 'process.stdout.write(require("./package.json").version)' 2>/dev/null || echo "?")"
+  inst_ver="$(installed_version)"
+  db_file="$(dirname "$CONFIG_PATH")/wand.db"
 
   echo
-  echo -e "${C_MAGENTA}${C_BOLD}  W A N D${C_RESET}    ${C_DIM}${SCOPE}-systemd dev shell${C_RESET}"
+  echo -e "${C_MAGENTA}${C_BOLD}  W A N D${C_RESET}    ${C_DIM}${BACKEND} local npm restart shell${C_RESET}"
   echo
-
-  section "Service"
-  row "Status"   "${status_dot} ${status_text}    PID ${SVC_PID}    uptime ${SVC_UPTIME}    mem ${SVC_MEM}"
-  row "Boot"     "${enabled_text}"
-  row "Scope"    "${C_BOLD}${SCOPE}${C_RESET}    ${C_DIM}(--user 切换到 user 级)${C_RESET}"
-  row "Unit"     "${C_DIM}${UNIT_FILE}${C_RESET}"
-  row "Binary"   "${WAND_BIN:-未安装}"
-  row "Version"  "${version_line}"
+  printf "  ${C_DIM}%-10s${C_RESET} %s (%s)  PID %s\n" "Service" "$state" "$SCOPE" "${pid:-0}"
+  printf "  ${C_DIM}%-10s${C_RESET} %s\n" "Unit" "$UNIT_FILE"
+  printf "  ${C_DIM}%-10s${C_RESET} %s\n" "Binary" "$WAND_BIN"
+  printf "  ${C_DIM}%-10s${C_RESET} repo %s / installed %s\n" "Version" "$repo_ver" "$inst_ver"
+  printf "  ${C_DIM}%-10s${C_RESET} %s://127.0.0.1:%s/\n" "Local" "$proto" "$port"
+  [[ -n "$ip" ]] && printf "  ${C_DIM}%-10s${C_RESET} %s://%s:%s/\n" "LAN" "$proto" "$ip" "$port"
+  printf "  ${C_DIM}%-10s${C_RESET} %s\n" "Config" "$CONFIG_PATH"
+  printf "  ${C_DIM}%-10s${C_RESET} %s\n" "SQLite" "$db_file"
   echo
-
-  section "Access"
-  row "Local"    "${C_CYAN}${PROTO}://127.0.0.1:${PORT}/${C_RESET}"
-  [[ -n "$LAN_IP" ]] && row "LAN" "${C_CYAN}${PROTO}://${LAN_IP}:${PORT}/${C_RESET}"
-  [[ -n "$DB_PASSWORD" ]] && row "Password" "${C_YELLOW}${DB_PASSWORD}${C_RESET}"
-  echo
-
-  section "Storage"
-  row "Config"   "$CONFIG_PATH"
-  row "SQLite"   "$DB_FILE  ${C_DIM}(${DB_SIZE})${C_RESET}"
-  row "Sessions" "${SESSIONS_ACTIVE} active / ${SESSIONS_TOTAL} total  ${C_DIM}(disk: ${SESSIONS_DISK})${C_RESET}"
-  echo
-
-  section "Recent logs"
-  if "${JOURNALCTL[@]}" -n 6 --no-pager -o cat 2>/dev/null | head -6 | sed "s/^/  ${C_DIM}/" | sed "s/$/${C_RESET}/"; then
-    :
-  else
-    echo -e "  ${C_DIM}(no logs)${C_RESET}"
-  fi
-  echo
-
-  section "Commands"
-  printf "  ${C_CYAN}%-24s${C_RESET} %s\n" "./start.sh"            "build + pack + install + service:install/restart（默认 system）"
-  printf "  ${C_CYAN}%-24s${C_RESET} %s\n" "./start.sh --user"     "改装 user-level service（不需要 root）"
-  printf "  ${C_CYAN}%-24s${C_RESET} %s\n" "./start.sh --attach"   "${C_YELLOW}接入运行中 service 的 TUI${C_RESET}（Ctrl-C 只退 TUI）"
-  printf "  ${C_CYAN}%-24s${C_RESET} %s\n" "./start.sh --no-build" "改前端 js/css 时跳过 tsc 加速"
-  printf "  ${C_CYAN}%-24s${C_RESET} %s\n" "./start.sh --restart"  "只重启，不重新打包（含 pkill 兜底）"
-  printf "  ${C_CYAN}%-24s${C_RESET} %s\n" "./start.sh --status"   "再次打印本面板（不动 service）"
-  printf "  ${C_CYAN}%-24s${C_RESET} %s\n" "./start.sh --logs"     "tail journal（Ctrl-C 退本 tail）"
-  printf "  ${C_CYAN}%-24s${C_RESET} %s\n" "./start.sh --stop"     "停 service"
-  printf "  ${C_CYAN}%-24s${C_RESET} %s\n" "./start.sh --uninstall" "完整卸载（wand service:uninstall + npm uninstall）"
-  echo
-  echo -e "  ${C_DIM}service 跑在 ${SCOPE}-level systemd 下，本脚本退出 / Ctrl-C 都不会停服。${C_RESET}"
-  if [[ "$SCOPE" == "user" ]]; then
-    echo -e "  ${C_DIM}登出后想保持运行：loginctl enable-linger \$USER${C_RESET}"
-  fi
-  echo -e "  ${C_DIM}浏览器刷不到改动: Cmd/Ctrl+Shift+R 硬刷${C_RESET}"
+  echo -e "  ${C_DIM}Recent logs${C_RESET}"
+  print_recent_logs
   echo
 }
 
-# ── 子命令分发 ───────────────────────────────────────────────────────
+follow_logs() {
+  if [[ "$BACKEND" == "systemd" ]]; then
+    local base=()
+    [[ "$SCOPE" == "user" ]] && base=(--user)
+    exec journalctl "${base[@]}" -u "$SERVICE_NAME" -f --no-pager
+  else
+    exec log stream --style compact --predicate 'process == "node" || process == "wand"'
+  fi
+}
+
+refresh_wand_runtime
+
 case "$ACTION" in
   attach)
     attach_to_running_service
     ;;
   status)
-    WAND_BIN="$(detect_wand_bin)"
     print_panel
     exit 0
     ;;
   logs)
-    msg "Ctrl-C 退出本 tail，service 不受影响"
-    exec "${JOURNALCTL[@]}" -f --no-pager
+    msg "Ctrl-C 退出本 log tail，service 不受影响"
+    follow_logs
     ;;
   stop)
-    WAND_BIN="$(detect_wand_bin)"
-    if [[ -n "$WAND_BIN" ]]; then
-      msg "$SUDO $WAND_BIN service:stop $SCOPE_FLAG"
-      $SUDO "$WAND_BIN" service:stop "$SCOPE_FLAG" || true
+    if [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
+      msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:stop $SCOPE_FLAG"
+      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" || true
     else
-      msg "${SYSTEMCTL[*]} stop $SERVICE_NAME"
-      $SUDO "${SYSTEMCTL[@]}" stop "$SERVICE_NAME" 2>&1 || true
+      warn "未找到 wand，无法通过 CLI stop"
     fi
     ok "已停"
     exit 0
     ;;
   restart-only)
-    WAND_BIN="$(detect_wand_bin)"
-    [[ -n "$WAND_BIN" ]] || die "未找到全局 wand 命令，先跑 ./start.sh 装一次。"
-    ensure_service_installed_and_running "$WAND_BIN"
+    ensure_service_installed_and_running
     print_panel
     exit 0
     ;;
   uninstall)
-    msg "wand service:uninstall + npm uninstall -g @co0ontty/wand"
-    WAND_BIN="$(detect_wand_bin)"
-    if [[ -n "$WAND_BIN" ]]; then
-      $SUDO "$WAND_BIN" service:uninstall "$SCOPE_FLAG" 2>&1 || true
-    else
-      $SUDO "${SYSTEMCTL[@]}" stop "$SERVICE_NAME" 2>&1 || true
-      $SUDO "${SYSTEMCTL[@]}" disable "$SERVICE_NAME" 2>&1 || true
-      $SUDO rm -f "$UNIT_FILE"
-      $SUDO "${SYSTEMCTL[@]}" daemon-reload 2>&1 || true
+    msg "wand service:uninstall + npm uninstall -g --prefix $WAND_PREFIX @co0ontty/wand"
+    if [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
+      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:uninstall "$SCOPE_FLAG" 2>&1 || true
     fi
-    npm unlink 2>&1 || npm uninstall -g @co0ontty/wand 2>&1 || true
+    "$NPM_BIN" uninstall -g --prefix "$WAND_PREFIX" @co0ontty/wand 2>&1 || true
     ok "卸载完成"
     exit 0
     ;;
 esac
 
-# ── dev 版本号管理 ──────────────────────────────────────────────────
-# 构建前设 dev 版本号，脚本退出时无论如何都恢复
-ORIG_VERSION="$(node -e "process.stdout.write(require('./package.json').version)" 2>/dev/null)"
-# 如果当前版本已带 -dev（上次中断没恢复），先剥掉
-ORIG_VERSION="${ORIG_VERSION%%-dev.*}"
-DEV_VERSION="${ORIG_VERSION}-dev.$(date +%m%d%H%M)"
+PACKAGE_VERSION="$("$NODE_BIN" -e 'process.stdout.write(require("./package.json").version)' 2>/dev/null)"
+RESTORE_VERSION="${PACKAGE_VERSION%%-dev.*}"
+BASE_VERSION="$(latest_tag_version)"
+[[ -n "$BASE_VERSION" ]] || BASE_VERSION="$RESTORE_VERSION"
+DEV_VERSION="${BASE_VERSION}-dev.$(date +%Y%m%d%H%M)"
+PACK_DIR=""
 
 restore_version() {
-  npm version "$ORIG_VERSION" --no-git-tag-version --allow-same-version >/dev/null 2>&1 || true
+  "$NPM_BIN" version "$RESTORE_VERSION" --no-git-tag-version --allow-same-version >/dev/null 2>&1 || true
+  [[ -n "$PACK_DIR" && -d "$PACK_DIR" ]] && rm -rf "$PACK_DIR"
+  return 0
 }
-trap 'restore_version' EXIT
+trap restore_version EXIT
+trap 'echo; warn "已中断。service 可能仍在跑旧版本。"; exit 130' INT
 
-# Ctrl-C 在 install 阶段安全：service 还在跑旧二进制不会受影响。
-on_install_sigint() {
-  echo
-  ok "已中止。service 不受影响（仍跑旧二进制）。"
-  ok "想重新来一次：./start.sh"
-  exit 130
-}
-trap 'restore_version; on_install_sigint' INT
-
-# ── ① 构建 ───────────────────────────────────────────────────────────
 if [[ "$DO_BUILD" == "1" ]]; then
-  msg "版本号: $ORIG_VERSION → $DEV_VERSION"
-  npm version "$DEV_VERSION" --no-git-tag-version --allow-same-version >/dev/null 2>&1
-  msg "npm run build"
-  npm run build
+  if [[ -e "$REPO_ROOT/dist" && ! -w "$REPO_ROOT/dist" ]]; then
+    command -v sudo >/dev/null 2>&1 || die "dist/ 不可写且找不到 sudo，请先修复权限: chown -R $(id -un):$(id -gn) $REPO_ROOT/dist"
+    warn "dist/ 当前不可写，先归还给当前用户"
+    sudo chown -R "$(id -u):$(id -g)" "$REPO_ROOT/dist"
+  fi
+  msg "版本号: package $RESTORE_VERSION, latest tag $BASE_VERSION -> $DEV_VERSION"
+  "$NPM_BIN" version "$DEV_VERSION" --no-git-tag-version --allow-same-version >/dev/null 2>&1
+  msg "WAND_BUILD_CHANNEL=beta npm run build"
+  WAND_BUILD_CHANNEL=beta "$NPM_BIN" run build
   ok "build 完成 ($DEV_VERSION)"
 else
   [[ -f "$REPO_ROOT/dist/cli.js" ]] || die "--no-build 但 dist/cli.js 不存在。"
@@ -469,46 +465,37 @@ else
   fi
 fi
 
-# ── ② npm link（可跳过） ─────────────────────────────────────────────
-# 用 npm link 取代 npm pack + npm install -g：创建符号链接而非复制，
-# 后续只要 npm run build + service:restart 就够，不用每次重打包。
 if [[ "$DO_INSTALL" == "1" ]]; then
-  if service_installed; then
-    $SUDO "${SYSTEMCTL[@]}" stop "$SERVICE_NAME" 2>/dev/null || true
+  if service_installed && [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
+    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" >/dev/null 2>&1 || true
   fi
   cleanup_stale_wand
-  msg "npm link（全局 wand → $(pwd)）"
-  npm link 2>&1 | tail -3
-  ok "npm link 完成"
+
+  PACK_DIR="$(mktemp -d)"
+  msg "npm pack -> install -g --prefix $WAND_PREFIX"
+  repair_global_package_permissions
+  cleanup_npm_package_temps
+  PACK_FILE="$("$NPM_BIN" pack --pack-destination "$PACK_DIR" | tail -1)"
+  [[ -n "$PACK_FILE" && -f "$PACK_DIR/$PACK_FILE" ]] || die "npm pack 未产出 tarball"
+  "$NPM_BIN" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund
+  ok "本地 npm 包已安装到 $WAND_PREFIX"
+  refresh_wand_runtime
 fi
 
-# link / install 之后才能确定 wand 位置
-WAND_BIN="$(detect_wand_bin)"
-[[ -n "$WAND_BIN" ]] || die "npm link 完成后仍未在 PATH 里找到 wand，检查 \$PATH / npm prefix。"
+[[ -f "$WAND_BIN" || -x "$WAND_BIN" ]] || die "安装后仍找不到 wand: $WAND_BIN"
 
-# ── ④ 配置：确保 config 存在；按需改 port ────────────────────────────
 if [[ ! -f "$CONFIG_PATH" ]]; then
-  msg "config 不存在，初始化: $WAND_BIN init -c $CONFIG_PATH"
+  msg "config 不存在，初始化: $CONFIG_PATH"
   mkdir -p "$(dirname "$CONFIG_PATH")"
-  "$WAND_BIN" init -c "$CONFIG_PATH" >/dev/null
+  run_wand init -c "$CONFIG_PATH" >/dev/null
 fi
+
 if [[ -n "$PORT_OVERRIDE" ]]; then
-  msg "$WAND_BIN config:set port $PORT_OVERRIDE -c $CONFIG_PATH"
-  "$WAND_BIN" config:set port "$PORT_OVERRIDE" -c "$CONFIG_PATH" >/dev/null
+  msg "wand config:set port $PORT_OVERRIDE -c $CONFIG_PATH"
+  run_wand config:set port "$PORT_OVERRIDE" -c "$CONFIG_PATH" >/dev/null
 fi
 
-# ── ⑤ 装 / 重启服务（走 wand service:* ＝ src/tui/commands.ts 同一套） ──
-on_restart_sigint() {
-  echo
-  warn "重启阶段被中断。service 可能处于未定义状态。"
-  warn "请手动跑：./start.sh --restart  把它重新拉起来。"
-  exit 130
-}
-trap on_restart_sigint INT
-
-ensure_service_installed_and_running "$WAND_BIN"
-
+ensure_service_installed_and_running
 trap - INT
-
-# ── ⑥ 全景面板 ───────────────────────────────────────────────────────
 print_panel
+exit 0

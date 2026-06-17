@@ -724,12 +724,15 @@ async function resolveAndroidApkAsset(
     try {
       const fileStat = await stat(filePath);
       if (!fileStat.isFile()) return null;
+      const fileName = path.basename(filePath);
+      const version = extractAndroidApkVersion(fileName);
+      if (channel === "stable" && isPrereleaseApkVersion(version)) return null;
       return {
-        fileName: path.basename(filePath),
+        fileName,
         filePath,
         size: fileStat.size,
         updatedAt: fileStat.mtime.toISOString(),
-        version: extractAndroidApkVersion(path.basename(filePath)),
+        version,
         downloadUrl: "/android/download",
         source: "local",
       };
@@ -1484,6 +1487,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       language: config.language ?? "",
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
+      updateChannel: getUpdateChannel(),
       currentVersion: DISPLAY_VERSION,
     });
   });

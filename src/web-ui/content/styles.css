@@ -224,6 +224,89 @@
     .is-wand-embed-terminal .main-layout.sidebar-pinned.sidebar-collapsed {
       padding-left: 0;
     }
+    .is-wand-embed-terminal .main-content {
+      background: #17120f;
+    }
+    .is-wand-embed-terminal .terminal-container {
+      margin: 0;
+      border-radius: 0;
+      border-left: 0;
+      border-right: 0;
+      box-shadow: none;
+    }
+    .is-wand-embed-terminal .input-panel {
+      padding: 7px 10px;
+      padding-bottom: calc(8px + var(--input-safe-bottom, var(--safe-bottom, 0px)) + var(--keyboard-offset, 0px));
+      border-top: 1px solid rgba(240, 230, 216, 0.14);
+      background:
+        linear-gradient(180deg, rgba(23, 18, 15, 0) 0%, rgba(23, 18, 15, 0.82) 28%, rgba(23, 18, 15, 0.96) 100%),
+        #17120f;
+      backdrop-filter: blur(16px) saturate(140%);
+      -webkit-backdrop-filter: blur(16px) saturate(140%);
+    }
+    .is-wand-embed-terminal .input-composer {
+      border-radius: 999px;
+      border-color: rgba(240, 230, 216, 0.16);
+      background: rgba(42, 32, 24, 0.88);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 28px rgba(0, 0, 0, 0.24);
+    }
+    .is-wand-embed-terminal .input-composer:focus-within,
+    .is-wand-embed-terminal .input-composer.has-text {
+      border-radius: 18px;
+      border-color: rgba(217, 122, 79, 0.58);
+      background: rgba(35, 27, 22, 0.96);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.10),
+        0 0 0 2px rgba(217, 122, 79, 0.16),
+        0 12px 32px rgba(0, 0, 0, 0.28);
+    }
+    .is-wand-embed-terminal .composer-main-row {
+      min-height: 48px;
+      padding: 5px 8px;
+      gap: 6px;
+    }
+    .is-wand-embed-terminal .composer-inline-config {
+      display: none;
+    }
+    .is-wand-embed-terminal .composer-input-wrap {
+      min-height: 34px;
+      border-radius: 17px;
+      background: rgba(255, 255, 255, 0.055);
+      border: 1px solid rgba(240, 230, 216, 0.10);
+    }
+    .is-wand-embed-terminal .input-composer:focus-within .composer-input-wrap,
+    .is-wand-embed-terminal .input-composer.has-text .composer-input-wrap {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(240, 230, 216, 0.16);
+    }
+    .is-wand-embed-terminal .input-textarea {
+      color: #f4e8da;
+      caret-color: #d97a4f;
+      padding: 7px 10px;
+      min-height: 34px;
+      font-size: 16px;
+      line-height: 1.35;
+    }
+    .is-wand-embed-terminal .input-textarea::placeholder {
+      color: rgba(244, 232, 218, 0.52);
+    }
+    .is-wand-embed-terminal .input-composer:not(:focus-within):not(.has-text) .input-textarea {
+      color: transparent;
+      caret-color: transparent;
+    }
+    .is-wand-embed-terminal .input-composer:not(:focus-within):not(.has-text) .input-textarea::placeholder {
+      opacity: 0;
+    }
+    .is-wand-embed-terminal .btn-circle-action {
+      color: rgba(244, 232, 218, 0.72);
+    }
+    .is-wand-embed-terminal .btn-circle-action:hover,
+    .is-wand-embed-terminal .btn-circle-action:active {
+      color: #f4e8da;
+      background: rgba(217, 122, 79, 0.16);
+    }
 
     /* ===== 首帧过渡抑制 ===== */
     html.no-transition,
@@ -6143,6 +6226,105 @@
       align-items: center;
     }
 
+    .composer-inline-config {
+      display: flex;
+      align-items: center;
+      flex: 0 1 auto;
+      min-width: 0;
+      gap: 4px;
+    }
+    .composer-config-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+    }
+    .composer-config-chip,
+    .composer-config-part {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-height: 28px;
+      box-sizing: border-box;
+      color: var(--text-secondary);
+      user-select: none;
+      white-space: nowrap;
+    }
+    .composer-config-chip {
+      max-width: 76px;
+      padding: 0 8px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 999px;
+      background: rgba(246, 241, 232, 0.72);
+      transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+    }
+    .composer-config-chip-mode {
+      color: var(--accent);
+      background: rgba(197, 101, 61, 0.1);
+      border-color: rgba(197, 101, 61, 0.22);
+    }
+    .composer-config-model-thinking {
+      display: inline-flex;
+      align-items: stretch;
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid rgba(197, 101, 61, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 248, 242, 0.82);
+      color: var(--accent);
+      transition: border-color var(--transition-fast), background var(--transition-fast);
+    }
+    .composer-config-chip:hover,
+    .composer-config-chip:focus-within,
+    .composer-config-model-thinking:hover,
+    .composer-config-model-thinking:focus-within {
+      border-color: var(--accent);
+      background: rgba(255, 248, 242, 0.96);
+    }
+    .composer-config-part {
+      min-width: 0;
+      padding: 0 7px;
+      cursor: pointer;
+    }
+    .composer-config-model {
+      max-width: 92px;
+    }
+    .composer-config-thinking {
+      min-width: 42px;
+      color: #a9652d;
+    }
+    .composer-config-thinking[data-thinking="off"] {
+      color: var(--text-muted);
+    }
+    .composer-config-thinking[data-thinking="standard"] {
+      color: #5d8a66;
+    }
+    .composer-config-thinking[data-thinking="deep"] {
+      color: #b16a2f;
+    }
+    .composer-config-thinking[data-thinking="max"] {
+      color: #c55248;
+    }
+    .composer-config-part + .composer-config-part {
+      border-left: 1px solid rgba(197, 101, 61, 0.14);
+    }
+    .composer-config-icon {
+      flex: 0 0 auto;
+      width: 13px;
+      height: 13px;
+    }
+    .composer-config-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 0.72rem;
+      font-weight: 600;
+      line-height: 1;
+    }
+
     
     .composer-text-pill {
       position: relative;
@@ -7745,6 +7927,34 @@
       flex-direction: column;
       gap: 2px;
     }
+    .plus-popover-trio-wrap .composer-config-controls {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+    .plus-popover-trio-wrap .composer-config-chip,
+    .plus-popover-trio-wrap .composer-config-model-thinking {
+      width: 100%;
+      max-width: none;
+      min-height: 36px;
+      border-radius: 12px;
+    }
+    .plus-popover-trio-wrap .composer-config-chip {
+      justify-content: flex-start;
+      padding: 0 10px;
+    }
+    .plus-popover-trio-wrap .composer-config-model,
+    .plus-popover-trio-wrap .composer-config-thinking {
+      flex: 1 1 0;
+      max-width: none;
+      min-height: 36px;
+      justify-content: flex-start;
+      padding: 0 10px;
+    }
+    .plus-popover-trio-wrap .composer-config-thinking {
+      flex: 0 0 86px;
+    }
 
     /* 三件套 popover 形态：纵向列表，每行 = tag + 当前值（点击触发原生 select）*/
     .chat-mode-trio-popover {
@@ -7795,6 +8005,57 @@
         min-width: 220px;
         left: 10px;
         bottom: calc(var(--safe-bottom, 0px) + 60px);
+      }
+      .composer-main-row {
+        gap: 3px;
+        padding-left: 5px;
+        padding-right: 5px;
+      }
+      .composer-inline-config {
+        gap: 3px;
+      }
+      .composer-config-chip,
+      .composer-config-part {
+        min-height: 26px;
+      }
+      .composer-config-chip {
+        padding: 0 7px;
+        max-width: 64px;
+      }
+      .composer-config-model {
+        max-width: 76px;
+      }
+      .composer-config-thinking {
+        min-width: 38px;
+      }
+      .composer-config-label {
+        font-size: 0.68rem;
+      }
+    }
+
+    @media (max-width: 430px) {
+      .composer-config-chip-mode {
+        width: 28px;
+        max-width: 28px;
+        padding: 0;
+      }
+      .composer-config-chip-mode .composer-config-label {
+        display: none;
+      }
+    }
+
+    @media (max-width: 380px) {
+      .composer-config-model {
+        width: 30px;
+        max-width: 30px;
+        padding: 0;
+      }
+      .composer-config-model .composer-config-label {
+        display: none;
+      }
+      .composer-config-thinking {
+        min-width: 34px;
+        padding: 0 5px;
       }
     }
 
