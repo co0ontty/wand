@@ -276,6 +276,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // "近底即锁回 true"的自愈，避免 resize / 键盘动画 / 锚点回填瞬间
         // 把已经上滚阅读的用户误判回贴底状态。
         var renderWasAtBottom = isChatNearBottom(chatMessages);
+        var renderIsInitial = !state.chatInitialRenderDone;
 
         // ChatGPT 风格"顶置最新轮次"模式开启时，停掉所有贴底/锚点/未读分支，
         // 改由本函数末尾的 applyChatTurnPin 统一把最新用户消息钉到视口顶部。
@@ -651,12 +652,14 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // 自动折叠（"横条 + 一屏"）：当内容高度 > 一屏时，把最新一轮 user+assistant
         // 的紧凑预览固定到输出框顶部。不要移动真实消息 DOM；滚动锚点、增量 diff、
         // 未读分割线和历史折叠都依赖 .chat-messages 内的节点稳定存在。
-        applyAutoFoldBar(chatOutput, chatMessages, selectedSession, allMessages, renderWasAtBottom);
+        applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial);
 
         // 顶置模式：在折叠历史、DOM diff 全部落定后，把最新用户消息钉到视口顶部。
         // column-reverse 下助手回复增长会把锚点往上推，所以每帧渲染后都要重钉。
-        if (pinningTurn) {
-          requestAnimationFrame(function() { applyChatTurnPin(chatMessages); });
+        if (state.chatPinTurnToTop) {
+          requestAnimationFrame(function() {
+            if (!applyChatTurnPin(chatMessages)) pinLatestRenderedUserToTop(chatMessages);
+          });
         }
 
         // Update structured session status bar (in-flight / completed indicator)
@@ -2114,16 +2117,18 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
       // 触发条件：聊天内容超出当前消息视口，且存在最新用户消息。顶部横条只渲染
       // 最新一轮的紧凑预览，不搬动真实消息 DOM。这样最新输入/回复的入口常驻在
       // 屏幕上方，下方 .chat-messages 继续负责一屏内容和真实滚动。
-      export function applyAutoFoldBar(chatOutput, chatMessages, selectedSession, allMessages, renderWasAtBottom) {
+      export function applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial) {
         if (!chatOutput || !chatMessages) return;
         if (!state.chatAutoFoldEnabled) {
           setAutoFoldMode(chatOutput, chatMessages, false);
+          clearAutoFoldHistoryHidden(chatMessages);
           clearAutoFoldBar(chatOutput);
           return;
         }
         var msgs = allMessages || state.currentMessages || [];
         if (!msgs || msgs.length === 0) {
           setAutoFoldMode(chatOutput, chatMessages, false);
+          clearAutoFoldHistoryHidden(chatMessages);
           clearAutoFoldBar(chatOutput);
           return;
         }
@@ -2134,6 +2139,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         }
         if (lastUserIdx < 0) {
           setAutoFoldMode(chatOutput, chatMessages, false);
+          clearAutoFoldHistoryHidden(chatMessages);
           clearAutoFoldBar(chatOutput);
           return;
         }
@@ -2146,17 +2152,25 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var hostHeight = chatOutput.clientHeight || 0;
         var viewportHeight = chatMessages.clientHeight || hostHeight;
         var totalContentHeight = chatMessages.scrollHeight || 0;
-        var needsFold = hostHeight > 0 && totalContentHeight > viewportHeight + 24;
+        var historyIndices = getHistoryIndicesBefore(msgs, lastUserIdx);
+        var hasFoldedHistory = historyIndices.length > 0 || !!chatMessages.querySelector(".chat-history-summary");
+        var needsFold = hostHeight > 0 && (totalContentHeight > viewportHeight + 24 || hasFoldedHistory);
         if (!needsFold) {
           clearAutoFoldBar(chatOutput);
+          clearAutoFoldHistoryHidden(chatMessages);
           setAutoFoldMode(chatOutput, chatMessages, false);
           return;
         }
 
         var foldBar = ensureFoldBar(chatOutput);
-        foldBar.innerHTML = buildAutoFoldBarHtml(msgs[lastUserIdx], assistantIdx >= 0 ? msgs[assistantIdx] : null);
+        var historyStats = historyIndices.length > 0 ? computeHistoryStats(msgs, historyIndices) : null;
+        foldBar.innerHTML = buildAutoFoldBarHtml(msgs[lastUserIdx], assistantIdx >= 0 ? msgs[assistantIdx] : null, historyStats);
         foldBar.classList.remove("hidden");
         setAutoFoldMode(chatOutput, chatMessages, true);
+        setAutoFoldHistoryHidden(chatMessages, lastUserIdx, historyIndices.length > 0);
+        if (renderIsInitial || state.chatPinTurnToTop || state.chatStickToBottom) {
+          followAutoFoldLatest(chatMessages);
+        }
         state.chatAutoFoldSnapshot = { userIdx: lastUserIdx, assistantIdx: assistantIdx };
       }
 
@@ -2176,6 +2190,115 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         chatOutput.classList.toggle("auto-fold", !!enabled);
       }
 
+      function getHistoryIndicesBefore(msgs, boundaryIdx) {
+        var indices = [];
+        for (var i = 0; i < boundaryIdx; i++) {
+          if (msgs[i]) indices.push(i);
+        }
+        return indices;
+      }
+
+      function clearAutoFoldHistoryHidden(chatMessages) {
+        if (!chatMessages) return;
+        var hidden = chatMessages.querySelectorAll(".chat-auto-fold-hidden");
+        for (var i = 0; i < hidden.length; i++) hidden[i].classList.remove("chat-auto-fold-hidden");
+      }
+
+      function setAutoFoldHistoryHidden(chatMessages, boundaryIdx, enabled) {
+        clearAutoFoldHistoryHidden(chatMessages);
+        if (!enabled || boundaryIdx < 1) return;
+        var nodes = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
+        for (var i = 0; i < nodes.length; i++) {
+          var idxAttr = nodes[i].getAttribute("data-msg-index");
+          if (idxAttr == null) continue;
+          var idx = parseInt(idxAttr, 10);
+          if (!isNaN(idx) && idx < boundaryIdx) nodes[i].classList.add("chat-auto-fold-hidden");
+        }
+        collapseHistorySummaryForAutoFold(chatMessages);
+      }
+
+      function collapseHistorySummaryForAutoFold(chatMessages) {
+        var summary = chatMessages ? chatMessages.querySelector(".chat-history-summary") : null;
+        if (!summary) return;
+        summary.setAttribute("data-expanded", "false");
+        var btn = summary.querySelector(".chat-history-summary-btn");
+        if (btn) btn.setAttribute("aria-expanded", "false");
+        var title = summary.querySelector(".chat-history-summary-title");
+        if (title) title.textContent = t("history.expand");
+        applyHistoryHiddenState(summary, false);
+        summary.classList.add("chat-auto-fold-hidden");
+        var sig = chatMessages.getAttribute("data-history-sig");
+        if (sig) {
+          var segs = sig.split(":");
+          if (segs.length >= 3) {
+            segs[2] = "0";
+            chatMessages.setAttribute("data-history-sig", segs.join(":"));
+          }
+        }
+      }
+
+      function followAutoFoldLatest(chatMessages) {
+        if (!chatMessages || !chatMessages.isConnected) return;
+        state.chatPinTurnToTop = true;
+        state.chatStickToBottom = false;
+        clearChatUnread({ removeDivider: true });
+        requestAnimationFrame(function() {
+          if (!chatMessages.isConnected || !state.chatPinTurnToTop) return;
+          if (!applyChatTurnPin(chatMessages)) pinLatestRenderedUserToTop(chatMessages);
+        });
+      }
+
+      function pinLatestRenderedUserToTop(chatMessages) {
+        var el = chatMessages || document.querySelector("#chat-output .chat-messages");
+        if (!el || !el.isConnected) return false;
+        var users = el.querySelectorAll(".chat-message.user:not(.chat-history-hidden):not(.chat-auto-fold-hidden)");
+        if (!users || users.length === 0) return false;
+        // DOM order is newest -> oldest because .chat-messages uses column-reverse.
+        var userEl = users[0];
+        var PIN_TOP_OFFSET = 12;
+
+        var spacer = el.querySelector(".chat-pin-spacer");
+        if (!spacer) {
+          spacer = document.createElement("div");
+          spacer.className = "chat-pin-spacer";
+          spacer.setAttribute("aria-hidden", "true");
+          spacer.style.flex = "0 0 auto";
+          spacer.style.width = "100%";
+          spacer.style.height = "0px";
+          spacer.style.pointerEvents = "none";
+          el.insertBefore(spacer, el.firstChild);
+        } else {
+          spacer.style.height = "0px";
+        }
+
+        var bottomEl = null;
+        for (var c = 0; c < el.children.length; c++) {
+          var child = el.children[c];
+          if (!child.classList) continue;
+          if (child.classList.contains("chat-pin-spacer")) continue;
+          if (child.classList.contains("chat-history-hidden")) continue;
+          if (child.classList.contains("chat-auto-fold-hidden")) continue;
+          bottomEl = child;
+          break;
+        }
+        if (bottomEl) {
+          var available = bottomEl.getBoundingClientRect().bottom - userEl.getBoundingClientRect().top;
+          var needed = el.clientHeight - PIN_TOP_OFFSET;
+          var spacerHeight = needed - available;
+          spacer.style.height = (spacerHeight > 0 ? Math.ceil(spacerHeight) : 0) + "px";
+        }
+
+        var containerTop = el.getBoundingClientRect().top;
+        var delta = (userEl.getBoundingClientRect().top - containerTop) - PIN_TOP_OFFSET;
+        if (Math.abs(delta) > 0.5) {
+          state.chatIsProgrammaticScroll = true;
+          state.chatProgrammaticScrollUntil = Date.now() + 350;
+          el.scrollTop += delta;
+          requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
+        }
+        return true;
+      }
+
       function clearAutoFoldBar(chatOutput) {
         if (!chatOutput) return;
         var bar = chatOutput.querySelector("#chat-fold-bar");
@@ -2185,10 +2308,18 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         state.chatAutoFoldSnapshot = null;
       }
 
-      function buildAutoFoldBarHtml(userMsg, assistantMsg) {
+      function buildAutoFoldBarHtml(userMsg, assistantMsg, historyStats) {
         var userPreview = getMessagePreviewText(userMsg) || "新消息";
         var assistantPreview = assistantMsg ? getMessagePreviewText(assistantMsg) : "等待回复...";
-        return '<button type="button" class="chat-fold-row user" onclick="window.__chatFoldJumpToLatest && window.__chatFoldJumpToLatest()" title="定位到最新消息">' +
+        var historyHtml = "";
+        if (historyStats) {
+          historyHtml = '<button type="button" class="chat-fold-row history" onclick="window.__chatFoldToggleHistory && window.__chatFoldToggleHistory()" title="展开或收起更早对话">' +
+              '<span class="chat-fold-role">历史</span>' +
+              '<span class="chat-fold-text">已收起 ' + escapeHtml(buildHistorySummaryMetaText(historyStats)) + '</span>' +
+            '</button>';
+        }
+        return historyHtml +
+          '<button type="button" class="chat-fold-row user" onclick="window.__chatFoldJumpToLatest && window.__chatFoldJumpToLatest()" title="定位到最新消息">' +
             '<span class="chat-fold-role">我</span>' +
             '<span class="chat-fold-text">' + escapeHtml(userPreview) + '</span>' +
           '</button>' +
@@ -2224,7 +2355,17 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
       }
 
       (window as any).__chatFoldJumpToLatest = function() {
-        scrollChatToBottom(true);
+        var chatMessages = document.querySelector("#chat-output .chat-messages");
+        if (chatMessages) followAutoFoldLatest(chatMessages);
+      };
+
+      (window as any).__chatFoldToggleHistory = function() {
+        var summary = document.querySelector("#chat-output .chat-history-summary");
+        var btn = summary ? summary.querySelector(".chat-history-summary-btn") : null;
+        if (summary) summary.classList.remove("chat-auto-fold-hidden");
+        if (btn && (window as any).__historySummaryToggle) {
+          (window as any).__historySummaryToggle(btn);
+        }
       };
 
       export function applyHistoryCollapse(chatMessages) {
@@ -2314,8 +2455,11 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         if (title) title.textContent = nowExpanded ? t("history.collapse") : t("history.expand");
         if (key) setPersistedExpandState(key, nowExpanded);
         applyHistoryHiddenState(wrap, nowExpanded);
-        // 同步父容器签名里的 expanded 段，避免下一次 render 因签名不符整卡重建（会闪一下）。
         var container = wrap.parentElement;
+        if (nowExpanded) {
+          clearAutoFoldHistoryHidden(container);
+        }
+        // 同步父容器签名里的 expanded 段，避免下一次 render 因签名不符整卡重建（会闪一下）。
         if (container) {
           var sig = container.getAttribute("data-history-sig");
           if (sig) {

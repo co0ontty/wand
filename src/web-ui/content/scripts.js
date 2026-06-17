@@ -654,7 +654,7 @@
       return s.id === state.selectedId;
     });
     var notAtBottom = !isChatNearBottom();
-    var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom;
+    var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom && !state.chatPinTurnToTop;
     bubble.classList.toggle("visible", shouldShow);
     bubble.classList.toggle("has-unread", state.chatUnreadCount > 0);
     var countEl = bubble.querySelector(".chat-unread-bubble-count");
@@ -11707,6 +11707,7 @@
     chatMessages = ensureChatMessagesContainer(chatOutput);
     if (!chatMessages) return;
     var renderWasAtBottom = isChatNearBottom(chatMessages);
+    var renderIsInitial = !state.chatInitialRenderDone;
     var pinningTurn = state.chatPinTurnToTop;
     var existingCount = chatMessages.querySelectorAll(".chat-message:not(.system-info)").length;
     var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
@@ -11974,10 +11975,10 @@
     }
     snapCollapsedSubagentPanelsToBottom2(chatMessages);
     applyHistoryCollapse(chatMessages);
-    applyAutoFoldBar(chatOutput, chatMessages, selectedSession, allMessages, renderWasAtBottom);
-    if (pinningTurn) {
+    applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial);
+    if (state.chatPinTurnToTop) {
       requestAnimationFrame(function() {
-        applyChatTurnPin(chatMessages);
+        if (!applyChatTurnPin(chatMessages)) pinLatestRenderedUserToTop(chatMessages);
       });
     }
     renderStructuredStatusBar(chatMessages, selectedSession);
@@ -13130,16 +13131,18 @@
       node = node.nextElementSibling;
     }
   }
-  function applyAutoFoldBar(chatOutput, chatMessages, selectedSession, allMessages, renderWasAtBottom) {
+  function applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial) {
     if (!chatOutput || !chatMessages) return;
     if (!state.chatAutoFoldEnabled) {
       setAutoFoldMode(chatOutput, chatMessages, false);
+      clearAutoFoldHistoryHidden(chatMessages);
       clearAutoFoldBar(chatOutput);
       return;
     }
     var msgs = allMessages || state.currentMessages || [];
     if (!msgs || msgs.length === 0) {
       setAutoFoldMode(chatOutput, chatMessages, false);
+      clearAutoFoldHistoryHidden(chatMessages);
       clearAutoFoldBar(chatOutput);
       return;
     }
@@ -13152,6 +13155,7 @@
     }
     if (lastUserIdx < 0) {
       setAutoFoldMode(chatOutput, chatMessages, false);
+      clearAutoFoldHistoryHidden(chatMessages);
       clearAutoFoldBar(chatOutput);
       return;
     }
@@ -13165,16 +13169,24 @@
     var hostHeight = chatOutput.clientHeight || 0;
     var viewportHeight = chatMessages.clientHeight || hostHeight;
     var totalContentHeight = chatMessages.scrollHeight || 0;
-    var needsFold = hostHeight > 0 && totalContentHeight > viewportHeight + 24;
+    var historyIndices = getHistoryIndicesBefore(msgs, lastUserIdx);
+    var hasFoldedHistory = historyIndices.length > 0 || !!chatMessages.querySelector(".chat-history-summary");
+    var needsFold = hostHeight > 0 && (totalContentHeight > viewportHeight + 24 || hasFoldedHistory);
     if (!needsFold) {
       clearAutoFoldBar(chatOutput);
+      clearAutoFoldHistoryHidden(chatMessages);
       setAutoFoldMode(chatOutput, chatMessages, false);
       return;
     }
     var foldBar = ensureFoldBar(chatOutput);
-    foldBar.innerHTML = buildAutoFoldBarHtml(msgs[lastUserIdx], assistantIdx >= 0 ? msgs[assistantIdx] : null);
+    var historyStats = historyIndices.length > 0 ? computeHistoryStats(msgs, historyIndices) : null;
+    foldBar.innerHTML = buildAutoFoldBarHtml(msgs[lastUserIdx], assistantIdx >= 0 ? msgs[assistantIdx] : null, historyStats);
     foldBar.classList.remove("hidden");
     setAutoFoldMode(chatOutput, chatMessages, true);
+    setAutoFoldHistoryHidden(chatMessages, lastUserIdx, historyIndices.length > 0);
+    if (renderIsInitial || state.chatPinTurnToTop || state.chatStickToBottom) {
+      followAutoFoldLatest(chatMessages);
+    }
     state.chatAutoFoldSnapshot = { userIdx: lastUserIdx, assistantIdx };
   }
   function ensureFoldBar(chatOutput) {
@@ -13190,6 +13202,107 @@
     if (!chatOutput) return;
     chatOutput.classList.toggle("auto-fold", !!enabled);
   }
+  function getHistoryIndicesBefore(msgs, boundaryIdx) {
+    var indices = [];
+    for (var i = 0; i < boundaryIdx; i++) {
+      if (msgs[i]) indices.push(i);
+    }
+    return indices;
+  }
+  function clearAutoFoldHistoryHidden(chatMessages) {
+    if (!chatMessages) return;
+    var hidden = chatMessages.querySelectorAll(".chat-auto-fold-hidden");
+    for (var i = 0; i < hidden.length; i++) hidden[i].classList.remove("chat-auto-fold-hidden");
+  }
+  function setAutoFoldHistoryHidden(chatMessages, boundaryIdx, enabled) {
+    clearAutoFoldHistoryHidden(chatMessages);
+    if (!enabled || boundaryIdx < 1) return;
+    var nodes = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
+    for (var i = 0; i < nodes.length; i++) {
+      var idxAttr = nodes[i].getAttribute("data-msg-index");
+      if (idxAttr == null) continue;
+      var idx = parseInt(idxAttr, 10);
+      if (!isNaN(idx) && idx < boundaryIdx) nodes[i].classList.add("chat-auto-fold-hidden");
+    }
+    collapseHistorySummaryForAutoFold(chatMessages);
+  }
+  function collapseHistorySummaryForAutoFold(chatMessages) {
+    var summary = chatMessages ? chatMessages.querySelector(".chat-history-summary") : null;
+    if (!summary) return;
+    summary.setAttribute("data-expanded", "false");
+    var btn = summary.querySelector(".chat-history-summary-btn");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    var title = summary.querySelector(".chat-history-summary-title");
+    if (title) title.textContent = t2("history.expand");
+    applyHistoryHiddenState(summary, false);
+    summary.classList.add("chat-auto-fold-hidden");
+    var sig = chatMessages.getAttribute("data-history-sig");
+    if (sig) {
+      var segs = sig.split(":");
+      if (segs.length >= 3) {
+        segs[2] = "0";
+        chatMessages.setAttribute("data-history-sig", segs.join(":"));
+      }
+    }
+  }
+  function followAutoFoldLatest(chatMessages) {
+    if (!chatMessages || !chatMessages.isConnected) return;
+    state.chatPinTurnToTop = true;
+    state.chatStickToBottom = false;
+    clearChatUnread({ removeDivider: true });
+    requestAnimationFrame(function() {
+      if (!chatMessages.isConnected || !state.chatPinTurnToTop) return;
+      if (!applyChatTurnPin(chatMessages)) pinLatestRenderedUserToTop(chatMessages);
+    });
+  }
+  function pinLatestRenderedUserToTop(chatMessages) {
+    var el = chatMessages || document.querySelector("#chat-output .chat-messages");
+    if (!el || !el.isConnected) return false;
+    var users = el.querySelectorAll(".chat-message.user:not(.chat-history-hidden):not(.chat-auto-fold-hidden)");
+    if (!users || users.length === 0) return false;
+    var userEl = users[0];
+    var PIN_TOP_OFFSET = 12;
+    var spacer = el.querySelector(".chat-pin-spacer");
+    if (!spacer) {
+      spacer = document.createElement("div");
+      spacer.className = "chat-pin-spacer";
+      spacer.setAttribute("aria-hidden", "true");
+      spacer.style.flex = "0 0 auto";
+      spacer.style.width = "100%";
+      spacer.style.height = "0px";
+      spacer.style.pointerEvents = "none";
+      el.insertBefore(spacer, el.firstChild);
+    } else {
+      spacer.style.height = "0px";
+    }
+    var bottomEl = null;
+    for (var c = 0; c < el.children.length; c++) {
+      var child = el.children[c];
+      if (!child.classList) continue;
+      if (child.classList.contains("chat-pin-spacer")) continue;
+      if (child.classList.contains("chat-history-hidden")) continue;
+      if (child.classList.contains("chat-auto-fold-hidden")) continue;
+      bottomEl = child;
+      break;
+    }
+    if (bottomEl) {
+      var available = bottomEl.getBoundingClientRect().bottom - userEl.getBoundingClientRect().top;
+      var needed = el.clientHeight - PIN_TOP_OFFSET;
+      var spacerHeight = needed - available;
+      spacer.style.height = (spacerHeight > 0 ? Math.ceil(spacerHeight) : 0) + "px";
+    }
+    var containerTop = el.getBoundingClientRect().top;
+    var delta = userEl.getBoundingClientRect().top - containerTop - PIN_TOP_OFFSET;
+    if (Math.abs(delta) > 0.5) {
+      state.chatIsProgrammaticScroll = true;
+      state.chatProgrammaticScrollUntil = Date.now() + 350;
+      el.scrollTop += delta;
+      requestAnimationFrame(function() {
+        state.chatIsProgrammaticScroll = false;
+      });
+    }
+    return true;
+  }
   function clearAutoFoldBar(chatOutput) {
     if (!chatOutput) return;
     var bar = chatOutput.querySelector("#chat-fold-bar");
@@ -13198,10 +13311,14 @@
     bar.classList.add("hidden");
     state.chatAutoFoldSnapshot = null;
   }
-  function buildAutoFoldBarHtml(userMsg, assistantMsg) {
+  function buildAutoFoldBarHtml(userMsg, assistantMsg, historyStats) {
     var userPreview = getMessagePreviewText(userMsg) || "\u65B0\u6D88\u606F";
     var assistantPreview = assistantMsg ? getMessagePreviewText(assistantMsg) : "\u7B49\u5F85\u56DE\u590D...";
-    return '<button type="button" class="chat-fold-row user" onclick="window.__chatFoldJumpToLatest && window.__chatFoldJumpToLatest()" title="\u5B9A\u4F4D\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-fold-role">\u6211</span><span class="chat-fold-text">' + escapeHtml2(userPreview) + '</span></button><button type="button" class="chat-fold-row assistant" onclick="window.__chatFoldJumpToLatest && window.__chatFoldJumpToLatest()" title="\u5B9A\u4F4D\u5230\u6700\u65B0\u56DE\u590D"><span class="chat-fold-role">Claude</span><span class="chat-fold-text">' + escapeHtml2(assistantPreview) + "</span></button>";
+    var historyHtml = "";
+    if (historyStats) {
+      historyHtml = '<button type="button" class="chat-fold-row history" onclick="window.__chatFoldToggleHistory && window.__chatFoldToggleHistory()" title="\u5C55\u5F00\u6216\u6536\u8D77\u66F4\u65E9\u5BF9\u8BDD"><span class="chat-fold-role">\u5386\u53F2</span><span class="chat-fold-text">\u5DF2\u6536\u8D77 ' + escapeHtml2(buildHistorySummaryMetaText(historyStats)) + "</span></button>";
+    }
+    return historyHtml + '<button type="button" class="chat-fold-row user" onclick="window.__chatFoldJumpToLatest && window.__chatFoldJumpToLatest()" title="\u5B9A\u4F4D\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-fold-role">\u6211</span><span class="chat-fold-text">' + escapeHtml2(userPreview) + '</span></button><button type="button" class="chat-fold-row assistant" onclick="window.__chatFoldJumpToLatest && window.__chatFoldJumpToLatest()" title="\u5B9A\u4F4D\u5230\u6700\u65B0\u56DE\u590D"><span class="chat-fold-role">Claude</span><span class="chat-fold-text">' + escapeHtml2(assistantPreview) + "</span></button>";
   }
   function getMessagePreviewText(msg) {
     if (!msg) return "";
@@ -13228,7 +13345,16 @@
     return text.length > 180 ? text.slice(0, 177) + "..." : text;
   }
   window.__chatFoldJumpToLatest = function() {
-    scrollChatToBottom(true);
+    var chatMessages = document.querySelector("#chat-output .chat-messages");
+    if (chatMessages) followAutoFoldLatest(chatMessages);
+  };
+  window.__chatFoldToggleHistory = function() {
+    var summary = document.querySelector("#chat-output .chat-history-summary");
+    var btn = summary ? summary.querySelector(".chat-history-summary-btn") : null;
+    if (summary) summary.classList.remove("chat-auto-fold-hidden");
+    if (btn && window.__historySummaryToggle) {
+      window.__historySummaryToggle(btn);
+    }
   };
   function applyHistoryCollapse(chatMessages) {
     if (!chatMessages) return;
@@ -13302,6 +13428,9 @@
     if (key) setPersistedExpandState(key, nowExpanded);
     applyHistoryHiddenState(wrap, nowExpanded);
     var container = wrap.parentElement;
+    if (nowExpanded) {
+      clearAutoFoldHistoryHidden(container);
+    }
     if (container) {
       var sig = container.getAttribute("data-history-sig");
       if (sig) {

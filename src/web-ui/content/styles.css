@@ -5147,15 +5147,15 @@
 
     /* ──────────────────────────────────────────────────────────────
        Auto-fold bar — compact latest-turn preview above chat messages.
-       内容超出一屏时，最新用户消息和最新回复的预览固定在顶部；真实消息仍留在
-       .chat-messages 里，避免破坏滚动锚点和增量渲染。
+       内容超出一屏时，更早对话收到顶部横条，最新用户消息和最新回复的预览固定在
+       顶部；真实最新轮次仍留在 .chat-messages 里，避免破坏滚动锚点和增量渲染。
        ────────────────────────────────────────────────────────────── */
     .chat-fold-bar {
       flex: 0 0 auto;
       display: flex;
       flex-direction: column;
       gap: 4px;
-      max-height: 112px;
+      max-height: 124px;
       overflow: hidden;
       padding: 8px 4px 7px;
       box-sizing: border-box;
@@ -5188,6 +5188,10 @@
       border-color: rgba(125, 91, 57, 0.2);
       background: rgba(255, 255, 255, 0.82);
     }
+    .chat-fold-row.history {
+      background: rgba(255, 248, 238, 0.72);
+      color: var(--text-secondary);
+    }
     .chat-fold-role {
       color: var(--text-muted);
       font-size: 0.72rem;
@@ -5208,7 +5212,7 @@
     }
     @media (max-width: 768px) {
       .chat-fold-bar {
-        max-height: 96px;
+        max-height: 112px;
         padding-top: 6px;
         padding-bottom: 6px;
       }
@@ -5231,9 +5235,10 @@
     /* ──────────────────────────────────────────────────────────────
        History collapse — summary divider folding earlier rounds
        发新消息后，"最后一条用户消息"之前的历史折叠成这张摘要卡。
-       折叠的历史消息元素挂 .chat-history-hidden（display:none）。
+       折叠的历史消息元素挂 .chat-history-hidden / .chat-auto-fold-hidden（display:none）。
        ────────────────────────────────────────────────────────────── */
-    .chat-history-hidden { display: none !important; }
+    .chat-history-hidden,
+    .chat-auto-fold-hidden { display: none !important; }
     .chat-history-summary {
       width: 100%;
       max-width: var(--chat-card-max-width, 720px);

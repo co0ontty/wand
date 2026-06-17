@@ -104,7 +104,7 @@ export function updateChatUnreadBubble() {
   var notAtBottom = !isChatNearBottom();
   // 显示条件：有选中会话 + 在 chat 视图 + 用户已经滚开了底部。
   // 不强制要求有未读——用户主动滚上去时也给一个"回到底部"的入口。
-  var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom;
+  var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom && !state.chatPinTurnToTop;
   bubble.classList.toggle("visible", shouldShow);
   bubble.classList.toggle("has-unread", state.chatUnreadCount > 0);
   var countEl = bubble.querySelector(".chat-unread-bubble-count");
