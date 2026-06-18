@@ -18314,8 +18314,12 @@
     } catch (e) {
     }
     try {
-      if (new URL(window.location.href).searchParams.get("embed") === "terminal") {
+      const params = new URL(window.location.href).searchParams;
+      if (params.get("embed") === "terminal") {
         document.documentElement.classList.add("is-wand-embed-terminal");
+        if (params.get("nativeInput") === "1") {
+          document.documentElement.classList.add("is-wand-native-input");
+        }
       }
     } catch (e) {
     }

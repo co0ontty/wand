@@ -207,8 +207,8 @@
 
     /* ===== 嵌入终端模式（iOS 原生壳把 PTY 套在原生头部里） =====
        由 ?embed=terminal 触发，main.ts 给 <html> 挂 .is-wand-embed-terminal。
-       只保留 #output 终端黑窗 + .input-panel 输入栏；侧边栏 / 顶栏 / 空白欢迎页
-       全部隐藏，顶部安全区交给原生导航条消费（这里归零，让终端贴在头部下沿）。 */
+       只保留 #output 终端黑窗；nativeInput=1 时底部输入栏由原生壳渲染。
+       侧边栏 / 顶栏 / 空白欢迎页全部隐藏，顶部安全区交给原生导航条消费。 */
     .is-wand-embed-terminal .sidebar,
     .is-wand-embed-terminal .main-header-row,
     .is-wand-embed-terminal .blank-chat,
@@ -219,93 +219,71 @@
     .is-wand-embed-terminal .app-container {
       padding-top: 0;
     }
+    html.is-wand-embed-terminal {
+      color-scheme: light dark;
+      --embed-pty-bg: #17120f;
+    }
+    html.is-wand-embed-terminal,
+    html.is-wand-embed-terminal body {
+      background: var(--embed-pty-bg);
+    }
     .is-wand-embed-terminal .main-layout,
     .is-wand-embed-terminal .main-layout.sidebar-pinned,
     .is-wand-embed-terminal .main-layout.sidebar-pinned.sidebar-collapsed {
       padding-left: 0;
     }
     .is-wand-embed-terminal .main-content {
-      background: #17120f;
+      background: var(--embed-pty-bg);
     }
     .is-wand-embed-terminal .terminal-container {
       margin: 0;
       border-radius: 0;
+      border: 0;
       border-left: 0;
       border-right: 0;
+      background: var(--embed-pty-bg);
       box-shadow: none;
     }
-    .is-wand-embed-terminal .input-panel {
-      padding: 7px 10px;
-      padding-bottom: calc(8px + var(--input-safe-bottom, var(--safe-bottom, 0px)) + var(--keyboard-offset, 0px));
-      border-top: 1px solid rgba(240, 230, 216, 0.14);
-      background:
-        linear-gradient(180deg, rgba(23, 18, 15, 0) 0%, rgba(23, 18, 15, 0.82) 28%, rgba(23, 18, 15, 0.96) 100%),
-        #17120f;
-      backdrop-filter: blur(16px) saturate(140%);
-      -webkit-backdrop-filter: blur(16px) saturate(140%);
+    .is-wand-embed-terminal .terminal-container:focus-within,
+    .is-wand-embed-terminal .terminal-container.interactive {
+      border-color: transparent;
+      box-shadow: none;
     }
-    .is-wand-embed-terminal .input-composer {
-      border-radius: 999px;
-      border-color: rgba(240, 230, 216, 0.16);
-      background: rgba(42, 32, 24, 0.88);
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.08),
-        0 10px 28px rgba(0, 0, 0, 0.24);
+    .is-wand-embed-terminal .terminal-container::after,
+    .is-wand-embed-terminal .terminal-scale-overlay,
+    .is-wand-embed-terminal .terminal-resize-handle {
+      display: none !important;
     }
-    .is-wand-embed-terminal .input-composer:focus-within,
-    .is-wand-embed-terminal .input-composer.has-text {
-      border-radius: 18px;
-      border-color: rgba(217, 122, 79, 0.58);
-      background: rgba(35, 27, 22, 0.96);
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.10),
-        0 0 0 2px rgba(217, 122, 79, 0.16),
-        0 12px 32px rgba(0, 0, 0, 0.28);
+    .is-wand-embed-terminal .terminal-scroll-wrap {
+      padding: 8px 4px 6px;
+      --term-font-family: "Roboto Mono", "Droid Sans Mono", "Noto Sans Mono", "Noto Sans Symbols 2", "Noto Sans Symbols", monospace;
+      --term-font-size: 10px !important;
+      --term-row-height: 15px !important;
+      --term-fg: #f5eadc;
+      --term-bg: transparent;
+      --term-cursor: #d67b52;
+      --term-color-0: #1f1b17;
+      --term-color-1: #d27766;
+      --term-color-2: #7fa36f;
+      --term-color-3: #d5a35b;
+      --term-color-4: #87a9d9;
+      --term-color-5: #c595c7;
+      --term-color-6: #7fb3b1;
+      --term-color-7: #f5eadc;
+      --term-color-8: #625347;
+      --term-color-9: #e39a89;
+      --term-color-10: #9cc08a;
+      --term-color-11: #ebbb6e;
+      --term-color-12: #a8c1ea;
+      --term-color-13: #dbb1dc;
+      --term-color-14: #9acbca;
+      --term-color-15: #fff7ef;
     }
-    .is-wand-embed-terminal .composer-main-row {
-      min-height: 48px;
-      padding: 5px 8px;
-      gap: 6px;
+    .is-wand-embed-terminal .terminal-scroll-wrap ::selection {
+      background: rgba(214, 123, 82, 0.28);
     }
-    .is-wand-embed-terminal .composer-inline-config {
-      display: none;
-    }
-    .is-wand-embed-terminal .composer-input-wrap {
-      min-height: 34px;
-      border-radius: 17px;
-      background: rgba(255, 255, 255, 0.055);
-      border: 1px solid rgba(240, 230, 216, 0.10);
-    }
-    .is-wand-embed-terminal .input-composer:focus-within .composer-input-wrap,
-    .is-wand-embed-terminal .input-composer.has-text .composer-input-wrap {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: rgba(240, 230, 216, 0.16);
-    }
-    .is-wand-embed-terminal .input-textarea {
-      color: #f4e8da;
-      caret-color: #d97a4f;
-      padding: 7px 10px;
-      min-height: 34px;
-      font-size: 16px;
-      line-height: 1.35;
-    }
-    .is-wand-embed-terminal .input-textarea::placeholder {
-      color: rgba(244, 232, 218, 0.52);
-    }
-    .is-wand-embed-terminal .input-composer:not(:focus-within):not(.has-text) .input-textarea {
-      color: transparent;
-      caret-color: transparent;
-    }
-    .is-wand-embed-terminal .input-composer:not(:focus-within):not(.has-text) .input-textarea::placeholder {
-      opacity: 0;
-    }
-    .is-wand-embed-terminal .btn-circle-action {
-      color: rgba(244, 232, 218, 0.72);
-    }
-    .is-wand-embed-terminal .btn-circle-action:hover,
-    .is-wand-embed-terminal .btn-circle-action:active {
-      color: #f4e8da;
-      background: rgba(217, 122, 79, 0.16);
+    .is-wand-embed-terminal.is-wand-native-input .input-panel {
+      display: none !important;
     }
 
     /* ===== 首帧过渡抑制 ===== */

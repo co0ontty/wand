@@ -49,6 +49,20 @@ Android sources live in `android/`; macOS sources live in `macos/`; iOS sources 
 - Artifact filenames must include a semantic version such as `wand-v1.37.0.apk` or `wand-v1.37.0.dmg`.
 - Do not change the Android release keystore or macOS signing identity casually; installed clients depend on signature continuity for upgrades.
 
+### Mobile Client UX Reference
+For Android mobile UI work, first consult `android/docs/ios-mobile-updates-reference-2026-06-18.md` and mirror the verified iOS interaction model unless there is a platform-specific reason not to. Current Android conventions established from that reference:
+
+- PTY uses a native shell: native top bar, dark embedded terminal WebView, native bottom input. Load the WebView with `embed=terminal&nativeInput=1`, hide the web input panel, and submit PTY input as text followed by `"\r"` with `shortcutKey = "enter_text"`.
+- Chat and PTY quick commit share the same `GitChangesButton`, `QuickCommitStore`, and `QuickCommitSheet`; keep the sheet half-expandable with a standard drag handle.
+- Appearance mode is persisted as `wand.appearanceMode` with `light`, `dark`, or `system`; settings should expose 明亮 / 黑暗 / 跟随系统 and `WandTheme` should honor it.
+- Session-list header follows the iOS inline toolbar pattern: centered segmented scope switcher, left-side overflow/settings menu, right-side create or clear action. Do not reintroduce a large title header.
+- Session cards use a left rail and right content column: provider logo top-left, `终端` / `聊天` chip bottom-left, title top-right, path bottom-right aligned vertically with the chip, and one-unit duration chip at top-right.
+- Duration chips show one unit only: `刚刚`, `N分钟`, `N小时`, or `N天`.
+- Keep Android visual treatment quiet and dense: neutral dark/light surfaces, restrained borders/shadows, compact icon buttons, no heavy circular toolbar cluster.
+- Embedded-terminal display issues are usually width/font fit problems, not UTF-8 decoding. In `embed=terminal`, prefer smaller monospace font, tighter padding, Android mono/symbol font fallbacks, and trigger terminal refit after injected CSS changes.
+
+After Android UI changes, validate on device with `cd android && ./gradlew :app:assembleDebug` and `adb install -r -d app/build/outputs/apk/debug/app-debug.apk`, then inspect screenshots for header, cards, PTY terminal, and input alignment.
+
 ## State, Security, and Configuration
 Do not commit real secrets, local state, or machine-specific paths from `~/.wand/`. Config defaults are defined in `src/config.ts`; `ensureConfig()` merges defaults and rewrites the normalized config, so config-schema changes must update that file carefully. SQLite lives beside the resolved config path and is managed by `src/storage.ts`.
 
@@ -56,4 +70,3 @@ Review changes touching auth, file access, PTY management, upload routes, comman
 
 ## Commit & Pull Request Guidelines
 Recent history favors short, imperative commit subjects in Chinese, for example `修复终端双路写入重叠` or `重构快捷提交并优化会话切换体验`. Keep commits scoped to one logical change. PRs should include user-visible impact, affected areas such as `web-ui`, `tui`, `android`, or `macos`, linked issues when applicable, validation performed, and screenshots or recordings for UI changes.
-
