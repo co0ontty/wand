@@ -343,6 +343,16 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           if (e.key === "Escape" && state.plusPopoverOpen) closePlusPopover();
         });
 
+        // 自动批准 chip 会随输入栏/会话状态局部刷新，使用委托避免刷新后丢失点击绑定。
+        document.addEventListener("click", function(e) {
+          var target = e.target as HTMLElement;
+          if (!target || typeof target.closest !== "function") return;
+          var toggle = target.closest("#auto-approve-toggle");
+          if (!toggle) return;
+          e.preventDefault();
+          toggleAutoApprove();
+        });
+
         // folder picker：外点关闭下拉
         document.addEventListener("click", function(e) {
           if (!(e.target as HTMLElement).closest(".folder-picker-container")) {
@@ -791,8 +801,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         if (approvePermissionBtn) approvePermissionBtn.addEventListener("click", approvePermission);
         var denyPermissionBtn = document.getElementById("deny-permission-btn");
         if (denyPermissionBtn) denyPermissionBtn.addEventListener("click", denyPermission);
-        var autoApproveToggle = document.getElementById("auto-approve-toggle");
-        if (autoApproveToggle) autoApproveToggle.addEventListener("click", toggleAutoApprove);
         var sendBtn = document.getElementById("send-input-button");
         if (sendBtn) sendBtn.addEventListener("click", function() {
           // 与 input focus 同理：手机 drawer 盖在上面才收起，桌面常驻栏保持原状。

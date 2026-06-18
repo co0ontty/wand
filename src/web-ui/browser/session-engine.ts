@@ -639,8 +639,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (isAutoApproveImpliedByMode(session)) return "";
         var enabled = !!session.autoApprovePermissions;
         return enabled
-          ? '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator active" title="自动批准已启用 — 点击关闭">' + iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">自动</span></span>'
-          : '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator" title="自动批准已关闭 — 点击开启">' + iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">手动</span></span>';
+          ? '<button id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator active" type="button" aria-pressed="true" aria-label="自动批准已启用，点击关闭" title="自动批准已启用 — 点击关闭">' + iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">自动</span></button>'
+          : '<button id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator" type="button" aria-pressed="false" aria-label="自动批准已关闭，点击开启" title="自动批准已关闭 — 点击开启">' + iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">手动</span></button>';
       }
 
       export function fetchAvailableModels() {
@@ -4076,6 +4076,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function handleInteractiveTextInput(inputBox) {
         if (!state.terminalInteractive || !inputBox) return false;
+        if (document.documentElement.classList.contains("is-wand-embed-terminal")) return false;
         var value = inputBox.value || "";
         if (!value) return false;
         queueDirectInput(value, "interactive_text").catch(function() {});

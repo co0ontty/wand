@@ -7,6 +7,7 @@ import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnaps
 import { normalizeMode } from "./config.js";
 import { blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
+import { resolveSessionCwd } from "./session-cwd.js";
 import {
   getGitStatus,
   QuickCommitError,
@@ -201,7 +202,7 @@ export function registerSessionRoutes(
       }
       const provider = body.provider === "codex" ? "codex" : "claude";
       const snapshot = structured.createSession({
-        cwd: body.cwd?.trim() || process.cwd(),
+        cwd: resolveSessionCwd(body.cwd, config.defaultCwd),
         mode: normalizeMode(body.mode, defaultMode),
         provider,
         runner: body.runner ?? (provider === "codex" ? "codex-cli-exec" : "claude-cli-print"),
@@ -211,7 +212,7 @@ export function registerSessionRoutes(
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
           : config.defaultThinkingEffort,
       });
-      onSessionCreated?.(body.cwd ?? snapshot.cwd);
+      onSessionCreated?.(snapshot.cwd);
       const prompt = body.prompt?.trim();
       if (prompt) {
         const finished = await structured.sendMessage(snapshot.id, prompt);

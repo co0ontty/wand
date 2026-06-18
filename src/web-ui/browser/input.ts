@@ -666,7 +666,8 @@ import { getSessionStatusLabel } from "./session-ui";
       export function sendInputFromBox(opts) {
         opts = opts || {};
         var interruptFlag = !!opts.interrupt;
-        if (state.terminalInteractive) {
+        var embedTerminal = document.documentElement.classList.contains("is-wand-embed-terminal");
+        if (state.terminalInteractive && !embedTerminal) {
           showToast("终端交互模式开启时，请直接在终端中输入。", "info");
           return Promise.resolve();
         }
@@ -1770,6 +1771,13 @@ import { getSessionStatusLabel } from "./session-ui";
         if (event.defaultPrevented || event.isComposing) return false;
         var target = event.target;
         if (!target) return true;
+        if (
+          document.documentElement.classList.contains("is-wand-embed-terminal") &&
+          target.closest &&
+          target.closest("#input-box")
+        ) {
+          return false;
+        }
         if (target.closest && target.closest("#mini-keyboard")) return false;
         if (shouldIgnoreInteractiveTarget(target)) return false;
         return true;
@@ -1970,7 +1978,10 @@ import { getSessionStatusLabel } from "./session-ui";
           // 不会落进 textarea；唯独 IME 组字期间 capture 放行(isComposing)，字符临时
           // 落入 textarea，由 compositionend 取最终文本发 PTY 后清空。
           composer.readOnly = false;
-          composer.classList.toggle("is-terminal-passthrough", !!state.terminalInteractive);
+          composer.classList.toggle(
+            "is-terminal-passthrough",
+            !!state.terminalInteractive && !document.documentElement.classList.contains("is-wand-embed-terminal"),
+          );
         }
         // v2: 终端交互模式时强制退出语音模式（语义冲突）。三件套已不在输入框里，
         // 不再需要 is-terminal-mode / has-placeholder 控制 ghost meta 显隐。

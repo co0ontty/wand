@@ -837,10 +837,14 @@ import { render, restoreLoginSession } from "./render";
         if (enabled) {
           toggle.className = base + " active";
           toggle.title = "自动批准已启用 — 点击关闭";
+          toggle.setAttribute("aria-pressed", "true");
+          toggle.setAttribute("aria-label", "自动批准已启用，点击关闭");
           toggle.innerHTML = iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">自动</span>';
         } else {
           toggle.className = base;
           toggle.title = "自动批准已关闭 — 点击开启";
+          toggle.setAttribute("aria-pressed", "false");
+          toggle.setAttribute("aria-label", "自动批准已关闭，点击开启");
           toggle.innerHTML = iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">手动</span>';
         }
       }

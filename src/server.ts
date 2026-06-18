@@ -867,7 +867,7 @@ async function resolveMacosDmgAsset(configDir: string, config: WandConfig): Prom
 async function listPathSuggestions(input: string, fallbackCwd: string): Promise<PathSuggestion[]> {
   const normalizedInput = input.trim();
   const baseInput = normalizedInput || fallbackCwd;
-  const resolvedInput = path.resolve(process.cwd(), baseInput);
+  const resolvedInput = normalizeFolderPath(baseInput);
   const endsWithSeparator = /[\\/]$/.test(normalizedInput);
 
   let searchDir = resolvedInput;
@@ -2370,7 +2370,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
         }
       );
-      recordRecentPath(storage, body.cwd ?? snapshot.cwd);
+      recordRecentPath(storage, snapshot.cwd);
       res.status(201).json(snapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法启动命令。请检查命令是否安装。") });

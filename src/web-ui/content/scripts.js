@@ -4564,10 +4564,14 @@
     if (enabled) {
       toggle.className = base + " active";
       toggle.title = "\u81EA\u52A8\u6279\u51C6\u5DF2\u542F\u7528 \u2014 \u70B9\u51FB\u5173\u95ED";
+      toggle.setAttribute("aria-pressed", "true");
+      toggle.setAttribute("aria-label", "\u81EA\u52A8\u6279\u51C6\u5DF2\u542F\u7528\uFF0C\u70B9\u51FB\u5173\u95ED");
       toggle.innerHTML = iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">\u81EA\u52A8</span>';
     } else {
       toggle.className = base;
       toggle.title = "\u81EA\u52A8\u6279\u51C6\u5DF2\u5173\u95ED \u2014 \u70B9\u51FB\u5F00\u542F";
+      toggle.setAttribute("aria-pressed", "false");
+      toggle.setAttribute("aria-label", "\u81EA\u52A8\u6279\u51C6\u5DF2\u5173\u95ED\uFF0C\u70B9\u51FB\u5F00\u542F");
       toggle.innerHTML = iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">\u624B\u52A8</span>';
     }
   }
@@ -6843,6 +6847,14 @@
       if (e.key === "Escape" && state.plusPopoverOpen) closePlusPopover();
     });
     document.addEventListener("click", function(e) {
+      var target = e.target;
+      if (!target || typeof target.closest !== "function") return;
+      var toggle = target.closest("#auto-approve-toggle");
+      if (!toggle) return;
+      e.preventDefault();
+      toggleAutoApprove();
+    });
+    document.addEventListener("click", function(e) {
       if (!e.target.closest(".folder-picker-container")) {
         var dd = document.getElementById("folder-picker-dropdown");
         if (dd) dd.classList.add("hidden");
@@ -7294,8 +7306,6 @@
     if (approvePermissionBtn) approvePermissionBtn.addEventListener("click", approvePermission);
     var denyPermissionBtn = document.getElementById("deny-permission-btn");
     if (denyPermissionBtn) denyPermissionBtn.addEventListener("click", denyPermission);
-    var autoApproveToggle = document.getElementById("auto-approve-toggle");
-    if (autoApproveToggle) autoApproveToggle.addEventListener("click", toggleAutoApprove);
     var sendBtn = document.getElementById("send-input-button");
     if (sendBtn) sendBtn.addEventListener("click", function() {
       dismissDrawerIfOverlay();
@@ -9601,7 +9611,8 @@
   function sendInputFromBox(opts) {
     opts = opts || {};
     var interruptFlag = !!opts.interrupt;
-    if (state.terminalInteractive) {
+    var embedTerminal = document.documentElement.classList.contains("is-wand-embed-terminal");
+    if (state.terminalInteractive && !embedTerminal) {
       showToast2("\u7EC8\u7AEF\u4EA4\u4E92\u6A21\u5F0F\u5F00\u542F\u65F6\uFF0C\u8BF7\u76F4\u63A5\u5728\u7EC8\u7AEF\u4E2D\u8F93\u5165\u3002", "info");
       return Promise.resolve();
     }
@@ -10485,6 +10496,9 @@
     if (event.defaultPrevented || event.isComposing) return false;
     var target = event.target;
     if (!target) return true;
+    if (document.documentElement.classList.contains("is-wand-embed-terminal") && target.closest && target.closest("#input-box")) {
+      return false;
+    }
     if (target.closest && target.closest("#mini-keyboard")) return false;
     if (shouldIgnoreInteractiveTarget(target)) return false;
     return true;
@@ -10656,7 +10670,10 @@
       composer.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
       composer.setAttribute("aria-disabled", composer.disabled ? "true" : "false");
       composer.readOnly = false;
-      composer.classList.toggle("is-terminal-passthrough", !!state.terminalInteractive);
+      composer.classList.toggle(
+        "is-terminal-passthrough",
+        !!state.terminalInteractive && !document.documentElement.classList.contains("is-wand-embed-terminal")
+      );
     }
     var composerEl = document.querySelector(".input-composer");
     if (composerEl && state.terminalInteractive && composerEl.classList.contains("voice-mode")) {
@@ -14910,7 +14927,7 @@
     if (!session) return "";
     if (isAutoApproveImpliedByMode(session)) return "";
     var enabled = !!session.autoApprovePermissions;
-    return enabled ? '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator active" title="\u81EA\u52A8\u6279\u51C6\u5DF2\u542F\u7528 \u2014 \u70B9\u51FB\u5173\u95ED">' + iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">\u81EA\u52A8</span></span>' : '<span id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator" title="\u81EA\u52A8\u6279\u51C6\u5DF2\u5173\u95ED \u2014 \u70B9\u51FB\u5F00\u542F">' + iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">\u624B\u52A8</span></span>';
+    return enabled ? '<button id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator active" type="button" aria-pressed="true" aria-label="\u81EA\u52A8\u6279\u51C6\u5DF2\u542F\u7528\uFF0C\u70B9\u51FB\u5173\u95ED" title="\u81EA\u52A8\u6279\u51C6\u5DF2\u542F\u7528 \u2014 \u70B9\u51FB\u5173\u95ED">' + iconSvg("shieldCheck", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">\u81EA\u52A8</span></button>' : '<button id="auto-approve-toggle" class="composer-pill composer-pill-chip auto-approve-indicator" type="button" aria-pressed="false" aria-label="\u81EA\u52A8\u6279\u51C6\u5DF2\u5173\u95ED\uFF0C\u70B9\u51FB\u5F00\u542F" title="\u81EA\u52A8\u6279\u51C6\u5DF2\u5173\u95ED \u2014 \u70B9\u51FB\u5F00\u542F">' + iconSvg("shield", { size: 12, strokeWidth: 1.7, cls: "composer-pill-icon" }) + '<span class="composer-pill-label">\u624B\u52A8</span></button>';
   }
   function fetchAvailableModels() {
     return fetch("/api/models", { credentials: "same-origin" }).then(function(res) {
@@ -17935,6 +17952,7 @@
   }
   function handleInteractiveTextInput(inputBox) {
     if (!state.terminalInteractive || !inputBox) return false;
+    if (document.documentElement.classList.contains("is-wand-embed-terminal")) return false;
     var value = inputBox.value || "";
     if (!value) return false;
     queueDirectInput4(value, "interactive_text").catch(function() {

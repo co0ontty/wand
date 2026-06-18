@@ -7411,6 +7411,8 @@
        仍保留作为特定色彩或最大宽度等微调入口。
        ====================================================================== */
     .composer-pill {
+      appearance: none;
+      -webkit-appearance: none;
       font-family: var(--font-sans);
       font-size: 0.625rem;
       font-weight: 500;
@@ -7462,6 +7464,17 @@
     }
     .composer-pill-chip.active:hover {
       background: rgba(197, 101, 61, 0.18);
+    }
+
+    .is-wand-app .input-composer:not(:focus-within):not(.has-text) .auto-approve-indicator {
+      width: 24px;
+      min-width: 24px;
+      padding-left: 0;
+      padding-right: 0;
+      gap: 0;
+    }
+    .is-wand-app .input-composer:not(:focus-within):not(.has-text) .auto-approve-indicator .composer-pill-label {
+      display: none;
     }
 
     /* 兼容旧类：保留为 alias，仅用于细节微调（如最大宽度） */

@@ -20,6 +20,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { generateSessionTopic } from "./session-topic.js";
+import { resolveSessionCwd } from "./session-cwd.js";
 
 interface CreateStructuredSessionOptions {
   cwd: string;
@@ -611,8 +612,9 @@ export class StructuredSessionManager {
     const prompt = options.prompt?.trim();
     const provider: SessionProvider = options.provider === "codex" ? "codex" : "claude";
     const runner = options.runner ?? defaultStructuredRunner(provider);
+    const baseCwd = resolveSessionCwd(options.cwd, this.config.defaultCwd);
     const worktreeSetup = options.worktreeEnabled
-      ? prepareSessionWorktree({ cwd: options.cwd, sessionId: id })
+      ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id })
       : null;
     const selectedModel = options.model?.trim() || null;
     const initialThinkingEffort = normalizeThinkingEffort(options.thinkingEffort);
@@ -627,7 +629,7 @@ export class StructuredSessionManager {
           : runner === "claude-sdk"
             ? "claude-agent-sdk (stream-json)"
             : "claude -p --output-format stream-json",
-      cwd: worktreeSetup?.cwd ?? options.cwd,
+      cwd: worktreeSetup?.cwd ?? baseCwd,
       mode: options.mode,
       worktreeEnabled: Boolean(worktreeSetup),
       worktree: worktreeSetup?.worktree ?? null,

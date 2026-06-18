@@ -21,6 +21,7 @@ import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./res
 import { applyThinkingEffortToPrompt, normalizeThinkingEffort } from "./structured-session-manager.js";
 import { generateSessionTopic } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
+import { resolveSessionCwd } from "./session-cwd.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {
   return /^codex\b/.test(command.trim()) ? "codex" : "claude";
@@ -924,9 +925,7 @@ export class ProcessManager extends EventEmitter {
   start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"] }): SessionSnapshot {
     this.assertCommandAllowed(command);
 
-    const baseCwd = cwd
-      ? path.resolve(process.cwd(), cwd)
-      : path.resolve(process.cwd(), this.config.defaultCwd);
+    const baseCwd = resolveSessionCwd(cwd, this.config.defaultCwd);
 
     const id = opts?.reuseId || randomUUID();
     // When a session is being resumed under the same id, capture its prior
