@@ -12,7 +12,7 @@
  * - Windows 不支持，attach 模式直接跳过；新启的 `wand web` 仍会按老逻辑启动（端口冲突时报错）。
  */
 
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, existsSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -45,6 +45,7 @@ export function writePidfile(configPath: string, info: PidInfo): void {
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(info, null, 2) + "\n", { mode: 0o600 });
   renameSync(tmp, file);
+  applyConfigDirOwnership(file, configPath, 0o600);
 }
 
 /** 读取并校验。文件不存在 / 损坏 / 进程不在 → 返回 null。 */
@@ -126,4 +127,18 @@ export function readLiveInstance(configPath: string): PidInfo | null {
   // 进程活着但 socket 不在 → 多半是异常崩溃后被某种监控拉起。视为不可用。
   if (info.socket && !existsSync(info.socket)) return null;
   return info;
+}
+
+function applyConfigDirOwnership(filePath: string, configPath: string, mode: number): void {
+  try {
+    const owner = statSync(path.dirname(configPath));
+    chownSync(filePath, owner.uid, owner.gid);
+  } catch {
+    /* best effort: non-root processes cannot chown, and usually already own the file */
+  }
+  try {
+    chmodSync(filePath, mode);
+  } catch {
+    /* noop */
+  }
 }

@@ -6,7 +6,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -589,12 +589,58 @@ function currentUserName(): string {
   }
 }
 
+function ownerUserNameForPath(targetPath: string): string {
+  const candidates = [targetPath, path.dirname(targetPath)];
+  for (const candidate of candidates) {
+    try {
+      const uid = statUid(candidate);
+      if (process.env.SUDO_UID === String(uid) && process.env.SUDO_USER) {
+        return process.env.SUDO_USER;
+      }
+      const resolved = spawnSync("id", ["-un", String(uid)], { encoding: "utf8", timeout: 3000 });
+      const name = (resolved.stdout || "").trim();
+      if (resolved.status === 0 && name) return name;
+    } catch {
+      /* try next candidate */
+    }
+  }
+  return process.env.SUDO_USER || currentUserName();
+}
+
+function homeForUser(userName: string, fallback: string): string {
+  if (!userName || userName === "root") return fallback;
+  if (process.platform === "darwin") {
+    const resolved = spawnSync("dscl", [".", "-read", `/Users/${userName}`, "NFSHomeDirectory"], {
+      encoding: "utf8",
+      timeout: 3000,
+    });
+    const match = (resolved.stdout || "").match(/NFSHomeDirectory:\s*(.+)/);
+    if (resolved.status === 0 && match?.[1]) return match[1].trim();
+  }
+  if (process.platform === "linux") {
+    const resolved = spawnSync("getent", ["passwd", userName], { encoding: "utf8", timeout: 3000 });
+    const home = (resolved.stdout || "").split(":")[5];
+    if (resolved.status === 0 && home) return home.trim();
+  }
+  return fallback;
+}
+
+function statUid(targetPath: string): number {
+  return readFileStat(targetPath).uid;
+}
+
+function readFileStat(targetPath: string): { uid: number } {
+  return statSync(targetPath);
+}
+
 function installSystemdService(ctx: ServiceContext, scope: ServiceScope): CommandResult {
   const unitPath = servicePathFor(scope);
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
   const nodeBinDir = path.dirname(nodeBin);
-  const runHome = process.env.HOME || os.homedir();
+  const runUser = scope === "system" ? ownerUserNameForPath(ctx.configPath) : currentUserName();
+  const fallbackHome = process.env.HOME || os.homedir();
+  const runHome = scope === "system" ? homeForUser(runUser, fallbackHome) : fallbackHome;
   // 关键：把调用 `wand service:install` 时的真实 PATH 写进 unit。
   // 否则 systemd 默认 PATH 极简（system scope 之前写死 `nodeBin:/usr/local/...`，
   // user scope 干脆没写），spawn 出的 claude/codex 子进程会撞 "command not found"
@@ -622,7 +668,6 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
 
   let unitLines: string[];
   if (scope === "system") {
-    const runUser = currentUserName();
     unitLines = [
       ...commonExec,
       `User=${runUser}`,
@@ -707,16 +752,20 @@ function installLaunchdService(ctx: ServiceContext, scope: ServiceScope): Comman
   const wandBin = resolveWandBin(ctx);
   const nodeBin = process.execPath;
   const nodeBinDir = path.dirname(nodeBin);
-  const runHome = process.env.HOME || os.homedir();
+  const runUser = scope === "system" ? ownerUserNameForPath(ctx.configPath) : currentUserName();
+  const fallbackHome = process.env.HOME || os.homedir();
+  const runHome = scope === "system" ? homeForUser(runUser, fallbackHome) : fallbackHome;
   // 与 systemd 同理：launchd 默认 PATH 极简，spawn 出的 claude 会找不到。
   const servicePath = buildServicePath(nodeBinDir, runHome);
-  // LaunchDaemon (system) 跑在 root，但 wand 数据应该归 ctx.configPath 的 owner；
-  // 简化处理：system 模式下不强制改 owner，让用户自己提前 chown。
+  const userNameField = scope === "system"
+    ? `  <key>UserName</key><string>${runUser}</string>\n`
+    : "";
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.wand.web</string>
+${userNameField}  <key>WorkingDirectory</key><string>${runHome}</string>
   <key>ProgramArguments</key>
   <array>
     <string>${nodeBin}</string>

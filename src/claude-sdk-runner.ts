@@ -28,6 +28,8 @@ export class ClaudeRunError extends Error {
 export interface RunClaudePrintOptions {
   cwd?: string;
   timeoutMs: number;
+  /** Optional Claude model id / alias. Empty or "default" keeps Claude Code's own default. */
+  model?: string;
   /**
    * 用户偏好的回复语言（取自 config.language）。传进来时会以
    * `appendSystemPrompt` 形式灌给 Claude，保证 quick-commit / prompt-optimizer
@@ -149,6 +151,7 @@ export async function runClaudePrint(
 
   const sdkClaudeBinary = resolveSdkClaudeBinary();
   const languageDirective = options.language ? buildLanguageDirective(options.language) : "";
+  const model = options.model?.trim();
   const sdkOptions: SdkOptions = {
     abortController,
     tools: [],
@@ -158,6 +161,7 @@ export async function runClaudePrint(
     ...(cwd ? { cwd } : {}),
     ...(sdkClaudeBinary ? { pathToClaudeCodeExecutable: sdkClaudeBinary } : {}),
     ...(languageDirective ? { appendSystemPrompt: languageDirective } : {}),
+    ...(model && model !== "default" ? { model } : {}),
   };
 
   // 单条 user message → AsyncGenerator，SDK 的 streaming input 协议要求。

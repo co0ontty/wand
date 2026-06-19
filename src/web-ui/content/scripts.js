@@ -324,9 +324,10 @@
     // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
     // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
     chatStickToBottom: true,
-    // ChatGPT 风格的"顶置最新轮次"：true = 把最新一条用户消息钉到视口顶部，
-    // 助手回复在其下方流式展开，更早的历史折叠成摘要卡。用户一旦手动滚动/滚轮/触摸
-    // 即释放此模式回到贴底。chatPinMinUserIndex 防止钉到比发送时更早的用户消息。
+    // 用户显式点折叠条时才进入的"顶置最新轮次"：true = 把最新一条用户消息
+    // 钉到视口顶部，助手回复在其下方流式展开。普通发送默认走贴底跟随。
+    // 用户一旦手动滚动/滚轮/触摸即释放此模式。chatPinMinUserIndex 防止
+    // 钉到比触发时更早的用户消息。
     chatPinTurnToTop: false,
     chatPinMinUserIndex: 0,
     // ===== 自动折叠（"横条 + 一屏"）=====
@@ -771,6 +772,22 @@
     chatMsgs.scrollTop = 0;
     requestAnimationFrame(done);
   }
+  function prepareChatBottomFollow() {
+    var chatMsgs = getChatScrollElement();
+    releaseChatTurnPin();
+    if (chatMsgs) removeChatPinSpacer(chatMsgs);
+    state.chatStickToBottom = true;
+    clearChatUnread({ removeDivider: true });
+    if (chatMsgs && chatMsgs.isConnected) {
+      state.chatIsProgrammaticScroll = true;
+      state.chatProgrammaticScrollUntil = Date.now() + 180;
+      chatMsgs.scrollTop = 0;
+      requestAnimationFrame(function() {
+        state.chatIsProgrammaticScroll = false;
+      });
+    }
+    updateChatUnreadBubble();
+  }
   function bindChatScrollListener() {
     var chatMsgs = getChatScrollElement();
     if (!chatMsgs || !chatMsgs.isConnected) return;
@@ -862,6 +879,9 @@
     if (btn) btn.onclick = function() {
       loadMoreChatMessages();
     };
+    var coarsePointer = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    var mobileViewport = window.innerWidth <= 768;
+    if (coarsePointer || mobileViewport || window.__wandImeNative || window.__wandIosNative) return;
     if (typeof IntersectionObserver === "undefined") return;
     _loadMoreObserver = new IntersectionObserver(function(entries) {
       for (var i = 0; i < entries.length; i++) {
@@ -4996,6 +5016,9 @@
     if (state.joystickRootEl) return;
     var root = document.createElement("div");
     root.className = "wand-joystick-root";
+    ["pointerdown", "pointerup", "touchstart", "touchend", "click"].forEach(function(type) {
+      root.addEventListener(type, suppressJoystickKeyboardFocus, true);
+    });
     var backdrop = document.createElement("div");
     backdrop.className = "wand-joystick-backdrop";
     root.appendChild(backdrop);
@@ -5039,10 +5062,30 @@
     window.addEventListener("orientationchange", state.joystickResizeHandler);
     updateJoystickVisibility();
   }
+  function suppressJoystickKeyboardFocus() {
+    if (!document.documentElement.classList.contains("is-wand-native-input")) return;
+    var active = document.activeElement;
+    if (active && typeof active.blur === "function") {
+      try {
+        active.blur();
+      } catch (err) {
+      }
+    }
+    setTimeout(function() {
+      var next = document.activeElement;
+      if (next && typeof next.blur === "function") {
+        try {
+          next.blur();
+        } catch (err) {
+        }
+      }
+    }, 0);
+  }
   function onJoystickPointerDown(e) {
     if (!isJoystickAvailable()) return;
     if ((e.pointerType === "mouse" || e.pointerType === "pen") && e.button !== 0) return;
     if (state.joystickPointerId !== null) return;
+    suppressJoystickKeyboardFocus();
     e.preventDefault();
     e.stopPropagation();
     var canDirectDrag = e.pointerType === "mouse" || e.pointerType === "pen";
@@ -9647,7 +9690,6 @@
           setDraftValue("");
           return Promise.resolve();
         }
-        startChatTurnPin(state.currentMessages.length);
         return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
           if (!readySession) {
             return null;
@@ -9656,6 +9698,7 @@
           if (readySession && readySession.provider === "codex" && state.selectedId !== readySession.id) {
             throw new Error("Codex session changed before input send.");
           }
+          prepareChatBottomFollow();
           return sendTerminalChunks(submitChunks, "enter_text", 30, submitView).then(function() {
             if (inputBox && inputBox.value === value) {
               inputBox.value = "";
@@ -9731,14 +9774,7 @@
         structuredState: optimisticStructuredState
       }), userMsgs);
       updateInputHint(isInterrupting ? "\u5DF2\u4E2D\u65AD\uFF0C\u6B63\u5728\u5904\u7406\u65B0\u6D88\u606F\u2026" : "\u601D\u8003\u4E2D\u2026");
-      var pinUserIdx = -1;
-      for (var pi = state.currentMessages.length - 1; pi >= 0; pi--) {
-        if (state.currentMessages[pi] && state.currentMessages[pi].role === "user") {
-          pinUserIdx = pi;
-          break;
-        }
-      }
-      startChatTurnPin(pinUserIdx >= 0 ? pinUserIdx : state.currentMessages.length);
+      prepareChatBottomFollow();
       renderChat(true);
       if (isInterrupting) {
         showToast2("\u5DF2\u4E2D\u65AD\u4E0A\u4E00\u6761\u56DE\u590D\uFF0C\u6B63\u5728\u5904\u7406\u65B0\u6D88\u606F\u2026", "info");
@@ -13203,7 +13239,7 @@
     foldBar.classList.remove("hidden");
     setAutoFoldMode(chatOutput, chatMessages, true);
     setAutoFoldHistoryHidden(chatMessages, lastUserIdx, historyIndices.length > 0);
-    if (renderIsInitial || state.chatPinTurnToTop || state.chatStickToBottom) {
+    if (state.chatPinTurnToTop) {
       followAutoFoldLatest(chatMessages);
     }
     state.chatAutoFoldSnapshot = { userIdx: lastUserIdx, assistantIdx };
@@ -14669,13 +14705,14 @@
     var kind = opts.kind === "compact" || opts.kind === "popover" ? opts.kind : "dropdown";
     var preferredTool = getPreferredTool();
     var composerMode = state.chatMode || "default";
-    var modelText = getEffectiveModel(session) || "default";
+    var modelText = getEffectiveModel(session) || "";
+    var modelLabel = getShortModelLabel(modelText, session);
     var thinkingText = getEffectiveThinking(session);
     function pill(ctrl, label, value, optionsHtml) {
       var tagHtml = kind === "compact" ? "" : '<span class="chat-mode-trio-tag">' + escapeHtml2(label) + "</span>";
       return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml2(label) + '">' + tagHtml + '<span class="composer-text-label">' + escapeHtml2(value) + '</span><select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" tabindex="-1" aria-label="' + escapeHtml2(label) + '">' + optionsHtml + "</select></span>";
     }
-    return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelText, renderChatModelOptionsRaw(modelText, session)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("thinking", "\u601D\u8003", thinkingText, renderChatThinkingOptionsRaw(thinkingText)) + "</div>";
+    return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelLabel, renderChatModelOptionsRaw(modelText, session)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("thinking", "\u601D\u8003", thinkingText, renderChatThinkingOptionsRaw(thinkingText)) + "</div>";
   }
   function getThinkingCompactLabel(id) {
     if (id === "standard") return "\u4F4E";
@@ -14691,8 +14728,13 @@
   }
   function getModelDisplayLabel(model, session) {
     var selected = model || "";
-    if (!selected || selected === "default") return "\u9ED8\u8BA4";
     var models = getModelsForCurrentProvider(session);
+    if (!selected || selected === "default") {
+      for (var j = 0; j < models.length; j++) {
+        if (models[j].id === "default") return models[j].label || models[j].id;
+      }
+      return "\u9ED8\u8BA4";
+    }
     for (var i = 0; i < models.length; i++) {
       if (models[i].id === selected) return models[i].label || models[i].id;
     }
@@ -14709,6 +14751,7 @@
     if (lower.indexOf("opus") !== -1) return "Opus";
     if (lower.indexOf("sonnet") !== -1) return "Sonnet";
     if (lower.indexOf("haiku") !== -1) return "Haiku";
+    if (lower.indexOf("gpt-5.5") !== -1) return "GPT-5.5";
     if (lower.indexOf("gpt-5") !== -1) return "GPT-5";
     if (lower.indexOf("gpt-4") !== -1) return "GPT-4";
     if (label.length > 12) return label.slice(0, 10) + "\u2026";
@@ -14738,22 +14781,23 @@
     var session = getSelectedSession5();
     var preferredTool = getPreferredTool();
     var mode = state.chatMode || "default";
-    var model = getEffectiveModel(session) || "default";
+    var model = getEffectiveModel(session) || "";
+    var modelLabel = getShortModelLabel(model, session);
     var thinking = getEffectiveThinking(session);
     var trios = document.querySelectorAll(".chat-mode-trio");
     trios.forEach(function(trio) {
-      function setPair(ctrl, value, optionsHtml) {
+      function setPair(ctrl, value, optionsHtml, labelText) {
         var pillNode = trio.querySelector('[data-mode-control-pill="' + ctrl + '"]');
         if (!pillNode) return;
         var label = pillNode.querySelector(".composer-text-label");
-        if (label) label.textContent = value;
+        if (label) label.textContent = labelText || value;
         var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]');
         if (!sel) return;
         if (optionsHtml) sel.innerHTML = optionsHtml;
         if (sel.value !== value) sel.value = value;
       }
       setPair("mode", mode, renderChatModeOptionsRaw(preferredTool, mode));
-      setPair("model", model, renderChatModelOptionsRaw(model, session));
+      setPair("model", model, renderChatModelOptionsRaw(model, session), modelLabel);
       setPair("thinking", thinking, renderChatThinkingOptionsRaw(thinking));
     });
     refreshComposerConfigControls(session, mode, getEffectiveModel(session) || "", thinking);
@@ -14815,30 +14859,34 @@
   }
   function renderChatModelOptions(selected, session) {
     var models = getModelsForCurrentProvider(session);
-    var html = '<option value="">\u9ED8\u8BA4\uFF08\u8DDF\u968F\u8BBE\u7F6E\uFF09</option>';
+    var normalized = selected === "default" ? "" : selected || "";
+    var html = '<option value=""' + (!normalized ? " selected" : "") + ">\u9ED8\u8BA4 \xB7 " + escapeHtml2(getModelDisplayLabel("", session)) + "</option>";
     for (var i = 0; i < models.length; i++) {
       var m = models[i];
+      if (m.id === "default") continue;
       var label = m.label || m.id;
-      html += '<option value="' + escapeHtml2(m.id) + '"' + (m.id === selected ? " selected" : "") + ">" + escapeHtml2(label) + "</option>";
+      html += '<option value="' + escapeHtml2(m.id) + '"' + (m.id === normalized ? " selected" : "") + ">" + escapeHtml2(label) + "</option>";
     }
-    if (selected && !models.some(function(m2) {
-      return m2.id === selected;
+    if (normalized && !models.some(function(m2) {
+      return m2.id === normalized;
     })) {
-      html += '<option value="' + escapeHtml2(selected) + '" selected>' + escapeHtml2(selected) + "\uFF08\u81EA\u5B9A\u4E49\uFF09</option>";
+      html += '<option value="' + escapeHtml2(normalized) + '" selected>' + escapeHtml2(normalized) + "\uFF08\u81EA\u5B9A\u4E49\uFF09</option>";
     }
     return html;
   }
   function renderChatModelOptionsRaw(selected, session) {
     var models = getModelsForCurrentProvider(session);
-    var html = '<option value="">default</option>';
+    var normalized = selected === "default" ? "" : selected || "";
+    var html = '<option value=""' + (!normalized ? " selected" : "") + ">" + escapeHtml2(getModelDisplayLabel("", session)) + "</option>";
     for (var i = 0; i < models.length; i++) {
       var m = models[i];
-      html += '<option value="' + escapeHtml2(m.id) + '"' + (m.id === selected ? " selected" : "") + ">" + escapeHtml2(m.id) + "</option>";
+      if (m.id === "default") continue;
+      html += '<option value="' + escapeHtml2(m.id) + '"' + (m.id === normalized ? " selected" : "") + ">" + escapeHtml2(m.id) + "</option>";
     }
-    if (selected && !models.some(function(m2) {
-      return m2.id === selected;
+    if (normalized && !models.some(function(m2) {
+      return m2.id === normalized;
     })) {
-      html += '<option value="' + escapeHtml2(selected) + '" selected>' + escapeHtml2(selected) + "</option>";
+      html += '<option value="' + escapeHtml2(normalized) + '" selected>' + escapeHtml2(normalized) + "</option>";
     }
     return html;
   }
@@ -15106,7 +15154,7 @@
       if (data && data.id) {
         updateSessionSnapshot(data);
         if (typeof showToast2 === "function") {
-          var display = normalized || "\u9ED8\u8BA4";
+          var display = getModelDisplayLabel(normalized, session);
           var hint = session.provider === "codex" ? "\uFF08\u4E0B\u6B21\u5BF9\u8BDD\u751F\u6548\uFF09" : "";
           showToast2("\u5DF2\u5207\u6362\u6A21\u578B \u2192 " + display + hint, "success");
         }

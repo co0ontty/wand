@@ -1,5 +1,10 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import net from "node:net";
 import process from "node:process";
 import {
   hasConfigFile,
@@ -10,6 +15,7 @@ import {
   writePreferenceToStorage,
 } from "./config.js";
 import {
+  isPidAlive,
   PidInfo,
   readLiveInstance,
   removePidfile,
@@ -19,6 +25,7 @@ import {
 } from "./pidfile.js";
 import { WandConfig } from "./types.js";
 import { getErrorMessage } from "./error-utils.js";
+import type { IpcResponse, IpcSnapshotData } from "./tui/ipc-protocol.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -36,7 +43,7 @@ async function main(): Promise<void> {
       const config = await ensureRequiredFiles(configPath, { silentReady: true });
 
       // —— 单实例检测：如果已有 wand 主进程在跑，直接 attach 而不重启服务 ——
-      const live = readLiveInstance(configPath);
+      const live = await discoverAttachableInstance(configPath);
       if (live) {
         await runAttach(live, configPath, useTui);
         break;
@@ -44,8 +51,18 @@ async function main(): Promise<void> {
 
       const { ensureNodePtyHelperExecutable } = await import("./ensure-node-pty-helper.js");
       ensureNodePtyHelperExecutable();
-      const { startServer } = await import("./server.js");
-      const handle = await startServer(config, configPath);
+      const { isPortInUseError, startServer } = await import("./server.js");
+      let handle: Awaited<ReturnType<typeof startServer>>;
+      try {
+        handle = await startServer(config, configPath);
+      } catch (err) {
+        if (isPortInUseError(err)) {
+          if (await handlePortInUse(config, configPath, useTui)) {
+            break;
+          }
+        }
+        throw err;
+      }
 
       // —— 注册实例：写 pidfile + 启动 IPC 服务端（TUI / banner 模式都需要） ——
       const startedAtMs = Date.now();
@@ -382,6 +399,237 @@ async function runAttach(live: PidInfo, configPath: string, useTui: boolean): Pr
   const onSignal = () => { void tui.stop(); };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
+}
+
+async function handlePortInUse(
+  config: WandConfig,
+  configPath: string,
+  useTui: boolean,
+): Promise<boolean> {
+  const live = await discoverAttachableInstance(configPath);
+  if (live) {
+    await runAttach(live, configPath, useTui);
+    return true;
+  }
+
+  const probe = await probeWandHttp(config);
+  const pid = findListeningPid(config.port);
+  if (probe?.isWand) {
+    printDetectedWandWithoutAttach(config, configPath, probe.url, pid);
+    process.exitCode = 0;
+    return true;
+  }
+
+  printPortInUse(config, configPath, pid);
+  process.exitCode = 1;
+  return true;
+}
+
+async function discoverAttachableInstance(configPath: string): Promise<PidInfo | null> {
+  const live = readLiveInstance(configPath);
+  if (live) return live;
+
+  const sockPath = socketPath(configPath);
+  if (!sockPath || !existsSync(sockPath)) return null;
+
+  const snapshot = await readIpcSnapshot(sockPath);
+  if (!snapshot) return null;
+  const pid = snapshot.header.pid;
+  if (!isPidAlive(pid)) return null;
+
+  return {
+    pid,
+    version: snapshot.header.version,
+    startedAt: snapshot.header.startedAtMs,
+    url: snapshot.header.url,
+    scheme: snapshot.header.scheme,
+    bindAddr: snapshot.header.bindAddr,
+    configPath: snapshot.header.configPath,
+    dbPath: snapshot.header.dbPath,
+    socket: sockPath,
+  };
+}
+
+function readIpcSnapshot(sockPath: string): Promise<IpcSnapshotData | null> {
+  return new Promise((resolve) => {
+    const sock = net.createConnection({ path: sockPath });
+    let buf = "";
+    let finished = false;
+    const finish = (value: IpcSnapshotData | null): void => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      try { sock.destroy(); } catch { /* noop */ }
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), 800);
+    timer.unref?.();
+    sock.setEncoding("utf8");
+    sock.on("connect", () => {
+      sock.write(JSON.stringify({ id: "probe", cmd: "snapshot" }) + "\n");
+    });
+    sock.on("data", (chunk: string) => {
+      buf += chunk;
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line) continue;
+        let msg: IpcResponse | null = null;
+        try { msg = JSON.parse(line) as IpcResponse; } catch { continue; }
+        if (msg?.id !== "probe" || !msg.ok) continue;
+        const data = msg.data;
+        if (isIpcSnapshotData(data)) {
+          finish(data);
+          return;
+        }
+      }
+    });
+    sock.on("error", () => finish(null));
+    sock.on("close", () => finish(null));
+  });
+}
+
+function isIpcSnapshotData(value: unknown): value is IpcSnapshotData {
+  if (!value || typeof value !== "object") return false;
+  const snap = value as Partial<IpcSnapshotData>;
+  const header = snap.header as Partial<IpcSnapshotData["header"]> | undefined;
+  return !!header
+    && typeof header.pid === "number"
+    && typeof header.version === "string"
+    && typeof header.startedAtMs === "number"
+    && typeof header.url === "string"
+    && (header.scheme === "HTTP" || header.scheme === "HTTPS")
+    && typeof header.bindAddr === "string"
+    && typeof header.configPath === "string"
+    && typeof header.dbPath === "string"
+    && Array.isArray(snap.sessions);
+}
+
+interface WandHttpProbe {
+  isWand: boolean;
+  url: string;
+}
+
+async function probeWandHttp(config: WandConfig): Promise<WandHttpProbe | null> {
+  const schemes = config.https ? ["https", "http"] : ["http", "https"];
+  for (const scheme of schemes) {
+    for (const host of probeHosts(config.host)) {
+      const baseUrl = `${scheme}://${host}:${config.port}`;
+      const sessionCheck = await requestText(`${baseUrl}/api/session-check`);
+      if (sessionCheck && looksLikeWandSessionCheck(sessionCheck.body)) {
+        return { isWand: true, url: baseUrl };
+      }
+      const home = await requestText(baseUrl);
+      if (home && home.body.includes("<title>Wand Console</title>")) {
+        return { isWand: true, url: baseUrl };
+      }
+    }
+  }
+  return null;
+}
+
+function probeHosts(configHost: string): string[] {
+  const hosts = ["127.0.0.1", "localhost"];
+  if (configHost && configHost !== "0.0.0.0" && configHost !== "::" && !hosts.includes(configHost)) {
+    hosts.push(configHost);
+  }
+  return hosts;
+}
+
+function looksLikeWandSessionCheck(body: string): boolean {
+  try {
+    const parsed = JSON.parse(body) as { authed?: unknown };
+    return typeof parsed.authed === "boolean";
+  } catch {
+    return false;
+  }
+}
+
+function requestText(urlText: string): Promise<{ status: number; body: string } | null> {
+  return new Promise((resolve) => {
+    let url: URL;
+    try {
+      url = new URL(urlText);
+    } catch {
+      resolve(null);
+      return;
+    }
+    const request = url.protocol === "https:" ? httpsRequest : httpRequest;
+    const req = request(
+      url,
+      {
+        method: "GET",
+        timeout: 800,
+        rejectUnauthorized: false,
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          if (body.length < 64 * 1024) body += chunk;
+        });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      },
+    );
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.on("error", () => resolve(null));
+    req.end();
+  });
+}
+
+function findListeningPid(port: number): number | null {
+  if (!Number.isInteger(port) || port <= 0) return null;
+  try {
+    const result = spawnSync(
+      "lsof",
+      ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+      { encoding: "utf8", timeout: 1000 },
+    );
+    if (result.status !== 0 && !result.stdout) return null;
+    const pid = (result.stdout || "")
+      .split(/\s+/)
+      .map((part) => Number(part.trim()))
+      .find((value) => Number.isInteger(value) && value > 0 && value !== process.pid);
+    return pid ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function printDetectedWandWithoutAttach(
+  config: WandConfig,
+  configPath: string,
+  url: string,
+  pid: number | null,
+): void {
+  const pidLine = pid ? `       PID      ${pid}\n` : "";
+  process.stdout.write(
+    `[wand] 检测到已有 Wand 服务正在运行：${url}\n` +
+    pidLine +
+    `       Config   ${configPath}\n` +
+    `       Port     ${config.port}\n` +
+    `       当前无法 attach：${socketPath(configPath) || "IPC socket"} 不可达。\n` +
+    `       请重启一次正在运行的服务；之后再执行 wand web 会恢复正常 attach。\n`,
+  );
+}
+
+function printPortInUse(config: WandConfig, configPath: string, pid: number | null): void {
+  const pidHint = pid ? `\n       占用进程 PID: ${pid}` : "";
+  const killHint = pid
+    ? `kill ${pid}`
+    : `kill $(lsof -ti :${config.port})`;
+  process.stderr.write(
+    `\n✗ [wand] 端口 ${config.port} 已被占用，但没有发现可 attach 的 Wand 实例。${pidHint}\n` +
+    `       Config: ${configPath}\n` +
+    `       Socket: ${socketPath(configPath) || "当前平台不支持 Unix socket"}\n\n` +
+    `解决方法（二选一）：\n` +
+    `1. 如果这是旧 Wand 服务，重启它后再运行 wand web\n` +
+    `2. 如果不是 Wand，占用进程可用以下命令终止：\n   ${killHint}\n\n`,
+  );
 }
 
 function setConfigValue(

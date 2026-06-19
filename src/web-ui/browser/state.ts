@@ -236,9 +236,10 @@ export var state: AppState = {
   // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
   // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
   chatStickToBottom: true,
-  // ChatGPT 风格的"顶置最新轮次"：true = 把最新一条用户消息钉到视口顶部，
-  // 助手回复在其下方流式展开，更早的历史折叠成摘要卡。用户一旦手动滚动/滚轮/触摸
-  // 即释放此模式回到贴底。chatPinMinUserIndex 防止钉到比发送时更早的用户消息。
+  // 用户显式点折叠条时才进入的"顶置最新轮次"：true = 把最新一条用户消息
+  // 钉到视口顶部，助手回复在其下方流式展开。普通发送默认走贴底跟随。
+  // 用户一旦手动滚动/滚轮/触摸即释放此模式。chatPinMinUserIndex 防止
+  // 钉到比触发时更早的用户消息。
   chatPinTurnToTop: false,
   chatPinMinUserIndex: 0,
   // ===== 自动折叠（"横条 + 一屏"）=====

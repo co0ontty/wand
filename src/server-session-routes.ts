@@ -11,7 +11,7 @@ import { resolveSessionCwd } from "./session-cwd.js";
 import {
   getGitStatus,
   QuickCommitError,
-  runQuickCommit,
+  runQuickCommitWithFallback,
   runTagHead,
   runPush,
   generateCommitMessageOnly,
@@ -519,9 +519,13 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean; submodule?: boolean };
     try {
-      const result = await runQuickCommit({
+      const result = await runQuickCommitWithFallback({
         cwd: snapshot.cwd,
         language: config.language ?? "",
+        provider: snapshot.provider,
+        model: snapshot.selectedModel ?? snapshot.structuredState?.model ?? config.defaultModel,
+        thinkingEffort: snapshot.thinkingEffort ?? config.defaultThinkingEffort,
+        inheritEnv: config.inheritEnv,
         autoMessage: body.autoMessage !== false,
         customMessage: typeof body.customMessage === "string" ? body.customMessage : undefined,
         tag: typeof body.tag === "string" ? body.tag : undefined,
@@ -551,7 +555,12 @@ export function registerSessionRoutes(
       return;
     }
     try {
-      const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "");
+      const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "", {
+        provider: snapshot.provider,
+        model: snapshot.selectedModel ?? snapshot.structuredState?.model ?? config.defaultModel,
+        thinkingEffort: snapshot.thinkingEffort ?? config.defaultThinkingEffort,
+        inheritEnv: config.inheritEnv,
+      });
       res.json(result);
     } catch (error) {
       if (error instanceof QuickCommitError) {

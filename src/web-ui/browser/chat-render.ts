@@ -1,7 +1,7 @@
 import { state, readStoredBoolean, writeStoredBoolean, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
 import { t, getActiveLang, iconSvg, I18N_DEFAULT_LANG } from "./i18n";
 import { escapeHtml, formatElapsedShort, isImagePath } from "./utils";
-import { applyChatTurnPin, applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getElementExpandKey, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, scrollChatToBottom, setChatStickToBottom, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
+import { applyChatTurnPin, applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getElementExpandKey, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
 import { copyTextSafely, showToastIfPossible, openFilePreview, appendToComposer, isMobileLayout } from "./file-browser";
 import { buildMessagesForRender, focusInputBox, getSelectedSession } from "./input";
 import { showToast, syncSessionProgressToNative, wandConfirm } from "./notifications";
@@ -2168,7 +2168,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         foldBar.classList.remove("hidden");
         setAutoFoldMode(chatOutput, chatMessages, true);
         setAutoFoldHistoryHidden(chatMessages, lastUserIdx, historyIndices.length > 0);
-        if (renderIsInitial || state.chatPinTurnToTop || state.chatStickToBottom) {
+        if (state.chatPinTurnToTop) {
           followAutoFoldLatest(chatMessages);
         }
         state.chatAutoFoldSnapshot = { userIdx: lastUserIdx, assistantIdx: assistantIdx };

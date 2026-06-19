@@ -1178,6 +1178,27 @@ export interface ServerHandle {
   close(): Promise<void>;
 }
 
+export class PortInUseError extends Error {
+  readonly code = "EADDRINUSE";
+
+  constructor(
+    readonly port: number,
+    readonly host: string,
+  ) {
+    super(`Port ${port} is already in use`);
+    this.name = "PortInUseError";
+  }
+}
+
+export function isPortInUseError(error: unknown): error is PortInUseError {
+  return error instanceof PortInUseError
+    || (
+      !!error
+      && typeof error === "object"
+      && (error as NodeJS.ErrnoException).code === "EADDRINUSE"
+    );
+}
+
 export async function startServer(config: WandConfig, configPath: string): Promise<ServerHandle> {
   // 关键：在创建 ProcessManager / 任何 spawn 之前先修 PATH。
   // 服务被注册为 systemd / launchd 时，unit 文件里的 PATH 是安装那一刻烧死的，
@@ -2421,6 +2442,10 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
   const wsManager = new WsBroadcastManager(wss, () => config.cardDefaults ?? {}, useHttps);
   wsManager.setup((id) => structuredSessions.get(id) ?? processes.get(id));
+  wss.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") return;
+    wandError("WebSocket 异常", err.message);
+  });
 
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
@@ -2499,7 +2524,23 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const collectedUrls: ServerUrl[] = [];
 
   await new Promise<void>((resolve, reject) => {
+    const cleanupFailedListen = (): void => {
+      try { wss.close(); } catch { /* noop */ }
+      try { server.close(); } catch { /* noop */ }
+      try { storage.close(); } catch { /* noop */ }
+    };
+    const onListenError = (err: NodeJS.ErrnoException): void => {
+      server.off("error", onListenError);
+      cleanupFailedListen();
+      if (err.code === "EADDRINUSE") {
+        reject(new PortInUseError(config.port, config.host));
+        return;
+      }
+      reject(err);
+    };
+    server.once("error", onListenError);
     server.listen(config.port, config.host, () => {
+      server.off("error", onListenError);
       bindAddr = `${config.host}:${config.port}`;
       const scheme: "HTTP" | "HTTPS" = useHttps ? "HTTPS" : "HTTP";
       // 主 URL：本机回环；若绑定 0.0.0.0 再补一个对外提示。
@@ -2510,17 +2551,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         collectedUrls.push({ url: `${protocol}://${config.host}:${config.port}`, scheme });
       }
       resolve();
-    });
-    server.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "EADDRINUSE") {
-        wandError(
-          `端口 ${config.port} 已被占用`,
-          `可能有另一个 Wand 进程正在运行。`,
-          `解决方法（二选一）：\n1. 在浏览器中访问当前运行的 Wand\n2. 或者终止占用端口的进程：\n   kill $(lsof -ti :${config.port})\n\n如果你确定没有其他实例在运行，可能是有程序意外占用了端口。`
-        );
-        process.exit(1);
-      }
-      reject(err);
     });
   });
 

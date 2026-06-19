@@ -6,7 +6,7 @@ import { extractSemver } from "./version-utils.js";
 const execAsync = promisify(exec);
 
 const CLAUDE_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "default（跟随 Claude Code 默认）", alias: true },
+  { id: "default", label: "Sonnet 4.6 · claude-sonnet-4-6（Claude Code 默认）", alias: true },
   { id: "opus", label: "opus（最新 Opus）", alias: true },
   { id: "sonnet", label: "sonnet（最新 Sonnet）", alias: true },
   { id: "haiku", label: "haiku（最新 Haiku）", alias: true },
@@ -17,7 +17,7 @@ const CLAUDE_MODELS: ClaudeModelInfo[] = [
 ];
 
 const CODEX_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "default（跟随 Codex 默认）", alias: true },
+  { id: "default", label: "GPT-5.5 · gpt-5.5（Codex 默认）", alias: true },
 ];
 
 interface ModelCache {
@@ -57,21 +57,27 @@ async function probeCodexModels(): Promise<ClaudeModelInfo[]> {
       .filter((m) => m.visibility === "list")
       .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
     if (!visible.length) return CODEX_FALLBACK_MODELS.map((m) => ({ ...m }));
+    const defaultModel = visible[0];
+    const defaultLabel = formatCodexModelLabel(defaultModel);
     const result: ClaudeModelInfo[] = [
-      { id: "default", label: "default（跟随 Codex 默认）", alias: true },
+      { id: "default", label: `${defaultLabel}（Codex 默认）`, alias: true },
     ];
     for (const m of visible) {
       result.push({
         id: m.slug,
-        label: m.display_name && m.display_name !== m.slug
-          ? `${m.display_name} · ${m.slug}`
-          : m.slug,
+        label: formatCodexModelLabel(m),
       });
     }
     return result;
   } catch {
     return CODEX_FALLBACK_MODELS.map((m) => ({ ...m }));
   }
+}
+
+function formatCodexModelLabel(model: CodexModelEntry): string {
+  return model.display_name && model.display_name !== model.slug
+    ? `${model.display_name} · ${model.slug}`
+    : model.slug;
 }
 
 export function getCachedModels(): ModelCache {

@@ -110,15 +110,40 @@ is_scope_running() {
   fi
 }
 
+running_scope_from_process() {
+  local owner
+  owner="$(ps ax -o user= -o command= | awk -v cfg="$CONFIG_PATH" '
+    index($0, cfg) == 0 { next }
+    !($0 ~ /(^|[[:space:]])wand([[:space:]]|$)/ || $0 ~ /\/wand([[:space:]]|$)/ || $0 ~ /\/cli\.js web/ || $0 ~ /src\/cli\.ts web/) { next }
+    { print $1; exit }
+  ' || true)"
+  case "$owner" in
+    root) echo "system" ;;
+    "") ;;
+    *) echo "user" ;;
+  esac
+}
+
+running_pid_from_process() {
+  ps ax -o pid= -o command= | awk -v cfg="$CONFIG_PATH" '
+    index($0, cfg) == 0 { next }
+    !($0 ~ /(^|[[:space:]])wand([[:space:]]|$)/ || $0 ~ /\/wand([[:space:]]|$)/ || $0 ~ /\/cli\.js web/ || $0 ~ /src\/cli\.ts web/) { next }
+    { print $1; exit }
+  ' || true
+}
+
 resolve_scope() {
   if [[ "$SCOPE" != "auto" ]]; then
     echo "$SCOPE"
     return
   fi
+  local running_scope
+  running_scope="$(running_scope_from_process)"
+  if [[ -n "$running_scope" ]]; then echo "$running_scope"; return; fi
   if is_scope_running "user"; then echo "user"; return; fi
   if is_scope_running "system"; then echo "system"; return; fi
-  if [[ -f "$(service_file_for "user")" ]]; then echo "user"; return; fi
   if [[ -f "$(service_file_for "system")" ]]; then echo "system"; return; fi
+  if [[ -f "$(service_file_for "user")" ]]; then echo "user"; return; fi
   echo "system"
 }
 
@@ -232,7 +257,11 @@ cleanup_stale_wand() {
     run_privileged kill $stale_pids 2>/dev/null || true
     sleep 1
   fi
-  [[ -S "$HOME/.wand/wand.sock" ]] && rm -f "$HOME/.wand/wand.sock"
+  local config_dir
+  config_dir="$(dirname "$CONFIG_PATH")"
+  if [[ -S "$config_dir/wand.sock" || -e "$config_dir/wand.pid" ]]; then
+    run_privileged rm -f "$config_dir/wand.sock" "$config_dir/wand.pid" 2>/dev/null || true
+  fi
   return 0
 }
 
@@ -268,16 +297,12 @@ ensure_service_installed_and_running() {
   [[ -x "$WAND_BIN" || -f "$WAND_BIN" ]] || die "找不到 wand: $WAND_BIN"
 
   if service_installed; then
-    msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:restart $SCOPE_FLAG"
-    if run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:restart "$SCOPE_FLAG"; then
-      ok "服务已重启"
-    else
-      warn "service:restart 失败，尝试 stop -> cleanup -> start"
-      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" >/dev/null 2>&1 || true
-      cleanup_stale_wand
-      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:start "$SCOPE_FLAG" || die "service:start 也失败了"
-      ok "兜底 start 成功"
-    fi
+    msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:stop $SCOPE_FLAG"
+    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" >/dev/null 2>&1 || true
+    cleanup_stale_wand
+    msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:install $SCOPE_FLAG"
+    run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" || die "service:install 失败"
+    ok "服务 unit/plist 已重写并启动"
   else
     msg "未发现 $BACKEND $SCOPE service，开始首次注册"
     msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:install $SCOPE_FLAG"
@@ -308,6 +333,8 @@ service_state() {
     out="$(launchctl print "$domain" 2>/dev/null || true)"
     if grep -q "state = running" <<<"$out"; then
       echo "active"
+    elif [[ -n "$(running_pid_from_process)" ]]; then
+      echo "active"
     elif [[ -n "$out" ]]; then
       echo "inactive"
     else
@@ -324,7 +351,10 @@ service_pid() {
   else
     local domain
     [[ "$SCOPE" == "user" ]] && domain="gui/$(id -u)/${LAUNCHD_LABEL}" || domain="system/${LAUNCHD_LABEL}"
-    launchctl print "$domain" 2>/dev/null | awk '/pid = / { print $3; exit }' || echo "0"
+    local pid
+    pid="$(launchctl print "$domain" 2>/dev/null | awk '/pid = / { print $3; exit }' || true)"
+    [[ -n "$pid" ]] || pid="$(running_pid_from_process)"
+    echo "${pid:-0}"
   fi
 }
 

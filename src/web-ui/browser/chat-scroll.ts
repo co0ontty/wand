@@ -241,6 +241,24 @@ export function scrollChatToBottom(smooth?: boolean) {
   requestAnimationFrame(done);
 }
 
+// 发送新消息前同步进入"贴底跟随"。和 scrollChatToBottom 不同，这里必须
+// 立即更新状态；否则随后的 optimistic render 会先按"用户正在读历史"锚点恢复，
+// 新消息/回复就不会出现在底部。
+export function prepareChatBottomFollow() {
+  var chatMsgs = getChatScrollElement();
+  releaseChatTurnPin();
+  if (chatMsgs) removeChatPinSpacer(chatMsgs);
+  state.chatStickToBottom = true;
+  clearChatUnread({ removeDivider: true });
+  if (chatMsgs && (chatMsgs as any).isConnected) {
+    state.chatIsProgrammaticScroll = true;
+    state.chatProgrammaticScrollUntil = Date.now() + 180;
+    (chatMsgs as any).scrollTop = 0;
+    requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
+  }
+  updateChatUnreadBubble();
+}
+
 export function bindChatScrollListener() {
   var chatMsgs = getChatScrollElement();
   if (!chatMsgs || !(chatMsgs as any).isConnected) return;
@@ -342,6 +360,11 @@ export function observeLoadMoreSentinel() {
   // Click handler for the button
   var btn = sentinel.querySelector(".chat-load-more-btn");
   if (btn) (btn as any).onclick = function() { loadMoreChatMessages(); };
+  // 移动端 App 里不要靠惯性滚动自动翻页：用户一拉到顶就连着加载历史，
+  // 容易把阅读位置带到很上面。保留显式按钮，桌面继续自动预取。
+  var coarsePointer = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+  var mobileViewport = window.innerWidth <= 768;
+  if (coarsePointer || mobileViewport || window.__wandImeNative || window.__wandIosNative) return;
   // IntersectionObserver for auto-load on scroll
   if (typeof IntersectionObserver === "undefined") return;
   _loadMoreObserver = new IntersectionObserver(function(entries) {

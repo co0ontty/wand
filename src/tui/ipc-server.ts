@@ -5,7 +5,8 @@
  */
 
 import net from "node:net";
-import { existsSync, unlinkSync } from "node:fs";
+import { chmodSync, chownSync, existsSync, statSync, unlinkSync } from "node:fs";
+import path from "node:path";
 import { IpcRequest, IpcResponseErr, IpcResponseOk, IpcSnapshotData } from "./ipc-protocol.js";
 import { getErrorMessage } from "../error-utils.js";
 
@@ -92,7 +93,9 @@ export function startIpcServer(deps: IpcServerDeps): IpcServerHandle | null {
     process.stderr.write(`[wand] IPC server error: ${err.message}\n`);
   });
 
-  server.listen(deps.socketPath);
+  server.listen(deps.socketPath, () => {
+    applySocketOwnership(deps.socketPath);
+  });
 
   return {
     close: async () => {
@@ -104,4 +107,18 @@ export function startIpcServer(deps: IpcServerDeps): IpcServerHandle | null {
       try { if (existsSync(deps.socketPath)) unlinkSync(deps.socketPath); } catch { /* noop */ }
     },
   };
+}
+
+function applySocketOwnership(socketPath: string): void {
+  try {
+    const owner = statSync(path.dirname(socketPath));
+    chownSync(socketPath, owner.uid, owner.gid);
+  } catch {
+    /* best effort: non-root processes cannot chown, and usually already own the socket */
+  }
+  try {
+    chmodSync(socketPath, 0o600);
+  } catch {
+    /* noop */
+  }
 }

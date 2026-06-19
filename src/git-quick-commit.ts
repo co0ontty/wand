@@ -1,12 +1,17 @@
 import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
 
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
+import { buildChildEnv } from "./env-utils.js";
 import { runGit as runGitBase, runGitRaw as runGitRawBase, getGitErrorMessage } from "./git-utils.js";
+import { applyThinkingEffortToPrompt, thinkingEffortToCodexReasoningEffort } from "./structured-session-manager.js";
 import {
   GitStatusFileEntry,
   GitStatusResult,
   PushResult,
   QuickCommitResult,
+  SessionProvider,
+  SessionSnapshot,
   TagHeadResult,
 } from "./types.js";
 
@@ -16,6 +21,8 @@ const MAX_FILE_ENTRIES = 200;
 // AI 生成 message/tag 的超时。SDK 链路 = spawn claude + API 调用（带自动重试），
 // 30s 在 API 抖动时不够用，放宽到 60s。
 const CLAUDE_MESSAGE_TIMEOUT_MS = 60_000;
+const CODEX_MESSAGE_TIMEOUT_MS = 60_000;
+const QUICK_COMMIT_CLI_TIMEOUT_MS = 120_000;
 const MAX_DIFF_FOR_AI = 100_000;
 const GIT_MAX_BUFFER = 16 * 1024 * 1024;
 
@@ -278,6 +285,10 @@ export function getGitStatus(cwd: string): GitStatusResult {
 interface QuickCommitOptions {
   cwd: string;
   language: string;
+  provider?: SessionProvider;
+  model?: string | null;
+  thinkingEffort?: SessionSnapshot["thinkingEffort"];
+  inheritEnv?: boolean;
   autoMessage: boolean;
   customMessage?: string;
   tag?: string;
@@ -291,6 +302,13 @@ interface QuickCommitOptions {
   submodule?: boolean;
 }
 
+interface QuickCommitAiOptions {
+  provider?: SessionProvider;
+  model?: string | null;
+  thinkingEffort?: SessionSnapshot["thinkingEffort"];
+  inheritEnv?: boolean;
+}
+
 export class QuickCommitError extends Error {
   constructor(message: string, public readonly code: QuickCommitErrorCode) {
     super(message);
@@ -300,9 +318,9 @@ export class QuickCommitError extends Error {
 
 // ── AI commit message generation ──
 
-async function callClaudeText(prompt: string, cwd: string, language?: string): Promise<string> {
+async function callClaudeText(prompt: string, cwd: string, language?: string, model?: string | null): Promise<string> {
   try {
-    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS, language });
+    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS, language, model: model ?? undefined });
   } catch (error) {
     if (error instanceof ClaudeRunError) {
       // 把通用 ClaudeRunError 翻译成 quick-commit 自己的错误码 + 中文话术。
@@ -319,6 +337,111 @@ async function callClaudeText(prompt: string, cwd: string, language?: string): P
     }
     throw error;
   }
+}
+
+function normalizeProvider(provider: SessionProvider | undefined): SessionProvider {
+  return provider === "codex" ? "codex" : "claude";
+}
+
+function stripFences(raw: string): string {
+  return raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+}
+
+function normalizeAiText(raw: string): string {
+  return stripFences(raw).replace(/^["'`]+|["'`]+$/g, "").trim();
+}
+
+function extractCodexText(stdout: string): string {
+  let lastAgentText = "";
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as { type?: string; item?: { type?: string; text?: unknown } };
+      if (parsed.type === "item.completed" && parsed.item?.type === "agent_message" && typeof parsed.item.text === "string") {
+        lastAgentText = parsed.item.text;
+      }
+    } catch {
+      // ignore non-JSON diagnostics mixed into stdout
+    }
+  }
+  if (lastAgentText) return lastAgentText.trim();
+
+  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const noise = /^(OpenAI Codex|[-]+$|workdir:|model:|provider:|approval:|sandbox:|reasoning|session id:|user$|codex$|tokens used$|[0-9,]+$)/i;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!noise.test(lines[i])) return lines[i];
+  }
+  return "";
+}
+
+function runCliText(
+  command: string,
+  args: string[],
+  prompt: string,
+  opts: { cwd: string; timeoutMs: number; inheritEnv?: boolean },
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: opts.cwd,
+      env: buildChildEnv(opts.inheritEnv !== false),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      settled = true;
+      child.kill("SIGTERM");
+      reject(new QuickCommitError(`${command} 调用超时。`, "CLAUDE_TIMEOUT"));
+    }, opts.timeoutMs);
+    child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      const code = error.code === "ENOENT" ? "CLAUDE_CLI_MISSING" : "CLAUDE_CLI_FAILED";
+      reject(new QuickCommitError(error.code === "ENOENT" ? `未找到 ${command} CLI。` : `${command} CLI 失败：${error.message}`, code));
+    });
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+      reject(new QuickCommitError(`${command} CLI 失败：${(stderr || stdout).trim() || `exit ${code}`}`, "CLAUDE_CLI_FAILED"));
+    });
+    child.stdin?.end(prompt);
+  });
+}
+
+async function callCodexText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+  const args = ["exec", "--json", "--color", "never", "--skip-git-repo-check", "--sandbox", "read-only"];
+  const model = opts.model?.trim();
+  if (model && model !== "default") args.push("--model", model);
+  const reasoningEffort = thinkingEffortToCodexReasoningEffort(opts.thinkingEffort ?? "off");
+  if (reasoningEffort) args.push("-c", `model_reasoning_effort=${reasoningEffort}`);
+  args.push("-");
+  const stdout = await runCliText("codex", args, prompt, {
+    cwd,
+    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    inheritEnv: opts.inheritEnv,
+  });
+  const text = extractCodexText(stdout);
+  if (!text) {
+    throw new QuickCommitError("Codex 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+  }
+  return text;
+}
+
+async function callAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
+  if (normalizeProvider(opts.provider) === "codex") {
+    return callCodexText(prompt, cwd, opts);
+  }
+  return callClaudeText(prompt, cwd, language, opts.model);
 }
 
 function collectStagedDiff(cwd: string): string {
@@ -341,14 +464,14 @@ function collectStagedDiff(cwd: string): string {
   return diff;
 }
 
-async function generateCommitMessage(cwd: string, language: string): Promise<string> {
+async function generateCommitMessage(cwd: string, language: string, ai: QuickCommitAiOptions = {}): Promise<string> {
   const diff = collectStagedDiff(cwd);
   const lang = language.trim() || "中文";
   const prompt = `阅读以下 git diff，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。\n\n${diff}`;
-  const raw = await callClaudeText(prompt, cwd, language);
-  const message = raw.replace(/^["'`]+|["'`]+$/g, "").trim();
+  const raw = await callAiText(prompt, cwd, language, ai);
+  const message = normalizeAiText(raw);
   if (!message) {
-    throw new QuickCommitError("Claude 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+    throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
   }
   return message;
 }
@@ -386,6 +509,7 @@ function sanitizeSuggestedTag(value: unknown): string | undefined {
 async function generateCommitMessageWithTag(
   cwd: string,
   language: string,
+  ai: QuickCommitAiOptions = {},
 ): Promise<GenerateCommitMessageResult> {
   const diff = collectStagedDiff(cwd);
   let latestTag: string | undefined;
@@ -407,21 +531,21 @@ async function generateCommitMessageWithTag(
 
 git diff:
 ${diff}`;
-  const raw = await callClaudeText(prompt, cwd, language);
+  const raw = await callAiText(prompt, cwd, language, ai);
   const parsed = tryParseJson(raw);
 
   let message: string;
   let suggestedTag: string | undefined;
   if (parsed && typeof parsed.message === "string") {
-    message = parsed.message.replace(/^["'`]+|["'`]+$/g, "").trim();
+    message = normalizeAiText(parsed.message);
     suggestedTag = sanitizeSuggestedTag(parsed.tag);
   } else {
     // Fallback: treat whole output as message, no tag suggestion
-    message = raw.replace(/^["'`]+|["'`]+$/g, "").trim();
+    message = normalizeAiText(raw);
     suggestedTag = undefined;
   }
   if (!message) {
-    throw new QuickCommitError("Claude 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+    throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
   }
 
   return { message, suggestedTag };
@@ -430,6 +554,7 @@ ${diff}`;
 export async function generateCommitMessageOnly(
   cwd: string,
   language: string,
+  ai: QuickCommitAiOptions = {},
 ): Promise<GenerateCommitMessageResult> {
   if (!cwd || !existsSync(cwd)) {
     throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
@@ -439,7 +564,7 @@ export async function generateCommitMessageOnly(
   } catch {
     // best-effort staging so the diff is complete
   }
-  return generateCommitMessageWithTag(cwd, language);
+  return generateCommitMessageWithTag(cwd, language, ai);
 }
 
 /**
@@ -450,6 +575,7 @@ async function generateTagAfterCommit(
   cwd: string,
   language: string,
   commitMessage: string,
+  ai: QuickCommitAiOptions = {},
 ): Promise<string> {
   let diff: string;
   try {
@@ -489,7 +615,7 @@ commit message：${commitMessage}
 
 git diff：
 ${diff}`;
-  const raw = await callClaudeText(prompt, cwd, language);
+  const raw = await callAiText(prompt, cwd, language, ai);
   const parsed = tryParseJson(raw);
   let suggested: string | undefined;
   if (parsed && typeof parsed.tag === "string") {
@@ -873,8 +999,145 @@ function collectSubmodulesForPush(cwd: string): { base: string; infos: Submodule
   return { base, infos };
 }
 
+function buildFallbackPrompt(opts: QuickCommitOptions, priorError: string): string {
+  const lang = opts.language.trim() || "中文";
+  const messageLine = opts.autoMessage === false
+    ? `- 使用这个 commit message：${(opts.customMessage || "").trim()}`
+    : `- 先根据当前 staged/unstaged diff 生成一条简洁的 ${lang} commit message（祈使句，不超过 50 字）`;
+  const tagLine = opts.tag?.trim()
+    ? `- 提交后创建 tag：${opts.tag.trim()}`
+    : opts.autoTag
+      ? "- 提交后根据改动幅度创建下一个语义化版本 tag"
+      : "- 不创建 tag";
+  const pushLine = opts.push ? "- 提交完成后推送当前分支；如果创建了 tag，也推送该 tag" : "- 不执行 push";
+  const submoduleLine = opts.submodule
+    ? "- 如果 submodule 内部也有改动，先在对应 submodule 内 add/commit，再提交父仓库里的 submodule 指针"
+    : "- 不进入 submodule 内部提交，只提交父仓库自身已纳入的改动";
+  return [
+    "你正在作为 Wand 的快捷提交兜底执行器运行。前置的内置快捷提交流程失败了，现在请直接用 CLI 工具完成同一件事。",
+    "",
+    "约束：",
+    "- 只允许执行与 git 快捷提交直接相关的命令，例如 git status、git diff、git add、git commit、git tag、git push、git submodule status。",
+    "- 不要修改源代码内容，不要运行测试，不要安装依赖，不要重构文件。",
+    "- 如果没有可提交改动，明确说明并停止，不要创建空 commit。",
+    "- commit message 和自然语言输出使用 " + lang + "。",
+    "",
+    "任务：",
+    "- 执行 git add -A 纳入当前改动。",
+    messageLine,
+    tagLine,
+    pushLine,
+    submoduleLine,
+    "",
+    `内置流程失败原因：${priorError}`,
+    "",
+    "完成后只输出一行 JSON：{\"ok\":true,\"message\":\"...\",\"tag\":\"...\"}。失败时输出一行 JSON：{\"ok\":false,\"error\":\"...\"}。",
+  ].join("\n");
+}
+
+function getHead(cwd: string): string | null {
+  try {
+    return runGit(["rev-parse", "HEAD"], cwd);
+  } catch {
+    return null;
+  }
+}
+
+function getHeadSummary(cwd: string): { hash: string; message: string } {
+  try {
+    const raw = runGit(["log", "-1", "--pretty=format:%h%x09%s"], cwd);
+    const parts = raw.split("\t");
+    return { hash: parts[0] ?? "", message: parts.slice(1).join("\t") };
+  } catch {
+    return { hash: "", message: "" };
+  }
+}
+
+function getLatestTagAtHead(cwd: string): string | undefined {
+  try {
+    return runGit(["describe", "--tags", "--exact-match", "HEAD"], cwd) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: string): Promise<QuickCommitResult> {
+  assertGitWorkTree(opts.cwd);
+  const beforeHead = getHead(opts.cwd);
+  const prompt = buildFallbackPrompt(opts, priorError);
+  const provider = normalizeProvider(opts.provider);
+  if (provider === "codex") {
+    const args = ["exec", "--json", "--color", "never", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
+    const model = opts.model?.trim();
+    if (model && model !== "default") args.push("--model", model);
+    const reasoningEffort = thinkingEffortToCodexReasoningEffort(opts.thinkingEffort ?? "off");
+    if (reasoningEffort) args.push("-c", `model_reasoning_effort=${reasoningEffort}`);
+    args.push("-");
+    await runCliText("codex", args, prompt, {
+      cwd: opts.cwd,
+      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      inheritEnv: opts.inheritEnv,
+    });
+  } else {
+    const args = ["-p", "--verbose", "--output-format", "stream-json"];
+    const model = opts.model?.trim();
+    if (model && model !== "default") args.push("--model", model);
+    args.push("--permission-mode", "bypassPermissions");
+    const effectivePrompt = applyThinkingEffortToPrompt(prompt, opts.thinkingEffort ?? "off");
+    await runCliText("claude", args, effectivePrompt, {
+      cwd: opts.cwd,
+      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      inheritEnv: opts.inheritEnv,
+    });
+  }
+
+  const afterHead = getHead(opts.cwd);
+  if (!afterHead || afterHead === beforeHead) {
+    throw new QuickCommitError("CLI 兜底没有创建新的 commit。", "GIT_COMMIT_FAILED");
+  }
+  const commit = getHeadSummary(opts.cwd);
+  const tag = getLatestTagAtHead(opts.cwd);
+  return {
+    ok: true,
+    commit,
+    tag: tag ? { name: tag } : undefined,
+    pushed: false,
+  };
+}
+
+function shouldFallbackToCli(error: QuickCommitError): boolean {
+  return ![
+    "CWD_MISSING",
+    "NO_CWD",
+    "NOT_A_GIT_REPO",
+    "NO_COMMIT",
+    "NOTHING_TO_COMMIT",
+    "NOTHING_TO_PUSH",
+    "EMPTY_MESSAGE",
+    "EMPTY_TAG",
+    "TAG_EXISTS",
+  ].includes(error.code);
+}
+
+export async function runQuickCommitWithFallback(opts: QuickCommitOptions): Promise<QuickCommitResult> {
+  try {
+    return await runQuickCommit(opts);
+  } catch (error) {
+    if (error instanceof QuickCommitError && shouldFallbackToCli(error)) {
+      return runQuickCommitFallbackCli(opts, error.message);
+    }
+    throw error;
+  }
+}
+
 export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCommitResult> {
   const { cwd, language, autoMessage, customMessage, tag, autoTag, push, submodule } = opts;
+  const ai: QuickCommitAiOptions = {
+    provider: opts.provider,
+    model: opts.model,
+    thinkingEffort: opts.thinkingEffort,
+    inheritEnv: opts.inheritEnv,
+  };
 
   assertGitWorkTree(cwd);
 
@@ -915,7 +1178,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
 
   let message: string;
   if (autoMessage) {
-    message = await generateCommitMessage(cwd, language);
+    message = await generateCommitMessage(cwd, language, ai);
   } else {
     message = (customMessage || "").trim();
     if (!message) {
@@ -971,7 +1234,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   // Tag: explicit `tag` wins; if empty + autoTag, ask Claude; otherwise skip.
   let tagName = (tag || "").trim();
   if (!tagName && autoTag) {
-    tagName = await generateTagAfterCommit(cwd, language, message);
+    tagName = await generateTagAfterCommit(cwd, language, message, ai);
   }
   if (tagName) {
     try {

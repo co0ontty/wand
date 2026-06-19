@@ -431,6 +431,9 @@ import { renderChat } from "./websocket";
 
         var root = document.createElement("div");
         root.className = "wand-joystick-root";
+        ["pointerdown", "pointerup", "touchstart", "touchend", "click"].forEach(function(type) {
+          root.addEventListener(type, suppressJoystickKeyboardFocus, true);
+        });
 
         var backdrop = document.createElement("div");
         backdrop.className = "wand-joystick-backdrop";
@@ -473,10 +476,25 @@ import { renderChat } from "./websocket";
         updateJoystickVisibility();
       }
 
+      export function suppressJoystickKeyboardFocus() {
+        if (!document.documentElement.classList.contains("is-wand-native-input")) return;
+        var active = document.activeElement as HTMLElement | null;
+        if (active && typeof active.blur === "function") {
+          try { active.blur(); } catch (err) {}
+        }
+        setTimeout(function() {
+          var next = document.activeElement as HTMLElement | null;
+          if (next && typeof next.blur === "function") {
+            try { next.blur(); } catch (err) {}
+          }
+        }, 0);
+      }
+
       export function onJoystickPointerDown(e) {
         if (!isJoystickAvailable()) return;
         if ((e.pointerType === "mouse" || e.pointerType === "pen") && e.button !== 0) return;
         if (state.joystickPointerId !== null) return;
+        suppressJoystickKeyboardFocus();
         e.preventDefault();
         e.stopPropagation();
         var canDirectDrag = e.pointerType === "mouse" || e.pointerType === "pen";

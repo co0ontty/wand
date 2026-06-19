@@ -310,7 +310,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var kind = (opts.kind === "compact" || opts.kind === "popover") ? opts.kind : "dropdown";
         var preferredTool = getPreferredTool();
         var composerMode = state.chatMode || "default";
-        var modelText = getEffectiveModel(session) || "default";
+        var modelText = getEffectiveModel(session) || "";
+        var modelLabel = getShortModelLabel(modelText, session);
         var thinkingText = getEffectiveThinking(session);
         function pill(ctrl, label, value, optionsHtml) {
           // compact 不显示分组小标签；dropdown / popover 都显示（"模式" / "模型" / "思考"）。
@@ -326,7 +327,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="会话设置">' +
           pill("mode", "模式", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) +
           '<span class="composer-text-sep" aria-hidden="true">·</span>' +
-          pill("model", "模型", modelText, renderChatModelOptionsRaw(modelText, session)) +
+          pill("model", "模型", modelLabel, renderChatModelOptionsRaw(modelText, session)) +
           '<span class="composer-text-sep" aria-hidden="true">·</span>' +
           pill("thinking", "思考", thinkingText, renderChatThinkingOptionsRaw(thinkingText)) +
         '</div>';
@@ -348,8 +349,13 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function getModelDisplayLabel(model, session) {
         var selected = model || "";
-        if (!selected || selected === "default") return "默认";
         var models = getModelsForCurrentProvider(session);
+        if (!selected || selected === "default") {
+          for (var j = 0; j < models.length; j++) {
+            if (models[j].id === "default") return models[j].label || models[j].id;
+          }
+          return "默认";
+        }
         for (var i = 0; i < models.length; i++) {
           if (models[i].id === selected) return models[i].label || models[i].id;
         }
@@ -367,6 +373,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (lower.indexOf("opus") !== -1) return "Opus";
         if (lower.indexOf("sonnet") !== -1) return "Sonnet";
         if (lower.indexOf("haiku") !== -1) return "Haiku";
+        if (lower.indexOf("gpt-5.5") !== -1) return "GPT-5.5";
         if (lower.indexOf("gpt-5") !== -1) return "GPT-5";
         if (lower.indexOf("gpt-4") !== -1) return "GPT-4";
         if (label.length > 12) return label.slice(0, 10) + "…";
@@ -427,22 +434,23 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var session = getSelectedSession();
         var preferredTool = getPreferredTool();
         var mode = state.chatMode || "default";
-        var model = getEffectiveModel(session) || "default";
+        var model = getEffectiveModel(session) || "";
+        var modelLabel = getShortModelLabel(model, session);
         var thinking = getEffectiveThinking(session);
         var trios = document.querySelectorAll(".chat-mode-trio");
         trios.forEach(function(trio) {
-          function setPair(ctrl, value, optionsHtml) {
+          function setPair(ctrl, value, optionsHtml, labelText?) {
             var pillNode = trio.querySelector('[data-mode-control-pill="' + ctrl + '"]');
             if (!pillNode) return;
             var label = pillNode.querySelector(".composer-text-label");
-            if (label) label.textContent = value;
+            if (label) label.textContent = labelText || value;
             var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]') as HTMLSelectElement | null;
             if (!sel) return;
             if (optionsHtml) sel.innerHTML = optionsHtml;
             if (sel.value !== value) sel.value = value;
           }
           setPair("mode", mode, renderChatModeOptionsRaw(preferredTool, mode));
-          setPair("model", model, renderChatModelOptionsRaw(model, session));
+          setPair("model", model, renderChatModelOptionsRaw(model, session), modelLabel);
           setPair("thinking", thinking, renderChatThinkingOptionsRaw(thinking));
         });
         refreshComposerConfigControls(session, mode, getEffectiveModel(session) || "", thinking);
@@ -511,14 +519,16 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function renderChatModelOptions(selected, session) {
         var models = getModelsForCurrentProvider(session);
-        var html = '<option value="">默认（跟随设置）</option>';
+        var normalized = selected === "default" ? "" : (selected || "");
+        var html = '<option value=""' + (!normalized ? " selected" : "") + '>默认 · ' + escapeHtml(getModelDisplayLabel("", session)) + '</option>';
         for (var i = 0; i < models.length; i++) {
           var m = models[i];
+          if (m.id === "default") continue;
           var label = m.label || m.id;
-          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === selected ? " selected" : "") + '>' + escapeHtml(label) + '</option>';
+          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === normalized ? " selected" : "") + '>' + escapeHtml(label) + '</option>';
         }
-        if (selected && !models.some(function(m) { return m.id === selected; })) {
-          html += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(selected) + '（自定义）</option>';
+        if (normalized && !models.some(function(m) { return m.id === normalized; })) {
+          html += '<option value="' + escapeHtml(normalized) + '" selected>' + escapeHtml(normalized) + '（自定义）</option>';
         }
         return html;
       }
@@ -526,13 +536,15 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       // model 选项 raw 版：空值显示 "default"，其它直接用 raw id（不带"（自定义）"等后缀）。
       export function renderChatModelOptionsRaw(selected, session) {
         var models = getModelsForCurrentProvider(session);
-        var html = '<option value="">default</option>';
+        var normalized = selected === "default" ? "" : (selected || "");
+        var html = '<option value=""' + (!normalized ? " selected" : "") + '>' + escapeHtml(getModelDisplayLabel("", session)) + '</option>';
         for (var i = 0; i < models.length; i++) {
           var m = models[i];
-          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === selected ? " selected" : "") + '>' + escapeHtml(m.id) + '</option>';
+          if (m.id === "default") continue;
+          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === normalized ? " selected" : "") + '>' + escapeHtml(m.id) + '</option>';
         }
-        if (selected && !models.some(function(m) { return m.id === selected; })) {
-          html += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(selected) + '</option>';
+        if (normalized && !models.some(function(m) { return m.id === normalized; })) {
+          html += '<option value="' + escapeHtml(normalized) + '" selected>' + escapeHtml(normalized) + '</option>';
         }
         return html;
       }
@@ -868,7 +880,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           if (data && data.id) {
             updateSessionSnapshot(data);
             if (typeof showToast === "function") {
-              var display = normalized || "默认";
+              var display = getModelDisplayLabel(normalized, session);
               var hint = session.provider === "codex" ? "（下次对话生效）" : "";
               showToast("已切换模型 → " + display + hint, "success");
             }

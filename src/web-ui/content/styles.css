@@ -399,6 +399,21 @@
       color: var(--text-primary);
     }
 
+    .input-textarea::selection {
+      background: rgba(79, 122, 88, 0.28);
+      color: #24160f;
+    }
+
+    .input-textarea::-moz-selection {
+      background: rgba(79, 122, 88, 0.28);
+      color: #24160f;
+    }
+
+    .chat-message.user .chat-message-bubble::selection {
+      background: rgba(255, 255, 255, 0.32);
+      color: #ffffff;
+    }
+
     /* ===== 应用容器 ===== */
     .app-container {
       --layout-main-file-panel-width: var(--file-panel-width);
@@ -3710,6 +3725,10 @@
       min-height: 0;
       min-width: 0;
       scrollbar-gutter: stable;
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
+      overflow-anchor: none;
       /* iOS Safari: 聊天到顶 / 到底再用力滑, scroll 会从 .chat-messages 冒到
          body, 即使父级有 overflow:hidden 也拦不住 (Safari 已知行为)。这一冒
          有两个用户可见的副作用: 1) 整页跟着一起被推一帧, 输入框跳动;
@@ -3740,24 +3759,39 @@
       border-color: var(--accent);
     }
 
+    @media (pointer: coarse), (max-width: 768px) {
+      .chat-load-more {
+        padding: 12px 0;
+      }
+      .chat-load-more-btn {
+        min-height: 36px;
+        padding: 8px 18px;
+        font-size: 0.78rem;
+      }
+      .chat-message.animate-in {
+        animation-duration: 0.18s;
+      }
+      .chat-message.user.animate-in {
+        animation-duration: 0.17s;
+      }
+    }
+
     /* ===== 消息动画 ===== */
     @keyframes messageSlide {
       from {
         opacity: 0;
-        transform: translateY(16px) scale(0.97);
-        filter: blur(6px);
+        transform: translateY(8px) scale(0.985);
       }
       to {
         opacity: 1;
         transform: translateY(0) scale(1);
-        filter: blur(0);
       }
     }
 
     @keyframes messageSlideUser {
       from {
         opacity: 0;
-        transform: translateX(20px) translateY(8px) scale(0.96);
+        transform: translateX(10px) translateY(4px) scale(0.985);
       }
       to {
         opacity: 1;
@@ -3859,12 +3893,12 @@
 
     /* ===== 消息进入动画 ===== */
     .chat-message.animate-in {
-      animation: messageSlide 0.5s var(--ease-out-expo);
-      will-change: opacity, transform, filter;
+      animation: messageSlide 0.22s var(--ease-out-expo);
+      will-change: opacity, transform;
     }
 
     .chat-message.user.animate-in {
-      animation: messageSlideUser 0.4s var(--ease-out-back);
+      animation: messageSlideUser 0.2s var(--ease-out-expo);
     }
 
     /* ===== 消息头像 ===== */
@@ -4333,8 +4367,10 @@
       overflow-x: hidden;
       min-width: 0;
       max-width: 100%;
-      transition: max-height 0.28s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+      transition: max-height 0.22s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
       scrollbar-gutter: stable;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
     }
     .subagent-panel[data-expanded="false"] .subagent-panel-body {
       max-height: 22em;
@@ -4765,7 +4801,7 @@
       border-top: 1px solid rgba(125, 91, 57, 0.08);
       max-height: 600px;
       overflow: hidden;
-      transition: max-height 0.35s var(--ease-out-expo), padding 0.35s var(--ease-out-expo), opacity 0.25s ease, transform 0.35s var(--ease-out-expo);
+      transition: max-height 0.24s var(--ease-out-expo), padding 0.24s var(--ease-out-expo), opacity 0.18s ease, transform 0.24s var(--ease-out-expo);
       opacity: 1;
       transform-origin: top;
     }
@@ -5234,7 +5270,7 @@
     }
     .tool-group[data-expanded="true"] .tool-group-body {
       display: block;
-      animation: tool-group-reveal 0.22s var(--ease-out-expo);
+      animation: tool-group-reveal 0.18s var(--ease-out-expo);
     }
     @keyframes tool-group-reveal {
       from { opacity: 0; transform: translateY(-2px); }
@@ -5525,7 +5561,7 @@
     }
     .inline-tool-open .inline-tool-expanded {
       display: block;
-      animation: tool-group-reveal 0.2s var(--ease-out-expo);
+      animation: tool-group-reveal 0.16s var(--ease-out-expo);
     }
     .inline-tool-result {
       background: rgba(125, 91, 57, 0.04);
