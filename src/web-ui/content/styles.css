@@ -285,6 +285,41 @@
     .is-wand-embed-terminal.is-wand-native-input .input-panel {
       display: none !important;
     }
+    .is-wand-embed-terminal .wand-joystick-root {
+      z-index: 120;
+    }
+    .is-wand-embed-terminal .wand-joystick-root.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+    .is-wand-embed-terminal .wand-joystick-backdrop {
+      z-index: 120;
+    }
+    .is-wand-embed-terminal .wand-joystick-ball {
+      width: 50px;
+      height: 50px;
+      color: rgba(255, 247, 239, 0.96);
+      background: rgba(35, 28, 24, 0.92);
+      border-color: rgba(255, 247, 239, 0.24);
+      box-shadow:
+        0 10px 26px rgba(0, 0, 0, 0.38),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      z-index: 123;
+    }
+    .is-wand-embed-terminal .wand-joystick-ball.panel-open,
+    .is-wand-embed-terminal .wand-joystick-ball:active {
+      transform: scale(1.04);
+      background: rgba(29, 23, 20, 0.98);
+      border-color: rgba(255, 247, 239, 0.34);
+    }
+    .is-wand-embed-terminal .wand-joystick-panel {
+      z-index: 124;
+      background: rgba(29, 23, 20, 0.98);
+      border-color: rgba(255, 247, 239, 0.18);
+      box-shadow:
+        0 18px 40px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
 
     /* ===== 首帧过渡抑制 ===== */
     html.no-transition,

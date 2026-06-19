@@ -253,11 +253,11 @@ export function startTui(deps: TuiDeps): TuiHandle {
     const isRoot = typeof process.getuid === "function" ? process.getuid() === 0 : false;
     const body = process.platform === "linux"
       ? `将写入 /etc/systemd/system/wand.service，systemctl enable --now，开机自启。\n${
-          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,建议先 Ctrl+C 退出 TUI 再 sudo wand web 重新进。"
+          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,请退出 TUI 后直接跑 sudo wand service:install。"
         }\n不想要 root？退出 TUI 跑 wand service:install --user (登出会被回收)。`
       : process.platform === "darwin"
         ? `将写入 /Library/LaunchDaemons/com.wand.web.plist，launchctl load，开机自启。\n${
-            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,建议先 Ctrl+C 退出 TUI 再 sudo wand web 重新进。"
+            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,请退出 TUI 后直接跑 sudo wand service:install。"
           }`
         : "当前平台暂不支持。";
     const ok = await layout.confirm({ title: "注册为系统服务", body });
