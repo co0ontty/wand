@@ -3,7 +3,7 @@ import express, { Express } from "express";
 import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
-import { ExecutionMode, InputRequest, ResizeRequest, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
+import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
 import { normalizeMode } from "./config.js";
 import { blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
@@ -169,6 +169,79 @@ function buildCodexResumeCommand(command: string, threadId: string): string {
     .replace(/\s+resume\s+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\s|$)/i, " ")
     .trim();
   return `${withoutExistingResume || "codex"} resume ${threadId}`;
+}
+
+function resolvePtyResumeProvider(snapshot: SessionSnapshot): SessionProvider {
+  const provider = snapshot.provider ?? (/^codex\b/.test(snapshot.command.trim()) ? "codex" : "claude");
+  if (provider !== "claude" && provider !== "codex") {
+    throw new Error("只有 Claude 或 Codex provider 支持恢复功能。");
+  }
+  return provider;
+}
+
+function startResumedPtySession(
+  processes: ProcessManager,
+  existingSession: SessionSnapshot,
+  sessionId: string,
+  defaultMode: ExecutionMode,
+  body: { mode?: ExecutionMode; cols?: number; rows?: number },
+  initialInput?: string
+): SessionSnapshot {
+  if ((existingSession.sessionKind ?? "pty") !== "pty") {
+    throw new Error("结构化会话不支持 PTY resume。");
+  }
+
+  const command = existingSession.command.trim();
+  const provider = resolvePtyResumeProvider(existingSession);
+  const resumeSessionId = existingSession.claudeSessionId;
+  if (!resumeSessionId) {
+    throw new Error(provider === "codex" ? "此会话没有 Codex thread ID，无法恢复。" : "此会话没有 Claude 会话 ID，无法恢复。");
+  }
+
+  if (provider === "claude" && !/^claude\b/.test(command)) {
+    throw new Error("只有 Claude 命令支持恢复功能。");
+  }
+  if (provider === "codex") {
+    if (!/^codex\b/.test(command)) {
+      throw new Error("只有 Codex 命令支持恢复功能。");
+    }
+    if (!processes.hasCodexSessionFile(resumeSessionId)) {
+      throw new Error("对应的 Codex 历史会话不存在，无法恢复。");
+    }
+  }
+
+  const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
+  const resumeCommand = provider === "codex"
+    ? buildCodexResumeCommand(command, resumeSessionId)
+    : `${command} --resume ${resumeSessionId}`;
+  const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
+  const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
+  return processes.start(resumeCommand, existingSession.cwd, newMode, initialInput, {
+    reuseId: sessionId,
+    cols: reqCols,
+    rows: reqRows,
+    provider,
+    model: existingSession.selectedModel ?? undefined,
+    thinkingEffort: existingSession.thinkingEffort ?? undefined,
+  });
+}
+
+function getAutoResumeInitialInput(input: string, view?: "chat" | "terminal", shortcutKey?: string): string | null {
+  if (view === "terminal") return null;
+  if (shortcutKey && shortcutKey !== "enter_text") return null;
+  const trimmedRight = input.replace(/[\r\n]+$/g, "").trimEnd();
+  return trimmedRight.trim().length > 0 ? trimmedRight : null;
+}
+
+function canAutoResumePtyForInput(snapshot: SessionSnapshot | null, input: string | null): snapshot is SessionSnapshot {
+  return Boolean(
+    snapshot
+    && (snapshot.sessionKind ?? "pty") === "pty"
+    && snapshot.status !== "running"
+    && (snapshot.provider === "claude" || snapshot.provider === "codex" || /^codex\b/.test(snapshot.command.trim()) || /^claude\b/.test(snapshot.command.trim()))
+    && snapshot.claudeSessionId
+    && input
+  );
 }
 
 function canMergeSession(snapshot: SessionSnapshot): boolean {
@@ -778,38 +851,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "结构化会话不支持 PTY resume。" });
         return;
       }
-      const command = existingSession.command.trim();
-      const provider = existingSession.provider ?? (/^codex\b/.test(command) ? "codex" : "claude");
-      if (provider !== "claude" && provider !== "codex") {
-        res.status(400).json({ error: "只有 Claude 或 Codex provider 支持恢复功能。" });
-        return;
-      }
-      const resumeSessionId = existingSession.claudeSessionId;
-      if (!resumeSessionId) {
-        res.status(400).json({ error: provider === "codex" ? "此会话没有 Codex thread ID，无法恢复。" : "此会话没有 Claude 会话 ID，无法恢复。" });
-        return;
-      }
-      if (provider === "claude" && !/^claude\b/.test(command)) {
-        res.status(400).json({ error: "只有 Claude 命令支持恢复功能。" });
-        return;
-      }
-      if (provider === "codex") {
-        if (!/^codex\b/.test(command)) {
-          res.status(400).json({ error: "只有 Codex 命令支持恢复功能。" });
-          return;
-        }
-        if (!processes.hasCodexSessionFile(resumeSessionId)) {
-          res.status(400).json({ error: "对应的 Codex 历史会话不存在，无法恢复。" });
-          return;
-        }
-      }
-      const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
-      const resumeCommand = provider === "codex"
-        ? buildCodexResumeCommand(command, resumeSessionId)
-        : `${command} --resume ${resumeSessionId}`;
-      const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
-      const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
-      const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: sessionId, cols: reqCols, rows: reqRows, provider });
+      const newSnapshot = startResumedPtySession(processes, existingSession, sessionId, defaultMode, body);
       res.status(201).json(newSnapshot);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法恢复会话。") });
@@ -876,6 +918,13 @@ export function registerSessionRoutes(
     try {
       if (structured.get(sessionId)) {
         const snapshot = await structured.sendMessage(sessionId, input);
+        res.json(snapshot);
+        return;
+      }
+      const autoResumeInput = getAutoResumeInitialInput(input, view, shortcutKey);
+      const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
+      if (autoResumeInput !== null && canAutoResumePtyForInput(existingSession, autoResumeInput)) {
+        const snapshot = startResumedPtySession(processes, existingSession, sessionId, defaultMode, {}, autoResumeInput);
         res.json(snapshot);
         return;
       }

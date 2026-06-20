@@ -1194,7 +1194,7 @@ export class ProcessManager extends EventEmitter {
         this.autoConfirmWithRecord(rec, chunk, child);
       }
 
-      if (initialInput && !initialInputSent && chunk.includes("❯")) {
+      if (initialInput && !initialInputSent && (chunk.includes("❯") || chunk.includes("›"))) {
         sendInitialInput();
       }
 
