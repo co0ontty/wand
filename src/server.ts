@@ -2411,6 +2411,10 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         return createHttpsServer({ key: ssl.key, cert: ssl.cert }, app);
       })()
     : createHttpServer(app);
+  // Node's 5s default can close an idle socket just before iOS URLSession reuses
+  // it for a later POST, surfacing as "network connection lost" on the client.
+  server.keepAliveTimeout = 75_000;
+  server.headersTimeout = 80_000;
 
   // 公开下载当前证书 —— 方便从手机/其他终端拉证书并导入信任链。
   // 不鉴权：证书本身是公开材料（不含私钥），泄露不影响安全。

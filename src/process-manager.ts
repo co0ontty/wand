@@ -1140,7 +1140,7 @@ export class ProcessManager extends EventEmitter {
       }
 
       current.ptyProcess.write(initialInput);
-      current.ptyProcess.write("\n");
+      current.ptyProcess.write("\r");
     };
 
     child.onData((chunk: string) => {

@@ -226,8 +226,18 @@ function startResumedPtySession(
   });
 }
 
-function getAutoResumeInitialInput(input: string, view?: "chat" | "terminal", shortcutKey?: string): string | null {
-  if (view === "terminal") return null;
+function getAutoResumeInitialInput(
+  snapshot: SessionSnapshot | null,
+  input: string,
+  view?: "chat" | "terminal",
+  shortcutKey?: string,
+): string | null {
+  if (view === "terminal") {
+    const isCodexPty = Boolean(snapshot?.provider === "codex" || /^codex\b/.test(snapshot?.command.trim() ?? ""));
+    if (!isCodexPty) return null;
+    if (shortcutKey && shortcutKey !== "enter_text") return null;
+    if (/[\x00-\x08\x0B-\x1F\x7F]/.test(input.replace(/[\r\n]+$/g, ""))) return null;
+  }
   if (shortcutKey && shortcutKey !== "enter_text") return null;
   const trimmedRight = input.replace(/[\r\n]+$/g, "").trimEnd();
   return trimmedRight.trim().length > 0 ? trimmedRight : null;
@@ -921,8 +931,8 @@ export function registerSessionRoutes(
         res.json(snapshot);
         return;
       }
-      const autoResumeInput = getAutoResumeInitialInput(input, view, shortcutKey);
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
+      const autoResumeInput = getAutoResumeInitialInput(existingSession, input, view, shortcutKey);
       if (autoResumeInput !== null && canAutoResumePtyForInput(existingSession, autoResumeInput)) {
         const snapshot = startResumedPtySession(processes, existingSession, sessionId, defaultMode, {}, autoResumeInput);
         res.json(snapshot);
