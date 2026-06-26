@@ -5,10 +5,10 @@
 [![node](https://img.shields.io/node/v/@co0ontty/wand.svg)](https://nodejs.org)
 [![GitHub last commit](https://img.shields.io/github/last-commit/co0ontty/wand)](https://github.com/co0ontty/wand/commits/master)
 
-通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。专为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [Codex](https://github.com/openai/codex) 设计，支持终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览、Android 客户端等功能。
+通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。专为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [Codex](https://github.com/openai/codex) 设计，支持终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览、多平台客户端。
 
 <p align="center">
-  <img src="docs/screenshots/chat-view.png" width="800" alt="结构化对话视图" />
+  <img src="docs/screenshots/hero.png" width="100%" alt="PTY 终端与结构化对话双视图" />
 </p>
 
 ## 安装
@@ -56,16 +56,12 @@ bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.s
 
 ## 功能
 
-<p align="center">
-  <img src="docs/screenshots/home.png" width="800" alt="欢迎页" />
-</p>
-
 ### 核心
 
 - **双视图模式** — 终端原始输出和结构化对话视图可随时切换，同一会话两种呈现
 - **多 Provider 支持** — 同时支持 Claude Code 和 Codex，可按需创建不同类型的会话
-- **会话管理** — 创建、归档、恢复会话；支持从 Claude 原生历史记录恢复；会话列表显示摘要，懒加载
-- **权限控制** — 可视化权限提示，支持逐次确认、单次批准、本轮记忆等策略；工具调用自动分组与审批统计
+- **会话管理** — 创建、归档、恢复会话；支持从 Claude 原生历史记录恢复；会话列表显示摘要
+- **权限控制** — 可视化权限提示，支持逐次确认、单次批准、本轮记忆等策略
 
 ### 交互体验
 
@@ -73,22 +69,23 @@ bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.s
 - **个性化角色** — 像素风猫咪头像（赛博虎妞 / 勤劳初二），支持自定义对话角色名称
 - **消息排队** — 在 AI 思考时可继续输入，消息自动排队发送
 - **文件浏览器** — 内置路径浏览和搜索功能
+- **快捷提交** — Git 变动快速提交入口，一键生成 commit message
 
 ### 部署与访问
 
-- **Android 客户端** — WebView 壳应用，支持加密连接码分发、APK 自动更新检查、原生通知推送、启动器图标切换
+- **多平台客户端** — Android / iOS / macOS 原生客户端，支持加密连接码分发、自动更新检查
 - **HTTPS** — 可选自签证书，适合远程或移动端访问
-- **版本管理** — 内置更新检查与升级提示
+- **版本管理** — 内置更新检查与升级提示，支持 stable/beta 双通道
 
 ## 截图
 
-| 登录 | 对话视图 |
+| 登录页 | 会话列表 |
 |:---:|:---:|
-| <img src="docs/screenshots/login.png" width="400" alt="登录页" /> | <img src="docs/screenshots/chat-view.png" width="400" alt="对话视图" /> |
+| <img src="docs/screenshots/login.png" width="400" alt="登录页" /> | <img src="docs/screenshots/android-home.png" width="400" alt="安卓会话列表" /> |
 
-| 终端 PTY 视图 |
-|:---:|
-| <img src="docs/screenshots/terminal-pty.png" width="800" alt="终端 PTY 视图" /> |
+| PTY 终端视图 | 聊天视图 |
+|:---:|:---:|
+| <img src="docs/screenshots/android-terminal.png" width="400" alt="安卓终端视图" /> | <img src="docs/screenshots/android-chat.png" width="400" alt="安卓聊天视图" /> |
 
 ## 配置
 
@@ -155,21 +152,19 @@ npm run dev -- -c /tmp/wand-test/config.json
 ## 项目结构
 
 ```
-src/
-  cli.ts                    # CLI 入口，解析命令和参数
-  server.ts                 # Express 服务器、REST API、WebSocket
-  server-session-routes.ts  # 会话/恢复/历史相关路由
-  process-manager.ts        # PTY 会话编排、输入输出路由、权限处理
-  claude-pty-bridge.ts      # PTY 输出解析为结构化对话数据
-  storage.ts                # SQLite 持久化
-  config.ts                 # 配置加载与合并
-  session-lifecycle.ts      # 会话状态机（idle/thinking/waiting/archived）
-  session-logger.ts         # 文件日志 ~/.wand/sessions/
-  resume-policy.ts          # Claude 历史绑定与恢复策略
-  web-ui/                   # 服务端渲染的前端 HTML/CSS/JS
-android/                    # Android 壳应用（submodule → co0ontty/wand-android）
-macos/                      # macOS 壳应用（submodule → co0ontty/wand-macos）
-ios/                        # iOS 壳应用（submodule → co0ontty/wand-ios）
+wand/
+├── src/
+│   ├── cli.ts                    # CLI 入口
+│   ├── server.ts                 # Express 服务器 + WebSocket
+│   ├── process-manager.ts        # PTY 会话编排
+│   ├── claude-pty-bridge.ts      # PTY 输出解析为结构化对话
+│   ├── storage.ts                # SQLite 持久化
+│   ├── config.ts                 # 配置加载
+│   └── web-ui/                   # 前端 HTML/CSS/JS
+├── android/                      # Android 客户端（submodule）
+├── ios/                          # iOS 客户端（submodule）
+├── macos/                        # macOS 客户端（submodule）
+└── docs/                         # 文档与截图
 ```
 
 三个客户端壳应用是独立仓库，以 git submodule 引用。克隆源码开发时需要带上：
