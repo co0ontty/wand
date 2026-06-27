@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
 import { buildChildEnv } from "./env-utils.js";
 import { runGit as runGitBase, runGitRaw as runGitRawBase, getGitErrorMessage } from "./git-utils.js";
-import { applyThinkingEffortToPrompt, thinkingEffortToCodexReasoningEffort } from "./structured-session-manager.js";
+import { thinkingEffortToClaudeCliEffort, thinkingEffortToCodexReasoningEffort } from "./structured-session-manager.js";
 import {
   GitStatusFileEntry,
   GitStatusResult,
@@ -1082,9 +1082,10 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     const args = ["-p", "--verbose", "--output-format", "stream-json"];
     const model = opts.model?.trim();
     if (model && model !== "default") args.push("--model", model);
+    const claudeEffort = thinkingEffortToClaudeCliEffort(opts.thinkingEffort ?? "off");
+    if (claudeEffort) args.push("--effort", claudeEffort);
     args.push("--permission-mode", "bypassPermissions");
-    const effectivePrompt = applyThinkingEffortToPrompt(prompt, opts.thinkingEffort ?? "off");
-    await runCliText("claude", args, effectivePrompt, {
+    await runCliText("claude", args, prompt, {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,

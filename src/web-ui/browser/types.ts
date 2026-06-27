@@ -13,8 +13,6 @@ export interface AppState {
   ws: WebSocket | null;
   wsConnected: boolean;
   chatStickToBottom: boolean;
-  chatPinTurnToTop: boolean;
-  chatPinMinUserIndex: number;
   chatAutoFoldEnabled: boolean;
   chatAutoFoldSnapshot: { userIdx: number; assistantIdx: number } | null;
   chatProgrammaticScrollUntil: number;

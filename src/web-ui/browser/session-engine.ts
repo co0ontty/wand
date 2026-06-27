@@ -557,13 +557,13 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       // ── 思考深度 (thinkingEffort) —— 与 model 选择三件套对称 ──
 
-      // 标签直接用 Claude CLI 原生 magic word：think / think hard / ultrathink。
-      // 这样用户一眼能对上官方文档里的思考强度档位，PTY 模式下也是这几个词被注入到 prompt 前缀。
+      // 标签直接用实际传给各 runner 的 effort 语义，避免把 Claude 的一次性深度提示词
+      // 误解成会话级配置。
       export var THINKING_LEVELS = [
-        { id: "off",      label: "off",        hint: "不启用思考（CLI 无前缀；SDK 关闭 thinking；Codex minimal）" },
-        { id: "standard", label: "think",      hint: "Claude CLI: think · SDK budget 4096 · Codex low" },
-        { id: "deep",     label: "think hard", hint: "Claude CLI: think hard · SDK budget 16000 · Codex medium" },
-        { id: "max",      label: "ultrathink", hint: "Claude CLI: ultrathink · SDK budget 31999 · Codex high" }
+        { id: "off",      label: "auto",   hint: "Claude CLI: auto/default · SDK 关闭 thinking · Codex minimal" },
+        { id: "standard", label: "low",    hint: "Claude CLI: low · SDK budget 4096 · Codex low" },
+        { id: "deep",     label: "medium", hint: "Claude CLI: medium · SDK budget 16000 · Codex medium" },
+        { id: "max",      label: "max",    hint: "Claude CLI: max · SDK budget 31999 · Codex high" }
       ];
 
       export function getThinkingLabel(id) {

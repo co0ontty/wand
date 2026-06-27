@@ -104,7 +104,7 @@ export function updateChatUnreadBubble() {
   var notAtBottom = !isChatNearBottom();
   // 显示条件：有选中会话 + 在 chat 视图 + 用户已经滚开了底部。
   // 不强制要求有未读——用户主动滚上去时也给一个"回到底部"的入口。
-  var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom && !state.chatPinTurnToTop;
+  var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom;
   bubble.classList.toggle("visible", shouldShow);
   bubble.classList.toggle("has-unread", state.chatUnreadCount > 0);
   var countEl = bubble.querySelector(".chat-unread-bubble-count");
@@ -126,98 +126,15 @@ export function updateChatUnreadBubble() {
   if (chatContainer) chatContainer.classList.toggle("has-jump-btn", shouldShow);
 }
 
-// ===== ChatGPT 风格"顶置最新轮次" =====
-// 发送新消息时调用：进入 pin 模式，记下"不能钉到比这更早的用户消息"的下界。
-// minUserIndex 通常是发送瞬间 currentMessages 的长度——保证 PTY 路径下
-// 真正的用户回显到达后才会被钉，不会误钉上一轮的旧用户消息。
-export function startChatTurnPin(minUserIndex: number) {
-  state.chatPinTurnToTop = true;
-  state.chatPinMinUserIndex = typeof minUserIndex === "number" ? minUserIndex : 0;
-  // 进入 pin 模式即脱离贴底，避免两套滚动逻辑打架。
-  state.chatStickToBottom = false;
-  clearChatUnread({ removeDivider: true });
-}
-
-// 用户一旦主动滚动/滚轮/触摸，或点了"回到底部"气泡，就退出 pin 模式。
-export function releaseChatTurnPin() {
-  if (!state.chatPinTurnToTop) return;
-  state.chatPinTurnToTop = false;
-  state.chatPinMinUserIndex = 0;
+function releaseChatTurnPin() {
   removeChatPinSpacer();
 }
 
-// pin 占位元素：column-reverse 下 DOM 第一个子节点 = 视觉底部，所以把 spacer
-// 插到最前面，就是在内容下方撑出可滚动空间——回复很短时也能把用户消息推到顶。
-function getChatPinSpacer(el: any, create: boolean) {
-  var spacer = el.querySelector(".chat-pin-spacer");
-  if (!spacer && create) {
-    spacer = document.createElement("div");
-    spacer.className = "chat-pin-spacer";
-    spacer.setAttribute("aria-hidden", "true");
-    spacer.style.flex = "0 0 auto";
-    spacer.style.width = "100%";
-    spacer.style.height = "0px";
-    spacer.style.pointerEvents = "none";
-    el.insertBefore(spacer, el.firstChild);
-  }
-  return spacer || null;
-}
-
-export function removeChatPinSpacer(chatMsgs?: any) {
+function removeChatPinSpacer(chatMsgs?: any) {
   var el = chatMsgs || getChatScrollElement();
   if (!el) return;
   var spacer = el.querySelector(".chat-pin-spacer");
   if (spacer && spacer.parentNode) spacer.parentNode.removeChild(spacer);
-}
-
-// 把最新一条（且 index >= chatPinMinUserIndex）的用户消息钉到视口顶部。
-// column-reverse 下 scrollTop 含义特殊，但 anchor 公式（按 getBoundingClientRect
-// 计算 delta 再加到 scrollTop）与布局方向无关，所以这里直接复用。
-export function applyChatTurnPin(chatMsgs?: any) {
-  if (!state.chatPinTurnToTop) return false;
-  var el = chatMsgs || getChatScrollElement();
-  if (!el || !el.isConnected) return false;
-  var msgs = state.currentMessages || [];
-  var targetIdx = -1;
-  for (var i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i] && msgs[i].role === "user") { targetIdx = i; break; }
-  }
-  if (targetIdx < 0 || targetIdx < state.chatPinMinUserIndex) return false;
-  var userEl = el.querySelector('.chat-message[data-msg-index="' + targetIdx + '"]');
-  if (!userEl) return false;
-  var PIN_TOP_OFFSET = 12;
-
-  // 回复很短时，用户消息 + 回复的总高度不足一屏，没有足够的可滚动内容
-  // 把用户消息推到顶部。先把 spacer 归零量一遍真实内容高度，缺多少补多少。
-  var spacer = getChatPinSpacer(el, true);
-  if (spacer) spacer.style.height = "0px";
-  // 视觉最底部的真实内容：跳过 spacer 后的第一个 DOM 子节点（column-reverse）。
-  var bottomEl: any = null;
-  var children = el.children;
-  for (var c = 0; c < children.length; c++) {
-    if (!children[c].classList || !children[c].classList.contains("chat-pin-spacer")) {
-      bottomEl = children[c];
-      break;
-    }
-  }
-  if (bottomEl) {
-    var available = bottomEl.getBoundingClientRect().bottom - userEl.getBoundingClientRect().top;
-    var needed = el.clientHeight - PIN_TOP_OFFSET;
-    var spacerHeight = needed - available;
-    if (spacer) spacer.style.height = (spacerHeight > 0 ? Math.ceil(spacerHeight) : 0) + "px";
-  }
-
-  var containerTop = el.getBoundingClientRect().top;
-  var delta = (userEl.getBoundingClientRect().top - containerTop) - PIN_TOP_OFFSET;
-  if (Math.abs(delta) > 0.5) {
-    state.chatIsProgrammaticScroll = true;
-    // scroll 事件常晚于 rAF 才派发，单 rAF 复位会被随后到来的程序 scroll 漏过，
-    // 误触发 releaseChatTurnPin。用时间戳兜底：宽限期内的 scroll 一律忽略。
-    state.chatProgrammaticScrollUntil = Date.now() + 350;
-    el.scrollTop += delta;
-    requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
-  }
-  return true;
 }
 
 export function scrollChatToBottom(smooth?: boolean) {
@@ -283,8 +200,7 @@ export function bindChatScrollListener() {
   state.chatScrollElement = chatMsgs;
   state.chatScrollHandler = function() {
     if (!(chatMsgs as any).isConnected) return;
-    // 程序触发的滚动（点了气泡 / pin 重定位）不算"用户翻页"——别把状态弄乱。
-    // 宽限期兜底：pin 重定位的 scroll 事件可能晚于 rAF 复位才到，这里一并忽略。
+    // 程序触发的滚动（点了气泡 / 发送后贴底）不算"用户翻页"——别把状态弄乱。
     if (state.chatIsProgrammaticScroll || Date.now() < state.chatProgrammaticScrollUntil) {
       updateChatUnreadBubble();
       return;

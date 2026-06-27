@@ -332,7 +332,7 @@ export function registerSessionRoutes(
   });
 
   // 思考深度切换：与 /model 路由对称。结构化会话立即影响下一条 prompt（CLI/SDK 各自接入
-  // applyThinkingEffortToPrompt / thinking budget），PTY 会话仅影响通过 chat 视图发送的输入。
+  // --effort / thinking budget），PTY 会话通过 /effort 更新当前 Claude 进程。
   app.post("/api/sessions/:id/thinking-effort", express.json(), (req, res) => {
     const body = req.body as { thinkingEffort?: string | null };
     const raw = typeof body?.thinkingEffort === "string" ? body.thinkingEffort : null;

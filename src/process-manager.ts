@@ -18,7 +18,7 @@ import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./resume-policy.js";
-import { applyThinkingEffortToPrompt, normalizeThinkingEffort } from "./structured-session-manager.js";
+import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort } from "./structured-session-manager.js";
 import { generateSessionTopic } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSessionCwd } from "./session-cwd.js";
@@ -952,7 +952,8 @@ export class ProcessManager extends EventEmitter {
     const effectiveMode = provider === "codex" ? "full-access" : mode;
     const isClaudeProvider = provider === "claude";
     const selectedModel = opts?.model?.trim() || undefined;
-    const processedCommand = this.processCommandForMode(command, effectiveMode, provider, selectedModel);
+    const initialThinkingEffort = normalizeThinkingEffort(opts?.thinkingEffort);
+    const processedCommand = this.processCommandForMode(command, effectiveMode, provider, selectedModel, initialThinkingEffort);
     const resumeCommandSessionId = isClaudeProvider
       ? getResumeCommandSessionId(processedCommand) ?? getResumeCommandSessionId(command)
       : null;
@@ -1015,7 +1016,7 @@ export class ProcessManager extends EventEmitter {
       codexSessionDiscoveryTimer: null,
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
-      thinkingEffort: normalizeThinkingEffort(opts?.thinkingEffort),
+      thinkingEffort: initialThinkingEffort,
       // cols 上限 256：与 @wterm/dom WASM grid 的 maxCols 硬编码一致，
       // 防止服务端按 >256 cols 让 Claude 用 CSI 绝对列定位写到 wterm 实际
       // 渲染不到的列上（表现为"内容神奇复制下行"）。
@@ -1434,14 +1435,16 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
-   * Set the thinking-effort level for a PTY session. For interactive Claude PTY
-   * we don't intercept raw key input; the effort is applied only when wand UI
-   * sends a chat-view message (see sendInput → applyThinkingEffortToPrompt).
+   * Set the thinking-effort level for a PTY session. Interactive Claude supports
+   * this through /effort; off maps to auto, which restores the model default.
    */
   setSessionThinkingEffort(id: string, effort: SessionSnapshot["thinkingEffort"]): SessionSnapshot {
     const record = this.mustGet(id);
     const normalized = normalizeThinkingEffort(effort);
     record.thinkingEffort = normalized;
+    if (record.provider === "claude" && record.status === "running" && record.ptyProcess) {
+      record.ptyProcess.write(`/effort ${thinkingEffortToClaudeSlashEffort(normalized)}\r`);
+    }
     this.persist(record);
     this.emitEvent({ type: "status", sessionId: id, data: { thinkingEffort: normalized } });
     return this.snapshot(record);
@@ -1500,21 +1503,12 @@ export class ProcessManager extends EventEmitter {
       this.logger.appendShortcutLog(id, shortcutKey, tailLines, ctx);
     }
 
-    // Thinking-depth magic-word injection. Only applied to chat-view submits
-    // (terminal direct keystrokes are pass-through). applyThinkingEffortToPrompt
-    // is safe on empty / lone-\r chunks (returns input unchanged) and won't
-    // double-prefix if the user already wrote the magic word themselves.
-    let effectiveInput = input;
-    if (view === "chat" && record.thinkingEffort && record.thinkingEffort !== "off") {
-      effectiveInput = applyThinkingEffortToPrompt(input, record.thinkingEffort);
-    }
-
     // Track user input via bridge for Chat mode
     if (record.ptyBridge) {
-      record.ptyBridge.onUserInput(effectiveInput);
+      record.ptyBridge.onUserInput(input);
     }
 
-    record.ptyProcess.write(effectiveInput);
+    record.ptyProcess.write(input);
     this.persist(record);
     return this.snapshot(record);
   }
@@ -2242,7 +2236,13 @@ export class ProcessManager extends EventEmitter {
     return false;
   }
 
-  private processCommandForMode(command: string, mode: ExecutionMode, provider: SessionProvider, model?: string): string {
+  private processCommandForMode(
+    command: string,
+    mode: ExecutionMode,
+    provider: SessionProvider,
+    model?: string,
+    thinkingEffort?: SessionSnapshot["thinkingEffort"],
+  ): string {
     if (provider === "codex") {
       let result = command;
       const trimmedModel = model?.trim();
@@ -2267,6 +2267,11 @@ export class ProcessManager extends EventEmitter {
     if (trimmedModel && trimmedModel !== "default" && !/--model\s/.test(command)) {
       const escapedModel = trimmedModel.replace(/'/g, "'\\''");
       result += ` --model '${escapedModel}'`;
+    }
+
+    const claudeEffort = thinkingEffortToClaudeCliEffort(thinkingEffort ?? null);
+    if (claudeEffort && !/--effort(?:\s|=|$)/.test(command)) {
+      result += ` --effort ${claudeEffort}`;
     }
 
     const hasPermFlag = /--permission-mode\s/.test(command);

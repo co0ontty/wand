@@ -1,7 +1,7 @@
 import { state, readStoredBoolean, writeStoredBoolean, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
 import { t, getActiveLang, iconSvg, I18N_DEFAULT_LANG } from "./i18n";
 import { escapeHtml, formatElapsedShort, isImagePath } from "./utils";
-import { applyChatTurnPin, applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getElementExpandKey, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
+import { applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getElementExpandKey, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, scrollChatToBottom, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
 import { copyTextSafely, showToastIfPossible, openFilePreview, appendToComposer, isMobileLayout } from "./file-browser";
 import { buildMessagesForRender, focusInputBox, getSelectedSession } from "./input";
 import { showToast, syncSessionProgressToNative, wandConfirm } from "./notifications";
@@ -278,10 +278,6 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var renderWasAtBottom = isChatNearBottom(chatMessages);
         var renderIsInitial = !state.chatInitialRenderDone;
 
-        // ChatGPT 风格"顶置最新轮次"模式开启时，停掉所有贴底/锚点/未读分支，
-        // 改由本函数末尾的 applyChatTurnPin 统一把最新用户消息钉到视口顶部。
-        var pinningTurn = state.chatPinTurnToTop;
-
         // 把 .system-info 卡片从计数里剔除——它由 extractPtySystemInfo 在
         // fullRenderChat 里穿插注入，不存在于 messages 数组中，混进 existingCount
         // 会让 msgCount !== existingCount 永远为真，每帧都走 fullRenderChat，从而
@@ -381,11 +377,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           // 才执行这个强制贴底；之后即便 prevMsgCount===0（page-refresh /
           // ws 重连等保留 sticky 的 reset 路径），也尊重 chatStickToBottom，
           // 不再把上滚的用户拽回去。
-          if (pinningTurn) {
-            // 顶置模式：位置交给末尾的 applyChatTurnPin，这里只清未读、标记已渲染。
-            clearChatUnread({ removeDivider: true });
-            state.chatInitialRenderDone = true;
-          } else if (prevMsgCount === 0 && !state.chatInitialRenderDone) {
+          if (prevMsgCount === 0 && !state.chatInitialRenderDone) {
             chatMessages.scrollTop = 0;
             state.chatStickToBottom = true;
             clearChatUnread({ removeDivider: true });
@@ -546,11 +538,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           //   但浏览器的 scroll anchoring 在某些边界场景会把 scrollTop 调成非 0；
           //   这里显式拉回 0 做兜底，不用动画，不会让用户感觉"被甩"）。
           // - 用户已经滚上去 → 一根毛都不动他的视图，只把未读累到气泡里。
-          if (pinningTurn) {
-            // 顶置模式：新到的助手消息不累计未读，位置交给末尾的 applyChatTurnPin。
-            clearChatUnread({ removeDivider: true });
-            updateChatUnreadBubble();
-          } else if (renderWasAtBottom) {
+          if (renderWasAtBottom) {
             requestAnimationFrame(function() {
               if (chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
                 state.chatIsProgrammaticScroll = true;
@@ -612,8 +600,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
             // 自然出现在底部，用户上滚时视图也不受打扰——不需要再 smartScroll。
             requestAnimationFrame(function() {
               // 兜底：用户贴底时如果浏览器把 scrollTop 调成非零，拉回来。
-              // 顶置模式下不碰 scrollTop，位置交给末尾的 applyChatTurnPin。
-              if (!pinningTurn && renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
+              if (renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
                 state.chatIsProgrammaticScroll = true;
                 chatMessages.scrollTop = 0;
                 requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
@@ -649,18 +636,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
         applyHistoryCollapse(chatMessages);
 
-        // 自动折叠（"横条 + 一屏"）：当内容高度 > 一屏时，把最新一轮 user+assistant
-        // 的紧凑预览固定到输出框顶部。不要移动真实消息 DOM；滚动锚点、增量 diff、
-        // 未读分割线和历史折叠都依赖 .chat-messages 内的节点稳定存在。
+        // 旧版会在顶部固定最新一轮预览；现在每次渲染都清掉该横条。
         applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial);
-
-        // 顶置模式：在折叠历史、DOM diff 全部落定后，把最新用户消息钉到视口顶部。
-        // column-reverse 下助手回复增长会把锚点往上推，所以每帧渲染后都要重钉。
-        if (state.chatPinTurnToTop) {
-          requestAnimationFrame(function() {
-            if (!applyChatTurnPin(chatMessages)) pinLatestRenderedUserToTop(chatMessages);
-          });
-        }
 
         // Update structured session status bar (in-flight / completed indicator)
         renderStructuredStatusBar(chatMessages, selectedSession);
@@ -2113,65 +2090,15 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         }
       }
 
-      // ===== 自动折叠横条（"横条 + 一屏"）=====
-      // 触发条件：聊天内容超出当前消息视口，且存在最新用户消息。顶部横条只渲染
-      // 最新一轮的紧凑预览，不搬动真实消息 DOM。这样最新输入/回复的入口常驻在
-      // 屏幕上方，下方 .chat-messages 继续负责一屏内容和真实滚动。
+      // ===== 自动折叠横条（已禁用）=====
+      // 保留清理入口，用来移除旧版本可能已经插入 DOM 的顶部固定横条和隐藏态。
       export function applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial) {
+        void allMessages;
+        void renderIsInitial;
         if (!chatOutput || !chatMessages) return;
-        if (!state.chatAutoFoldEnabled) {
-          setAutoFoldMode(chatOutput, chatMessages, false);
-          clearAutoFoldHistoryHidden(chatMessages);
-          clearAutoFoldBar(chatOutput);
-          return;
-        }
-        var msgs = allMessages || state.currentMessages || [];
-        if (!msgs || msgs.length === 0) {
-          setAutoFoldMode(chatOutput, chatMessages, false);
-          clearAutoFoldHistoryHidden(chatMessages);
-          clearAutoFoldBar(chatOutput);
-          return;
-        }
-
-        var lastUserIdx = -1;
-        for (var i = msgs.length - 1; i >= 0; i--) {
-          if (msgs[i] && msgs[i].role === "user") { lastUserIdx = i; break; }
-        }
-        if (lastUserIdx < 0) {
-          setAutoFoldMode(chatOutput, chatMessages, false);
-          clearAutoFoldHistoryHidden(chatMessages);
-          clearAutoFoldBar(chatOutput);
-          return;
-        }
-
-        var assistantIdx = -1;
-        for (var j = msgs.length - 1; j > lastUserIdx; j--) {
-          if (msgs[j] && msgs[j].role === "assistant") { assistantIdx = j; break; }
-        }
-
-        var hostHeight = chatOutput.clientHeight || 0;
-        var viewportHeight = chatMessages.clientHeight || hostHeight;
-        var totalContentHeight = chatMessages.scrollHeight || 0;
-        var historyIndices = getHistoryIndicesBefore(msgs, lastUserIdx);
-        var hasFoldedHistory = historyIndices.length > 0 || !!chatMessages.querySelector(".chat-history-summary");
-        var needsFold = hostHeight > 0 && (totalContentHeight > viewportHeight + 24 || hasFoldedHistory);
-        if (!needsFold) {
-          clearAutoFoldBar(chatOutput);
-          clearAutoFoldHistoryHidden(chatMessages);
-          setAutoFoldMode(chatOutput, chatMessages, false);
-          return;
-        }
-
-        var foldBar = ensureFoldBar(chatOutput);
-        var historyStats = historyIndices.length > 0 ? computeHistoryStats(msgs, historyIndices) : null;
-        foldBar.innerHTML = buildAutoFoldBarHtml(msgs[lastUserIdx], assistantIdx >= 0 ? msgs[assistantIdx] : null, historyStats);
-        foldBar.classList.remove("hidden");
-        setAutoFoldMode(chatOutput, chatMessages, true);
-        setAutoFoldHistoryHidden(chatMessages, lastUserIdx, historyIndices.length > 0);
-        if (state.chatPinTurnToTop) {
-          followAutoFoldLatest(chatMessages);
-        }
-        state.chatAutoFoldSnapshot = { userIdx: lastUserIdx, assistantIdx: assistantIdx };
+        setAutoFoldMode(chatOutput, chatMessages, false);
+        clearAutoFoldHistoryHidden(chatMessages);
+        clearAutoFoldBar(chatOutput);
       }
 
       function ensureFoldBar(chatOutput) {
@@ -2239,64 +2166,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
       function followAutoFoldLatest(chatMessages) {
         if (!chatMessages || !chatMessages.isConnected) return;
-        state.chatPinTurnToTop = true;
-        state.chatStickToBottom = false;
         clearChatUnread({ removeDivider: true });
-        requestAnimationFrame(function() {
-          if (!chatMessages.isConnected || !state.chatPinTurnToTop) return;
-          if (!applyChatTurnPin(chatMessages)) pinLatestRenderedUserToTop(chatMessages);
-        });
-      }
-
-      function pinLatestRenderedUserToTop(chatMessages) {
-        var el = chatMessages || document.querySelector("#chat-output .chat-messages");
-        if (!el || !el.isConnected) return false;
-        var users = el.querySelectorAll(".chat-message.user:not(.chat-history-hidden):not(.chat-auto-fold-hidden)");
-        if (!users || users.length === 0) return false;
-        // DOM order is newest -> oldest because .chat-messages uses column-reverse.
-        var userEl = users[0];
-        var PIN_TOP_OFFSET = 12;
-
-        var spacer = el.querySelector(".chat-pin-spacer");
-        if (!spacer) {
-          spacer = document.createElement("div");
-          spacer.className = "chat-pin-spacer";
-          spacer.setAttribute("aria-hidden", "true");
-          spacer.style.flex = "0 0 auto";
-          spacer.style.width = "100%";
-          spacer.style.height = "0px";
-          spacer.style.pointerEvents = "none";
-          el.insertBefore(spacer, el.firstChild);
-        } else {
-          spacer.style.height = "0px";
-        }
-
-        var bottomEl = null;
-        for (var c = 0; c < el.children.length; c++) {
-          var child = el.children[c];
-          if (!child.classList) continue;
-          if (child.classList.contains("chat-pin-spacer")) continue;
-          if (child.classList.contains("chat-history-hidden")) continue;
-          if (child.classList.contains("chat-auto-fold-hidden")) continue;
-          bottomEl = child;
-          break;
-        }
-        if (bottomEl) {
-          var available = bottomEl.getBoundingClientRect().bottom - userEl.getBoundingClientRect().top;
-          var needed = el.clientHeight - PIN_TOP_OFFSET;
-          var spacerHeight = needed - available;
-          spacer.style.height = (spacerHeight > 0 ? Math.ceil(spacerHeight) : 0) + "px";
-        }
-
-        var containerTop = el.getBoundingClientRect().top;
-        var delta = (userEl.getBoundingClientRect().top - containerTop) - PIN_TOP_OFFSET;
-        if (Math.abs(delta) > 0.5) {
-          state.chatIsProgrammaticScroll = true;
-          state.chatProgrammaticScrollUntil = Date.now() + 350;
-          el.scrollTop += delta;
-          requestAnimationFrame(function() { state.chatIsProgrammaticScroll = false; });
-        }
-        return true;
+        scrollChatToBottom(true);
       }
 
       function clearAutoFoldBar(chatOutput) {

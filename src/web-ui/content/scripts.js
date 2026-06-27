@@ -324,24 +324,8 @@
     // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
     // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
     chatStickToBottom: true,
-    // 用户显式点折叠条时才进入的"顶置最新轮次"：true = 把最新一条用户消息
-    // 钉到视口顶部，助手回复在其下方流式展开。普通发送默认走贴底跟随。
-    // 用户一旦手动滚动/滚轮/触摸即释放此模式。chatPinMinUserIndex 防止
-    // 钉到比触发时更早的用户消息。
-    chatPinTurnToTop: false,
-    chatPinMinUserIndex: 0,
-    // ===== 自动折叠（"横条 + 一屏"）=====
-    // true（默认）= 当聊天内容超出一屏时，把"最后一条用户消息 + 最新一条助手消息"
-    // 的紧凑预览固定在输出框顶部，下方滚动区填满剩余屏幕。
-    // 持久化到 localStorage（键 wand-chat-auto-fold）。
-    chatAutoFoldEnabled: (function() {
-      try {
-        var v = localStorage.getItem("wand-chat-auto-fold");
-        return v === null ? true : v === "true";
-      } catch (e) {
-        return true;
-      }
-    })(),
+    // 旧版自动折叠横条已禁用：不再把最新一轮摘要固定到聊天顶部。
+    chatAutoFoldEnabled: false,
     // 当前会话视图里"激活的折叠快照"，记录顶部预览对应的最新 user / assistant 索引。
     chatAutoFoldSnapshot: null,
     chatUnreadCount: 0,
@@ -657,7 +641,7 @@
       return s.id === state.selectedId;
     });
     var notAtBottom = !isChatNearBottom();
-    var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom && !state.chatPinTurnToTop;
+    var shouldShow = !!selectedSession && state.currentView === "chat" && notAtBottom;
     bubble.classList.toggle("visible", shouldShow);
     bubble.classList.toggle("has-unread", state.chatUnreadCount > 0);
     var countEl = bubble.querySelector(".chat-unread-bubble-count");
@@ -676,81 +660,14 @@
     var chatContainer = document.getElementById("chat-output");
     if (chatContainer) chatContainer.classList.toggle("has-jump-btn", shouldShow);
   }
-  function startChatTurnPin(minUserIndex) {
-    state.chatPinTurnToTop = true;
-    state.chatPinMinUserIndex = typeof minUserIndex === "number" ? minUserIndex : 0;
-    state.chatStickToBottom = false;
-    clearChatUnread({ removeDivider: true });
-  }
   function releaseChatTurnPin() {
-    if (!state.chatPinTurnToTop) return;
-    state.chatPinTurnToTop = false;
-    state.chatPinMinUserIndex = 0;
     removeChatPinSpacer();
-  }
-  function getChatPinSpacer(el, create) {
-    var spacer = el.querySelector(".chat-pin-spacer");
-    if (!spacer && create) {
-      spacer = document.createElement("div");
-      spacer.className = "chat-pin-spacer";
-      spacer.setAttribute("aria-hidden", "true");
-      spacer.style.flex = "0 0 auto";
-      spacer.style.width = "100%";
-      spacer.style.height = "0px";
-      spacer.style.pointerEvents = "none";
-      el.insertBefore(spacer, el.firstChild);
-    }
-    return spacer || null;
   }
   function removeChatPinSpacer(chatMsgs) {
     var el = chatMsgs || getChatScrollElement();
     if (!el) return;
     var spacer = el.querySelector(".chat-pin-spacer");
     if (spacer && spacer.parentNode) spacer.parentNode.removeChild(spacer);
-  }
-  function applyChatTurnPin(chatMsgs) {
-    if (!state.chatPinTurnToTop) return false;
-    var el = chatMsgs || getChatScrollElement();
-    if (!el || !el.isConnected) return false;
-    var msgs = state.currentMessages || [];
-    var targetIdx = -1;
-    for (var i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i] && msgs[i].role === "user") {
-        targetIdx = i;
-        break;
-      }
-    }
-    if (targetIdx < 0 || targetIdx < state.chatPinMinUserIndex) return false;
-    var userEl = el.querySelector('.chat-message[data-msg-index="' + targetIdx + '"]');
-    if (!userEl) return false;
-    var PIN_TOP_OFFSET = 12;
-    var spacer = getChatPinSpacer(el, true);
-    if (spacer) spacer.style.height = "0px";
-    var bottomEl = null;
-    var children = el.children;
-    for (var c = 0; c < children.length; c++) {
-      if (!children[c].classList || !children[c].classList.contains("chat-pin-spacer")) {
-        bottomEl = children[c];
-        break;
-      }
-    }
-    if (bottomEl) {
-      var available = bottomEl.getBoundingClientRect().bottom - userEl.getBoundingClientRect().top;
-      var needed = el.clientHeight - PIN_TOP_OFFSET;
-      var spacerHeight = needed - available;
-      if (spacer) spacer.style.height = (spacerHeight > 0 ? Math.ceil(spacerHeight) : 0) + "px";
-    }
-    var containerTop = el.getBoundingClientRect().top;
-    var delta = userEl.getBoundingClientRect().top - containerTop - PIN_TOP_OFFSET;
-    if (Math.abs(delta) > 0.5) {
-      state.chatIsProgrammaticScroll = true;
-      state.chatProgrammaticScrollUntil = Date.now() + 350;
-      el.scrollTop += delta;
-      requestAnimationFrame(function() {
-        state.chatIsProgrammaticScroll = false;
-      });
-    }
-    return true;
   }
   function scrollChatToBottom(smooth) {
     var chatMsgs = getChatScrollElement();
@@ -7971,8 +7888,6 @@
       state.chatUnreadCount = 0;
       state.chatUnreadStartIndex = -1;
       state.chatInitialRenderDone = false;
-      state.chatPinTurnToTop = false;
-      state.chatPinMinUserIndex = 0;
     }
   }
   function getEffectiveCwd3() {
@@ -11763,7 +11678,6 @@
     if (!chatMessages) return;
     var renderWasAtBottom = isChatNearBottom(chatMessages);
     var renderIsInitial = !state.chatInitialRenderDone;
-    var pinningTurn = state.chatPinTurnToTop;
     var existingCount = chatMessages.querySelectorAll(".chat-message:not(.system-info)").length;
     var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
     function fullRenderChat() {
@@ -11816,10 +11730,7 @@
           msgEls[idx].setAttribute("data-msg-index", String(visibleOffset + totalVisible - 1 - idx));
         }
       })();
-      if (pinningTurn) {
-        clearChatUnread({ removeDivider: true });
-        state.chatInitialRenderDone = true;
-      } else if (prevMsgCount === 0 && !state.chatInitialRenderDone) {
+      if (prevMsgCount === 0 && !state.chatInitialRenderDone) {
         chatMessages.scrollTop = 0;
         state.chatStickToBottom = true;
         clearChatUnread({ removeDivider: true });
@@ -11950,10 +11861,7 @@
       attachAllCopyHandlers(chatMessages);
       applyPersistedExpandState(chatMessages);
       collapseOldToolCards(chatMessages, insertedEls);
-      if (pinningTurn) {
-        clearChatUnread({ removeDivider: true });
-        updateChatUnreadBubble();
-      } else if (renderWasAtBottom) {
+      if (renderWasAtBottom) {
         requestAnimationFrame(function() {
           if (chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
             state.chatIsProgrammaticScroll = true;
@@ -12000,7 +11908,7 @@
         bindChatScrollListener();
         applyPersistedExpandState(chatMessages);
         requestAnimationFrame(function() {
-          if (!pinningTurn && renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
+          if (renderWasAtBottom && chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
             state.chatIsProgrammaticScroll = true;
             chatMessages.scrollTop = 0;
             requestAnimationFrame(function() {
@@ -12031,11 +11939,6 @@
     snapCollapsedSubagentPanelsToBottom2(chatMessages);
     applyHistoryCollapse(chatMessages);
     applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial);
-    if (state.chatPinTurnToTop) {
-      requestAnimationFrame(function() {
-        if (!applyChatTurnPin(chatMessages)) pinLatestRenderedUserToTop(chatMessages);
-      });
-    }
     renderStructuredStatusBar(chatMessages, selectedSession);
     updateTodoProgress(allMessages);
   }
@@ -13187,62 +13090,12 @@
     }
   }
   function applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial) {
+    void allMessages;
+    void renderIsInitial;
     if (!chatOutput || !chatMessages) return;
-    if (!state.chatAutoFoldEnabled) {
-      setAutoFoldMode(chatOutput, chatMessages, false);
-      clearAutoFoldHistoryHidden(chatMessages);
-      clearAutoFoldBar(chatOutput);
-      return;
-    }
-    var msgs = allMessages || state.currentMessages || [];
-    if (!msgs || msgs.length === 0) {
-      setAutoFoldMode(chatOutput, chatMessages, false);
-      clearAutoFoldHistoryHidden(chatMessages);
-      clearAutoFoldBar(chatOutput);
-      return;
-    }
-    var lastUserIdx = -1;
-    for (var i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i] && msgs[i].role === "user") {
-        lastUserIdx = i;
-        break;
-      }
-    }
-    if (lastUserIdx < 0) {
-      setAutoFoldMode(chatOutput, chatMessages, false);
-      clearAutoFoldHistoryHidden(chatMessages);
-      clearAutoFoldBar(chatOutput);
-      return;
-    }
-    var assistantIdx = -1;
-    for (var j = msgs.length - 1; j > lastUserIdx; j--) {
-      if (msgs[j] && msgs[j].role === "assistant") {
-        assistantIdx = j;
-        break;
-      }
-    }
-    var hostHeight = chatOutput.clientHeight || 0;
-    var viewportHeight = chatMessages.clientHeight || hostHeight;
-    var totalContentHeight = chatMessages.scrollHeight || 0;
-    var historyIndices = getHistoryIndicesBefore(msgs, lastUserIdx);
-    var hasFoldedHistory = historyIndices.length > 0 || !!chatMessages.querySelector(".chat-history-summary");
-    var needsFold = hostHeight > 0 && (totalContentHeight > viewportHeight + 24 || hasFoldedHistory);
-    if (!needsFold) {
-      clearAutoFoldBar(chatOutput);
-      clearAutoFoldHistoryHidden(chatMessages);
-      setAutoFoldMode(chatOutput, chatMessages, false);
-      return;
-    }
-    var foldBar = ensureFoldBar(chatOutput);
-    var historyStats = historyIndices.length > 0 ? computeHistoryStats(msgs, historyIndices) : null;
-    foldBar.innerHTML = buildAutoFoldBarHtml(msgs[lastUserIdx], assistantIdx >= 0 ? msgs[assistantIdx] : null, historyStats);
-    foldBar.classList.remove("hidden");
-    setAutoFoldMode(chatOutput, chatMessages, true);
-    setAutoFoldHistoryHidden(chatMessages, lastUserIdx, historyIndices.length > 0);
-    if (state.chatPinTurnToTop) {
-      followAutoFoldLatest(chatMessages);
-    }
-    state.chatAutoFoldSnapshot = { userIdx: lastUserIdx, assistantIdx };
+    setAutoFoldMode(chatOutput, chatMessages, false);
+    clearAutoFoldHistoryHidden(chatMessages);
+    clearAutoFoldBar(chatOutput);
   }
   function ensureFoldBar(chatOutput) {
     var bar = chatOutput.querySelector("#chat-fold-bar");
@@ -13302,61 +13155,8 @@
   }
   function followAutoFoldLatest(chatMessages) {
     if (!chatMessages || !chatMessages.isConnected) return;
-    state.chatPinTurnToTop = true;
-    state.chatStickToBottom = false;
     clearChatUnread({ removeDivider: true });
-    requestAnimationFrame(function() {
-      if (!chatMessages.isConnected || !state.chatPinTurnToTop) return;
-      if (!applyChatTurnPin(chatMessages)) pinLatestRenderedUserToTop(chatMessages);
-    });
-  }
-  function pinLatestRenderedUserToTop(chatMessages) {
-    var el = chatMessages || document.querySelector("#chat-output .chat-messages");
-    if (!el || !el.isConnected) return false;
-    var users = el.querySelectorAll(".chat-message.user:not(.chat-history-hidden):not(.chat-auto-fold-hidden)");
-    if (!users || users.length === 0) return false;
-    var userEl = users[0];
-    var PIN_TOP_OFFSET = 12;
-    var spacer = el.querySelector(".chat-pin-spacer");
-    if (!spacer) {
-      spacer = document.createElement("div");
-      spacer.className = "chat-pin-spacer";
-      spacer.setAttribute("aria-hidden", "true");
-      spacer.style.flex = "0 0 auto";
-      spacer.style.width = "100%";
-      spacer.style.height = "0px";
-      spacer.style.pointerEvents = "none";
-      el.insertBefore(spacer, el.firstChild);
-    } else {
-      spacer.style.height = "0px";
-    }
-    var bottomEl = null;
-    for (var c = 0; c < el.children.length; c++) {
-      var child = el.children[c];
-      if (!child.classList) continue;
-      if (child.classList.contains("chat-pin-spacer")) continue;
-      if (child.classList.contains("chat-history-hidden")) continue;
-      if (child.classList.contains("chat-auto-fold-hidden")) continue;
-      bottomEl = child;
-      break;
-    }
-    if (bottomEl) {
-      var available = bottomEl.getBoundingClientRect().bottom - userEl.getBoundingClientRect().top;
-      var needed = el.clientHeight - PIN_TOP_OFFSET;
-      var spacerHeight = needed - available;
-      spacer.style.height = (spacerHeight > 0 ? Math.ceil(spacerHeight) : 0) + "px";
-    }
-    var containerTop = el.getBoundingClientRect().top;
-    var delta = userEl.getBoundingClientRect().top - containerTop - PIN_TOP_OFFSET;
-    if (Math.abs(delta) > 0.5) {
-      state.chatIsProgrammaticScroll = true;
-      state.chatProgrammaticScrollUntil = Date.now() + 350;
-      el.scrollTop += delta;
-      requestAnimationFrame(function() {
-        state.chatIsProgrammaticScroll = false;
-      });
-    }
-    return true;
+    scrollChatToBottom(true);
   }
   function clearAutoFoldBar(chatOutput) {
     if (!chatOutput) return;
@@ -14894,10 +14694,10 @@
     refreshAllChatModeTrios2();
   }
   var THINKING_LEVELS = [
-    { id: "off", label: "off", hint: "\u4E0D\u542F\u7528\u601D\u8003\uFF08CLI \u65E0\u524D\u7F00\uFF1BSDK \u5173\u95ED thinking\uFF1BCodex minimal\uFF09" },
-    { id: "standard", label: "think", hint: "Claude CLI: think \xB7 SDK budget 4096 \xB7 Codex low" },
-    { id: "deep", label: "think hard", hint: "Claude CLI: think hard \xB7 SDK budget 16000 \xB7 Codex medium" },
-    { id: "max", label: "ultrathink", hint: "Claude CLI: ultrathink \xB7 SDK budget 31999 \xB7 Codex high" }
+    { id: "off", label: "auto", hint: "Claude CLI: auto/default \xB7 SDK \u5173\u95ED thinking \xB7 Codex minimal" },
+    { id: "standard", label: "low", hint: "Claude CLI: low \xB7 SDK budget 4096 \xB7 Codex low" },
+    { id: "deep", label: "medium", hint: "Claude CLI: medium \xB7 SDK budget 16000 \xB7 Codex medium" },
+    { id: "max", label: "max", hint: "Claude CLI: max \xB7 SDK budget 31999 \xB7 Codex high" }
   ];
   function getThinkingLabel(id) {
     for (var i = 0; i < THINKING_LEVELS.length; i++) {

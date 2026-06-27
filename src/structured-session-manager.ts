@@ -80,31 +80,20 @@ export function thinkingEffortToSdkBudget(effort: SessionSnapshot["thinkingEffor
   }
 }
 
-/**
- * Claude CLI 用：在 prompt 前注入魔法词，让 claude code 自动识别为思考请求。
- * off → 原 prompt 不变。
- */
-export function applyThinkingEffortToPrompt(
-  prompt: string,
-  effort: SessionSnapshot["thinkingEffort"],
-): string {
-  const trimmed = prompt.trimStart();
-  if (!trimmed) return prompt;
-  let prefix = "";
+/** Claude CLI 用：把 thinkingEffort 映射到 `--effort` / `/effort` 支持的等级。off → 不覆盖默认值。 */
+export function thinkingEffortToClaudeCliEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
   switch (effort) {
-    case "standard": prefix = "think. "; break;
-    case "deep": prefix = "think hard. "; break;
-    case "max": prefix = "ultrathink. "; break;
+    case "standard": return "low";
+    case "deep": return "medium";
+    case "max": return "max";
     case "off":
-    default: return prompt;
+    default: return null;
   }
-  // 用户已经手写了相同强度的指令时不重复加，避免把 "ultrathink. ultrathink." 喂给模型。
-  const lower = trimmed.toLowerCase();
-  if (lower.startsWith("ultrathink") || lower.startsWith("think hard") || lower.startsWith("think very") || lower.startsWith("think harder")) {
-    return prompt;
-  }
-  if (effort === "standard" && lower.startsWith("think")) return prompt;
-  return prefix + trimmed;
+}
+
+/** Claude PTY slash-command 用：off 表示恢复模型默认 effort。 */
+export function thinkingEffortToClaudeSlashEffort(effort: SessionSnapshot["thinkingEffort"]): string {
+  return thinkingEffortToClaudeCliEffort(effort) ?? "auto";
 }
 
 /** Codex CLI 用：把 thinkingEffort 映射到 model_reasoning_effort 配置。off → minimal。 */
@@ -973,8 +962,8 @@ export class StructuredSessionManager {
 
   /**
    * Update the thinking-effort level for a structured session. Takes effect on
-   * the next spawn / next message (SDK runner injects `thinking`, CLI runner
-   * prepends magic words, codex runner overrides `model_reasoning_effort`).
+   * the next spawn / next message (SDK runner injects `thinking`, Claude CLI
+   * runner passes `--effort`, codex runner overrides `model_reasoning_effort`).
    */
   setSessionThinkingEffort(
     sessionId: string,
@@ -1583,6 +1572,10 @@ export class StructuredSessionManager {
       if (modelChoice && modelChoice !== "default") {
         args.push("--model", modelChoice);
       }
+      const claudeEffort = thinkingEffortToClaudeCliEffort(session.thinkingEffort);
+      if (claudeEffort) {
+        args.push("--effort", claudeEffort);
+      }
 
       // 托管模式：禁用 AskUserQuestion，让 agent 自己拍板，不要等用户决策。
       // 非托管模式：保留工具，靠 processLine 检测后主动 kill child 触发"中断+续接"流程。
@@ -1600,9 +1593,7 @@ export class StructuredSessionManager {
       // 下一个 flag）。表现为 claude 报 "Input must be provided either through
       // stdin or as a prompt argument when using --print"。
       //
-      // 思考深度通过给 prompt 前置魔法词触发（think / think hard / ultrathink）。
-      // applyThinkingEffortToPrompt 自身已经做了"用户已写过就不重复加"的保护。
-      const effectivePrompt = applyThinkingEffortToPrompt(prompt, session.thinkingEffort);
+      // 思考深度通过 --effort 传给 Claude CLI；prompt 保持用户原文。
       const spawnedAt = new Date().toISOString();
       const child = spawn("claude", args, {
         cwd: session.cwd,
@@ -1615,13 +1606,13 @@ export class StructuredSessionManager {
         pid: child.pid ?? null,
         cwd: session.cwd,
         args,
-        prompt: effectivePrompt.slice(0, 2048),
-        promptLength: effectivePrompt.length,
+        prompt: prompt.slice(0, 2048),
+        promptLength: prompt.length,
         claudeSessionId: session.claudeSessionId,
         spawnedAt,
       });
       this.pendingChildren.set(sessionId, child);
-      child.stdin?.end(effectivePrompt);
+      child.stdin?.end(prompt);
 
       const turnState: StreamingTurnState = {
         blocks: [],

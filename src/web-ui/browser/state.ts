@@ -236,22 +236,8 @@ export var state: AppState = {
   // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
   // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
   chatStickToBottom: true,
-  // 用户显式点折叠条时才进入的"顶置最新轮次"：true = 把最新一条用户消息
-  // 钉到视口顶部，助手回复在其下方流式展开。普通发送默认走贴底跟随。
-  // 用户一旦手动滚动/滚轮/触摸即释放此模式。chatPinMinUserIndex 防止
-  // 钉到比触发时更早的用户消息。
-  chatPinTurnToTop: false,
-  chatPinMinUserIndex: 0,
-  // ===== 自动折叠（"横条 + 一屏"）=====
-  // true（默认）= 当聊天内容超出一屏时，把"最后一条用户消息 + 最新一条助手消息"
-  // 的紧凑预览固定在输出框顶部，下方滚动区填满剩余屏幕。
-  // 持久化到 localStorage（键 wand-chat-auto-fold）。
-  chatAutoFoldEnabled: (function() {
-    try {
-      var v = localStorage.getItem("wand-chat-auto-fold");
-      return v === null ? true : v === "true";
-    } catch (e) { return true; }
-  })(),
+  // 旧版自动折叠横条已禁用：不再把最新一轮摘要固定到聊天顶部。
+  chatAutoFoldEnabled: false,
   // 当前会话视图里"激活的折叠快照"，记录顶部预览对应的最新 user / assistant 索引。
   chatAutoFoldSnapshot: null,
   chatUnreadCount: 0,
