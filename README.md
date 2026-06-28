@@ -39,10 +39,15 @@ If you install with `npm`, initialize and start Wand manually:
 
 ```bash
 wand init
+wand config:password  # Print the login password
 wand web
 ```
 
-The install script already runs `wand init` and lets you choose whether to install a background service or start Wand manually.
+The install script already runs `wand init`, prints the login password, and lets you choose whether to install a background service or start Wand manually. To view the password later, run:
+
+```bash
+wand config:password
+```
 
 ### Features
 
@@ -168,10 +173,15 @@ npm install -g @co0ontty/wand
 
 ```bash
 wand init
+wand config:password  # 查看登录密码
 wand web
 ```
 
-一键安装脚本会自动执行 `wand init`，并让你选择安装为后台服务或之后手动运行 `wand web`。
+一键安装脚本会自动执行 `wand init`、显示登录密码，并让你选择安装为后台服务或之后手动运行 `wand web`。之后如需再次查看密码，运行：
+
+```bash
+wand config:password
+```
 
 ### 功能
 

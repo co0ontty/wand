@@ -1,5 +1,6 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { request as httpRequest } from "node:http";
@@ -131,6 +132,11 @@ async function main(): Promise<void> {
       }
       break;
     }
+    case "config:password": {
+      const { config } = await loadConfigForCli(configPath, { ensureInitialPassword: true });
+      process.stdout.write(`${config.password}\n`);
+      break;
+    }
     case "config:set": {
       const key = args[1];
       const value = args[2];
@@ -202,6 +208,7 @@ Commands:
   wand web                  Start web console server (or attach to running one)
   wand config:path          Print resolved config path
   wand config:show          Print current config
+  wand config:password      Print current login password
   wand config:set           Update a simple config value
 
 System service (default = system-wide; pass --user for user-level):
@@ -226,18 +233,9 @@ async function ensureRequiredFiles(
   configPath: string,
   opts: { silentReady?: boolean } = {}
 ): Promise<WandConfig> {
-  const { ensureDatabaseFile, resolveDatabasePath, WandStorage } = await import("./storage.js");
-  const dbPath = resolveDatabasePath(configPath);
-  const hadConfig = hasConfigFile(configPath);
-  // 先建 DB 文件，再加载 config（loadConfigWithStorage 需要 storage 来迁移老 JSON 偏好字段并应用 DB 覆盖）。
-  const createdDb = ensureDatabaseFile(dbPath);
-  const storage = new WandStorage(dbPath);
-  let config: WandConfig;
-  try {
-    config = await loadConfigWithStorage(configPath, storage);
-  } finally {
-    storage.close();
-  }
+  const { config, dbPath, hadConfig, createdDb, generatedPassword } = await loadConfigForCli(configPath, {
+    ensureInitialPassword: true,
+  });
 
   // 已存在的 ready 信息在 TUI 模式下由启动 banner 统一展示，此处静默；
   // 但 created 是首次创建事件，无论 TUI 与否都值得提示。
@@ -252,8 +250,44 @@ async function ensureRequiredFiles(
   } else if (!opts.silentReady) {
     process.stdout.write(`[wand] SQLite database ready at ${dbPath}\n`);
   }
+  if (generatedPassword) {
+    process.stdout.write(`[wand] Created initial login password: ${generatedPassword}\n`);
+  }
 
   return config;
+}
+
+interface CliConfigLoadResult {
+  config: WandConfig;
+  dbPath: string;
+  hadConfig: boolean;
+  createdDb: boolean;
+  generatedPassword: string | null;
+}
+
+async function loadConfigForCli(
+  configPath: string,
+  opts: { ensureInitialPassword?: boolean } = {},
+): Promise<CliConfigLoadResult> {
+  const { ensureDatabaseFile, resolveDatabasePath, WandStorage } = await import("./storage.js");
+  const dbPath = resolveDatabasePath(configPath);
+  const hadConfig = hasConfigFile(configPath);
+  // 先建 DB 文件，再加载 config（loadConfigWithStorage 需要 storage 来迁移老 JSON 偏好字段并应用 DB 覆盖）。
+  const createdDb = ensureDatabaseFile(dbPath);
+  const storage = new WandStorage(dbPath);
+  let config: WandConfig;
+  let generatedPassword: string | null = null;
+  try {
+    config = await loadConfigWithStorage(configPath, storage);
+    if (opts.ensureInitialPassword && !hadConfig && !storage.hasCustomPassword() && config.password === "change-me") {
+      generatedPassword = crypto.randomBytes(18).toString("base64url");
+      storage.setPassword(generatedPassword);
+      config.password = generatedPassword;
+    }
+  } finally {
+    storage.close();
+  }
+  return { config, dbPath, hadConfig, createdDb, generatedPassword };
 }
 
 function shouldUseTui(): boolean {

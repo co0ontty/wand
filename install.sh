@@ -10,6 +10,46 @@ info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
+read_wand_password() {
+  if command -v wand &>/dev/null; then
+    wand config:password 2>/dev/null && return 0
+  fi
+  node <<'NODE' 2>/dev/null
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const configPath = path.join(os.homedir(), ".wand", "config.json");
+let configPassword = "";
+try {
+  const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  if (typeof config.password === "string" && config.password.length > 0) {
+    configPassword = config.password;
+  }
+} catch {}
+
+try {
+  const { DatabaseSync } = require("node:sqlite");
+  const dbPath = path.join(path.dirname(configPath), "wand.db");
+  if (fs.existsSync(dbPath)) {
+    const db = new DatabaseSync(dbPath);
+    const row = db.prepare("SELECT value FROM app_config WHERE key = ?").get("password");
+    db.close();
+    if (row && typeof row.value === "string" && row.value.length > 0) {
+      console.log(row.value);
+      process.exit(0);
+    }
+  }
+} catch {}
+
+if (configPassword) {
+  console.log(configPassword);
+  process.exit(0);
+}
+process.exit(1);
+NODE
+}
+
 REQUIRED_NODE_MAJOR=22
 
 # --- Check Node.js ---
@@ -92,6 +132,12 @@ npm install -g @co0ontty/wand || error "npm install failed."
 # --- Init (needed before service:install reads config) ---
 info "Initializing wand..."
 wand init
+if WAND_INITIAL_PASSWORD="$(read_wand_password)"; then
+  info "Wand login password: ${GREEN}${WAND_INITIAL_PASSWORD}${NC}"
+  info "You can view it again with: ${GREEN}wand config:password${NC}"
+else
+  warn "Unable to read Wand login password. Try: wand config:password"
+fi
 
 # --- Re-register systemd unit if we stopped one (升级场景) ---
 # 关键修复：以前这里只 `systemctl start`，但 unit 文件里的 `Environment=PATH=...`
