@@ -26,8 +26,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: false
           fetch-depth: 0
+
+      - name: Checkout macOS submodule
+        run: |
+          set -euo pipefail
+          git submodule sync -- macos
+          for attempt in 1 2 3 4 5; do
+            if git submodule update --init --force -- macos; then
+              exit 0
+            fi
+            delay=$((attempt * 15))
+            echo "macos submodule checkout failed; retrying in ${delay}s..."
+            sleep "$delay"
+          done
+          git submodule status -- macos
+          exit 1
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
