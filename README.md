@@ -5,12 +5,6 @@
 [![node](https://img.shields.io/node/v/@co0ontty/wand.svg)](https://nodejs.org)
 [![GitHub last commit](https://img.shields.io/github/last-commit/co0ontty/wand)](https://github.com/co0ontty/wand/commits/master)
 
-通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。专为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [Codex](https://github.com/openai/codex) 设计，支持终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览、多平台客户端。
-
-<p align="center">
-  <img src="docs/screenshots/hero.png" width="100%" alt="PTY 终端与结构化对话双视图" />
-</p>
-
 ## 安装
 
 ### 一键安装
@@ -54,6 +48,18 @@ bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.s
 
 如果以前装过 systemd 自启服务但还是 `Restart=on-failure`（v1.25.x 前的版本），重新跑 `sudo wand service:install` 重装服务即可换成 `Restart=always`，自动更新后才能正确拉起新进程。
 
+## 概览
+
+通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。专为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [Codex](https://github.com/openai/codex) 设计，支持终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览、多平台客户端。
+
+<p align="center">
+  <img src="docs/screenshots/clients-overview.png" width="100%" alt="Web 居中，iOS 和 Android 客户端在两侧的多端详情总览" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/hero.png" width="100%" alt="PTY 终端与结构化对话双视图" />
+</p>
+
 ## 功能
 
 ### 核心
@@ -79,13 +85,21 @@ bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.s
 
 ## 截图
 
-| 登录页 | 会话列表 |
+| Web 结构化详情 | Web PTY 详情 |
 |:---:|:---:|
-| <img src="docs/screenshots/login.png" width="400" alt="登录页" /> | <img src="docs/screenshots/android-home.png" width="400" alt="安卓会话列表" /> |
+| <img src="docs/screenshots/web-structured-detail.png" width="400" alt="Web 结构化会话详情" /> | <img src="docs/screenshots/web-pty-detail.png" width="400" alt="Web PTY 终端详情" /> |
 
-| PTY 终端视图 | 聊天视图 |
+| iOS 客户端 | Android 客户端 |
 |:---:|:---:|
-| <img src="docs/screenshots/android-terminal.png" width="400" alt="安卓终端视图" /> | <img src="docs/screenshots/android-chat.png" width="400" alt="安卓聊天视图" /> |
+| <img src="docs/screenshots/ios-home.png" width="300" alt="iOS 原生会话列表" /> | <img src="docs/screenshots/android-terminal.png" width="300" alt="Android 移动端 PTY 详情" /> |
+
+| 登录页 | App 连接页 |
+|:---:|:---:|
+| <img src="docs/screenshots/login.png" width="400" alt="登录页" /> | <img src="docs/screenshots/android-main.png" width="300" alt="Android App 连接页" /> |
+
+| Android 会话列表 | Android 聊天视图 |
+|:---:|:---:|
+| <img src="docs/screenshots/android-home.png" width="300" alt="Android 会话列表" /> | <img src="docs/screenshots/android-chat.png" width="300" alt="Android 聊天视图" /> |
 
 ## 配置
 
