@@ -5,49 +5,6 @@
 [![node](https://img.shields.io/node/v/@co0ontty/wand.svg)](https://nodejs.org)
 [![GitHub last commit](https://img.shields.io/github/last-commit/co0ontty/wand)](https://github.com/co0ontty/wand/commits/master)
 
-## 安装
-
-### 一键安装
-
-自动检测并安装 Node.js（需要 v22+），然后安装 wand：
-
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.sh)
-```
-
-装完后脚本会询问：
-
-- **1) 装为系统服务（推荐，默认）** — 写入 system-wide systemd（`/etc/systemd/system/wand.service`）或 launchd LaunchDaemon（`/Library/LaunchDaemons/com.wand.web.plist`），后台运行、开机自启、崩了自重启。**需要 sudo**（脚本会自动加）。
-- **2) 单次启动** — 不装服务，之后手动跑 `wand web`。
-
-> 通过管道运行（`bash <(curl ...)`）时 stdin 不是终端，默认走 **1（系统服务）**。想强制单次启动可以 `WAND_INSTALL_MODE=oneshot bash install.sh`。
->
-> 不想用 sudo？可以装 user-level 版本：`wand service:install --user`（写入 `~/.config/systemd/user/wand.service`，登出会被回收，除非 `loginctl enable-linger $USER`）。
-
-### 手动安装
-
-```bash
-npm install -g @co0ontty/wand
-wand init
-sudo wand service:install   # 装为系统服务（system-wide, 默认）
-# 或者：wand service:install --user   # 不要 sudo，但登出会被回收
-wand web                    # 没服务时启动新实例；有服务时 attach TUI
-```
-
-安装完成后打开浏览器访问终端中提示的地址即可。
-
-### 升级
-
-推荐用同一条一键脚本升级（脚本会自动停掉正在运行的 wand 进程、清理 npm 改名残留再装最新版）：
-
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.sh)
-```
-
-> 也可以直接在网页设置里点「更新」按钮，或在 TUI 模式按 `u`，wand 自己会调用同样的清理逻辑。Web 端点击更新后会自动重启服务，无需手动操作。
-
-如果以前装过 systemd 自启服务但还是 `Restart=on-failure`（v1.25.x 前的版本），重新跑 `sudo wand service:install` 重装服务即可换成 `Restart=always`，自动更新后才能正确拉起新进程。
-
 ## 概览
 
 通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。专为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [Codex](https://github.com/openai/codex) 设计，支持终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览、多平台客户端。
@@ -59,6 +16,16 @@ bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.s
 <p align="center">
   <img src="docs/screenshots/hero.png" width="100%" alt="PTY 终端与结构化对话双视图" />
 </p>
+
+## 安装
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/co0ontty/wand/master/install.sh)
+```
+
+```bash
+npm install -g @co0ontty/wand
+```
 
 ## 功能
 
