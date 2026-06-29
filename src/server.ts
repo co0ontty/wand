@@ -52,6 +52,15 @@ import { canUseDetachedUpdateHelper, startDetachedUpdateHelper } from "./update-
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
+import {
+  DEFAULT_BROWSER_EXTENSION_BASE_URL,
+  buildPasswordSecurityReport,
+  generatePassword,
+  generateTotpCode,
+  normalizePasswordItemType,
+  type PasswordVaultItemFilter,
+  type PasswordVaultItemInput,
+} from "./password-manager.js";
 import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, type PathRepairResult } from "./path-repair.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
@@ -516,13 +525,36 @@ async function enrichWithGitStatus(items: FileEntry[], dirPath: string): Promise
 
 // ── Auth helpers ──
 
-function buildRequireAuth(useHttps: boolean) {
+function buildRequireAuth(useHttps: boolean, storage: WandStorage, config: WandConfig) {
   return function requireAuth(req: Request, res: Response, next: NextFunction): void {
-    if (!validateSession(readSessionCookie(req, useHttps))) {
+    if (!validateSession(readSessionCookie(req, useHttps)) && !validateBearerAppToken(req, storage, config)) {
       res.status(401).json({ error: "未授权，请先登录。" });
       return;
     }
     next();
+  };
+}
+
+function getEffectivePassword(storage: WandStorage, config: WandConfig): string {
+  return storage.getPassword() ?? config.password;
+}
+
+function validateBearerAppToken(req: Request, storage: WandStorage, config: WandConfig): boolean {
+  const header = firstHeaderValue(req.headers.authorization);
+  if (!header?.startsWith("Bearer ")) return false;
+  const token = header.slice("Bearer ".length).trim();
+  if (!token) return false;
+  try {
+    return verifyAppToken(token, getEffectivePassword(storage, config), config.appSecret ?? "");
+  } catch {
+    return false;
+  }
+}
+
+function appTokenLoginPayload(storage: WandStorage, config: WandConfig): { appToken: string; serverUrl: string } {
+  return {
+    appToken: generateAppToken(getEffectivePassword(storage, config), config.appSecret ?? ""),
+    serverUrl: DEFAULT_BROWSER_EXTENSION_BASE_URL,
   };
 }
 
@@ -614,6 +646,13 @@ function normalizePublicOrigin(value: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function isBrowserExtensionOrigin(value: string | undefined): boolean {
+  if (!value) return false;
+  return /^chrome-extension:\/\/[a-z]{32}$/i.test(value)
+    || /^moz-extension:\/\/[0-9a-f-]+$/i.test(value)
+    || /^safari-web-extension:\/\//i.test(value);
 }
 
 function isPrivateIpv4(address: string): boolean {
@@ -1233,11 +1272,26 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger);
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
-  const requireAuth = buildRequireAuth(useHttps);
+  const requireAuth = buildRequireAuth(useHttps, storage, config);
   const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
 
   app.use(express.json({ limit: "1mb" }));
   app.use(compression({ threshold: 1024 }));
+  app.use((req, res, next) => {
+    const origin = firstHeaderValue(req.headers.origin);
+    if (origin && isBrowserExtensionOrigin(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      res.setHeader("Vary", "Origin");
+    }
+    if (req.method === "OPTIONS" && origin && isBrowserExtensionOrigin(origin)) {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
 
   const sendEmbeddedVendorAsset = (assetPath: EmbeddedVendorAssetPath, _req: Request, res: Response): void => {
     const asset = EMBEDDED_WEB_ASSETS.vendor[assetPath];
@@ -1312,9 +1366,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       return;
     }
 
-    const { password, appToken } = req.body as { password?: string; appToken?: string };
-    const dbPassword = storage.getPassword();
-    const effectivePassword = dbPassword ?? config.password;
+    const { password, appToken, client } = req.body as { password?: string; appToken?: string; client?: string };
+    const effectivePassword = getEffectivePassword(storage, config);
 
     // App token login — derived from password, so password change invalidates it
     let authenticated = false;
@@ -1356,7 +1409,10 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.cookie(SESSION_COOKIE_HTTP, token, { ...cookieOpts, secure: false });
       res.cookie(SESSION_COOKIE_LEGACY, token, { ...cookieOpts, secure: false });
     }
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      ...(client === "browser-extension" ? appTokenLoginPayload(storage, config) : {}),
+    });
   });
 
   app.post("/api/logout", (req, res) => {
@@ -1511,6 +1567,128 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       updateChannel: getUpdateChannel(),
       currentVersion: DISPLAY_VERSION,
     });
+  });
+
+  // ── Browser extension password vault endpoints ──
+
+  app.get("/api/browser-extension/status", (_req, res) => {
+    res.json({
+      ok: true,
+      serverUrl: DEFAULT_BROWSER_EXTENSION_BASE_URL,
+      features: {
+        loginAutofill: true,
+        saveLogins: true,
+        federatedLoginMemory: true,
+        passwordGenerator: true,
+        totp: true,
+        cardsAndIdentities: true,
+        vaults: true,
+        securityReport: true,
+        passkeys: "webauthn-proxy",
+      },
+    });
+  });
+
+  app.get("/api/browser-extension/vaults", (_req, res) => {
+    res.json({ vaults: storage.listPasswordVaults() });
+  });
+
+  app.post("/api/browser-extension/vaults", (req, res) => {
+    try {
+      const vault = storage.createPasswordVault((req.body as { name?: unknown }).name);
+      res.status(201).json({ vault });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法创建 vault。") });
+    }
+  });
+
+  app.get("/api/browser-extension/items", (req, res) => {
+    const filter: PasswordVaultItemFilter = {
+      q: firstQueryStringValue(req.query.q),
+      url: firstQueryStringValue(req.query.url),
+      vaultId: firstQueryStringValue(req.query.vaultId),
+      type: req.query.type ? normalizePasswordItemType(firstQueryStringValue(req.query.type)) : undefined,
+      limit: req.query.limit ? Number(firstQueryStringValue(req.query.limit)) : undefined,
+    };
+    res.json({ items: storage.listPasswordItems(filter) });
+  });
+
+  app.post("/api/browser-extension/items", (req, res) => {
+    try {
+      const item = storage.createPasswordItem(req.body as PasswordVaultItemInput);
+      res.status(201).json({ item });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法保存条目。") });
+    }
+  });
+
+  app.get("/api/browser-extension/items/:id", (req, res) => {
+    const item = storage.getPasswordItem(req.params.id);
+    if (!item) {
+      res.status(404).json({ error: "条目不存在。" });
+      return;
+    }
+    res.json({ item });
+  });
+
+  app.put("/api/browser-extension/items/:id", (req, res) => {
+    try {
+      const item = storage.updatePasswordItem(req.params.id, req.body as PasswordVaultItemInput);
+      if (!item) {
+        res.status(404).json({ error: "条目不存在。" });
+        return;
+      }
+      res.json({ item });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法更新条目。") });
+    }
+  });
+
+  app.delete("/api/browser-extension/items/:id", (req, res) => {
+    if (!storage.deletePasswordItem(req.params.id)) {
+      res.status(404).json({ error: "条目不存在。" });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
+  app.post("/api/browser-extension/items/:id/use", (req, res) => {
+    const item = storage.touchPasswordItem(req.params.id);
+    if (!item) {
+      res.status(404).json({ error: "条目不存在。" });
+      return;
+    }
+    res.json({ item });
+  });
+
+  app.get("/api/browser-extension/generator/password", (req, res) => {
+    res.json({
+      password: generatePassword({
+        length: Number(firstQueryStringValue(req.query.length)),
+        digits: firstQueryStringValue(req.query.digits) !== "false",
+        symbols: firstQueryStringValue(req.query.symbols) !== "false",
+      }),
+    });
+  });
+
+  app.post("/api/browser-extension/totp/preview", (req, res) => {
+    try {
+      const { secret, digits, period } = req.body as { secret?: string; digits?: number; period?: number };
+      if (!secret) {
+        res.status(400).json({ error: "缺少 TOTP secret。" });
+        return;
+      }
+      res.json({
+        code: generateTotpCode(secret, Date.now(), digits ?? 6, period ?? 30),
+        period: period ?? 30,
+      });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法生成 TOTP。") });
+    }
+  });
+
+  app.get("/api/browser-extension/security-report", (_req, res) => {
+    res.json({ report: buildPasswordSecurityReport(storage.listPasswordItems({ includeArchived: false, limit: 200 })) });
   });
 
   // ── Settings endpoints ──
@@ -1677,8 +1855,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.get("/api/app-connect-code", requireAuth, (req, res) => {
-    const dbPassword = storage.getPassword();
-    const effectivePassword = dbPassword ?? config.password;
+    const effectivePassword = getEffectivePassword(storage, config);
     const protocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
     const host = getPublicRequestHost(req, config);
     const browserOrigin = normalizePublicOrigin(firstQueryStringValue(req.query.origin));
@@ -2545,14 +2722,16 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     server.once("error", onListenError);
     server.listen(config.port, config.host, () => {
       server.off("error", onListenError);
-      bindAddr = `${config.host}:${config.port}`;
+      const address = server.address();
+      const actualPort = typeof address === "object" && address ? address.port : config.port;
+      bindAddr = `${config.host}:${actualPort}`;
       const scheme: "HTTP" | "HTTPS" = useHttps ? "HTTPS" : "HTTP";
       // 主 URL：本机回环；若绑定 0.0.0.0 再补一个对外提示。
-      collectedUrls.push({ url: `${protocol}://127.0.0.1:${config.port}`, scheme });
+      collectedUrls.push({ url: `${protocol}://127.0.0.1:${actualPort}`, scheme });
       if (config.host === "0.0.0.0") {
-        collectedUrls.push({ url: `${protocol}://0.0.0.0:${config.port}`, scheme });
+        collectedUrls.push({ url: `${protocol}://0.0.0.0:${actualPort}`, scheme });
       } else if (config.host !== "127.0.0.1" && config.host !== "localhost") {
-        collectedUrls.push({ url: `${protocol}://${config.host}:${config.port}`, scheme });
+        collectedUrls.push({ url: `${protocol}://${config.host}:${actualPort}`, scheme });
       }
       resolve();
     });
@@ -2565,11 +2744,18 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     );
   }
 
+  const testMode = process.env.WAND_TEST_MODE === "1";
+  const updateChecksEnabled = !testMode && process.env.WAND_DISABLE_UPDATE_CHECK !== "1";
+
   // Start configured background sessions after the server is already reachable.
-  processes.runStartupCommands();
+  if (!testMode) {
+    processes.runStartupCommands();
+  }
 
   // Pre-warm model cache (probes claude --version + codex debug models).
-  refreshModels().catch(() => {});
+  if (!testMode) {
+    refreshModels().catch(() => {});
+  }
 
   // ── Auto-update endpoints ──
 
@@ -2678,13 +2864,17 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   }
 
-  // Background update check on startup
-  performAutoUpdate().catch(() => {});
-
-  // Periodic update check (every 30 minutes)
-  setInterval(() => {
+  let updateCheckTimer: NodeJS.Timeout | null = null;
+  if (updateChecksEnabled) {
+    // Background update check on startup
     performAutoUpdate().catch(() => {});
-  }, 30 * 60 * 1000);
+
+    // Periodic update check (every 30 minutes)
+    updateCheckTimer = setInterval(() => {
+      performAutoUpdate().catch(() => {});
+    }, 30 * 60 * 1000);
+    updateCheckTimer.unref();
+  }
 
   const close = (): Promise<void> => new Promise<void>((resolve) => {
     let done = false;
@@ -2696,6 +2886,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     };
     try { wss.clients.forEach((c) => c.close()); } catch { /* ignore */ }
     try { wss.close(); } catch { /* ignore */ }
+    if (updateCheckTimer) clearInterval(updateCheckTimer);
     try {
       server.close(() => finish());
     } catch {

@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Wand Passwords",
+  "description": "Wand browser password manager with autofill, save prompts, cards, identities, TOTP, and security checks.",
+  "version": "0.1.0",
+  "permissions": [
+    "activeTab",
+    "clipboardWrite",
+    "contextMenus",
+    "webAuthenticationProxy",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://home.huniu.fun:8183/*",
+    "http://127.0.0.1:*/*",
+    "http://localhost:*/*",
+    "https://127.0.0.1:*/*",
+    "https://localhost:*/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Wand Passwords",
+    "default_popup": "src/popup.html"
+  },
+  "options_page": "src/options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -13,6 +13,8 @@
 
 Wand is a web console for remotely accessing and managing local CLI tools from a browser. It is designed for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://github.com/openai/codex), with terminal and structured conversation views, persistent resumable sessions, permission controls, file browsing, and native clients for multiple platforms.
 
+The browser password manager extension source lives in `browser-extension/`; setup and supported baseline features are documented in [docs/browser-extension.md](docs/browser-extension.md).
+
 <p align="center">
   <img src="docs/screenshots/clients-overview.png" width="100%" alt="Web centered with iOS and Android clients on both sides" />
 </p>

@@ -12,7 +12,8 @@
     "url": ""
   },
   "files": [
-    "dist"
+    "dist",
+    "browser-extension"
   ],
   "preferGlobal": true,
   "scripts": {
@@ -21,6 +22,7 @@
     "build:copy-content": "cp -r src/web-ui/content dist/web-ui/ && node scripts/minify-dist-content.js",
     "dev": "node scripts/bundle-browser.js && npm run generate:web-assets && tsx src/cli.ts web",
     "check": "node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json",
+    "test": "node --test --import tsx tests/*.test.ts",
     "prepublishOnly": "VER=${WAND_PUBLISH_VERSION:-$(git tag --sort=-v:refname --list 'v*' | head -1)} && VER=${VER#v} && npm version \"$VER\" --no-git-tag-version --allow-same-version && npm run build"
   },
   "keywords": [

@@ -1,7 +1,21 @@
+import crypto from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot, WandConfig, ConversationTurn, SessionKind, SessionProvider, SessionRunner, StructuredSessionState, WorktreeMergeInfo } from "./types.js";
+import {
+  DEFAULT_PASSWORD_VAULT_ID,
+  DEFAULT_PASSWORD_VAULT_NAME,
+  itemMatchesFilter,
+  normalizePasswordItemInput,
+  normalizeVaultName,
+  nowIso,
+  type PasswordVault,
+  type PasswordVaultItem,
+  type PasswordVaultItemFilter,
+  type PasswordVaultItemInput,
+  type PasswordVaultItemType,
+} from "./password-manager.js";
 
 interface SessionRow {
   id: string;
@@ -30,6 +44,32 @@ interface SessionRow {
   worktree_merge_info: string | null;
   title: string | null;
   description: string | null;
+}
+
+interface PasswordVaultRow {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface PasswordVaultItemRow {
+  id: string;
+  vault_id: string;
+  type: PasswordVaultItemType;
+  title: string;
+  username: string | null;
+  password: string | null;
+  urls: string;
+  notes: string | null;
+  fields: string;
+  tags: string;
+  favorite: number;
+  archived: number;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+  password_updated_at: string | null;
 }
 
 function safeJsonParse<T>(raw: string | null): T | undefined {
@@ -287,6 +327,37 @@ const INIT_SQL = `
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS password_vaults (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS password_items (
+    id TEXT PRIMARY KEY,
+    vault_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    username TEXT,
+    password TEXT,
+    urls TEXT NOT NULL DEFAULT '[]',
+    notes TEXT,
+    fields TEXT NOT NULL DEFAULT '{}',
+    tags TEXT NOT NULL DEFAULT '[]',
+    favorite INTEGER NOT NULL DEFAULT 0,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_used_at TEXT,
+    password_updated_at TEXT,
+    FOREIGN KEY(vault_id) REFERENCES password_vaults(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_password_items_vault ON password_items(vault_id);
+  CREATE INDEX IF NOT EXISTS idx_password_items_type ON password_items(type);
+  CREATE INDEX IF NOT EXISTS idx_password_items_updated ON password_items(updated_at);
 `;
 
 export function ensureDatabaseFile(dbPath: string): boolean {
@@ -307,6 +378,7 @@ export class WandStorage {
     this.db = new DatabaseSync(dbPath);
     this.db.exec(INIT_SQL);
     ensureCommandSessionSchema(this.db);
+    this.ensureDefaultPasswordVault();
   }
 
   close(): void {
@@ -392,6 +464,169 @@ export class WandStorage {
   /** Persist appSecret in database (DB is the authoritative source after first migration) */
   setAppSecret(value: string): void {
     this.setConfigValue("appSecret", value);
+  }
+
+  // ============ Browser Extension Password Vault Methods ============
+
+  ensureDefaultPasswordVault(): void {
+    const now = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO password_vaults (id, name, created_at, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`
+      )
+      .run(DEFAULT_PASSWORD_VAULT_ID, DEFAULT_PASSWORD_VAULT_NAME, now, now);
+  }
+
+  listPasswordVaults(): PasswordVault[] {
+    this.ensureDefaultPasswordVault();
+    const rows = this.db
+      .prepare("SELECT id, name, created_at, updated_at FROM password_vaults ORDER BY name COLLATE NOCASE ASC")
+      .all() as unknown as PasswordVaultRow[];
+    return rows.map(mapPasswordVaultRow);
+  }
+
+  createPasswordVault(nameInput: unknown): PasswordVault {
+    const name = normalizeVaultName(nameInput);
+    const now = nowIso();
+    const id = crypto.randomUUID();
+    this.db
+      .prepare("INSERT INTO password_vaults (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run(id, name, now, now);
+    return { id, name, createdAt: now, updatedAt: now };
+  }
+
+  getPasswordVault(id: string): PasswordVault | null {
+    const row = this.db
+      .prepare("SELECT id, name, created_at, updated_at FROM password_vaults WHERE id = ?")
+      .get(id) as PasswordVaultRow | undefined;
+    return row ? mapPasswordVaultRow(row) : null;
+  }
+
+  listPasswordItems(filter: PasswordVaultItemFilter = {}): PasswordVaultItem[] {
+    this.ensureDefaultPasswordVault();
+    const rows = this.db
+      .prepare(
+        `SELECT id, vault_id, type, title, username, password, urls, notes, fields, tags, favorite, archived,
+                created_at, updated_at, last_used_at, password_updated_at
+         FROM password_items
+         WHERE (? = 1 OR archived = 0)
+         ORDER BY favorite DESC, last_used_at DESC NULLS LAST, updated_at DESC`
+      )
+      .all(filter.includeArchived ? 1 : 0) as unknown as PasswordVaultItemRow[];
+    const limit = typeof filter.limit === "number" && Number.isFinite(filter.limit)
+      ? Math.max(1, Math.min(200, Math.floor(filter.limit)))
+      : 100;
+    return rows.map(mapPasswordItemRow).filter((item) => itemMatchesFilter(item, filter)).slice(0, limit);
+  }
+
+  getPasswordItem(id: string): PasswordVaultItem | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, vault_id, type, title, username, password, urls, notes, fields, tags, favorite, archived,
+                created_at, updated_at, last_used_at, password_updated_at
+         FROM password_items
+         WHERE id = ? AND archived = 0`
+      )
+      .get(id) as PasswordVaultItemRow | undefined;
+    return row ? mapPasswordItemRow(row) : null;
+  }
+
+  createPasswordItem(input: PasswordVaultItemInput): PasswordVaultItem {
+    this.ensureDefaultPasswordVault();
+    const normalized = normalizePasswordItemInput(input);
+    const vaultId = typeof input.vaultId === "string" && this.getPasswordVault(input.vaultId)
+      ? input.vaultId
+      : DEFAULT_PASSWORD_VAULT_ID;
+    const now = nowIso();
+    const id = crypto.randomUUID();
+    const passwordUpdatedAt = normalized.password ? now : undefined;
+    this.db
+      .prepare(
+        `INSERT INTO password_items (
+           id, vault_id, type, title, username, password, urls, notes, fields, tags, favorite, archived,
+           created_at, updated_at, last_used_at, password_updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, ?)`
+      )
+      .run(
+        id,
+        vaultId,
+        normalized.type,
+        normalized.title,
+        normalized.username ?? null,
+        normalized.password ?? null,
+        JSON.stringify(normalized.urls),
+        normalized.notes ?? null,
+        JSON.stringify(normalized.fields),
+        JSON.stringify(normalized.tags),
+        normalized.favorite ? 1 : 0,
+        now,
+        now,
+        passwordUpdatedAt ?? null,
+      );
+    return this.getPasswordItem(id)!;
+  }
+
+  updatePasswordItem(id: string, input: PasswordVaultItemInput): PasswordVaultItem | null {
+    const existing = this.getPasswordItem(id);
+    if (!existing) return null;
+    const merged: PasswordVaultItemInput = {
+      vaultId: input.vaultId ?? existing.vaultId,
+      type: input.type ?? existing.type,
+      title: input.title ?? existing.title,
+      username: input.username ?? existing.username,
+      password: input.password ?? existing.password,
+      urls: input.urls ?? existing.urls,
+      notes: input.notes ?? existing.notes,
+      fields: input.fields ?? existing.fields,
+      tags: input.tags ?? existing.tags,
+      favorite: input.favorite ?? existing.favorite,
+    };
+    const normalized = normalizePasswordItemInput(merged);
+    const vaultId = typeof merged.vaultId === "string" && this.getPasswordVault(merged.vaultId)
+      ? merged.vaultId
+      : existing.vaultId;
+    const now = nowIso();
+    const passwordChanged = Object.prototype.hasOwnProperty.call(input, "password") && normalized.password !== existing.password;
+    const passwordUpdatedAt = passwordChanged ? (normalized.password ? now : null) : (existing.passwordUpdatedAt ?? null);
+    this.db
+      .prepare(
+        `UPDATE password_items
+         SET vault_id = ?, type = ?, title = ?, username = ?, password = ?, urls = ?, notes = ?,
+             fields = ?, tags = ?, favorite = ?, updated_at = ?, password_updated_at = ?
+         WHERE id = ? AND archived = 0`
+      )
+      .run(
+        vaultId,
+        normalized.type,
+        normalized.title,
+        normalized.username ?? null,
+        normalized.password ?? null,
+        JSON.stringify(normalized.urls),
+        normalized.notes ?? null,
+        JSON.stringify(normalized.fields),
+        JSON.stringify(normalized.tags),
+        normalized.favorite ? 1 : 0,
+        now,
+        passwordUpdatedAt,
+        id,
+      );
+    return this.getPasswordItem(id);
+  }
+
+  touchPasswordItem(id: string): PasswordVaultItem | null {
+    const now = nowIso();
+    this.db.prepare("UPDATE password_items SET last_used_at = ?, updated_at = ? WHERE id = ? AND archived = 0").run(now, now, id);
+    return this.getPasswordItem(id);
+  }
+
+  deletePasswordItem(id: string): boolean {
+    const now = nowIso();
+    const result = this.db
+      .prepare("UPDATE password_items SET archived = 1, updated_at = ? WHERE id = ? AND archived = 0")
+      .run(now, id);
+    return result.changes > 0;
   }
 
   // ============ Auth Session Methods ============
@@ -522,6 +757,35 @@ export class WandStorage {
   deleteSession(id: string): void {
     this.db.prepare("DELETE FROM command_sessions WHERE id = ?").run(id);
   }
+}
+
+function mapPasswordVaultRow(row: PasswordVaultRow): PasswordVault {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapPasswordItemRow(row: PasswordVaultItemRow): PasswordVaultItem {
+  return {
+    id: row.id,
+    vaultId: row.vault_id,
+    type: row.type,
+    title: row.title,
+    username: row.username ?? undefined,
+    password: row.password ?? undefined,
+    urls: safeJsonParse<string[]>(row.urls)?.filter((item): item is string => typeof item === "string") ?? [],
+    notes: row.notes ?? undefined,
+    fields: safeJsonParse<Record<string, string>>(row.fields) ?? {},
+    tags: safeJsonParse<string[]>(row.tags)?.filter((item): item is string => typeof item === "string") ?? [],
+    favorite: Boolean(row.favorite),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastUsedAt: row.last_used_at ?? undefined,
+    passwordUpdatedAt: row.password_updated_at ?? undefined,
+  };
 }
 
 const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
