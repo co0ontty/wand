@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml } from "./utils";
+import { escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
 import { formatInlineResult, scheduleChatRender } from "./chat-render";
 import { applyExpandedState, applyPersistedExpandState, persistCrossSessionQueue, persistElementExpandState, persistSelectedId, saveStructuredQueue, scrollChatToBottom } from "./chat-scroll";
 import { adjustTerminalScale, closeFilePanel, dismissFileContextMenu, filterFileTree, isMobileLayout, navigateExplorerUp, openFilePreview, refreshFileExplorer, setFilePanelOpen, toggleFilePanel, updateFilePanelState, updateScaleLabel } from "./file-browser";
@@ -1154,7 +1154,7 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           items.forEach(function(item) {
             var p = item.path || item;
             html += '<div class="folder-recent-item" data-path="' + escapeHtml(p) + '">' +
-              '<span class="folder-recent-item-path">' + escapeHtml(p) + '</span>' +
+              renderTailMarqueePath(p, "folder-recent-item-path") +
             '</div>';
           });
           html += '</div>';
@@ -1168,6 +1168,7 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
             if (recentHtml) {
               folderPickerDropdown!.innerHTML = recentHtml;
               folderPickerDropdown!.classList.remove("hidden");
+              refreshTailMarqueePaths(folderPickerDropdown);
               folderPickerDropdown!.querySelectorAll(".folder-recent-item").forEach(function(item: any) {
                 item.addEventListener("click", function() {
                   var path = (this as HTMLElement).dataset.path;

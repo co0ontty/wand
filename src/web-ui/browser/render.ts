@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { computeRunningSignal, escapeHtml, scrollPathElementToEnd, scrollInputToEnd, updateRunningIndicators } from "./utils";
+import { computeRunningSignal, escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath, scrollPathElementToEnd, scrollInputToEnd, updateRunningIndicators } from "./utils";
 import { getConfigCwd } from "./chat-scroll";
 import { renderChatEmptyState, shortCommand } from "./chat-render";
 import { attachEventListeners } from "./events";
@@ -435,6 +435,7 @@ export function render(options?: any) {
   scrollPathElementToEnd(document.getElementById("topbar-cwd"));
   scrollPathElementToEnd(document.getElementById("blank-chat-cwd-path"));
   scrollPathElementToEnd(document.getElementById("working-dir-indicator-path"));
+  refreshTailMarqueePaths();
 }
 
 export function renderApprovalStatsBadge() {
@@ -629,7 +630,7 @@ export function renderAppShell() {
                   '<span class="topbar-session-title" title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span>' +
                   '<span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span>' +
                   '<span class="current-task hidden" id="current-task"></span>' +
-                  (selectedSession.cwd ? '<span class="topbar-cwd" id="topbar-cwd" title="' + escapeHtml(selectedSession.cwd) + '" role="button" tabindex="0">' + escapeHtml(selectedSession.cwd) + '</span>' : '')
+                  (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : '')
                 )
               : '<span class="topbar-tagline">Wand 控制台</span>' +
                 '<span class="current-task hidden" id="current-task"></span>'
@@ -712,7 +713,7 @@ export function renderAppShell() {
             '<div class="blank-chat-cwd-wrap">' +
               '<div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" title="点击切换工作目录">' +
                 '<span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + '</span>' +
-                '<span class="blank-chat-cwd-path" id="blank-chat-cwd-path">' + escapeHtml(getEffectiveCwd()) + '</span>' +
+                renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') +
                 '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span>' +
               '</div>' +
               '<div class="blank-chat-cwd-dropdown hidden" id="blank-chat-cwd-dropdown"></div>' +

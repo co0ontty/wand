@@ -177,6 +177,13 @@ export function escapeHtml(value: any) {
     .replace(/'/g, "&#39;");
 }
 
+export function renderTailMarqueePath(value: any, className: string, attrs?: string) {
+  var text = String(value || "");
+  return '<span class="' + className + ' tail-marquee-path" title="' + escapeHtml(text) + '"' + (attrs || "") + '>' +
+    '<span class="tail-marquee-path-inner">' + escapeHtml(text) + '</span>' +
+  '</span>';
+}
+
 // 是否是浏览器可内联渲染的图片路径。和服务端 IMAGE_EXTS（src/server.ts）
 // 保持一致：Read 工具读到这些后缀时，聊天里直出缩略图预览。
 var IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|heic|heif)$/i;
@@ -196,8 +203,9 @@ export function isImagePath(value: any) {
 // 还用过 `direction: rtl` hack 来"优先显示尾段"，副作用是首字符 "/" 也被
 // 吃掉，导致显示文本跟实际 data-path / value 字符串对不上。
 //
-// 这里把统一行为抽成两个小工具：
-//   1) scrollPathElementToEnd —— 横向 overflow 容器，scrollLeft 推到末尾
+// 这里把统一行为抽成几个小工具：
+//   1) scrollPathElementToEnd —— 横向 overflow 容器，scrollLeft 推到末尾；
+//      对 tail-marquee-path 则测量溢出量并交给 CSS transform 跑马灯
 //   2) scrollInputToEnd —— input 元素专用，setSelectionRange 把光标放末尾
 //      再补一刀 scrollLeft，兼容各浏览器
 //
@@ -208,6 +216,17 @@ export function scrollPathElementToEnd(el: any) {
   // 容器可能刚被 setHTML 进来，等浏览器把布局跑完再算 scrollWidth
   var apply = function() {
     try {
+      var inner = el.firstElementChild && el.firstElementChild.classList && el.firstElementChild.classList.contains("tail-marquee-path-inner")
+        ? el.firstElementChild
+        : null;
+      if (inner) {
+        var overflow = Math.max(0, inner.scrollWidth - el.clientWidth);
+        el.classList.toggle("is-overflowing", overflow > 1);
+        el.style.setProperty("--tail-marquee-shift", overflow + "px");
+        var travelSeconds = Math.max(4.8, overflow / 18);
+        el.style.setProperty("--tail-marquee-duration", Math.max(6.8, travelSeconds / 0.68) + "s");
+        return;
+      }
       if (el.scrollWidth > el.clientWidth) {
         el.scrollLeft = el.scrollWidth;
       }
@@ -217,6 +236,24 @@ export function scrollPathElementToEnd(el: any) {
   if (typeof requestAnimationFrame === "function") {
     requestAnimationFrame(apply);
   }
+}
+
+export function refreshTailMarqueePaths(root?: any) {
+  var scope = root || document;
+  if (!scope || typeof scope.querySelectorAll !== "function") return;
+  scope.querySelectorAll(".tail-marquee-path").forEach(function(el: any) {
+    scrollPathElementToEnd(el);
+  });
+}
+
+export function setTailMarqueePathText(el: any, value: any) {
+  if (!el) return;
+  var text = String(value || "");
+  var inner = el.querySelector && el.querySelector(".tail-marquee-path-inner");
+  if (inner) inner.textContent = text;
+  else el.textContent = text;
+  if (el.setAttribute) el.setAttribute("title", text);
+  scrollPathElementToEnd(el);
 }
 
 export function scrollInputToEnd(input: any) {

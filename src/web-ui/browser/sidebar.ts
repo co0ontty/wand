@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml } from "./utils";
+import { escapeHtml, renderTailMarqueePath } from "./utils";
 import { persistSelectedId } from "./chat-scroll";
 import { closeSwipedItem } from "./input";
 import { showError, wandConfirm } from "./notifications";
@@ -424,7 +424,7 @@ import { renderSessionItem } from "./session-ui";
         return '<div class="claude-history-directory-header codex-history-directory-header" data-action="toggle-codex-history-directory" data-cwd="' + escapeHtml(cwd) + '" role="button" tabindex="0">' +
           '<div class="session-group-title claude-history-directory-title">' +
             '<span class="chevron">' + chevron + '</span>' +
-            '<span class="claude-history-directory-label">' + escapeHtml(cwdShort) + ' (' + count + ')</span>' +
+            '<span class="claude-history-directory-label">' + renderTailMarqueePath(cwd, "claude-history-directory-label-path") + '<span class="claude-history-directory-count">(' + count + ')</span></span>' +
           '</div>' +
         '</div>';
       }
@@ -462,7 +462,7 @@ import { renderSessionItem } from "./session-ui";
         return '<div class="claude-history-directory-header" data-action="toggle-history-directory" data-cwd="' + escapeHtml(cwd) + '" role="button" tabindex="0">' +
           '<div class="session-group-title claude-history-directory-title">' +
             '<span class="chevron">' + chevron + '</span>' +
-            '<span class="claude-history-directory-label">' + escapeHtml(cwdShort) + ' (' + count + ')</span>' +
+            '<span class="claude-history-directory-label">' + renderTailMarqueePath(cwd, "claude-history-directory-label-path") + '<span class="claude-history-directory-count">(' + count + ')</span></span>' +
             '<button class="btn btn-danger btn-xs claude-history-directory-clear-btn" data-action="delete-history-directory" data-cwd="' +
             escapeHtml(cwd) + '" type="button" aria-label="清空此目录的历史会话" title="清空此目录的历史会话">清空此目录</button>' +
           '</div>' +

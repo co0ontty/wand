@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
 import { t, getActiveLang, iconSvg, I18N_DEFAULT_LANG } from "./i18n";
-import { escapeHtml, formatElapsedShort, isImagePath } from "./utils";
+import { escapeHtml, formatElapsedShort, isImagePath, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
 import { applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getElementExpandKey, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, scrollChatToBottom, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
 import { copyTextSafely, showToastIfPossible, openFilePreview, appendToComposer, isMobileLayout } from "./file-browser";
 import { buildMessagesForRender, focusInputBox, getSelectedSession } from "./input";
@@ -151,6 +151,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var chatMessages = ensureChatMessagesContainer(chatOutput);
         if (!chatMessages) return null;
         chatMessages.innerHTML = html;
+        refreshTailMarqueePaths(chatMessages);
         bindChatScrollListener();
         updateChatUnreadBubble();
         return chatMessages;
@@ -370,6 +371,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
               msgEls[idx].setAttribute("data-msg-index", String(visibleOffset + totalVisible - 1 - idx));
             }
           })();
+          refreshTailMarqueePaths(chatMessages);
           // 会话切换 / 首次渲染后，浏览器会把旧的 scrollTop 钳制到新内容
           // 的最大值——column-reverse 下这意味着视觉上跳到最上面（最旧消息），
           // 也就是用户反馈的"退出再回来时被重定向到最上面"。
@@ -3060,7 +3062,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           '<div class="diff-header" onclick="__tcToggle(event,this)">' +
             '<span class="diff-file-icon"></span>' +
             '<span class="diff-file-name">' + escapeHtml(fileName) + '</span>' +
-            '<span class="diff-path">' + escapeHtml(path) + '</span>' +
+            renderTailMarqueePath(path, "diff-path") +
             '<span class="diff-status ' + statusClass + '">' + statusText + '</span>' +
             '<span class="diff-toggle">▼</span>' +
           '</div>' +

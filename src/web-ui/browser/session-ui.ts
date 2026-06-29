@@ -1,6 +1,6 @@
 import { state, readStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml, scrollPathElementToEnd } from "./utils";
+import { escapeHtml, renderTailMarqueePath } from "./utils";
 import { isMobileLayout } from "./file-browser";
 import { getSelectedSession } from "./input";
 import { showToast } from "./notifications";
@@ -47,7 +47,7 @@ import { renderManageCheckbox } from "./sidebar";
 
         return '<div class="working-dir-indicator" id="working-dir-indicator" title="' + escapeHtml(displayDir) + '" data-path="' + escapeHtml(displayDir) + '">' +
           '<span class="working-dir-indicator-icon">' + iconSvg("folder", { size: 12, strokeWidth: 1.7 }) + '</span>' +
-          '<span class="working-dir-indicator-path" id="working-dir-indicator-path">' + escapeHtml(displayDir) + '</span>' +
+          renderTailMarqueePath(displayDir, "working-dir-indicator-path", ' id="working-dir-indicator-path"') +
         '</div>';
       }
 
@@ -401,20 +401,20 @@ import { renderManageCheckbox } from "./sidebar";
                 '</div>' +
               '</div>' +
               '<div class="field">' +
-                '<label class="field-label">模式</label>' +
-                '<div id="mode-cards" class="mode-cards">' +
-                  renderModeCards(modalMode) +
-                '</div>' +
-                '<p id="mode-description" class="field-hint">' + escapeHtml(getToolModeHint(modalTool, modalMode)) + '</p>' +
-              '</div>' +
-              '<div class="field">' +
                 '<label class="field-label" for="cwd">工作目录</label>' +
                 '<div class="suggestions-wrap">' +
                   '<input id="cwd" type="text" class="field-input" autocomplete="off" placeholder="' + escapeHtml(getEffectiveCwd()) + '" />' +
                   '<div id="cwd-suggestions" class="suggestions hidden"></div>' +
                 '</div>' +
-                '<p class="field-hint">留空则使用上方目录，支持路径自动补全。</p>' +
+                '<p class="field-hint">创建前先确认目录；留空则使用上方目录，支持路径自动补全。</p>' +
                 '<div id="recent-paths-bubbles" class="recent-paths-bubbles"></div>' +
+              '</div>' +
+              '<div class="field">' +
+                '<label class="field-label">模式</label>' +
+                '<div id="mode-cards" class="mode-cards">' +
+                  renderModeCards(modalMode) +
+                '</div>' +
+                '<p id="mode-description" class="field-hint">' + escapeHtml(getToolModeHint(modalTool, modalMode)) + '</p>' +
               '</div>' +
             '</div>' +
             '<div class="modal-footer">' +

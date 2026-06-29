@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean, configPath } from "./state";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml, formatElapsedShort } from "./utils";
+import { escapeHtml, formatElapsedShort, refreshTailMarqueePaths, renderTailMarqueePath, setTailMarqueePathText } from "./utils";
 import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender, shortCommand } from "./chat-render";
 import { bindChatScrollListener, clearStructuredQueuePersistence, getConfigCwd, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, scrollChatToBottom, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import { attachEventListeners } from "./events";
@@ -1262,7 +1262,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
                 var countEl = document.getElementById("session-count");
                 if (countEl) countEl.textContent = String(state.sessions.length);
               } else {
-                if (listEl) listEl.innerHTML = rendered;
+                if (listEl) {
+                  listEl.innerHTML = rendered;
+                  refreshTailMarqueePaths(listEl);
+                }
                 var countEl = document.getElementById("session-count");
                 if (countEl) countEl.textContent = String(state.sessions.length);
               }
@@ -1317,7 +1320,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function updateSessionsList() {
         var listEl = document.getElementById("sessions-list");
         var countEl = document.getElementById("session-count");
-        if (listEl) listEl.innerHTML = renderSessionsListContent();
+        if (listEl) {
+          listEl.innerHTML = renderSessionsListContent();
+          refreshTailMarqueePaths(listEl);
+        }
         if (countEl) countEl.textContent = String(state.sessions.length);
         // History renders inline inside #sessions-list now, so the line above
         // already refreshed it — no separate docked region to update.
@@ -3710,7 +3716,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             var currentDir = state.workingDir || defaultCwd;
             html += '<div class="blank-chat-cwd-item' + (currentDir === defaultCwd ? " active" : "") + '" data-path="' + escapeHtml(defaultCwd) + '">' +
               '<span class="blank-chat-cwd-item-label">默认</span>' +
-              '<span class="blank-chat-cwd-item-path">' + escapeHtml(defaultCwd) + '</span>' +
+              renderTailMarqueePath(defaultCwd, "blank-chat-cwd-item-path") +
             '</div>';
             if (items.length) {
               var seen = {};
@@ -3719,11 +3725,12 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
                 if (seen[item.path]) return;
                 seen[item.path] = true;
                 html += '<div class="blank-chat-cwd-item' + (currentDir === item.path ? " active" : "") + '" data-path="' + escapeHtml(item.path) + '">' +
-                  '<span class="blank-chat-cwd-item-path">' + escapeHtml(item.path) + '</span>' +
+                  renderTailMarqueePath(item.path, "blank-chat-cwd-item-path") +
                 '</div>';
               });
             }
             dropdown.innerHTML = html;
+            refreshTailMarqueePaths(dropdown);
             dropdown.querySelectorAll(".blank-chat-cwd-item").forEach(function(el) {
               el.addEventListener("click", function(e) {
                 e.stopPropagation();
@@ -3731,7 +3738,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
                 state.workingDir = path;
                 try { localStorage.setItem("wand-working-dir", path); } catch(e) {}
                 var pathEl = document.getElementById("blank-chat-cwd-path");
-                if (pathEl) pathEl.textContent = path;
+                setTailMarqueePathText(pathEl, path);
                 dropdown.classList.add("hidden");
                 var arrow = document.getElementById("blank-chat-cwd-arrow");
                 if (arrow) arrow.textContent = "▼";
@@ -3752,9 +3759,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             }
             container.innerHTML = items.map(function(item) {
               return '<button class="recent-path-bubble" data-path="' + escapeHtml(item.path) + '" title="' + escapeHtml(item.path) + '">' +
-                escapeHtml(item.name) +
+                renderTailMarqueePath(item.path, "recent-path-bubble-path") +
               '</button>';
             }).join("");
+            refreshTailMarqueePaths(container);
             container.querySelectorAll(".recent-path-bubble").forEach(function(el) {
               el.addEventListener("click", function() {
                 var cwdEl = document.getElementById("cwd") as HTMLInputElement | null;
@@ -3798,9 +3806,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         container.innerHTML = items.map(function(item) {
           return '<button class="suggestion-item" data-path="' + escapeHtml(item.path) + '">' +
             '<strong>' + escapeHtml(item.name) + '</strong>' +
-            '<small>' + escapeHtml(item.path) + '</small>' +
+            '<small>' + renderTailMarqueePath(item.path, "suggestion-item-path") + '</small>' +
           '</button>';
         }).join("");
+        refreshTailMarqueePaths(container);
 
         container.querySelectorAll(".suggestion-item").forEach(function(el) {
           el.addEventListener("click", function() {

@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml, scrollInputToEnd, scrollPathElementToEnd } from "./utils";
+import { escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath, scrollInputToEnd, scrollPathElementToEnd, setTailMarqueePathText } from "./utils";
 import { getSelectedSession, focusInputBox } from "./input";
 import { hideError, openWandDialog, showError, showToast } from "./notifications";
 import { render, getEffectiveCwd } from "./render";
@@ -622,7 +622,7 @@ import { getConfigCwd } from "./chat-scroll";
                     '<div class="file-preview-name-row">' +
                       '<span class="file-preview-filename">加载中…</span>' +
                     '</div>' +
-                    '<span class="file-preview-path" title=""></span>' +
+                    renderTailMarqueePath("", "file-preview-path") +
                   '</div>' +
                 '</div>' +
                 '<div class="file-preview-toolbar"></div>' +
@@ -705,22 +705,19 @@ import { getConfigCwd } from "./chat-scroll";
                 '<div class="file-preview-name-row">' +
                   '<span class="file-preview-filename">加载中…</span>' +
                 '</div>' +
-                '<span class="file-preview-path" title=""></span>' +
+                renderTailMarqueePath("", "file-preview-path") +
               '</div>';
           }
           var toolbarEl = overlay.querySelector(".file-preview-toolbar");
           if (toolbarEl) toolbarEl.innerHTML = "";
           var pathEl = overlay.querySelector(".file-preview-path");
-          if (pathEl) { pathEl.textContent = ""; pathEl.title = ""; }
+          setTailMarqueePathText(pathEl, "");
           var bodyReset = overlay.querySelector(".file-preview-body");
           if (bodyReset) bodyReset.innerHTML = '<div class="file-preview-loading">加载预览…</div>';
         }
 
         var pathDisplayEl = overlay.querySelector(".file-preview-path");
-        if (pathDisplayEl) {
-          pathDisplayEl.textContent = filePath;
-          pathDisplayEl.title = filePath;
-        }
+        setTailMarqueePathText(pathDisplayEl, filePath);
 
         fetch("/api/file-preview?path=" + encodeURIComponent(filePath), { credentials: "same-origin" })
           .then(function(res) {
@@ -878,12 +875,13 @@ import { getConfigCwd } from "./chat-scroll";
               '<span>·</span>' +
               '<span>' + escapeHtml(formatFileSize(data.size)) + '</span>' +
             '</div>' +
-            '<div class="binary-preview-path" title="' + escapeHtml(data.path) + '">' + escapeHtml(data.path) + '</div>' +
+            renderTailMarqueePath(data.path, "binary-preview-path") +
             '<div class="binary-preview-actions">' +
               '<a class="binary-preview-btn" href="' + rawUrl + '" download="' + escapeHtml(data.name) + '">下载文件</a>' +
               '<button class="binary-preview-btn" type="button" data-action="view-cat">在终端中查看</button>' +
             '</div>' +
           '</div>';
+        refreshTailMarqueePaths(body);
         var catBtn = body.querySelector('[data-action="view-cat"]');
         if (catBtn) catBtn.addEventListener("click", function() {
           if (appendToComposer('cat -- "' + data.path + '"')) {
