@@ -1060,7 +1060,7 @@ export class ProcessManager extends EventEmitter {
         cwd: resolvedCwd,
         env: buildChildEnv(this.config.inheritEnv !== false, {
           WAND_MODE: effectiveMode,
-          WAND_AUTO_CONFIRM: effectiveMode === "full-access" ? "1" : "0",
+          WAND_AUTO_CONFIRM: record.autoApprovePermissions ? "1" : "0",
           WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0"
         }),
         name: "xterm-color",
@@ -1465,6 +1465,9 @@ export class ProcessManager extends EventEmitter {
       mode,
       record.provider ?? "claude",
     );
+    if (record.ptyBridge) {
+      record.ptyBridge.setAutoApprove(record.autoApprovePermissions);
+    }
     this.persist(record);
     this.emitEvent({
       type: "status",
