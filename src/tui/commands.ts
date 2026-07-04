@@ -193,6 +193,8 @@ function clipboardCandidates(): Array<{ cmd: string; args: string[] }> {
 
 // ─── 系统服务（systemd system / user / launchd） ─────────────────────────
 
+const LAUNCHD_LABEL = "com.wand.web";
+
 /**
  * 服务安装的作用域：
  *   - "system" = Linux 写 /etc/systemd/system/wand.service；macOS 写 /Library/LaunchDaemons/
@@ -394,26 +396,35 @@ function launchdStatus(scope: ServiceScope): ServiceStatus {
       platform: "darwin",
     };
   }
-  // launchctl list 输出三列：PID  Status  Label
-  const list = spawnSync("launchctl", ["list", "com.wand.web"], { encoding: "utf8" });
-  if (list.status !== 0) {
+  const target = launchdTarget(scope);
+  const printed = spawnSync("launchctl", ["print", target], { encoding: "utf8", timeout: 10_000 });
+  if (printed.status !== 0) {
     return {
       installed: true,
       state: "inactive",
-      description: `[${scope}] loaded 但未在运行（launchctl list 找不到）`,
-      raw: list.stderr || "",
+      description: `[${scope}] installed 但未 bootstrap · ${target}`,
+      raw: ((printed.stdout || "") + "\n" + (printed.stderr || "")).trim(),
       platform: "darwin",
     };
   }
-  const text = list.stdout;
-  const pidMatch = text.match(/"PID"\s*=\s*(\d+);/);
-  const exitMatch = text.match(/"LastExitStatus"\s*=\s*(-?\d+);/);
-  const pid = pidMatch ? Number(pidMatch[1]) : 0;
-  const lastExit = exitMatch ? Number(exitMatch[1]) : 0;
-  const desc = pid > 0 ? `[${scope}] running · PID ${pid}` : `[${scope}] stopped (last exit=${lastExit})`;
+  const text = printed.stdout || "";
+  const state = matchLaunchdField(text, "state") || "loaded";
+  const pid = Number(matchLaunchdField(text, "pid") || "0");
+  const lastExit = matchLaunchdField(text, "last exit code");
+  const normalized: ServiceStatus["state"] = pid > 0 || state === "running"
+    ? "active"
+    : state === "failed"
+      ? "failed"
+      : "inactive";
+  const tail = pid > 0
+    ? ` · PID ${pid}`
+    : lastExit
+      ? ` · last exit ${lastExit}`
+      : "";
+  const desc = `[${scope}] ${state}${tail} · ${target}`;
   return {
     installed: true,
-    state: pid > 0 ? "active" : "inactive",
+    state: normalized,
     description: desc,
     raw: text,
     platform: "darwin",
@@ -442,36 +453,120 @@ function runSystemctl(scope: ServiceScope, args: string[], successWord: string):
 function launchctlLoad(scope: ServiceScope): CommandResult {
   const plist = servicePathFor(scope);
   if (!existsSync(plist)) return { ok: false, message: `未安装 (${plist} 不存在)` };
-  const r = spawnSync("launchctl", ["load", "-w", plist], { encoding: "utf8", timeout: 10_000 });
-  if (r.status === 0) return { ok: true, message: `已 launchctl load (${scope})` };
-  return {
-    ok: false,
-    message: `launchctl load 失败 (exit ${r.status})`,
-    detail: ((r.stdout || "") + "\n" + (r.stderr || "")).trim(),
-  };
+  return launchdBootstrap(scope, plist, `已启动 launchd ${scope}`);
 }
 
 function launchctlUnload(scope: ServiceScope): CommandResult {
   const plist = servicePathFor(scope);
   if (!existsSync(plist)) return { ok: false, message: `未安装 (${plist} 不存在)` };
-  const r = spawnSync("launchctl", ["unload", plist], { encoding: "utf8", timeout: 10_000 });
-  if (r.status === 0) return { ok: true, message: `已 launchctl unload (${scope})` };
-  return {
-    ok: false,
-    message: `launchctl unload 失败 (exit ${r.status})`,
-    detail: ((r.stdout || "") + "\n" + (r.stderr || "")).trim(),
-  };
+  return launchdBootout(scope, plist, `已停止 launchd ${scope}`);
 }
 
 function launchdRestart(scope: ServiceScope): CommandResult {
-  const stop = launchctlUnload(scope);
-  const start = launchctlLoad(scope);
-  if (stop.ok && start.ok) return { ok: true, message: `已 launchd 重启 (${scope})` };
+  const target = launchdTarget(scope);
+  const kicked = spawnSync("launchctl", ["kickstart", "-k", target], { encoding: "utf8", timeout: 10_000 });
+  if (kicked.status === 0) return { ok: true, message: `已重启 launchd ${scope}: ${target}` };
+
+  const started = launchctlLoad(scope);
+  if (started.ok) return { ok: true, message: `已 bootstrap 并启动 launchd ${scope}: ${target}` };
   return {
     ok: false,
-    message: "launchd 重启失败",
-    detail: `unload: ${stop.message}\nload: ${start.message}`,
+    message: `launchd 重启失败 (${target})`,
+    detail: [
+      `kickstart: ${formatSpawnResult(kicked)}`,
+      `bootstrap: ${started.message}`,
+      started.detail ?? "",
+    ].filter(Boolean).join("\n"),
   };
+}
+
+function launchdDomain(scope: ServiceScope): string {
+  return scope === "user" ? `gui/${currentUid()}` : "system";
+}
+
+function launchdTarget(scope: ServiceScope): string {
+  return `${launchdDomain(scope)}/${LAUNCHD_LABEL}`;
+}
+
+function currentUid(): number {
+  const fn = (process as unknown as { getuid?: () => number }).getuid;
+  if (typeof fn === "function") {
+    try { return fn.call(process); } catch { /* fall through */ }
+  }
+  const id = spawnSync("id", ["-u"], { encoding: "utf8", timeout: 3000 });
+  const uid = Number((id.stdout || "").trim());
+  return Number.isInteger(uid) && uid >= 0 ? uid : 0;
+}
+
+function matchLaunchdField(text: string, field: string): string | null {
+  const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(new RegExp(`^\\s*${escaped} = (.+)$`, "m"));
+  return match?.[1]?.trim() ?? null;
+}
+
+function launchdBootstrap(scope: ServiceScope, plist: string, successMessage: string): CommandResult {
+  const domain = launchdDomain(scope);
+  const target = launchdTarget(scope);
+  const bootout = spawnSync("launchctl", ["bootout", domain, plist], { encoding: "utf8", timeout: 10_000 });
+  const bootstrap = spawnSync("launchctl", ["bootstrap", domain, plist], { encoding: "utf8", timeout: 10_000 });
+  const enable = spawnSync("launchctl", ["enable", target], { encoding: "utf8", timeout: 10_000 });
+  const kickstart = spawnSync("launchctl", ["kickstart", "-k", target], { encoding: "utf8", timeout: 10_000 });
+  const detail = [
+    `target: ${target}`,
+    `bootout: ${formatSpawnResult(bootout)}`,
+    `bootstrap: ${formatSpawnResult(bootstrap)}`,
+    `enable: ${formatSpawnResult(enable)}`,
+    `kickstart: ${formatSpawnResult(kickstart)}`,
+  ].join("\n");
+
+  if (bootstrap.status !== 0 && !launchdIsAlreadyBootstrapped(bootstrap)) {
+    return { ok: false, message: `launchctl bootstrap 失败 (${target})`, detail };
+  }
+  if (enable.status !== 0) {
+    return { ok: false, message: `launchctl enable 失败 (${target})`, detail };
+  }
+  if (kickstart.status !== 0) {
+    const status = launchdStatus(scope);
+    if (status.state !== "active") {
+      return { ok: false, message: `launchctl kickstart 失败 (${target})`, detail };
+    }
+  }
+  return { ok: true, message: successMessage, detail };
+}
+
+function launchdBootout(scope: ServiceScope, plist: string, successMessage: string): CommandResult {
+  const domain = launchdDomain(scope);
+  const target = launchdTarget(scope);
+  const bootout = spawnSync("launchctl", ["bootout", domain, plist], { encoding: "utf8", timeout: 10_000 });
+  if (bootout.status === 0 || launchdIsNotBootstrapped(bootout)) {
+    return {
+      ok: true,
+      message: successMessage,
+      detail: `target: ${target}\nbootout: ${formatSpawnResult(bootout)}`,
+    };
+  }
+  return {
+    ok: false,
+    message: `launchctl bootout 失败 (${target})`,
+    detail: formatSpawnResult(bootout),
+  };
+}
+
+function launchdIsAlreadyBootstrapped(result: ReturnType<typeof spawnSync>): boolean {
+  const text = `${result.stdout || ""}\n${result.stderr || ""}`;
+  return /already bootstrapped|service already loaded|Bootstrap failed:\s*5/i.test(text);
+}
+
+function launchdIsNotBootstrapped(result: ReturnType<typeof spawnSync>): boolean {
+  const text = `${result.stdout || ""}\n${result.stderr || ""}`;
+  return /No such process|service is not loaded|Bootstrap failed:\s*3/i.test(text);
+}
+
+function formatSpawnResult(result: ReturnType<typeof spawnSync>): string {
+  const text = ((result.stdout || "") + "\n" + (result.stderr || "")).trim();
+  return result.status === 0
+    ? "ok"
+    : `failed (${text || `exit ${result.status}`})`;
 }
 
 function unsupported(): CommandResult {
@@ -791,17 +886,22 @@ ${userNameField}  <key>WorkingDirectory</key><string>${runHome}</string>
   } catch (err) {
     return { ok: false, message: `写入 plist 失败: ${getErrorMessage(err)}` };
   }
-  const load = spawnSync("launchctl", ["load", "-w", plistPath], { encoding: "utf8" });
-  if (load.status !== 0) {
+  const started = launchdBootstrap(
+    scope,
+    plistPath,
+    `已注册 launchd ${scope === "user" ? "用户代理" : "系统守护"}: ${plistPath}`,
+  );
+  if (!started.ok) {
     return {
       ok: false,
-      message: "已写入 plist，但 launchctl load 失败",
-      detail: load.stderr.trim() || `exit ${load.status}`,
+      message: "已写入 plist，但 launchctl 启动失败",
+      detail: started.detail,
     };
   }
   return {
     ok: true,
     message: `已注册 launchd ${scope === "user" ? "用户代理" : "系统守护"}: ${plistPath}`,
+    detail: started.detail,
   };
 }
 
@@ -810,7 +910,8 @@ function uninstallLaunchdService(scope: ServiceScope): CommandResult {
   if (!existsSync(plistPath)) {
     return { ok: false, message: `未检测到已安装的 launchd ${scope} 服务` };
   }
-  const unload = spawnSync("launchctl", ["unload", "-w", plistPath], { encoding: "utf8" });
+  const stopped = launchdBootout(scope, plistPath, `已停止 launchd ${scope}`);
+  const disabled = spawnSync("launchctl", ["disable", launchdTarget(scope)], { encoding: "utf8", timeout: 10_000 });
   try {
     unlinkSync(plistPath);
   } catch (err) {
@@ -819,7 +920,10 @@ function uninstallLaunchdService(scope: ServiceScope): CommandResult {
   return {
     ok: true,
     message: `已卸载 launchd ${scope === "user" ? "用户代理" : "系统守护"}`,
-    detail: unload.status === 0 ? "unload: ok" : `unload: ${unload.stderr.trim()}`,
+    detail: [
+      stopped.detail ?? stopped.message,
+      `disable: ${formatSpawnResult(disabled)}`,
+    ].join("\n"),
   };
 }
 

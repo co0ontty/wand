@@ -22,8 +22,9 @@ export interface RelaunchPlan {
 /**
  * 计算重启方式。
  *
- * - systemd 托管（存在 INVOCATION_ID）且已装服务 → "exit-only"：仅退出，由 unit 里
- *   （更新自修复后可能刚被重写的）ExecStart 重新拉起，避免 spawn 抢 pidfile 的竞态。
+ * - systemd / launchd 托管且已装服务 → "exit-only"：仅退出，由 unit/plist 里
+ *   （更新自修复后可能刚被重写的）ExecStart/ProgramArguments 重新拉起，
+ *   避免 spawn 抢 pidfile 的竞态。
  * - 否则 → "spawn"：bin 优先用刚装好的全局 CLI（更新后能跑到新版），回退 argv[1]。
  */
 export function computeRelaunch(opts: {
@@ -31,7 +32,9 @@ export function computeRelaunch(opts: {
   globalCli: string | null;
 }): RelaunchPlan {
   const managedBySystemd = !!process.env.INVOCATION_ID;
-  if (managedBySystemd && opts.serviceInstalled) {
+  const managedByLaunchd =
+    process.platform === "darwin" && process.env.XPC_SERVICE_NAME === "com.wand.web";
+  if ((managedBySystemd || managedByLaunchd) && opts.serviceInstalled) {
     return { mode: "exit-only" };
   }
   const bin = opts.globalCli ?? process.argv[1] ?? "";

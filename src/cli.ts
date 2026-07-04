@@ -18,7 +18,7 @@ import {
 import {
   isPidAlive,
   PidInfo,
-  readLiveInstance,
+  readPidfile,
   removePidfile,
   removeSocketFile,
   socketPath,
@@ -460,8 +460,29 @@ async function handlePortInUse(
 }
 
 async function discoverAttachableInstance(configPath: string): Promise<PidInfo | null> {
-  const live = readLiveInstance(configPath);
-  if (live) return live;
+  const live = readPidfile(configPath);
+  if (live && live.pid !== process.pid) {
+    if (!isPidAlive(live.pid)) {
+      removePidfile(configPath);
+      removeSocketFile(configPath);
+    } else if (live.socket && existsSync(live.socket)) {
+      const snapshot = await readIpcSnapshot(live.socket);
+      if (
+        snapshot &&
+        snapshot.header.pid === live.pid &&
+        snapshot.header.configPath === configPath
+      ) {
+        return pidInfoFromSnapshot(snapshot);
+      }
+      if (!pidCommandLooksLikeWand(live.pid, configPath)) {
+        removePidfile(configPath);
+        removeSocketFile(configPath);
+      }
+    } else if (!pidCommandLooksLikeWand(live.pid, configPath)) {
+      removePidfile(configPath);
+      removeSocketFile(configPath);
+    }
+  }
 
   const sockPath = socketPath(configPath);
   if (!sockPath || !existsSync(sockPath)) return null;
@@ -471,8 +492,14 @@ async function discoverAttachableInstance(configPath: string): Promise<PidInfo |
   const pid = snapshot.header.pid;
   if (!isPidAlive(pid)) return null;
 
+  if (snapshot.header.configPath !== configPath) return null;
+
+  return pidInfoFromSnapshot(snapshot);
+}
+
+function pidInfoFromSnapshot(snapshot: IpcSnapshotData): PidInfo {
   return {
-    pid,
+    pid: snapshot.header.pid,
     version: snapshot.header.version,
     startedAt: snapshot.header.startedAtMs,
     url: snapshot.header.url,
@@ -480,8 +507,30 @@ async function discoverAttachableInstance(configPath: string): Promise<PidInfo |
     bindAddr: snapshot.header.bindAddr,
     configPath: snapshot.header.configPath,
     dbPath: snapshot.header.dbPath,
-    socket: sockPath,
+    socket: socketPath(snapshot.header.configPath),
   };
+}
+
+function pidCommandLooksLikeWand(pid: number, configPath: string): boolean {
+  try {
+    const result = spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+      timeout: 1000,
+    });
+    if (result.status !== 0) return false;
+    const command = result.stdout || "";
+    return (
+      command.includes(configPath) &&
+      (
+        /\bwand\b/.test(command) ||
+        command.includes("/wand ") ||
+        command.includes("/cli.js web") ||
+        command.includes("src/cli.ts web")
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 function readIpcSnapshot(sockPath: string): Promise<IpcSnapshotData | null> {

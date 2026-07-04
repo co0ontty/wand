@@ -727,28 +727,35 @@
       }
     }
     state.chatScrollElement = chatMsgs;
+    function handleManualHistoryScroll() {
+      releaseChatTurnPin();
+      state.chatStickToBottom = false;
+      if (chatMsgs.querySelector(".chat-history-summary")) {
+        renderChat(true);
+      }
+      updateChatUnreadBubble();
+    }
     state.chatScrollHandler = function() {
       if (!chatMsgs.isConnected) return;
       if (state.chatIsProgrammaticScroll || Date.now() < state.chatProgrammaticScrollUntil) {
         updateChatUnreadBubble();
         return;
       }
-      releaseChatTurnPin();
       var atBottom = isChatNearBottom(chatMsgs);
       if (atBottom) {
+        releaseChatTurnPin();
         state.chatStickToBottom = true;
         clearChatUnread({ removeDivider: true });
       } else {
-        state.chatStickToBottom = false;
+        handleManualHistoryScroll();
+        return;
       }
       updateChatUnreadBubble();
     };
     state.chatScrollWheelHandler = function(e) {
       if (state.chatIsProgrammaticScroll) return;
       if (e.deltaY < 0) {
-        releaseChatTurnPin();
-        state.chatStickToBottom = false;
-        updateChatUnreadBubble();
+        handleManualHistoryScroll();
       }
     };
     state.chatScrollTouchStartHandler = function(e) {
@@ -760,9 +767,7 @@
       if (!e.touches || e.touches.length === 0) return;
       var deltaY = e.touches[0].clientY - state.chatTouchStartY;
       if (deltaY > 4) {
-        releaseChatTurnPin();
-        state.chatStickToBottom = false;
-        updateChatUnreadBubble();
+        handleManualHistoryScroll();
       }
     };
     chatMsgs.addEventListener("scroll", state.chatScrollHandler, { passive: true });
@@ -5610,6 +5615,8 @@
         batchDeleteSelected();
       } else if (actionButton.dataset.action === "toggle-selection") {
         toggleManagedItemSelection(actionButton.dataset.kind, actionButton.dataset.id);
+      } else if (actionButton.dataset.action === "swipe-delete-session" && actionButton.dataset.sessionId) {
+        deleteSession(actionButton.dataset.sessionId);
       } else if (actionButton.dataset.action === "delete-session" && actionButton.dataset.sessionId) {
         (function(sid) {
           confirmDelete("\u786E\u8BA4\u5220\u9664\u8FD9\u4E2A\u4F1A\u8BDD\u5417\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002", { title: "\u5220\u9664\u4F1A\u8BDD" }).then(function(ok) {
@@ -11936,7 +11943,7 @@
       fullRenderChat();
     }
     snapCollapsedSubagentPanelsToBottom2(chatMessages);
-    applyHistoryCollapse(chatMessages);
+    applyHistoryCollapse(chatMessages, selectedSession);
     applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial);
     renderStructuredStatusBar(chatMessages, selectedSession);
     updateTodoProgress(allMessages);
@@ -13210,9 +13217,42 @@
       window.__historySummaryToggle(btn);
     }
   };
-  function applyHistoryCollapse(chatMessages) {
+  function collectHistoryCollapseState(chatMessages, msgEls, lastUserIdx, measureLatestTurn) {
+    var stateForCollapse = {
+      shouldCollapseForViewport: false,
+      historyIndices: [],
+      firstHistoryEl: null
+    };
+    if (!chatMessages || lastUserIdx < 0) return stateForCollapse;
+    var viewportHeight = measureLatestTurn ? chatMessages.clientHeight || chatMessages.getBoundingClientRect().height || 0 : 0;
+    var firstLatestTurnEl = null;
+    var lastLatestTurnEl = null;
+    for (var i = 0; i < msgEls.length; i++) {
+      var idxAttr = msgEls[i].getAttribute("data-msg-index");
+      if (idxAttr == null) continue;
+      var idx = parseInt(idxAttr, 10);
+      if (isNaN(idx)) continue;
+      if (idx < lastUserIdx) {
+        stateForCollapse.historyIndices.push(idx);
+        if (!stateForCollapse.firstHistoryEl) stateForCollapse.firstHistoryEl = msgEls[i];
+      } else if (measureLatestTurn) {
+        if (!firstLatestTurnEl) firstLatestTurnEl = msgEls[i];
+        lastLatestTurnEl = msgEls[i];
+      }
+    }
+    if (measureLatestTurn && viewportHeight > 0 && firstLatestTurnEl && lastLatestTurnEl) {
+      var firstRect = firstLatestTurnEl.getBoundingClientRect();
+      var lastRect = lastLatestTurnEl.getBoundingClientRect();
+      var latestTurnHeight = Math.max(firstRect.bottom, lastRect.bottom) - Math.min(firstRect.top, lastRect.top);
+      var collapseThreshold = Math.max(220, viewportHeight - 24);
+      stateForCollapse.shouldCollapseForViewport = latestTurnHeight >= collapseThreshold;
+    }
+    return stateForCollapse;
+  }
+  function applyHistoryCollapse(chatMessages, selectedSession) {
     if (!chatMessages) return;
     var allMessages = state.currentMessages || [];
+    if (!selectedSession) selectedSession = getSelectedSession3();
     var lastUserIdx = -1;
     for (var i = allMessages.length - 1; i >= 0; i--) {
       if (allMessages[i] && allMessages[i].role === "user") {
@@ -13232,18 +13272,14 @@
       return;
     }
     var msgEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
-    var historyIndices = [];
-    var firstHistoryEl = null;
-    for (var m = 0; m < msgEls.length; m++) {
-      var idxAttr = msgEls[m].getAttribute("data-msg-index");
-      if (idxAttr == null) continue;
-      var idx = parseInt(idxAttr, 10);
-      if (isNaN(idx)) continue;
-      if (idx < lastUserIdx) {
-        historyIndices.push(idx);
-        if (!firstHistoryEl) firstHistoryEl = msgEls[m];
-      }
+    var viewportDriven = shouldRequestChatFormat2(selectedSession);
+    var collapseState = collectHistoryCollapseState(chatMessages, msgEls, lastUserIdx, viewportDriven && state.chatStickToBottom);
+    if (viewportDriven && (!state.chatStickToBottom || !collapseState.shouldCollapseForViewport)) {
+      clearAll();
+      return;
     }
+    var historyIndices = collapseState.historyIndices;
+    var firstHistoryEl = collapseState.firstHistoryEl;
     if (historyIndices.length < 2 || !firstHistoryEl) {
       clearAll();
       return;
@@ -14696,7 +14732,7 @@
     { id: "off", label: "auto", hint: "Claude CLI: auto/default \xB7 SDK \u5173\u95ED thinking \xB7 Codex minimal" },
     { id: "standard", label: "low", hint: "Claude CLI: low \xB7 SDK budget 4096 \xB7 Codex low" },
     { id: "deep", label: "medium", hint: "Claude CLI: medium \xB7 SDK budget 16000 \xB7 Codex medium" },
-    { id: "max", label: "max", hint: "Claude CLI: max \xB7 SDK budget 31999 \xB7 Codex high" }
+    { id: "max", label: "max", hint: "Claude CLI: max \xB7 SDK budget 31999 \xB7 Codex xhigh" }
   ];
   function getThinkingLabel(id) {
     for (var i = 0; i < THINKING_LEVELS.length; i++) {

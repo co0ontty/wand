@@ -101,7 +101,7 @@ export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["th
   switch (effort) {
     case "standard": return "low";
     case "deep": return "medium";
-    case "max": return "high";
+    case "max": return "xhigh";
     case "off": return "minimal";
     default: return null;
   }
@@ -1225,7 +1225,7 @@ export class StructuredSessionManager {
     if (modelChoice && modelChoice !== "default") {
       args.push("--model", modelChoice);
     }
-    // 思考深度 → model_reasoning_effort（off → minimal，standard → low，deep → medium，max → high）
+    // 思考深度 → model_reasoning_effort（off → minimal，standard → low，deep → medium，max → xhigh）
     // Newer Codex CLI versions removed the old dedicated exec flag, but still
     // accept config overrides through `-c`.
     const reasoningEffort = thinkingEffortToCodexReasoningEffort(session.thinkingEffort);
@@ -2918,12 +2918,15 @@ export class StructuredSessionManager {
       const aggregatedOutput = typeof item.aggregated_output === "string" ? item.aggregated_output : "";
       const exitCode = typeof item.exit_code === "number" ? item.exit_code : null;
       const status = typeof item.status === "string" ? item.status : completed ? "completed" : "in_progress";
+      const input: Record<string, unknown> = { command, status };
+      if (exitCode !== null) input.exit_code = exitCode;
       if (!completed) {
         return [{
           type: "tool_use",
           id,
           name: "Bash",
-          input: { command, status },
+          description: "running",
+          input,
         }];
       }
       // codex 的 status 可能是 declined（sandbox 拒了命令）/ failed（执行失败）—
@@ -2933,12 +2936,21 @@ export class StructuredSessionManager {
       const fallbackText = status === "declined"
         ? "command declined by sandbox"
         : (exitCode === null ? "" : `exit_code: ${exitCode}`);
-      return [{
-        type: "tool_result",
-        tool_use_id: id,
-        content: aggregatedOutput || fallbackText,
-        is_error: isError,
-      }];
+      return [
+        {
+          type: "tool_use",
+          id,
+          name: "Bash",
+          description: exitCode === null ? status : `${status} · exit ${exitCode}`,
+          input,
+        },
+        {
+          type: "tool_result",
+          tool_use_id: id,
+          content: aggregatedOutput || fallbackText,
+          is_error: isError,
+        },
+      ];
     }
 
     if (type === "file_change") {
@@ -2959,14 +2971,14 @@ export class StructuredSessionManager {
         let input: Record<string, unknown>;
         if (kind === "add") {
           toolName = "Write";
-          input = { file_path: path, content: "" };
+          input = { file_path: path, content: "", kind, status };
         } else if (kind === "delete") {
           // 复用 Bash 终端卡，rm 语义直观
           toolName = "Bash";
-          input = { command: `rm ${path}`, description: `delete ${path}`, status };
+          input = { command: `rm ${path}`, description: `delete ${path}`, kind, status };
         } else {
           toolName = "Edit";
-          input = { file_path: path, old_string: "", new_string: "" };
+          input = { file_path: path, old_string: "", new_string: "", kind, status };
         }
         if (!completed) {
           blocks.push({ type: "tool_use", id: subId, name: toolName, input });
@@ -2990,12 +3002,14 @@ export class StructuredSessionManager {
       const errObj = item.error && typeof item.error === "object" ? item.error as Record<string, unknown> : null;
       const status = typeof item.status === "string" ? item.status : completed ? "completed" : "in_progress";
       const isError = !!errObj || status === "failed";
+      const input = { ...args, status };
       if (!completed) {
         return [{
           type: "tool_use",
           id,
           name: `${server}__${tool}`,
-          input: args,
+          description: status,
+          input,
         }];
       }
       let resultText = "";
@@ -3006,30 +3020,57 @@ export class StructuredSessionManager {
         const inner = this.extractCodexText(resultRec.content);
         resultText = inner || JSON.stringify(resultRec).slice(0, 4096);
       }
-      return [{
-        type: "tool_result",
-        tool_use_id: id,
-        content: resultText,
-        is_error: isError,
-      }];
+      return [
+        {
+          type: "tool_use",
+          id,
+          name: `${server}__${tool}`,
+          description: status,
+          input,
+        },
+        {
+          type: "tool_result",
+          tool_use_id: id,
+          content: resultText,
+          is_error: isError,
+        },
+      ];
     }
 
     if (type === "web_search") {
       const query = typeof item.query === "string" ? item.query : "";
+      const action = item.action && typeof item.action === "object" ? item.action as Record<string, unknown> : null;
+      const actionType = action && typeof action.type === "string" ? action.type : "";
+      const queries = action && Array.isArray(action.queries)
+        ? action.queries.filter((v): v is string => typeof v === "string")
+        : [];
+      const input: Record<string, unknown> = { query };
+      if (actionType) input.action = actionType;
+      if (queries.length > 0) input.queries = queries;
       if (!completed) {
         return [{
           type: "tool_use",
           id,
           name: "WebSearch",
-          input: { query },
+          description: actionType || "searching",
+          input,
         }];
       }
-      return [{
-        type: "tool_result",
-        tool_use_id: id,
-        // codex 不在 exec 流里回 search 结果，这里给个占位让 UI 卡片完成态。
-        content: query ? `query: ${query}` : "",
-      }];
+      return [
+        {
+          type: "tool_use",
+          id,
+          name: "WebSearch",
+          description: actionType || "completed",
+          input,
+        },
+        {
+          type: "tool_result",
+          tool_use_id: id,
+          // codex 不在 exec 流里回 search 结果，这里给个占位让 UI 卡片完成态。
+          content: queries.length > 0 ? queries.map((q) => `query: ${q}`).join("\n") : (query ? `query: ${query}` : ""),
+        },
+      ];
     }
 
     if (type === "collab_tool_call") {

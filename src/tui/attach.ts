@@ -14,9 +14,9 @@ import {
   isServiceInstalled,
   openInBrowser,
   readUpdateChannel,
+  serviceRestart,
   uninstallService,
 } from "./commands.js";
-import { spawnSync } from "node:child_process";
 import { repairServiceUnitAfterUpdate } from "../service-self-repair.js";
 import { IpcClient } from "./ipc-client.js";
 import { IpcSnapshotData } from "./ipc-protocol.js";
@@ -187,33 +187,16 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
 
   async function handleRestart(): Promise<void> {
     const installed = safeServiceInstalled();
-    if (installed && process.platform === "linux") {
+    if (installed) {
       const ok = await layout.confirm({
         title: "重启 wand 服务",
-        body: "将执行 systemctl --user restart wand.service。当前 attach 会话会随主进程重启被踢掉。",
+        body: "将重启已安装的 wand systemd / launchd 服务。当前 attach 会话会随主进程重启短暂断开。",
       });
       if (!ok) return;
-      layout.showToast("systemctl --user restart wand.service …", "info", 3000);
-      const r = spawnSync("systemctl", ["--user", "restart", "wand.service"], { encoding: "utf8" });
-      if (r.status === 0) {
-        layout.showToast("已请求重启，IPC 会自动重连", "success", 3000);
-      } else {
-        layout.showToast(`systemctl 失败 (exit ${r.status})`, "error", 4000);
-        layout.showDetail("systemctl 输出", (r.stdout || "") + "\n" + (r.stderr || ""));
-      }
-      return;
-    }
-    if (installed && process.platform === "darwin") {
-      const ok = await layout.confirm({
-        title: "重启 wand 服务",
-        body: "将依次 launchctl unload / load com.wand.web。",
-      });
-      if (!ok) return;
-      const plist = `${process.env.HOME}/Library/LaunchAgents/com.wand.web.plist`;
-      const u = spawnSync("launchctl", ["unload", plist], { encoding: "utf8" });
-      const l = spawnSync("launchctl", ["load", plist], { encoding: "utf8" });
-      const ok2 = u.status === 0 && l.status === 0;
-      layout.showToast(ok2 ? "已请求 launchd 重启" : "launchctl 调用失败", ok2 ? "success" : "error", 3500);
+      layout.showToast("正在请求服务重启…", "info", 3000);
+      const r = await runOffMicrotask(() => serviceRestart());
+      layout.showToast(r.ok ? "已请求重启，IPC 会自动重连" : r.message, r.ok ? "success" : "error", 4000);
+      if (r.detail) layout.showDetail(r.ok ? "服务重启输出" : "服务重启失败", r.detail);
       return;
     }
     // 没注册成服务：尝试通过 IPC 让主进程自我退出，再由用户手动重启

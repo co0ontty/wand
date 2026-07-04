@@ -115,6 +115,8 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
             batchDeleteSelected();
           } else if (actionButton.dataset.action === "toggle-selection") {
             toggleManagedItemSelection(actionButton.dataset.kind!, actionButton.dataset.id!);
+          } else if (actionButton.dataset.action === "swipe-delete-session" && actionButton.dataset.sessionId) {
+            deleteSession(actionButton.dataset.sessionId);
           } else if (actionButton.dataset.action === "delete-session" && actionButton.dataset.sessionId) {
             (function(sid: string) {
               confirmDelete("确认删除这个会话吗？此操作无法撤销。", { title: "删除会话" }).then(function(ok: any) {

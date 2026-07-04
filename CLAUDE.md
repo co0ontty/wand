@@ -9,6 +9,9 @@ npm install                # Install dependencies (requires Node.js >= 22.5.0)
 npm run check              # bundle browser scripts → regenerate embedded assets → tsc --noEmit (server tsconfig.json + browser tsconfig.browser.json)
 npm run build              # bundle wterm → bundle qrcode → bundle browser → generate embedded assets → tsc → copy+minify src/web-ui/content into dist/web-ui/ → stamp dist/build-info.json → fix dist permissions
 npm run dev                # bundle browser scripts + regenerate embedded assets, then run src/cli.ts web via tsx
+npm test                   # run node:test suites via tsx (tests/*.test.ts)
+node --test --import tsx tests/password-manager.test.ts  # run one test file
+node --test --import tsx --test-name-pattern "vaults" tests/password-manager.test.ts  # run matching tests
 node dist/cli.js init      # Create or refresh config + SQLite files
 node dist/cli.js web       # Start the packaged web server from dist/
 wand config:path           # Print resolved config path
@@ -20,7 +23,7 @@ wand service:status           # Service state; also :start :stop :restart :logs 
 
 `wand web` is single-instance per config: if a wand instance is already running, it **attaches** (TUI or banner) instead of starting a second server. In a TTY it renders a neo-blessed TUI dashboard; set `WAND_NO_TUI=1` to force the plain one-line banner. `wand service:*` flags: `--user`/`--system` (default system, needs root), `--verbose`, `--lines <N>` (for `service:logs`).
 
-There is no automated test suite, no single-test command, and no lint/format script in this repo.
+There is a small Node test suite under `tests/*.test.ts`; there is still no lint/format script in this repo.
 
 **Recommended validation after TS or UI changes:**
 ```bash

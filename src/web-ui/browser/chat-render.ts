@@ -6,7 +6,7 @@ import { copyTextSafely, showToastIfPossible, openFilePreview, appendToComposer,
 import { buildMessagesForRender, focusInputBox, getSelectedSession } from "./input";
 import { showToast, syncSessionProgressToNative, wandConfirm } from "./notifications";
 import { render } from "./render";
-import { copyToClipboard, getPreferredMessages, isRecoverableToolError, isStructuredSession, renderChatModeTrioHtml, selectSession } from "./session-engine";
+import { copyToClipboard, getPreferredMessages, isRecoverableToolError, isStructuredSession, renderChatModeTrioHtml, selectSession, shouldRequestChatFormat } from "./session-engine";
 import { renderStructuredStatusBar, updateRunningIndicators } from "./utils";
 import { getCardDefault, snapCollapsedSubagentPanelsToBottom } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
@@ -636,7 +636,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         snapCollapsedSubagentPanelsToBottom(chatMessages);
 
         // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
-        applyHistoryCollapse(chatMessages);
+        applyHistoryCollapse(chatMessages, selectedSession);
 
         // 旧版会在顶部固定最新一轮预览；现在每次渲染都清掉该横条。
         applyAutoFoldBar(chatOutput, chatMessages, allMessages, renderIsInitial);
@@ -2241,9 +2241,48 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         }
       };
 
-      export function applyHistoryCollapse(chatMessages) {
+      function collectHistoryCollapseState(chatMessages, msgEls, lastUserIdx, measureLatestTurn) {
+        var stateForCollapse = {
+          shouldCollapseForViewport: false,
+          historyIndices: [],
+          firstHistoryEl: null,
+        };
+        if (!chatMessages || lastUserIdx < 0) return stateForCollapse;
+        var viewportHeight = measureLatestTurn
+          ? (chatMessages.clientHeight || chatMessages.getBoundingClientRect().height || 0)
+          : 0;
+        var firstLatestTurnEl = null;
+        var lastLatestTurnEl = null;
+        for (var i = 0; i < msgEls.length; i++) {
+          var idxAttr = msgEls[i].getAttribute("data-msg-index");
+          if (idxAttr == null) continue;
+          var idx = parseInt(idxAttr, 10);
+          if (isNaN(idx)) continue;
+          if (idx < lastUserIdx) {
+            stateForCollapse.historyIndices.push(idx);
+            // DOM 顺序 newest→oldest：第一个命中的就是 DOM 里最靠前的历史元素。
+            if (!stateForCollapse.firstHistoryEl) stateForCollapse.firstHistoryEl = msgEls[i];
+          } else if (measureLatestTurn) {
+            if (!firstLatestTurnEl) firstLatestTurnEl = msgEls[i];
+            lastLatestTurnEl = msgEls[i];
+          }
+        }
+        if (measureLatestTurn && viewportHeight > 0 && firstLatestTurnEl && lastLatestTurnEl) {
+          var firstRect = firstLatestTurnEl.getBoundingClientRect();
+          var lastRect = lastLatestTurnEl.getBoundingClientRect();
+          var latestTurnHeight = Math.max(firstRect.bottom, lastRect.bottom) - Math.min(firstRect.top, lastRect.top);
+          // Codex / 结构化流默认先展示完整上下文；只有最新一轮自己接近占满
+          // 聊天视口时，才把更早历史收到摘要里，让正在生成的长回复向上锁住。
+          var collapseThreshold = Math.max(220, viewportHeight - 24);
+          stateForCollapse.shouldCollapseForViewport = latestTurnHeight >= collapseThreshold;
+        }
+        return stateForCollapse;
+      }
+
+      export function applyHistoryCollapse(chatMessages, selectedSession) {
         if (!chatMessages) return;
         var allMessages = state.currentMessages || [];
+        if (!selectedSession) selectedSession = getSelectedSession();
         var lastUserIdx = -1;
         for (var i = allMessages.length - 1; i >= 0; i--) {
           if (allMessages[i] && allMessages[i].role === "user") { lastUserIdx = i; break; }
@@ -2260,21 +2299,20 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // 没有"最后一条用户消息之前的历史"就不折叠。
         if (lastUserIdx < 1) { clearAll(); return; }
 
-        // 收集已渲染的历史消息元素（data-msg-index < boundary）。
+        // 收集已渲染的消息元素，供视口判断和历史折叠共用，避免一轮 render 重复查 DOM。
         var msgEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
-        var historyIndices = [];
-        var firstHistoryEl = null;
-        for (var m = 0; m < msgEls.length; m++) {
-          var idxAttr = msgEls[m].getAttribute("data-msg-index");
-          if (idxAttr == null) continue;
-          var idx = parseInt(idxAttr, 10);
-          if (isNaN(idx)) continue;
-          if (idx < lastUserIdx) {
-            historyIndices.push(idx);
-            // DOM 顺序 newest→oldest：第一个命中的就是 DOM 里最靠前的历史元素。
-            if (!firstHistoryEl) firstHistoryEl = msgEls[m];
-          }
+
+        // Codex / 结构化模式下先保持历史可见；等最新一轮回复自身撑满视口，
+        // 再把更早历史收起。短回复不再一发新消息就只剩一张"展开历史"卡。
+        var viewportDriven = shouldRequestChatFormat(selectedSession);
+        var collapseState = collectHistoryCollapseState(chatMessages, msgEls, lastUserIdx, viewportDriven && state.chatStickToBottom);
+        if (viewportDriven && (!state.chatStickToBottom || !collapseState.shouldCollapseForViewport)) {
+          clearAll();
+          return;
         }
+
+        var historyIndices = collapseState.historyIndices;
+        var firstHistoryEl = collapseState.firstHistoryEl;
         // 至少折叠一整轮（≥2 条历史 turn）才值得出摘要，避免折叠孤零零一条短消息。
         if (historyIndices.length < 2 || !firstHistoryEl) { clearAll(); return; }
 

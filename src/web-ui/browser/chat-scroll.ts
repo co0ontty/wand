@@ -198,6 +198,16 @@ export function bindChatScrollListener() {
     }
   }
   state.chatScrollElement = chatMsgs;
+
+  function handleManualHistoryScroll() {
+    releaseChatTurnPin();
+    state.chatStickToBottom = false;
+    if (chatMsgs.querySelector(".chat-history-summary")) {
+      renderChat(true);
+    }
+    updateChatUnreadBubble();
+  }
+
   state.chatScrollHandler = function() {
     if (!(chatMsgs as any).isConnected) return;
     // 程序触发的滚动（点了气泡 / 发送后贴底）不算"用户翻页"——别把状态弄乱。
@@ -206,15 +216,16 @@ export function bindChatScrollListener() {
       return;
     }
     // 用户真的手动滚了——退出 pin 模式，回到普通贴底逻辑。
-    releaseChatTurnPin();
     var atBottom = isChatNearBottom(chatMsgs);
     if (atBottom) {
       // 用户自己滚到底了——清未读、贴回底部、撤下气泡。
+      releaseChatTurnPin();
       state.chatStickToBottom = true;
       clearChatUnread({ removeDivider: true });
     } else {
       // 用户主动往上翻——脱离贴底状态。新消息只会累积到气泡，不滚视图。
-      state.chatStickToBottom = false;
+      handleManualHistoryScroll();
+      return;
     }
     updateChatUnreadBubble();
   };
@@ -225,9 +236,7 @@ export function bindChatScrollListener() {
   state.chatScrollWheelHandler = function(e: any) {
     if (state.chatIsProgrammaticScroll) return;
     if (e.deltaY < 0) {
-      releaseChatTurnPin();
-      state.chatStickToBottom = false;
-      updateChatUnreadBubble();
+      handleManualHistoryScroll();
     }
   };
   state.chatScrollTouchStartHandler = function(e: any) {
@@ -240,9 +249,7 @@ export function bindChatScrollListener() {
     // column-reverse 下：手指向下拖（clientY 变大）= 内容向下走 = 看历史。
     var deltaY = e.touches[0].clientY - state.chatTouchStartY;
     if (deltaY > 4) {
-      releaseChatTurnPin();
-      state.chatStickToBottom = false;
-      updateChatUnreadBubble();
+      handleManualHistoryScroll();
     }
   };
   chatMsgs.addEventListener("scroll", state.chatScrollHandler, { passive: true });

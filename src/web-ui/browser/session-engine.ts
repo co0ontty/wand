@@ -563,7 +563,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         { id: "off",      label: "auto",   hint: "Claude CLI: auto/default · SDK 关闭 thinking · Codex minimal" },
         { id: "standard", label: "low",    hint: "Claude CLI: low · SDK budget 4096 · Codex low" },
         { id: "deep",     label: "medium", hint: "Claude CLI: medium · SDK budget 16000 · Codex medium" },
-        { id: "max",      label: "max",    hint: "Claude CLI: max · SDK budget 31999 · Codex high" }
+        { id: "max",      label: "max",    hint: "Claude CLI: max · SDK budget 31999 · Codex xhigh" }
       ];
 
       export function getThinkingLabel(id) {
