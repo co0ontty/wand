@@ -1346,15 +1346,24 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                     '</label>' +
                   '</div>' +
                 '</div>' +
-                '<div class="field">' +
-                  '<label class="field-label" for="cfg-default-model">默认模型</label>' +
-                  '<div class="settings-row-with-action">' +
-                    '<select id="cfg-default-model" class="field-input field-select">' +
-                      '<option value="">跟随 Claude Code 默认</option>' +
-                    '</select>' +
-                    '<button type="button" id="cfg-default-model-refresh" class="btn btn-secondary btn-sm" title="刷新模型列表">刷新</button>' +
+                '<div class="field-row">' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="cfg-default-model">Claude 默认模型</label>' +
+                    '<div class="settings-row-with-action">' +
+                      '<select id="cfg-default-model" class="field-input field-select">' +
+                        '<option value="">跟随 Claude Code 默认</option>' +
+                      '</select>' +
+                      '<button type="button" id="cfg-default-model-refresh" class="btn btn-secondary btn-sm" title="刷新模型列表">刷新</button>' +
+                    '</div>' +
+                    '<p class="field-hint" id="cfg-default-model-version">新建 Claude 会话时默认使用该模型；运行中的会话可在输入框切换。</p>' +
                   '</div>' +
-                  '<p class="field-hint" id="cfg-default-model-version">新建会话时默认使用该模型；运行中的会话可在输入框切换。</p>' +
+                  '<div class="field">' +
+                    '<label class="field-label" for="cfg-default-codex-model">Codex 默认模型</label>' +
+                    '<select id="cfg-default-codex-model" class="field-input field-select">' +
+                      '<option value="">跟随 Codex 默认</option>' +
+                    '</select>' +
+                    '<p class="field-hint">留空时不传 --model，由 Codex CLI 使用当前默认模型。</p>' +
+                  '</div>' +
                 '</div>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-cwd">默认工作目录</label>' +

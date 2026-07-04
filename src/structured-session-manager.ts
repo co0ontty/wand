@@ -12,7 +12,7 @@ import { WandStorage } from "./storage.js";
 import {
   CardExpandDefaults, ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
   ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState,
-  SubagentMeta, WandConfig,
+  SubagentMeta, ToolUseBlock, WandConfig,
 } from "./types.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
@@ -29,7 +29,7 @@ interface CreateStructuredSessionOptions {
   provider?: SessionProvider;
   runner?: SessionRunner;
   worktreeEnabled?: boolean;
-  /** 用户指定的 Claude 模型（别名或完整 ID）。留空则 spawn 时不加 --model。 */
+  /** 用户指定的模型（别名或完整 ID）。留空则 spawn 时不加 --model。 */
   model?: string;
   /** 用户预设的思考深度。留空 / null 视为 off。 */
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
@@ -96,15 +96,90 @@ export function thinkingEffortToClaudeSlashEffort(effort: SessionSnapshot["think
   return thinkingEffortToClaudeCliEffort(effort) ?? "auto";
 }
 
-/** Codex CLI 用：把 thinkingEffort 映射到 model_reasoning_effort 配置。off → minimal。 */
+/** Codex CLI 用：把 thinkingEffort 映射到 model_reasoning_effort 配置。off → 不覆盖 Codex 默认。 */
 export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
   switch (effort) {
     case "standard": return "low";
     case "deep": return "medium";
     case "max": return "xhigh";
-    case "off": return "minimal";
+    case "off": return null;
     default: return null;
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function getString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> {
+  if (asRecord(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string" || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return asRecord(parsed) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function codexPatchToolName(kind: string): string {
+  if (kind === "add") return "Write";
+  return "Edit";
+}
+
+function codexPatchResultText(stdout: unknown, stderr: unknown, success: boolean): string {
+  const err = getString(stderr).trim();
+  const out = getString(stdout).trim();
+  if (!success) return err || out || "patch apply failed";
+  return "";
+}
+
+export function buildCodexPatchApplyBlocks(item: Record<string, unknown>): ContentBlock[] {
+  const changes = asRecord(item.changes);
+  if (!changes) return [];
+  const callId = getString(item.call_id) || getString(item.id) || "patch";
+  const status = getString(item.status) || "completed";
+  const success = item.success !== false && status !== "failed";
+  const resultText = codexPatchResultText(item.stdout, item.stderr, success);
+  const entries = Object.entries(changes);
+  const blocks: ContentBlock[] = [];
+
+  entries.forEach(([filePath, rawChange], index) => {
+    const change = asRecord(rawChange) ?? {};
+    const kind = getString(change.type) || "update";
+    const unifiedDiff = getString(change.unified_diff);
+    const movePath = getString(change.move_path);
+    const toolUseId = `${callId}#${index}`;
+    const input: Record<string, unknown> = {
+      file_path: filePath,
+      kind,
+      status,
+    };
+    if (unifiedDiff) input.unified_diff = unifiedDiff;
+    if (movePath) input.move_path = movePath;
+
+    blocks.push({
+      type: "tool_use",
+      id: toolUseId,
+      name: codexPatchToolName(kind),
+      description: kind,
+      input,
+    });
+    blocks.push({
+      type: "tool_result",
+      tool_use_id: toolUseId,
+      content: resultText,
+      is_error: !success,
+    });
+  });
+
+  return blocks;
 }
 
 /** Accumulated state while streaming a single claude -p response. */
@@ -1225,7 +1300,7 @@ export class StructuredSessionManager {
     if (modelChoice && modelChoice !== "default") {
       args.push("--model", modelChoice);
     }
-    // 思考深度 → model_reasoning_effort（off → minimal，standard → low，deep → medium，max → xhigh）
+    // 思考深度 → model_reasoning_effort（off → 不覆盖，standard → low，deep → medium，max → xhigh）
     // Newer Codex CLI versions removed the old dedicated exec flag, but still
     // accept config overrides through `-c`.
     const reasoningEffort = thinkingEffortToCodexReasoningEffort(session.thinkingEffort);
@@ -1334,47 +1409,61 @@ export class StructuredSessionManager {
         let parsed: any;
         try { parsed = JSON.parse(trimmed); } catch { return; }
         this.logger?.appendStreamEvent(sessionId, parsed);
-        if (parsed?.type === "thread.started" && typeof parsed.thread_id === "string") {
-          turnState.sessionId = parsed.thread_id;
+        const event = this.unwrapCodexStreamEvent(parsed);
+        if (event?.type === "thread.started" && typeof event.thread_id === "string") {
+          turnState.sessionId = event.thread_id;
           syncSnapshot();
           return;
         }
-        if (parsed?.type === "item.started" && parsed.item) {
-          this.applyCodexItem(turnState, parsed.item, "started");
+        if (event?.type === "item.started" && asRecord(event.item)) {
+          this.applyCodexItem(turnState, event.item as Record<string, unknown>, "started");
           syncSnapshot();
           scheduleEmit();
           return;
         }
-        if (parsed?.type === "item.updated" && parsed.item) {
+        if (event?.type === "item.updated" && asRecord(event.item)) {
           // codex `item.updated` 重新发送完整 ThreadItem（不是 delta）。
           // 对 text/thinking/TodoWrite 走 codexBlockIndex 替换；对 tool_use
           // 仍然按现有 id 复用，避免重复卡片。
-          this.applyCodexItem(turnState, parsed.item, "updated");
+          this.applyCodexItem(turnState, event.item as Record<string, unknown>, "updated");
           syncSnapshot();
           scheduleEmit();
           return;
         }
-        if (parsed?.type === "item.completed" && parsed.item) {
-          this.applyCodexItem(turnState, parsed.item, "completed");
+        if (event?.type === "item.completed" && asRecord(event.item)) {
+          this.applyCodexItem(turnState, event.item as Record<string, unknown>, "completed");
           syncSnapshot();
           scheduleEmit();
           return;
         }
-        if (parsed?.type === "turn.completed") {
-          turnState.usage = this.extractCodexUsage(parsed.usage) ?? turnState.usage;
+        if (event?.type === "turn.completed") {
+          turnState.usage = this.extractCodexUsage(asRecord(event.usage) ?? undefined) ?? turnState.usage;
           syncSnapshot();
           scheduleEmit();
           return;
         }
-        if (parsed?.type === "error") {
-          const message = typeof parsed.message === "string" ? parsed.message : "";
+        if (event?.type === "token_count") {
+          const info = asRecord(event.info);
+          const lastUsage = asRecord(info?.last_token_usage);
+          turnState.usage = this.extractCodexUsage(lastUsage ?? undefined) ?? turnState.usage;
+          syncSnapshot();
+          scheduleEmit();
+          return;
+        }
+        if (this.applyCodexLooseEvent(turnState, event)) {
+          syncSnapshot();
+          scheduleEmit();
+          return;
+        }
+        if (event?.type === "error") {
+          const message = typeof event.message === "string" ? event.message : "";
           if (message) codexErrors.push(message);
           return;
         }
-        if (parsed?.type === "turn.failed") {
-          const errObj = (parsed.error && typeof parsed.error === "object") ? parsed.error as Record<string, unknown> : null;
+        if (event?.type === "turn.failed") {
+          const errObj = (event.error && typeof event.error === "object") ? event.error as Record<string, unknown> : null;
           const message = (errObj && typeof errObj.message === "string" && errObj.message)
-            || (typeof parsed.message === "string" ? parsed.message : "")
+            || (typeof event.message === "string" ? event.message : "")
             || "codex turn failed";
           codexTurnFailed = message;
           return;
@@ -2804,6 +2893,134 @@ export class StructuredSessionManager {
     return typeof content === "undefined" || content === null ? "" : String(content);
   }
 
+  private unwrapCodexStreamEvent(parsed: unknown): Record<string, unknown> | null {
+    const event = asRecord(parsed);
+    if (!event) return null;
+    const type = getString(event.type);
+    if ((type === "response_item" || type === "event_msg") && asRecord(event.payload)) {
+      return event.payload as Record<string, unknown>;
+    }
+    return event;
+  }
+
+  private applyCodexLooseEvent(turnState: StreamingTurnState, event: Record<string, unknown> | null): boolean {
+    if (!event) return false;
+    const type = getString(event.type);
+    const supported = new Set([
+      "message",
+      "agent_message",
+      "reasoning",
+      "function_call",
+      "function_call_output",
+      "custom_tool_call",
+      "custom_tool_call_output",
+      "patch_apply_end",
+      "mcp_tool_call_end",
+      "web_search_call",
+      "web_search_end",
+      "tool_search_call",
+      "tool_search_output",
+    ]);
+    if (!supported.has(type)) return false;
+    this.applyCodexItem(turnState, event, "completed");
+    return true;
+  }
+
+  private codexFunctionToolUse(item: Record<string, unknown>): ToolUseBlock | null {
+    const rawName = getString(item.name) || "function_call";
+    const callId = getString(item.call_id) || getString(item.id) || rawName;
+    const args = parseJsonRecord(item.arguments);
+    const input = { ...args };
+
+    if (rawName === "exec_command") {
+      const command = getString(args.cmd) || getString(args.command);
+      if (command) input.command = command;
+      return {
+        type: "tool_use",
+        id: callId,
+        name: "Bash",
+        description: getString(args.workdir) || undefined,
+        input,
+      };
+    }
+
+    if (rawName === "write_stdin") {
+      return {
+        type: "tool_use",
+        id: callId,
+        name: "Bash",
+        description: "write stdin",
+        input: {
+          ...input,
+          command: `write_stdin ${getString(args.session_id) || getString(args.sessionId) || ""}`.trim(),
+        },
+      };
+    }
+
+    if (rawName === "update_plan" && Array.isArray(args.plan)) {
+      const todos = args.plan.map((entry) => {
+        const rec = asRecord(entry) ?? {};
+        const status = getString(rec.status);
+        return {
+          content: getString(rec.step),
+          activeForm: getString(rec.step),
+          status: status === "completed" ? "completed" : status === "in_progress" ? "in_progress" : "pending",
+        };
+      });
+      return {
+        type: "tool_use",
+        id: callId,
+        name: "TodoWrite",
+        description: getString(args.explanation) || undefined,
+        input: { todos },
+      };
+    }
+
+    if (rawName === "view_image") {
+      const filePath = getString(args.path);
+      return {
+        type: "tool_use",
+        id: callId,
+        name: "Read",
+        description: "view image",
+        input: filePath ? { ...input, file_path: filePath } : input,
+      };
+    }
+
+    if (rawName === "js") {
+      return {
+        type: "tool_use",
+        id: callId,
+        name: "node_repl__js",
+        description: getString(args.title) || undefined,
+        input,
+      };
+    }
+
+    return {
+      type: "tool_use",
+      id: callId,
+      name: rawName,
+      input,
+    };
+  }
+
+  private codexMcpToolBlocks(item: Record<string, unknown>): ContentBlock[] {
+    const callId = getString(item.call_id) || getString(item.id) || "mcp";
+    const invocation = asRecord(item.invocation) ?? {};
+    const server = getString(invocation.server) || "mcp";
+    const tool = getString(invocation.tool) || "tool";
+    const args = asRecord(invocation.arguments) ?? {};
+    const result = asRecord(item.result);
+    const isError = !!result?.Err || getString(item.status) === "failed";
+    const ok = asRecord(result?.Ok);
+    const content = ok ? this.extractCodexText(ok.content) || JSON.stringify(ok).slice(0, 4096) : this.extractCodexText(result);
+    return [
+      { type: "tool_use", id: callId, name: `${server}__${tool}`, input: args },
+      { type: "tool_result", tool_use_id: callId, content, is_error: isError },
+    ];
+  }
+
   private extractCodexText(value: unknown): string {
     if (typeof value === "string") return value;
     if (!value || typeof value !== "object") return "";
@@ -2903,6 +3120,13 @@ export class StructuredSessionManager {
     const id = typeof item.id === "string" ? item.id : randomUUID();
     const type = typeof item.type === "string" ? item.type : "unknown";
 
+    if (type === "message") {
+      const role = getString(item.role);
+      if (role !== "assistant") return [];
+      const text = this.extractCodexText(item.content);
+      return text ? [{ type: "text", text }] : [];
+    }
+
     if (type === "agent_message") {
       const text = this.extractCodexText(item);
       return text ? [{ type: "text", text }] : [];
@@ -2953,6 +3177,48 @@ export class StructuredSessionManager {
       ];
     }
 
+    if (type === "function_call") {
+      const block = this.codexFunctionToolUse(item);
+      return block ? [block] : [];
+    }
+
+    if (type === "function_call_output") {
+      const callId = getString(item.call_id) || id;
+      return [{
+        type: "tool_result",
+        tool_use_id: callId,
+        content: this.normalizeToolResultContent(item.output),
+      }];
+    }
+
+    if (type === "custom_tool_call") {
+      const callId = getString(item.call_id) || id;
+      const name = getString(item.name) || "custom_tool_call";
+      return [{
+        type: "tool_use",
+        id: callId,
+        name,
+        description: getString(item.status) || undefined,
+        input: {
+          input: getString(item.input),
+          status: getString(item.status) || (completed ? "completed" : "in_progress"),
+        },
+      }];
+    }
+
+    if (type === "custom_tool_call_output") {
+      const callId = getString(item.call_id) || id;
+      return [{
+        type: "tool_result",
+        tool_use_id: callId,
+        content: this.normalizeToolResultContent(item.output),
+      }];
+    }
+
+    if (type === "patch_apply_end") {
+      return buildCodexPatchApplyBlocks(item);
+    }
+
     if (type === "file_change") {
       // 注意：codex exec stream 没有 old_string/new_string——只给 path + kind。
       // 这里每个 file 一个 sub-id（`${item.id}#${i}`），这样如果 codex 一次给多
@@ -2973,9 +3239,8 @@ export class StructuredSessionManager {
           toolName = "Write";
           input = { file_path: path, content: "", kind, status };
         } else if (kind === "delete") {
-          // 复用 Bash 终端卡，rm 语义直观
-          toolName = "Bash";
-          input = { command: `rm ${path}`, description: `delete ${path}`, kind, status };
+          toolName = "Edit";
+          input = { file_path: path, kind, status };
         } else {
           toolName = "Edit";
           input = { file_path: path, old_string: "", new_string: "", kind, status };
@@ -2993,6 +3258,10 @@ export class StructuredSessionManager {
         }
       });
       return blocks;
+    }
+
+    if (type === "mcp_tool_call_end") {
+      return this.codexMcpToolBlocks(item);
     }
 
     if (type === "mcp_tool_call") {
@@ -3035,6 +3304,59 @@ export class StructuredSessionManager {
           is_error: isError,
         },
       ];
+    }
+
+    if (type === "web_search_call") {
+      const callId = getString(item.call_id) || id;
+      return [{
+        type: "tool_use",
+        id: callId,
+        name: "WebSearch",
+        description: getString(item.status) || "searching",
+        input: {},
+      }];
+    }
+
+    if (type === "web_search_end") {
+      const callId = getString(item.call_id) || id;
+      const action = asRecord(item.action);
+      const query = getString(item.query);
+      const actionType = getString(action?.type);
+      return [
+        {
+          type: "tool_use",
+          id: callId,
+          name: "WebSearch",
+          description: actionType || "completed",
+          input: query ? { query, action: actionType } : { action: actionType },
+        },
+        {
+          type: "tool_result",
+          tool_use_id: callId,
+          content: query ? `query: ${query}` : "",
+        },
+      ];
+    }
+
+    if (type === "tool_search_call") {
+      const callId = getString(item.call_id) || id;
+      const args = asRecord(item.arguments) ?? {};
+      return [{
+        type: "tool_use",
+        id: callId,
+        name: "tool_search",
+        description: getString(item.status) || undefined,
+        input: args,
+      }];
+    }
+
+    if (type === "tool_search_output") {
+      const callId = getString(item.call_id) || id;
+      return [{
+        type: "tool_result",
+        tool_use_id: callId,
+        content: this.normalizeToolResultContent(item.tools),
+      }];
     }
 
     if (type === "web_search") {

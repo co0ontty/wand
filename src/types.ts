@@ -115,6 +115,8 @@ export interface WandConfig {
   cardDefaults?: CardExpandDefaults;
   /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */
   defaultModel?: string;
+  /** 新建 Codex 会话时默认使用的模型。留空则不传 --model，由 codex 自行决定。 */
+  defaultCodexModel?: string;
   /** 新建会话时默认使用的思考深度。 */
   defaultThinkingEffort?: "off" | "standard" | "deep" | "max";
   /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */
@@ -253,7 +255,7 @@ export interface CommandRequest {
   mode?: ExecutionMode;
   initialInput?: string;
   worktreeEnabled?: boolean;
-  /** Claude 模型（别名或完整 ID）。仅对 claude provider 生效。留空则回落到 config.defaultModel。 */
+  /** 模型（别名或完整 ID）。留空则按 provider 回落到服务端默认模型。 */
   model?: string;
   /** 创建会话时由前端测得的真实列数。后端用它直接 spawn PTY，避免"先 120 列再 resize"的早期错位。 */
   cols?: number;

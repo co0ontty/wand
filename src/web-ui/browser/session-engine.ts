@@ -504,11 +504,53 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         }).join("");
       }
 
+      export function getProviderKey(provider) {
+        return provider === "codex" ? "codex" : "claude";
+      }
+
+      export function getProviderForSession(session) {
+        return getProviderKey((session && session.provider) || state.sessionTool || "claude");
+      }
+
+      export function getConfigDefaultModels() {
+        var configured = state.config && state.config.defaultModels && typeof state.config.defaultModels === "object"
+          ? state.config.defaultModels
+          : {};
+        return {
+          claude: typeof configured.claude === "string" ? configured.claude : ((state.config && state.config.defaultModel) || ""),
+          codex: typeof configured.codex === "string" ? configured.codex : ((state.config && state.config.defaultCodexModel) || "")
+        };
+      }
+
+      export function getConfigDefaultModelForProvider(provider) {
+        var defaults = getConfigDefaultModels();
+        return getProviderKey(provider) === "codex" ? (defaults.codex || "") : (defaults.claude || "");
+      }
+
+      export function getChatModelForProvider(provider) {
+        var key = getProviderKey(provider);
+        var selected = state.chatModels && typeof state.chatModels[key] === "string" ? state.chatModels[key] : "";
+        if (!selected && key === "claude") selected = state.chatModel || "";
+        return selected || "";
+      }
+
+      export function setChatModelForProvider(provider, model) {
+        var key = getProviderKey(provider);
+        var normalized = (model || "").trim();
+        if (!state.chatModels) state.chatModels = { claude: "", codex: "" };
+        state.chatModels[key] = normalized;
+        state.chatModel = normalized;
+        try {
+          localStorage.setItem("wand-chat-model-" + key, normalized);
+          localStorage.removeItem("wand-chat-model");
+        } catch (e) {}
+      }
+
       export function getEffectiveModel(session) {
         if (session && session.selectedModel) return session.selectedModel;
-        if (state.chatModel) return state.chatModel;
-        if (state.config && state.config.defaultModel) return state.config.defaultModel;
-        return "";
+        var provider = getProviderForSession(session);
+        var selected = getChatModelForProvider(provider);
+        return selected || getConfigDefaultModelForProvider(provider) || "";
       }
 
       export function getModelsForCurrentProvider(session) {
@@ -838,15 +880,24 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function updateSettingsDefaultModelSelect(data?) {
-        var select = document.getElementById("cfg-default-model") as HTMLSelectElement | null;
-        if (!select) return;
-        var previous = select.value;
-        var current = previous || state.configDefaultModel || (state.config && state.config.defaultModel) || "";
-        select.innerHTML = renderChatModelOptions(current, { provider: "claude" });
-        select.value = current;
+        var defaults = getConfigDefaultModels();
+        var claudeSelect = document.getElementById("cfg-default-model") as HTMLSelectElement | null;
+        if (claudeSelect) {
+          var previousClaude = claudeSelect.value;
+          var currentClaude = previousClaude || (state.configDefaultModels && state.configDefaultModels.claude) || defaults.claude || "";
+          claudeSelect.innerHTML = renderChatModelOptions(currentClaude, { provider: "claude" });
+          claudeSelect.value = currentClaude;
+        }
+        var codexSelect = document.getElementById("cfg-default-codex-model") as HTMLSelectElement | null;
+        if (codexSelect) {
+          var previousCodex = codexSelect.value;
+          var currentCodex = previousCodex || (state.configDefaultModels && state.configDefaultModels.codex) || defaults.codex || "";
+          codexSelect.innerHTML = renderChatModelOptions(currentCodex, { provider: "codex" });
+          codexSelect.value = currentCodex;
+        }
         var versionEl = document.getElementById("cfg-default-model-version");
         if (versionEl && data) {
-          versionEl.textContent = data.claudeVersion ? "已检测到 claude " + data.claudeVersion : "新建会话时默认使用该模型。";
+          versionEl.textContent = data.claudeVersion ? "已检测到 claude " + data.claudeVersion : "新建 Claude 会话时默认使用该模型。";
         }
       }
 
@@ -860,10 +911,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function onChatModelChange(value) {
         var normalized = (value || "").trim();
-        state.chatModel = normalized;
-        try { localStorage.setItem("wand-chat-model", normalized); } catch (e) {}
-        refreshAllChatModeTrios();
         var session = getSelectedSession();
+        var provider = getProviderForSession(session);
+        setChatModelForProvider(provider, normalized);
+        refreshAllChatModeTrios();
         if (!session) return;
         fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
           method: "POST",
@@ -925,7 +976,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function createStructuredSession(prompt?, cwdOverride?, modeOverride?, worktreeEnabled?) {
         var provider = state.sessionTool === "codex" ? "codex" : "claude";
-        var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
+        var modelPref = getChatModelForProvider(provider);
         var thinkingPref = state.chatThinking || "off";
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
@@ -2855,7 +2906,14 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (inheritEnvEl) inheritEnvEl.checked = cfg.inheritEnv !== false;
 
             // Default model
-            state.configDefaultModel = cfg.defaultModel || "";
+            var defaultModels = cfg.defaultModels && typeof cfg.defaultModels === "object"
+              ? cfg.defaultModels
+              : { claude: cfg.defaultModel || "", codex: cfg.defaultCodexModel || "" };
+            state.configDefaultModels = {
+              claude: defaultModels.claude || "",
+              codex: defaultModels.codex || ""
+            };
+            state.configDefaultModel = state.configDefaultModels.claude;
             updateSettingsDefaultModelSelect();
             fetchAvailableModels().then(function() {
               updateSettingsDefaultModelSelect();
@@ -2912,12 +2970,18 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           shell: (document.getElementById("cfg-shell") as HTMLInputElement | null || {} as any).value,
           language: (document.getElementById("cfg-language") as HTMLSelectElement | null || {} as any).value || "",
           defaultModel: (document.getElementById("cfg-default-model") as HTMLSelectElement | null || {} as any).value || "",
+          defaultCodexModel: (document.getElementById("cfg-default-codex-model") as HTMLSelectElement | null || {} as any).value || "",
+          defaultModels: {
+            claude: (document.getElementById("cfg-default-model") as HTMLSelectElement | null || {} as any).value || "",
+            codex: (document.getElementById("cfg-default-codex-model") as HTMLSelectElement | null || {} as any).value || ""
+          },
           structuredRunner: (document.getElementById("cfg-structured-runner") as HTMLSelectElement | null || {} as any).value || "cli",
           inheritEnv: (document.getElementById("cfg-inherit-env") as HTMLInputElement | null || {} as any).checked !== false,
         };
 
-        var previousDefaultModel = (state.config && state.config.defaultModel) || "";
+        var previousDefaults = getConfigDefaultModels();
         var nextDefaultModel = body.defaultModel || "";
+        var nextDefaultCodexModel = body.defaultCodexModel || "";
 
         fetch("/api/settings/config", {
           method: "POST",
@@ -2940,11 +3004,20 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             msgEl.classList.remove("hidden");
           }
           if (!data || !data.error) {
-            if (state.config) state.config.defaultModel = nextDefaultModel;
+            if (state.config) {
+              state.config.defaultModel = nextDefaultModel;
+              state.config.defaultCodexModel = nextDefaultCodexModel;
+              state.config.defaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel };
+            }
+            state.configDefaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel };
             state.configDefaultModel = nextDefaultModel;
-            if (nextDefaultModel !== previousDefaultModel) {
-              state.chatModel = "";
-              try { localStorage.removeItem("wand-chat-model"); } catch (e) {}
+            if (nextDefaultModel !== previousDefaults.claude) {
+              setChatModelForProvider("claude", "");
+            }
+            if (nextDefaultCodexModel !== previousDefaults.codex) {
+              setChatModelForProvider("codex", "");
+            }
+            if (nextDefaultModel !== previousDefaults.claude || nextDefaultCodexModel !== previousDefaults.codex) {
               syncComposerModelSelect(getSelectedSession());
             }
           }

@@ -4,7 +4,7 @@ import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
-import { normalizeMode } from "./config.js";
+import { getDefaultModelForProvider, normalizeMode } from "./config.js";
 import { blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
 import { resolveSessionCwd } from "./session-cwd.js";
@@ -284,13 +284,14 @@ export function registerSessionRoutes(
         return;
       }
       const provider = body.provider === "codex" ? "codex" : "claude";
+      const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const snapshot = structured.createSession({
         cwd: resolveSessionCwd(body.cwd, config.defaultCwd),
         mode: normalizeMode(body.mode, defaultMode),
         provider,
         runner: body.runner ?? (provider === "codex" ? "codex-cli-exec" : "claude-cli-print"),
         worktreeEnabled: body.worktreeEnabled === true,
-        model: typeof body.model === "string" ? body.model.trim() : (config.defaultModel ?? "").trim() || undefined,
+        model: rawModel || getDefaultModelForProvider(config, provider) || undefined,
         thinkingEffort: typeof body.thinkingEffort === "string"
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
           : config.defaultThinkingEffort,
@@ -606,7 +607,7 @@ export function registerSessionRoutes(
         cwd: snapshot.cwd,
         language: config.language ?? "",
         provider: snapshot.provider,
-        model: snapshot.selectedModel ?? snapshot.structuredState?.model ?? config.defaultModel,
+        model: snapshot.selectedModel ?? snapshot.structuredState?.model ?? getDefaultModelForProvider(config, snapshot.provider),
         thinkingEffort: snapshot.thinkingEffort ?? config.defaultThinkingEffort,
         inheritEnv: config.inheritEnv,
         autoMessage: body.autoMessage !== false,
@@ -640,7 +641,7 @@ export function registerSessionRoutes(
     try {
       const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "", {
         provider: snapshot.provider,
-        model: snapshot.selectedModel ?? snapshot.structuredState?.model ?? config.defaultModel,
+        model: snapshot.selectedModel ?? snapshot.structuredState?.model ?? getDefaultModelForProvider(config, snapshot.provider),
         thinkingEffort: snapshot.thinkingEffort ?? config.defaultThinkingEffort,
         inheritEnv: config.inheritEnv,
       });

@@ -150,6 +150,17 @@ export var state: AppState = {
   cwdValue: "",
   modeValue: "managed",
   chatMode: "managed",
+  chatModels: (function() {
+    try {
+      var legacy = localStorage.getItem("wand-chat-model") || "";
+      return {
+        claude: localStorage.getItem("wand-chat-model-claude") || legacy,
+        codex: localStorage.getItem("wand-chat-model-codex") || "",
+      };
+    } catch (e) {
+      return { claude: "", codex: "" };
+    }
+  })(),
   chatModel: (function() {
     try { return localStorage.getItem("wand-chat-model") || ""; } catch (e) { return ""; }
   })(),

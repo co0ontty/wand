@@ -3043,6 +3043,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var newStr = inputData.new_string || inputData.content || "";
         var oldContent = inputData.old_content || "";
         var newContent = inputData.new_content || "";
+        var unifiedDiff = inputData.unified_diff || inputData.diff || "";
+        var changeKind = inputData.kind || "";
 
         var isWrite = toolName === "Write" || toolName === "MultiEdit";
         var isError = toolResult && toolResult.is_error;
@@ -3052,7 +3054,10 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // Build side-by-side diff HTML (old | new columns)
         var leftCol = "";
         var rightCol = "";
-        if (isWrite) {
+        var unifiedCol = "";
+        if (unifiedDiff) {
+          unifiedCol = '<div class="diff-col diff-col-full"><div class="diff-col-label">Diff</div>' + renderUnifiedDiffLines(unifiedDiff) + '</div>';
+        } else if (isWrite) {
           // Write: only show new content on right
           rightCol = '<div class="diff-line diff-add">+ ' + escapeHtml(newContent) + '</div>';
         } else {
@@ -3075,7 +3080,10 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
               : "失败";
           } else {
             statusClass = "diff-success";
-            statusText = "已修改";
+            statusText = changeKind === "add" ? "已新增"
+              : changeKind === "delete" ? "已删除"
+                : changeKind === "move" ? "已移动"
+                  : "已修改";
           }
         } else {
           statusClass = "diff-pending";
@@ -3090,26 +3098,56 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var collapsedClass = shouldExpand ? "" : " collapsed";
 
         // If only one column has content, show full width
-        var bothCols = leftCol && rightCol;
+        var bothCols = !unifiedCol && leftCol && rightCol;
         var colClass = bothCols ? "diff-col-half" : "diff-col-full";
+        var columnsHtml = unifiedCol || (
+          (bothCols ? '<div class="diff-col ' + colClass + '"><div class="diff-col-label">旧</div>' + leftCol + '</div>' : '') +
+          '<div class="diff-col ' + colClass + '"><div class="diff-col-label">' + (bothCols ? '新' : '') + '</div>' + (rightCol || leftCol || renderEmptyDiff(path)) + '</div>'
+        );
+        var openButton = path
+          ? '<button class="diff-open-file" type="button" data-path="' + escapeHtml(path) + '" title="打开文件" onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));">打开</button>'
+          : '';
 
         return '<div class="inline-diff' + collapsedClass + '" data-tool-name="' + escapeHtml(toolName) + '"' +
           ' data-expand-kind="diff" data-expand-key="' + escapeHtml(expandKey) + '"' +
-          ' data-tool-use-id="' + escapeHtml(toolId) + '">' +
+          ' data-tool-use-id="' + escapeHtml(toolId) + '" data-path="' + escapeHtml(path) + '">' +
           '<div class="diff-header" onclick="__tcToggle(event,this)">' +
             '<span class="diff-file-icon"></span>' +
             '<span class="diff-file-name">' + escapeHtml(fileName) + '</span>' +
             renderTailMarqueePath(path, "diff-path") +
             '<span class="diff-status ' + statusClass + '">' + statusText + '</span>' +
+            openButton +
             '<span class="diff-toggle">▼</span>' +
           '</div>' +
           '<div class="diff-body">' +
             '<div class="diff-columns">' +
-              (bothCols ? '<div class="diff-col ' + colClass + '"><div class="diff-col-label">旧</div>' + leftCol + '</div>' : '') +
-              '<div class="diff-col ' + colClass + '"><div class="diff-col-label">' + (bothCols ? '新' : '') + '</div>' + (rightCol || leftCol) + '</div>' +
+              columnsHtml +
             '</div>' +
           '</div>' +
         '</div>';
+      }
+
+      export function renderUnifiedDiffLines(diff) {
+        var lines = String(diff || "").split("\n");
+        var limit = 600;
+        var html = "";
+        for (var i = 0; i < lines.length && i < limit; i++) {
+          var line = lines[i];
+          var cls = "diff-context";
+          if (/^@@/.test(line)) cls = "diff-hunk";
+          else if (/^\+/.test(line) && !/^\+\+\+/.test(line)) cls = "diff-add";
+          else if (/^-/.test(line) && !/^---/.test(line)) cls = "diff-remove";
+          html += '<div class="diff-line ' + cls + '">' + escapeHtml(line || " ") + '</div>';
+        }
+        if (lines.length > limit) {
+          html += '<div class="diff-line diff-context">…（已截断 ' + (lines.length - limit) + ' 行）</div>';
+        }
+        return html || renderEmptyDiff("");
+      }
+
+      export function renderEmptyDiff(path) {
+        var suffix = path ? "，可打开文件查看当前内容" : "";
+        return '<div class="diff-empty">Codex 未提供内联 diff' + suffix + '。</div>';
       }
 
       export function formatInlineResult(content, toolName) {

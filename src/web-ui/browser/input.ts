@@ -8,7 +8,7 @@ import { isMobileLayout, updateFilePanelCwd } from "./file-browser";
 import { loadGitStatus } from "./git-commit";
 import { showToast, wandConfirm, wandAlert, wandPrompt, openWandDialog, showError, hideError, sendBrowserNotification, _syncWakeLock } from "./notifications";
 import { render, resetChatRenderCache, getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, clearAttachments, dismissDrawerIfOverlay, getComposerPlaceholder, getComposerTool, getPreferredMessages, getPreferredTool, getSafeModeForTool, isStructuredSession, loadOutput, loadSessions, refreshAll, selectSession, setDraftValue, shouldRequestChatFormat, subscribeToSession, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { applyCurrentView, buildAttachmentPrefix, clearAttachments, dismissDrawerIfOverlay, getChatModelForProvider, getComposerPlaceholder, getComposerTool, getPreferredMessages, getPreferredTool, getSafeModeForTool, isStructuredSession, loadOutput, loadSessions, refreshAll, selectSession, setDraftValue, shouldRequestChatFormat, subscribeToSession, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, confirmDelete } from "./sidebar";
 import { initTerminal, maybeScheduleResyncForChunk, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, softResyncTerminal, syncTerminalBuffer } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, sendTerminalResize, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
@@ -2370,7 +2370,7 @@ import { getSessionStatusLabel } from "./session-ui";
           state.preferredCommand = command;
           state.chatMode = getSafeModeForTool(command, state.chatMode);
         }
-        var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
+        var modelPref = (command === "claude" || command === "codex") ? getChatModelForProvider(command) : "";
         return fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2516,7 +2516,7 @@ import { getSessionStatusLabel } from "./session-ui";
         var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
-        var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
+        var modelPref = getChatModelForProvider(preferredTool);
         fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2555,7 +2555,7 @@ import { getSessionStatusLabel } from "./session-ui";
         var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
-        var modelPref = state.chatModel || (state.config && state.config.defaultModel) || "";
+        var modelPref = getChatModelForProvider(preferredTool);
         fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

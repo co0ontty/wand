@@ -22,6 +22,7 @@ export const PREFERENCE_KEYS = [
   "defaultMode",
   "defaultCwd",
   "defaultModel",
+  "defaultCodexModel",
   "defaultThinkingEffort",
   "structuredRunner",
   "language",
@@ -62,6 +63,7 @@ export const defaultConfig = (): WandConfig => ({
   macos: defaultMacosDmgConfig(),
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
+  defaultCodexModel: "",
   defaultThinkingEffort: "off",
   structuredRunner: "cli" as StructuredRunnerOption,
   inheritEnv: true,
@@ -268,6 +270,10 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultModel"), defaults.defaultModel ?? "");
     if (typeof v === "string") config.defaultModel = v.trim();
   }
+  if (storage.hasPreference(preferenceStorageKey("defaultCodexModel"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("defaultCodexModel"), defaults.defaultCodexModel ?? "");
+    if (typeof v === "string") config.defaultCodexModel = v.trim();
+  }
   if (storage.hasPreference(preferenceStorageKey("defaultThinkingEffort"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultThinkingEffort"), defaults.defaultThinkingEffort ?? "off");
     if (v === "off" || v === "standard" || v === "deep" || v === "max") config.defaultThinkingEffort = v;
@@ -316,6 +322,12 @@ export function writePreferenceToStorage(
       const v = typeof value === "string" ? value.trim() : "";
       storage.setPreference(dbKey, v);
       config.defaultModel = v;
+      break;
+    }
+    case "defaultCodexModel": {
+      const v = typeof value === "string" ? value.trim() : "";
+      storage.setPreference(dbKey, v);
+      config.defaultCodexModel = v;
       break;
     }
     case "defaultThinkingEffort": {
@@ -494,6 +506,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
+    defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
     defaultThinkingEffort: input.defaultThinkingEffort === "standard"
       || input.defaultThinkingEffort === "deep"
       || input.defaultThinkingEffort === "max"
@@ -506,6 +519,18 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
 
 export function isExecutionMode(value: unknown): value is ExecutionMode {
   return value === "assist" || value === "agent" || value === "agent-max" || value === "auto-edit" || value === "default" || value === "full-access" || value === "native" || value === "managed";
+}
+
+export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel">): { claude: string; codex: string } {
+  return {
+    claude: (config.defaultModel ?? "").trim(),
+    codex: (config.defaultCodexModel ?? "").trim(),
+  };
+}
+
+export function getDefaultModelForProvider(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel">, provider: "claude" | "codex" | undefined): string {
+  const defaults = getProviderDefaultModels(config);
+  return provider === "codex" ? defaults.codex : defaults.claude;
 }
 
 export function normalizeMode(input: string | undefined, fallback: ExecutionMode): ExecutionMode {

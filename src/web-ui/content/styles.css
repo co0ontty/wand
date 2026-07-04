@@ -5987,6 +5987,23 @@
       background: var(--warning-muted);
       color: var(--warning);
     }
+    .diff-open-file {
+      flex-shrink: 0;
+      border: 1px solid rgba(125, 91, 57, 0.16);
+      background: rgba(255, 253, 248, 0.72);
+      color: var(--text-secondary);
+      border-radius: var(--radius-full);
+      padding: 3px 9px;
+      font-size: 0.6875rem;
+      font-weight: 650;
+      cursor: pointer;
+      transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+    }
+    .diff-open-file:hover {
+      background: rgba(197, 101, 61, 0.1);
+      border-color: rgba(197, 101, 61, 0.28);
+      color: var(--accent);
+    }
     .diff-body {
       overflow: hidden;
       border-top: 1px solid rgba(125, 91, 57, 0.08);
@@ -6046,6 +6063,23 @@
       background: rgba(178, 79, 69, 0.06);
       color: #7c2a23;
       border-left: 2px solid rgba(178, 79, 69, 0.45);
+    }
+    .diff-context {
+      background: rgba(255, 253, 248, 0.86);
+      color: var(--text-secondary);
+      border-left: 2px solid transparent;
+    }
+    .diff-hunk {
+      background: rgba(74, 111, 165, 0.09);
+      color: var(--info);
+      border-left: 2px solid rgba(74, 111, 165, 0.35);
+      font-weight: 650;
+    }
+    .diff-empty {
+      padding: 10px 12px;
+      font-size: 0.75rem;
+      color: var(--text-tertiary);
+      background: rgba(255, 253, 248, 0.86);
     }
 
     

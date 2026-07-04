@@ -25,6 +25,8 @@ import {
 import { ensureCertificates } from "./cert.js";
 import { buildChildEnv } from "./env-utils.js";
 import {
+  getDefaultModelForProvider,
+  getProviderDefaultModels,
   isExecutionMode,
   normalizeMode,
   PREFERENCE_KEYS,
@@ -79,6 +81,7 @@ import {
   InputRequest,
   PathSuggestion,
   ResizeRequest,
+  SessionProvider,
   StructuredChatPersonaConfig,
   WandConfig
 } from "./types.js";
@@ -1544,12 +1547,15 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.get("/api/config", async (_req, res) => {
     const structuredChatPersona = await buildStructuredChatPersonaPayload(configPath, config);
+    const defaultModels = getProviderDefaultModels(config);
     res.json({
       host: config.host,
       port: config.port,
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
-      defaultModel: config.defaultModel ?? "",
+      defaultModel: defaultModels.claude,
+      defaultCodexModel: defaultModels.codex,
+      defaultModels,
       defaultThinkingEffort: config.defaultThinkingEffort ?? "off",
       commandPresets: config.commandPresets,
       structuredRunner: config.structuredRunner ?? "cli",
@@ -1699,6 +1705,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       certPath: path.join(configDir, "server.crt"),
     };
     const { password: _pw, ...safeConfig } = config;
+    const defaultModels = getProviderDefaultModels(config);
     const localApk = await resolveAndroidApkAsset(configDir, config);
     const ghApk = await fetchGitHubLatestApk();
     const apkDir = resolveAndroidApkDir(configDir, config);
@@ -1721,7 +1728,12 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       packageName: PKG_NAME,
       nodeVersion: PKG_NODE_REQ,
       repoUrl: PKG_REPO_URL,
-      config: safeConfig,
+      config: {
+        ...safeConfig,
+        defaultModel: defaultModels.claude,
+        defaultCodexModel: defaultModels.codex,
+        defaultModels,
+      },
       hasCert: existsSync(certPaths.keyPath) && existsSync(certPaths.certPath),
       updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
       latestVersion: cachedUpdateInfo?.latest ?? null,
@@ -1867,7 +1879,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.post("/api/settings/config", async (req, res) => {
-    const body = req.body as Partial<WandConfig>;
+    const body = req.body as Partial<WandConfig> & { defaultModels?: { claude?: unknown; codex?: unknown } };
     // 部署字段：写 JSON，需要重启服务才生效（host/port/https 影响监听，shell 影响新 PTY）
     const deployFields = ["host", "port", "https", "shell"] as const;
     let touchedDeployField = false;
@@ -1898,6 +1910,22 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.status(400).json({ error: `无效执行模式: ${body.defaultMode}` });
       return;
     }
+    if (body.defaultModels && typeof body.defaultModels === "object") {
+      const modelDefaults = body.defaultModels;
+      try {
+        if (Object.prototype.hasOwnProperty.call(modelDefaults, "claude")) {
+          writePreferenceToStorage(config, storage, "defaultModel", modelDefaults.claude);
+          touchedPreferenceField = true;
+        }
+        if (Object.prototype.hasOwnProperty.call(modelDefaults, "codex")) {
+          writePreferenceToStorage(config, storage, "defaultCodexModel", modelDefaults.codex);
+          touchedPreferenceField = true;
+        }
+      } catch (err) {
+        res.status(400).json({ error: getErrorMessage(err, "默认模型配置校验失败") });
+        return;
+      }
+    }
     for (const field of PREFERENCE_KEYS) {
       if (!(field in body) || (body as Record<string, unknown>)[field] === undefined) continue;
       try {
@@ -1919,8 +1947,18 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         await saveConfig(configPath, config);
       }
       const { password: _pw, ...safeConfig } = config;
+      const defaultModels = getProviderDefaultModels(config);
       // 只有部署字段才需要重启；偏好字段已经热生效。
-      res.json({ ok: true, config: safeConfig, restartRequired: touchedDeployField });
+      res.json({
+        ok: true,
+        config: {
+          ...safeConfig,
+          defaultModel: defaultModels.claude,
+          defaultCodexModel: defaultModels.codex,
+          defaultModels,
+        },
+        restartRequired: touchedDeployField,
+      });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "保存配置失败。") });
     }
@@ -1928,24 +1966,30 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
   app.get("/api/models", (_req, res) => {
     const cached = getCachedModels();
+    const defaultModels = getProviderDefaultModels(config);
     res.json({
       models: cached.models,
       codexModels: cached.codexModels,
       claudeVersion: cached.claudeVersion,
       refreshedAt: cached.refreshedAt,
-      defaultModel: config.defaultModel ?? "",
+      defaultModel: defaultModels.claude,
+      defaultCodexModel: defaultModels.codex,
+      defaultModels,
     });
   });
 
   app.post("/api/models/refresh", async (_req, res) => {
     try {
       const refreshed = await refreshModels();
+      const defaultModels = getProviderDefaultModels(config);
       res.json({
         models: refreshed.models,
         codexModels: refreshed.codexModels,
         claudeVersion: refreshed.claudeVersion,
         refreshedAt: refreshed.refreshedAt,
-        defaultModel: config.defaultModel ?? "",
+        defaultModel: defaultModels.claude,
+        defaultCodexModel: defaultModels.codex,
+        defaultModels,
       });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "刷新模型列表失败。") });
@@ -2551,7 +2595,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     const initialInput = body.initialInput?.trim();
     try {
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
-      const effectiveModel = rawModel || (config.defaultModel ?? "").trim() || undefined;
+      const provider: SessionProvider = body.provider === "codex" || /^codex\b/.test(body.command.trim()) ? "codex" : "claude";
+      const effectiveModel = rawModel || getDefaultModelForProvider(config, provider) || undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
       const snapshot = processes.start(
@@ -2561,7 +2606,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         initialInput || undefined,
         {
           worktreeEnabled: body.worktreeEnabled === true,
-          provider: body.provider,
+          provider,
           model: effectiveModel,
           cols: reqCols,
           rows: reqRows,
