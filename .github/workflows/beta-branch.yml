@@ -19,6 +19,9 @@ concurrency:
 
 jobs:
   publish-beta:
+    concurrency:
+      group: npm-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -79,23 +82,38 @@ jobs:
           set -uo pipefail
           PKG="@co0ontty/wand"
           VERSION="${{ steps.version.outputs.version }}"
-          published() { npm view "${PKG}@${VERSION}" version >/dev/null 2>&1; }
+          published() { [ "$(npm view "${PKG}@${VERSION}" version 2>/dev/null || true)" = "${VERSION}" ]; }
+          beta_tagged() { [ "$(npm view "${PKG}" dist-tags.beta 2>/dev/null || true)" = "${VERSION}" ]; }
+          wait_for_publish() {
+            for check in 1 2 3 4 5 6; do
+              if published && beta_tagged; then
+                return 0
+              fi
+              delay=$((check * 10))
+              echo "Waiting for ${PKG}@${VERSION} to appear as beta (${check}/6); retrying in ${delay}s..."
+              sleep "${delay}"
+            done
+            return 1
+          }
           if published; then
             echo "Version ${VERSION} already exists on npm; moving beta dist-tag."
             npm dist-tag add "${PKG}@${VERSION}" beta
-            exit 0
+            wait_for_publish
+            exit $?
           fi
-          # tag push 时正式版 NPM Publish 可能和这里并发写 packument（E409），退避重试。
           for attempt in 1 2 3 4 5; do
-            if npm publish --access public --tag beta; then
+            if npm publish --access public --tag beta && wait_for_publish; then
               exit 0
             fi
             if published; then
-              echo "npm publish reported an error but ${VERSION} is live; treating as success."
-              exit 0
+              echo "${PKG}@${VERSION} exists after publish attempt; ensuring beta dist-tag."
+              npm dist-tag add "${PKG}@${VERSION}" beta
+              if wait_for_publish; then
+                exit 0
+              fi
             fi
             delay=$((attempt * 30))
-            echo "Publish attempt ${attempt} failed (likely E409 race with stable publish); retrying in ${delay}s..."
+            echo "Publish attempt ${attempt} failed or did not propagate; retrying in ${delay}s..."
             sleep "${delay}"
           done
           echo "All publish attempts failed." >&2

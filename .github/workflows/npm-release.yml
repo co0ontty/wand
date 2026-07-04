@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   publish-npm:
+    concurrency:
+      group: npm-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,13 +32,17 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Sync package.json version with tag
+      - name: Sync package versions with tag
         run: |
           node -e "
           const fs = require('fs');
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          pkg.version = '${{ steps.version.outputs.version }}';
-          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          const version = '${{ steps.version.outputs.version }}';
+          for (const file of ['package.json', 'package-lock.json']) {
+            const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
+            pkg.version = version;
+            if (pkg.packages && pkg.packages['']) pkg.packages[''].version = version;
+            fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
+          }
           "
 
       - name: Install dependencies
@@ -44,10 +51,9 @@ jobs:
       - name: Build
         run: npm run build
 
-      # tag push 往往伴随同一时刻的 master push，Beta NPM Publish 会和这里并发写
-      # 同一个包的 packument，npm 注册表会对后到的一方报 E409。所以：
-      #   1) 幂等：版本已在 npm 上则直接成功（也覆盖手动重跑场景）；
-      #   2) 失败后指数退避重试，并在每次重试前再查一遍版本是否实际已落地。
+      # Stable 与 beta 发布共用 npm-publish concurrency group，避免同时写同一个
+      # packument。npm publish 返回成功后仍要反查 registry，因为并发写曾导致版本被
+      # tombstone：不能重发同版本，但 npm view 又读不到它。
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -55,21 +61,38 @@ jobs:
           set -uo pipefail
           PKG="@co0ontty/wand"
           VERSION="${{ steps.version.outputs.version }}"
-          published() { npm view "${PKG}@${VERSION}" version >/dev/null 2>&1; }
+          published() { [ "$(npm view "${PKG}@${VERSION}" version 2>/dev/null || true)" = "${VERSION}" ]; }
+          latest_tagged() { [ "$(npm view "${PKG}" dist-tags.latest 2>/dev/null || true)" = "${VERSION}" ]; }
+          wait_for_publish() {
+            for check in 1 2 3 4 5 6; do
+              if published && latest_tagged; then
+                return 0
+              fi
+              delay=$((check * 10))
+              echo "Waiting for ${PKG}@${VERSION} to appear as latest (${check}/6); retrying in ${delay}s..."
+              sleep "${delay}"
+            done
+            return 1
+          }
           if published; then
-            echo "${PKG}@${VERSION} already on npm; nothing to do."
-            exit 0
+            echo "${PKG}@${VERSION} already on npm; ensuring latest dist-tag."
+            npm dist-tag add "${PKG}@${VERSION}" latest
+            wait_for_publish
+            exit $?
           fi
           for attempt in 1 2 3 4 5; do
-            if npm publish --access public; then
+            if npm publish --access public && wait_for_publish; then
               exit 0
             fi
             if published; then
-              echo "npm publish reported an error but ${VERSION} is live; treating as success."
-              exit 0
+              echo "${PKG}@${VERSION} exists after publish attempt; ensuring latest dist-tag."
+              npm dist-tag add "${PKG}@${VERSION}" latest
+              if wait_for_publish; then
+                exit 0
+              fi
             fi
             delay=$((attempt * 30))
-            echo "Publish attempt ${attempt} failed (likely E409 race with beta publish); retrying in ${delay}s..."
+            echo "Publish attempt ${attempt} failed or did not propagate; retrying in ${delay}s..."
             sleep "${delay}"
           done
           echo "All publish attempts failed." >&2
