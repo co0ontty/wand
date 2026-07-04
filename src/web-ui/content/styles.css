@@ -4275,15 +4275,14 @@
       min-width: 0;
     }
 
-    /* ===== subagent panel（整段输出统一折叠面板）=====
-       结构：header（handoff + 展开按钮）+ body（max-height 22em 滚动）+ footer（同款按钮）
-       状态：data-expanded="false" 预览 / "true" 展开（body 拉到 70vh 仍可滚）
+    /* ===== subagent panel（整段输出统一角色窗口）=====
+       结构：header（角色名 + 任务摘要 + 内容数）+ body（固定高度滚动内容）
        色彩：跟随 --agent-color（外层 inline style 注入），同 agent 跨 turn 颜色稳定 */
     .subagent-panel {
       margin: 8px 0;
       border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 25%, transparent);
       border-left: 3px solid color-mix(in srgb, var(--agent-color, var(--accent)) 55%, transparent);
-      border-radius: 10px;
+      border-radius: 12px;
       overflow: hidden;
       background: color-mix(in srgb, var(--agent-color, var(--accent)) 3%, var(--bg-surface));
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
@@ -4296,14 +4295,8 @@
       padding: 8px 12px;
       background: color-mix(in srgb, var(--agent-color, var(--accent)) 10%, var(--bg-surface));
       border-bottom: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 16%, transparent);
-      cursor: pointer;
-      user-select: none;
       font-size: 0.78rem;
       line-height: 1.35;
-      transition: background 0.15s ease;
-    }
-    .subagent-panel-header:hover {
-      background: color-mix(in srgb, var(--agent-color, var(--accent)) 14%, var(--bg-surface));
     }
     .subagent-panel-header:focus-visible {
       outline: 2px solid color-mix(in srgb, var(--agent-color, var(--accent)) 55%, transparent);
@@ -4370,9 +4363,23 @@
       font-weight: 400;
     }
 
-    .subagent-panel-toggle {
+    .subagent-panel-count {
       flex: 0 0 auto;
       display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--agent-color, var(--accent)) 24%, transparent);
+      background: color-mix(in srgb, var(--agent-color, var(--accent)) 9%, var(--bg-surface));
+      color: color-mix(in srgb, var(--agent-color, var(--accent)) 72%, var(--text-primary));
+      font-size: 0.7rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .subagent-panel-toggle {
+      display: none;
+      flex: 0 0 auto;
       align-items: center;
       gap: 4px;
       padding: 3px 10px;
@@ -4401,30 +4408,29 @@
       transform: rotate(180deg);
     }
 
-    /* body：默认 max-height 22em（≈14 行），内部滚动；展开后拉到 70vh 仍内部可滚，
-       避免一个超长 subagent 把整页撑爆。展开过渡只动 max-height，body 内的卡片
-       不动，不会有抖动。 */
+    /* body：固定高度 + 内部滚动，避免一个超长 subagent 把整页撑爆。 */
     .subagent-panel-body {
       padding: 10px 14px;
+      height: 320px;
+      box-sizing: border-box;
       overflow-y: auto;
       overflow-x: hidden;
       min-width: 0;
       max-width: 100%;
-      transition: max-height 0.22s var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
       scrollbar-gutter: stable;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
     }
     .subagent-panel[data-expanded="false"] .subagent-panel-body {
-      max-height: 22em;
+      height: 320px;
     }
     .subagent-panel[data-expanded="true"] .subagent-panel-body {
-      max-height: 70vh;
+      height: 320px;
     }
     .subagent-panel-body > :first-child { margin-top: 0; }
     .subagent-panel-body > :last-child { margin-bottom: 0; }
 
-    /* body 里的工具卡 / 文本：缩一点字号 + 减小 margin，让 22em 能装下更多内容 */
+    /* body 里的工具卡 / 文本：缩一点字号 + 减小 margin，让窗口里能装下更多内容 */
     .subagent-panel-body .tool-use-card,
     .subagent-panel-body .tool-group,
     .subagent-panel-body .inline-tool,
@@ -4452,10 +4458,9 @@
       background: transparent;
     }
 
-    /* footer：跟 header 对称，永远可见在 panel 底部。滚到 body 最下时用户能就近点。
-       hint 是个软提示"— 协作猫 —"，告诉用户 panel 边界，避免与下一段父消息混淆。 */
+    /* footer：旧折叠面板留下的结构；新角色窗口不再输出 footer。 */
     .subagent-panel-footer {
-      display: flex;
+      display: none;
       align-items: center;
       gap: 10px;
       padding: 6px 12px;
@@ -10853,22 +10858,23 @@
       .subagent-reply { padding: 9px 12px; }
       .subagent-reply.collapsible { padding: 0; }
       .subagent-reply.final { padding: 9px 11px; }
-      /* subagent-panel：窄屏头部不省略 attribution（可换行多行 vs 单行省略），
-         body 高度收紧一点，footer hint 隐掉只留按钮。 */
+      /* subagent-panel：窄屏头部不省略 attribution，body 保持固定高度内滚动。 */
       .subagent-panel { margin: 6px 0; }
       .subagent-panel-header {
         padding: 7px 10px;
         gap: 6px;
         font-size: 0.74rem;
+        flex-wrap: wrap;
       }
       .subagent-panel-attribution {
         white-space: normal;
         line-height: 1.4;
       }
+      .subagent-panel-count { margin-left: auto; }
       .subagent-panel-tag { margin: 0 4px; padding: 0 4px; }
-      .subagent-panel-body { padding: 9px 11px; }
-      .subagent-panel[data-expanded="false"] .subagent-panel-body { max-height: 18em; }
-      .subagent-panel[data-expanded="true"] .subagent-panel-body { max-height: 60vh; }
+      .subagent-panel-body { height: 260px; padding: 9px 11px; }
+      .subagent-panel[data-expanded="false"] .subagent-panel-body { height: 260px; max-height: none; }
+      .subagent-panel[data-expanded="true"] .subagent-panel-body { height: 260px; max-height: none; }
       .subagent-panel-footer { padding: 5px 10px; }
       .subagent-panel-footer-hint { display: none; }
       .markdown-content .code-block { margin: 8px 0; }

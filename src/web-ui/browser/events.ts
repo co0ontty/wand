@@ -113,27 +113,20 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         applyExpandedState(bubble, "subagent-reply", !expanded);
         persistElementExpandState(bubble, "subagent-reply");
       };
-      // Toggle function for whole subagent panel (handoff + body + footer)。
-      // 头部 / 尾部按钮、整条 header 都绑这个；data-expanded 一变，CSS 切 body max-height
-      // + 旋转 chevron，applyExpandedState 走通用通道写持久化。
+      // 旧版 subagent panel 是可折叠面板；新版是固定高度角色窗口。
+      // 保留这个入口兼容旧 DOM / 旧内联事件，但只会把窗口恢复到常驻展开态。
       (window as any).__subagentPanelToggle = function(e: any, target: any) {
         if (e) { e.preventDefault(); e.stopPropagation(); }
         var panel = target && target.closest ? target.closest(".subagent-panel") : null;
         if (!panel) return;
-        var expanded = panel.getAttribute("data-expanded") === "true";
-        applyExpandedState(panel, "subagent-panel", !expanded);
-        persistElementExpandState(panel, "subagent-panel");
+        panel.setAttribute("data-expanded", "true");
       };
 
-      // 折叠态的 subagent-panel-body 默认 max-height 22em + overflow-y:auto。流式
-      // 输出在底部追加内容，新 DOM 节点初始 scrollTop=0 会让用户停在最上面，看不
-      // 到新到的工具卡 / 文本。re-render 后扫一遍所有折叠面板，把 body 滚到底，
-      // 表现就跟"贴底跟随"的小窗口一致。
-      // 展开态故意跳过：展开后 max-height 提到 70vh，用户多半就是想从头读，
-      // applyExpandedState 已经把 scrollTop 拉到 0，不能在这里再覆盖。
+      // 固定高度角色窗口默认从头展示，便于看见任务入口。未来如果需要 live-tail
+      // 跟随，可给 panel 标 data-follow-tail="true"，这个入口会只处理那类窗口。
       export function snapCollapsedSubagentPanelsToBottom(container: any) {
         if (!container) return;
-        var panels = container.querySelectorAll('.subagent-panel[data-expanded="false"]');
+        var panels = container.querySelectorAll('.subagent-panel[data-follow-tail="true"]');
         for (var i = 0; i < panels.length; i++) {
           var body = panels[i].querySelector(".subagent-panel-body");
           if (!body) continue;

@@ -32,8 +32,16 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG#v}"
+          BUILD_STAMP="$(TZ=Asia/Shanghai date +%Y%m%d%H%M)"
+          if [[ "$VERSION" == *+* ]]; then
+            ASSET_VERSION="${VERSION}.${BUILD_STAMP}"
+          else
+            ASSET_VERSION="${VERSION}+${BUILD_STAMP}"
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_stamp=$BUILD_STAMP" >> "$GITHUB_OUTPUT"
+          echo "asset_version=$ASSET_VERSION" >> "$GITHUB_OUTPUT"
 
       # versionCode 一律由 android/app/build.gradle 从 versionName 派生（唯一真源）。
       # 不要在这里另算一套传 -PAPP_VERSION_CODE：两套方案并存会让本地构建装过的设备
@@ -48,10 +56,10 @@ jobs:
       - name: Rename APK
         run: |
           mv android/app/build/outputs/apk/debug/app-debug.apk \
-             android/app/build/outputs/apk/debug/wand-${{ steps.version.outputs.tag }}.apk
+             android/app/build/outputs/apk/debug/wand-v${{ steps.version.outputs.asset_version }}.apk
 
       # body 由 .github/workflows/release-notes.yml 单点管理，这里只上传 APK。
       - name: Upload APK to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/apk/debug/wand-${{ steps.version.outputs.tag }}.apk
+          files: android/app/build/outputs/apk/debug/wand-v${{ steps.version.outputs.asset_version }}.apk

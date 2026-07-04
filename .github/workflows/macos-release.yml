@@ -56,7 +56,15 @@ jobs:
           else
             VERSION="${{ github.event.inputs.version }}"
           fi
+          BUILD_STAMP="$(TZ=Asia/Shanghai date +%Y%m%d%H%M)"
+          if [[ "$VERSION" == *+* ]]; then
+            ASSET_VERSION="${VERSION}.${BUILD_STAMP}"
+          else
+            ASSET_VERSION="${VERSION}+${BUILD_STAMP}"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_stamp=$BUILD_STAMP" >> "$GITHUB_OUTPUT"
+          echo "asset_version=$ASSET_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build DMG
         working-directory: macos
@@ -65,12 +73,19 @@ jobs:
           chmod +x scripts/generate-icons.swift
           ./build.sh "${{ steps.version.outputs.version }}"
 
+      - name: Stamp DMG filename
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ASSET_VERSION: ${{ steps.version.outputs.asset_version }}
+        run: |
+          mv "macos/dist/wand-v${VERSION}.dmg" "macos/dist/wand-v${ASSET_VERSION}.dmg"
+
       # 手动触发 / 任何情况下都上传为 artifact，方便直接在 Actions run 页面下载。
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wand-macos-dmg-${{ steps.version.outputs.version }}
-          path: macos/dist/wand-v${{ steps.version.outputs.version }}.dmg
+          name: wand-macos-dmg-${{ steps.version.outputs.asset_version }}
+          path: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
           if-no-files-found: error
 
       # 仅 tag push 时传到 Release（body 由 release-notes.yml 单点管理，这里只放文件）。
@@ -78,4 +93,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: macos/dist/wand-v${{ steps.version.outputs.version }}.dmg
+          files: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg

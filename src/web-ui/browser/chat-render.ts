@@ -630,9 +630,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           fullRenderChat();
         }
 
-        // 流式 / 全量重渲染后，把所有折叠态 subagent-panel 的 body 滚到底，让
-        // 用户在小窗口里能持续看到最新到达的工具卡 / 文本，而不是停在最上面。
-        // 展开态有自己的 scrollTop=0 逻辑（applyExpandedState），这里不会动它。
+        // 子 Agent 现在是固定高度角色窗口。保留这个后处理入口给未来的 live-tail
+        // 跟随策略；默认不强制改 scrollTop，历史窗口打开时从任务开头读起。
         snapCollapsedSubagentPanelsToBottom(chatMessages);
 
         // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
@@ -1716,14 +1715,18 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var agentType = sub.agentType || "";
         if (agentType && SUBAGENT_NAME_MAP[agentType]) return SUBAGENT_NAME_MAP[agentType];
         if (agentType) return agentType;
-        var tail = (sub.taskId || "").slice(-4) || (getActiveLang() === "English" ? "?" : "未知");
-        return t("subagent.helper_fallback_prefix") + tail;
+        return getActiveLang() === "English" ? "Subtask" : "子任务";
+      }
+      export function catPrefixedSubagentName(name) {
+        var text = String(name || "").trim();
+        if (!text) return "猫猫子 Agent";
+        return text.indexOf("猫猫") === 0 ? text : "猫猫 " + text;
       }
       export function getSubagentDisplayName(sub) {
         var base = getSubagentBaseName(sub);
         if (!base) return base;
         var suffix = (_subagentSuffixMap && sub && sub.taskId) ? _subagentSuffixMap.get(sub.taskId) : null;
-        return suffix ? base + suffix : base;
+        return catPrefixedSubagentName(suffix ? base + suffix : base);
       }
       export function getSubagentPalette(sub) {
         // 哈希优先用 agentType，让同类型 agent 跨 turn 颜色稳定；没有 agentType 时
@@ -1976,7 +1979,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
       export var TOOL_GROUP_LABELS = { Read: "读取", Glob: "搜索", Grep: "搜索", WebFetch: "抓取", WebSearch: "搜索", TodoRead: "待办" };
 
-      export function renderToolGroup(items, role, toolResults, messageKey) {
+      export function renderToolGroup(items, role, toolResults, messageKey, options?: any) {
+        var opts = options || {};
         // Count by tool name
         var counts = {};
         for (var k = 0; k < items.length; k++) {
@@ -2002,13 +2006,13 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var summaryText = parts.join(" · ");
         var groupKey = buildExpandKey("tool-group", [messageKey, items[0] && items[0].index, items.length]);
         var persistedExpanded = getPersistedExpandState(groupKey);
-        var shouldExpand = persistedExpanded === null ? getCardDefault("toolGroup") : persistedExpanded;
+        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? getCardDefault("toolGroup") : persistedExpanded);
 
         // Render each item's inline-tool card
         var innerHtml = "";
         for (var k = 0; k < items.length; k++) {
           try {
-            innerHtml += renderContentBlock(items[k].block, role, toolResults, items[k].index, messageKey);
+            innerHtml += renderContentBlock(items[k].block, role, toolResults, items[k].index, messageKey, opts);
           } catch (e) {
             innerHtml += '<div class="render-error">工具渲染失败</div>';
           }
@@ -2488,8 +2492,9 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
       // 渲染一段内的 blocks。独立 group consecutive tools，避免父/子 agent 的工具
       // 调用跨边界被合并；grp.index 偏移到原数组全局位置，保持 expand key 唯一。
-      export function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey) {
+      export function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey, options?: any) {
         var html = "";
+        var opts = options || {};
         try {
           var groups = groupConsecutiveTools(segmentBlocks);
           for (var g = 0; g < groups.length; g++) {
@@ -2500,9 +2505,9 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
                 for (var k = 0; k < grp.items.length; k++) {
                   shifted.push({ block: grp.items[k].block, index: grp.items[k].index + segmentFirstIndex });
                 }
-                html += renderToolGroup(shifted, role, toolResults, messageKey);
+                html += renderToolGroup(shifted, role, toolResults, messageKey, opts);
               } else {
-                html += renderContentBlock(grp.block, role, toolResults, grp.index + segmentFirstIndex, messageKey);
+                html += renderContentBlock(grp.block, role, toolResults, grp.index + segmentFirstIndex, messageKey, opts);
               }
             } catch (e) {
               html += '<div class="render-error">消息块渲染失败</div>';
@@ -2526,7 +2531,10 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var lastSubId = null;
         for (var si = 0; si < segments.length; si++) {
           var seg = segments[si];
-          var segHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey);
+          var segmentOptions = seg.subagent
+            ? { inSubagentPanel: true, forceExpandedToolBodies: true }
+            : {};
+          var segHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey, segmentOptions);
           // 段内所有 block 都被短路返空（典型场景：父段只剩一个空 thinking）时，
           // 跳过整段。否则会渲染出"只有头像没内容"的空气泡。
           if (!segHtml || !segHtml.trim()) continue;
@@ -2549,42 +2557,34 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         return html;
       }
 
-      // 渲染整段 subagent 输出为一个可折叠面板：
+      // 渲染整段 subagent 输出为一个固定高度角色窗口：
       //   ┌─ subagent-panel ──────────────────────────────────┐
-      //   │ [🐱] ↳ 勤劳初二 让 协作猫 帮忙：xxx     [展开 ▾] │  ← header (always visible)
+      //   │ [🐱] 猫猫审查猫 · Review changes        25 条内容 │  ← header
       //   ├───────────────────────────────────────────────────┤
       //   │ <tool 卡 1>                                       │
       //   │ <text>                                            │  ← body
-      //   │ <tool 卡 2>                                       │     默认 max-height 22em
+      //   │ <tool 卡 2>                                       │     固定高度 + 内部滚动
       //   │ <... 最终回复 ...>                                │     + 内部 overflow-y:auto
-      //   ├───────────────────────────────────────────────────┤
-      //   │                              [展开 ▾]            │  ← footer (always visible)
       //   └───────────────────────────────────────────────────┘
-      // 状态写在 .subagent-panel[data-expanded]，按 messageKey + taskId 持久化。
-      // 默认折叠（preview）；用户点头/尾按钮或头部标题条都能切。
       export function buildSubagentPanelHtml(seg, parentPersonaName, segHtml, messageKey, includeHandoff) {
         var sub = seg.subagent;
         var subPalette = getSubagentPalette(sub);
         var subName = getSubagentDisplayName(sub);
         var taskId = sub.taskId || "";
         var avatarSvg = buildPixelSvg(buildCatGrid(subPalette));
+        var itemCount = countRenderableSegmentBlocks(seg.blocks);
 
         var titleHtml;
         if (includeHandoff) {
-          // 用 i18n 模板拼 handoff title。{parent}/{sub} 用占位符避免在调用点拼字符串导致
-          // 顺序错乱（中文 "X 让 Y 帮忙"，英文 "X asked Y for help"，词序完全不同）。
-          // tag 是单独的彩色 chip，所以把模板里的 {sub} 替换成空 span 占位，然后再 splice
-          // 进 <strong> + chip——保证模板可读、调用点不脏。
-          var subInlineHtml = '<strong class="subagent-panel-name">' + escapeHtml(subName) + '</strong>' +
-            '<span class="subagent-panel-tag" title="' + escapeHtml(t("subagent.tag_title")) + '">' + escapeHtml(t("subagent.tag")) + '</span>';
           var hasDesc = !!(sub.taskDescription && String(sub.taskDescription).trim());
-          var handoffTpl = hasDesc ? t("subagent.handoff.with_desc", { parent: escapeHtml(parentPersonaName), sub: subInlineHtml })
-                                   : t("subagent.handoff", { parent: escapeHtml(parentPersonaName), sub: subInlineHtml });
           var descSpan = hasDesc
             ? '<span class="subagent-panel-task-desc">' + escapeHtml(sub.taskDescription) + '</span>'
-            : '';
-          titleHtml = '<span class="subagent-panel-arrow" aria-hidden="true">↳</span>' +
-            '<span class="subagent-panel-attribution">' + handoffTpl + descSpan + '</span>';
+            : '<span class="subagent-panel-task-desc">' + escapeHtml(t("subagent.continued")) + '</span>';
+          titleHtml = '<span class="subagent-panel-attribution">' +
+            '<strong class="subagent-panel-name">' + escapeHtml(subName) + '</strong>' +
+            '<span class="subagent-panel-tag" title="' + escapeHtml(t("subagent.tag_title")) + '">' + escapeHtml(t("subagent.tag")) + '</span>' +
+            descSpan +
+          '</span>';
         } else {
           titleHtml = '<span class="subagent-panel-attribution">' +
             '<strong class="subagent-panel-name">' + escapeHtml(subName) + '</strong>' +
@@ -2593,39 +2593,34 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         }
 
         var expandKey = buildExpandKey("subagent-panel", [messageKey, taskId]);
-        var persisted = getPersistedExpandState(expandKey);
-        var expanded = persisted === null ? false : !!persisted;
-
-        function toggleBtnHtml(position) {
-          return '<button type="button" class="subagent-panel-toggle" ' +
-                          'data-position="' + position + '" ' +
-                          'onclick="__subagentPanelToggle(event, this)" ' +
-                          'aria-expanded="' + (expanded ? "true" : "false") + '" ' +
-                          'aria-label="' + escapeHtml(expanded ? t("ui.collapse_panel_aria") : t("ui.expand_panel_aria")) + '">' +
-              '<span class="subagent-panel-toggle-label">' + escapeHtml(expanded ? t("ui.collapse") : t("ui.expand")) + '</span>' +
-              '<svg class="subagent-panel-toggle-icon" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">' +
-                '<path d="M2.5 3.75L5 6.25L7.5 3.75" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>' +
-              '</svg>' +
-            '</button>';
-        }
 
         return '<div class="subagent-panel" ' +
                     'data-expand-kind="subagent-panel" ' +
                     'data-expand-key="' + escapeHtml(expandKey) + '" ' +
                     'data-agent-id="' + escapeHtml(taskId) + '" ' +
-                    'data-expanded="' + (expanded ? "true" : "false") + '" ' +
+                    'data-expanded="true" ' +
                     'style="--agent-color:' + subPalette.primary + '">' +
-          '<div class="subagent-panel-header" onclick="__subagentPanelToggle(event, this)" role="button" tabindex="0" aria-label="' + escapeHtml(t("subagent.title_aria")) + '">' +
+          '<div class="subagent-panel-header" aria-label="' + escapeHtml(t("subagent.title_aria")) + '">' +
             '<span class="subagent-panel-avatar" aria-hidden="true">' + avatarSvg + '</span>' +
             titleHtml +
-            toggleBtnHtml("top") +
+            '<span class="subagent-panel-count">' + escapeHtml(itemCount + " 条内容") + '</span>' +
           '</div>' +
           '<div class="subagent-panel-body">' + segHtml + '</div>' +
-          '<div class="subagent-panel-footer">' +
-            '<span class="subagent-panel-footer-hint" aria-hidden="true">— ' + escapeHtml(subName) + ' —</span>' +
-            toggleBtnHtml("bottom") +
-          '</div>' +
         '</div>';
+      }
+
+      export function countRenderableSegmentBlocks(blocks) {
+        if (!Array.isArray(blocks)) return 0;
+        var count = 0;
+        for (var i = 0; i < blocks.length; i++) {
+          var block = blocks[i];
+          if (!block || !block.type) continue;
+          if (block.type === "tool_result") continue;
+          if (block.type === "text" && !String(block.text || "").trim() && !block.__processing) continue;
+          if (block.type === "thinking" && !String(block.thinking || "").trim()) continue;
+          count++;
+        }
+        return Math.max(1, count);
       }
 
       export function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
@@ -2741,12 +2736,13 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         return wrap + body;
       }
 
-      export function renderContentBlock(block, role, toolResults, index, messageKey) {
+      export function renderContentBlock(block, role, toolResults, index, messageKey, options?: any) {
+        var opts = options || {};
         if (!block || !block.type) return "";
 
-        // Task/Agent tool_use 自带 __subagent.taskId === block.id（后端自盖章）：
-        // 不画工具卡片，由 handoff 行表达"派遣"语义。
-        if (block.type === "tool_use" && block.__subagent && block.__subagent.taskId === block.id) {
+        // 普通父段里仍用角色窗口表达 Task/Agent；进入子 Agent 窗口后，
+        // 工具卡本身要显示出来，用户才能看见这个子任务在做什么。
+        if (!opts.inSubagentPanel && block.type === "tool_use" && block.__subagent && block.__subagent.taskId === block.id) {
           return "";
         }
         // 只有父 Task 的 tool_result（taskId === tool_use_id）走 reply bubble；
@@ -2789,7 +2785,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
           case "tool_use":
             var toolResult = pickToolResultForDisplay(toolResults, block.id);
-            var rendered = renderToolUseCard(block, toolResult, index, messageKey);
+            var rendered = renderToolUseCard(block, toolResult, index, messageKey, opts);
             if (hasRecoveredToolNoise(toolResults, block.id)) {
               rendered = renderRecoveredToolHint(block.name || "工具") + rendered;
             }
@@ -2819,7 +2815,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         }
       }
 
-      export function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index) {
+      export function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index, options?: any) {
+        var opts = options || {};
         var toolId = block.id || "tool-" + toolName;
         var expandKey = buildExpandKey("inline-tool", [messageKey, toolId || index, index]);
         var persistedExpanded = getPersistedExpandState(expandKey);
@@ -2893,7 +2890,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var fullResult = resultContent;
 
         var expandedHtml = "";
-        var shouldExpand = persistedExpanded === null ? getCardDefault("inlineTools") : persistedExpanded;
+        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? getCardDefault("inlineTools") : persistedExpanded);
         if (hasResult) {
           expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + '</div>' +
@@ -2953,7 +2950,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
       }
 
       // Terminal-style display for Bash commands
-      export function renderTerminalTool(block, toolResult, toolName, messageKey, index) {
+      export function renderTerminalTool(block, toolResult, toolName, messageKey, index, options?: any) {
+        var opts = options || {};
         var inputData = block.input || {};
         var command = inputData.command || inputData.cmd || "";
         var resultContent = extractToolResultText(toolResult && toolResult.content);
@@ -2997,7 +2995,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
         // Show command preview in header (truncate long commands)
         var cmdPreview = command.length > 80 ? command.slice(0, 77) + "…" : command;
-        var shouldExpand = persistedExpanded === null ? getCardDefault("terminal") : persistedExpanded;
+        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? getCardDefault("terminal") : persistedExpanded);
 
         var termTruncated = toolResult && toolResult._truncated === true;
         var termTruncAttrs = termTruncated
@@ -3034,7 +3032,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         return "";
       }
 
-      export function renderDiffTool(block, toolResult, toolName, messageKey, index) {
+      export function renderDiffTool(block, toolResult, toolName, messageKey, index, options?: any) {
+        var opts = options || {};
         var inputData = block.input || {};
         var path = inputData.file_path || inputData.path || "";
         var fileName = path.split("/").pop() || path;
@@ -3087,7 +3086,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var expandKey = buildExpandKey("diff", [messageKey, toolId || index, index]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
-        var shouldExpand = persistedExpanded === null ? (statusClass === "diff-pending" || cardDefaultExpand) : persistedExpanded;
+        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? (statusClass === "diff-pending" || cardDefaultExpand) : persistedExpanded);
         var collapsedClass = shouldExpand ? "" : " collapsed";
 
         // If only one column has content, show full width
@@ -3118,7 +3117,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         return '<pre class="inline-tool-result-text" style="max-height: 300px; overflow-y: auto;">' + escapeHtml(content) + '</pre>';
       }
 
-      export function renderToolUseCard(block, toolResult, index, messageKey) {
+      export function renderToolUseCard(block, toolResult, index, messageKey, options?: any) {
+        var opts = options || {};
         var toolName = block.name || "unknown";
         var toolId = block.id || "tool-" + toolName + "-" + (typeof index === "number" ? index : 0);
         var fileInfo = extractFileInfo(toolName, block.input);
@@ -3126,17 +3126,17 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // ── Lightweight inline tools: Read, Glob, Grep, WebFetch, WebSearch, TodoRead
         if (toolName === "Read" || toolName === "Glob" || toolName === "Grep" ||
             toolName === "WebFetch" || toolName === "WebSearch" || toolName === "TodoRead") {
-          return renderInlineTool(block, toolResult, toolName, fileInfo, "", messageKey, index);
+          return renderInlineTool(block, toolResult, toolName, fileInfo, "", messageKey, index, opts);
         }
 
         // ── Terminal-style: Bash
         if (toolName === "Bash") {
-          return renderTerminalTool(block, toolResult, toolName, messageKey, index);
+          return renderTerminalTool(block, toolResult, toolName, messageKey, index, opts);
         }
 
         // ── Diff-style: Edit, Write, MultiEdit
         if (toolName === "Edit" || toolName === "Write" || toolName === "MultiEdit") {
-          return renderDiffTool(block, toolResult, toolName, messageKey, index);
+          return renderDiffTool(block, toolResult, toolName, messageKey, index, opts);
         }
 
         // ── AskUserQuestion tool — special card with batch submit
@@ -3231,7 +3231,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
             // Expand state: default expanded when unanswered, collapsed when answered
             var askExpandKey = buildExpandKey("tool-card", [messageKey, toolId]);
             var askPersisted = getPersistedExpandState(askExpandKey);
-            var askShouldExpand = askPersisted === null ? !isAnswered : askPersisted;
+            var askShouldExpand = opts.forceExpandedToolBodies ? true : (askPersisted === null ? !isAnswered : askPersisted);
             var askCollapsed = askShouldExpand ? "" : " collapsed";
             var answeredClass = isAnswered ? " ask-user-answered" : "";
 
@@ -3296,7 +3296,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
-        var shouldExpand = persistedExpanded === null ? (statusClass === "loading" || cardDefaultExpand) : persistedExpanded;
+        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? (statusClass === "loading" || cardDefaultExpand) : persistedExpanded);
         var tcTruncated = toolResult && toolResult._truncated === true;
         var collapsedClass = shouldExpand ? "" : " collapsed";
         var toggleHtml = '<span class="tool-use-toggle">▼</span>';

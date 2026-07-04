@@ -6609,13 +6609,11 @@
     }
     var panel = target && target.closest ? target.closest(".subagent-panel") : null;
     if (!panel) return;
-    var expanded = panel.getAttribute("data-expanded") === "true";
-    applyExpandedState(panel, "subagent-panel", !expanded);
-    persistElementExpandState(panel, "subagent-panel");
+    panel.setAttribute("data-expanded", "true");
   };
   function snapCollapsedSubagentPanelsToBottom2(container) {
     if (!container) return;
-    var panels = container.querySelectorAll('.subagent-panel[data-expanded="false"]');
+    var panels = container.querySelectorAll('.subagent-panel[data-follow-tail="true"]');
     for (var i = 0; i < panels.length; i++) {
       var body = panels[i].querySelector(".subagent-panel-body");
       if (!body) continue;
@@ -12819,14 +12817,18 @@
     var agentType = sub.agentType || "";
     if (agentType && SUBAGENT_NAME_MAP[agentType]) return SUBAGENT_NAME_MAP[agentType];
     if (agentType) return agentType;
-    var tail = (sub.taskId || "").slice(-4) || (getActiveLang() === "English" ? "?" : "\u672A\u77E5");
-    return t2("subagent.helper_fallback_prefix") + tail;
+    return getActiveLang() === "English" ? "Subtask" : "\u5B50\u4EFB\u52A1";
+  }
+  function catPrefixedSubagentName(name) {
+    var text = String(name || "").trim();
+    if (!text) return "\u732B\u732B\u5B50 Agent";
+    return text.indexOf("\u732B\u732B") === 0 ? text : "\u732B\u732B " + text;
   }
   function getSubagentDisplayName(sub) {
     var base = getSubagentBaseName(sub);
     if (!base) return base;
     var suffix = _subagentSuffixMap && sub && sub.taskId ? _subagentSuffixMap.get(sub.taskId) : null;
-    return suffix ? base + suffix : base;
+    return catPrefixedSubagentName(suffix ? base + suffix : base);
   }
   function getSubagentPalette(sub) {
     var seed = sub && (sub.agentType || sub.taskId) || "subagent";
@@ -13002,7 +13004,8 @@
     return groups;
   }
   var TOOL_GROUP_LABELS = { Read: "\u8BFB\u53D6", Glob: "\u641C\u7D22", Grep: "\u641C\u7D22", WebFetch: "\u6293\u53D6", WebSearch: "\u641C\u7D22", TodoRead: "\u5F85\u529E" };
-  function renderToolGroup(items, role, toolResults, messageKey) {
+  function renderToolGroup(items, role, toolResults, messageKey, options) {
+    var opts = options || {};
     var counts = {};
     for (var k = 0; k < items.length; k++) {
       var n = items[k].block.name;
@@ -13028,11 +13031,11 @@
     var summaryText = parts.join(" \xB7 ");
     var groupKey = buildExpandKey("tool-group", [messageKey, items[0] && items[0].index, items.length]);
     var persistedExpanded = getPersistedExpandState(groupKey);
-    var shouldExpand = persistedExpanded === null ? getCardDefault("toolGroup") : persistedExpanded;
+    var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? getCardDefault("toolGroup") : persistedExpanded;
     var innerHtml = "";
     for (var k = 0; k < items.length; k++) {
       try {
-        innerHtml += renderContentBlock(items[k].block, role, toolResults, items[k].index, messageKey);
+        innerHtml += renderContentBlock(items[k].block, role, toolResults, items[k].index, messageKey, opts);
       } catch (e) {
         innerHtml += '<div class="render-error">\u5DE5\u5177\u6E32\u67D3\u5931\u8D25</div>';
       }
@@ -13415,8 +13418,9 @@
     }
     return segs;
   }
-  function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey) {
+  function buildSegmentBlocksHtml(segmentBlocks, segmentFirstIndex, role, toolResults, messageKey, options) {
     var html = "";
+    var opts = options || {};
     try {
       var groups = groupConsecutiveTools(segmentBlocks);
       for (var g = 0; g < groups.length; g++) {
@@ -13427,9 +13431,9 @@
             for (var k = 0; k < grp.items.length; k++) {
               shifted.push({ block: grp.items[k].block, index: grp.items[k].index + segmentFirstIndex });
             }
-            html += renderToolGroup(shifted, role, toolResults, messageKey);
+            html += renderToolGroup(shifted, role, toolResults, messageKey, opts);
           } else {
-            html += renderContentBlock(grp.block, role, toolResults, grp.index + segmentFirstIndex, messageKey);
+            html += renderContentBlock(grp.block, role, toolResults, grp.index + segmentFirstIndex, messageKey, opts);
           }
         } catch (e) {
           html += '<div class="render-error">\u6D88\u606F\u5757\u6E32\u67D3\u5931\u8D25</div>';
@@ -13447,7 +13451,8 @@
     var lastSubId = null;
     for (var si = 0; si < segments.length; si++) {
       var seg = segments[si];
-      var segHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey);
+      var segmentOptions = seg.subagent ? { inSubagentPanel: true, forceExpandedToolBodies: true } : {};
+      var segHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey, segmentOptions);
       if (!segHtml || !segHtml.trim()) continue;
       if (seg.subagent) {
         var includeHandoff = showHandoff && lastSubId !== seg.subagent.taskId;
@@ -13466,23 +13471,30 @@
     var subName = getSubagentDisplayName(sub);
     var taskId = sub.taskId || "";
     var avatarSvg = buildPixelSvg(buildCatGrid(subPalette));
+    var itemCount = countRenderableSegmentBlocks(seg.blocks);
     var titleHtml;
     if (includeHandoff) {
-      var subInlineHtml = '<strong class="subagent-panel-name">' + escapeHtml2(subName) + '</strong><span class="subagent-panel-tag" title="' + escapeHtml2(t2("subagent.tag_title")) + '">' + escapeHtml2(t2("subagent.tag")) + "</span>";
       var hasDesc = !!(sub.taskDescription && String(sub.taskDescription).trim());
-      var handoffTpl = hasDesc ? t2("subagent.handoff.with_desc", { parent: escapeHtml2(parentPersonaName), sub: subInlineHtml }) : t2("subagent.handoff", { parent: escapeHtml2(parentPersonaName), sub: subInlineHtml });
-      var descSpan = hasDesc ? '<span class="subagent-panel-task-desc">' + escapeHtml2(sub.taskDescription) + "</span>" : "";
-      titleHtml = '<span class="subagent-panel-arrow" aria-hidden="true">\u21B3</span><span class="subagent-panel-attribution">' + handoffTpl + descSpan + "</span>";
+      var descSpan = hasDesc ? '<span class="subagent-panel-task-desc">' + escapeHtml2(sub.taskDescription) + "</span>" : '<span class="subagent-panel-task-desc">' + escapeHtml2(t2("subagent.continued")) + "</span>";
+      titleHtml = '<span class="subagent-panel-attribution"><strong class="subagent-panel-name">' + escapeHtml2(subName) + '</strong><span class="subagent-panel-tag" title="' + escapeHtml2(t2("subagent.tag_title")) + '">' + escapeHtml2(t2("subagent.tag")) + "</span>" + descSpan + "</span>";
     } else {
       titleHtml = '<span class="subagent-panel-attribution"><strong class="subagent-panel-name">' + escapeHtml2(subName) + '</strong><span class="subagent-panel-task-desc"> ' + escapeHtml2(t2("subagent.continued")) + "</span></span>";
     }
     var expandKey = buildExpandKey("subagent-panel", [messageKey, taskId]);
-    var persisted = getPersistedExpandState(expandKey);
-    var expanded = persisted === null ? false : !!persisted;
-    function toggleBtnHtml(position) {
-      return '<button type="button" class="subagent-panel-toggle" data-position="' + position + '" onclick="__subagentPanelToggle(event, this)" aria-expanded="' + (expanded ? "true" : "false") + '" aria-label="' + escapeHtml2(expanded ? t2("ui.collapse_panel_aria") : t2("ui.expand_panel_aria")) + '"><span class="subagent-panel-toggle-label">' + escapeHtml2(expanded ? t2("ui.collapse") : t2("ui.expand")) + '</span><svg class="subagent-panel-toggle-icon" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M2.5 3.75L5 6.25L7.5 3.75" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>';
+    return '<div class="subagent-panel" data-expand-kind="subagent-panel" data-expand-key="' + escapeHtml2(expandKey) + '" data-agent-id="' + escapeHtml2(taskId) + '" data-expanded="true" style="--agent-color:' + subPalette.primary + '"><div class="subagent-panel-header" aria-label="' + escapeHtml2(t2("subagent.title_aria")) + '"><span class="subagent-panel-avatar" aria-hidden="true">' + avatarSvg + "</span>" + titleHtml + '<span class="subagent-panel-count">' + escapeHtml2(itemCount + " \u6761\u5185\u5BB9") + '</span></div><div class="subagent-panel-body">' + segHtml + "</div></div>";
+  }
+  function countRenderableSegmentBlocks(blocks) {
+    if (!Array.isArray(blocks)) return 0;
+    var count = 0;
+    for (var i = 0; i < blocks.length; i++) {
+      var block = blocks[i];
+      if (!block || !block.type) continue;
+      if (block.type === "tool_result") continue;
+      if (block.type === "text" && !String(block.text || "").trim() && !block.__processing) continue;
+      if (block.type === "thinking" && !String(block.thinking || "").trim()) continue;
+      count++;
     }
-    return '<div class="subagent-panel" data-expand-kind="subagent-panel" data-expand-key="' + escapeHtml2(expandKey) + '" data-agent-id="' + escapeHtml2(taskId) + '" data-expanded="' + (expanded ? "true" : "false") + '" style="--agent-color:' + subPalette.primary + '"><div class="subagent-panel-header" onclick="__subagentPanelToggle(event, this)" role="button" tabindex="0" aria-label="' + escapeHtml2(t2("subagent.title_aria")) + '"><span class="subagent-panel-avatar" aria-hidden="true">' + avatarSvg + "</span>" + titleHtml + toggleBtnHtml("top") + '</div><div class="subagent-panel-body">' + segHtml + '</div><div class="subagent-panel-footer"><span class="subagent-panel-footer-hint" aria-hidden="true">\u2014 ' + escapeHtml2(subName) + " \u2014</span>" + toggleBtnHtml("bottom") + "</div></div>";
+    return Math.max(1, count);
   }
   function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
     var role = msg.role;
@@ -13551,9 +13563,10 @@
     var body = rest.trim() ? '<div class="user-attachment-text">' + escapeHtml2(rest) + "</div>" : "";
     return wrap + body;
   }
-  function renderContentBlock(block, role, toolResults, index, messageKey) {
+  function renderContentBlock(block, role, toolResults, index, messageKey, options) {
+    var opts = options || {};
     if (!block || !block.type) return "";
-    if (block.type === "tool_use" && block.__subagent && block.__subagent.taskId === block.id) {
+    if (!opts.inSubagentPanel && block.type === "tool_use" && block.__subagent && block.__subagent.taskId === block.id) {
       return "";
     }
     if (block.type === "tool_result" && block.__subagent && block.__subagent.taskId === block.tool_use_id) {
@@ -13579,7 +13592,7 @@
         return '<div class="thinking-inline ' + (thinkingExpanded ? "expanded" : "collapsed") + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml2(thinkingKey) + '" data-thinking="' + escapeHtml2(thinkingText) + '" onclick="__thinkingToggle(this)"><span class="thinking-inline-icon">\u29BF</span><span class="thinking-inline-preview">' + escapeHtml2(thinkingExpanded ? thinkingText : preview) + '</span><span class="thinking-inline-action">' + (thinkingExpanded ? "\u6536\u8D77" : "\u5C55\u5F00") + "</span></div>";
       case "tool_use":
         var toolResult = pickToolResultForDisplay(toolResults, block.id);
-        var rendered = renderToolUseCard(block, toolResult, index, messageKey);
+        var rendered = renderToolUseCard(block, toolResult, index, messageKey, opts);
         if (hasRecoveredToolNoise(toolResults, block.id)) {
           rendered = renderRecoveredToolHint(block.name || "\u5DE5\u5177") + rendered;
         }
@@ -13597,7 +13610,8 @@
         return `<div class="unknown-block collapsed" onclick="this.classList.toggle('collapsed')"><div class="unknown-block-header"><span class="unknown-block-icon">?</span><span class="unknown-block-label">\u672A\u8BC6\u522B\u7684\u5185\u5BB9\u5757\uFF1A` + escapeHtml2(unknownType) + '</span><span class="unknown-block-toggle">\u25BC</span></div><pre class="unknown-block-body">' + escapeHtml2(unknownJson) + "</pre></div>";
     }
   }
-  function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index) {
+  function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index, options) {
+    var opts = options || {};
     var toolId = block.id || "tool-" + toolName;
     var expandKey = buildExpandKey("inline-tool", [messageKey, toolId || index, index]);
     var persistedExpanded = getPersistedExpandState(expandKey);
@@ -13663,7 +13677,7 @@
     var previewDataAttr = escapeHtml2(preview);
     var fullResult = resultContent;
     var expandedHtml = "";
-    var shouldExpand = persistedExpanded === null ? getCardDefault("inlineTools") : persistedExpanded;
+    var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? getCardDefault("inlineTools") : persistedExpanded;
     if (hasResult) {
       expandedHtml = '<div class="inline-tool-expanded" style="display: ' + (shouldExpand ? "block" : "none") + ';"><div class="inline-tool-result">' + formatInlineResult(resultContent, toolName) + "</div></div>";
     } else if (isError) {
@@ -13686,7 +13700,8 @@
     var truncatedAttrs = isTruncated ? 'data-truncated="true" data-tool-use-id="' + escapeHtml2(block.id || "") + '" ' : "";
     return '<div class="inline-tool ' + extraClass + '" data-expand-kind="inline-tool" data-expand-key="' + escapeHtml2(expandKey) + '" data-result="' + escapeHtml2(fullResult) + '" data-preview="' + previewDataAttr + '" data-status="' + (isError ? "error" : hasResult ? "done" : "pending") + '" ' + truncatedAttrs + 'onclick="__inlineToolToggle(this)"><div class="inline-tool-row"><span class="inline-tool-status">' + statusIcon + "</span>" + icon + '<span class="inline-tool-title">' + escapeHtml2(title) + "</span>" + extraInfoHtml + "</div>" + imageHtml + expandedHtml + "</div>";
   }
-  function renderTerminalTool(block, toolResult, toolName, messageKey, index) {
+  function renderTerminalTool(block, toolResult, toolName, messageKey, index, options) {
+    var opts = options || {};
     var inputData = block.input || {};
     var command = inputData.command || inputData.cmd || "";
     var resultContent = extractToolResultText(toolResult && toolResult.content);
@@ -13723,7 +13738,7 @@
       exitCodeHtml = '<div class="term-exit ' + codeClass + '">exit ' + exitCode + "</div>";
     }
     var cmdPreview = command.length > 80 ? command.slice(0, 77) + "\u2026" : command;
-    var shouldExpand = persistedExpanded === null ? getCardDefault("terminal") : persistedExpanded;
+    var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? getCardDefault("terminal") : persistedExpanded;
     var termTruncated = toolResult && toolResult._truncated === true;
     var termTruncAttrs = termTruncated ? ' data-truncated="true" data-tool-use-id="' + escapeHtml2(block.id || "") + '"' : "";
     return '<div class="inline-terminal" data-expand-kind="terminal" data-expand-key="' + escapeHtml2(expandKey) + '" data-expanded="' + (shouldExpand ? "true" : "false") + '"' + termTruncAttrs + '><div class="term-header" onclick="__terminalExpand(this)">' + statusDot + '<span class="term-cmd-preview"><span class="term-prompt">$</span> ' + escapeHtml2(cmdPreview) + '</span><span class="term-toggle-icon">' + (shouldExpand ? "\u25BC" : "\u25B6") + '</span></div><div class="term-body" style="display:' + (shouldExpand ? "block" : "none") + ';"><div class="term-command"><span class="term-prompt">$</span> ' + cmdDisplay + "</div>" + (outputHtml ? '<div class="term-output">' + outputHtml + "</div>" : "") + exitCodeHtml + "</div></div>";
@@ -13744,7 +13759,8 @@
     }
     return "";
   }
-  function renderDiffTool(block, toolResult, toolName, messageKey, index) {
+  function renderDiffTool(block, toolResult, toolName, messageKey, index, options) {
+    var opts = options || {};
     var inputData = block.input || {};
     var path = inputData.file_path || inputData.path || "";
     var fileName = path.split("/").pop() || path;
@@ -13786,7 +13802,7 @@
     var expandKey = buildExpandKey("diff", [messageKey, toolId || index, index]);
     var persistedExpanded = getPersistedExpandState(expandKey);
     var cardDefaultExpand = getCardDefault("editCards");
-    var shouldExpand = persistedExpanded === null ? statusClass === "diff-pending" || cardDefaultExpand : persistedExpanded;
+    var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? statusClass === "diff-pending" || cardDefaultExpand : persistedExpanded;
     var collapsedClass = shouldExpand ? "" : " collapsed";
     var bothCols = leftCol && rightCol;
     var colClass = bothCols ? "diff-col-half" : "diff-col-full";
@@ -13796,18 +13812,19 @@
     if (!content) return '<span class="inline-tool-empty">\u65E0\u8F93\u51FA</span>';
     return '<pre class="inline-tool-result-text" style="max-height: 300px; overflow-y: auto;">' + escapeHtml2(content) + "</pre>";
   }
-  function renderToolUseCard(block, toolResult, index, messageKey) {
+  function renderToolUseCard(block, toolResult, index, messageKey, options) {
+    var opts = options || {};
     var toolName = block.name || "unknown";
     var toolId = block.id || "tool-" + toolName + "-" + (typeof index === "number" ? index : 0);
     var fileInfo = extractFileInfo(toolName, block.input);
     if (toolName === "Read" || toolName === "Glob" || toolName === "Grep" || toolName === "WebFetch" || toolName === "WebSearch" || toolName === "TodoRead") {
-      return renderInlineTool(block, toolResult, toolName, fileInfo, "", messageKey, index);
+      return renderInlineTool(block, toolResult, toolName, fileInfo, "", messageKey, index, opts);
     }
     if (toolName === "Bash") {
-      return renderTerminalTool(block, toolResult, toolName, messageKey, index);
+      return renderTerminalTool(block, toolResult, toolName, messageKey, index, opts);
     }
     if (toolName === "Edit" || toolName === "Write" || toolName === "MultiEdit") {
-      return renderDiffTool(block, toolResult, toolName, messageKey, index);
+      return renderDiffTool(block, toolResult, toolName, messageKey, index, opts);
     }
     if (toolName === "AskUserQuestion" && block.input && block.input.questions) {
       var questions = block.input.questions;
@@ -13874,7 +13891,7 @@
         }
         var askExpandKey = buildExpandKey("tool-card", [messageKey, toolId]);
         var askPersisted = getPersistedExpandState(askExpandKey);
-        var askShouldExpand = askPersisted === null ? !isAnswered : askPersisted;
+        var askShouldExpand = opts.forceExpandedToolBodies ? true : askPersisted === null ? !isAnswered : askPersisted;
         var askCollapsed = askShouldExpand ? "" : " collapsed";
         var answeredClass = isAnswered ? " ask-user-answered" : "";
         return '<div class="tool-use-card ask-user' + answeredClass + askCollapsed + '" data-tool-use-id="' + escapeHtml2(toolId) + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml2(askExpandKey) + '"><div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)"><span class="tool-use-icon">' + (isAnswered ? "\u2713" : "?") + '</span><span class="tool-use-name">\u63D0\u95EE</span>' + headerSummary + answeredSummary + '<span class="tool-use-toggle">\u25BC</span></div><div class="tool-use-body ask-user-body">' + questionsHtml + actionsHtml + "</div></div>";
@@ -13919,7 +13936,7 @@
     var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
     var persistedExpanded = getPersistedExpandState(expandKey);
     var cardDefaultExpand = getCardDefault("editCards");
-    var shouldExpand = persistedExpanded === null ? statusClass === "loading" || cardDefaultExpand : persistedExpanded;
+    var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? statusClass === "loading" || cardDefaultExpand : persistedExpanded;
     var tcTruncated = toolResult && toolResult._truncated === true;
     var collapsedClass = shouldExpand ? "" : " collapsed";
     var toggleHtml = '<span class="tool-use-toggle">\u25BC</span>';

@@ -3,8 +3,8 @@
  * 避免各处各写一份比较/提取逻辑导致 debug.MMDDHHMM 后缀排序不一致。
  */
 
-/** 从任意文本中提取 X.Y.Z[-/+后缀] 形式的版本号（带捕获组）。 */
-export const SEMVER_PATTERN = /(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)/;
+/** 从任意文本中提取 X.Y.Z[-prerelease][+build] 形式的版本号（带捕获组）。 */
+export const SEMVER_PATTERN = /(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?)/;
 
 /** 提取文本中的第一个语义化版本号，没有则返回 null。 */
 export function extractSemver(text: string): string | null {
@@ -20,14 +20,8 @@ export function extractSemver(text: string): string | null {
  *   贴近标准 semver，避免 debug.MMDDHHMM 后缀因纯字典序而跨月/跨年排反。
  */
 export function compareSemver(a: string, b: string): number {
-  const parse = (v: string) => {
-    const [main, ...rest] = v.replace(/^v/, "").split("-");
-    const pre = rest.join("-");
-    const mainParts = main.split(".").map((n) => Number(n) || 0);
-    return { mainParts, pre };
-  };
-  const pa = parse(a);
-  const pb = parse(b);
+  const pa = parseSemverLike(a);
+  const pb = parseSemverLike(b);
   for (let i = 0; i < 3; i++) {
     const diff = (pa.mainParts[i] || 0) - (pb.mainParts[i] || 0);
     if (diff !== 0) return diff;
@@ -80,14 +74,8 @@ function comparePrereleaseSegments(preA: string, preB: string): number {
  *   系统允许互装，比较结果只用于「是否提示更新」。
  */
 export function compareApkInstallOrder(a: string, b: string): number {
-  const parse = (v: string) => {
-    const [main, ...rest] = v.replace(/^v/, "").split("-");
-    const pre = rest.join("-");
-    const mainParts = main.split(".").map((n) => Number(n) || 0);
-    return { mainParts, pre, isDebug: pre.startsWith("debug") };
-  };
-  const pa = parse(a);
-  const pb = parse(b);
+  const pa = parseSemverLike(a);
+  const pb = parseSemverLike(b);
   for (let i = 0; i < 3; i++) {
     const diff = (pa.mainParts[i] || 0) - (pb.mainParts[i] || 0);
     if (diff !== 0) return diff;
@@ -95,4 +83,12 @@ export function compareApkInstallOrder(a: string, b: string): number {
   if (pa.isDebug !== pb.isDebug) return pa.isDebug ? 1 : -1;
   if (pa.isDebug && pb.isDebug) return comparePrereleaseSegments(pa.pre, pb.pre);
   return 0;
+}
+
+function parseSemverLike(v: string): { mainParts: number[]; pre: string; isDebug: boolean } {
+  const withoutBuild = v.trim().replace(/^v/, "").split("+")[0] ?? "";
+  const [main, ...rest] = withoutBuild.split("-");
+  const pre = rest.join("-");
+  const mainParts = main.split(".").map((n) => Number(n) || 0);
+  return { mainParts, pre, isDebug: pre.startsWith("debug") };
 }
