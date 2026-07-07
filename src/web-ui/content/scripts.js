@@ -18346,6 +18346,9 @@
       if (/WandPlatform\/iOS/.test(ua)) {
         document.documentElement.classList.add("is-wand-ios");
       }
+      if (/WandPlatform\/Android/.test(ua)) {
+        document.documentElement.classList.add("is-wand-android");
+      }
     } catch (e) {
     }
     try {

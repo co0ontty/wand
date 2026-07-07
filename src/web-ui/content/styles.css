@@ -15759,4 +15759,665 @@
       border-color: var(--accent);
     }
 
+    /* ===== Layout refinement: list rows and detail headers ===== */
+    .session-item-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      column-gap: 8px;
+      min-height: 40px;
+      width: 100%;
+    }
+
+    .session-item-row:has(> .session-manage-check) {
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+    }
+
+    .session-item-row > .session-manage-check {
+      grid-column: 1;
+      justify-self: center;
+      align-self: center;
+      width: 24px;
+      height: 24px;
+      margin-right: 0;
+    }
+
+    .session-item-row > .session-main {
+      grid-column: 1;
+      min-width: 0;
+      padding-right: 0;
+    }
+
+    .session-item-row:has(> .session-manage-check) > .session-main {
+      grid-column: 2;
+    }
+
+    .session-item-row > .session-actions {
+      grid-column: 2;
+      position: static;
+      transform: none;
+      justify-self: end;
+      align-self: center;
+      min-width: max-content;
+      min-height: 32px;
+    }
+
+    .session-item-row:has(> .session-manage-check) > .session-actions {
+      grid-column: 3;
+    }
+
+    .session-actions:empty {
+      display: none;
+    }
+
+    .session-title-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: baseline;
+      column-gap: 8px;
+      min-width: 0;
+    }
+
+    .session-main {
+      gap: 4px;
+    }
+
+    .session-command,
+    .session-title,
+    .claude-history-preview {
+      line-height: 1.35;
+    }
+
+    .session-meta {
+      min-width: 0;
+      gap: 6px;
+      flex-wrap: nowrap;
+      overflow: hidden;
+    }
+
+    .session-meta > span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-status,
+    .session-id,
+    .session-kind-badge,
+    .session-recovery-hint {
+      flex: 0 0 auto;
+    }
+
+    .session-action-btn {
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      min-height: 32px;
+      border-radius: 9px;
+    }
+
+    .session-manage-bar {
+      min-height: 38px;
+    }
+
+    .session-manage-actions .btn,
+    .session-manage-toggle {
+      min-height: 32px;
+      white-space: nowrap;
+    }
+
+    .file-tree {
+      --tree-meta-width: 56px;
+      --tree-status-width: 22px;
+    }
+
+    .tree-item {
+      display: grid;
+      grid-template-columns: 18px 20px minmax(0, 1fr) minmax(0, var(--tree-meta-width)) var(--tree-status-width);
+      align-items: center;
+      column-gap: 6px;
+      min-height: 32px;
+      padding: 4px 10px;
+      white-space: nowrap;
+      transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+    }
+
+    .tree-item:hover,
+    .tree-item:active {
+      transform: none;
+    }
+
+    .tree-toggle {
+      grid-column: 1;
+      width: 18px;
+      height: 18px;
+    }
+
+    .tree-icon {
+      grid-column: 2;
+      width: 20px;
+      height: 20px;
+      margin-right: 0;
+      justify-content: center;
+      font-size: 0.875rem;
+      line-height: 1;
+    }
+
+    .tree-name {
+      grid-column: 3;
+      min-width: 0;
+    }
+
+    .tree-meta {
+      grid-column: 4;
+      justify-self: end;
+      max-width: none;
+      margin-left: 0;
+      padding-left: 0;
+      text-align: right;
+    }
+
+    .git-status-badge {
+      grid-column: 5;
+      justify-self: end;
+      width: 20px;
+      min-width: 20px;
+      height: 20px;
+      padding: 0;
+      line-height: 20px;
+      border-radius: 6px;
+      box-sizing: border-box;
+    }
+
+    .tree-children.open {
+      margin-left: 13px;
+      padding-left: 5px;
+      border-left: 1px solid rgba(125, 91, 57, 0.09);
+    }
+
+    .tool-use-header {
+      display: grid;
+      grid-template-columns: 24px minmax(7ch, max-content) minmax(0, 1fr) auto;
+      align-items: center;
+      column-gap: 10px;
+      min-height: 42px;
+    }
+
+    .tool-use-icon {
+      grid-column: 1;
+      width: 22px;
+      min-width: 22px;
+    }
+
+    .tool-use-name {
+      grid-column: 2;
+      max-width: 180px;
+    }
+
+    .tool-use-file,
+    .tool-use-summary {
+      grid-column: 3;
+      max-width: none;
+      min-width: 0;
+    }
+
+    .tool-use-toggle {
+      grid-column: 4;
+      justify-self: end;
+      margin-left: 0;
+    }
+
+    .diff-header {
+      display: grid;
+      grid-template-columns: minmax(7ch, max-content) minmax(0, 1fr) auto auto auto;
+      align-items: center;
+      column-gap: 10px;
+      min-height: 42px;
+    }
+
+    .diff-file-icon {
+      display: none;
+    }
+
+    .diff-file-name {
+      grid-column: 1;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .diff-path {
+      grid-column: 2;
+      min-width: 0;
+      text-overflow: ellipsis;
+    }
+
+    .diff-status {
+      grid-column: 3;
+      white-space: nowrap;
+    }
+
+    .diff-open-file {
+      grid-column: 4;
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      white-space: nowrap;
+    }
+
+    .diff-toggle {
+      grid-column: 5;
+      justify-self: end;
+      margin-left: 0;
+    }
+
+    .file-preview-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .file-preview-title {
+      min-width: 0;
+    }
+
+    .file-preview-toolbar {
+      min-width: 0;
+      max-width: min(52vw, 460px);
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      row-gap: 6px;
+      margin-left: 0;
+    }
+
+    .file-preview-toolbar-btn,
+    .file-preview-toolbar-group .file-preview-toolbar-btn {
+      min-height: 32px;
+    }
+
+    .file-preview-close {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+    }
+
+    .markdown-preview {
+      max-width: 78ch;
+      margin: 0 auto;
+      box-sizing: border-box;
+    }
+
+    .settings-panel-header,
+    .settings-panel > .field-row,
+    .settings-panel > .field,
+    .settings-panel > .settings-card,
+    .settings-panel > .switch-card-list,
+    .settings-panel > #presets-list {
+      min-width: 0;
+    }
+
+    .settings-panel-desc {
+      max-width: 72ch;
+    }
+
+    .switch-card-header,
+    .settings-toggle-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      column-gap: 14px;
+    }
+
+    .switch-card-title,
+    .switch-card-desc,
+    .settings-toggle-text,
+    .settings-toggle-title,
+    .settings-toggle-desc {
+      min-width: 0;
+    }
+
+    .settings-toggle-aside,
+    .settings-switch,
+    .switch-slider {
+      justify-self: end;
+    }
+
+    .settings-range-row {
+      display: grid;
+      grid-template-columns: minmax(9ch, max-content) minmax(0, 1fr) auto;
+      align-items: center;
+      column-gap: 12px;
+    }
+
+    .settings-range-label {
+      min-width: 0;
+    }
+
+    .settings-range-row input[type="range"],
+    .settings-range {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .preset-item {
+      display: grid;
+      grid-template-columns: minmax(10ch, max-content) minmax(0, 1fr);
+      align-items: start;
+      column-gap: 14px;
+    }
+
+    .preset-detail {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      text-align: right;
+    }
+
+    .env-preview-toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .env-preview-controls {
+      min-width: 0;
+      justify-content: flex-end;
+    }
+
+    .env-preview-row {
+      grid-template-columns: minmax(10rem, 0.42fr) minmax(0, 1fr) max-content;
+      align-items: center;
+    }
+
+    .env-preview-name {
+      min-width: 0;
+    }
+
+    .env-preview-len {
+      justify-self: end;
+    }
+
+    .queue-item {
+      display: grid;
+      grid-template-columns: 8px minmax(0, 1fr) max-content max-content max-content;
+      align-items: center;
+      column-gap: 6px;
+      min-height: 28px;
+    }
+
+    .queue-item-dot,
+    .queue-item-age,
+    .queue-item-send-now,
+    .queue-item-cancel {
+      justify-self: end;
+    }
+
+    .qc-file-row {
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      align-items: center;
+      column-gap: 8px;
+      min-height: 28px;
+    }
+
+    .qc-file-path {
+      min-width: 0;
+    }
+
+    @media (pointer: coarse), (max-width: 768px) {
+      .session-item-row {
+        min-height: 44px;
+      }
+
+      .session-action-btn {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+      }
+
+      .tree-item {
+        grid-template-columns: 20px 22px minmax(0, 1fr) minmax(0, 56px) 24px;
+        min-height: 44px;
+        padding: 8px 12px;
+      }
+
+      .file-preview-toolbar-btn,
+      .file-preview-toolbar-group .file-preview-toolbar-btn {
+        min-height: 36px;
+        min-width: 36px;
+      }
+
+      .file-explorer-up,
+      .file-side-panel-iconbtn,
+      .file-preview-close,
+      .diff-open-file,
+      .queue-item-send-now,
+      .queue-item-cancel {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        touch-action: manipulation;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .session-title-row {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: 2px;
+      }
+
+      .session-time {
+        justify-self: start;
+      }
+
+      .tool-use-header {
+        grid-template-columns: 24px minmax(0, 1fr) auto;
+      }
+
+      .tool-use-name {
+        grid-column: 2;
+        max-width: none;
+      }
+
+      .tool-use-file,
+      .tool-use-summary {
+        grid-column: 2 / 4;
+      }
+
+      .tool-use-toggle {
+        grid-column: 3;
+        grid-row: 1;
+      }
+
+      .diff-header {
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        row-gap: 4px;
+      }
+
+      .diff-file-name {
+        grid-column: 1;
+        max-width: none;
+      }
+
+      .diff-path {
+        grid-column: 1 / 4;
+        grid-row: 2;
+      }
+
+      .diff-status {
+        grid-column: 2;
+        grid-row: 1;
+      }
+
+      .diff-open-file {
+        grid-column: 3;
+        grid-row: 1;
+      }
+
+      .diff-toggle {
+        display: none;
+      }
+
+      .file-preview-header {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+      }
+
+      .file-preview-toolbar {
+        grid-column: 1 / 3;
+        grid-row: 2;
+        max-width: 100%;
+        justify-content: flex-start;
+      }
+
+      .file-preview-close {
+        grid-column: 2;
+        grid-row: 1;
+      }
+
+      .markdown-preview {
+        max-width: none;
+        padding: 16px;
+      }
+
+      .switch-card-header,
+      .settings-toggle-row,
+      .settings-range-row,
+      .preset-item,
+      .env-preview-toolbar,
+      .env-preview-row {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: 8px;
+      }
+
+      .settings-toggle-aside,
+      .settings-switch,
+      .switch-slider,
+      .preset-detail,
+      .env-preview-controls,
+      .env-preview-len {
+        justify-self: start;
+        text-align: left;
+      }
+
+      .env-preview-controls {
+        width: 100%;
+      }
+
+      .queue-item {
+        grid-template-columns: 8px minmax(0, 1fr) auto;
+        row-gap: 6px;
+      }
+
+      .queue-item-send-now,
+      .queue-item-cancel {
+        grid-row: 2;
+      }
+
+      .queue-item-send-now {
+        grid-column: 2;
+        justify-self: start;
+      }
+
+      .queue-item-cancel {
+        grid-column: 3;
+      }
+    }
+
+    @media (max-width: 768px), (pointer: coarse) {
+      html.is-wand-android .file-explorer-up,
+      html.is-wand-android .file-side-panel-iconbtn,
+      html.is-wand-android .file-preview-close,
+      html.is-wand-android .diff-open-file,
+      html.is-wand-android .queue-item-send-now,
+      html.is-wand-android .queue-item-cancel,
+      html.is-wand-android .queue-header-clear {
+        min-width: 44px;
+        min-height: 44px;
+      }
+
+      html.is-wand-android .file-explorer-up,
+      html.is-wand-android .file-side-panel-iconbtn,
+      html.is-wand-android .file-preview-close {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+      }
+
+      html.is-wand-android .file-preview-toolbar-btn,
+      html.is-wand-android .file-preview-toolbar-group .file-preview-toolbar-btn {
+        min-width: 44px;
+        min-height: 44px;
+        height: 44px;
+        padding: 0 10px;
+        border-radius: 10px;
+        touch-action: manipulation;
+      }
+
+      html.is-wand-android .file-preview-toolbar-group {
+        border-radius: 10px;
+      }
+
+      html.is-wand-android .diff-open-file {
+        height: 44px;
+        padding: 0 12px;
+        border-radius: 12px;
+      }
+
+      html.is-wand-android .queue-item {
+        grid-template-columns: 8px minmax(0, 1fr) max-content max-content max-content;
+        row-gap: 0;
+        min-height: 44px;
+        padding: 6px 8px;
+        opacity: 0.86;
+      }
+
+      html.is-wand-android .queue-item-age {
+        grid-column: 3;
+        grid-row: 1;
+      }
+
+      html.is-wand-android .queue-item-send-now {
+        grid-column: 4;
+        grid-row: 1;
+        height: 44px;
+        padding: 0 12px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        line-height: 1;
+      }
+
+      html.is-wand-android .queue-item-cancel,
+      html.is-wand-android .queue-header-clear {
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border-radius: 12px;
+        font-size: 1rem;
+        line-height: 1;
+      }
+
+      html.is-wand-android .queue-item-cancel {
+        grid-column: 5;
+        grid-row: 1;
+      }
+
+      html.is-wand-android .switch-card-header,
+      html.is-wand-android .settings-toggle-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+      }
+
+      html.is-wand-android .settings-toggle-aside,
+      html.is-wand-android .settings-switch,
+      html.is-wand-android .switch-slider {
+        justify-self: end;
+      }
+    }
+
     /* 结束标记 */

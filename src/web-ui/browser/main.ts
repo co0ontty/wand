@@ -33,6 +33,9 @@ import { state } from "./state";
     if (/WandPlatform\/iOS/.test(ua)) {
       document.documentElement.classList.add('is-wand-ios');
     }
+    if (/WandPlatform\/Android/.test(ua)) {
+      document.documentElement.classList.add('is-wand-android');
+    }
   } catch (e) {}
 
   // 嵌入终端模式：原生壳（iOS）把 PTY 会话套在原生头部里，只需网页展示

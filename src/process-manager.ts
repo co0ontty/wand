@@ -117,6 +117,7 @@ interface ClaudeProjectSessionCandidate {
 
 interface ClaudeProjectSessionDetails extends ClaudeProjectSessionCandidate {
   hasConversation: boolean;
+  firstUserAtMs: number | null;
 }
 
 interface PersistedMessageState {
@@ -136,12 +137,14 @@ function readClaudeProjectSessionDetails(filePath: string, id: string): ClaudePr
     const fileSessionIds = new Set<string>();
     let hasAssistant = false;
     let hasUser = false;
+    let firstUserAtMs: number | null = null;
 
     for (const line of lines) {
       try {
         const parsed = JSON.parse(line) as {
           sessionId?: string;
           type?: string;
+          timestamp?: string;
           message?: {
             role?: string;
           };
@@ -151,6 +154,10 @@ function readClaudeProjectSessionDetails(filePath: string, id: string): ClaudePr
         }
         if (parsed.type === "user" || parsed.message?.role === "user") {
           hasUser = true;
+          if (firstUserAtMs === null && parsed.timestamp) {
+            const parsedTime = Date.parse(parsed.timestamp);
+            if (Number.isFinite(parsedTime)) firstUserAtMs = parsedTime;
+          }
         }
         if (parsed.type === "assistant" || parsed.message?.role === "assistant") {
           hasAssistant = true;
@@ -175,7 +182,8 @@ function readClaudeProjectSessionDetails(filePath: string, id: string): ClaudePr
       id,
       filePath,
       mtimeMs: stats.mtimeMs,
-      hasConversation: hasUser && hasAssistant && lines.length >= REAL_CONVERSATION_MIN_LINES
+      hasConversation: hasUser && hasAssistant && lines.length >= REAL_CONVERSATION_MIN_LINES,
+      firstUserAtMs,
     };
   } catch {
     return null;
@@ -256,6 +264,33 @@ function selectClaudeProjectSessionForRecord(record: Pick<SessionRecord, "cwd" |
 
 function getLatestClaudeProjectSessionId(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): string | null {
   return selectClaudeProjectSessionForRecord(record)?.id ?? null;
+}
+
+function selectClaudeProjectSessionForTimeWindow(record: Pick<SessionSnapshot, "cwd" | "startedAt" | "endedAt" | "messages">): ClaudeProjectSessionDetails | null {
+  const startedAtMs = parseTimeMs(record.startedAt);
+  if (startedAtMs === null) return null;
+
+  const endedAtMs = parseTimeMs(record.endedAt) ?? Date.now();
+  const windowStart = startedAtMs - START_TIME_SKEW_MS;
+  const windowEnd = endedAtMs + START_TIME_SKEW_MS;
+  const fallbackWindowEnd = endedAtMs + DISCOVERY_RECENT_WINDOW_MS;
+
+  const candidates = listClaudeProjectSessionCandidates(record.cwd)
+    .map((candidate) => readClaudeProjectSessionDetails(candidate.filePath, candidate.id))
+    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
+    .filter((candidate) => {
+      if (candidate.firstUserAtMs !== null) {
+        return candidate.firstUserAtMs >= windowStart && candidate.firstUserAtMs <= windowEnd;
+      }
+      return candidate.mtimeMs >= windowStart && candidate.mtimeMs <= fallbackWindowEnd;
+    })
+    .sort((a, b) => {
+      const aTime = a.firstUserAtMs ?? a.mtimeMs;
+      const bTime = b.firstUserAtMs ?? b.mtimeMs;
+      return Math.abs(aTime - startedAtMs) - Math.abs(bTime - startedAtMs);
+    });
+
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 function listRecentClaudeProjectSessionIds(cwd: string, startedAt: string): string[] {
@@ -665,6 +700,13 @@ function recoverCodexSessionIdFromHistory(snapshot: Pick<SessionSnapshot, "provi
   return getCodexResumeCommandSessionId(snapshot.command) ?? selectCodexSessionForTimeWindow(snapshot)?.claudeSessionId ?? null;
 }
 
+function recoverClaudeSessionIdFromHistory(snapshot: Pick<SessionSnapshot, "provider" | "command" | "cwd" | "startedAt" | "endedAt" | "claudeSessionId" | "messages">): string | null {
+  if (snapshot.provider !== "claude" || snapshot.claudeSessionId) {
+    return null;
+  }
+  return getResumeCommandSessionId(snapshot.command) ?? selectClaudeProjectSessionForTimeWindow(snapshot)?.id ?? null;
+}
+
 /** Delete every rollout file belonging to the given codex thread ids. */
 function deleteCodexRolloutFiles(threadIds: Set<string>): number {
   if (threadIds.size === 0) return 0;
@@ -818,13 +860,19 @@ export class ProcessManager extends EventEmitter {
           ? getCodexResumeCommandSessionId(snapshot.command)
           : null;
       const orphanEndedAt = snapshot.status === "running" ? new Date().toISOString() : null;
-      const sessionIdFromHistory = isCodexCmd
-        ? recoverCodexSessionIdFromHistory({
+      const sessionIdFromHistory = isClaudeCmd
+        ? recoverClaudeSessionIdFromHistory({
             ...snapshot,
-            provider: "codex",
+            provider: "claude",
             endedAt: snapshot.endedAt ?? orphanEndedAt,
           })
-        : null;
+        : isCodexCmd
+          ? recoverCodexSessionIdFromHistory({
+              ...snapshot,
+              provider: "codex",
+              endedAt: snapshot.endedAt ?? orphanEndedAt,
+            })
+          : null;
       const restoredSessionId = resumeCommandSessionId ?? snapshot.claudeSessionId ?? sessionIdFromHistory;
       // Sessions restored from storage have ptyProcess: null — the old server's PTY
       // belongs to a dead process. Mark running sessions as exited so the UI
@@ -839,8 +887,9 @@ export class ProcessManager extends EventEmitter {
           messages: recoveredMessages.length > 0 ? recoveredMessages : snapshot.messages,
         };
         this.storage.saveSession(updated);
-        if (isCodexCmd && restoredSessionId && restoredSessionId !== snapshot.claudeSessionId) {
-          process.stderr.write(`[wand] Recovered Codex thread ID for orphan PTY ${snapshot.id}: ${restoredSessionId}\n`);
+        if (restoredSessionId && restoredSessionId !== snapshot.claudeSessionId) {
+          const label = isCodexCmd ? "Codex thread" : "Claude session";
+          process.stderr.write(`[wand] Recovered ${label} ID for orphan PTY ${snapshot.id}: ${restoredSessionId}\n`);
         }
         this.sessions.set(snapshot.id, {
           ...updated,
@@ -886,9 +935,8 @@ export class ProcessManager extends EventEmitter {
           : snapshot;
         if (updated !== snapshot) {
           this.storage.saveSessionMetadata(updated);
-          if (isCodexCmd) {
-            process.stderr.write(`[wand] Recovered Codex thread ID for saved PTY ${snapshot.id}: ${restoredSessionId}\n`);
-          }
+          const label = isCodexCmd ? "Codex thread" : "Claude session";
+          process.stderr.write(`[wand] Recovered ${label} ID for saved PTY ${snapshot.id}: ${restoredSessionId}\n`);
         }
         this.sessions.set(snapshot.id, {
           ...updated,
@@ -1177,6 +1225,7 @@ export class ProcessManager extends EventEmitter {
       }
       current.pendingEscalation = null;
       current.ptyPermissionBlocked = false;
+      this.captureClaudeSessionId(current, { allowTimeWindowFallback: true });
       this.captureCodexSessionId(current, { allowTimeWindowFallback: true });
       current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
       current.exitCode = current.stopRequested ? null : exitCode;
@@ -1481,6 +1530,35 @@ export class ProcessManager extends EventEmitter {
     return true;
   }
 
+  private captureClaudeSessionId(record: SessionRecord, options?: { allowTimeWindowFallback?: boolean }): boolean {
+    if (record.provider !== "claude" || record.claudeSessionId) {
+      return false;
+    }
+    record.messages = snapshotMessages(record);
+    const discoveredSessionId = record.knownClaudeProjectMtimes
+      ? getLatestClaudeProjectSessionId({
+          cwd: record.cwd,
+          startedAt: record.startedAt,
+          knownClaudeProjectMtimes: record.knownClaudeProjectMtimes,
+          messages: record.messages,
+        })
+      : null;
+    const fallbackSessionId = discoveredSessionId
+      ? null
+      : options?.allowTimeWindowFallback
+        ? selectClaudeProjectSessionForTimeWindow(record)?.id ?? null
+        : null;
+    const sessionId = discoveredSessionId ?? fallbackSessionId;
+    if (!sessionId) {
+      return false;
+    }
+    record.claudeSessionId = sessionId;
+    record.knownClaudeProjectMtimes?.set(sessionId, Date.now());
+    this.claudeHistoryCache = null;
+    process.stderr.write(`[wand] Captured Claude session ID: ${sessionId}\n`);
+    return true;
+  }
+
   get(id: string): SessionSnapshot | null {
     const record = this.sessions.get(id);
     if (!record) {
@@ -1694,13 +1772,15 @@ export class ProcessManager extends EventEmitter {
     record.exitCode = null;
     record.endedAt = new Date().toISOString();
     record.ptyProcess = null;
+    // Update lifecycle before dropping the bridge so Claude project-session
+    // discovery can still inspect the latest parsed turns.
+    this.captureClaudeSessionId(record, { allowTimeWindowFallback: true });
+    this.captureCodexSessionId(record, { allowTimeWindowFallback: true });
     if (record.ptyBridge) {
       record.ptyBridge.removeAllListeners();
       record.ptyBridge = null;
     }
 
-    // Update lifecycle
-    this.captureCodexSessionId(record, { allowTimeWindowFallback: true });
     this.persist(record);
     return this.snapshot(record);
   }

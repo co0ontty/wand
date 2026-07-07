@@ -251,6 +251,51 @@ function parseApkChannel(value: unknown): ApkUpdateChannel {
   return value === "beta" ? "beta" : "stable";
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+async function refreshDistributionConfig(configPath: string, config: WandConfig): Promise<void> {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+
+  const android = asRecord(raw.android);
+  if (android) {
+    config.android = { ...(config.android ?? {}) };
+    if (typeof android.enabled === "boolean") config.android.enabled = android.enabled;
+    if (Object.prototype.hasOwnProperty.call(android, "apkDir")) {
+      config.android.apkDir = typeof android.apkDir === "string" && android.apkDir.trim()
+        ? android.apkDir.trim()
+        : "android";
+    }
+    if (Object.prototype.hasOwnProperty.call(android, "currentApkFile")) {
+      config.android.currentApkFile = typeof android.currentApkFile === "string"
+        ? android.currentApkFile.trim()
+        : "";
+    }
+  }
+
+  const macos = asRecord(raw.macos);
+  if (macos) {
+    config.macos = { ...(config.macos ?? {}) };
+    if (typeof macos.enabled === "boolean") config.macos.enabled = macos.enabled;
+    if (Object.prototype.hasOwnProperty.call(macos, "dmgDir")) {
+      config.macos.dmgDir = typeof macos.dmgDir === "string" && macos.dmgDir.trim()
+        ? macos.dmgDir.trim()
+        : "macos";
+    }
+    if (Object.prototype.hasOwnProperty.call(macos, "currentDmgFile")) {
+      config.macos.currentDmgFile = typeof macos.currentDmgFile === "string"
+        ? macos.currentDmgFile.trim()
+        : "";
+    }
+  }
+}
+
 /** 版本号带 prerelease 后缀（如 -debug.06121811）即视为 beta 构建。 */
 function isPrereleaseApkVersion(version: string | null): boolean {
   return !!version && version.includes("-");
@@ -259,11 +304,12 @@ function isPrereleaseApkVersion(version: string | null): boolean {
 async function resolveLatestApkVersion(
   configDir: string,
   config: WandConfig,
-  channel: ApkUpdateChannel
+  channel: ApkUpdateChannel,
+  configPath?: string
 ): Promise<ResolvedApkVersion | null> {
   // local 与 github 两个来源都看，按安装序取真正更新的那个（持平偏向 local：同源下载更快）。
   // 旧逻辑是「local 存在就一票否决」——本地目录留着旧包时，会把线上新版压住不提示。
-  const localApk = await resolveAndroidApkAsset(configDir, config, channel);
+  const localApk = await resolveAndroidApkAsset(configDir, config, channel, configPath);
   const local: ResolvedApkVersion | null = localApk && localApk.version
     ? {
       version: localApk.version,
@@ -343,8 +389,12 @@ interface ResolvedDmgVersion {
   source: "local" | "github";
 }
 
-async function resolveLatestDmgVersion(configDir: string, config: WandConfig): Promise<ResolvedDmgVersion | null> {
-  const localDmg = await resolveMacosDmgAsset(configDir, config);
+async function resolveLatestDmgVersion(
+  configDir: string,
+  config: WandConfig,
+  configPath?: string,
+): Promise<ResolvedDmgVersion | null> {
+  const localDmg = await resolveMacosDmgAsset(configDir, config, configPath);
   if (localDmg && localDmg.version) {
     return {
       version: localDmg.version,
@@ -754,14 +804,19 @@ function extractAndroidApkVersion(fileName: string): string | null {
 async function resolveAndroidApkAsset(
   configDir: string,
   config: WandConfig,
-  channel: ApkUpdateChannel = "beta"
+  channel: ApkUpdateChannel = "beta",
+  configPath?: string,
 ): Promise<AndroidApkAsset | null> {
+  if (configPath) await refreshDistributionConfig(configPath, config);
   if (config.android?.enabled !== true) return null;
   const apkDir = resolveAndroidApkDir(configDir, config);
   await mkdir(apkDir, { recursive: true });
 
   const configuredFile = config.android?.currentApkFile?.trim();
-  if (configuredFile) {
+  // Beta is the local development channel: every check should pick the newest
+  // APK in apkDir, so dropping a new debug build into the directory is enough.
+  // currentApkFile remains a stable/manual pin and backward-compatible fallback.
+  if (configuredFile && channel !== "beta") {
     const filePath = path.join(apkDir, path.basename(configuredFile));
     try {
       const fileStat = await stat(filePath);
@@ -843,7 +898,12 @@ function extractMacosDmgVersion(fileName: string): string | null {
   return extractSemver(fileName.replace(/\.dmg$/i, ""));
 }
 
-async function resolveMacosDmgAsset(configDir: string, config: WandConfig): Promise<MacosDmgAsset | null> {
+async function resolveMacosDmgAsset(
+  configDir: string,
+  config: WandConfig,
+  configPath?: string,
+): Promise<MacosDmgAsset | null> {
+  if (configPath) await refreshDistributionConfig(configPath, config);
   if (config.macos?.enabled !== true) return null;
   const dmgDir = resolveMacosDmgDir(configDir, config);
   await mkdir(dmgDir, { recursive: true });
@@ -1447,7 +1507,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
     // 更新通道：beta 包含 -debug.* 构建，stable（默认，含不传参的老客户端）只推正式版。
     const channel = parseApkChannel(req.query.channel);
-    const latest = await resolveLatestApkVersion(configDir, config, channel);
+    const latest = await resolveLatestApkVersion(configDir, config, channel, configPath);
     if (!latest) {
       res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null, channel });
       return;
@@ -1469,15 +1529,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.get("/android/download", async (req, res) => {
-    if (config.android?.enabled !== true) {
-      res.status(404).json({ error: "Android APK 下载未启用。" });
-      return;
-    }
     // 更新弹窗的下载链接由 /api/android-apk-update 按通道生成（始终带 ?channel=）。
     // 裸 /android/download（网页下载页、二维码落地页）不带参时默认 beta ——
     // 保持「下载页拿到的就是目录里真正最新的包」的旧行为。
     const channel = req.query.channel === "stable" ? "stable" as const : "beta" as const;
-    const androidApk = await resolveAndroidApkAsset(configDir, config, channel);
+    const androidApk = await resolveAndroidApkAsset(configDir, config, channel, configPath);
     if (!androidApk) {
       res.status(404).json({ error: "当前没有可下载的 APK 文件。" });
       return;
@@ -1500,7 +1556,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.status(400).json({ error: "Missing currentVersion query parameter." });
       return;
     }
-    const latest = await resolveLatestDmgVersion(configDir, config);
+    const latest = await resolveLatestDmgVersion(configDir, config, configPath);
     if (!latest) {
       res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null });
       return;
@@ -1518,11 +1574,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.get("/macos/download", async (req, res) => {
-    if (config.macos?.enabled !== true) {
-      res.status(404).json({ error: "macOS DMG 下载未启用。" });
-      return;
-    }
-    const macosDmg = await resolveMacosDmgAsset(configDir, config);
+    const macosDmg = await resolveMacosDmgAsset(configDir, config, configPath);
     if (!macosDmg) {
       res.status(404).json({ error: "当前没有可下载的 DMG 文件。" });
       return;
@@ -1706,7 +1758,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     };
     const { password: _pw, ...safeConfig } = config;
     const defaultModels = getProviderDefaultModels(config);
-    const localApk = await resolveAndroidApkAsset(configDir, config);
+    const localApk = await resolveAndroidApkAsset(configDir, config, "beta", configPath);
     const ghApk = await fetchGitHubLatestApk();
     const apkDir = resolveAndroidApkDir(configDir, config);
     // Backward-compatible: pick best available for hasApk/version/downloadUrl
@@ -1715,7 +1767,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       : ghApk
         ? { hasApk: true, fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, updatedAt: null, downloadUrl: ghApk.downloadUrl, source: "github" as const }
         : null;
-    const localDmg = await resolveMacosDmgAsset(configDir, config);
+    const localDmg = await resolveMacosDmgAsset(configDir, config, configPath);
     const ghDmg = await fetchGitHubLatestDmg();
     const dmgDir = resolveMacosDmgDir(configDir, config);
     const resolvedDmg = localDmg
@@ -1779,7 +1831,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.get("/api/android-apk", async (_req, res) => {
-    const localApk = await resolveAndroidApkAsset(configDir, config);
+    const localApk = await resolveAndroidApkAsset(configDir, config, "beta", configPath);
     const ghApk = await fetchGitHubLatestApk();
     const apkDir = resolveAndroidApkDir(configDir, config);
     const resolvedApk = localApk
@@ -1803,7 +1855,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.get("/api/macos-dmg", async (_req, res) => {
-    const localDmg = await resolveMacosDmgAsset(configDir, config);
+    const localDmg = await resolveMacosDmgAsset(configDir, config, configPath);
     const ghDmg = await fetchGitHubLatestDmg();
     const dmgDir = resolveMacosDmgDir(configDir, config);
     const resolvedDmg = localDmg
