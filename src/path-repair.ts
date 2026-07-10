@@ -223,8 +223,9 @@ export function repairRuntimePath(): PathRepairResult {
  *
  * 行为：
  *   - 跑 `${shell} -l -c '...'` 拉 $PATH 和 command -v claude/codex（4s 超时）
- *   - 把 login shell PATH 里我们还没收录的目录 **前插** 到 process.env.PATH（注意
- *     是前插，不是追加 —— 它比 unit 里的更可信）
+ *   - 按 login shell 的 PATH 顺序重排 process.env.PATH，再把仅存在于 service 的
+ *     目录追加回去。不能只前插新增目录：同一个 CLI 同时装在 nvm 和 Homebrew 时，
+ *     两个目录本来都存在，旧实现不会重排，structured 与 PTY 会命中不同版本。
  *   - 失败时静默走同步那一版结果
  *
  * 接受一个已经跑过同步阶段的 result，在上面 mutate。
@@ -259,12 +260,11 @@ export async function deepRepairRuntimePath(
   }
 
   const delim = path.delimiter;
-  const existing = new Set(
-    (process.env.PATH ?? "")
-      .split(delim)
-      .map((seg) => seg.trim())
-      .filter((seg) => seg.length > 0),
-  );
+  const currentSegments = (process.env.PATH ?? "")
+    .split(delim)
+    .map((seg) => seg.trim())
+    .filter((seg) => seg.length > 0);
+  const existing = new Set(currentSegments);
 
   // login shell 报告的所有 PATH 段 + claude/codex 解析出的目录都纳入候选。
   const fromShell: string[] = [];
@@ -274,27 +274,31 @@ export async function deepRepairRuntimePath(
   if (probe.claude) fromShell.push(path.dirname(probe.claude));
   if (probe.codex) fromShell.push(path.dirname(probe.codex));
 
-  const additions: string[] = [];
+  const preferred: string[] = [];
+  const preferredSet = new Set<string>();
   for (const dir of fromShell) {
-    if (!dir || existing.has(dir)) continue;
+    if (!dir || preferredSet.has(dir)) continue;
     let ok = false;
     try { ok = existsSync(dir); } catch { ok = false; }
     if (!ok) continue;
-    existing.add(dir);
-    additions.push(dir);
+    preferredSet.add(dir);
+    preferred.push(dir);
   }
 
+  const additions = preferred.filter((dir) => !existing.has(dir));
+  const serviceOnly = currentSegments.filter((dir) => !preferredSet.has(dir));
+  const reordered = [...preferred, ...serviceOnly];
+  const nextPath = reordered.join(delim);
+  if (nextPath && nextPath !== (process.env.PATH ?? "")) {
+    process.env.PATH = nextPath;
+  }
   if (additions.length > 0) {
-    // 前插：login shell 的 PATH 优先级比 unit 写死的高，让 claude 解析到用户期望的版本。
-    const prefix = additions.join(delim);
-    const currentPath = process.env.PATH ?? "";
-    process.env.PATH = currentPath ? `${prefix}${delim}${currentPath}` : prefix;
     result.added.push(...additions);
   }
 
   result.finalPath = process.env.PATH ?? "";
-  // 修复完再 probe 一次，让 resolved 字段反映最终能找到的位置（之前 sync 阶段
-  // 可能 claude 还是 missing，login shell 注入 nvm 目录后这次能命中）。
+  // 修复完再 probe 一次，让 resolved 字段反映最终能找到的位置；目录即使原本已在
+  // service PATH 中，也可能因本次重排而从旧的 nvm 副本切换到 Homebrew 副本。
   result.resolved = probeCommands();
   result.deepProbe = "success";
   return result;

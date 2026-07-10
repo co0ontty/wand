@@ -292,7 +292,7 @@ interface QuickCommitOptions {
   autoMessage: boolean;
   customMessage?: string;
   tag?: string;
-  /** When `tag` is empty, ask Claude to generate one based on the diff + commit message. */
+  /** When `tag` is empty, ask the session provider to generate one based on the diff + commit message. */
   autoTag?: boolean;
   push?: boolean;
   /**
@@ -568,7 +568,7 @@ export async function generateCommitMessageOnly(
 }
 
 /**
- * Ask Claude for a single tag string. Called from `runQuickCommit` after the commit has
+ * Ask the session provider for a single tag string. Called from `runQuickCommit` after the commit has
  * already landed, so we look at `git show HEAD` and use `HEAD~1` for the previous tag.
  */
 async function generateTagAfterCommit(
@@ -702,7 +702,11 @@ function doPush(opts: DoPushOptions): PushOutcome {
 interface TagHeadOptions {
   cwd: string;
   language: string;
-  /** Explicit tag name. If empty and `autoTag` is true, ask Claude to generate one. */
+  provider?: SessionProvider;
+  model?: string | null;
+  thinkingEffort?: SessionSnapshot["thinkingEffort"];
+  inheritEnv?: boolean;
+  /** Explicit tag name. If empty and `autoTag` is true, ask the session provider to generate one. */
   tag?: string;
   autoTag?: boolean;
   /** Push only this tag to its upstream remote after creating it. */
@@ -729,7 +733,12 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
     } catch {
       headSubject = "";
     }
-    tagName = await generateTagAfterCommit(cwd, language, headSubject || "");
+    tagName = await generateTagAfterCommit(cwd, language, headSubject || "", {
+      provider: opts.provider,
+      model: opts.model,
+      thinkingEffort: opts.thinkingEffort,
+      inheritEnv: opts.inheritEnv,
+    });
   }
   if (!tagName) {
     throw new QuickCommitError("请填写 tag 名称，或开启 AI 生成。", "EMPTY_TAG");
@@ -1232,7 +1241,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     commitHash = "";
   }
 
-  // Tag: explicit `tag` wins; if empty + autoTag, ask Claude; otherwise skip.
+  // Tag: explicit `tag` wins; if empty + autoTag, ask the session provider; otherwise skip.
   let tagName = (tag || "").trim();
   if (!tagName && autoTag) {
     tagName = await generateTagAfterCommit(cwd, language, message, ai);

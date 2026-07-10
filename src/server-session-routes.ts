@@ -8,6 +8,7 @@ import { getDefaultModelForProvider, normalizeMode } from "./config.js";
 import { blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import { resolveSessionAiContext } from "./session-ai-context.js";
 import {
   getGitStatus,
   QuickCommitError,
@@ -603,13 +604,11 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean; submodule?: boolean };
     try {
+      const ai = resolveSessionAiContext(snapshot, config);
       const result = await runQuickCommitWithFallback({
         cwd: snapshot.cwd,
         language: config.language ?? "",
-        provider: snapshot.provider,
-        model: snapshot.selectedModel ?? snapshot.structuredState?.model ?? getDefaultModelForProvider(config, snapshot.provider),
-        thinkingEffort: snapshot.thinkingEffort ?? config.defaultThinkingEffort,
-        inheritEnv: config.inheritEnv,
+        ...ai,
         autoMessage: body.autoMessage !== false,
         customMessage: typeof body.customMessage === "string" ? body.customMessage : undefined,
         tag: typeof body.tag === "string" ? body.tag : undefined,
@@ -639,11 +638,9 @@ export function registerSessionRoutes(
       return;
     }
     try {
+      const ai = resolveSessionAiContext(snapshot, config);
       const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "", {
-        provider: snapshot.provider,
-        model: snapshot.selectedModel ?? snapshot.structuredState?.model ?? getDefaultModelForProvider(config, snapshot.provider),
-        thinkingEffort: snapshot.thinkingEffort ?? config.defaultThinkingEffort,
-        inheritEnv: config.inheritEnv,
+        ...ai,
       });
       res.json(result);
     } catch (error) {
@@ -667,9 +664,11 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { tag?: string; autoTag?: boolean; push?: boolean };
     try {
+      const ai = resolveSessionAiContext(snapshot, config);
       const result = await runTagHead({
         cwd: snapshot.cwd,
         language: config.language ?? "",
+        ...ai,
         tag: typeof body.tag === "string" ? body.tag : undefined,
         autoTag: !!body.autoTag,
         push: !!body.push,
