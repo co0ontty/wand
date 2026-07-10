@@ -28,8 +28,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          # release tag 可能比客户端仓库的 push 早几秒可见。主仓库与子模块
+          # 分开 checkout，避免短暂竞态直接终止整个 IPA workflow。
+          submodules: false
           fetch-depth: 0
+
+      - name: Checkout iOS submodule
+        run: |
+          set -euo pipefail
+          git submodule sync -- ios
+          for attempt in 1 2 3 4 5; do
+            if git submodule update --init --force -- ios; then
+              exit 0
+            fi
+            delay=$((attempt * 15))
+            echo "ios submodule checkout failed; retrying in ${delay}s..."
+            sleep "$delay"
+          done
+          git submodule status -- ios
+          exit 1
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app

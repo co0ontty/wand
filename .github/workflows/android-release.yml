@@ -15,8 +15,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: true
+          # 主仓库 tag 与客户端子模块 push 几乎同时发生时，checkout@v4 的
+          # 一次性递归拉取会直接失败。先取主仓库，再对目标子模块做有退避的重试。
+          submodules: false
           fetch-depth: 0
+
+      - name: Checkout Android submodule
+        run: |
+          set -euo pipefail
+          git submodule sync -- android
+          for attempt in 1 2 3 4 5; do
+            if git submodule update --init --force -- android; then
+              exit 0
+            fi
+            delay=$((attempt * 15))
+            echo "android submodule checkout failed; retrying in ${delay}s..."
+            sleep "$delay"
+          done
+          git submodule status -- android
+          exit 1
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
