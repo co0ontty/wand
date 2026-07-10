@@ -128,6 +128,29 @@ function parseJsonRecord(value: unknown): Record<string, unknown> {
   }
 }
 
+/**
+ * Preserve both Responses content-part arrays and arbitrary structured tool output.
+ * Arrays without a `type` discriminator (for example Codex tool_search results)
+ * are serialized instead of being filtered to an empty result.
+ */
+export function normalizeStructuredToolResultContent(
+  content: unknown,
+): string | Array<{ type: string; [key: string]: unknown }> {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts = content.filter((item): item is { type: string; [key: string]: unknown } =>
+      !!item && typeof item === "object" && typeof (item as any).type === "string",
+    );
+    if (parts.length === content.length) return parts;
+    try {
+      return JSON.stringify(content, null, 2);
+    } catch {
+      return String(content);
+    }
+  }
+  return typeof content === "undefined" || content === null ? "" : String(content);
+}
+
 function codexPatchToolName(kind: string): string {
   if (kind === "add") return "Write";
   return "Edit";
@@ -182,6 +205,239 @@ export function buildCodexPatchApplyBlocks(item: Record<string, unknown>): Conte
   return blocks;
 }
 
+const CODEX_FILE_SNAPSHOT_MAX_BYTES = 512 * 1024;
+const CODEX_DIFF_MAX_EDIT_DISTANCE = 512;
+const CODEX_DIFF_MAX_CHARS = 32 * 1024;
+const CODEX_DIFF_CONTEXT_LINES = 3;
+
+export interface CodexFileSnapshot {
+  exists: boolean;
+  text: string | null;
+  unavailableReason?: string;
+}
+
+type CodexFileSnapshotMap = Map<string, CodexFileSnapshot>;
+
+type CodexDiffLine = {
+  kind: "equal" | "delete" | "add";
+  text: string;
+};
+
+function readCodexFileSnapshot(filePath: string): CodexFileSnapshot {
+  if (!filePath || !existsSync(filePath)) return { exists: false, text: "" };
+  try {
+    const stat = statSync(filePath);
+    if (!stat.isFile()) {
+      return { exists: true, text: null, unavailableReason: "目标不是普通文件" };
+    }
+    if (stat.size > CODEX_FILE_SNAPSHOT_MAX_BYTES) {
+      return { exists: true, text: null, unavailableReason: "文件过大，未生成差异正文" };
+    }
+    const content = readFileSync(filePath);
+    if (content.includes(0)) {
+      return { exists: true, text: null, unavailableReason: "二进制文件不支持文本差异" };
+    }
+    return { exists: true, text: content.toString("utf8") };
+  } catch (error) {
+    return {
+      exists: true,
+      text: null,
+      unavailableReason: `读取文件失败：${getErrorMessage(error)}`,
+    };
+  }
+}
+
+/**
+ * Myers line diff. File snapshots are bounded above; the edit-distance guard
+ * keeps completely rewritten generated files from consuming quadratic memory.
+ */
+function diffCodexLines(before: string[], after: string[]): CodexDiffLine[] {
+  const max = before.length + after.length;
+  let frontier = new Map<number, number>([[1, 0]]);
+  const trace: Map<number, number>[] = [];
+  let completedDistance = -1;
+
+  for (let distance = 0; distance <= max && distance <= CODEX_DIFF_MAX_EDIT_DISTANCE; distance++) {
+    trace.push(new Map(frontier));
+    for (let diagonal = -distance; diagonal <= distance; diagonal += 2) {
+      const down = frontier.get(diagonal + 1) ?? Number.NEGATIVE_INFINITY;
+      const right = frontier.get(diagonal - 1) ?? Number.NEGATIVE_INFINITY;
+      let oldIndex = diagonal === -distance || (diagonal !== distance && right < down)
+        ? Math.max(0, down)
+        : Math.max(0, right + 1);
+      let newIndex = oldIndex - diagonal;
+      while (
+        oldIndex < before.length
+        && newIndex < after.length
+        && before[oldIndex] === after[newIndex]
+      ) {
+        oldIndex++;
+        newIndex++;
+      }
+      frontier.set(diagonal, oldIndex);
+      if (oldIndex >= before.length && newIndex >= after.length) {
+        completedDistance = distance;
+        break;
+      }
+    }
+    if (completedDistance >= 0) break;
+  }
+
+  // A very large rewrite is still useful to inspect. This fallback is not
+  // minimal, but remains truthful and is later clipped by transport/UI limits.
+  if (completedDistance < 0) {
+    return [
+      ...before.map((text): CodexDiffLine => ({ kind: "delete", text })),
+      ...after.map((text): CodexDiffLine => ({ kind: "add", text })),
+    ];
+  }
+
+  const reversed: CodexDiffLine[] = [];
+  let oldIndex = before.length;
+  let newIndex = after.length;
+  for (let distance = completedDistance; distance >= 0; distance--) {
+    const previous = trace[distance];
+    const diagonal = oldIndex - newIndex;
+    const down = previous.get(diagonal + 1) ?? Number.NEGATIVE_INFINITY;
+    const right = previous.get(diagonal - 1) ?? Number.NEGATIVE_INFINITY;
+    const previousDiagonal = diagonal === -distance || (diagonal !== distance && right < down)
+      ? diagonal + 1
+      : diagonal - 1;
+    const previousOldIndex = Math.max(0, previous.get(previousDiagonal) ?? 0);
+    const previousNewIndex = previousOldIndex - previousDiagonal;
+
+    while (oldIndex > previousOldIndex && newIndex > previousNewIndex) {
+      reversed.push({ kind: "equal", text: before[oldIndex - 1] });
+      oldIndex--;
+      newIndex--;
+    }
+    if (distance === 0) break;
+    if (oldIndex === previousOldIndex) {
+      reversed.push({ kind: "add", text: after[newIndex - 1] });
+      newIndex--;
+    } else {
+      reversed.push({ kind: "delete", text: before[oldIndex - 1] });
+      oldIndex--;
+    }
+  }
+  return reversed.reverse();
+}
+
+function codexDiffPath(filePath: string): string {
+  return filePath.replace(/[\r\n]/g, " ").replace(/^\/+/, "");
+}
+
+function codexDiffLines(text: string): string[] {
+  if (!text) return [];
+  const normalized = text.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  if (normalized.endsWith("\n")) lines.pop();
+  return lines;
+}
+
+function buildCodexUnifiedDiff(
+  filePath: string,
+  before: CodexFileSnapshot,
+  after: CodexFileSnapshot,
+): string {
+  if (before.text === null || after.text === null || before.text === after.text) return "";
+  const oldLines = codexDiffLines(before.text);
+  const newLines = codexDiffLines(after.text);
+  const lines = diffCodexLines(oldLines, newLines);
+  const changedIndexes = lines
+    .map((line, index) => line.kind === "equal" ? -1 : index)
+    .filter((index) => index >= 0);
+  if (changedIndexes.length === 0) return "";
+
+  const oldBefore: number[] = [];
+  const newBefore: number[] = [];
+  let oldCount = 0;
+  let newCount = 0;
+  lines.forEach((line, index) => {
+    oldBefore[index] = oldCount;
+    newBefore[index] = newCount;
+    if (line.kind !== "add") oldCount++;
+    if (line.kind !== "delete") newCount++;
+  });
+
+  const hunks: Array<{ start: number; end: number }> = [];
+  for (const changedIndex of changedIndexes) {
+    const start = Math.max(0, changedIndex - CODEX_DIFF_CONTEXT_LINES);
+    const end = Math.min(lines.length, changedIndex + CODEX_DIFF_CONTEXT_LINES + 1);
+    const previous = hunks[hunks.length - 1];
+    if (previous && start <= previous.end) previous.end = Math.max(previous.end, end);
+    else hunks.push({ start, end });
+  }
+
+  const displayPath = codexDiffPath(filePath);
+  const output = [
+    before.exists ? `--- a/${displayPath}` : "--- /dev/null",
+    after.exists ? `+++ b/${displayPath}` : "+++ /dev/null",
+  ];
+  for (const hunk of hunks) {
+    const hunkLines = lines.slice(hunk.start, hunk.end);
+    const hunkOldCount = hunkLines.filter((line) => line.kind !== "add").length;
+    const hunkNewCount = hunkLines.filter((line) => line.kind !== "delete").length;
+    const hunkOldStart = hunkOldCount === 0 ? oldBefore[hunk.start] : oldBefore[hunk.start] + 1;
+    const hunkNewStart = hunkNewCount === 0 ? newBefore[hunk.start] : newBefore[hunk.start] + 1;
+    output.push(`@@ -${hunkOldStart},${hunkOldCount} +${hunkNewStart},${hunkNewCount} @@`);
+    for (const line of hunkLines) {
+      output.push(`${line.kind === "add" ? "+" : line.kind === "delete" ? "-" : " "}${line.text}`);
+    }
+  }
+  const diff = output.join("\n");
+  if (diff.length <= CODEX_DIFF_MAX_CHARS) return diff;
+  const cutAt = diff.lastIndexOf("\n", CODEX_DIFF_MAX_CHARS);
+  return `${diff.slice(0, cutAt > 0 ? cutAt : CODEX_DIFF_MAX_CHARS)}\n…（差异正文已截断）`;
+}
+
+export function buildCodexFileChangeBlocks(
+  item: Record<string, unknown>,
+  completed: boolean,
+  beforeSnapshots: CodexFileSnapshotMap = new Map(),
+  afterSnapshots: CodexFileSnapshotMap = new Map(),
+): ContentBlock[] {
+  const id = getString(item.id) || "file-change";
+  const rawChanges = Array.isArray(item.changes) ? item.changes : [];
+  const status = getString(item.status) || (completed ? "completed" : "in_progress");
+  const isError = status === "failed";
+  const blocks: ContentBlock[] = [];
+
+  rawChanges.forEach((entry, index) => {
+    const change = asRecord(entry);
+    if (!change) return;
+    const filePath = getString(change.path);
+    const kind = getString(change.kind) || "update";
+    const toolUseId = `${id}#${index}`;
+    const input: Record<string, unknown> = { file_path: filePath, kind, status };
+    const before = beforeSnapshots.get(toolUseId);
+    const after = afterSnapshots.get(toolUseId);
+    if (completed && before && after) {
+      const unifiedDiff = buildCodexUnifiedDiff(filePath, before, after);
+      if (unifiedDiff) input.unified_diff = unifiedDiff;
+      const unavailableReason = before.unavailableReason || after.unavailableReason;
+      if (!unifiedDiff && unavailableReason) input.diff_unavailable_reason = unavailableReason;
+    }
+
+    blocks.push({
+      type: "tool_use",
+      id: toolUseId,
+      name: codexPatchToolName(kind),
+      description: kind,
+      input,
+    });
+    if (completed) {
+      blocks.push({
+        type: "tool_result",
+        tool_use_id: toolUseId,
+        content: isError ? `file change failed: ${filePath}` : "",
+        is_error: isError,
+      });
+    }
+  });
+  return blocks;
+}
+
 /** Accumulated state while streaming a single claude -p response. */
 interface StreamingTurnState {
   blocks: ContentBlock[];
@@ -196,6 +452,9 @@ interface StreamingTurnState {
    * pairing for codex stays driven by `upsertCodexBlock` via matching ids.
    */
   codexBlockIndex?: Map<string, number>;
+  /** Codex `file_change` only carries paths; snapshots provide the missing diff body. */
+  codexFileSnapshots?: CodexFileSnapshotMap;
+  cwd?: string;
 }
 
 /**
@@ -1350,6 +1609,8 @@ export class StructuredSessionManager {
         model: session.selectedModel ?? session.structuredState?.model,
         usage: undefined,
         codexBlockIndex: new Map(),
+        codexFileSnapshots: new Map(),
+        cwd: session.cwd,
       };
       let lineBuf = "";
       let stderr = "";
@@ -2884,13 +3145,7 @@ export class StructuredSessionManager {
   }
 
   private normalizeToolResultContent(content: unknown): string | Array<{ type: string; [key: string]: unknown }> {
-    if (typeof content === "string") {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      return content.filter((item): item is { type: string; [key: string]: unknown } => !!item && typeof item === "object" && typeof (item as any).type === "string");
-    }
-    return typeof content === "undefined" || content === null ? "" : String(content);
+    return normalizeStructuredToolResultContent(content);
   }
 
   private unwrapCodexStreamEvent(parsed: unknown): Record<string, unknown> | null {
@@ -2914,12 +3169,18 @@ export class StructuredSessionManager {
       "function_call_output",
       "custom_tool_call",
       "custom_tool_call_output",
+      "command_execution",
       "patch_apply_end",
+      "file_change",
+      "mcp_tool_call",
       "mcp_tool_call_end",
       "web_search_call",
       "web_search_end",
+      "web_search",
       "tool_search_call",
       "tool_search_output",
+      "collab_tool_call",
+      "todo_list",
     ]);
     if (!supported.has(type)) return false;
     this.applyCodexItem(turnState, event, "completed");
@@ -3056,7 +3317,36 @@ export class StructuredSessionManager {
   ): void {
     const completed = phase === "completed";
     const itemId = typeof item.id === "string" ? item.id : "";
-    const blocks = this.extractCodexItemBlock(item, completed);
+    const itemType = getString(item.type);
+    let afterSnapshots: CodexFileSnapshotMap | undefined;
+    if (itemType === "file_change" && itemId) {
+      const snapshots = turnState.codexFileSnapshots ??= new Map();
+      const rawChanges = Array.isArray(item.changes) ? item.changes : [];
+      if (phase === "started") {
+        rawChanges.forEach((entry, index) => {
+          const filePath = getString(asRecord(entry)?.path);
+          const absolutePath = path.isAbsolute(filePath)
+            ? filePath
+            : path.resolve(turnState.cwd || process.cwd(), filePath);
+          snapshots.set(`${itemId}#${index}`, readCodexFileSnapshot(absolutePath));
+        });
+      } else if (completed) {
+        afterSnapshots = new Map();
+        rawChanges.forEach((entry, index) => {
+          const filePath = getString(asRecord(entry)?.path);
+          const absolutePath = path.isAbsolute(filePath)
+            ? filePath
+            : path.resolve(turnState.cwd || process.cwd(), filePath);
+          afterSnapshots?.set(`${itemId}#${index}`, readCodexFileSnapshot(absolutePath));
+        });
+      }
+    }
+    const blocks = this.extractCodexItemBlock(
+      item,
+      completed,
+      turnState.codexFileSnapshots,
+      afterSnapshots,
+    );
     if (blocks.length === 0) return;
 
     const index = turnState.codexBlockIndex ??= new Map<string, number>();
@@ -3087,6 +3377,11 @@ export class StructuredSessionManager {
       // 仍然走原有 upsert：tool_result 按 tool_use_id 配对，其余直接 push。
       this.upsertCodexBlock(turnState.blocks, block);
     }
+    if (completed && itemType === "file_change") {
+      for (const key of [...(turnState.codexFileSnapshots?.keys() ?? [])]) {
+        if (key.startsWith(`${itemId}#`)) turnState.codexFileSnapshots?.delete(key);
+      }
+    }
   }
 
   /**
@@ -3100,10 +3395,8 @@ export class StructuredSessionManager {
    *   agent_message     → text
    *   reasoning         → thinking
    *   command_execution → tool_use "Bash" + tool_result
-   *   file_change       → one tool_use per file, named Edit/Write/Bash by `kind`
-   *                       (codex does NOT carry old_string/new_string in the
-   *                       exec stream, only the path list; diff card body is
-   *                       empty but the file row + status still render)
+   *   file_change       → one Edit/Write per file; snapshots taken between
+   *                       item.started/completed restore the omitted diff body
    *   mcp_tool_call     → tool_use named "<server>__<tool>" + tool_result
    *   web_search        → tool_use "WebSearch" + tool_result (results not in stream)
    *   todo_list         → tool_use "TodoWrite" (replaced in place on each update)
@@ -3116,7 +3409,12 @@ export class StructuredSessionManager {
    * `turnState.codexBlockIndex`; tool_use ↔ tool_result pairing still goes
    * through `upsertCodexBlock` by matching ids.
    */
-  private extractCodexItemBlock(item: Record<string, unknown>, completed: boolean): ContentBlock[] {
+  private extractCodexItemBlock(
+    item: Record<string, unknown>,
+    completed: boolean,
+    beforeSnapshots?: CodexFileSnapshotMap,
+    afterSnapshots?: CodexFileSnapshotMap,
+  ): ContentBlock[] {
     const id = typeof item.id === "string" ? item.id : randomUUID();
     const type = typeof item.type === "string" ? item.type : "unknown";
 
@@ -3220,44 +3518,7 @@ export class StructuredSessionManager {
     }
 
     if (type === "file_change") {
-      // 注意：codex exec stream 没有 old_string/new_string——只给 path + kind。
-      // 这里每个 file 一个 sub-id（`${item.id}#${i}`），这样如果 codex 一次给多
-      // 个文件，每个文件能独立成卡片 + 独立 tool_result 状态。
-      const rawChanges = Array.isArray(item.changes) ? item.changes : [];
-      const status = typeof item.status === "string" ? item.status : completed ? "completed" : "in_progress";
-      const isError = status === "failed";
-      const blocks: ContentBlock[] = [];
-      rawChanges.forEach((entry, idx) => {
-        if (!entry || typeof entry !== "object") return;
-        const change = entry as Record<string, unknown>;
-        const path = typeof change.path === "string" ? change.path : "";
-        const kind = typeof change.kind === "string" ? change.kind : "update";
-        const subId = `${id}#${idx}`;
-        let toolName: string;
-        let input: Record<string, unknown>;
-        if (kind === "add") {
-          toolName = "Write";
-          input = { file_path: path, content: "", kind, status };
-        } else if (kind === "delete") {
-          toolName = "Edit";
-          input = { file_path: path, kind, status };
-        } else {
-          toolName = "Edit";
-          input = { file_path: path, old_string: "", new_string: "", kind, status };
-        }
-        if (!completed) {
-          blocks.push({ type: "tool_use", id: subId, name: toolName, input });
-        } else {
-          blocks.push({ type: "tool_use", id: subId, name: toolName, input });
-          blocks.push({
-            type: "tool_result",
-            tool_use_id: subId,
-            content: isError ? `file change failed: ${path}` : "",
-            is_error: isError,
-          });
-        }
-      });
-      return blocks;
+      return buildCodexFileChangeBlocks(item, completed, beforeSnapshots, afterSnapshots);
     }
 
     if (type === "mcp_tool_call_end") {

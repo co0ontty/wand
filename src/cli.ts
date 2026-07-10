@@ -312,11 +312,6 @@ interface ServerHandleForBanner {
 
 function printStartupBanner(handle: ServerHandleForBanner): void {
   const all = [...handle.processManager.listSlim(), ...handle.structuredSessions.listSlim()];
-  let active = 0, archived = 0;
-  for (const s of all) {
-    if (s.archived) archived += 1;
-    else if (s.status === "running") active += 1;
-  }
   const scheme = handle.httpsEnabled ? "HTTPS" : "HTTP";
   const primary = handle.urls[0]?.url ?? `${handle.httpsEnabled ? "https" : "http"}://${handle.bindAddr}`;
   const orphan = handle.orphanRecoveredCount > 0
@@ -327,7 +322,7 @@ function printStartupBanner(handle: ServerHandleForBanner): void {
     `       Bind     ${handle.bindAddr}`,
     `       Config   ${handle.configPath}`,
     `       Database ${handle.dbPath}`,
-    `       Sessions ${active} active · ${archived} archived · ${all.length} total${orphan}`,
+    `       Sessions ${all.length} total${orphan}`,
   ];
   for (const extra of handle.urls.slice(1)) {
     lines.splice(1, 0, `       URL      ${extra.url} (${extra.scheme})`);

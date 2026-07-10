@@ -1,6 +1,6 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml, renderTailMarqueePath } from "./utils";
+import { escapeHtml } from "./utils";
 import { persistSelectedId } from "./chat-scroll";
 import { closeSwipedItem } from "./input";
 import { showError, wandConfirm } from "./notifications";
@@ -9,23 +9,25 @@ import { renderSessionItem } from "./session-ui";
 
 // Functions defined in other modules (scripts.js IIFE scope)
 
-      // 「最近」分组的统一数据源：未归档 active sessions + 24h 内 Claude 历史，
-      // 一起按"创建时间"倒序排（session 用 startedAt，history 用 timestamp）。
-      // 展开侧栏的「最近」和折叠侧栏的窄条都基于这份列表渲染，序号严格对应。
-      export function getRecentEntries() {
-        var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      // 单一会话列表的数据源：Wand 会话（含已归档）与本机可恢复会话
+      // 一起按创建/修改时间倒序排列。展开侧栏与折叠窄条共用这份顺序。
+      export function getSessionEntries() {
         var entries: any[] = [];
         state.sessions.forEach(function(s: any) {
-          if (s.archived) return;
           var t = s.startedAt ? new Date(s.startedAt).getTime() : 0;
           entries.push({ kind: "session", ref: s, t: isFinite(t) ? t : 0 });
         });
         if (state.claudeHistoryLoaded) {
           getVisibleClaudeHistorySessions().forEach(function(h: any) {
-            if (!h.timestamp) return;
-            var t = new Date(h.timestamp).getTime();
-            if (!isFinite(t) || t <= cutoff) return;
+            var t = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
+            if (!isFinite(t)) t = Number(h.mtimeMs) || 0;
             entries.push({ kind: "history", ref: h, t: t });
+          });
+        }
+        if (state.codexHistoryLoaded) {
+          getVisibleCodexHistorySessions().forEach(function(h: any) {
+            var t = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
+            entries.push({ kind: "codex", ref: h, t: isFinite(t) ? t : 0 });
           });
         }
         entries.sort(function(a, b) { return b.t - a.t; });
@@ -33,29 +35,13 @@ import { renderSessionItem } from "./session-ui";
       }
 
       export function renderSessions() {
-        // Claude/Codex history is rendered INLINE as the final collapsible
-        // group of this same scrolling list (see renderClaudeHistoryGroup),
-        // styled like 已归档. There is no separate docked region anymore —
-        // that previously stranded an empty void above the footer.
-        var archivedSessions = state.sessions.filter(function(session: any) { return session.archived; });
         var groups: any[] = [];
         groups.push(renderSessionManageBar());
-
-        var recentEntries = getRecentEntries();
-        var historyGroup = renderClaudeHistoryGroup();
-
-        if (recentEntries.length > 0) {
-          groups.push(renderRecentGroup(recentEntries));
-        }
-        if (archivedSessions.length > 0) {
-          groups.push(renderArchivedGroup(archivedSessions));
-        }
-        if (recentEntries.length === 0 && archivedSessions.length === 0 && !historyGroup) {
+        var entries = getSessionEntries();
+        if (entries.length === 0) {
           return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
         }
-        if (historyGroup) {
-          groups.push(historyGroup);
-        }
+        groups.push(renderSessionEntries(entries));
         return groups.join("");
       }
 
@@ -66,7 +52,7 @@ import { renderSessionItem } from "./session-ui";
       }
 
       export function renderCollapsedSessionTiles() {
-        var entries = getRecentEntries();
+        var entries = getSessionEntries();
         var tiles = entries.map(function(e: any, i: any) {
           var idx = i + 1;
           if (e.kind === "session") {
@@ -78,7 +64,7 @@ import { renderSessionItem } from "./session-ui";
           var h = e.ref;
           var preview = h.firstUserMessage || "(空会话)";
           var hTitle = preview + " · " + formatHistoryTime(h.timestamp);
-          return '<button class="sidebar-collapsed-tile history" type="button" data-collapsed-history-id="' + escapeHtml(h.claudeSessionId) + '" data-cwd="' + escapeHtml(h.cwd || "") + '" title="' + escapeHtml(hTitle) + '">' + idx + '</button>';
+          return '<button class="sidebar-collapsed-tile" type="button" data-collapsed-history-id="' + escapeHtml(h.claudeSessionId) + '" data-provider="' + escapeHtml(e.kind === "codex" ? "codex" : "claude") + '" data-cwd="' + escapeHtml(h.cwd || "") + '" title="' + escapeHtml(hTitle) + '">' + idx + '</button>';
         }).join("");
         // 窄条底部固定一个「+」快速新建会话方块，替代被隐藏的 footer 新会话入口。
         var addTile = '<button class="sidebar-collapsed-tile add" type="button" data-collapsed-new-session="1" title="新建会话" aria-label="新建会话">' +
@@ -94,7 +80,7 @@ import { renderSessionItem } from "./session-ui";
       export function renderSessionManageBar() {
         if (!state.sessionsManageMode) {
           return '<div class="session-manage-bar">' +
-            '<span class="sidebar-intro">最近的会话记录</span>' +
+            '<span class="sidebar-intro">全部会话</span>' +
             '<button class="btn btn-ghost btn-xs session-manage-toggle" data-action="toggle-manage-mode" type="button">' +
               '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>' +
               '<span>管理</span>' +
@@ -104,7 +90,8 @@ import { renderSessionItem } from "./session-ui";
 
         var sessionCount = getSelectedSessionIds().length;
         var historyCount = getSelectedClaudeHistoryIds().length;
-        var totalCount = sessionCount + historyCount;
+        var codexCount = getSelectedCodexHistoryIds().length;
+        var totalCount = sessionCount + historyCount + codexCount;
         var hasAny = totalCount > 0;
         var selectable = countSelectableItems();
         var allSelected = selectable > 0 && totalCount >= selectable;
@@ -131,106 +118,15 @@ import { renderSessionItem } from "./session-ui";
         '</div>';
       }
 
-      export function renderSessionGroup(title: any, sessions: any, kind?: any) {
-        return '<section class="session-group">' +
-          '<div class="session-group-title">' + escapeHtml(title) + '</div>' +
-          sessions.map(function(session: any) { return renderSessionItem(session, kind); }).join("") +
-        '</section>';
-      }
-
-      export function renderArchivedGroup(archivedSessions: any) {
-        var expanded = !!state.archivedExpanded;
-        var chevron = expanded ? "&#9662;" : "&#9656;";
-        var header = '<div class="session-group-title claude-history-toggle" data-action="toggle-archived-group">' +
-          '<span class="chevron">' + chevron + '</span> 已归档 ' +
-          '<span class="history-count">' + archivedSessions.length + '</span>' +
-          '</div>';
-        if (!expanded) {
-          return '<section class="session-group">' + header + '</section>';
-        }
-        var items = archivedSessions.map(function(session: any) { return renderSessionItem(session, "sessions"); }).join("");
-        return '<section class="session-group">' + header + items + '</section>';
-      }
-
-      export function renderRecentGroup(entries: any) {
-        // No "最近" group title here — the section intro ("最近的会话记录") above
-        // already labels this group, so a second label would be redundant.
-        var html = '<section class="session-group session-group--recent">';
+      export function renderSessionEntries(entries: any) {
+        var html = '<section class="session-group">';
         html += entries.map(function(e: any) {
           return e.kind === "session"
             ? renderSessionItem(e.ref, "sessions")
-            : renderClaudeHistoryItem(e.ref, "history");
+            : renderClaudeHistoryItem(e.ref, e.kind);
         }).join("");
         html += '</section>';
         return html;
-      }
-
-      // Compute the items eligible for the history region (older than 24h —
-       // the recent-24h ones already show in the recent group above).
-      export function getClaudeHistoryRegionItems() {
-        var cutoff = Date.now() - 24 * 60 * 60 * 1000;
-        return getVisibleClaudeHistorySessions().filter(function(s: any) {
-          return !s.timestamp || new Date(s.timestamp).getTime() <= cutoff;
-        });
-      }
-
-      // Render history as the final INLINE collapsible group of #sessions-list,
-      // styled like the 已归档 group. Returns '' when history is fully loaded
-      // and empty, so a workspace with no older CLI history shows no stray
-      // "历史会话 0" row (and no stranded bar above the footer).
-      export function renderClaudeHistoryGroup() {
-        var visibleHistory = getClaudeHistoryRegionItems();
-        var loaded = !!state.claudeHistoryLoaded;
-        var codexVisible = getVisibleCodexHistorySessions();
-        var codexLoaded = !!state.codexHistoryLoaded;
-        var fullyLoaded = loaded && codexLoaded;
-        var count = (loaded ? visibleHistory.length : 0) + (codexLoaded ? codexVisible.length : 0);
-        if (fullyLoaded && count === 0) return '';
-
-        var expanded = !!state.claudeHistoryExpanded;
-        var chevron = expanded ? "&#9662;" : "&#9656;";
-        var countContent = fullyLoaded ? (count > 999 ? "999+" : String(count)) : "···";
-        var header = '<div class="session-group-title claude-history-toggle session-history-toggle" id="claude-history-toggle" role="button" tabindex="0" aria-expanded="' + expanded + '" title="' + (expanded ? "收起历史会话" : "展开历史会话") + '">' +
-          '<span class="chevron">' + chevron + '</span> 历史会话 ' +
-          '<span class="history-count' + (fullyLoaded ? '' : ' loading') + '">' + countContent + '</span>' +
-        '</div>';
-        var body = expanded
-          ? '<div class="session-history-body">' + renderClaudeHistoryBodyContent(visibleHistory) + renderCodexHistoryBodyContent(codexVisible) + '</div>'
-          : '';
-        return '<section class="session-group session-group--history">' + header + body + '</section>';
-      }
-
-      export function renderClaudeHistoryBodyContent(visibleHistory: any) {
-        if (!state.claudeHistoryLoaded) {
-          return '<div class="claude-history-loading">扫描历史会话中…</div>';
-        }
-        if (visibleHistory.length === 0) {
-          // Group is only rendered when there is content somewhere (Claude or
-          // Codex); a Claude-empty/Codex-present case shows just the Codex list.
-          return '';
-        }
-        var groups: any = {};
-        var groupOrder: any[] = [];
-        visibleHistory.forEach(function(s: any) {
-          if (!groups[s.cwd]) {
-            groups[s.cwd] = [];
-            groupOrder.push(s.cwd);
-          }
-          groups[s.cwd].push(s);
-        });
-        var toolbar = '<div class="sidebar-history-toolbar">' +
-          '<button class="btn btn-ghost btn-xs sidebar-history-clear" data-action="clear-all-history" type="button">清空全部</button>' +
-        '</div>';
-        var listHtml = '';
-        groupOrder.forEach(function(cwd: any) {
-          var cwdShort = cwd.split("/").filter(Boolean).slice(-3).join("/");
-          var isDirExpanded = !!state.claudeHistoryExpandedDirs[cwd];
-          listHtml += renderClaudeHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length, isDirExpanded);
-          if (isDirExpanded) {
-            listHtml += groups[cwd].map(function(session: any) { return renderClaudeHistoryItem(session, "history"); }).join("");
-          }
-        });
-        return toolbar + '<div class="sidebar-history-scroll">' + listHtml + '</div>';
       }
 
       export function getVisibleClaudeHistorySessions() {
@@ -251,16 +147,20 @@ import { renderSessionItem } from "./session-ui";
         return Object.keys(state.selectedClaudeHistoryIds).filter(function(id) { return !!state.selectedClaudeHistoryIds[id]; });
       }
 
+      export function getSelectedCodexHistoryIds() {
+        return Object.keys(state.selectedCodexHistoryIds).filter(function(id) { return !!state.selectedCodexHistoryIds[id]; });
+      }
+
       export function clearManageSelections() {
         state.selectedSessionIds = {};
         state.selectedClaudeHistoryIds = {};
+        state.selectedCodexHistoryIds = {};
       }
 
       export function toggleManageMode(force?: any) {
         state.sessionsManageMode = typeof force === "boolean" ? force : !state.sessionsManageMode;
-        if (state.sessionsManageMode && !state.claudeHistoryLoaded) {
-          // 进入管理模式即后台补齐 Claude 历史，让「已选 N」「全选」计数从一开始
-          // 就覆盖全部历史，而不是只统计已加载的那部分。
+        if (state.sessionsManageMode && (!state.claudeHistoryLoaded || !state.codexHistoryLoaded)) {
+          // 进入管理模式即后台补齐两个 provider，让计数从一开始覆盖完整列表。
           ensureClaudeHistoryLoaded().then(updateSessionsList);
         }
         if (!state.sessionsManageMode) {
@@ -275,7 +175,7 @@ import { renderSessionItem } from "./session-ui";
       }
 
       export function countSelectableItems() {
-        return getSelectableSessions().length + getVisibleClaudeHistorySessions().length;
+        return getSelectableSessions().length + getVisibleClaudeHistorySessions().length + getVisibleCodexHistorySessions().length;
       }
 
       export function selectAllVisibleItems() {
@@ -283,12 +183,10 @@ import { renderSessionItem } from "./session-ui";
         // 异步扫描，若用户在扫描完成前点「全选」，state.claudeHistory 仍为空会漏选，
         // 删除时表现为"只删了已加载的，跨目录/未扫完的历史还在"。这里先确保历史
         // 加载完成再全选。
-        if (!state.claudeHistoryLoaded) {
+        if (!state.claudeHistoryLoaded || !state.codexHistoryLoaded) {
           ensureClaudeHistoryLoaded().then(selectAllVisibleItems);
           return;
         }
-        // 展开 Claude 历史分组，让用户能直观看到这些历史项也被选中了。
-        state.claudeHistoryExpanded = true;
         var nextSessionIds: any = {};
         getSelectableSessions().forEach(function(session: any) {
           nextSessionIds[session.id] = true;
@@ -297,8 +195,13 @@ import { renderSessionItem } from "./session-ui";
         getVisibleClaudeHistorySessions().forEach(function(session: any) {
           nextHistoryIds[session.claudeSessionId] = true;
         });
+        var nextCodexIds: any = {};
+        getVisibleCodexHistorySessions().forEach(function(session: any) {
+          nextCodexIds[session.claudeSessionId] = true;
+        });
         state.selectedSessionIds = nextSessionIds;
         state.selectedClaudeHistoryIds = nextHistoryIds;
+        state.selectedCodexHistoryIds = nextCodexIds;
         updateSessionsList();
       }
 
@@ -309,7 +212,11 @@ import { renderSessionItem } from "./session-ui";
 
       export function toggleManagedItemSelection(kind: any, id: any) {
         if (!state.sessionsManageMode || !id) return;
-        var target = kind === "history" ? state.selectedClaudeHistoryIds : state.selectedSessionIds;
+        var target = kind === "history"
+          ? state.selectedClaudeHistoryIds
+          : kind === "codex"
+            ? state.selectedCodexHistoryIds
+            : state.selectedSessionIds;
         if (target[id]) {
           delete target[id];
         } else {
@@ -320,7 +227,11 @@ import { renderSessionItem } from "./session-ui";
 
       export function renderManageCheckbox(kind: any, id: any, label: any) {
         if (!state.sessionsManageMode) return '';
-        var selected = kind === "history" ? !!state.selectedClaudeHistoryIds[id] : !!state.selectedSessionIds[id];
+        var selected = kind === "history"
+          ? !!state.selectedClaudeHistoryIds[id]
+          : kind === "codex"
+            ? !!state.selectedCodexHistoryIds[id]
+            : !!state.selectedSessionIds[id];
         return '<label class="session-manage-check">' +
           '<input type="checkbox" data-action="toggle-selection" data-kind="' + escapeHtml(kind) + '" data-id="' + escapeHtml(id) + '"' + (selected ? ' checked' : '') + ' aria-label="' + escapeHtml(label) + '">' +
           '<span></span>' +
@@ -336,7 +247,8 @@ import { renderSessionItem } from "./session-ui";
       export function batchDeleteSelected() {
         var sessionIds = getSelectedSessionIds();
         var historyIds = getSelectedClaudeHistoryIds();
-        var total = sessionIds.length + historyIds.length;
+        var codexIds = getSelectedCodexHistoryIds();
+        var total = sessionIds.length + historyIds.length + codexIds.length;
         if (!total) return;
         confirmDelete('确认删除所选 ' + total + ' 项吗？此操作无法撤销。', {
           title: "删除所选 " + total + " 项",
@@ -360,6 +272,14 @@ import { renderSessionItem } from "./session-ui";
               body: JSON.stringify({ claudeSessionIds: historyIds })
             }).then(function(res) { return res.json(); }));
           }
+          if (codexIds.length > 0) {
+            requests.push(fetch('/api/codex-history/batch-delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ claudeSessionIds: codexIds })
+            }).then(function(res) { return res.json(); }));
+          }
 
           Promise.all(requests)
             .then(function() {
@@ -369,6 +289,9 @@ import { renderSessionItem } from "./session-ui";
               }
               state.claudeHistory = state.claudeHistory.filter(function(session: any) {
                 return historyIds.indexOf(session.claudeSessionId) === -1;
+              });
+              state.codexHistory = state.codexHistory.filter(function(session: any) {
+                return codexIds.indexOf(session.claudeSessionId) === -1;
               });
               clearManageSelections();
               return refreshAll();
@@ -416,56 +339,6 @@ import { renderSessionItem } from "./session-ui";
         });
       }
 
-      export function renderCodexHistoryDirectoryHeader(cwd: any, cwdShort: any, count: any, isExpanded: any) {
-        var chevron = isExpanded ? "▾" : "▸";
-        return '<div class="claude-history-directory-header codex-history-directory-header" data-action="toggle-codex-history-directory" data-cwd="' + escapeHtml(cwd) + '" role="button" tabindex="0">' +
-          '<div class="session-group-title claude-history-directory-title">' +
-            '<span class="chevron">' + chevron + '</span>' +
-            '<span class="claude-history-directory-label">' + renderTailMarqueePath(cwd, "claude-history-directory-label-path") + '<span class="claude-history-directory-count">(' + count + ')</span></span>' +
-          '</div>' +
-        '</div>';
-      }
-
-      export function renderCodexHistoryBodyContent(visibleHistory: any) {
-        if (!state.codexHistoryLoaded) {
-          return '<div class="claude-history-loading">扫描 Codex 历史会话中…</div>';
-        }
-        if (visibleHistory.length === 0) {
-          return '';
-        }
-        var groups: any = {};
-        var groupOrder: any[] = [];
-        visibleHistory.forEach(function(s: any) {
-          if (!groups[s.cwd]) {
-            groups[s.cwd] = [];
-            groupOrder.push(s.cwd);
-          }
-          groups[s.cwd].push(s);
-        });
-        var listHtml = '<div class="sidebar-history-section-label">Codex</div>';
-        groupOrder.forEach(function(cwd: any) {
-          var cwdShort = cwd.split("/").filter(Boolean).slice(-3).join("/");
-          var isDirExpanded = !!state.codexHistoryExpandedDirs[cwd];
-          listHtml += renderCodexHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length, isDirExpanded);
-          if (isDirExpanded) {
-            listHtml += groups[cwd].map(function(session: any) { return renderClaudeHistoryItem(session, "codex"); }).join("");
-          }
-        });
-        return '<div class="sidebar-history-scroll codex-history-scroll">' + listHtml + '</div>';
-      }
-
-      export function renderClaudeHistoryDirectoryHeader(cwd: any, cwdShort: any, count: any, isExpanded: any) {
-        var chevron = isExpanded ? "&#9662;" : "&#9656;";
-        return '<div class="claude-history-directory-header" data-action="toggle-history-directory" data-cwd="' + escapeHtml(cwd) + '" role="button" tabindex="0">' +
-          '<div class="session-group-title claude-history-directory-title">' +
-            '<span class="chevron">' + chevron + '</span>' +
-            '<span class="claude-history-directory-label">' + renderTailMarqueePath(cwd, "claude-history-directory-label-path") + '<span class="claude-history-directory-count">(' + count + ')</span></span>' +
-            '<button class="btn btn-danger btn-xs claude-history-directory-clear-btn" data-action="delete-history-directory" data-cwd="' +
-            escapeHtml(cwd) + '" type="button" aria-label="清空此目录的历史会话" title="清空此目录的历史会话">清空此目录</button>' +
-          '</div>' +
-        '</div>';
-      }
-
       export function renderClaudeHistoryItem(session: any, kind: any) {
         var isCodex = kind === "codex";
         var rAct = isCodex ? "resume-codex-history" : "resume-history";
@@ -474,16 +347,16 @@ import { renderSessionItem } from "./session-ui";
         var shortId = session.claudeSessionId.slice(0, 8);
         var preview = session.firstUserMessage || "(空会话)";
         var timeStr = formatHistoryTime(session.timestamp);
-        var checkbox = renderManageCheckbox(kind, session.claudeSessionId, "选择历史会话 " + preview);
+        var checkbox = renderManageCheckbox(kind, session.claudeSessionId, "选择会话 " + preview);
         var deleteButton = state.sessionsManageMode ? '' :
           '<button class="session-action-btn delete-btn" data-action="' + dAct + '" data-claude-session-id="' +
-          session.claudeSessionId + '" type="button" aria-label="删除会话" title="隐藏此历史会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
+          session.claudeSessionId + '" type="button" aria-label="删除会话" title="删除会话"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
         var resumeButton = state.sessionsManageMode ? '' :
           '<button class="session-action-btn" data-action="' + rAct + '" data-claude-session-id="' +
           session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) +
-          '" type="button" aria-label="恢复会话" title="' + (isCodex ? "恢复此 Codex 历史会话" : "恢复此 Claude 历史会话") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
+          '" type="button" aria-label="恢复会话" title="' + (isCodex ? "恢复此 Codex 会话" : "恢复此 Claude 会话") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
 
-        return '<div class="session-item claude-history-item' + (state.sessionsManageMode && selMap[session.claudeSessionId] ? ' selected' : '') + '" data-claude-history-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
+        return '<div class="session-item' + (state.sessionsManageMode && selMap[session.claudeSessionId] ? ' selected' : '') + '" data-claude-history-id="' + session.claudeSessionId + '" data-provider="' + (isCodex ? 'codex' : 'claude') + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +
               checkbox +
@@ -541,15 +414,16 @@ import { renderSessionItem } from "./session-ui";
       // 且在已加载时立即 resolve。
       var _claudeHistoryLoadingPromise: any = null;
       export function ensureClaudeHistoryLoaded() {
-        ensureCodexHistoryLoaded();
-        if (state.claudeHistoryLoaded) return Promise.resolve();
-        if (_claudeHistoryLoadingPromise) return _claudeHistoryLoadingPromise;
-        _claudeHistoryLoadingPromise = loadClaudeHistory().then(function() {
-          _claudeHistoryLoadingPromise = null;
-        }, function() {
-          _claudeHistoryLoadingPromise = null;
-        });
-        return _claudeHistoryLoadingPromise;
+        var codexPromise = ensureCodexHistoryLoaded();
+        if (!state.claudeHistoryLoaded && !_claudeHistoryLoadingPromise) {
+          _claudeHistoryLoadingPromise = loadClaudeHistory().then(function() {
+            _claudeHistoryLoadingPromise = null;
+          }, function() {
+            _claudeHistoryLoadingPromise = null;
+          });
+        }
+        var claudePromise = _claudeHistoryLoadingPromise || Promise.resolve();
+        return Promise.all([claudePromise, codexPromise]).then(function() {});
       }
 
       export function loadCodexHistory() {

@@ -82,7 +82,6 @@ import { renderManageCheckbox } from "./sidebar";
 
       export function getSessionStatusLabel(session) {
         if (!session) return "";
-        if (session.archived) return "已归档";
         if (session.permissionBlocked) return "等待授权";
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) return "思考中";
         var statusMap = {
@@ -97,7 +96,6 @@ import { renderManageCheckbox } from "./sidebar";
 
       export function getSessionStatusClass(session) {
         if (!session) return "";
-        if (session.archived) return "archived";
         if (session.permissionBlocked) return "permission-blocked";
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) return "running";
         return session.status || "";

@@ -121,7 +121,7 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
     if (h.sessionCounts.total !== lastTotal) {
       if (lastTotal !== -1) {
         appendActivity(
-          `会话计数: ${h.sessionCounts.active} active · ${h.sessionCounts.archived} archived · ${h.sessionCounts.total} total`,
+          `会话计数: ${h.sessionCounts.total}`,
           "info",
         );
       }

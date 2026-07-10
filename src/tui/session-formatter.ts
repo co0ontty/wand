@@ -11,7 +11,7 @@ export interface SessionRow {
   state: string;
   duration: string;
   /** 用于上色的语义级别（blessed tag 由调用方决定）。 */
-  tone: "running" | "idle" | "archived" | "exited" | "failed" | "stopped";
+  tone: "running" | "idle" | "exited" | "failed" | "stopped";
 }
 
 /** 把绝对路径压缩为友好显示：`~/foo` 或者长路径只保留尾部。 */
@@ -33,18 +33,6 @@ export function shortenCwd(cwd: string, max = 28): string {
 export function formatSession(snap: SessionSnapshot, now = Date.now()): SessionRow {
   const runner = (snap.runner || snap.provider || "pty").toString();
   const cwd = shortenCwd(snap.cwd);
-
-  if (snap.archived) {
-    return {
-      id: snap.id,
-      glyph: "○",
-      runner,
-      cwd,
-      state: "archived",
-      duration: "",
-      tone: "archived",
-    };
-  }
 
   switch (snap.status) {
     case "running": {
@@ -93,32 +81,7 @@ export function formatSession(snap: SessionSnapshot, now = Date.now()): SessionR
   }
 }
 
-/** 把行集按"活跃优先 → idle → 已结束 → archived"排序，再按开始时间倒序。 */
+/** 单一会话列表按开始时间倒序展示，不再按归档状态分组。 */
 export function sortRows(snaps: SessionSnapshot[]): SessionSnapshot[] {
-  const rank: Record<string, number> = {
-    running: 0,
-    idle: 1,
-    failed: 2,
-    stopped: 3,
-    exited: 4,
-    archived: 5,
-  };
-  return [...snaps].sort((a, b) => {
-    const ra = a.archived
-      ? rank.archived
-      : a.status === "running"
-        ? a.currentTaskTitle
-          ? rank.running
-          : rank.idle
-        : rank[a.status] ?? 99;
-    const rb = b.archived
-      ? rank.archived
-      : b.status === "running"
-        ? b.currentTaskTitle
-          ? rank.running
-          : rank.idle
-        : rank[b.status] ?? 99;
-    if (ra !== rb) return ra - rb;
-    return b.startedAt.localeCompare(a.startedAt);
-  });
+  return [...snaps].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }

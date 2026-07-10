@@ -10,7 +10,7 @@ import { getSelectedSession, updateInteractiveControls } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
 import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, syncSessionModalUI, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
 import { renderSessionModal, getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
-import { renderSessionsListContent, renderSessions, loadClaudeHistory, ensureClaudeHistoryLoaded } from "./sidebar";
+import { renderSessionsListContent, renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
 import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale, startPolling } from "./websocket";
@@ -157,6 +157,9 @@ export function syncOnForeground(reason: string, force?: boolean) {
   if (state.claudeHistoryLoaded) {
     loadClaudeHistory();
   }
+  if (state.codexHistoryLoaded) {
+    loadCodexHistory();
+  }
   // 不再 loadOutput 当前会话——WS 重连后服务端会主动推一条 init
   // 消息，那条路径已经走 ensureTerminalFitWithRetry 强制按真实
   // cols 重排 history，足够覆盖前台恢复时的同步需求。这里多加
@@ -300,9 +303,8 @@ export function restoreLoginSession() {
         if (_macAppVersion) {
           checkDmgAutoUpdate();
         }
-        // Warm up history in the background a beat after first paint so
-        // the inline 历史会话 count is real (not "···") and recent CLI
-        // sessions merge into the list without a manual expand. Deferred
+        // Warm up local recoverable sessions in the background a beat after
+        // first paint so every source joins the unified list automatically. Deferred
         // to avoid competing with the initial session/output load.
         if (!state.claudeHistoryLoaded) {
           setTimeout(function() {

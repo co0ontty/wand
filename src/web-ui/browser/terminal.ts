@@ -3,7 +3,7 @@ import { escapeHtml } from "./utils";
 import { doRenderChat, normalizeTerminalOutput, scheduleChatRender } from "./chat-render";
 import { bindChatScrollListener, persistSelectedId } from "./chat-scroll";
 import { applyTerminalScale, isMobileLayout } from "./file-browser";
-import { _swipeState, captureTerminalInput, closeSwipedItem, deleteClaudeHistoryDirectory, deleteSession, executeDeleteHistory, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, hasActiveTerminalSelection, queueDirectInput, reconcileInteractiveState, resumeClaudeHistorySession, resumeSessionFromList, setDeletingState, switchToSessionView, updateInteractiveControls } from "./input";
+import { _swipeState, captureTerminalInput, closeSwipedItem, deleteClaudeHistoryDirectory, deleteSession, executeDeleteHistory, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, hasActiveTerminalSelection, queueDirectInput, reconcileInteractiveState, resumeClaudeHistorySession, resumeCodexHistorySession, resumeSessionFromList, setDeletingState, switchToSessionView, updateInteractiveControls } from "./input";
 import { showToast } from "./notifications";
 import { render } from "./render";
 import { applyCurrentView, closeSessionsDrawer, copyToClipboard, dismissDrawerIfOverlay, isStructuredSession, loadSessions, openSessionModal, openWorktreeMergeModal, retryWorktreeCleanup, selectSession, updateSessionsList } from "./session-engine";
@@ -74,7 +74,8 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
             event.stopPropagation();
             var historyCid = collapsedTile.dataset.collapsedHistoryId;
             var historyCwd = collapsedTile.dataset.cwd || "";
-            resumeClaudeHistorySession(historyCid, historyCwd)
+            var resumeCollapsed = collapsedTile.dataset.provider === "codex" ? resumeCodexHistorySession : resumeClaudeHistorySession;
+            resumeCollapsed(historyCid, historyCwd)
               .then(function(data: any) {
                 if (data && data.id) {
                   state.selectedId = data.id;
@@ -125,7 +126,7 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
             })(actionButton.dataset.sessionId);
           } else if (actionButton.dataset.action === "delete-history" && actionButton.dataset.claudeSessionId) {
             (function(cid: string, item: any) {
-              confirmDelete("确认隐藏这条 Claude 历史吗？", { title: "隐藏历史会话", okLabel: "隐藏" }).then(function(ok: any) {
+              confirmDelete("确认删除这条 Claude 会话吗？", { title: "删除会话" }).then(function(ok: any) {
                 if (ok) executeDeleteHistory(cid, item);
               });
             })(actionButton.dataset.claudeSessionId, actionButton.closest(".session-item"));
@@ -177,7 +178,7 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
             if (item.dataset.sessionId) {
               toggleManagedItemSelection("sessions", item.dataset.sessionId);
             } else if (item.dataset.claudeHistoryId) {
-              toggleManagedItemSelection("history", item.dataset.claudeHistoryId);
+              toggleManagedItemSelection(item.dataset.provider === "codex" ? "codex" : "history", item.dataset.claudeHistoryId);
             }
             return;
           }
@@ -191,7 +192,8 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
           } else if (item.dataset.claudeHistoryId) {
             var claudeSessionId = item.dataset.claudeHistoryId;
             var cwd = item.dataset.cwd;
-            resumeClaudeHistorySession(claudeSessionId, cwd)
+            var resumeItem = item.dataset.provider === "codex" ? resumeCodexHistorySession : resumeClaudeHistorySession;
+            resumeItem(claudeSessionId, cwd)
               .then(function(data: any) {
                 if (data && data.id) {
                   state.selectedId = data.id;
@@ -217,7 +219,7 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
           if (item.dataset.sessionId) {
             toggleManagedItemSelection("sessions", item.dataset.sessionId);
           } else if (item.dataset.claudeHistoryId) {
-            toggleManagedItemSelection("history", item.dataset.claudeHistoryId);
+            toggleManagedItemSelection(item.dataset.provider === "codex" ? "codex" : "history", item.dataset.claudeHistoryId);
           }
           return;
         }
@@ -226,7 +228,8 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
         } else if (item.dataset.claudeHistoryId) {
           var claudeSessionId = item.dataset.claudeHistoryId;
           var cwd = item.dataset.cwd;
-          resumeClaudeHistorySession(claudeSessionId, cwd)
+          var resumeItem = item.dataset.provider === "codex" ? resumeCodexHistorySession : resumeClaudeHistorySession;
+          resumeItem(claudeSessionId, cwd)
             .then(function(data: any) {
               if (data && data.id) {
                 state.selectedId = data.id;

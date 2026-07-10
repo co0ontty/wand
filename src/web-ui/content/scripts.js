@@ -3188,7 +3188,6 @@
   }
   function getSessionStatusLabel(session) {
     if (!session) return "";
-    if (session.archived) return "\u5DF2\u5F52\u6863";
     if (session.permissionBlocked) return "\u7B49\u5F85\u6388\u6743";
     if (isStructuredSession2(session) && session.structuredState && session.structuredState.inFlight) return "\u601D\u8003\u4E2D";
     var statusMap = {
@@ -3202,7 +3201,6 @@
   }
   function getSessionStatusClass(session) {
     if (!session) return "";
-    if (session.archived) return "archived";
     if (session.permissionBlocked) return "permission-blocked";
     if (isStructuredSession2(session) && session.structuredState && session.structuredState.inFlight) return "running";
     return session.status || "";
@@ -3388,20 +3386,23 @@
   }
 
   // src/web-ui/browser/sidebar.ts
-  function getRecentEntries() {
-    var cutoff = Date.now() - 24 * 60 * 60 * 1e3;
+  function getSessionEntries() {
     var entries = [];
     state.sessions.forEach(function(s) {
-      if (s.archived) return;
       var t15 = s.startedAt ? new Date(s.startedAt).getTime() : 0;
       entries.push({ kind: "session", ref: s, t: isFinite(t15) ? t15 : 0 });
     });
     if (state.claudeHistoryLoaded) {
       getVisibleClaudeHistorySessions().forEach(function(h) {
-        if (!h.timestamp) return;
-        var t15 = new Date(h.timestamp).getTime();
-        if (!isFinite(t15) || t15 <= cutoff) return;
+        var t15 = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
+        if (!isFinite(t15)) t15 = Number(h.mtimeMs) || 0;
         entries.push({ kind: "history", ref: h, t: t15 });
+      });
+    }
+    if (state.codexHistoryLoaded) {
+      getVisibleCodexHistorySessions().forEach(function(h) {
+        var t15 = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
+        entries.push({ kind: "codex", ref: h, t: isFinite(t15) ? t15 : 0 });
       });
     }
     entries.sort(function(a, b) {
@@ -3410,32 +3411,20 @@
     return entries;
   }
   function renderSessions2() {
-    var archivedSessions = state.sessions.filter(function(session) {
-      return session.archived;
-    });
     var groups = [];
     groups.push(renderSessionManageBar());
-    var recentEntries = getRecentEntries();
-    var historyGroup = renderClaudeHistoryGroup();
-    if (recentEntries.length > 0) {
-      groups.push(renderRecentGroup(recentEntries));
-    }
-    if (archivedSessions.length > 0) {
-      groups.push(renderArchivedGroup(archivedSessions));
-    }
-    if (recentEntries.length === 0 && archivedSessions.length === 0 && !historyGroup) {
+    var entries = getSessionEntries();
+    if (entries.length === 0) {
       return renderSessionManageBar() + '<div class="empty-state"><strong>\u8FD8\u6CA1\u6709\u4F1A\u8BDD\u8BB0\u5F55</strong><br>\u70B9\u51FB\u4E0A\u65B9\u300C\u65B0\u5BF9\u8BDD\u300D\u5F00\u59CB\u4F60\u7684\u7B2C\u4E00\u6B21\u5BF9\u8BDD\u3002</div>';
     }
-    if (historyGroup) {
-      groups.push(historyGroup);
-    }
+    groups.push(renderSessionEntries(entries));
     return groups.join("");
   }
   function isSidebarNarrow() {
     return !!state.sidebarPinned && !!state.sidebarCollapsed;
   }
   function renderCollapsedSessionTiles() {
-    var entries = getRecentEntries();
+    var entries = getSessionEntries();
     var tiles = entries.map(function(e, i) {
       var idx = i + 1;
       if (e.kind === "session") {
@@ -3447,7 +3436,7 @@
       var h = e.ref;
       var preview = h.firstUserMessage || "(\u7A7A\u4F1A\u8BDD)";
       var hTitle = preview + " \xB7 " + formatHistoryTime(h.timestamp);
-      return '<button class="sidebar-collapsed-tile history" type="button" data-collapsed-history-id="' + escapeHtml2(h.claudeSessionId) + '" data-cwd="' + escapeHtml2(h.cwd || "") + '" title="' + escapeHtml2(hTitle) + '">' + idx + "</button>";
+      return '<button class="sidebar-collapsed-tile" type="button" data-collapsed-history-id="' + escapeHtml2(h.claudeSessionId) + '" data-provider="' + escapeHtml2(e.kind === "codex" ? "codex" : "claude") + '" data-cwd="' + escapeHtml2(h.cwd || "") + '" title="' + escapeHtml2(hTitle) + '">' + idx + "</button>";
     }).join("");
     var addTile = '<button class="sidebar-collapsed-tile add" type="button" data-collapsed-new-session="1" title="\u65B0\u5EFA\u4F1A\u8BDD" aria-label="\u65B0\u5EFA\u4F1A\u8BDD"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>';
     return '<div class="sidebar-collapsed-tiles">' + tiles + addTile + "</div>";
@@ -3457,11 +3446,12 @@
   }
   function renderSessionManageBar() {
     if (!state.sessionsManageMode) {
-      return '<div class="session-manage-bar"><span class="sidebar-intro">\u6700\u8FD1\u7684\u4F1A\u8BDD\u8BB0\u5F55</span><button class="btn btn-ghost btn-xs session-manage-toggle" data-action="toggle-manage-mode" type="button"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>\u7BA1\u7406</span></button></div>';
+      return '<div class="session-manage-bar"><span class="sidebar-intro">\u5168\u90E8\u4F1A\u8BDD</span><button class="btn btn-ghost btn-xs session-manage-toggle" data-action="toggle-manage-mode" type="button"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>\u7BA1\u7406</span></button></div>';
     }
     var sessionCount = getSelectedSessionIds().length;
     var historyCount = getSelectedClaudeHistoryIds().length;
-    var totalCount = sessionCount + historyCount;
+    var codexCount = getSelectedCodexHistoryIds().length;
+    var totalCount = sessionCount + historyCount + codexCount;
     var hasAny = totalCount > 0;
     var selectable = countSelectableItems();
     var allSelected = selectable > 0 && totalCount >= selectable;
@@ -3472,81 +3462,13 @@
     var summary = hasAny ? '<span class="session-manage-count">' + totalCount + '</span><span class="session-manage-summary-label">\u5DF2\u9009\u62E9</span>' : '<span class="session-manage-summary-label muted">\u9009\u62E9\u8981\u7BA1\u7406\u7684\u9879\u76EE</span>';
     return '<div class="session-manage-bar active">' + exitBtn + '<div class="session-manage-summary">' + summary + '</div><div class="session-manage-actions"><button class="btn btn-ghost btn-xs" data-action="' + selectAllAction + '" type="button"' + selectAllDisabled + ">" + selectAllLabel + '</button><button class="btn btn-danger btn-xs" data-action="delete-selected" type="button"' + (hasAny ? "" : " disabled") + ">\u5220\u9664" + (hasAny ? " " + totalCount : "") + "</button></div></div>";
   }
-  function renderSessionGroup(title, sessions, kind) {
-    return '<section class="session-group"><div class="session-group-title">' + escapeHtml2(title) + "</div>" + sessions.map(function(session) {
-      return renderSessionItem(session, kind);
-    }).join("") + "</section>";
-  }
-  function renderArchivedGroup(archivedSessions) {
-    var expanded = !!state.archivedExpanded;
-    var chevron = expanded ? "&#9662;" : "&#9656;";
-    var header = '<div class="session-group-title claude-history-toggle" data-action="toggle-archived-group"><span class="chevron">' + chevron + '</span> \u5DF2\u5F52\u6863 <span class="history-count">' + archivedSessions.length + "</span></div>";
-    if (!expanded) {
-      return '<section class="session-group">' + header + "</section>";
-    }
-    var items = archivedSessions.map(function(session) {
-      return renderSessionItem(session, "sessions");
-    }).join("");
-    return '<section class="session-group">' + header + items + "</section>";
-  }
-  function renderRecentGroup(entries) {
-    var html = '<section class="session-group session-group--recent">';
+  function renderSessionEntries(entries) {
+    var html = '<section class="session-group">';
     html += entries.map(function(e) {
-      return e.kind === "session" ? renderSessionItem(e.ref, "sessions") : renderClaudeHistoryItem(e.ref, "history");
+      return e.kind === "session" ? renderSessionItem(e.ref, "sessions") : renderClaudeHistoryItem(e.ref, e.kind);
     }).join("");
     html += "</section>";
     return html;
-  }
-  function getClaudeHistoryRegionItems() {
-    var cutoff = Date.now() - 24 * 60 * 60 * 1e3;
-    return getVisibleClaudeHistorySessions().filter(function(s) {
-      return !s.timestamp || new Date(s.timestamp).getTime() <= cutoff;
-    });
-  }
-  function renderClaudeHistoryGroup() {
-    var visibleHistory = getClaudeHistoryRegionItems();
-    var loaded = !!state.claudeHistoryLoaded;
-    var codexVisible = getVisibleCodexHistorySessions();
-    var codexLoaded = !!state.codexHistoryLoaded;
-    var fullyLoaded = loaded && codexLoaded;
-    var count = (loaded ? visibleHistory.length : 0) + (codexLoaded ? codexVisible.length : 0);
-    if (fullyLoaded && count === 0) return "";
-    var expanded = !!state.claudeHistoryExpanded;
-    var chevron = expanded ? "&#9662;" : "&#9656;";
-    var countContent = fullyLoaded ? count > 999 ? "999+" : String(count) : "\xB7\xB7\xB7";
-    var header = '<div class="session-group-title claude-history-toggle session-history-toggle" id="claude-history-toggle" role="button" tabindex="0" aria-expanded="' + expanded + '" title="' + (expanded ? "\u6536\u8D77\u5386\u53F2\u4F1A\u8BDD" : "\u5C55\u5F00\u5386\u53F2\u4F1A\u8BDD") + '"><span class="chevron">' + chevron + '</span> \u5386\u53F2\u4F1A\u8BDD <span class="history-count' + (fullyLoaded ? "" : " loading") + '">' + countContent + "</span></div>";
-    var body = expanded ? '<div class="session-history-body">' + renderClaudeHistoryBodyContent(visibleHistory) + renderCodexHistoryBodyContent(codexVisible) + "</div>" : "";
-    return '<section class="session-group session-group--history">' + header + body + "</section>";
-  }
-  function renderClaudeHistoryBodyContent(visibleHistory) {
-    if (!state.claudeHistoryLoaded) {
-      return '<div class="claude-history-loading">\u626B\u63CF\u5386\u53F2\u4F1A\u8BDD\u4E2D\u2026</div>';
-    }
-    if (visibleHistory.length === 0) {
-      return "";
-    }
-    var groups = {};
-    var groupOrder = [];
-    visibleHistory.forEach(function(s) {
-      if (!groups[s.cwd]) {
-        groups[s.cwd] = [];
-        groupOrder.push(s.cwd);
-      }
-      groups[s.cwd].push(s);
-    });
-    var toolbar = '<div class="sidebar-history-toolbar"><button class="btn btn-ghost btn-xs sidebar-history-clear" data-action="clear-all-history" type="button">\u6E05\u7A7A\u5168\u90E8</button></div>';
-    var listHtml = "";
-    groupOrder.forEach(function(cwd) {
-      var cwdShort = cwd.split("/").filter(Boolean).slice(-3).join("/");
-      var isDirExpanded = !!state.claudeHistoryExpandedDirs[cwd];
-      listHtml += renderClaudeHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length, isDirExpanded);
-      if (isDirExpanded) {
-        listHtml += groups[cwd].map(function(session) {
-          return renderClaudeHistoryItem(session, "history");
-        }).join("");
-      }
-    });
-    return toolbar + '<div class="sidebar-history-scroll">' + listHtml + "</div>";
   }
   function getVisibleClaudeHistorySessions() {
     var managedIds = /* @__PURE__ */ new Set();
@@ -3567,13 +3489,19 @@
       return !!state.selectedClaudeHistoryIds[id];
     });
   }
+  function getSelectedCodexHistoryIds() {
+    return Object.keys(state.selectedCodexHistoryIds).filter(function(id) {
+      return !!state.selectedCodexHistoryIds[id];
+    });
+  }
   function clearManageSelections() {
     state.selectedSessionIds = {};
     state.selectedClaudeHistoryIds = {};
+    state.selectedCodexHistoryIds = {};
   }
   function toggleManageMode(force) {
     state.sessionsManageMode = typeof force === "boolean" ? force : !state.sessionsManageMode;
-    if (state.sessionsManageMode && !state.claudeHistoryLoaded) {
+    if (state.sessionsManageMode && (!state.claudeHistoryLoaded || !state.codexHistoryLoaded)) {
       ensureClaudeHistoryLoaded().then(updateSessionsList);
     }
     if (!state.sessionsManageMode) {
@@ -3586,14 +3514,13 @@
     return state.sessions.slice();
   }
   function countSelectableItems() {
-    return getSelectableSessions().length + getVisibleClaudeHistorySessions().length;
+    return getSelectableSessions().length + getVisibleClaudeHistorySessions().length + getVisibleCodexHistorySessions().length;
   }
   function selectAllVisibleItems() {
-    if (!state.claudeHistoryLoaded) {
+    if (!state.claudeHistoryLoaded || !state.codexHistoryLoaded) {
       ensureClaudeHistoryLoaded().then(selectAllVisibleItems);
       return;
     }
-    state.claudeHistoryExpanded = true;
     var nextSessionIds = {};
     getSelectableSessions().forEach(function(session) {
       nextSessionIds[session.id] = true;
@@ -3602,8 +3529,13 @@
     getVisibleClaudeHistorySessions().forEach(function(session) {
       nextHistoryIds[session.claudeSessionId] = true;
     });
+    var nextCodexIds = {};
+    getVisibleCodexHistorySessions().forEach(function(session) {
+      nextCodexIds[session.claudeSessionId] = true;
+    });
     state.selectedSessionIds = nextSessionIds;
     state.selectedClaudeHistoryIds = nextHistoryIds;
+    state.selectedCodexHistoryIds = nextCodexIds;
     updateSessionsList();
   }
   function clearSelections() {
@@ -3612,7 +3544,7 @@
   }
   function toggleManagedItemSelection(kind, id) {
     if (!state.sessionsManageMode || !id) return;
-    var target = kind === "history" ? state.selectedClaudeHistoryIds : state.selectedSessionIds;
+    var target = kind === "history" ? state.selectedClaudeHistoryIds : kind === "codex" ? state.selectedCodexHistoryIds : state.selectedSessionIds;
     if (target[id]) {
       delete target[id];
     } else {
@@ -3622,7 +3554,7 @@
   }
   function renderManageCheckbox(kind, id, label) {
     if (!state.sessionsManageMode) return "";
-    var selected = kind === "history" ? !!state.selectedClaudeHistoryIds[id] : !!state.selectedSessionIds[id];
+    var selected = kind === "history" ? !!state.selectedClaudeHistoryIds[id] : kind === "codex" ? !!state.selectedCodexHistoryIds[id] : !!state.selectedSessionIds[id];
     return '<label class="session-manage-check"><input type="checkbox" data-action="toggle-selection" data-kind="' + escapeHtml2(kind) + '" data-id="' + escapeHtml2(id) + '"' + (selected ? " checked" : "") + ' aria-label="' + escapeHtml2(label) + '"><span></span></label>';
   }
   function confirmDelete(message, options) {
@@ -3631,7 +3563,8 @@
   function batchDeleteSelected() {
     var sessionIds = getSelectedSessionIds();
     var historyIds = getSelectedClaudeHistoryIds();
-    var total = sessionIds.length + historyIds.length;
+    var codexIds = getSelectedCodexHistoryIds();
+    var total = sessionIds.length + historyIds.length + codexIds.length;
     if (!total) return;
     confirmDelete("\u786E\u8BA4\u5220\u9664\u6240\u9009 " + total + " \u9879\u5417\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002", {
       title: "\u5220\u9664\u6240\u9009 " + total + " \u9879"
@@ -3658,6 +3591,16 @@
           return res.json();
         }));
       }
+      if (codexIds.length > 0) {
+        requests.push(fetch("/api/codex-history/batch-delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ claudeSessionIds: codexIds })
+        }).then(function(res) {
+          return res.json();
+        }));
+      }
       Promise.all(requests).then(function() {
         if (sessionIds.indexOf(state.selectedId) !== -1) {
           state.selectedId = null;
@@ -3665,6 +3608,9 @@
         }
         state.claudeHistory = state.claudeHistory.filter(function(session) {
           return historyIds.indexOf(session.claudeSessionId) === -1;
+        });
+        state.codexHistory = state.codexHistory.filter(function(session) {
+          return codexIds.indexOf(session.claudeSessionId) === -1;
         });
         clearManageSelections();
         return refreshAll();
@@ -3710,43 +3656,6 @@
       });
     });
   }
-  function renderCodexHistoryDirectoryHeader(cwd, cwdShort, count, isExpanded) {
-    var chevron = isExpanded ? "\u25BE" : "\u25B8";
-    return '<div class="claude-history-directory-header codex-history-directory-header" data-action="toggle-codex-history-directory" data-cwd="' + escapeHtml2(cwd) + '" role="button" tabindex="0"><div class="session-group-title claude-history-directory-title"><span class="chevron">' + chevron + '</span><span class="claude-history-directory-label">' + renderTailMarqueePath(cwd, "claude-history-directory-label-path") + '<span class="claude-history-directory-count">(' + count + ")</span></span></div></div>";
-  }
-  function renderCodexHistoryBodyContent(visibleHistory) {
-    if (!state.codexHistoryLoaded) {
-      return '<div class="claude-history-loading">\u626B\u63CF Codex \u5386\u53F2\u4F1A\u8BDD\u4E2D\u2026</div>';
-    }
-    if (visibleHistory.length === 0) {
-      return "";
-    }
-    var groups = {};
-    var groupOrder = [];
-    visibleHistory.forEach(function(s) {
-      if (!groups[s.cwd]) {
-        groups[s.cwd] = [];
-        groupOrder.push(s.cwd);
-      }
-      groups[s.cwd].push(s);
-    });
-    var listHtml = '<div class="sidebar-history-section-label">Codex</div>';
-    groupOrder.forEach(function(cwd) {
-      var cwdShort = cwd.split("/").filter(Boolean).slice(-3).join("/");
-      var isDirExpanded = !!state.codexHistoryExpandedDirs[cwd];
-      listHtml += renderCodexHistoryDirectoryHeader(cwd, cwdShort, groups[cwd].length, isDirExpanded);
-      if (isDirExpanded) {
-        listHtml += groups[cwd].map(function(session) {
-          return renderClaudeHistoryItem(session, "codex");
-        }).join("");
-      }
-    });
-    return '<div class="sidebar-history-scroll codex-history-scroll">' + listHtml + "</div>";
-  }
-  function renderClaudeHistoryDirectoryHeader(cwd, cwdShort, count, isExpanded) {
-    var chevron = isExpanded ? "&#9662;" : "&#9656;";
-    return '<div class="claude-history-directory-header" data-action="toggle-history-directory" data-cwd="' + escapeHtml2(cwd) + '" role="button" tabindex="0"><div class="session-group-title claude-history-directory-title"><span class="chevron">' + chevron + '</span><span class="claude-history-directory-label">' + renderTailMarqueePath(cwd, "claude-history-directory-label-path") + '<span class="claude-history-directory-count">(' + count + ')</span></span><button class="btn btn-danger btn-xs claude-history-directory-clear-btn" data-action="delete-history-directory" data-cwd="' + escapeHtml2(cwd) + '" type="button" aria-label="\u6E05\u7A7A\u6B64\u76EE\u5F55\u7684\u5386\u53F2\u4F1A\u8BDD" title="\u6E05\u7A7A\u6B64\u76EE\u5F55\u7684\u5386\u53F2\u4F1A\u8BDD">\u6E05\u7A7A\u6B64\u76EE\u5F55</button></div></div>';
-  }
   function renderClaudeHistoryItem(session, kind) {
     var isCodex = kind === "codex";
     var rAct = isCodex ? "resume-codex-history" : "resume-history";
@@ -3755,10 +3664,10 @@
     var shortId = session.claudeSessionId.slice(0, 8);
     var preview = session.firstUserMessage || "(\u7A7A\u4F1A\u8BDD)";
     var timeStr = formatHistoryTime(session.timestamp);
-    var checkbox = renderManageCheckbox(kind, session.claudeSessionId, "\u9009\u62E9\u5386\u53F2\u4F1A\u8BDD " + preview);
-    var deleteButton = state.sessionsManageMode ? "" : '<button class="session-action-btn delete-btn" data-action="' + dAct + '" data-claude-session-id="' + session.claudeSessionId + '" type="button" aria-label="\u5220\u9664\u4F1A\u8BDD" title="\u9690\u85CF\u6B64\u5386\u53F2\u4F1A\u8BDD"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
-    var resumeButton = state.sessionsManageMode ? "" : '<button class="session-action-btn" data-action="' + rAct + '" data-claude-session-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml2(session.cwd) + '" type="button" aria-label="\u6062\u590D\u4F1A\u8BDD" title="' + (isCodex ? "\u6062\u590D\u6B64 Codex \u5386\u53F2\u4F1A\u8BDD" : "\u6062\u590D\u6B64 Claude \u5386\u53F2\u4F1A\u8BDD") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
-    return '<div class="session-item claude-history-item' + (state.sessionsManageMode && selMap[session.claudeSessionId] ? " selected" : "") + '" data-claude-history-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml2(session.cwd) + '" role="button" tabindex="0"><div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-command claude-history-preview">' + escapeHtml2(preview) + '</div><div class="session-meta"><span class="session-id" title="' + escapeHtml2(session.claudeSessionId) + '">' + escapeHtml2(shortId) + "</span><span>" + escapeHtml2(timeStr) + '</span></div></div><span class="session-actions">' + resumeButton + deleteButton + "</span></div></div></div>";
+    var checkbox = renderManageCheckbox(kind, session.claudeSessionId, "\u9009\u62E9\u4F1A\u8BDD " + preview);
+    var deleteButton = state.sessionsManageMode ? "" : '<button class="session-action-btn delete-btn" data-action="' + dAct + '" data-claude-session-id="' + session.claudeSessionId + '" type="button" aria-label="\u5220\u9664\u4F1A\u8BDD" title="\u5220\u9664\u4F1A\u8BDD"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
+    var resumeButton = state.sessionsManageMode ? "" : '<button class="session-action-btn" data-action="' + rAct + '" data-claude-session-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml2(session.cwd) + '" type="button" aria-label="\u6062\u590D\u4F1A\u8BDD" title="' + (isCodex ? "\u6062\u590D\u6B64 Codex \u4F1A\u8BDD" : "\u6062\u590D\u6B64 Claude \u4F1A\u8BDD") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
+    return '<div class="session-item' + (state.sessionsManageMode && selMap[session.claudeSessionId] ? " selected" : "") + '" data-claude-history-id="' + session.claudeSessionId + '" data-provider="' + (isCodex ? "codex" : "claude") + '" data-cwd="' + escapeHtml2(session.cwd) + '" role="button" tabindex="0"><div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-command claude-history-preview">' + escapeHtml2(preview) + '</div><div class="session-meta"><span class="session-id" title="' + escapeHtml2(session.claudeSessionId) + '">' + escapeHtml2(shortId) + "</span><span>" + escapeHtml2(timeStr) + '</span></div></div><span class="session-actions">' + resumeButton + deleteButton + "</span></div></div></div>";
   }
   function formatHistoryTime(isoStr) {
     if (!isoStr) return "";
@@ -3794,15 +3703,17 @@
   }
   var _claudeHistoryLoadingPromise = null;
   function ensureClaudeHistoryLoaded() {
-    ensureCodexHistoryLoaded();
-    if (state.claudeHistoryLoaded) return Promise.resolve();
-    if (_claudeHistoryLoadingPromise) return _claudeHistoryLoadingPromise;
-    _claudeHistoryLoadingPromise = loadClaudeHistory().then(function() {
-      _claudeHistoryLoadingPromise = null;
-    }, function() {
-      _claudeHistoryLoadingPromise = null;
+    var codexPromise = ensureCodexHistoryLoaded();
+    if (!state.claudeHistoryLoaded && !_claudeHistoryLoadingPromise) {
+      _claudeHistoryLoadingPromise = loadClaudeHistory().then(function() {
+        _claudeHistoryLoadingPromise = null;
+      }, function() {
+        _claudeHistoryLoadingPromise = null;
+      });
+    }
+    var claudePromise = _claudeHistoryLoadingPromise || Promise.resolve();
+    return Promise.all([claudePromise, codexPromise]).then(function() {
     });
-    return _claudeHistoryLoadingPromise;
   }
   function loadCodexHistory() {
     return fetch("/api/codex-history", { credentials: "same-origin" }).then(function(res) {
@@ -5587,7 +5498,8 @@
         event.stopPropagation();
         var historyCid = collapsedTile.dataset.collapsedHistoryId;
         var historyCwd = collapsedTile.dataset.cwd || "";
-        resumeClaudeHistorySession(historyCid, historyCwd).then(function(data) {
+        var resumeCollapsed = collapsedTile.dataset.provider === "codex" ? resumeCodexHistorySession : resumeClaudeHistorySession;
+        resumeCollapsed(historyCid, historyCwd).then(function(data) {
           if (data && data.id) {
             state.selectedId = data.id;
             persistSelectedId();
@@ -5635,7 +5547,7 @@
         })(actionButton.dataset.sessionId);
       } else if (actionButton.dataset.action === "delete-history" && actionButton.dataset.claudeSessionId) {
         (function(cid, item2) {
-          confirmDelete("\u786E\u8BA4\u9690\u85CF\u8FD9\u6761 Claude \u5386\u53F2\u5417\uFF1F", { title: "\u9690\u85CF\u5386\u53F2\u4F1A\u8BDD", okLabel: "\u9690\u85CF" }).then(function(ok) {
+          confirmDelete("\u786E\u8BA4\u5220\u9664\u8FD9\u6761 Claude \u4F1A\u8BDD\u5417\uFF1F", { title: "\u5220\u9664\u4F1A\u8BDD" }).then(function(ok) {
             if (ok) executeDeleteHistory(cid, item2);
           });
         })(actionButton.dataset.claudeSessionId, actionButton.closest(".session-item"));
@@ -5688,7 +5600,7 @@
         if (item.dataset.sessionId) {
           toggleManagedItemSelection("sessions", item.dataset.sessionId);
         } else if (item.dataset.claudeHistoryId) {
-          toggleManagedItemSelection("history", item.dataset.claudeHistoryId);
+          toggleManagedItemSelection(item.dataset.provider === "codex" ? "codex" : "history", item.dataset.claudeHistoryId);
         }
         return;
       }
@@ -5702,7 +5614,8 @@
       } else if (item.dataset.claudeHistoryId) {
         var claudeSessionId = item.dataset.claudeHistoryId;
         var cwd = item.dataset.cwd;
-        resumeClaudeHistorySession(claudeSessionId, cwd).then(function(data) {
+        var resumeItem = item.dataset.provider === "codex" ? resumeCodexHistorySession : resumeClaudeHistorySession;
+        resumeItem(claudeSessionId, cwd).then(function(data) {
           if (data && data.id) {
             state.selectedId = data.id;
             persistSelectedId();
@@ -5725,7 +5638,7 @@
       if (item.dataset.sessionId) {
         toggleManagedItemSelection("sessions", item.dataset.sessionId);
       } else if (item.dataset.claudeHistoryId) {
-        toggleManagedItemSelection("history", item.dataset.claudeHistoryId);
+        toggleManagedItemSelection(item.dataset.provider === "codex" ? "codex" : "history", item.dataset.claudeHistoryId);
       }
       return;
     }
@@ -5734,7 +5647,8 @@
     } else if (item.dataset.claudeHistoryId) {
       var claudeSessionId = item.dataset.claudeHistoryId;
       var cwd = item.dataset.cwd;
-      resumeClaudeHistorySession(claudeSessionId, cwd).then(function(data) {
+      var resumeItem = item.dataset.provider === "codex" ? resumeCodexHistorySession : resumeClaudeHistorySession;
+      resumeItem(claudeSessionId, cwd).then(function(data) {
         if (data && data.id) {
           state.selectedId = data.id;
           persistSelectedId();
@@ -7954,6 +7868,9 @@
     }
     if (state.claudeHistoryLoaded) {
       loadClaudeHistory();
+    }
+    if (state.codexHistoryLoaded) {
+      loadCodexHistory();
     }
     return loadSessions({ skipSelectedOutputReload: true }).catch(function(e) {
       console.error("[wand] foreground sync failed:", reason, e);
@@ -10953,7 +10870,7 @@
       }).catch(function() {
         if (item) item.classList.remove("deleting");
         var errorEl = document.getElementById("action-error");
-        showError2(errorEl, "\u65E0\u6CD5\u5220\u9664\u5386\u53F2\u4F1A\u8BDD\u3002");
+        showError2(errorEl, "\u65E0\u6CD5\u5220\u9664\u4F1A\u8BDD\u3002");
       });
     }, 250);
   }
@@ -11253,19 +11170,18 @@
       }
       return data;
     }).catch(function(error) {
-      showToast2(error && error.message || "\u65E0\u6CD5\u6062\u590D\u5386\u53F2\u4F1A\u8BDD\u3002", "error");
+      showToast2(error && error.message || "\u65E0\u6CD5\u6062\u590D\u4F1A\u8BDD\u3002", "error");
       return null;
     });
   }
   function handleDeleteCodexHistoryAction(actionButton) {
     var threadId = actionButton.dataset.claudeSessionId;
     if (!threadId) return;
-    confirmDelete("\u786E\u8BA4\u9690\u85CF\u8FD9\u6761 Codex \u5386\u53F2\u4F1A\u8BDD\u5417\uFF1F", {
-      title: "\u9690\u85CF Codex \u5386\u53F2",
-      okLabel: "\u9690\u85CF"
+    confirmDelete("\u786E\u8BA4\u5220\u9664\u8FD9\u6761 Codex \u4F1A\u8BDD\u5417\uFF1F", {
+      title: "\u5220\u9664\u4F1A\u8BDD"
     }).then(function(ok) {
       if (!ok) return;
-      var item = actionButton.closest(".claude-history-item");
+      var item = actionButton.closest(".session-item");
       if (item) item.style.opacity = "0.5";
       fetch("/api/codex-history/" + encodeURIComponent(threadId), {
         method: "DELETE",
@@ -11325,7 +11241,7 @@
       }
       return data;
     }).catch(function(error) {
-      showToast2(error && error.message || "\u65E0\u6CD5\u6062\u590D\u5386\u53F2\u4F1A\u8BDD\u3002", "error");
+      showToast2(error && error.message || "\u65E0\u6CD5\u6062\u590D\u4F1A\u8BDD\u3002", "error");
       return null;
     });
   }

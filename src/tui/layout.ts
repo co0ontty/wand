@@ -254,10 +254,7 @@ export function buildLayout(): LayoutHandle {
 
   function refreshHeader(info: HeaderInfo): void {
     const counts = info.sessionCounts;
-    const sess =
-      `{green-fg}${counts.active}{/} active · ` +
-      `{gray-fg}${counts.archived}{/} archived · ` +
-      `{white-fg}${counts.total}{/} total`;
+    const sess = `{white-fg}${counts.total}{/} sessions`;
     const orphan = info.orphanRecoveredCount > 0
       ? `  {gray-fg}(${info.orphanRecoveredCount} orphan PTYs cleaned){/}`
       : "";
@@ -591,7 +588,6 @@ function toneColor(tone: SessionRow["tone"]): string {
     case "failed": return "red";
     case "stopped": return "yellow";
     case "exited": return "gray";
-    case "archived": return "gray";
     default: return "white";
   }
 }

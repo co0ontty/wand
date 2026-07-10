@@ -2305,7 +2305,7 @@ import { getSessionStatusLabel } from "./session-ui";
             .catch(function() {
               if (item) item.classList.remove("deleting");
               var errorEl = document.getElementById("action-error");
-              showError(errorEl, "无法删除历史会话。");
+              showError(errorEl, "无法删除会话。");
             });
         }, 250);
       }
@@ -2635,7 +2635,7 @@ import { getSessionStatusLabel } from "./session-ui";
           return data;
         })
         .catch(function(error) {
-          showToast((error && error.message) || "无法恢复历史会话。", "error");
+          showToast((error && error.message) || "无法恢复会话。", "error");
           return null;
         });
       }
@@ -2643,12 +2643,11 @@ import { getSessionStatusLabel } from "./session-ui";
       export function handleDeleteCodexHistoryAction(actionButton) {
         var threadId = actionButton.dataset.claudeSessionId;
         if (!threadId) return;
-        confirmDelete("确认隐藏这条 Codex 历史会话吗？", {
-          title: "隐藏 Codex 历史",
-          okLabel: "隐藏"
+        confirmDelete("确认删除这条 Codex 会话吗？", {
+          title: "删除会话"
         }).then(function(ok) {
           if (!ok) return;
-          var item = actionButton.closest(".claude-history-item");
+          var item = actionButton.closest(".session-item");
           if (item) item.style.opacity = "0.5";
           fetch("/api/codex-history/" + encodeURIComponent(threadId), {
             method: "DELETE",
@@ -2715,7 +2714,7 @@ import { getSessionStatusLabel } from "./session-ui";
           return data;
         })
         .catch(function(error) {
-          showToast((error && error.message) || "无法恢复历史会话。", "error");
+          showToast((error && error.message) || "无法恢复会话。", "error");
           return null;
         });
       }

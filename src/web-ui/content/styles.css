@@ -736,19 +736,6 @@
         0 4px 10px -3px rgba(184, 92, 55, 0.36),
         inset 0 1px 0 rgba(255, 255, 255, 0.32);
     }
-    /* History tile — softer cream tone to distinguish from active sessions */
-    .sidebar-collapsed-tile.history {
-      background: linear-gradient(145deg, #e8d3c0 0%, #d3b69d 50%, #b89478 100%);
-      color: rgba(89, 58, 32, 0.88);
-      box-shadow:
-        0 1px 2px rgba(120, 88, 56, 0.18),
-        inset 0 1px 0 rgba(255, 255, 255, 0.42);
-    }
-    .sidebar-collapsed-tile.history:hover {
-      box-shadow:
-        0 4px 10px -3px rgba(120, 88, 56, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.48);
-    }
     /* 快速新建会话 tile —— 虚线描边 + 加号，区别于实心会话方块 */
     .sidebar-collapsed-tile.add {
       background: rgba(184, 92, 55, 0.06);
@@ -1436,10 +1423,7 @@
 
     /* ===== 会话列表 ===== */
     .sessions-list {
-      /* Flex column that fills the scroll body so the 历史会话 group can pin to
-         the very bottom (margin-top:auto) when the list is short, yet flow
-         naturally and scroll when it's long. #sessions-panel is display:contents
-         so this is effectively a direct child of the scrolling .sidebar-body. */
+      /* Flex column that fills the scrolling sidebar body. */
       flex: 1 0 auto;
       min-height: 0;
       display: flex;
@@ -1495,104 +1479,11 @@
       border-radius: var(--radius-full);
     }
 
-    /* ===== Claude 历史会话 ===== */
-    .claude-history-toggle {
-      cursor: pointer;
-      user-select: none;
-      transition: color 0.15s ease;
-    }
-    .claude-history-toggle:hover {
-      color: var(--text-primary);
-    }
-    .claude-history-toggle .chevron {
-      display: inline-block;
-      transition: transform 0.25s var(--ease-out-expo);
-      font-size: 0.6875rem;
-      margin-right: 4px;
-    }
-    .claude-history-toggle .history-count {
-      font-size: 0.6875rem;
-      font-weight: 600;
-      color: var(--text-secondary);
-      background: var(--bg-tertiary);
-      padding: 2px 7px;
-      border-radius: var(--radius-full);
-      margin-left: 6px;
-    }
-    .claude-history-loading {
-      padding: 16px 8px;
-      color: var(--text-muted);
-      font-size: 0.8125rem;
-      text-align: center;
-      font-style: italic;
-    }
-    .sidebar-history-section-label {
-      padding: 8px 10px 4px 10px;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      opacity: 0.5;
-    }
-    .claude-history-directory-header {
-      margin-top: 6px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .claude-history-directory-header .chevron {
-      font-size: 0.6875rem;
-      margin-right: 4px;
-    }
-    .claude-history-directory-title {
-      font-size: 0.6875rem;
-      padding: 6px 8px 6px 12px;
-      opacity: 0.8;
-      justify-content: space-between;
-    }
-    /* No accent bar on nested directory rows — the 3px bar stays on top-level
-       groups (历史会话 / 已归档) only, so the hierarchy reads as group → folder
-       → items instead of a column of identical orange ticks. The chevron +
-       slight indent already signal the sub-level. */
-    .claude-history-directory-header .claude-history-directory-title::before {
-      display: none;
-    }
-    .claude-history-directory-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      min-width: 0;
-      flex: 1 1 auto;
-      overflow: hidden;
-      white-space: nowrap;
-    }
-    .claude-history-directory-label-path {
-      flex: 1 1 auto;
-      min-width: 0;
-      font-family: var(--font-mono);
-      font-weight: 600;
-    }
-    .claude-history-directory-count {
-      flex: 0 0 auto;
-      color: var(--text-tertiary);
-    }
-    .claude-history-directory-clear-btn {
-      opacity: 0.9;
-      flex-shrink: 0;
-    }
     .claude-history-preview {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .claude-history-item {
-      opacity: 0.85;
-      transition: opacity 0.15s ease, background 0.15s ease;
-    }
-    .claude-history-item:hover {
-      opacity: 1;
-      background: rgba(255, 253, 250, 0.96);
-    }
-
     /* ===== 会话卡片项 ===== */
     .session-item {
       width: 100%;
@@ -2325,66 +2216,6 @@
       padding: 2px 6px;
       border-radius: 4px;
       font-weight: 500;
-    }
-
-    /* ===== Sidebar: inline 历史会话 group =====
-       History (older Claude + Codex CLI sessions) is the final collapsible
-       group of #sessions-list — same scroll, same idiom as 已归档. No docked
-       region, no 40% cap, no stranded bar above the footer: when the list is
-       short the empty space simply falls below the content, as a list should. */
-    /* Pin the history group to the very bottom of the sidebar (just above the
-       footer). margin-top:auto eats the free space when the list is short;
-       when the list overflows there is no free space, so history simply
-       follows the content and scrolls. Collapsed + minimized by default. */
-    .session-group--history {
-      margin-top: auto;
-      padding-top: 6px;
-    }
-
-    /* Toggle header reuses .session-group-title + .claude-history-toggle.
-       The count chip turns into a quiet ellipsis while history is still
-       scanning, then settles to the real number. */
-    .session-history-toggle .history-count.loading {
-      letter-spacing: 0.12em;
-      color: var(--text-muted);
-      background: transparent;
-      padding-left: 2px;
-      padding-right: 2px;
-    }
-
-    .session-history-body {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      padding: 2px 0 4px;
-      animation: historyBodyFadeIn 0.22s var(--ease-out-expo);
-    }
-
-    @keyframes historyBodyFadeIn {
-      from { opacity: 0; transform: translateY(-2px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    .sidebar-history-toolbar {
-      display: flex;
-      justify-content: flex-end;
-      padding: 2px 4px 6px;
-      flex-shrink: 0;
-    }
-
-    .sidebar-history-clear {
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-    .sidebar-history-clear:hover {
-      color: var(--danger);
-      background: var(--danger-muted);
-    }
-
-    .sidebar-history-scroll {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
     }
 
     .sidebar-footer {
