@@ -3987,6 +3987,37 @@
       margin: 3px 0;
     }
 
+    /* 单轮用量始终占据 assistant 内容的最后一行；流式估算与最终值原位替换。 */
+    .turn-usage-summary {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      width: 100%;
+      min-height: 20px;
+      margin-top: 6px;
+      padding: 2px 2px 0;
+      color: var(--text-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.67rem;
+      line-height: 1.45;
+      font-variant-numeric: tabular-nums;
+      box-sizing: border-box;
+    }
+    .turn-usage-summary.is-estimated {
+      opacity: 0.82;
+    }
+    .turn-usage-icon {
+      width: 13px;
+      height: 13px;
+      margin-top: 1px;
+      flex: 0 0 auto;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.35;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
     /* ===== 多角色群聊（subagent 加入对话） ===== */
     /* 一个 assistant turn 内有 subagent 时，根容器切到 multi-agent 模式，
        内部多个 .chat-message-segment 子段堆叠，每段自带头像与气泡。 */
@@ -4690,6 +4721,8 @@
       padding-bottom: 0;
       opacity: 0;
       transform: scaleY(0.95);
+      visibility: hidden;
+      pointer-events: none;
     }
     .tool-use-content {
       margin: 0;
@@ -5774,6 +5807,8 @@
       overflow: hidden;
       opacity: 0;
       transition: max-height 0.35s var(--ease-out-expo), opacity 0.25s ease;
+      visibility: hidden;
+      pointer-events: none;
     }
     .diff-file-icon {
       display: none;

@@ -6478,6 +6478,10 @@
     if (card) {
       var wasCollapsed = card.classList.contains("collapsed");
       card.classList.toggle("collapsed");
+      var isExpanded = wasCollapsed;
+      headerEl.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+      var cardBody = card.querySelector(".tool-use-body, .diff-body");
+      if (cardBody) cardBody.setAttribute("aria-hidden", isExpanded ? "false" : "true");
       var expandKind = card.dataset.expandKind || "tool-card";
       persistElementExpandState(card, expandKind);
       if (wasCollapsed) {
@@ -6577,6 +6581,8 @@
       var isHidden = body.style.display === "none";
       body.style.display = isHidden ? "block" : "none";
       container.dataset.expanded = isHidden ? "true" : "false";
+      el.setAttribute("aria-expanded", isHidden ? "true" : "false");
+      body.setAttribute("aria-hidden", isHidden ? "false" : "true");
       var toggleIcon = el.querySelector(".term-toggle-icon");
       if (toggleIcon) toggleIcon.textContent = isHidden ? "\u25BC" : "\u25B6";
       persistElementExpandState(container, "terminal");
@@ -11623,6 +11629,10 @@
               if (block.description) contentLen += block.description.length;
               if (block.input) contentLen += JSON.stringify(block.input).length;
             }
+            if (selectedSession.messages[bi].usage) {
+              var hashUsage = selectedSession.messages[bi].usage;
+              contentLen += (hashUsage.inputTokens || 0) + (hashUsage.outputTokens || 0) + (hashUsage.cacheReadInputTokens || 0) + (hashUsage.cacheCreationInputTokens || 0) + (hashUsage.reasoningOutputTokens || 0) + Math.round((hashUsage.totalCostUsd || 0) * 1e6) + (hashUsage.estimated === true ? 1 : 0);
+            }
           } else {
             totalBlocks += 1;
             contentLen = String(msgContent).length;
@@ -11728,79 +11738,43 @@
       attachAllCopyHandlers(chatMessages);
       bindChatScrollListener();
       applyPersistedExpandState(chatMessages);
-      var firstMsg = chatMessages.querySelector(".chat-message:not(.system-info)");
-      if (firstMsg) {
-        var cards = firstMsg.querySelectorAll(".tool-use-card, .inline-diff[data-expand-key]");
-        if (cards.length > 0) {
-          var firstCard = cards[0];
-          var firstCardKey = getElementExpandKey(firstCard);
-          if (getPersistedExpandState(firstCardKey) === null) {
-            firstCard.classList.remove("collapsed");
-          }
-          for (var ci = 1; ci < cards.length; ci++) {
-            var cardKey = getElementExpandKey(cards[ci]);
-            if (getPersistedExpandState(cardKey) === null) {
-              if (cards[ci].classList.contains("ask-user") && !cards[ci].classList.contains("ask-user-answered")) continue;
-              cards[ci].classList.add("collapsed");
-            }
-          }
-        }
-      }
       requestAnimationFrame(function() {
         refreshChatUnreadDivider(chatMessages);
         updateChatUnreadBubble();
         observeLoadMoreSentinel();
       });
     }
-    function collapseOldToolCards(container, newEls) {
-      var allCards2 = container.querySelectorAll(".tool-use-card, .inline-diff[data-expand-key]");
-      allCards2.forEach(function(c) {
-        var cardKey = getElementExpandKey(c);
-        if (getPersistedExpandState(cardKey) !== null) return;
-        if (c.classList.contains("ask-user") && !c.classList.contains("ask-user-answered")) return;
-        if (newEls) {
-          for (var i2 = 0; i2 < newEls.length; i2++) {
-            if (newEls[i2].contains(c)) return;
-          }
-        }
-        c.classList.add("collapsed");
-      });
-    }
     var roundUsageByIndex = {};
     (function() {
-      var acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0 };
+      var acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalCostUsd: 0, estimated: false };
+      var hasUsage = false;
       var lastAssistantIdx = -1;
       for (var mi2 = 0; mi2 < allMessages.length; mi2++) {
         var m = allMessages[mi2];
         if (m.role === "user") {
-          if (lastAssistantIdx >= 0 && (acc.inputTokens > 0 || acc.outputTokens > 0 || acc.totalCostUsd > 0)) {
-            roundUsageByIndex[lastAssistantIdx] = {
-              inputTokens: acc.inputTokens,
-              outputTokens: acc.outputTokens,
-              cacheReadInputTokens: acc.cacheReadInputTokens,
-              totalCostUsd: acc.totalCostUsd
-            };
+          if (lastAssistantIdx >= 0 && hasUsage) {
+            roundUsageByIndex[lastAssistantIdx] = acc;
           }
-          acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0 };
+          acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalCostUsd: 0, estimated: false };
+          hasUsage = false;
           lastAssistantIdx = -1;
         } else if (m.role === "assistant" && m.usage) {
           var u = m.usage;
+          hasUsage = true;
           acc.inputTokens += u.inputTokens || 0;
           acc.outputTokens += u.outputTokens || 0;
           acc.cacheReadInputTokens += u.cacheReadInputTokens || 0;
+          acc.cacheCreationInputTokens += u.cacheCreationInputTokens || 0;
+          acc.reasoningOutputTokens += u.reasoningOutputTokens || 0;
           acc.totalCostUsd += u.totalCostUsd || 0;
+          acc.estimated = acc.estimated || u.estimated === true;
           lastAssistantIdx = mi2;
         } else if (m.role === "assistant") {
           lastAssistantIdx = mi2;
         }
       }
-      if (lastAssistantIdx >= 0 && (acc.inputTokens > 0 || acc.outputTokens > 0 || acc.totalCostUsd > 0)) {
-        roundUsageByIndex[lastAssistantIdx] = {
-          inputTokens: acc.inputTokens,
-          outputTokens: acc.outputTokens,
-          cacheReadInputTokens: acc.cacheReadInputTokens,
-          totalCostUsd: acc.totalCostUsd
-        };
+      if (lastAssistantIdx >= 0 && hasUsage) {
+        roundUsageByIndex[lastAssistantIdx] = acc;
       }
     })();
     if (needsFullRender) {
@@ -11829,7 +11803,6 @@
       bindChatScrollListener();
       attachAllCopyHandlers(chatMessages);
       applyPersistedExpandState(chatMessages);
-      collapseOldToolCards(chatMessages, insertedEls);
       if (renderWasAtBottom) {
         requestAnimationFrame(function() {
           if (chatMessages.isConnected && Math.abs(chatMessages.scrollTop) > 1) {
@@ -13416,7 +13389,7 @@
     var lastSubId = null;
     for (var si = 0; si < segments.length; si++) {
       var seg = segments[si];
-      var segmentOptions = seg.subagent ? { inSubagentPanel: true, forceExpandedToolBodies: true } : {};
+      var segmentOptions = seg.subagent ? { inSubagentPanel: true } : {};
       var segHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey, segmentOptions);
       if (!segHtml || !segHtml.trim()) continue;
       if (seg.subagent) {
@@ -13464,12 +13437,13 @@
   function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
     var role = msg.role;
     var messageKey = getMessageKey(msg, messageIndex);
+    var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
     var isQueued = role === "user" && msg.content && msg.content.some(function(b) {
       return b.__queued;
     });
     if (!msg.content || msg.content.length === 0) {
       if (role === "assistant") {
-        return '<div class="chat-message ' + role + '">' + chatAvatar(role) + '<div class="chat-message-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div></div>';
+        return '<div class="chat-message ' + role + '">' + chatAvatar(role) + '<div class="chat-message-content"><div class="typing-indicator"><span></span><span></span><span></span></div>' + usageHtml + "</div></div>";
       }
       return '<div class="chat-message ' + role + ' empty-message" data-message-key="' + escapeHtml2(messageKey) + '">' + chatAvatar(role) + '<div class="chat-message-content"><span class="empty-message-hint">\uFF08\u7A7A\u6D88\u606F\uFF09</span></div></div>';
     }
@@ -13496,12 +13470,32 @@
     });
     if (!hasSubagent) {
       var html = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
-      return '<div class="chat-message ' + role + '" data-message-key="' + escapeHtml2(messageKey) + '">' + chatAvatar(role) + '<div class="chat-message-content">' + html + "</div></div>";
+      return '<div class="chat-message ' + role + '" data-message-key="' + escapeHtml2(messageKey) + '">' + chatAvatar(role) + '<div class="chat-message-content">' + html + usageHtml + "</div></div>";
     }
     var multiHtml = '<div class="chat-message ' + role + ' multi-agent" data-message-key="' + escapeHtml2(messageKey) + '">';
     multiHtml += buildMultiAgentHtml(segments, role, parentPersona.name, toolResults, messageKey, { showHandoff: true });
+    multiHtml += usageHtml;
     multiHtml += "</div>";
     return multiHtml;
+  }
+  function compactUsageNumber(value) {
+    if (value >= 1e6) return (value / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (value >= 1e3) return (value / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
+    return String(Math.max(0, Math.round(value || 0)));
+  }
+  function renderUsageSummaryHtml(usage) {
+    if (!usage) return "";
+    var estimated = usage.estimated === true;
+    var parts = [];
+    if ((usage.inputTokens || 0) > 0) parts.push("\u8F93\u5165 " + compactUsageNumber(usage.inputTokens));
+    if ((usage.cacheReadInputTokens || 0) > 0) parts.push("\u7F13\u5B58\u547D\u4E2D " + compactUsageNumber(usage.cacheReadInputTokens));
+    if ((usage.cacheCreationInputTokens || 0) > 0) parts.push("\u7F13\u5B58\u5199\u5165 " + compactUsageNumber(usage.cacheCreationInputTokens));
+    if ((usage.outputTokens || 0) > 0) parts.push("\u8F93\u51FA " + (estimated ? "\u2248" : "") + compactUsageNumber(usage.outputTokens));
+    if ((usage.reasoningOutputTokens || 0) > 0) parts.push("\u63A8\u7406 " + (estimated ? "\u2248" : "") + compactUsageNumber(usage.reasoningOutputTokens));
+    if ((usage.totalCostUsd || 0) > 0) parts.push("$" + Number(usage.totalCostUsd).toFixed(4).replace(/0+$/, "").replace(/\.$/, ""));
+    if (parts.length === 0 && estimated) parts.push("\u6B63\u5728\u7EDF\u8BA1\u7528\u91CF\u2026");
+    if (parts.length === 0) return "";
+    return '<div class="turn-usage-summary' + (estimated ? " is-estimated" : "") + '" role="status" aria-live="polite" aria-label="\u672C\u8F6E\u7528\u91CF ' + escapeHtml2(parts.join("\uFF0C")) + '"><svg class="turn-usage-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5h11M4 11V7.5M8 11V3M12 11V5.5"/></svg><span>' + escapeHtml2(parts.join(" \xB7 ")) + "</span></div>";
   }
   var ATTACHMENT_PREFIX_RE = /^\s*\[附件已上传，请查看以下文件:\n([\s\S]*?)\]\n+/;
   function renderUserAttachmentBlock(rawPath) {
@@ -13706,7 +13700,7 @@
     var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? getCardDefault("terminal") : persistedExpanded;
     var termTruncated = toolResult && toolResult._truncated === true;
     var termTruncAttrs = termTruncated ? ' data-truncated="true" data-tool-use-id="' + escapeHtml2(block.id || "") + '"' : "";
-    return '<div class="inline-terminal" data-expand-kind="terminal" data-expand-key="' + escapeHtml2(expandKey) + '" data-expanded="' + (shouldExpand ? "true" : "false") + '"' + termTruncAttrs + '><div class="term-header" onclick="__terminalExpand(this)">' + statusDot + '<span class="term-cmd-preview"><span class="term-prompt">$</span> ' + escapeHtml2(cmdPreview) + '</span><span class="term-toggle-icon">' + (shouldExpand ? "\u25BC" : "\u25B6") + '</span></div><div class="term-body" style="display:' + (shouldExpand ? "block" : "none") + ';"><div class="term-command"><span class="term-prompt">$</span> ' + cmdDisplay + "</div>" + (outputHtml ? '<div class="term-output">' + outputHtml + "</div>" : "") + exitCodeHtml + "</div></div>";
+    return '<div class="inline-terminal" data-expand-kind="terminal" data-expand-key="' + escapeHtml2(expandKey) + '" data-expanded="' + (shouldExpand ? "true" : "false") + '"' + termTruncAttrs + '><div class="term-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? "true" : "false") + `" onclick="__terminalExpand(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();__terminalExpand(this);}">` + statusDot + '<span class="term-cmd-preview"><span class="term-prompt">$</span> ' + escapeHtml2(cmdPreview) + '</span><span class="term-toggle-icon">' + (shouldExpand ? "\u25BC" : "\u25B6") + '</span></div><div class="term-body" aria-hidden="' + (shouldExpand ? "false" : "true") + '" style="display:' + (shouldExpand ? "block" : "none") + ';"><div class="term-command"><span class="term-prompt">$</span> ' + cmdDisplay + "</div>" + (outputHtml ? '<div class="term-output">' + outputHtml + "</div>" : "") + exitCodeHtml + "</div></div>";
   }
   function extractToolResultText(content) {
     if (!content) return "";
@@ -13772,13 +13766,13 @@
     var expandKey = buildExpandKey("diff", [messageKey, toolId || index, index]);
     var persistedExpanded = getPersistedExpandState(expandKey);
     var cardDefaultExpand = getCardDefault("editCards");
-    var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? statusClass === "diff-pending" || cardDefaultExpand : persistedExpanded;
+    var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? cardDefaultExpand : persistedExpanded;
     var collapsedClass = shouldExpand ? "" : " collapsed";
     var bothCols = !unifiedCol && leftCol && rightCol;
     var colClass = bothCols ? "diff-col-half" : "diff-col-full";
     var columnsHtml = unifiedCol || (bothCols ? '<div class="diff-col ' + colClass + '"><div class="diff-col-label">\u65E7</div>' + leftCol + "</div>" : "") + '<div class="diff-col ' + colClass + '"><div class="diff-col-label">' + (bothCols ? "\u65B0" : "") + "</div>" + (rightCol || leftCol || renderEmptyDiff(path)) + "</div>";
     var openButton = path ? '<button class="diff-open-file" type="button" data-path="' + escapeHtml2(path) + `" title="\u6253\u5F00\u6587\u4EF6" onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute('data-path'));">\u6253\u5F00</button>` : "";
-    return '<div class="inline-diff' + collapsedClass + '" data-tool-name="' + escapeHtml2(toolName) + '" data-expand-kind="diff" data-expand-key="' + escapeHtml2(expandKey) + '" data-tool-use-id="' + escapeHtml2(toolId) + '" data-path="' + escapeHtml2(path) + '"><div class="diff-header" onclick="__tcToggle(event,this)"><span class="diff-file-icon"></span><span class="diff-file-name">' + escapeHtml2(fileName) + "</span>" + renderTailMarqueePath(path, "diff-path") + '<span class="diff-status ' + statusClass + '">' + statusText + "</span>" + openButton + '<span class="diff-toggle">\u25BC</span></div><div class="diff-body"><div class="diff-columns">' + columnsHtml + "</div></div></div>";
+    return '<div class="inline-diff' + collapsedClass + '" data-tool-name="' + escapeHtml2(toolName) + '" data-expand-kind="diff" data-expand-key="' + escapeHtml2(expandKey) + '" data-tool-use-id="' + escapeHtml2(toolId) + '" data-path="' + escapeHtml2(path) + '"><div class="diff-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? "true" : "false") + `" onclick="__tcToggle(event,this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();__tcToggle(event,this);}"><span class="diff-file-icon"></span><span class="diff-file-name">` + escapeHtml2(fileName) + "</span>" + renderTailMarqueePath(path, "diff-path") + '<span class="diff-status ' + statusClass + '">' + statusText + "</span>" + openButton + '<span class="diff-toggle">\u25BC</span></div><div class="diff-body" aria-hidden="' + (shouldExpand ? "false" : "true") + '"><div class="diff-columns">' + columnsHtml + "</div></div></div>";
   }
   function renderUnifiedDiffLines(diff) {
     var lines = String(diff || "").split("\n");
@@ -13929,11 +13923,11 @@
     var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
     var persistedExpanded = getPersistedExpandState(expandKey);
     var cardDefaultExpand = getCardDefault("editCards");
-    var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? statusClass === "loading" || cardDefaultExpand : persistedExpanded;
+    var shouldExpand = opts.forceExpandedToolBodies ? true : persistedExpanded === null ? cardDefaultExpand : persistedExpanded;
     var tcTruncated = toolResult && toolResult._truncated === true;
     var collapsedClass = shouldExpand ? "" : " collapsed";
     var toggleHtml = '<span class="tool-use-toggle">\u25BC</span>';
-    return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml2(expandKey) + '" data-tool-use-id="' + escapeHtml2(toolId) + '"' + (tcTruncated ? ' data-truncated="true"' : "") + '><div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)"><span class="tool-use-icon">' + headerIcon + '</span><span class="tool-use-name">' + escapeHtml2(titleText) + "</span>" + subtitleHtml + toggleHtml + '</div><div class="tool-use-body">' + (description ? '<div class="tool-use-meta"><span class="tool-use-meta-label">\u5DE5\u5177\uFF1A</span>' + escapeHtml2(toolName) + "</div>" : "") + '<pre class="tool-use-content">' + escapeHtml2(fullJson) + "</pre>" + (resultHtml ? '<div class="tool-use-result">' + resultHtml + "</div>" : "") + "</div></div>";
+    return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml2(expandKey) + '" data-tool-use-id="' + escapeHtml2(toolId) + '"' + (tcTruncated ? ' data-truncated="true"' : "") + '><div class="tool-use-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? "true" : "false") + `" data-tool-toggle onclick="__tcToggle(event,this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();__tcToggle(event,this);}"><span class="tool-use-icon">` + headerIcon + '</span><span class="tool-use-name">' + escapeHtml2(titleText) + "</span>" + subtitleHtml + toggleHtml + '</div><div class="tool-use-body" aria-hidden="' + (shouldExpand ? "false" : "true") + '">' + (description ? '<div class="tool-use-meta"><span class="tool-use-meta-label">\u5DE5\u5177\uFF1A</span>' + escapeHtml2(toolName) + "</div>" : "") + '<pre class="tool-use-content">' + escapeHtml2(fullJson) + "</pre>" + (resultHtml ? '<div class="tool-use-result">' + resultHtml + "</div>" : "") + "</div></div>";
   }
   function getToolDisplayName(toolName) {
     var names = {

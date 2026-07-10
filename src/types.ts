@@ -397,6 +397,8 @@ export interface ConversationTurn {
     /** codex 专属：reasoning_output_tokens（GPT-5 等带思考模型，per-turn 计费）。 */
     reasoningOutputTokens?: number;
     totalCostUsd?: number;
+    /** True while the live value is estimated; omitted once the provider reports final usage. */
+    estimated?: boolean;
   };
 }
 

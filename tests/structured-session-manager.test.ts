@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildCodexFileChangeBlocks,
   buildCodexPatchApplyBlocks,
+  estimateCodexOutputTokens,
   normalizeStructuredToolResultContent,
   thinkingEffortToCodexReasoningEffort,
 } from "../src/structured-session-manager.js";
@@ -11,6 +12,17 @@ test("codex off thinking effort does not force minimal", () => {
   assert.equal(thinkingEffortToCodexReasoningEffort("off"), null);
   assert.equal(thinkingEffortToCodexReasoningEffort(null), null);
   assert.equal(thinkingEffortToCodexReasoningEffort("standard"), "low");
+});
+
+test("codex live output usage estimate grows with streamed content", () => {
+  const short = estimateCodexOutputTokens([{ type: "text", text: "hello" }]);
+  const longer = estimateCodexOutputTokens([
+    { type: "text", text: "hello world, this is a longer streamed answer" },
+    { type: "tool_use", id: "tool_1", name: "Bash", input: { command: "npm test" } },
+  ]);
+  assert.equal(short, 2);
+  assert.ok(longer > short);
+  assert.equal(estimateCodexOutputTokens([]), 0);
 });
 
 test("structured tool arrays without content-part types remain inspectable", () => {

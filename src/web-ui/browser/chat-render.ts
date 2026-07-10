@@ -241,6 +241,18 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
                   if (block.description) contentLen += block.description.length; // tool_use description
                   if (block.input) contentLen += JSON.stringify(block.input).length; // tool_use input
                 }
+                if (selectedSession.messages[bi].usage) {
+                  var hashUsage = selectedSession.messages[bi].usage;
+                  // Hash values (not JSON length): 12→13 tokens must re-render even
+                  // though the serialized object keeps exactly the same length.
+                  contentLen += (hashUsage.inputTokens || 0)
+                    + (hashUsage.outputTokens || 0)
+                    + (hashUsage.cacheReadInputTokens || 0)
+                    + (hashUsage.cacheCreationInputTokens || 0)
+                    + (hashUsage.reasoningOutputTokens || 0)
+                    + Math.round((hashUsage.totalCostUsd || 0) * 1000000)
+                    + (hashUsage.estimated === true ? 1 : 0);
+                }
               } else {
                 totalBlocks += 1;
                 contentLen = String(msgContent).length;
@@ -410,26 +422,6 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           attachAllCopyHandlers(chatMessages);
           bindChatScrollListener();
           applyPersistedExpandState(chatMessages);
-          // Only expand the single newest tool card (first chat-message = newest due to column-reverse)
-          var firstMsg = chatMessages.querySelector(".chat-message:not(.system-info)");
-          if (firstMsg) {
-            var cards = firstMsg.querySelectorAll(".tool-use-card, .inline-diff[data-expand-key]");
-            if (cards.length > 0) {
-              var firstCard = cards[0];
-              var firstCardKey = getElementExpandKey(firstCard);
-              if (getPersistedExpandState(firstCardKey) === null) {
-                firstCard.classList.remove("collapsed");
-              }
-              for (var ci = 1; ci < cards.length; ci++) {
-                var cardKey = getElementExpandKey(cards[ci]);
-                if (getPersistedExpandState(cardKey) === null) {
-                  // Never collapse unanswered AskUserQuestion cards
-                  if (cards[ci].classList.contains("ask-user") && !cards[ci].classList.contains("ask-user-answered")) continue;
-                  cards[ci].classList.add("collapsed");
-                }
-              }
-            }
-          }
           // 不主动 smartScrollToBottom——同一会话的全量重渲染要么是
           // streaming fallback（页面位置应保持），要么是 msgCount 减少（极少见，
           // 走 prevMsgCount===0 那条分支已经处理）。让浏览器自带的 scroll
@@ -441,64 +433,40 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           });
         }
 
-        // Collapse all tool-use cards except those in the new message elements (marked with animate-in)
-        // newEls: NodeList/Array of newly added message elements, or null to keep only the first card expanded
-        function collapseOldToolCards(container, newEls) {
-          var allCards = container.querySelectorAll(".tool-use-card, .inline-diff[data-expand-key]");
-          allCards.forEach(function(c) {
-            var cardKey = getElementExpandKey(c);
-            if (getPersistedExpandState(cardKey) !== null) return;
-            // Never collapse unanswered AskUserQuestion cards — the user
-            // needs to interact with the options.
-            if (c.classList.contains("ask-user") && !c.classList.contains("ask-user-answered")) return;
-            // Keep expanded if this card is inside a newly added message
-            if (newEls) {
-              for (var i = 0; i < newEls.length; i++) {
-                if (newEls[i].contains(c)) return;
-              }
-            }
-            c.classList.add("collapsed");
-          });
-        }
-
         // Pre-compute per-round cumulative usage using original (full array) indices.
         // A "round" starts at a user message and includes all subsequent assistant turns
         // until the next user message. Only the last assistant in each round shows the total.
         var roundUsageByIndex = {};
         (function() {
-          var acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0 };
+          var acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalCostUsd: 0, estimated: false };
+          var hasUsage = false;
           var lastAssistantIdx = -1;
           for (var mi = 0; mi < allMessages.length; mi++) {
             var m = allMessages[mi];
             if (m.role === "user") {
-              if (lastAssistantIdx >= 0 && (acc.inputTokens > 0 || acc.outputTokens > 0 || acc.totalCostUsd > 0)) {
-                roundUsageByIndex[lastAssistantIdx] = {
-                  inputTokens: acc.inputTokens,
-                  outputTokens: acc.outputTokens,
-                  cacheReadInputTokens: acc.cacheReadInputTokens,
-                  totalCostUsd: acc.totalCostUsd
-                };
+              if (lastAssistantIdx >= 0 && hasUsage) {
+                roundUsageByIndex[lastAssistantIdx] = acc;
               }
-              acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0 };
+              acc = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalCostUsd: 0, estimated: false };
+              hasUsage = false;
               lastAssistantIdx = -1;
             } else if (m.role === "assistant" && m.usage) {
               var u = m.usage;
+              hasUsage = true;
               acc.inputTokens += (u.inputTokens || 0);
               acc.outputTokens += (u.outputTokens || 0);
               acc.cacheReadInputTokens += (u.cacheReadInputTokens || 0);
+              acc.cacheCreationInputTokens += (u.cacheCreationInputTokens || 0);
+              acc.reasoningOutputTokens += (u.reasoningOutputTokens || 0);
               acc.totalCostUsd += (u.totalCostUsd || 0);
+              acc.estimated = acc.estimated || u.estimated === true;
               lastAssistantIdx = mi;
             } else if (m.role === "assistant") {
               lastAssistantIdx = mi;
             }
           }
-          if (lastAssistantIdx >= 0 && (acc.inputTokens > 0 || acc.outputTokens > 0 || acc.totalCostUsd > 0)) {
-            roundUsageByIndex[lastAssistantIdx] = {
-              inputTokens: acc.inputTokens,
-              outputTokens: acc.outputTokens,
-              cacheReadInputTokens: acc.cacheReadInputTokens,
-              totalCostUsd: acc.totalCostUsd
-            };
+          if (lastAssistantIdx >= 0 && hasUsage) {
+            roundUsageByIndex[lastAssistantIdx] = acc;
           }
         })();
 
@@ -533,8 +501,6 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           bindChatScrollListener();
           attachAllCopyHandlers(chatMessages);
           applyPersistedExpandState(chatMessages);
-          // Collapse all existing cards; new cards (with animate-in) stay expanded
-          collapseOldToolCards(chatMessages, insertedEls);
           // Telegram 行为：
           // - 用户原本就贴在底部 → 维持贴底（column-reverse 通常会自动留在底部，
           //   但浏览器的 scroll anchoring 在某些边界场景会把 scrollTop 调成非 0；
@@ -2532,7 +2498,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         for (var si = 0; si < segments.length; si++) {
           var seg = segments[si];
           var segmentOptions = seg.subagent
-            ? { inSubagentPanel: true, forceExpandedToolBodies: true }
+            ? { inSubagentPanel: true }
             : {};
           var segHtml = buildSegmentBlocksHtml(seg.blocks, seg.firstIndex, role, toolResults, messageKey, segmentOptions);
           // 段内所有 block 都被短路返空（典型场景：父段只剩一个空 thinking）时，
@@ -2626,6 +2592,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
       export function renderStructuredMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
         var role = msg.role;
         var messageKey = getMessageKey(msg, messageIndex);
+        var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
 
         // 排队中的用户消息标记（subagent 不会出现在 user role 的 user input 中）
         var isQueued = role === "user" && msg.content && msg.content.some(function(b) { return b.__queued; });
@@ -2634,7 +2601,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           if (role === "assistant") {
             return '<div class="chat-message ' + role + '">' +
               chatAvatar(role) +
-              '<div class="chat-message-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>' +
+              '<div class="chat-message-content"><div class="typing-indicator"><span></span><span></span><span></span></div>' + usageHtml + '</div>' +
             '</div>';
           }
           // 空 user 消息（极少出现，但快速发送的边界场景会让消息"消失"）。
@@ -2677,7 +2644,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           var html = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
           return '<div class="chat-message ' + role + '" data-message-key="' + escapeHtml(messageKey) + '">' +
             chatAvatar(role) +
-            '<div class="chat-message-content">' + html + '</div>' +
+            '<div class="chat-message-content">' + html + usageHtml + '</div>' +
           '</div>';
         }
 
@@ -2686,8 +2653,33 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // 插入一行 handoff 提示（"勤劳初二 ↳ 让 侦探猫 帮忙"）。
         var multiHtml = '<div class="chat-message ' + role + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">';
         multiHtml += buildMultiAgentHtml(segments, role, parentPersona.name, toolResults, messageKey, { showHandoff: true });
+        multiHtml += usageHtml;
         multiHtml += '</div>';
         return multiHtml;
+      }
+
+      function compactUsageNumber(value) {
+        if (value >= 1000000) return (value / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+        if (value >= 1000) return (value / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+        return String(Math.max(0, Math.round(value || 0)));
+      }
+
+      function renderUsageSummaryHtml(usage) {
+        if (!usage) return "";
+        var estimated = usage.estimated === true;
+        var parts = [];
+        if ((usage.inputTokens || 0) > 0) parts.push("输入 " + compactUsageNumber(usage.inputTokens));
+        if ((usage.cacheReadInputTokens || 0) > 0) parts.push("缓存命中 " + compactUsageNumber(usage.cacheReadInputTokens));
+        if ((usage.cacheCreationInputTokens || 0) > 0) parts.push("缓存写入 " + compactUsageNumber(usage.cacheCreationInputTokens));
+        if ((usage.outputTokens || 0) > 0) parts.push("输出 " + (estimated ? "≈" : "") + compactUsageNumber(usage.outputTokens));
+        if ((usage.reasoningOutputTokens || 0) > 0) parts.push("推理 " + (estimated ? "≈" : "") + compactUsageNumber(usage.reasoningOutputTokens));
+        if ((usage.totalCostUsd || 0) > 0) parts.push("$" + Number(usage.totalCostUsd).toFixed(4).replace(/0+$/, "").replace(/\.$/, ""));
+        if (parts.length === 0 && estimated) parts.push("正在统计用量…");
+        if (parts.length === 0) return "";
+        return '<div class="turn-usage-summary' + (estimated ? ' is-estimated' : '') + '" role="status" aria-live="polite" aria-label="本轮用量 ' + escapeHtml(parts.join("，")) + '">' +
+          '<svg class="turn-usage-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5h11M4 11V7.5M8 11V3M12 11V5.5"/></svg>' +
+          '<span>' + escapeHtml(parts.join(" · ")) + '</span>' +
+        '</div>';
       }
       // 用户上传附件时，客户端用 buildAttachmentPrefix 在 prompt 前注入一段
       //   [附件已上传，请查看以下文件:\n<path1>\n<path2>]\n\n<正文>
@@ -3003,12 +2995,12 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           : '';
 
         return '<div class="inline-terminal" data-expand-kind="terminal" data-expand-key="' + escapeHtml(expandKey) + '" data-expanded="' + (shouldExpand ? 'true' : 'false') + '"' + termTruncAttrs + '>' +
-          '<div class="term-header" onclick="__terminalExpand(this)">' +
+          '<div class="term-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" onclick="__terminalExpand(this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__terminalExpand(this);}">' +
             statusDot +
             '<span class="term-cmd-preview"><span class="term-prompt">$</span> ' + escapeHtml(cmdPreview) + '</span>' +
             '<span class="term-toggle-icon">' + (shouldExpand ? '▼' : '▶') + '</span>' +
           '</div>' +
-          '<div class="term-body" style="display:' + (shouldExpand ? 'block' : 'none') + ';">' +
+          '<div class="term-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '" style="display:' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="term-command"><span class="term-prompt">$</span> ' + cmdDisplay + '</div>' +
             (outputHtml ? '<div class="term-output">' + outputHtml + '</div>' : '') +
             exitCodeHtml +
@@ -3094,7 +3086,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var expandKey = buildExpandKey("diff", [messageKey, toolId || index, index]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
-        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? (statusClass === "diff-pending" || cardDefaultExpand) : persistedExpanded);
+        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? cardDefaultExpand : persistedExpanded);
         var collapsedClass = shouldExpand ? "" : " collapsed";
 
         // If only one column has content, show full width
@@ -3111,7 +3103,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         return '<div class="inline-diff' + collapsedClass + '" data-tool-name="' + escapeHtml(toolName) + '"' +
           ' data-expand-kind="diff" data-expand-key="' + escapeHtml(expandKey) + '"' +
           ' data-tool-use-id="' + escapeHtml(toolId) + '" data-path="' + escapeHtml(path) + '">' +
-          '<div class="diff-header" onclick="__tcToggle(event,this)">' +
+          '<div class="diff-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" onclick="__tcToggle(event,this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__tcToggle(event,this);}">' +
             '<span class="diff-file-icon"></span>' +
             '<span class="diff-file-name">' + escapeHtml(fileName) + '</span>' +
             renderTailMarqueePath(path, "diff-path") +
@@ -3119,7 +3111,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
             openButton +
             '<span class="diff-toggle">▼</span>' +
           '</div>' +
-          '<div class="diff-body">' +
+          '<div class="diff-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '">' +
             '<div class="diff-columns">' +
               columnsHtml +
             '</div>' +
@@ -3334,18 +3326,18 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
-        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? (statusClass === "loading" || cardDefaultExpand) : persistedExpanded);
+        var shouldExpand = opts.forceExpandedToolBodies ? true : (persistedExpanded === null ? cardDefaultExpand : persistedExpanded);
         var tcTruncated = toolResult && toolResult._truncated === true;
         var collapsedClass = shouldExpand ? "" : " collapsed";
         var toggleHtml = '<span class="tool-use-toggle">▼</span>';
         return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '"' + (tcTruncated ? ' data-truncated="true"' : '') + '>' +
-          '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
+          '<div class="tool-use-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" data-tool-toggle onclick="__tcToggle(event,this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__tcToggle(event,this);}">' +
             '<span class="tool-use-icon">' + headerIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(titleText) + '</span>' +
             subtitleHtml +
             toggleHtml +
           '</div>' +
-          '<div class="tool-use-body">' +
+          '<div class="tool-use-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '">' +
             (description ? '<div class="tool-use-meta"><span class="tool-use-meta-label">工具：</span>' + escapeHtml(toolName) + '</div>' : '') +
             '<pre class="tool-use-content">' + escapeHtml(fullJson) + '</pre>' +
             (resultHtml ? '<div class="tool-use-result">' + resultHtml + '</div>' : '') +

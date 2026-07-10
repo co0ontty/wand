@@ -458,6 +458,40 @@ interface StreamingTurnState {
 }
 
 /**
+ * Codex `exec --json` only publishes authoritative usage with `turn.completed`.
+ * Keep the bottom usage row useful while the turn is running by estimating the
+ * model-produced text/tool arguments; the final provider value replaces this.
+ */
+export function estimateCodexOutputTokens(blocks: ContentBlock[]): number {
+  let asciiUnits = 0;
+  let wideUnits = 0;
+  const addText = (value: string): void => {
+    for (const char of value) {
+      if (char.codePointAt(0)! <= 0x7f) asciiUnits += 1;
+      else wideUnits += 1;
+    }
+  };
+  for (const block of blocks) {
+    if (block.type === "text") addText(block.text);
+    else if (block.type === "thinking") addText(block.thinking);
+    else if (block.type === "tool_use") {
+      addText(block.name);
+      try { addText(JSON.stringify(block.input)); } catch { /* best-effort live estimate */ }
+    }
+  }
+  if (asciiUnits === 0 && wideUnits === 0) return 0;
+  return Math.max(1, Math.ceil(asciiUnits / 4 + wideUnits));
+}
+
+function refreshEstimatedCodexUsage(turnState: StreamingTurnState): void {
+  if (turnState.usage?.estimated !== true) return;
+  turnState.usage = {
+    outputTokens: estimateCodexOutputTokens(turnState.blocks),
+    estimated: true,
+  };
+}
+
+/**
  * Per-turn registry of Task tool_use_id → subagent meta. Populated when the
  * parent assistant emits Task tool_use blocks; consulted when subagent
  * messages arrive so we can stamp them with agentType / description and
@@ -1607,7 +1641,7 @@ export class StructuredSessionManager {
         result: "",
         sessionId: session.claudeSessionId,
         model: session.selectedModel ?? session.structuredState?.model,
-        usage: undefined,
+        usage: { outputTokens: 0, estimated: true },
         codexBlockIndex: new Map(),
         codexFileSnapshots: new Map(),
         cwd: session.cwd,
@@ -1638,6 +1672,7 @@ export class StructuredSessionManager {
       const syncSnapshot = (): void => {
         const current = this.sessions.get(sessionId);
         if (!current) return;
+        refreshEstimatedCodexUsage(turnState);
         const inProgressTurn: ConversationTurn = {
           role: "assistant",
           content: this.compactContentBlocks([...turnState.blocks], turnState.result),

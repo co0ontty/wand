@@ -66,6 +66,10 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         if (card) {
           var wasCollapsed = card.classList.contains("collapsed");
           card.classList.toggle("collapsed");
+          var isExpanded = wasCollapsed;
+          headerEl.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+          var cardBody = card.querySelector(".tool-use-body, .diff-body");
+          if (cardBody) cardBody.setAttribute("aria-hidden", isExpanded ? "false" : "true");
           var expandKind = card.dataset.expandKind || "tool-card";
           persistElementExpandState(card, expandKind);
           if (wasCollapsed) {
@@ -171,6 +175,8 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           var isHidden = body.style.display === "none";
           body.style.display = isHidden ? "block" : "none";
           container.dataset.expanded = isHidden ? "true" : "false";
+          el.setAttribute("aria-expanded", isHidden ? "true" : "false");
+          body.setAttribute("aria-hidden", isHidden ? "false" : "true");
           var toggleIcon = el.querySelector(".term-toggle-icon");
           if (toggleIcon) toggleIcon.textContent = isHidden ? "▼" : "▶";
           persistElementExpandState(container, "terminal");
