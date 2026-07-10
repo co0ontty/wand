@@ -55,23 +55,24 @@ export function showToast(message: string, type?: string) {
 }
 
 // ── Wand Dialog (alert / confirm / prompt) ──
-// Replaces window.alert / window.confirm / window.prompt with a Liquid Glass
-// styled modal so confirmations and notices match the rest of wand's UI.
+// In-page dialogs keep confirmations consistent inside desktop browsers and
+// iOS / Android WebViews without invoking platform JavaScript alert chrome.
 
 export var _wandDialogStack: Function[] = [];
+export var _wandDialogIdCounter = 0;
 
 export function _wandDialogIcon(type: string) {
   switch (type) {
-    case "warning": return "!";
-    case "danger":  return "⚠︎"; // ⚠ (text style)
-    case "success": return "✓";       // ✓
-    case "question": return "?";
-    default: return "i";
+    case "warning": return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+    case "danger": return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>';
+    case "success": return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+    case "question": return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.5 2.5 0 1 1 4.5 1.5c-.9.8-2.2 1.2-2.2 2.5"/><path d="M12 17h.01"/></svg>';
+    default: return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg>';
   }
 }
 
 /**
- * Open a Liquid-Glass styled dialog. Returns a Promise resolving to the
+ * Open a Wand-styled in-page dialog. Returns a Promise resolving to the
  * value returned by the clicked button's `value`, or `cancelValue` if
  * dismissed via Esc / backdrop click / cancel button.
  *
@@ -92,10 +93,12 @@ export function openWandDialog(opts: any) {
   opts = opts || {};
   var dismissable = opts.dismissable !== false;
   var type = opts.type || "info";
-  var iconChar = opts.icon || _wandDialogIcon(type);
+  var iconSvg = _wandDialogIcon(type);
   var hasInput = !!opts.input;
 
   return new Promise(function(resolve) {
+    var dialogId = "wand-dialog-" + (++_wandDialogIdCounter);
+    var previouslyFocused = document.activeElement as HTMLElement | null;
     var backdrop = document.createElement("div");
     backdrop.className = "wand-dialog-backdrop";
     backdrop.setAttribute("role", "presentation");
@@ -104,7 +107,6 @@ export function openWandDialog(opts: any) {
     dialog.className = "wand-dialog";
     dialog.setAttribute("role", hasInput ? "dialog" : "alertdialog");
     dialog.setAttribute("aria-modal", "true");
-    if (opts.title) dialog.setAttribute("aria-label", opts.title);
 
     // Header
     var header = document.createElement("div");
@@ -112,7 +114,12 @@ export function openWandDialog(opts: any) {
 
     var iconEl = document.createElement("div");
     iconEl.className = "wand-dialog-icon " + type;
-    iconEl.textContent = iconChar;
+    iconEl.setAttribute("aria-hidden", "true");
+    if (opts.icon) {
+      iconEl.textContent = String(opts.icon);
+    } else {
+      iconEl.innerHTML = iconSvg;
+    }
     header.appendChild(iconEl);
 
     var textWrap = document.createElement("div");
@@ -120,15 +127,20 @@ export function openWandDialog(opts: any) {
     if (opts.title) {
       var titleEl = document.createElement("div");
       titleEl.className = "wand-dialog-title";
+      titleEl.id = dialogId + "-title";
       titleEl.textContent = opts.title;
       textWrap.appendChild(titleEl);
+      dialog.setAttribute("aria-labelledby", titleEl.id);
     }
     if (opts.message) {
       var msgEl = document.createElement("div");
       msgEl.className = "wand-dialog-message";
+      msgEl.id = dialogId + "-message";
       msgEl.textContent = opts.message;
       textWrap.appendChild(msgEl);
+      dialog.setAttribute("aria-describedby", msgEl.id);
     }
+    if (!opts.title) dialog.setAttribute("aria-label", type === "danger" ? "确认操作" : "提示");
     header.appendChild(textWrap);
     dialog.appendChild(header);
 
@@ -140,6 +152,9 @@ export function openWandDialog(opts: any) {
       inputEl = document.createElement("input");
       inputEl.type = "text";
       inputEl.className = "wand-dialog-input";
+      inputEl.setAttribute("aria-label", opts.inputLabel || opts.title || "输入内容");
+      inputEl.autocomplete = "off";
+      inputEl.spellcheck = false;
       if (opts.inputPlaceholder) inputEl.placeholder = opts.inputPlaceholder;
       if (opts.inputValue != null) inputEl.value = String(opts.inputValue);
       bodyEl.appendChild(inputEl);
@@ -163,10 +178,15 @@ export function openWandDialog(opts: any) {
       document.removeEventListener("keydown", keyHandler, true);
       var idx = _wandDialogStack.indexOf(close);
       if (idx >= 0) _wandDialogStack.splice(idx, 1);
+      var reduceMotion = false;
+      try { reduceMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (_e) {}
       setTimeout(function() {
         if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+        if (previouslyFocused && document.contains(previouslyFocused) && typeof previouslyFocused.focus === "function") {
+          try { previouslyFocused.focus(); } catch (_e) {}
+        }
         resolve(value);
-      }, 160);
+      }, reduceMotion || document.hidden ? 0 : 140);
     }
 
     buttons.forEach(function(btnSpec: any) {
@@ -226,6 +246,20 @@ export function openWandDialog(opts: any) {
             close(primary.value);
           }
         }
+        return;
+      }
+      if (e.key === "Tab") {
+        var focusables = dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])');
+        if (!focusables.length) return;
+        var first = focusables[0] as HTMLElement;
+        var last = focusables[focusables.length - 1] as HTMLElement;
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     }
     document.addEventListener("keydown", keyHandler, true);
@@ -248,7 +282,7 @@ export function openWandDialog(opts: any) {
 }
 
 /**
- * Liquid-glass replacement for window.alert.
+ * In-page replacement for window.alert.
  * @param {string} message
  * @param {object} [options] - { title, type, okLabel }
  * @returns {Promise<void>}
@@ -266,7 +300,7 @@ export function wandAlert(message: any, options?: any) {
 }
 
 /**
- * Liquid-glass replacement for window.confirm. Resolves to true/false.
+ * In-page replacement for window.confirm. Resolves to true/false.
  * @param {string} message
  * @param {object} [options] - { title, type ("question"|"warning"|"danger"), okLabel, cancelLabel, danger }
  * @returns {Promise<boolean>}
@@ -292,7 +326,7 @@ export function wandConfirm(message: any, options?: any) {
 }
 
 /**
- * Liquid-glass replacement for window.prompt. Resolves to entered string,
+ * In-page replacement for window.prompt. Resolves to entered string,
  * or null if cancelled.
  * @param {string} message
  * @param {string} [defaultValue]

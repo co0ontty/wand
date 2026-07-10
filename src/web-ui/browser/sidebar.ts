@@ -327,13 +327,10 @@ import { renderSessionItem } from "./session-ui";
         '</label>';
       }
 
-      // Returns a Promise<boolean>. Uses the Liquid Glass styled wandConfirm
-      // when available, falls back to native confirm during early page boot.
+      // Always use Wand's in-page confirmation so iOS / Android WebViews do not
+      // fall back to differently styled platform JavaScript dialogs.
       export function confirmDelete(message: any, options?: any) {
-        if (typeof (window as any).wandConfirm === "function") {
-          return (window as any).wandConfirm(message, Object.assign({ type: "danger", danger: true, okLabel: "删除" }, options || {}));
-        }
-        return Promise.resolve(window.confirm(message));
+        return wandConfirm(message, Object.assign({ type: "danger", danger: true, okLabel: "删除" }, options || {}));
       }
 
       export function batchDeleteSelected() {

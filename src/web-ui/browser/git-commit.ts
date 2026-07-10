@@ -1013,7 +1013,7 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                     '</button>' +
                     '<button class="settings-tab" data-tab="general" role="tab" aria-selected="false" aria-controls="settings-tab-general">' +
                       '<span class="settings-tab-main">基本配置</span>' +
-                      '<span class="settings-tab-meta">主机、模式、语言、目录</span>' +
+                      '<span class="settings-tab-meta">模型、模式与运行环境</span>' +
                     '</button>' +
                     '<button class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="settings-tab-notifications">' +
                       '<span class="settings-tab-main">通知</span>' +
@@ -1273,7 +1273,7 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
               '<div class="settings-panel" id="settings-tab-general" role="tabpanel">' +
                 '<div class="settings-panel-header">' +
                   '<h3 class="settings-panel-title">基本配置</h3>' +
-                  '<p class="settings-panel-desc">配置服务监听地址、默认模式、语言和工作目录。</p>' +
+                  '<p class="settings-panel-desc">配置服务连接、默认模型、执行方式和工作目录。</p>' +
                 '</div>' +
                 '<div class="field-row">' +
                   '<div class="field">' +
@@ -1346,25 +1346,62 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                     '</label>' +
                   '</div>' +
                 '</div>' +
-                '<div class="field-row">' +
-                  '<div class="field">' +
-                    '<label class="field-label" for="cfg-default-model">Claude 默认模型</label>' +
-                    '<div class="settings-row-with-action">' +
-                      '<select id="cfg-default-model" class="field-input field-select">' +
-                        '<option value="">跟随 Claude Code 默认</option>' +
-                      '</select>' +
-                      '<button type="button" id="cfg-default-model-refresh" class="btn btn-secondary btn-sm" title="刷新模型列表">刷新</button>' +
+                '<section class="settings-model-card" aria-labelledby="settings-model-card-title">' +
+                  '<div class="settings-model-card-header">' +
+                    '<div class="settings-model-card-heading">' +
+                      '<span class="settings-model-card-icon" aria-hidden="true">' + iconSvg("cpu", { size: 18, strokeWidth: 1.8 }) + '</span>' +
+                      '<div>' +
+                        '<h4 class="settings-model-card-title" id="settings-model-card-title">默认模型</h4>' +
+                        '<p class="settings-model-card-desc">从已检测列表中选择，或直接输入自定义模型名称 / ID。</p>' +
+                      '</div>' +
                     '</div>' +
-                    '<p class="field-hint" id="cfg-default-model-version">新建 Claude 会话时默认使用该模型；运行中的会话可在输入框切换。</p>' +
+                    '<button type="button" id="cfg-default-model-refresh" class="btn btn-secondary btn-sm settings-model-refresh" title="重新检测 Claude 与 Codex 模型">' +
+                      '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>' +
+                      '<span>刷新列表</span>' +
+                    '</button>' +
                   '</div>' +
-                  '<div class="field">' +
-                    '<label class="field-label" for="cfg-default-codex-model">Codex 默认模型</label>' +
-                    '<select id="cfg-default-codex-model" class="field-input field-select">' +
-                      '<option value="">跟随 Codex 默认</option>' +
-                    '</select>' +
-                    '<p class="field-hint">留空时不传 --model，由 Codex CLI 使用当前默认模型。</p>' +
+                  '<div class="settings-model-grid">' +
+                    '<div class="field settings-model-field">' +
+                      '<div class="settings-model-label-row">' +
+                        '<label class="field-label" for="cfg-default-model">Claude</label>' +
+                        '<span class="settings-model-provider">Claude Code</span>' +
+                      '</div>' +
+                      '<div class="model-combobox" data-provider="claude">' +
+                        '<div class="model-combobox-control">' +
+                          '<input id="cfg-default-model" class="field-input model-combobox-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cfg-default-model-listbox" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="跟随 Claude Code 默认" />' +
+                          '<button type="button" class="model-combobox-toggle" aria-label="展开 Claude 模型列表">' +
+                            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>' +
+                          '</button>' +
+                        '</div>' +
+                        '<div id="cfg-default-model-listbox" class="model-combobox-menu hidden" role="listbox" aria-label="Claude 模型"></div>' +
+                      '</div>' +
+                      '<div class="settings-model-meta">' +
+                        '<span class="settings-model-status" data-model-status="claude">跟随 CLI 默认</span>' +
+                        '<span class="settings-model-help">会原样传给 <code>--model</code></span>' +
+                      '</div>' +
+                    '</div>' +
+                    '<div class="field settings-model-field">' +
+                      '<div class="settings-model-label-row">' +
+                        '<label class="field-label" for="cfg-default-codex-model">Codex</label>' +
+                        '<span class="settings-model-provider">Codex CLI</span>' +
+                      '</div>' +
+                      '<div class="model-combobox" data-provider="codex">' +
+                        '<div class="model-combobox-control">' +
+                          '<input id="cfg-default-codex-model" class="field-input model-combobox-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cfg-default-codex-model-listbox" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="跟随 Codex 默认" />' +
+                          '<button type="button" class="model-combobox-toggle" aria-label="展开 Codex 模型列表">' +
+                            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>' +
+                          '</button>' +
+                        '</div>' +
+                        '<div id="cfg-default-codex-model-listbox" class="model-combobox-menu hidden" role="listbox" aria-label="Codex 模型"></div>' +
+                      '</div>' +
+                      '<div class="settings-model-meta">' +
+                        '<span class="settings-model-status" data-model-status="codex">跟随 CLI 默认</span>' +
+                        '<span class="settings-model-help">留空则不传模型参数</span>' +
+                      '</div>' +
+                    '</div>' +
                   '</div>' +
-                '</div>' +
+                  '<p class="field-hint settings-model-version" id="cfg-default-model-version">模型名称仅在新建会话时作为默认值；运行中的结构化会话仍可单独切换。</p>' +
+                '</section>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-cwd">默认工作目录</label>' +
                   '<input id="cfg-cwd" type="text" class="field-input" placeholder="/home/user" />' +
@@ -1413,7 +1450,7 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                 '</div>' +
                 '<div class="settings-card">' +
                   '<div class="settings-card-head">' +
-                    '<span class="settings-card-icon">🔒</span>' +
+                    '<span class="settings-card-icon" aria-hidden="true">' + iconSvg("lock", { size: 18, strokeWidth: 1.8 }) + '</span>' +
                     '<div class="settings-card-head-text">' +
                       '<h3 class="settings-card-title">修改密码</h3>' +
                       '<p class="settings-card-desc">至少 6 个字符；保存后下次登录生效。</p>' +
@@ -1438,7 +1475,7 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                 '</div>' +
                 '<div class="settings-card">' +
                   '<div class="settings-card-head">' +
-                    '<span class="settings-card-icon">🔐</span>' +
+                    '<span class="settings-card-icon" aria-hidden="true">' + iconSvg("certificate", { size: 18, strokeWidth: 1.8 }) + '</span>' +
                     '<div class="settings-card-head-text">' +
                       '<h3 class="settings-card-title">SSL 证书</h3>' +
                       '<p class="settings-card-desc" id="cert-status">加载中...</p>' +

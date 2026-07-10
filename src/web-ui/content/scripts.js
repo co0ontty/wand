@@ -526,6 +526,8 @@
     // shape sets — 24x24 viewbox, currentColor stroke
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
     shieldCheck: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
+    lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v3"/>',
+    certificate: '<path d="M6 3h12v14H6z"/><path d="M9 7h6"/><path d="M9 11h4"/><path d="m10 17-1 4 3-1 3 1-1-4"/>',
     cpu: '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 15h3"/><path d="M1 9h3"/><path d="M1 15h3"/><rect x="10" y="10" width="4" height="4" rx="1"/>',
     brain: '<path d="M9.5 4.5a3 3 0 0 0-4.7 3.1 3.3 3.3 0 0 0 .3 6.1A3 3 0 0 0 8 19h1.5V4.5z"/><path d="M14.5 4.5a3 3 0 0 1 4.7 3.1 3.3 3.3 0 0 1-.3 6.1A3 3 0 0 1 16 19h-1.5V4.5z"/><path d="M9.5 8H7.8"/><path d="M14.5 8h1.7"/><path d="M9.5 13H7.6"/><path d="M14.5 13h1.9"/>',
     keyboard: '<rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="10"/><line x1="10" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="14" y2="10"/><line x1="18" y1="10" x2="18" y2="10"/><line x1="6" y1="14" x2="6" y2="14"/><line x1="18" y1="14" x2="18" y2="14"/><line x1="9" y1="14" x2="15" y2="14"/>',
@@ -3135,7 +3137,7 @@
     return '<section id="worktree-merge-modal" class="modal-backdrop hidden"><div class="modal worktree-merge-modal"><div class="modal-header"><div><h2 class="modal-title">\u5408\u5E76 Worktree</h2><p class="modal-subtitle">\u68C0\u67E5\u5F53\u524D\u4EFB\u52A1\u5206\u652F\u5E76\u5FEB\u6377\u5408\u5E76\u5230\u4E3B\u5206\u652F\u3002</p></div><button id="close-worktree-merge-button" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="\u5173\u95ED"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div><div class="modal-body"><div id="worktree-merge-content" class="worktree-merge-content"></div><p id="worktree-merge-error" class="error-message hidden"></p><div class="worktree-merge-actions"><button id="worktree-merge-cancel-button" class="btn btn-secondary">\u53D6\u6D88</button><button id="worktree-merge-confirm-button" class="btn btn-primary">\u786E\u8BA4\u5408\u5E76\u5E76\u6E05\u7406</button></div></div></div></section>';
   }
   function renderSettingsModal() {
-    return '<section id="settings-modal" class="modal-backdrop hidden"><div class="modal settings-modal"><div class="modal-header settings-modal-header"><div class="settings-modal-title-group"><h2 class="modal-title">\u8BBE\u7F6E</h2><p class="settings-modal-subtitle">\u8C03\u6574\u5E94\u7528\u914D\u7F6E\u3001\u901A\u77E5\u3001\u5B89\u5168\u548C\u663E\u793A\u504F\u597D</p></div><button id="close-settings-button" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="\u5173\u95ED"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div><div class="modal-body settings-modal-body"><div class="settings-layout"><aside class="settings-sidebar"><div class="settings-sidebar-header"><div class="settings-sidebar-title">\u504F\u597D\u8BBE\u7F6E</div><div class="settings-sidebar-hint">\u5DE6\u4FA7\u5207\u6362\u5206\u533A\uFF0C\u53F3\u4FA7\u67E5\u770B\u8BE6\u7EC6\u8BF4\u660E\u4E0E\u9009\u9879\u3002</div></div><div class="settings-tabs" role="tablist" aria-label="\u8BBE\u7F6E\u5206\u7EC4" aria-orientation="vertical"><button class="settings-tab active" data-tab="about" role="tab" aria-selected="true" aria-controls="settings-tab-about"><span class="settings-tab-main">\u5173\u4E8E</span><span class="settings-tab-meta">\u7248\u672C\u3001\u66F4\u65B0\u4E0E\u8FDE\u63A5\u65B9\u5F0F</span></button><button class="settings-tab" data-tab="general" role="tab" aria-selected="false" aria-controls="settings-tab-general"><span class="settings-tab-main">\u57FA\u672C\u914D\u7F6E</span><span class="settings-tab-meta">\u4E3B\u673A\u3001\u6A21\u5F0F\u3001\u8BED\u8A00\u3001\u76EE\u5F55</span></button><button class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="settings-tab-notifications"><span class="settings-tab-main">\u901A\u77E5</span><span class="settings-tab-meta">\u63D0\u793A\u97F3\u4E0E\u6D4F\u89C8\u5668\u901A\u77E5</span></button><button class="settings-tab" data-tab="security" role="tab" aria-selected="false" aria-controls="settings-tab-security"><span class="settings-tab-main">\u5B89\u5168</span><span class="settings-tab-meta">\u5BC6\u7801\u4E0E\u8BC1\u4E66</span></button><button class="settings-tab" data-tab="presets" role="tab" aria-selected="false" aria-controls="settings-tab-presets"><span class="settings-tab-main">\u547D\u4EE4\u9884\u8BBE</span><span class="settings-tab-meta">\u67E5\u770B\u5DF2\u6709\u9884\u8BBE</span></button><button class="settings-tab" data-tab="display" role="tab" aria-selected="false" aria-controls="settings-tab-display"><span class="settings-tab-main">\u663E\u793A</span><span class="settings-tab-meta">\u5361\u7247\u9ED8\u8BA4\u5C55\u5F00\u884C\u4E3A</span></button></div></aside><div class="settings-content"><div class="settings-panel active" id="settings-tab-about" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u5173\u4E8E Wand</h3><p class="settings-panel-desc">\u67E5\u770B\u7248\u672C\u4FE1\u606F\u3001\u66F4\u65B0\u72B6\u6001\u548C Android App \u8FDE\u63A5\u65B9\u5F0F\u3002</p></div><div class="settings-about-info"><div class="settings-about-row"><span class="settings-label">\u5305\u540D</span><span class="settings-value" id="settings-pkg-name">-</span></div><div class="settings-about-row"><span class="settings-label">\u5F53\u524D\u7248\u672C</span><span class="settings-value" id="settings-version">-</span></div><div class="settings-about-row"><span class="settings-label">Node.js \u8981\u6C42</span><span class="settings-value" id="settings-node-req">-</span></div><div class="settings-about-row"><span class="settings-label">\u4ED3\u5E93\u5730\u5740</span><span class="settings-value" id="settings-repo-url"><a href="#" target="_blank" rel="noopener">-</a></span></div></div><div class="settings-update-section" id="web-update-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("globe", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">Web \u7AEF</h4><p class="settings-section-sub">\u6D4F\u89C8\u5668\u8BBF\u95EE\u7684\u670D\u52A1\u7248\u672C</p></div></div><div class="settings-about-row"><span class="settings-label">\u6700\u65B0\u7248\u672C</span><span class="settings-value" id="settings-latest-version">-</span></div><div class="settings-update-actions"><button id="check-update-button" class="btn btn-secondary btn-sm">\u68C0\u67E5\u66F4\u65B0</button><button id="do-update-button" class="btn btn-primary btn-sm hidden">\u66F4\u65B0\u5230\u6700\u65B0\u7248</button><button id="do-restart-button" class="btn btn-success btn-sm hidden">\u91CD\u542F\u751F\u6548</button></div><p id="update-message" class="hint hidden"></p><div class="settings-toggle-row"><div class="settings-toggle-text"><span class="settings-toggle-title">Beta \u901A\u9053</span><span class="settings-toggle-desc">\u66F4\u65B0\u5230 npm beta \u7248\u672C\uFF08tag + commit \u5C3E\u6807\uFF09\uFF0C\u5C1D\u9C9C\u65B0\u529F\u80FD\uFF0C\u53EF\u80FD\u4E0D\u7A33\u5B9A\u3002</span></div><label class="settings-switch"><input type="checkbox" id="beta-channel-toggle" class="switch-toggle"><span class="switch-slider"></span></label></div><div class="settings-toggle-row"><div class="settings-toggle-text"><span class="settings-toggle-title">\u81EA\u52A8\u66F4\u65B0</span><span class="settings-toggle-desc">\u68C0\u6D4B\u5230\u65B0\u7248\u672C\u5C06\u81EA\u52A8\u4E0B\u8F7D\u5B89\u88C5\u5E76\u91CD\u542F\u670D\u52A1\u3002</span></div><label class="settings-switch"><input type="checkbox" id="auto-update-web-toggle" class="switch-toggle"><span class="switch-slider"></span></label></div></div><div class="settings-update-section hidden" id="android-apk-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("smartphone", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">Android App</h4><p class="settings-section-sub">\u539F\u751F\u5BA2\u6237\u7AEF\u7248\u672C\u4E0E APK \u4E0B\u8F7D</p></div></div><div id="android-apk-current-row" class="settings-about-row hidden"><span class="settings-label">\u5F53\u524D\u7248\u672C</span><span class="settings-value" id="settings-android-apk-current">-</span></div><div id="android-apk-github-row" class="settings-about-row settings-about-row-action hidden"><span class="settings-label">\u7EBF\u4E0A\u7248\u672C</span><span class="settings-value settings-value-flex" id="settings-android-apk-github">-</span><button id="download-github-apk-btn" class="btn btn-secondary btn-sm hidden" type="button">\u4E0B\u8F7D</button></div><div id="android-apk-local-row" class="settings-about-row settings-about-row-action hidden"><span class="settings-label">\u672C\u5730\u7248\u672C</span><span class="settings-value settings-value-flex" id="settings-android-apk-local">-</span><button id="download-local-apk-btn" class="btn btn-secondary btn-sm hidden" type="button">\u4E0B\u8F7D</button></div><div id="android-auto-update-row" class="settings-toggle-row hidden"><div class="settings-toggle-text"><span class="settings-toggle-title">\u81EA\u52A8\u66F4\u65B0</span><span class="settings-toggle-desc" id="android-auto-update-hint">\u68C0\u6D4B\u5230\u65B0\u7248 APK \u65F6\u81EA\u52A8\u62C9\u8D77\u4E0B\u8F7D\uFF0C\u5B89\u88C5\u4ECD\u9700\u5728\u7CFB\u7EDF\u4E2D\u786E\u8BA4\u3002</span></div><label class="settings-switch"><input type="checkbox" id="auto-update-apk-toggle" class="switch-toggle"><span class="switch-slider"></span></label></div><p id="android-apk-message" class="hint hidden"></p></div><div class="settings-update-section hidden" id="macos-dmg-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("desktop", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">macOS App</h4><p class="settings-section-sub">\u539F\u751F\u5BA2\u6237\u7AEF\u7248\u672C\u4E0E DMG \u4E0B\u8F7D</p></div></div><div id="macos-dmg-current-row" class="settings-about-row hidden"><span class="settings-label">\u5F53\u524D\u7248\u672C</span><span class="settings-value" id="settings-macos-dmg-current">-</span></div><div id="macos-dmg-github-row" class="settings-about-row settings-about-row-action hidden"><span class="settings-label">\u7EBF\u4E0A\u7248\u672C</span><span class="settings-value settings-value-flex" id="settings-macos-dmg-github">-</span><button id="download-github-dmg-btn" class="btn btn-secondary btn-sm hidden" type="button">\u4E0B\u8F7D</button></div><div id="macos-dmg-local-row" class="settings-about-row settings-about-row-action hidden"><span class="settings-label">\u672C\u5730\u7248\u672C</span><span class="settings-value settings-value-flex" id="settings-macos-dmg-local">-</span><button id="download-local-dmg-btn" class="btn btn-secondary btn-sm hidden" type="button">\u4E0B\u8F7D</button></div><div id="macos-auto-update-row" class="settings-toggle-row hidden"><div class="settings-toggle-text"><span class="settings-toggle-title">\u81EA\u52A8\u66F4\u65B0</span><span class="settings-toggle-desc" id="macos-auto-update-hint">\u68C0\u6D4B\u5230\u65B0\u7248 DMG \u5C06\u81EA\u52A8\u4E0B\u8F7D\u5E76\u6302\u8F7D\u3002</span></div><label class="settings-switch"><input type="checkbox" id="auto-update-dmg-toggle" class="switch-toggle"><span class="switch-slider"></span></label></div><p id="macos-dmg-message" class="hint hidden"></p></div><div class="settings-update-section" id="android-connect-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("link", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">App \u8FDE\u63A5\u7801</h4><p class="settings-section-sub">\u7C98\u8D34\u5230 Android App \u5373\u53EF\u81EA\u52A8\u8FDE\u63A5\uFF0C\u65E0\u9700\u5BC6\u7801\uFF1B\u6539\u5BC6\u7801\u540E\u5931\u6548\u3002</p></div></div><div class="settings-connect-url-box"><code id="android-connect-code" class="settings-connect-url-text">-</code><button id="copy-connect-code-button" class="btn btn-secondary btn-sm" type="button" title="\u590D\u5236\u8FDE\u63A5\u7801">\u590D\u5236</button></div><div class="settings-connect-qr-box"><div class="settings-connect-qr-wrap" id="android-connect-qr-wrap" title="\u70B9\u51FB\u653E\u5927"><canvas id="android-connect-qr" width="180" height="180"></canvas><div class="settings-connect-qr-empty" id="android-connect-qr-empty">\u751F\u6210\u4E2D\u2026</div></div><p class="settings-connect-qr-hint">\u7528 Wand App \u626B\u4E00\u626B\uFF0C\u5373\u53EF\u4E00\u952E\u586B\u5165\u670D\u52A1\u5668\u5730\u5740\u4E0E\u8FDE\u63A5\u7801\u3002</p></div></div></div><div class="settings-panel" id="settings-tab-notifications" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u901A\u77E5</h3><p class="settings-panel-desc">\u8BBE\u7F6E\u63D0\u793A\u97F3\u3001\u7CFB\u7EDF\u901A\u77E5\u548C\u6D4F\u89C8\u5668\u901A\u77E5\u7684\u884C\u4E3A\u3002</p></div><div class="settings-notification-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("bell", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u901A\u77E5\u504F\u597D</h4><p class="settings-section-sub">\u63D0\u793A\u97F3\u4E0E\u5E94\u7528\u5185\u901A\u77E5\u6C14\u6CE1</p></div></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-notif-sound">\u64AD\u653E\u63D0\u793A\u97F3</label><span class="settings-toggle-desc">\u91CD\u8981\u901A\u77E5\uFF08\u7248\u672C\u66F4\u65B0\u3001\u6743\u9650\u7B49\u5F85\u7B49\uFF09\u65F6\u64AD\u653E\u67D4\u548C\u63D0\u793A\u97F3\u3002</span></div><label class="settings-switch"><input id="cfg-notif-sound" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div><div class="settings-range-row" id="notif-volume-field"><label class="settings-range-label" for="cfg-notif-volume">\u97F3\u91CF</label><input id="cfg-notif-volume" type="range" min="0" max="100" step="5" class="settings-range" /><span id="cfg-notif-volume-val" class="settings-range-value">80%</span></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-notif-bubble">\u5E94\u7528\u5185\u901A\u77E5\u6C14\u6CE1</label><span class="settings-toggle-desc">\u5728\u9875\u9762\u9876\u90E8\u5F39\u51FA\u6D6E\u52A8\u901A\u77E5\u6C14\u6CE1\u3002</span></div><label class="settings-switch"><input id="cfg-notif-bubble" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div></div><div id="native-sound-section" class="settings-notification-section hidden"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("music", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u7CFB\u7EDF\u901A\u77E5\u94C3\u58F0</h4><p class="settings-section-sub">\u9009\u62E9 Android \u7CFB\u7EDF\u901A\u77E5\u4F7F\u7528\u7684\u94C3\u58F0</p></div></div><div class="settings-row-with-action"><select id="native-sound-select" class="field-input field-select"></select><button id="native-sound-preview" class="btn btn-secondary btn-sm btn-with-icon" type="button">' + iconSvg("play", { size: 11, strokeWidth: 1.8, fill: "currentColor" }) + '<span>\u8BD5\u542C</span></button></div></div><div id="native-haptic-section" class="settings-notification-section hidden"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("vibrate", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u89E6\u611F\u53CD\u9988</h4><p class="settings-section-sub">\u6309\u94AE\u64CD\u4F5C\u548C\u4EFB\u52A1\u5B8C\u6210\u65F6\u63D0\u4F9B\u632F\u52A8\u53CD\u9988</p></div></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-haptic-enabled">\u542F\u7528\u89E6\u611F\u53CD\u9988</label></div><label class="settings-switch"><input id="cfg-haptic-enabled" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div></div><div class="settings-notification-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("globe", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u6D4F\u89C8\u5668\u901A\u77E5</h4><p class="settings-section-sub">\u6765\u81EA\u7CFB\u7EDF\u901A\u77E5\u4E2D\u5FC3\u7684\u5F39\u7A97</p></div></div><div class="settings-about-row"><span class="settings-label">\u6388\u6743\u72B6\u6001</span><span class="settings-value" id="notification-permission-status">-</span></div><div class="settings-update-actions"><button id="notification-request-btn" class="btn btn-primary btn-sm hidden" type="button">\u6388\u6743\u901A\u77E5</button><button id="notification-reset-btn" class="btn btn-ghost btn-sm hidden" type="button">\u91CD\u65B0\u6388\u6743</button><button id="notification-test-btn" class="btn btn-secondary btn-sm" type="button">\u53D1\u9001\u6D4B\u8BD5\u901A\u77E5</button><button id="notification-test-delay-btn" class="btn btn-ghost btn-sm" type="button">10 \u79D2\u540E\u53D1\u9001</button></div><p id="notification-test-message" class="hint hidden"></p></div></div><div class="settings-panel" id="settings-tab-general" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u57FA\u672C\u914D\u7F6E</h3><p class="settings-panel-desc">\u914D\u7F6E\u670D\u52A1\u76D1\u542C\u5730\u5740\u3001\u9ED8\u8BA4\u6A21\u5F0F\u3001\u8BED\u8A00\u548C\u5DE5\u4F5C\u76EE\u5F55\u3002</p></div><div class="field-row"><div class="field"><label class="field-label" for="cfg-host">\u76D1\u542C\u5730\u5740 (host)</label><input id="cfg-host" type="text" class="field-input" placeholder="127.0.0.1" /></div><div class="field"><label class="field-label" for="cfg-port">\u7AEF\u53E3 (port)</label><input id="cfg-port" type="number" class="field-input" placeholder="8443" min="1" max="65535" /></div></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-https">\u542F\u7528 HTTPS</label><span class="settings-toggle-desc">\u4F7F\u7528\u81EA\u7B7E\u540D\u8BC1\u4E66\u52A0\u5BC6\u6D4F\u89C8\u5668\u5230\u670D\u52A1\u7684\u8FDE\u63A5\uFF0Chost \u4E3A\u975E 127.0.0.1 \u65F6\u5EFA\u8BAE\u5F00\u542F\u3002</span></div><label class="settings-switch"><input id="cfg-https" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div><div class="field-row"><div class="field"><label class="field-label" for="cfg-mode">\u9ED8\u8BA4\u6267\u884C\u6A21\u5F0F</label><select id="cfg-mode" class="field-input"><option value="default">default</option><option value="assist">assist</option><option value="agent">agent</option><option value="agent-max">agent-max</option><option value="auto-edit">auto-edit</option><option value="full-access">full-access</option><option value="native">native</option><option value="managed">managed</option></select></div><div class="field"><label class="field-label" for="cfg-language">\u56DE\u590D\u8BED\u8A00</label><select id="cfg-language" class="field-input"><option value="">\u81EA\u52A8\uFF08\u4E0D\u6307\u5B9A\uFF09</option><option value="\u4E2D\u6587">\u4E2D\u6587</option><option value="English">English</option><option value="\u65E5\u672C\u8A9E">\u65E5\u672C\u8A9E</option><option value="\uD55C\uAD6D\uC5B4">\uD55C\uAD6D\uC5B4</option><option value="Espa\xF1ol">Espa\xF1ol</option><option value="Fran\xE7ais">Fran\xE7ais</option><option value="Deutsch">Deutsch</option><option value="\u0420\u0443\u0441\u0441\u043A\u0438\u0439">\u0420\u0443\u0441\u0441\u043A\u0438\u0439</option></select></div></div><p class="field-hint" style="margin-top:-4px;">\u8BBE\u7F6E\u56DE\u590D\u8BED\u8A00\u540E\uFF0CClaude \u5C06\u5C3D\u91CF\u4F7F\u7528\u6307\u5B9A\u8BED\u8A00\u56DE\u590D\u3002</p><div class="field"><label class="field-label" for="cfg-structured-runner">\u7ED3\u6784\u5316\u4F1A\u8BDD Runner</label><select id="cfg-structured-runner" class="field-input"><option value="sdk">SDK\uFF08@anthropic-ai/claude-agent-sdk\uFF0C\u9ED8\u8BA4\uFF09</option><option value="cli">CLI\uFF08spawn claude -p\uFF09</option></select><p class="field-hint" style="margin-top:4px;">SDK \u6A21\u5F0F\u4F7F\u7528\u5B98\u65B9 Agent SDK \u66FF\u4EE3 CLI subprocess\uFF0C\u63A5\u53E3\u66F4\u6574\u6D01\uFF0C\u529F\u80FD\u7B49\u4EF7\u3002\u4FDD\u5B58\u540E\u5BF9\u65B0\u5EFA\u4F1A\u8BDD\u7ACB\u5373\u751F\u6548\u3002</p></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-inherit-env">\u7EE7\u627F\u73AF\u5883\u53D8\u91CF</label><span class="settings-toggle-desc">\u542F\u52A8 PTY / \u7ED3\u6784\u5316\u5B50\u8FDB\u7A0B\u65F6\uFF0C\u628A\u5F53\u524D\u670D\u52A1\u8FDB\u7A0B\u7684\u73AF\u5883\u53D8\u91CF\u4F20\u7ED9 claude / codex\u3002\u5173\u95ED\u540E\u5B50\u8FDB\u7A0B\u4EC5\u83B7\u5F97\u6700\u5C0F\u53EF\u7528\u73AF\u5883\uFF08PATH/HOME/SHELL/LANG/TERM \u7B49\uFF09\uFF0C\u53EF\u7528\u4E8E\u9694\u79BB API key \u7B49\u654F\u611F\u51ED\u636E\u3002</span></div><div class="settings-toggle-aside"><button type="button" id="cfg-view-env-btn" class="btn btn-secondary btn-sm" title="\u67E5\u770B\u5B9E\u9645\u4F1A\u6CE8\u5165\u5230\u5B50\u8FDB\u7A0B\u7684\u73AF\u5883\u53D8\u91CF">\u67E5\u770B</button><label class="settings-switch"><input id="cfg-inherit-env" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div></div><div class="field-row"><div class="field"><label class="field-label" for="cfg-default-model">Claude \u9ED8\u8BA4\u6A21\u578B</label><div class="settings-row-with-action"><select id="cfg-default-model" class="field-input field-select"><option value="">\u8DDF\u968F Claude Code \u9ED8\u8BA4</option></select><button type="button" id="cfg-default-model-refresh" class="btn btn-secondary btn-sm" title="\u5237\u65B0\u6A21\u578B\u5217\u8868">\u5237\u65B0</button></div><p class="field-hint" id="cfg-default-model-version">\u65B0\u5EFA Claude \u4F1A\u8BDD\u65F6\u9ED8\u8BA4\u4F7F\u7528\u8BE5\u6A21\u578B\uFF1B\u8FD0\u884C\u4E2D\u7684\u4F1A\u8BDD\u53EF\u5728\u8F93\u5165\u6846\u5207\u6362\u3002</p></div><div class="field"><label class="field-label" for="cfg-default-codex-model">Codex \u9ED8\u8BA4\u6A21\u578B</label><select id="cfg-default-codex-model" class="field-input field-select"><option value="">\u8DDF\u968F Codex \u9ED8\u8BA4</option></select><p class="field-hint">\u7559\u7A7A\u65F6\u4E0D\u4F20 --model\uFF0C\u7531 Codex CLI \u4F7F\u7528\u5F53\u524D\u9ED8\u8BA4\u6A21\u578B\u3002</p></div></div><div class="field"><label class="field-label" for="cfg-cwd">\u9ED8\u8BA4\u5DE5\u4F5C\u76EE\u5F55</label><input id="cfg-cwd" type="text" class="field-input" placeholder="/home/user" /></div><div class="field"><label class="field-label" for="cfg-shell">Shell</label><input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" /></div>' + (typeof WandNative !== "undefined" && typeof WandNative.getAppIcon === "function" ? '<div class="settings-app-icon-block"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("palette", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u5E94\u7528\u56FE\u6807</h4><p class="settings-section-sub">\u9009\u62E9 App \u542F\u52A8\u5668\u56FE\u6807\uFF0C\u8FD4\u56DE\u684C\u9762\u540E\u751F\u6548</p></div></div><div id="app-icon-picker" class="settings-app-icon-picker"><button type="button" class="settings-app-icon-option" data-icon="shorthair"><span class="settings-app-icon-preview">' + PIXEL_AVATAR.user + '</span><span class="settings-app-icon-label">\u8D5B\u535A\u864E\u599E</span></button><button type="button" class="settings-app-icon-option" data-icon="garfield"><span class="settings-app-icon-preview">' + PIXEL_AVATAR.assistant + '</span><span class="settings-app-icon-label">\u52E4\u52B3\u521D\u4E8C</span></button></div><p id="app-icon-message" class="hint hidden"></p></div>' : "") + '<div class="settings-actions settings-actions-sticky"><button id="save-config-button" class="btn btn-primary btn-block">\u4FDD\u5B58\u914D\u7F6E</button></div><p id="config-message" class="hint hidden settings-status-message"></p></div><div class="settings-panel" id="settings-tab-security" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u5B89\u5168</h3><p class="settings-panel-desc">\u7BA1\u7406\u767B\u5F55\u5BC6\u7801\u4E0E SSL \u8BC1\u4E66\uFF0C\u654F\u611F\u53D8\u66F4\u8BF7\u786E\u8BA4\u540E\u518D\u4FDD\u5B58\u3002</p></div><div class="settings-card"><div class="settings-card-head"><span class="settings-card-icon">\u{1F512}</span><div class="settings-card-head-text"><h3 class="settings-card-title">\u4FEE\u6539\u5BC6\u7801</h3><p class="settings-card-desc">\u81F3\u5C11 6 \u4E2A\u5B57\u7B26\uFF1B\u4FDD\u5B58\u540E\u4E0B\u6B21\u767B\u5F55\u751F\u6548\u3002</p></div></div><form id="change-password-form" autocomplete="on" onsubmit="return false;"><input type="text" name="username" autocomplete="username" value="wand" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" readonly /><div class="field"><label class="field-label" for="new-password">\u65B0\u5BC6\u7801</label><input id="new-password" type="password" class="field-input" placeholder="\u8F93\u5165\u65B0\u5BC6\u7801\uFF08\u81F3\u5C11 6 \u4E2A\u5B57\u7B26\uFF09" autocomplete="new-password" /></div><div class="field"><label class="field-label" for="confirm-password">\u786E\u8BA4\u5BC6\u7801</label><input id="confirm-password" type="password" class="field-input" placeholder="\u518D\u6B21\u8F93\u5165\u65B0\u5BC6\u7801" autocomplete="new-password" /></div><div class="settings-card-actions"><button id="save-password-button" class="btn btn-primary" type="submit">\u4FDD\u5B58\u5BC6\u7801</button></div><p id="settings-error" class="error-message hidden"></p><p id="settings-success" class="hint settings-success-message hidden"></p></form></div><div class="settings-card"><div class="settings-card-head"><span class="settings-card-icon">\u{1F510}</span><div class="settings-card-head-text"><h3 class="settings-card-title">SSL \u8BC1\u4E66</h3><p class="settings-card-desc" id="cert-status">\u52A0\u8F7D\u4E2D...</p></div></div><div class="field"><label class="field-label" for="cert-key-file">\u79C1\u94A5\u6587\u4EF6 (.key)</label><div class="file-picker"><input id="cert-key-file" type="file" class="file-picker-input" accept=".key,.pem" /><label for="cert-key-file" class="file-picker-trigger"><svg class="file-picker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg><span class="file-picker-label">\u9009\u62E9\u79C1\u94A5</span></label><span class="file-picker-name" data-default="\u672A\u9009\u62E9\u6587\u4EF6">\u672A\u9009\u62E9\u6587\u4EF6</span></div></div><div class="field"><label class="field-label" for="cert-cert-file">\u8BC1\u4E66\u6587\u4EF6 (.crt/.pem)</label><div class="file-picker"><input id="cert-cert-file" type="file" class="file-picker-input" accept=".crt,.pem,.cert" /><label for="cert-cert-file" class="file-picker-trigger"><svg class="file-picker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span class="file-picker-label">\u9009\u62E9\u8BC1\u4E66</span></label><span class="file-picker-name" data-default="\u672A\u9009\u62E9\u6587\u4EF6">\u672A\u9009\u62E9\u6587\u4EF6</span></div></div><div class="settings-card-actions"><button id="upload-cert-button" class="btn btn-primary">\u4E0A\u4F20\u8BC1\u4E66</button></div><p id="cert-message" class="hint hidden"></p></div></div><div class="settings-panel" id="settings-tab-presets" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u547D\u4EE4\u9884\u8BBE</h3><p class="settings-panel-desc">\u5F53\u524D\u547D\u4EE4\u9884\u8BBE\u4ECE config.json \u8BFB\u53D6\uFF0C\u53EF\u5728\u8FD9\u91CC\u5FEB\u901F\u67E5\u770B\u5DF2\u6709\u914D\u7F6E\u3002</p></div><div id="presets-list" class="presets-list"></div></div><div class="settings-panel" id="settings-tab-display" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u663E\u793A</h3><p class="settings-panel-desc">\u63A7\u5236\u804A\u5929\u89C6\u56FE\u91CC\u4E0D\u540C\u5361\u7247\u7C7B\u578B\u7684\u9ED8\u8BA4\u5C55\u5F00\u72B6\u6001\u3002</p></div><div class="settings-section-title">\u5361\u7247\u9ED8\u8BA4\u5C55\u5F00\u72B6\u6001</div><p class="hint settings-inline-hint">\u8BBE\u7F6E\u7ED3\u6784\u5316\u804A\u5929\u89C6\u56FE\u4E2D\u5404\u7C7B\u5361\u7247\u7684\u9ED8\u8BA4\u5C55\u5F00/\u6298\u53E0\u72B6\u6001\u3002\u624B\u52A8\u64CD\u4F5C\u7684\u5C55\u5F00\u72B6\u6001\u4F18\u5148\u4E8E\u6B64\u9ED8\u8BA4\u8BBE\u7F6E\u3002</p><div class="switch-card-list"><label class="switch-card" for="cfg-card-edit"><div class="switch-card-header"><span class="switch-card-title">\u7F16\u8F91\u5361\u7247 (Edit/Write)</span><input id="cfg-card-edit" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">\u6587\u4EF6\u7F16\u8F91\u548C\u5199\u5165\u64CD\u4F5C\u7684 diff \u89C6\u56FE</div></label><label class="switch-card" for="cfg-card-inline"><div class="switch-card-header"><span class="switch-card-title">\u5185\u8054\u5DE5\u5177 (Read/Glob/Grep)</span><input id="cfg-card-inline" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">\u6587\u4EF6\u8BFB\u53D6\u3001\u641C\u7D22\u7B49\u5DE5\u5177\u7684\u7ED3\u679C</div></label><label class="switch-card" for="cfg-card-terminal"><div class="switch-card-header"><span class="switch-card-title">\u7EC8\u7AEF\u8F93\u51FA (Bash)</span><input id="cfg-card-terminal" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">\u547D\u4EE4\u884C\u6267\u884C\u7ED3\u679C</div></label><label class="switch-card" for="cfg-card-thinking"><div class="switch-card-header"><span class="switch-card-title">\u601D\u8003\u8FC7\u7A0B (Thinking)</span><input id="cfg-card-thinking" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">Claude \u7684\u601D\u8003\u8FC7\u7A0B\u5757</div></label><label class="switch-card" for="cfg-card-toolgroup"><div class="switch-card-header"><span class="switch-card-title">\u5DE5\u5177\u7EC4</span><input id="cfg-card-toolgroup" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">\u8FDE\u7EED\u540C\u7C7B\u5DE5\u5177\u8C03\u7528\u7684\u6298\u53E0\u7EC4</div></label></div><div class="settings-actions settings-actions-sticky"><button id="save-display-button" class="btn btn-primary btn-block">\u4FDD\u5B58\u663E\u793A\u8BBE\u7F6E</button></div><p id="display-message" class="hint hidden settings-status-message"></p></div></div></div></section>';
+    return '<section id="settings-modal" class="modal-backdrop hidden"><div class="modal settings-modal"><div class="modal-header settings-modal-header"><div class="settings-modal-title-group"><h2 class="modal-title">\u8BBE\u7F6E</h2><p class="settings-modal-subtitle">\u8C03\u6574\u5E94\u7528\u914D\u7F6E\u3001\u901A\u77E5\u3001\u5B89\u5168\u548C\u663E\u793A\u504F\u597D</p></div><button id="close-settings-button" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="\u5173\u95ED"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div><div class="modal-body settings-modal-body"><div class="settings-layout"><aside class="settings-sidebar"><div class="settings-sidebar-header"><div class="settings-sidebar-title">\u504F\u597D\u8BBE\u7F6E</div><div class="settings-sidebar-hint">\u5DE6\u4FA7\u5207\u6362\u5206\u533A\uFF0C\u53F3\u4FA7\u67E5\u770B\u8BE6\u7EC6\u8BF4\u660E\u4E0E\u9009\u9879\u3002</div></div><div class="settings-tabs" role="tablist" aria-label="\u8BBE\u7F6E\u5206\u7EC4" aria-orientation="vertical"><button class="settings-tab active" data-tab="about" role="tab" aria-selected="true" aria-controls="settings-tab-about"><span class="settings-tab-main">\u5173\u4E8E</span><span class="settings-tab-meta">\u7248\u672C\u3001\u66F4\u65B0\u4E0E\u8FDE\u63A5\u65B9\u5F0F</span></button><button class="settings-tab" data-tab="general" role="tab" aria-selected="false" aria-controls="settings-tab-general"><span class="settings-tab-main">\u57FA\u672C\u914D\u7F6E</span><span class="settings-tab-meta">\u6A21\u578B\u3001\u6A21\u5F0F\u4E0E\u8FD0\u884C\u73AF\u5883</span></button><button class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="settings-tab-notifications"><span class="settings-tab-main">\u901A\u77E5</span><span class="settings-tab-meta">\u63D0\u793A\u97F3\u4E0E\u6D4F\u89C8\u5668\u901A\u77E5</span></button><button class="settings-tab" data-tab="security" role="tab" aria-selected="false" aria-controls="settings-tab-security"><span class="settings-tab-main">\u5B89\u5168</span><span class="settings-tab-meta">\u5BC6\u7801\u4E0E\u8BC1\u4E66</span></button><button class="settings-tab" data-tab="presets" role="tab" aria-selected="false" aria-controls="settings-tab-presets"><span class="settings-tab-main">\u547D\u4EE4\u9884\u8BBE</span><span class="settings-tab-meta">\u67E5\u770B\u5DF2\u6709\u9884\u8BBE</span></button><button class="settings-tab" data-tab="display" role="tab" aria-selected="false" aria-controls="settings-tab-display"><span class="settings-tab-main">\u663E\u793A</span><span class="settings-tab-meta">\u5361\u7247\u9ED8\u8BA4\u5C55\u5F00\u884C\u4E3A</span></button></div></aside><div class="settings-content"><div class="settings-panel active" id="settings-tab-about" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u5173\u4E8E Wand</h3><p class="settings-panel-desc">\u67E5\u770B\u7248\u672C\u4FE1\u606F\u3001\u66F4\u65B0\u72B6\u6001\u548C Android App \u8FDE\u63A5\u65B9\u5F0F\u3002</p></div><div class="settings-about-info"><div class="settings-about-row"><span class="settings-label">\u5305\u540D</span><span class="settings-value" id="settings-pkg-name">-</span></div><div class="settings-about-row"><span class="settings-label">\u5F53\u524D\u7248\u672C</span><span class="settings-value" id="settings-version">-</span></div><div class="settings-about-row"><span class="settings-label">Node.js \u8981\u6C42</span><span class="settings-value" id="settings-node-req">-</span></div><div class="settings-about-row"><span class="settings-label">\u4ED3\u5E93\u5730\u5740</span><span class="settings-value" id="settings-repo-url"><a href="#" target="_blank" rel="noopener">-</a></span></div></div><div class="settings-update-section" id="web-update-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("globe", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">Web \u7AEF</h4><p class="settings-section-sub">\u6D4F\u89C8\u5668\u8BBF\u95EE\u7684\u670D\u52A1\u7248\u672C</p></div></div><div class="settings-about-row"><span class="settings-label">\u6700\u65B0\u7248\u672C</span><span class="settings-value" id="settings-latest-version">-</span></div><div class="settings-update-actions"><button id="check-update-button" class="btn btn-secondary btn-sm">\u68C0\u67E5\u66F4\u65B0</button><button id="do-update-button" class="btn btn-primary btn-sm hidden">\u66F4\u65B0\u5230\u6700\u65B0\u7248</button><button id="do-restart-button" class="btn btn-success btn-sm hidden">\u91CD\u542F\u751F\u6548</button></div><p id="update-message" class="hint hidden"></p><div class="settings-toggle-row"><div class="settings-toggle-text"><span class="settings-toggle-title">Beta \u901A\u9053</span><span class="settings-toggle-desc">\u66F4\u65B0\u5230 npm beta \u7248\u672C\uFF08tag + commit \u5C3E\u6807\uFF09\uFF0C\u5C1D\u9C9C\u65B0\u529F\u80FD\uFF0C\u53EF\u80FD\u4E0D\u7A33\u5B9A\u3002</span></div><label class="settings-switch"><input type="checkbox" id="beta-channel-toggle" class="switch-toggle"><span class="switch-slider"></span></label></div><div class="settings-toggle-row"><div class="settings-toggle-text"><span class="settings-toggle-title">\u81EA\u52A8\u66F4\u65B0</span><span class="settings-toggle-desc">\u68C0\u6D4B\u5230\u65B0\u7248\u672C\u5C06\u81EA\u52A8\u4E0B\u8F7D\u5B89\u88C5\u5E76\u91CD\u542F\u670D\u52A1\u3002</span></div><label class="settings-switch"><input type="checkbox" id="auto-update-web-toggle" class="switch-toggle"><span class="switch-slider"></span></label></div></div><div class="settings-update-section hidden" id="android-apk-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("smartphone", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">Android App</h4><p class="settings-section-sub">\u539F\u751F\u5BA2\u6237\u7AEF\u7248\u672C\u4E0E APK \u4E0B\u8F7D</p></div></div><div id="android-apk-current-row" class="settings-about-row hidden"><span class="settings-label">\u5F53\u524D\u7248\u672C</span><span class="settings-value" id="settings-android-apk-current">-</span></div><div id="android-apk-github-row" class="settings-about-row settings-about-row-action hidden"><span class="settings-label">\u7EBF\u4E0A\u7248\u672C</span><span class="settings-value settings-value-flex" id="settings-android-apk-github">-</span><button id="download-github-apk-btn" class="btn btn-secondary btn-sm hidden" type="button">\u4E0B\u8F7D</button></div><div id="android-apk-local-row" class="settings-about-row settings-about-row-action hidden"><span class="settings-label">\u672C\u5730\u7248\u672C</span><span class="settings-value settings-value-flex" id="settings-android-apk-local">-</span><button id="download-local-apk-btn" class="btn btn-secondary btn-sm hidden" type="button">\u4E0B\u8F7D</button></div><div id="android-auto-update-row" class="settings-toggle-row hidden"><div class="settings-toggle-text"><span class="settings-toggle-title">\u81EA\u52A8\u66F4\u65B0</span><span class="settings-toggle-desc" id="android-auto-update-hint">\u68C0\u6D4B\u5230\u65B0\u7248 APK \u65F6\u81EA\u52A8\u62C9\u8D77\u4E0B\u8F7D\uFF0C\u5B89\u88C5\u4ECD\u9700\u5728\u7CFB\u7EDF\u4E2D\u786E\u8BA4\u3002</span></div><label class="settings-switch"><input type="checkbox" id="auto-update-apk-toggle" class="switch-toggle"><span class="switch-slider"></span></label></div><p id="android-apk-message" class="hint hidden"></p></div><div class="settings-update-section hidden" id="macos-dmg-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("desktop", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">macOS App</h4><p class="settings-section-sub">\u539F\u751F\u5BA2\u6237\u7AEF\u7248\u672C\u4E0E DMG \u4E0B\u8F7D</p></div></div><div id="macos-dmg-current-row" class="settings-about-row hidden"><span class="settings-label">\u5F53\u524D\u7248\u672C</span><span class="settings-value" id="settings-macos-dmg-current">-</span></div><div id="macos-dmg-github-row" class="settings-about-row settings-about-row-action hidden"><span class="settings-label">\u7EBF\u4E0A\u7248\u672C</span><span class="settings-value settings-value-flex" id="settings-macos-dmg-github">-</span><button id="download-github-dmg-btn" class="btn btn-secondary btn-sm hidden" type="button">\u4E0B\u8F7D</button></div><div id="macos-dmg-local-row" class="settings-about-row settings-about-row-action hidden"><span class="settings-label">\u672C\u5730\u7248\u672C</span><span class="settings-value settings-value-flex" id="settings-macos-dmg-local">-</span><button id="download-local-dmg-btn" class="btn btn-secondary btn-sm hidden" type="button">\u4E0B\u8F7D</button></div><div id="macos-auto-update-row" class="settings-toggle-row hidden"><div class="settings-toggle-text"><span class="settings-toggle-title">\u81EA\u52A8\u66F4\u65B0</span><span class="settings-toggle-desc" id="macos-auto-update-hint">\u68C0\u6D4B\u5230\u65B0\u7248 DMG \u5C06\u81EA\u52A8\u4E0B\u8F7D\u5E76\u6302\u8F7D\u3002</span></div><label class="settings-switch"><input type="checkbox" id="auto-update-dmg-toggle" class="switch-toggle"><span class="switch-slider"></span></label></div><p id="macos-dmg-message" class="hint hidden"></p></div><div class="settings-update-section" id="android-connect-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("link", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">App \u8FDE\u63A5\u7801</h4><p class="settings-section-sub">\u7C98\u8D34\u5230 Android App \u5373\u53EF\u81EA\u52A8\u8FDE\u63A5\uFF0C\u65E0\u9700\u5BC6\u7801\uFF1B\u6539\u5BC6\u7801\u540E\u5931\u6548\u3002</p></div></div><div class="settings-connect-url-box"><code id="android-connect-code" class="settings-connect-url-text">-</code><button id="copy-connect-code-button" class="btn btn-secondary btn-sm" type="button" title="\u590D\u5236\u8FDE\u63A5\u7801">\u590D\u5236</button></div><div class="settings-connect-qr-box"><div class="settings-connect-qr-wrap" id="android-connect-qr-wrap" title="\u70B9\u51FB\u653E\u5927"><canvas id="android-connect-qr" width="180" height="180"></canvas><div class="settings-connect-qr-empty" id="android-connect-qr-empty">\u751F\u6210\u4E2D\u2026</div></div><p class="settings-connect-qr-hint">\u7528 Wand App \u626B\u4E00\u626B\uFF0C\u5373\u53EF\u4E00\u952E\u586B\u5165\u670D\u52A1\u5668\u5730\u5740\u4E0E\u8FDE\u63A5\u7801\u3002</p></div></div></div><div class="settings-panel" id="settings-tab-notifications" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u901A\u77E5</h3><p class="settings-panel-desc">\u8BBE\u7F6E\u63D0\u793A\u97F3\u3001\u7CFB\u7EDF\u901A\u77E5\u548C\u6D4F\u89C8\u5668\u901A\u77E5\u7684\u884C\u4E3A\u3002</p></div><div class="settings-notification-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("bell", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u901A\u77E5\u504F\u597D</h4><p class="settings-section-sub">\u63D0\u793A\u97F3\u4E0E\u5E94\u7528\u5185\u901A\u77E5\u6C14\u6CE1</p></div></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-notif-sound">\u64AD\u653E\u63D0\u793A\u97F3</label><span class="settings-toggle-desc">\u91CD\u8981\u901A\u77E5\uFF08\u7248\u672C\u66F4\u65B0\u3001\u6743\u9650\u7B49\u5F85\u7B49\uFF09\u65F6\u64AD\u653E\u67D4\u548C\u63D0\u793A\u97F3\u3002</span></div><label class="settings-switch"><input id="cfg-notif-sound" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div><div class="settings-range-row" id="notif-volume-field"><label class="settings-range-label" for="cfg-notif-volume">\u97F3\u91CF</label><input id="cfg-notif-volume" type="range" min="0" max="100" step="5" class="settings-range" /><span id="cfg-notif-volume-val" class="settings-range-value">80%</span></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-notif-bubble">\u5E94\u7528\u5185\u901A\u77E5\u6C14\u6CE1</label><span class="settings-toggle-desc">\u5728\u9875\u9762\u9876\u90E8\u5F39\u51FA\u6D6E\u52A8\u901A\u77E5\u6C14\u6CE1\u3002</span></div><label class="settings-switch"><input id="cfg-notif-bubble" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div></div><div id="native-sound-section" class="settings-notification-section hidden"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("music", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u7CFB\u7EDF\u901A\u77E5\u94C3\u58F0</h4><p class="settings-section-sub">\u9009\u62E9 Android \u7CFB\u7EDF\u901A\u77E5\u4F7F\u7528\u7684\u94C3\u58F0</p></div></div><div class="settings-row-with-action"><select id="native-sound-select" class="field-input field-select"></select><button id="native-sound-preview" class="btn btn-secondary btn-sm btn-with-icon" type="button">' + iconSvg("play", { size: 11, strokeWidth: 1.8, fill: "currentColor" }) + '<span>\u8BD5\u542C</span></button></div></div><div id="native-haptic-section" class="settings-notification-section hidden"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("vibrate", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u89E6\u611F\u53CD\u9988</h4><p class="settings-section-sub">\u6309\u94AE\u64CD\u4F5C\u548C\u4EFB\u52A1\u5B8C\u6210\u65F6\u63D0\u4F9B\u632F\u52A8\u53CD\u9988</p></div></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-haptic-enabled">\u542F\u7528\u89E6\u611F\u53CD\u9988</label></div><label class="settings-switch"><input id="cfg-haptic-enabled" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div></div><div class="settings-notification-section"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("globe", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u6D4F\u89C8\u5668\u901A\u77E5</h4><p class="settings-section-sub">\u6765\u81EA\u7CFB\u7EDF\u901A\u77E5\u4E2D\u5FC3\u7684\u5F39\u7A97</p></div></div><div class="settings-about-row"><span class="settings-label">\u6388\u6743\u72B6\u6001</span><span class="settings-value" id="notification-permission-status">-</span></div><div class="settings-update-actions"><button id="notification-request-btn" class="btn btn-primary btn-sm hidden" type="button">\u6388\u6743\u901A\u77E5</button><button id="notification-reset-btn" class="btn btn-ghost btn-sm hidden" type="button">\u91CD\u65B0\u6388\u6743</button><button id="notification-test-btn" class="btn btn-secondary btn-sm" type="button">\u53D1\u9001\u6D4B\u8BD5\u901A\u77E5</button><button id="notification-test-delay-btn" class="btn btn-ghost btn-sm" type="button">10 \u79D2\u540E\u53D1\u9001</button></div><p id="notification-test-message" class="hint hidden"></p></div></div><div class="settings-panel" id="settings-tab-general" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u57FA\u672C\u914D\u7F6E</h3><p class="settings-panel-desc">\u914D\u7F6E\u670D\u52A1\u8FDE\u63A5\u3001\u9ED8\u8BA4\u6A21\u578B\u3001\u6267\u884C\u65B9\u5F0F\u548C\u5DE5\u4F5C\u76EE\u5F55\u3002</p></div><div class="field-row"><div class="field"><label class="field-label" for="cfg-host">\u76D1\u542C\u5730\u5740 (host)</label><input id="cfg-host" type="text" class="field-input" placeholder="127.0.0.1" /></div><div class="field"><label class="field-label" for="cfg-port">\u7AEF\u53E3 (port)</label><input id="cfg-port" type="number" class="field-input" placeholder="8443" min="1" max="65535" /></div></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-https">\u542F\u7528 HTTPS</label><span class="settings-toggle-desc">\u4F7F\u7528\u81EA\u7B7E\u540D\u8BC1\u4E66\u52A0\u5BC6\u6D4F\u89C8\u5668\u5230\u670D\u52A1\u7684\u8FDE\u63A5\uFF0Chost \u4E3A\u975E 127.0.0.1 \u65F6\u5EFA\u8BAE\u5F00\u542F\u3002</span></div><label class="settings-switch"><input id="cfg-https" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div><div class="field-row"><div class="field"><label class="field-label" for="cfg-mode">\u9ED8\u8BA4\u6267\u884C\u6A21\u5F0F</label><select id="cfg-mode" class="field-input"><option value="default">default</option><option value="assist">assist</option><option value="agent">agent</option><option value="agent-max">agent-max</option><option value="auto-edit">auto-edit</option><option value="full-access">full-access</option><option value="native">native</option><option value="managed">managed</option></select></div><div class="field"><label class="field-label" for="cfg-language">\u56DE\u590D\u8BED\u8A00</label><select id="cfg-language" class="field-input"><option value="">\u81EA\u52A8\uFF08\u4E0D\u6307\u5B9A\uFF09</option><option value="\u4E2D\u6587">\u4E2D\u6587</option><option value="English">English</option><option value="\u65E5\u672C\u8A9E">\u65E5\u672C\u8A9E</option><option value="\uD55C\uAD6D\uC5B4">\uD55C\uAD6D\uC5B4</option><option value="Espa\xF1ol">Espa\xF1ol</option><option value="Fran\xE7ais">Fran\xE7ais</option><option value="Deutsch">Deutsch</option><option value="\u0420\u0443\u0441\u0441\u043A\u0438\u0439">\u0420\u0443\u0441\u0441\u043A\u0438\u0439</option></select></div></div><p class="field-hint" style="margin-top:-4px;">\u8BBE\u7F6E\u56DE\u590D\u8BED\u8A00\u540E\uFF0CClaude \u5C06\u5C3D\u91CF\u4F7F\u7528\u6307\u5B9A\u8BED\u8A00\u56DE\u590D\u3002</p><div class="field"><label class="field-label" for="cfg-structured-runner">\u7ED3\u6784\u5316\u4F1A\u8BDD Runner</label><select id="cfg-structured-runner" class="field-input"><option value="sdk">SDK\uFF08@anthropic-ai/claude-agent-sdk\uFF0C\u9ED8\u8BA4\uFF09</option><option value="cli">CLI\uFF08spawn claude -p\uFF09</option></select><p class="field-hint" style="margin-top:4px;">SDK \u6A21\u5F0F\u4F7F\u7528\u5B98\u65B9 Agent SDK \u66FF\u4EE3 CLI subprocess\uFF0C\u63A5\u53E3\u66F4\u6574\u6D01\uFF0C\u529F\u80FD\u7B49\u4EF7\u3002\u4FDD\u5B58\u540E\u5BF9\u65B0\u5EFA\u4F1A\u8BDD\u7ACB\u5373\u751F\u6548\u3002</p></div><div class="settings-toggle-row"><div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-inherit-env">\u7EE7\u627F\u73AF\u5883\u53D8\u91CF</label><span class="settings-toggle-desc">\u542F\u52A8 PTY / \u7ED3\u6784\u5316\u5B50\u8FDB\u7A0B\u65F6\uFF0C\u628A\u5F53\u524D\u670D\u52A1\u8FDB\u7A0B\u7684\u73AF\u5883\u53D8\u91CF\u4F20\u7ED9 claude / codex\u3002\u5173\u95ED\u540E\u5B50\u8FDB\u7A0B\u4EC5\u83B7\u5F97\u6700\u5C0F\u53EF\u7528\u73AF\u5883\uFF08PATH/HOME/SHELL/LANG/TERM \u7B49\uFF09\uFF0C\u53EF\u7528\u4E8E\u9694\u79BB API key \u7B49\u654F\u611F\u51ED\u636E\u3002</span></div><div class="settings-toggle-aside"><button type="button" id="cfg-view-env-btn" class="btn btn-secondary btn-sm" title="\u67E5\u770B\u5B9E\u9645\u4F1A\u6CE8\u5165\u5230\u5B50\u8FDB\u7A0B\u7684\u73AF\u5883\u53D8\u91CF">\u67E5\u770B</button><label class="settings-switch"><input id="cfg-inherit-env" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label></div></div><section class="settings-model-card" aria-labelledby="settings-model-card-title"><div class="settings-model-card-header"><div class="settings-model-card-heading"><span class="settings-model-card-icon" aria-hidden="true">' + iconSvg("cpu", { size: 18, strokeWidth: 1.8 }) + '</span><div><h4 class="settings-model-card-title" id="settings-model-card-title">\u9ED8\u8BA4\u6A21\u578B</h4><p class="settings-model-card-desc">\u4ECE\u5DF2\u68C0\u6D4B\u5217\u8868\u4E2D\u9009\u62E9\uFF0C\u6216\u76F4\u63A5\u8F93\u5165\u81EA\u5B9A\u4E49\u6A21\u578B\u540D\u79F0 / ID\u3002</p></div></div><button type="button" id="cfg-default-model-refresh" class="btn btn-secondary btn-sm settings-model-refresh" title="\u91CD\u65B0\u68C0\u6D4B Claude \u4E0E Codex \u6A21\u578B"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg><span>\u5237\u65B0\u5217\u8868</span></button></div><div class="settings-model-grid"><div class="field settings-model-field"><div class="settings-model-label-row"><label class="field-label" for="cfg-default-model">Claude</label><span class="settings-model-provider">Claude Code</span></div><div class="model-combobox" data-provider="claude"><div class="model-combobox-control"><input id="cfg-default-model" class="field-input model-combobox-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cfg-default-model-listbox" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="\u8DDF\u968F Claude Code \u9ED8\u8BA4" /><button type="button" class="model-combobox-toggle" aria-label="\u5C55\u5F00 Claude \u6A21\u578B\u5217\u8868"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button></div><div id="cfg-default-model-listbox" class="model-combobox-menu hidden" role="listbox" aria-label="Claude \u6A21\u578B"></div></div><div class="settings-model-meta"><span class="settings-model-status" data-model-status="claude">\u8DDF\u968F CLI \u9ED8\u8BA4</span><span class="settings-model-help">\u4F1A\u539F\u6837\u4F20\u7ED9 <code>--model</code></span></div></div><div class="field settings-model-field"><div class="settings-model-label-row"><label class="field-label" for="cfg-default-codex-model">Codex</label><span class="settings-model-provider">Codex CLI</span></div><div class="model-combobox" data-provider="codex"><div class="model-combobox-control"><input id="cfg-default-codex-model" class="field-input model-combobox-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cfg-default-codex-model-listbox" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="\u8DDF\u968F Codex \u9ED8\u8BA4" /><button type="button" class="model-combobox-toggle" aria-label="\u5C55\u5F00 Codex \u6A21\u578B\u5217\u8868"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button></div><div id="cfg-default-codex-model-listbox" class="model-combobox-menu hidden" role="listbox" aria-label="Codex \u6A21\u578B"></div></div><div class="settings-model-meta"><span class="settings-model-status" data-model-status="codex">\u8DDF\u968F CLI \u9ED8\u8BA4</span><span class="settings-model-help">\u7559\u7A7A\u5219\u4E0D\u4F20\u6A21\u578B\u53C2\u6570</span></div></div></div><p class="field-hint settings-model-version" id="cfg-default-model-version">\u6A21\u578B\u540D\u79F0\u4EC5\u5728\u65B0\u5EFA\u4F1A\u8BDD\u65F6\u4F5C\u4E3A\u9ED8\u8BA4\u503C\uFF1B\u8FD0\u884C\u4E2D\u7684\u7ED3\u6784\u5316\u4F1A\u8BDD\u4ECD\u53EF\u5355\u72EC\u5207\u6362\u3002</p></section><div class="field"><label class="field-label" for="cfg-cwd">\u9ED8\u8BA4\u5DE5\u4F5C\u76EE\u5F55</label><input id="cfg-cwd" type="text" class="field-input" placeholder="/home/user" /></div><div class="field"><label class="field-label" for="cfg-shell">Shell</label><input id="cfg-shell" type="text" class="field-input" placeholder="/bin/bash" /></div>' + (typeof WandNative !== "undefined" && typeof WandNative.getAppIcon === "function" ? '<div class="settings-app-icon-block"><div class="settings-section-head"><span class="settings-section-icon">' + iconSvg("palette", { size: 18, strokeWidth: 1.7 }) + '</span><div class="settings-section-head-text"><h4 class="settings-section-heading">\u5E94\u7528\u56FE\u6807</h4><p class="settings-section-sub">\u9009\u62E9 App \u542F\u52A8\u5668\u56FE\u6807\uFF0C\u8FD4\u56DE\u684C\u9762\u540E\u751F\u6548</p></div></div><div id="app-icon-picker" class="settings-app-icon-picker"><button type="button" class="settings-app-icon-option" data-icon="shorthair"><span class="settings-app-icon-preview">' + PIXEL_AVATAR.user + '</span><span class="settings-app-icon-label">\u8D5B\u535A\u864E\u599E</span></button><button type="button" class="settings-app-icon-option" data-icon="garfield"><span class="settings-app-icon-preview">' + PIXEL_AVATAR.assistant + '</span><span class="settings-app-icon-label">\u52E4\u52B3\u521D\u4E8C</span></button></div><p id="app-icon-message" class="hint hidden"></p></div>' : "") + '<div class="settings-actions settings-actions-sticky"><button id="save-config-button" class="btn btn-primary btn-block">\u4FDD\u5B58\u914D\u7F6E</button></div><p id="config-message" class="hint hidden settings-status-message"></p></div><div class="settings-panel" id="settings-tab-security" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u5B89\u5168</h3><p class="settings-panel-desc">\u7BA1\u7406\u767B\u5F55\u5BC6\u7801\u4E0E SSL \u8BC1\u4E66\uFF0C\u654F\u611F\u53D8\u66F4\u8BF7\u786E\u8BA4\u540E\u518D\u4FDD\u5B58\u3002</p></div><div class="settings-card"><div class="settings-card-head"><span class="settings-card-icon" aria-hidden="true">' + iconSvg("lock", { size: 18, strokeWidth: 1.8 }) + '</span><div class="settings-card-head-text"><h3 class="settings-card-title">\u4FEE\u6539\u5BC6\u7801</h3><p class="settings-card-desc">\u81F3\u5C11 6 \u4E2A\u5B57\u7B26\uFF1B\u4FDD\u5B58\u540E\u4E0B\u6B21\u767B\u5F55\u751F\u6548\u3002</p></div></div><form id="change-password-form" autocomplete="on" onsubmit="return false;"><input type="text" name="username" autocomplete="username" value="wand" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" readonly /><div class="field"><label class="field-label" for="new-password">\u65B0\u5BC6\u7801</label><input id="new-password" type="password" class="field-input" placeholder="\u8F93\u5165\u65B0\u5BC6\u7801\uFF08\u81F3\u5C11 6 \u4E2A\u5B57\u7B26\uFF09" autocomplete="new-password" /></div><div class="field"><label class="field-label" for="confirm-password">\u786E\u8BA4\u5BC6\u7801</label><input id="confirm-password" type="password" class="field-input" placeholder="\u518D\u6B21\u8F93\u5165\u65B0\u5BC6\u7801" autocomplete="new-password" /></div><div class="settings-card-actions"><button id="save-password-button" class="btn btn-primary" type="submit">\u4FDD\u5B58\u5BC6\u7801</button></div><p id="settings-error" class="error-message hidden"></p><p id="settings-success" class="hint settings-success-message hidden"></p></form></div><div class="settings-card"><div class="settings-card-head"><span class="settings-card-icon" aria-hidden="true">' + iconSvg("certificate", { size: 18, strokeWidth: 1.8 }) + '</span><div class="settings-card-head-text"><h3 class="settings-card-title">SSL \u8BC1\u4E66</h3><p class="settings-card-desc" id="cert-status">\u52A0\u8F7D\u4E2D...</p></div></div><div class="field"><label class="field-label" for="cert-key-file">\u79C1\u94A5\u6587\u4EF6 (.key)</label><div class="file-picker"><input id="cert-key-file" type="file" class="file-picker-input" accept=".key,.pem" /><label for="cert-key-file" class="file-picker-trigger"><svg class="file-picker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg><span class="file-picker-label">\u9009\u62E9\u79C1\u94A5</span></label><span class="file-picker-name" data-default="\u672A\u9009\u62E9\u6587\u4EF6">\u672A\u9009\u62E9\u6587\u4EF6</span></div></div><div class="field"><label class="field-label" for="cert-cert-file">\u8BC1\u4E66\u6587\u4EF6 (.crt/.pem)</label><div class="file-picker"><input id="cert-cert-file" type="file" class="file-picker-input" accept=".crt,.pem,.cert" /><label for="cert-cert-file" class="file-picker-trigger"><svg class="file-picker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg><span class="file-picker-label">\u9009\u62E9\u8BC1\u4E66</span></label><span class="file-picker-name" data-default="\u672A\u9009\u62E9\u6587\u4EF6">\u672A\u9009\u62E9\u6587\u4EF6</span></div></div><div class="settings-card-actions"><button id="upload-cert-button" class="btn btn-primary">\u4E0A\u4F20\u8BC1\u4E66</button></div><p id="cert-message" class="hint hidden"></p></div></div><div class="settings-panel" id="settings-tab-presets" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u547D\u4EE4\u9884\u8BBE</h3><p class="settings-panel-desc">\u5F53\u524D\u547D\u4EE4\u9884\u8BBE\u4ECE config.json \u8BFB\u53D6\uFF0C\u53EF\u5728\u8FD9\u91CC\u5FEB\u901F\u67E5\u770B\u5DF2\u6709\u914D\u7F6E\u3002</p></div><div id="presets-list" class="presets-list"></div></div><div class="settings-panel" id="settings-tab-display" role="tabpanel"><div class="settings-panel-header"><h3 class="settings-panel-title">\u663E\u793A</h3><p class="settings-panel-desc">\u63A7\u5236\u804A\u5929\u89C6\u56FE\u91CC\u4E0D\u540C\u5361\u7247\u7C7B\u578B\u7684\u9ED8\u8BA4\u5C55\u5F00\u72B6\u6001\u3002</p></div><div class="settings-section-title">\u5361\u7247\u9ED8\u8BA4\u5C55\u5F00\u72B6\u6001</div><p class="hint settings-inline-hint">\u8BBE\u7F6E\u7ED3\u6784\u5316\u804A\u5929\u89C6\u56FE\u4E2D\u5404\u7C7B\u5361\u7247\u7684\u9ED8\u8BA4\u5C55\u5F00/\u6298\u53E0\u72B6\u6001\u3002\u624B\u52A8\u64CD\u4F5C\u7684\u5C55\u5F00\u72B6\u6001\u4F18\u5148\u4E8E\u6B64\u9ED8\u8BA4\u8BBE\u7F6E\u3002</p><div class="switch-card-list"><label class="switch-card" for="cfg-card-edit"><div class="switch-card-header"><span class="switch-card-title">\u7F16\u8F91\u5361\u7247 (Edit/Write)</span><input id="cfg-card-edit" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">\u6587\u4EF6\u7F16\u8F91\u548C\u5199\u5165\u64CD\u4F5C\u7684 diff \u89C6\u56FE</div></label><label class="switch-card" for="cfg-card-inline"><div class="switch-card-header"><span class="switch-card-title">\u5185\u8054\u5DE5\u5177 (Read/Glob/Grep)</span><input id="cfg-card-inline" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">\u6587\u4EF6\u8BFB\u53D6\u3001\u641C\u7D22\u7B49\u5DE5\u5177\u7684\u7ED3\u679C</div></label><label class="switch-card" for="cfg-card-terminal"><div class="switch-card-header"><span class="switch-card-title">\u7EC8\u7AEF\u8F93\u51FA (Bash)</span><input id="cfg-card-terminal" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">\u547D\u4EE4\u884C\u6267\u884C\u7ED3\u679C</div></label><label class="switch-card" for="cfg-card-thinking"><div class="switch-card-header"><span class="switch-card-title">\u601D\u8003\u8FC7\u7A0B (Thinking)</span><input id="cfg-card-thinking" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">Claude \u7684\u601D\u8003\u8FC7\u7A0B\u5757</div></label><label class="switch-card" for="cfg-card-toolgroup"><div class="switch-card-header"><span class="switch-card-title">\u5DE5\u5177\u7EC4</span><input id="cfg-card-toolgroup" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></div><div class="switch-card-desc">\u8FDE\u7EED\u540C\u7C7B\u5DE5\u5177\u8C03\u7528\u7684\u6298\u53E0\u7EC4</div></label></div><div class="settings-actions settings-actions-sticky"><button id="save-display-button" class="btn btn-primary btn-block">\u4FDD\u5B58\u663E\u793A\u8BBE\u7F6E</button></div><p id="display-message" class="hint hidden settings-status-message"></p></div></div></div></section>';
   }
 
   // src/web-ui/browser/session-ui.ts
@@ -3624,10 +3626,7 @@
     return '<label class="session-manage-check"><input type="checkbox" data-action="toggle-selection" data-kind="' + escapeHtml2(kind) + '" data-id="' + escapeHtml2(id) + '"' + (selected ? " checked" : "") + ' aria-label="' + escapeHtml2(label) + '"><span></span></label>';
   }
   function confirmDelete(message, options) {
-    if (typeof window.wandConfirm === "function") {
-      return window.wandConfirm(message, Object.assign({ type: "danger", danger: true, okLabel: "\u5220\u9664" }, options || {}));
-    }
-    return Promise.resolve(window.confirm(message));
+    return wandConfirm2(message, Object.assign({ type: "danger", danger: true, okLabel: "\u5220\u9664" }, options || {}));
   }
   function batchDeleteSelected() {
     var sessionIds = getSelectedSessionIds();
@@ -7044,6 +7043,7 @@
     }
     var saveConfigBtn = document.getElementById("save-config-button");
     if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
+    bindSettingsModelComboboxes();
     var defaultModelRefreshBtn = document.getElementById("cfg-default-model-refresh");
     if (defaultModelRefreshBtn) defaultModelRefreshBtn.addEventListener("click", refreshAvailableModels);
     var viewEnvBtn = document.getElementById("cfg-view-env-btn");
@@ -8221,29 +8221,30 @@
     }, type === "error" ? 4e3 : 2200);
   }
   var _wandDialogStack = [];
+  var _wandDialogIdCounter = 0;
   function _wandDialogIcon(type) {
     switch (type) {
       case "warning":
-        return "!";
+        return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
       case "danger":
-        return "\u26A0\uFE0E";
-      // ⚠ (text style)
+        return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>';
       case "success":
-        return "\u2713";
-      // ✓
+        return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
       case "question":
-        return "?";
+        return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.5 2.5 0 1 1 4.5 1.5c-.9.8-2.2 1.2-2.2 2.5"/><path d="M12 17h.01"/></svg>';
       default:
-        return "i";
+        return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg>';
     }
   }
   function openWandDialog(opts) {
     opts = opts || {};
     var dismissable = opts.dismissable !== false;
     var type = opts.type || "info";
-    var iconChar = opts.icon || _wandDialogIcon(type);
+    var iconSvg7 = _wandDialogIcon(type);
     var hasInput = !!opts.input;
     return new Promise(function(resolve) {
+      var dialogId = "wand-dialog-" + ++_wandDialogIdCounter;
+      var previouslyFocused = document.activeElement;
       var backdrop = document.createElement("div");
       backdrop.className = "wand-dialog-backdrop";
       backdrop.setAttribute("role", "presentation");
@@ -8251,27 +8252,36 @@
       dialog.className = "wand-dialog";
       dialog.setAttribute("role", hasInput ? "dialog" : "alertdialog");
       dialog.setAttribute("aria-modal", "true");
-      if (opts.title) dialog.setAttribute("aria-label", opts.title);
       var header = document.createElement("div");
       header.className = "wand-dialog-header";
       var iconEl = document.createElement("div");
       iconEl.className = "wand-dialog-icon " + type;
-      iconEl.textContent = iconChar;
+      iconEl.setAttribute("aria-hidden", "true");
+      if (opts.icon) {
+        iconEl.textContent = String(opts.icon);
+      } else {
+        iconEl.innerHTML = iconSvg7;
+      }
       header.appendChild(iconEl);
       var textWrap = document.createElement("div");
       textWrap.className = "wand-dialog-textwrap";
       if (opts.title) {
         var titleEl = document.createElement("div");
         titleEl.className = "wand-dialog-title";
+        titleEl.id = dialogId + "-title";
         titleEl.textContent = opts.title;
         textWrap.appendChild(titleEl);
+        dialog.setAttribute("aria-labelledby", titleEl.id);
       }
       if (opts.message) {
         var msgEl = document.createElement("div");
         msgEl.className = "wand-dialog-message";
+        msgEl.id = dialogId + "-message";
         msgEl.textContent = opts.message;
         textWrap.appendChild(msgEl);
+        dialog.setAttribute("aria-describedby", msgEl.id);
       }
+      if (!opts.title) dialog.setAttribute("aria-label", type === "danger" ? "\u786E\u8BA4\u64CD\u4F5C" : "\u63D0\u793A");
       header.appendChild(textWrap);
       dialog.appendChild(header);
       var inputEl = null;
@@ -8281,6 +8291,9 @@
         inputEl = document.createElement("input");
         inputEl.type = "text";
         inputEl.className = "wand-dialog-input";
+        inputEl.setAttribute("aria-label", opts.inputLabel || opts.title || "\u8F93\u5165\u5185\u5BB9");
+        inputEl.autocomplete = "off";
+        inputEl.spellcheck = false;
         if (opts.inputPlaceholder) inputEl.placeholder = opts.inputPlaceholder;
         if (opts.inputValue != null) inputEl.value = String(opts.inputValue);
         bodyEl.appendChild(inputEl);
@@ -8299,10 +8312,21 @@
         document.removeEventListener("keydown", keyHandler, true);
         var idx = _wandDialogStack.indexOf(close);
         if (idx >= 0) _wandDialogStack.splice(idx, 1);
+        var reduceMotion = false;
+        try {
+          reduceMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+        } catch (_e) {
+        }
         setTimeout(function() {
           if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+          if (previouslyFocused && document.contains(previouslyFocused) && typeof previouslyFocused.focus === "function") {
+            try {
+              previouslyFocused.focus();
+            } catch (_e) {
+            }
+          }
           resolve(value);
-        }, 160);
+        }, reduceMotion || document.hidden ? 0 : 140);
       }
       buttons.forEach(function(btnSpec) {
         var btn = document.createElement("button");
@@ -8354,6 +8378,20 @@
               close(primary.value);
             }
           }
+          return;
+        }
+        if (e.key === "Tab") {
+          var focusables = dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])');
+          if (!focusables.length) return;
+          var first = focusables[0];
+          var last = focusables[focusables.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
         }
       }
       document.addEventListener("keydown", keyHandler, true);
@@ -8385,7 +8423,7 @@
       ]
     });
   }
-  function wandConfirm4(message, options) {
+  function wandConfirm2(message, options) {
     options = options || {};
     var danger = !!options.danger || options.type === "danger";
     return openWandDialog({
@@ -8423,7 +8461,7 @@
     });
   }
   window.wandAlert = wandAlert2;
-  window.wandConfirm = wandConfirm4;
+  window.wandConfirm = wandConfirm2;
   window.wandPrompt = wandPrompt;
   window.openWandDialog = openWandDialog;
   var notificationStack = [];
@@ -10861,7 +10899,7 @@
   function stopSession() {
     if (!state.selectedId) return;
     var id = state.selectedId;
-    wandConfirm4(t2("stop.confirm.message"), {
+    wandConfirm2(t2("stop.confirm.message"), {
       title: t2("stop.confirm.title"),
       danger: true,
       okLabel: t2("stop.confirm.ok"),
@@ -14922,9 +14960,12 @@
     if (state.modelsRefreshing) return Promise.resolve(null);
     state.modelsRefreshing = true;
     var btn = document.getElementById("cfg-default-model-refresh");
+    var btnLabel = btn && btn.querySelector("span");
     if (btn) {
       btn.disabled = true;
-      btn.textContent = "\u5237\u65B0\u4E2D...";
+      btn.classList.add("is-loading");
+      btn.setAttribute("aria-busy", "true");
+      if (btnLabel) btnLabel.textContent = "\u68C0\u6D4B\u4E2D";
     }
     return fetch("/api/models/refresh", { method: "POST", credentials: "same-origin" }).then(function(res) {
       return res.json();
@@ -14946,7 +14987,9 @@
       state.modelsRefreshing = false;
       if (btn) {
         btn.disabled = false;
-        btn.textContent = "\u5237\u65B0";
+        btn.classList.remove("is-loading");
+        btn.removeAttribute("aria-busy");
+        if (btnLabel) btnLabel.textContent = "\u5237\u65B0\u5217\u8868";
       }
     });
   }
@@ -15036,25 +15079,244 @@
     }
     listEl.innerHTML = html;
   }
+  function getSettingsModelsForProvider(provider) {
+    return provider === "codex" ? state.availableCodexModels || [] : state.availableModels || [];
+  }
+  function updateSettingsModelStatus(provider) {
+    var inputId = provider === "codex" ? "cfg-default-codex-model" : "cfg-default-model";
+    var input = document.getElementById(inputId);
+    var status = document.querySelector('[data-model-status="' + provider + '"]');
+    if (!input || !status) return;
+    var value = (input.value || "").trim();
+    var models = getSettingsModelsForProvider(provider);
+    var known = null;
+    for (var i = 0; i < models.length; i++) {
+      if (models[i].id === value) {
+        known = models[i];
+        break;
+      }
+    }
+    status.classList.remove("is-custom", "is-known");
+    if (!value) {
+      status.textContent = "\u8DDF\u968F CLI \u9ED8\u8BA4";
+      return;
+    }
+    if (known) {
+      status.textContent = "\u5DF2\u68C0\u6D4B\u5230";
+      status.classList.add("is-known");
+      return;
+    }
+    status.textContent = "\u81EA\u5B9A\u4E49\u540D\u79F0";
+    status.classList.add("is-custom");
+  }
+  function renderSettingsModelCombobox(root) {
+    if (!root) return;
+    var provider = root.getAttribute("data-provider") === "codex" ? "codex" : "claude";
+    var input = root.querySelector(".model-combobox-input");
+    var menu = root.querySelector(".model-combobox-menu");
+    if (!input || !menu) return;
+    var rawValue = input.value || "";
+    var value = rawValue.trim();
+    var query = value.toLowerCase();
+    var models = getSettingsModelsForProvider(provider);
+    var defaultModel = null;
+    var exactMatch = false;
+    var rows = [];
+    for (var i = 0; i < models.length; i++) {
+      var model = models[i];
+      if (model.id === "default") {
+        defaultModel = model;
+        continue;
+      }
+      if (model.id === value) exactMatch = true;
+      var label = model.label || model.id;
+      if (query && model.id.toLowerCase().indexOf(query) === -1 && label.toLowerCase().indexOf(query) === -1) continue;
+      rows.push({ value: model.id, label, meta: label === model.id ? "\u5DF2\u68C0\u6D4B\u6A21\u578B" : model.id, custom: false });
+    }
+    var defaultLabel = provider === "codex" ? "\u8DDF\u968F Codex \u9ED8\u8BA4" : "\u8DDF\u968F Claude Code \u9ED8\u8BA4";
+    var defaultMeta = defaultModel && defaultModel.label ? defaultModel.label : "\u4E0D\u4F20 --model \u53C2\u6570";
+    var html = "";
+    if (!query || defaultLabel.toLowerCase().indexOf(query) !== -1 || defaultMeta.toLowerCase().indexOf(query) !== -1) {
+      html += '<button type="button" class="model-combobox-option' + (!value ? " is-selected" : "") + '" role="option" aria-selected="' + (!value ? "true" : "false") + '" data-model-value=""><span class="model-combobox-option-check" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg></span><span class="model-combobox-option-copy"><span class="model-combobox-option-label">' + escapeHtml2(defaultLabel) + '</span><span class="model-combobox-option-meta">' + escapeHtml2(defaultMeta) + "</span></span></button>";
+    }
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var isSelected = row.value === value;
+      html += '<button type="button" class="model-combobox-option' + (isSelected ? " is-selected" : "") + '" role="option" aria-selected="' + (isSelected ? "true" : "false") + '" data-model-value="' + escapeHtml2(row.value) + '"><span class="model-combobox-option-check" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg></span><span class="model-combobox-option-copy"><span class="model-combobox-option-label">' + escapeHtml2(row.label) + '</span><span class="model-combobox-option-meta">' + escapeHtml2(row.meta) + "</span></span></button>";
+    }
+    if (value && !exactMatch) {
+      html += '<button type="button" class="model-combobox-option model-combobox-option-custom is-selected" role="option" aria-selected="true" data-model-value="' + escapeHtml2(value) + '"><span class="model-combobox-option-custom-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></span><span class="model-combobox-option-copy"><span class="model-combobox-option-label">\u4F7F\u7528\u81EA\u5B9A\u4E49\u540D\u79F0</span><span class="model-combobox-option-meta">' + escapeHtml2(value) + "</span></span></button>";
+    }
+    if (!html) {
+      html = '<div class="model-combobox-empty">\u6CA1\u6709\u5339\u914D\u7684\u6A21\u578B\uFF0C\u53EF\u4EE5\u7EE7\u7EED\u8F93\u5165\u81EA\u5B9A\u4E49\u540D\u79F0\u3002</div>';
+    }
+    menu.innerHTML = html;
+    var options = menu.querySelectorAll(".model-combobox-option");
+    var activeIndex = -1;
+    for (var o = 0; o < options.length; o++) {
+      if (options[o].getAttribute("aria-selected") === "true") {
+        activeIndex = o;
+        break;
+      }
+    }
+    root._wandModelActiveIndex = activeIndex >= 0 ? activeIndex : options.length ? 0 : -1;
+    updateSettingsModelActiveOption(root);
+    updateSettingsModelStatus(provider);
+  }
+  function updateSettingsModelActiveOption(root) {
+    if (!root) return;
+    var menu = root.querySelector(".model-combobox-menu");
+    var input = root.querySelector(".model-combobox-input");
+    if (!menu || !input) return;
+    var options = menu.querySelectorAll(".model-combobox-option");
+    var activeIndex = typeof root._wandModelActiveIndex === "number" ? root._wandModelActiveIndex : -1;
+    for (var i = 0; i < options.length; i++) {
+      options[i].classList.toggle("is-active", i === activeIndex);
+      if (i === activeIndex) {
+        if (!options[i].id) options[i].id = (menu.id || "model-listbox") + "-option-" + i;
+        input.setAttribute("aria-activedescendant", options[i].id);
+      }
+    }
+    if (activeIndex < 0) input.removeAttribute("aria-activedescendant");
+  }
+  function openSettingsModelCombobox(root) {
+    if (!root) return;
+    var input = root.querySelector(".model-combobox-input");
+    var menu = root.querySelector(".model-combobox-menu");
+    if (!input || !menu) return;
+    document.querySelectorAll(".model-combobox.is-open").forEach(function(other) {
+      if (other !== root) closeSettingsModelCombobox(other);
+    });
+    renderSettingsModelCombobox(root);
+    root.classList.add("is-open");
+    menu.classList.remove("hidden");
+    input.setAttribute("aria-expanded", "true");
+  }
+  function closeSettingsModelCombobox(root) {
+    if (!root) return;
+    var input = root.querySelector(".model-combobox-input");
+    var menu = root.querySelector(".model-combobox-menu");
+    root.classList.remove("is-open");
+    if (menu) menu.classList.add("hidden");
+    if (input) {
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+    }
+  }
+  function selectSettingsModelOption(root, value) {
+    if (!root) return;
+    var input = root.querySelector(".model-combobox-input");
+    if (!input) return;
+    var shouldRestoreInputFocus = document.activeElement === input;
+    input.value = value || "";
+    input.dataset.modelInitialized = "true";
+    input.dataset.modelDirty = "true";
+    updateSettingsModelStatus(root.getAttribute("data-provider") === "codex" ? "codex" : "claude");
+    closeSettingsModelCombobox(root);
+    if (shouldRestoreInputFocus) input.focus();
+  }
+  function bindSettingsModelComboboxes() {
+    if (!window.__wandSettingsModelOutsideBound) {
+      window.__wandSettingsModelOutsideBound = true;
+      document.addEventListener("click", function(event) {
+        var target = event.target;
+        document.querySelectorAll(".model-combobox.is-open").forEach(function(root) {
+          if (!target || !root.contains(target)) closeSettingsModelCombobox(root);
+        });
+      });
+    }
+    var roots = document.querySelectorAll(".model-combobox");
+    roots.forEach(function(root) {
+      if (root.dataset.bound === "true") return;
+      root.dataset.bound = "true";
+      var input = root.querySelector(".model-combobox-input");
+      var toggle = root.querySelector(".model-combobox-toggle");
+      var menu = root.querySelector(".model-combobox-menu");
+      if (!input || !toggle || !menu) return;
+      input.addEventListener("focus", function() {
+        openSettingsModelCombobox(root);
+      });
+      input.addEventListener("input", function() {
+        input.dataset.modelInitialized = "true";
+        input.dataset.modelDirty = "true";
+        openSettingsModelCombobox(root);
+      });
+      input.addEventListener("keydown", function(event) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeSettingsModelCombobox(root);
+          return;
+        }
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
+        if (!root.classList.contains("is-open")) {
+          if (event.key === "Enter") return;
+          openSettingsModelCombobox(root);
+        }
+        var options = menu.querySelectorAll(".model-combobox-option");
+        if (!options.length) return;
+        event.preventDefault();
+        var index = typeof root._wandModelActiveIndex === "number" ? root._wandModelActiveIndex : -1;
+        if (event.key === "ArrowDown") index = index < options.length - 1 ? index + 1 : 0;
+        if (event.key === "ArrowUp") index = index > 0 ? index - 1 : options.length - 1;
+        root._wandModelActiveIndex = index;
+        updateSettingsModelActiveOption(root);
+        if (event.key === "Enter") {
+          var active = options[index];
+          if (active) selectSettingsModelOption(root, active.getAttribute("data-model-value") || "");
+        } else {
+          var activeOption = options[index];
+          if (activeOption && typeof activeOption.scrollIntoView === "function") activeOption.scrollIntoView({ block: "nearest" });
+        }
+      });
+      toggle.addEventListener("mousedown", function(event) {
+        event.preventDefault();
+      });
+      toggle.addEventListener("click", function() {
+        if (root.classList.contains("is-open")) {
+          closeSettingsModelCombobox(root);
+        } else {
+          openSettingsModelCombobox(root);
+        }
+      });
+      menu.addEventListener("mousedown", function(event) {
+        event.preventDefault();
+      });
+      menu.addEventListener("click", function(event) {
+        var option = event.target.closest(".model-combobox-option");
+        if (!option) return;
+        selectSettingsModelOption(root, option.getAttribute("data-model-value") || "");
+      });
+      root.addEventListener("focusout", function() {
+        setTimeout(function() {
+          if (!root.contains(document.activeElement)) closeSettingsModelCombobox(root);
+        }, 0);
+      });
+      renderSettingsModelCombobox(root);
+    });
+  }
   function updateSettingsDefaultModelSelect(data) {
     var defaults = getConfigDefaultModels();
-    var claudeSelect = document.getElementById("cfg-default-model");
-    if (claudeSelect) {
-      var previousClaude = claudeSelect.value;
-      var currentClaude = previousClaude || state.configDefaultModels && state.configDefaultModels.claude || defaults.claude || "";
-      claudeSelect.innerHTML = renderChatModelOptions(currentClaude, { provider: "claude" });
-      claudeSelect.value = currentClaude;
+    var claudeInput = document.getElementById("cfg-default-model");
+    if (claudeInput) {
+      if (claudeInput.dataset.modelInitialized !== "true") {
+        claudeInput.value = state.configDefaultModels && state.configDefaultModels.claude || defaults.claude || "";
+        claudeInput.dataset.modelInitialized = "true";
+      }
+      var claudeRoot = claudeInput.closest(".model-combobox");
+      if (claudeRoot) renderSettingsModelCombobox(claudeRoot);
     }
-    var codexSelect = document.getElementById("cfg-default-codex-model");
-    if (codexSelect) {
-      var previousCodex = codexSelect.value;
-      var currentCodex = previousCodex || state.configDefaultModels && state.configDefaultModels.codex || defaults.codex || "";
-      codexSelect.innerHTML = renderChatModelOptions(currentCodex, { provider: "codex" });
-      codexSelect.value = currentCodex;
+    var codexInput = document.getElementById("cfg-default-codex-model");
+    if (codexInput) {
+      if (codexInput.dataset.modelInitialized !== "true") {
+        codexInput.value = state.configDefaultModels && state.configDefaultModels.codex || defaults.codex || "";
+        codexInput.dataset.modelInitialized = "true";
+      }
+      var codexRoot = codexInput.closest(".model-combobox");
+      if (codexRoot) renderSettingsModelCombobox(codexRoot);
     }
     var versionEl = document.getElementById("cfg-default-model-version");
     if (versionEl && data) {
-      versionEl.textContent = data.claudeVersion ? "\u5DF2\u68C0\u6D4B\u5230 claude " + data.claudeVersion : "\u65B0\u5EFA Claude \u4F1A\u8BDD\u65F6\u9ED8\u8BA4\u4F7F\u7528\u8BE5\u6A21\u578B\u3002";
+      versionEl.textContent = data.claudeVersion ? "\u5DF2\u68C0\u6D4B\u5230 Claude CLI " + data.claudeVersion + "\uFF1B\u5217\u8868\u5DF2\u540C\u65F6\u540C\u6B65 Codex \u53EF\u7528\u6A21\u578B\u3002" : "\u672A\u8BFB\u53D6\u5230 Claude CLI \u7248\u672C\uFF1B\u4ECD\u53EF\u76F4\u63A5\u8F93\u5165\u81EA\u5B9A\u4E49\u6A21\u578B\u540D\u79F0\u3002";
     }
   }
   function getSelectedSession5() {
@@ -16200,6 +16462,10 @@
       hideSettingsMessages();
       setupFocusTrap(modal);
       bindSettingsTabKeyboardNavigation();
+      modal.querySelectorAll(".model-combobox-input").forEach(function(node) {
+        node.dataset.modelDirty = "false";
+        node.dataset.modelInitialized = "false";
+      });
       switchSettingsTab("about");
       loadSettingsData();
       var soundEl = document.getElementById("cfg-notif-sound");
@@ -16263,6 +16529,9 @@
   function closeSettingsModal() {
     var modal = document.getElementById("settings-modal");
     if (modal) {
+      modal.querySelectorAll(".model-combobox.is-open").forEach(function(root) {
+        closeSettingsModelCombobox(root);
+      });
       if (state.focusTrapHandler) {
         document.removeEventListener("keydown", state.focusTrapHandler);
         state.focusTrapHandler = null;
@@ -16318,6 +16587,9 @@
     });
   }
   function switchSettingsTab(tabName) {
+    document.querySelectorAll(".model-combobox.is-open").forEach(function(root) {
+      closeSettingsModelCombobox(root);
+    });
     var tabs = document.querySelectorAll(".settings-tab");
     var panels = document.querySelectorAll(".settings-panel");
     for (var i = 0; i < tabs.length; i++) {
@@ -16343,17 +16615,21 @@
   }
   function handleSettingsTabKeydown(event) {
     if (!event) return;
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "Home" && event.key !== "End") {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") {
       return;
     }
     var tabs = Array.prototype.slice.call(document.querySelectorAll(".settings-tab"));
     if (!tabs.length) return;
+    var tabList = event.currentTarget && event.currentTarget.closest ? event.currentTarget.closest(".settings-tabs") : null;
+    var horizontal = tabList && tabList.getAttribute("aria-orientation") === "horizontal";
+    if (horizontal && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
+    if (!horizontal && (event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
     var currentIndex = tabs.indexOf(event.currentTarget);
     if (currentIndex === -1) return;
     event.preventDefault();
     var nextIndex = currentIndex;
-    if (event.key === "ArrowUp") nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1;
-    if (event.key === "ArrowDown") nextIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0;
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft") nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") nextIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0;
     if (event.key === "Home") nextIndex = 0;
     if (event.key === "End") nextIndex = tabs.length - 1;
     var nextTab = tabs[nextIndex];
@@ -16363,6 +16639,15 @@
     if (typeof nextTab.focus === "function") nextTab.focus();
   }
   function bindSettingsTabKeyboardNavigation() {
+    var tabList = document.querySelector(".settings-tabs");
+    if (tabList) {
+      var horizontal = false;
+      try {
+        horizontal = !!(window.matchMedia && window.matchMedia("(max-width: 760px)").matches);
+      } catch (_e) {
+      }
+      tabList.setAttribute("aria-orientation", horizontal ? "horizontal" : "vertical");
+    }
     var tabs = document.querySelectorAll(".settings-tab");
     for (var i = 0; i < tabs.length; i++) {
       tabs[i].removeEventListener("keydown", handleSettingsTabKeydown);
@@ -16536,13 +16821,7 @@
       var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle");
       if (autoUpdateDmgToggle) autoUpdateDmgToggle.checked = !!_macAppVersion && !!autoUpdate.dmg;
       function safeNotify(msg, type) {
-        if (typeof window.wandAlert === "function") {
-          window.wandAlert(msg, { type: type === "error" ? "danger" : "info" });
-        } else if (typeof showToast2 === "function") {
-          showToast2(msg, type === "error" ? "error" : "info");
-        } else if (type === "error") {
-          alert(msg);
-        }
+        wandAlert2(msg, { type: type === "error" ? "danger" : "info" });
       }
       function triggerLocalDownload(url, fileName, btn) {
         var original = btn ? btn.textContent : "";
@@ -16859,6 +17138,10 @@
         codex: defaultModels.codex || ""
       };
       state.configDefaultModel = state.configDefaultModels.claude;
+      var defaultClaudeInput = document.getElementById("cfg-default-model");
+      var defaultCodexInput = document.getElementById("cfg-default-codex-model");
+      if (defaultClaudeInput && defaultClaudeInput.dataset.modelDirty !== "true") defaultClaudeInput.dataset.modelInitialized = "false";
+      if (defaultCodexInput && defaultCodexInput.dataset.modelDirty !== "true") defaultCodexInput.dataset.modelInitialized = "false";
       updateSettingsDefaultModelSelect();
       fetchAvailableModels().then(function() {
         updateSettingsDefaultModelSelect();
@@ -16899,6 +17182,8 @@
       msgEl.classList.add("hidden");
       msgEl.textContent = "";
     }
+    var defaultModelValue = ((document.getElementById("cfg-default-model") || {}).value || "").trim();
+    var defaultCodexModelValue = ((document.getElementById("cfg-default-codex-model") || {}).value || "").trim();
     var body = {
       host: (document.getElementById("cfg-host") || {}).value,
       port: Number((document.getElementById("cfg-port") || {}).value),
@@ -16907,11 +17192,11 @@
       defaultCwd: (document.getElementById("cfg-cwd") || {}).value,
       shell: (document.getElementById("cfg-shell") || {}).value,
       language: (document.getElementById("cfg-language") || {}).value || "",
-      defaultModel: (document.getElementById("cfg-default-model") || {}).value || "",
-      defaultCodexModel: (document.getElementById("cfg-default-codex-model") || {}).value || "",
+      defaultModel: defaultModelValue,
+      defaultCodexModel: defaultCodexModelValue,
       defaultModels: {
-        claude: (document.getElementById("cfg-default-model") || {}).value || "",
-        codex: (document.getElementById("cfg-default-codex-model") || {}).value || ""
+        claude: defaultModelValue,
+        codex: defaultCodexModelValue
       },
       structuredRunner: (document.getElementById("cfg-structured-runner") || {}).value || "cli",
       inheritEnv: (document.getElementById("cfg-inherit-env") || {}).checked !== false
@@ -16945,6 +17230,10 @@
         }
         state.configDefaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel };
         state.configDefaultModel = nextDefaultModel;
+        var savedClaudeInput = document.getElementById("cfg-default-model");
+        var savedCodexInput = document.getElementById("cfg-default-codex-model");
+        if (savedClaudeInput) savedClaudeInput.dataset.modelDirty = "false";
+        if (savedCodexInput) savedCodexInput.dataset.modelDirty = "false";
         if (nextDefaultModel !== previousDefaults.claude) {
           setChatModelForProvider("claude", "");
         }

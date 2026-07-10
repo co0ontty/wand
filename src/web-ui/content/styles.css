@@ -5083,9 +5083,6 @@
     }
 
     /* Enhanced Thinking Card */
-      overflow-y: auto;
-
-    /* Enhanced Thinking Card */
     /* 简化版内联思考展示 */
     .thinking-inline {
       display: flex;
@@ -16417,6 +16414,867 @@
       html.is-wand-android .settings-switch,
       html.is-wand-android .switch-slider {
         justify-self: end;
+      }
+    }
+
+    /* ============================================================
+       Settings refresh — compact tool layout + WebView-safe model picker
+       ============================================================ */
+
+    @keyframes wand-surface-in {
+      from { opacity: 0; transform: translateY(8px) scale(0.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes wand-surface-out {
+      from { opacity: 1; transform: translateY(0) scale(1); }
+      to { opacity: 0; transform: translateY(4px) scale(0.99); }
+    }
+
+    @keyframes wand-backdrop-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .modal-backdrop {
+      background: rgba(24, 20, 17, 0.52);
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      animation: wand-backdrop-in 160ms ease-out both;
+    }
+
+    .modal {
+      background: var(--bg-elevated);
+      background-image: none;
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      box-shadow: 0 24px 64px rgba(42, 31, 22, 0.2), 0 4px 16px rgba(42, 31, 22, 0.08);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      animation: wand-surface-in 180ms ease-out both;
+    }
+
+    .modal-backdrop.closing .modal {
+      animation: wand-surface-out 130ms ease-in both;
+    }
+
+    .modal-close-btn,
+    .session-modal .modal-header > .btn-icon.btn-ghost,
+    .settings-modal .settings-modal-header > .btn-icon.btn-ghost {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 12px;
+      transition: background 150ms ease, color 150ms ease, box-shadow 150ms ease;
+    }
+
+    .modal-close-btn:hover,
+    .session-modal .modal-header > .btn-icon.btn-ghost:hover,
+    .settings-modal .settings-modal-header > .btn-icon.btn-ghost:hover,
+    .modal-close-btn:active,
+    .session-modal .modal-header > .btn-icon.btn-ghost:active,
+    .settings-modal .settings-modal-header > .btn-icon.btn-ghost:active {
+      transform: none;
+      box-shadow: none;
+    }
+
+    .settings-modal {
+      width: min(980px, calc(100vw - 32px));
+      max-width: 980px;
+      height: min(840px, calc(100dvh - 32px - var(--wand-safe-top) - var(--wand-safe-bottom)));
+      min-height: 0;
+      max-height: calc(100dvh - 32px - var(--wand-safe-top) - var(--wand-safe-bottom));
+    }
+
+    .settings-modal .settings-modal-header {
+      min-height: 68px;
+      padding: 14px 18px 14px 22px;
+      align-items: center;
+      background: var(--bg-elevated);
+    }
+
+    .settings-modal .settings-modal-title-group .modal-title {
+      font-size: 1.125rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .settings-modal .settings-modal-subtitle {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+    }
+
+    .settings-modal .settings-modal-body {
+      padding: 18px 22px 22px;
+    }
+
+    .settings-layout {
+      grid-template-columns: 208px minmax(0, 1fr);
+      gap: 24px;
+    }
+
+    .settings-modal .settings-sidebar {
+      gap: 12px;
+      padding-right: 18px;
+    }
+
+    .settings-sidebar-hint {
+      line-height: 1.45;
+    }
+
+    .settings-modal .settings-tabs {
+      gap: 4px;
+      padding-right: 0;
+    }
+
+    .settings-modal .settings-tab {
+      min-height: 52px;
+      padding: 9px 11px;
+      gap: 2px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      transform: none;
+      transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+    }
+
+    .settings-modal .settings-tab:hover {
+      background: var(--accent-muted);
+      border-color: transparent;
+      transform: none;
+    }
+
+    .settings-modal .settings-tab.active {
+      color: var(--accent-active);
+      background: var(--accent-muted);
+      background-image: none;
+      border-color: rgba(197, 101, 61, 0.2);
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    .settings-modal .settings-tab.active::before {
+      display: block;
+      left: -1px;
+      top: 11px;
+      bottom: 11px;
+      width: 3px;
+    }
+
+    .settings-modal .settings-tab-main {
+      font-size: 0.875rem;
+    }
+
+    .settings-modal .settings-tab-meta {
+      font-size: 0.6875rem;
+    }
+
+    .settings-modal .settings-panel-header {
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-color: var(--border-subtle);
+    }
+
+    .settings-modal .settings-panel-title {
+      font-size: 1.25rem;
+      letter-spacing: -0.025em;
+    }
+
+    .settings-modal .settings-panel-desc {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+
+    .settings-modal .settings-card,
+    .settings-modal .settings-update-section,
+    .settings-modal .settings-notification-section,
+    .settings-modal .settings-about-info,
+    .settings-modal .preset-item,
+    .settings-modal .settings-toggle-row,
+    .settings-modal .settings-range-row {
+      background: var(--bg-surface);
+      border-color: var(--border-subtle);
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    .settings-modal .settings-card-icon {
+      color: var(--accent);
+      background: var(--accent-muted);
+      background-image: none;
+      box-shadow: none;
+      font-size: 0;
+    }
+
+    .settings-model-card {
+      max-width: 860px;
+      margin: 4px 0 16px;
+      padding: 18px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      background: var(--bg-surface);
+    }
+
+    .settings-model-card-header,
+    .settings-model-card-heading,
+    .settings-model-label-row,
+    .settings-model-meta {
+      display: flex;
+      align-items: center;
+    }
+
+    .settings-model-card-header {
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 16px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .settings-model-card-heading {
+      min-width: 0;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .settings-model-card-icon {
+      width: 36px;
+      height: 36px;
+      flex: 0 0 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      background: var(--accent-muted);
+      border-radius: 11px;
+    }
+
+    .settings-model-card-title {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 0.9375rem;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .settings-model-card-desc {
+      margin: 3px 0 0;
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+      line-height: 1.5;
+    }
+
+    .settings-model-refresh {
+      min-width: 108px;
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      touch-action: manipulation;
+    }
+
+    .settings-model-refresh.is-loading svg {
+      animation: settings-model-refresh-spin 800ms linear infinite;
+    }
+
+    @keyframes settings-model-refresh-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .settings-model-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .settings-model-field {
+      min-width: 0;
+      margin: 0 !important;
+    }
+
+    .settings-model-label-row {
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 7px;
+    }
+
+    .settings-model-label-row .field-label {
+      margin: 0;
+      font-size: 0.8125rem;
+      font-weight: 700;
+    }
+
+    .settings-model-provider {
+      color: var(--text-muted);
+      font-size: 0.6875rem;
+      font-weight: 600;
+    }
+
+    .model-combobox {
+      position: relative;
+      min-width: 0;
+    }
+
+    .model-combobox-control {
+      position: relative;
+    }
+
+    .settings-modal .model-combobox-input {
+      min-height: 48px;
+      padding: 10px 48px 10px 13px;
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      line-height: 1.4;
+      background: var(--bg-elevated);
+      border-radius: 12px;
+    }
+
+    .model-combobox-toggle {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 44px;
+      height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      color: var(--text-tertiary);
+      background: transparent;
+      border: 0;
+      border-radius: 10px;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: color 150ms ease, background 150ms ease;
+    }
+
+    .model-combobox-toggle:hover {
+      color: var(--text-primary);
+      background: var(--accent-muted);
+    }
+
+    .model-combobox-toggle:focus-visible,
+    .model-combobox-option:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .model-combobox-toggle svg {
+      transition: transform 160ms ease;
+    }
+
+    .model-combobox.is-open .model-combobox-toggle svg {
+      transform: rotate(180deg);
+    }
+
+    .model-combobox-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      z-index: 80;
+      max-height: 280px;
+      overflow-y: auto;
+      padding: 5px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-default);
+      border-radius: 13px;
+      box-shadow: 0 16px 36px rgba(42, 31, 22, 0.16), 0 2px 8px rgba(42, 31, 22, 0.08);
+      overscroll-behavior: contain;
+    }
+
+    .model-combobox-option {
+      width: 100%;
+      min-height: 52px;
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      color: var(--text-primary);
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-radius: 9px;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    .model-combobox-option:hover,
+    .model-combobox-option.is-active {
+      background: var(--accent-muted);
+    }
+
+    .model-combobox-option-check,
+    .model-combobox-option-custom-icon {
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: transparent;
+    }
+
+    .model-combobox-option.is-selected .model-combobox-option-check {
+      color: var(--accent);
+    }
+
+    .model-combobox-option-custom-icon {
+      color: var(--accent);
+    }
+
+    .model-combobox-option-copy {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .model-combobox-option-label,
+    .model-combobox-option-meta {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .model-combobox-option-label {
+      font-size: 0.8125rem;
+      font-weight: 600;
+    }
+
+    .model-combobox-option-meta {
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+    }
+
+    .model-combobox-option-custom {
+      margin-top: 4px;
+      border-top: 1px solid var(--border-subtle);
+      border-radius: 0 0 9px 9px;
+    }
+
+    .model-combobox-empty {
+      padding: 14px 12px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    .settings-model-meta {
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 7px;
+    }
+
+    .settings-model-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-secondary);
+      font-size: 0.6875rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .settings-model-status::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      flex: 0 0 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    .settings-model-status.is-known::before { background: var(--success); }
+    .settings-model-status.is-custom::before { background: var(--accent); }
+
+    .settings-model-help {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--text-muted);
+      font-size: 0.6875rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .settings-model-help code {
+      font-size: inherit;
+    }
+
+    .settings-model-version {
+      margin: 15px 0 0;
+      padding-top: 13px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    /* Wand dialog: a restrained, non-springing surface for every WebView. */
+    .wand-dialog-backdrop {
+      padding-top: max(20px, var(--wand-safe-top));
+      padding-bottom: max(20px, var(--wand-safe-bottom));
+      padding-left: max(20px, var(--wand-safe-left));
+      padding-right: max(20px, var(--wand-safe-right));
+      background: rgba(24, 20, 17, 0.56);
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      animation: wand-backdrop-in 160ms ease-out both;
+    }
+
+    .wand-dialog-backdrop.closing {
+      animation: wandDialogBackdropOut 130ms ease-in both;
+    }
+
+    .wand-dialog {
+      max-width: 400px;
+      background: var(--bg-elevated);
+      background-image: none;
+      border: 1px solid var(--border-subtle);
+      border-radius: 18px;
+      box-shadow: 0 24px 64px rgba(42, 31, 22, 0.22), 0 4px 16px rgba(42, 31, 22, 0.08);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      animation: wand-surface-in 180ms ease-out both;
+    }
+
+    .wand-dialog-backdrop.closing .wand-dialog {
+      animation: wand-surface-out 130ms ease-in both;
+    }
+
+    .wand-dialog-header {
+      gap: 12px;
+      padding: 20px 20px 12px;
+    }
+
+    .wand-dialog-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      box-shadow: none;
+    }
+
+    .wand-dialog-icon.info,
+    .wand-dialog-icon.question {
+      color: var(--accent-active);
+      background: var(--accent-muted);
+    }
+
+    .wand-dialog-icon.warning {
+      color: var(--warning);
+      background: var(--warning-muted);
+    }
+
+    .wand-dialog-icon.danger {
+      color: var(--danger);
+      background: var(--danger-muted);
+    }
+
+    .wand-dialog-icon.success {
+      color: var(--success);
+      background: var(--success-muted);
+    }
+
+    .wand-dialog-title {
+      font-size: 1rem;
+      letter-spacing: -0.015em;
+    }
+
+    .wand-dialog-message {
+      font-size: 0.875rem;
+      line-height: 1.6;
+    }
+
+    .wand-dialog-body {
+      padding: 4px 20px 14px;
+    }
+
+    .wand-dialog-input {
+      min-height: 48px;
+      font-size: 1rem;
+      background: var(--bg-surface);
+    }
+
+    .wand-dialog-footer {
+      gap: 10px;
+      padding: 14px 20px 18px;
+      margin-top: 4px;
+      background: var(--bg-secondary);
+    }
+
+    .wand-dialog-footer .btn {
+      min-width: 88px;
+      min-height: 44px;
+    }
+
+    .wand-dialog .btn-danger,
+    .wand-dialog .btn-danger:hover,
+    .wand-dialog .btn-danger:active {
+      color: var(--text-inverse);
+      background: var(--danger);
+      background-image: none;
+      border-color: var(--danger);
+      box-shadow: none;
+      transform: none;
+    }
+
+    .wand-dialog .btn-danger:hover { background: var(--danger-hover); }
+
+    @media (max-width: 760px) {
+      .modal-backdrop {
+        padding: var(--wand-safe-top) var(--wand-safe-right) var(--wand-safe-bottom) var(--wand-safe-left);
+        align-items: stretch;
+      }
+
+      .settings-modal {
+        width: 100%;
+        max-width: none;
+        height: 100%;
+        min-height: 0;
+        max-height: none;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      .settings-modal .settings-modal-header {
+        position: relative;
+        z-index: 5;
+        min-height: 64px;
+        padding: 10px 12px 10px 16px;
+      }
+
+      .settings-modal .settings-modal-subtitle {
+        display: none;
+      }
+
+      .settings-modal .settings-modal-body {
+        display: block;
+        padding: 0 14px max(18px, var(--wand-safe-bottom));
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+
+      .settings-layout {
+        display: block;
+      }
+
+      .settings-modal .settings-sidebar {
+        position: sticky;
+        top: 0;
+        z-index: 4;
+        display: block;
+        margin: 0 -14px 16px;
+        padding: 8px 14px;
+        overflow: hidden;
+        border-right: 0;
+        border-bottom: 1px solid var(--border-subtle);
+        background: var(--bg-elevated);
+      }
+
+      .settings-sidebar-header {
+        display: none;
+      }
+
+      .settings-modal .settings-tabs {
+        display: flex;
+        flex-direction: row;
+        gap: 6px;
+        padding: 0;
+        overflow-x: auto;
+        scroll-snap-type: x proximity;
+        scrollbar-width: none;
+      }
+
+      .settings-modal .settings-tabs::-webkit-scrollbar {
+        display: none;
+      }
+
+      .settings-modal .settings-tab {
+        flex: 0 0 auto;
+        min-width: 0;
+        min-height: 44px;
+        padding: 9px 13px;
+        scroll-snap-align: start;
+      }
+
+      .settings-modal .settings-tab::before,
+      .settings-modal .settings-tab.active::before {
+        display: none;
+      }
+
+      .settings-modal .settings-tab-meta {
+        display: none;
+      }
+
+      .settings-modal .settings-content {
+        height: auto;
+        overflow: visible;
+        padding: 0;
+      }
+
+      .settings-panel {
+        min-height: 0;
+      }
+
+      .settings-modal .settings-panel-title {
+        font-size: 1.125rem;
+      }
+
+      .field-row,
+      .settings-model-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .field-row {
+        gap: 0;
+      }
+
+      .settings-model-card {
+        padding: 14px;
+        border-radius: 16px;
+      }
+
+      .settings-model-card-header {
+        align-items: flex-start;
+      }
+
+      .settings-model-card-desc {
+        max-width: 44ch;
+      }
+
+      .settings-model-refresh {
+        min-width: 44px;
+        width: 44px;
+        min-height: 44px;
+        padding: 0;
+      }
+
+      .settings-model-refresh span {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+
+      .settings-model-grid {
+        gap: 16px;
+      }
+
+      .settings-modal .field-input,
+      .settings-modal .model-combobox-input,
+      .settings-modal select.field-input {
+        min-height: 48px;
+        font-size: 16px;
+      }
+
+      .settings-modal .btn-sm,
+      .settings-modal .btn-icon {
+        min-height: 44px;
+      }
+
+      .model-combobox-menu {
+        position: static;
+        max-height: 240px;
+        margin-top: 6px;
+        box-shadow: none;
+      }
+
+      .model-combobox-option {
+        min-height: 52px;
+      }
+
+      .settings-actions-sticky {
+        bottom: calc(-1 * max(18px, var(--wand-safe-bottom)));
+        margin: 6px -14px 0;
+        padding: 16px 14px max(18px, var(--wand-safe-bottom));
+        background: var(--bg-elevated);
+        border-top: 1px solid var(--border-subtle);
+      }
+    }
+
+    @media (max-width: 760px), (pointer: coarse) {
+      .settings-modal .btn,
+      .settings-modal .btn-sm,
+      .settings-modal .btn-icon,
+      .settings-modal .settings-tab,
+      .settings-modal .model-combobox-toggle {
+        min-height: 44px;
+        touch-action: manipulation;
+      }
+
+      .settings-modal .btn-icon,
+      .settings-modal .model-combobox-toggle {
+        min-width: 44px;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .wand-dialog-backdrop {
+        align-items: flex-end;
+        padding: max(16px, var(--wand-safe-top)) var(--wand-safe-right) 0 var(--wand-safe-left);
+      }
+
+      .wand-dialog {
+        max-width: none;
+        border-radius: 20px 20px 0 0;
+        border-bottom: 0;
+      }
+
+      .wand-dialog-header {
+        padding: 18px 18px 10px;
+      }
+
+      .wand-dialog-body {
+        padding-left: 18px;
+        padding-right: 18px;
+      }
+
+      .wand-dialog-footer {
+        padding: 12px 18px max(18px, var(--wand-safe-bottom));
+      }
+
+      .wand-dialog-footer .btn {
+        flex: 1 1 0;
+      }
+    }
+
+    @media (max-width: 390px) {
+      .settings-model-card-heading {
+        gap: 8px;
+      }
+
+      .settings-model-card-icon {
+        width: 32px;
+        height: 32px;
+        flex-basis: 32px;
+      }
+
+      .settings-model-help {
+        display: none;
+      }
+
+      .wand-dialog-footer {
+        flex-direction: column-reverse;
+      }
+
+      .wand-dialog-footer .btn {
+        width: 100%;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .settings-model-refresh.is-loading svg {
+        animation: none;
       }
     }
 

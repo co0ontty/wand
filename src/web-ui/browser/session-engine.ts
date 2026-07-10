@@ -716,7 +716,13 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (state.modelsRefreshing) return Promise.resolve(null);
         state.modelsRefreshing = true;
         var btn = document.getElementById("cfg-default-model-refresh") as HTMLButtonElement | null;
-        if (btn) { btn.disabled = true; btn.textContent = "刷新中..."; }
+        var btnLabel = btn && btn.querySelector("span");
+        if (btn) {
+          btn.disabled = true;
+          btn.classList.add("is-loading");
+          btn.setAttribute("aria-busy", "true");
+          if (btnLabel) btnLabel.textContent = "检测中";
+        }
         return fetch("/api/models/refresh", { method: "POST", credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
@@ -737,7 +743,12 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           })
           .finally(function() {
             state.modelsRefreshing = false;
-            if (btn) { btn.disabled = false; btn.textContent = "刷新"; }
+            if (btn) {
+              btn.disabled = false;
+              btn.classList.remove("is-loading");
+              btn.removeAttribute("aria-busy");
+              if (btnLabel) btnLabel.textContent = "刷新列表";
+            }
           });
       }
 
@@ -879,25 +890,252 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         listEl.innerHTML = html;
       }
 
+      export function getSettingsModelsForProvider(provider) {
+        return provider === "codex" ? (state.availableCodexModels || []) : (state.availableModels || []);
+      }
+
+      export function updateSettingsModelStatus(provider) {
+        var inputId = provider === "codex" ? "cfg-default-codex-model" : "cfg-default-model";
+        var input = document.getElementById(inputId) as HTMLInputElement | null;
+        var status = document.querySelector('[data-model-status="' + provider + '"]');
+        if (!input || !status) return;
+        var value = (input.value || "").trim();
+        var models = getSettingsModelsForProvider(provider);
+        var known = null;
+        for (var i = 0; i < models.length; i++) {
+          if (models[i].id === value) { known = models[i]; break; }
+        }
+        status.classList.remove("is-custom", "is-known");
+        if (!value) {
+          status.textContent = "跟随 CLI 默认";
+          return;
+        }
+        if (known) {
+          status.textContent = "已检测到";
+          status.classList.add("is-known");
+          return;
+        }
+        status.textContent = "自定义名称";
+        status.classList.add("is-custom");
+      }
+
+      export function renderSettingsModelCombobox(root) {
+        if (!root) return;
+        var provider = root.getAttribute("data-provider") === "codex" ? "codex" : "claude";
+        var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
+        var menu = root.querySelector(".model-combobox-menu");
+        if (!input || !menu) return;
+        var rawValue = input.value || "";
+        var value = rawValue.trim();
+        var query = value.toLowerCase();
+        var models = getSettingsModelsForProvider(provider);
+        var defaultModel = null;
+        var exactMatch = false;
+        var rows: any[] = [];
+        for (var i = 0; i < models.length; i++) {
+          var model = models[i];
+          if (model.id === "default") {
+            defaultModel = model;
+            continue;
+          }
+          if (model.id === value) exactMatch = true;
+          var label = model.label || model.id;
+          if (query && model.id.toLowerCase().indexOf(query) === -1 && label.toLowerCase().indexOf(query) === -1) continue;
+          rows.push({ value: model.id, label: label, meta: label === model.id ? "已检测模型" : model.id, custom: false });
+        }
+
+        var defaultLabel = provider === "codex" ? "跟随 Codex 默认" : "跟随 Claude Code 默认";
+        var defaultMeta = defaultModel && defaultModel.label ? defaultModel.label : "不传 --model 参数";
+        var html = "";
+        if (!query || defaultLabel.toLowerCase().indexOf(query) !== -1 || defaultMeta.toLowerCase().indexOf(query) !== -1) {
+          html += '<button type="button" class="model-combobox-option' + (!value ? ' is-selected' : '') + '" role="option" aria-selected="' + (!value ? 'true' : 'false') + '" data-model-value="">' +
+            '<span class="model-combobox-option-check" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg></span>' +
+            '<span class="model-combobox-option-copy"><span class="model-combobox-option-label">' + escapeHtml(defaultLabel) + '</span><span class="model-combobox-option-meta">' + escapeHtml(defaultMeta) + '</span></span>' +
+          '</button>';
+        }
+        for (var r = 0; r < rows.length; r++) {
+          var row = rows[r];
+          var isSelected = row.value === value;
+          html += '<button type="button" class="model-combobox-option' + (isSelected ? ' is-selected' : '') + '" role="option" aria-selected="' + (isSelected ? 'true' : 'false') + '" data-model-value="' + escapeHtml(row.value) + '">' +
+            '<span class="model-combobox-option-check" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg></span>' +
+            '<span class="model-combobox-option-copy"><span class="model-combobox-option-label">' + escapeHtml(row.label) + '</span><span class="model-combobox-option-meta">' + escapeHtml(row.meta) + '</span></span>' +
+          '</button>';
+        }
+        if (value && !exactMatch) {
+          html += '<button type="button" class="model-combobox-option model-combobox-option-custom is-selected" role="option" aria-selected="true" data-model-value="' + escapeHtml(value) + '">' +
+            '<span class="model-combobox-option-custom-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></span>' +
+            '<span class="model-combobox-option-copy"><span class="model-combobox-option-label">使用自定义名称</span><span class="model-combobox-option-meta">' + escapeHtml(value) + '</span></span>' +
+          '</button>';
+        }
+        if (!html) {
+          html = '<div class="model-combobox-empty">没有匹配的模型，可以继续输入自定义名称。</div>';
+        }
+        menu.innerHTML = html;
+        var options = menu.querySelectorAll(".model-combobox-option");
+        var activeIndex = -1;
+        for (var o = 0; o < options.length; o++) {
+          if (options[o].getAttribute("aria-selected") === "true") { activeIndex = o; break; }
+        }
+        (root as any)._wandModelActiveIndex = activeIndex >= 0 ? activeIndex : (options.length ? 0 : -1);
+        updateSettingsModelActiveOption(root);
+        updateSettingsModelStatus(provider);
+      }
+
+      export function updateSettingsModelActiveOption(root) {
+        if (!root) return;
+        var menu = root.querySelector(".model-combobox-menu");
+        var input = root.querySelector(".model-combobox-input");
+        if (!menu || !input) return;
+        var options = menu.querySelectorAll(".model-combobox-option");
+        var activeIndex = typeof (root as any)._wandModelActiveIndex === "number" ? (root as any)._wandModelActiveIndex : -1;
+        for (var i = 0; i < options.length; i++) {
+          options[i].classList.toggle("is-active", i === activeIndex);
+          if (i === activeIndex) {
+            if (!options[i].id) options[i].id = (menu.id || "model-listbox") + "-option-" + i;
+            input.setAttribute("aria-activedescendant", options[i].id);
+          }
+        }
+        if (activeIndex < 0) input.removeAttribute("aria-activedescendant");
+      }
+
+      export function openSettingsModelCombobox(root) {
+        if (!root) return;
+        var input = root.querySelector(".model-combobox-input");
+        var menu = root.querySelector(".model-combobox-menu");
+        if (!input || !menu) return;
+        document.querySelectorAll(".model-combobox.is-open").forEach(function(other) {
+          if (other !== root) closeSettingsModelCombobox(other);
+        });
+        renderSettingsModelCombobox(root);
+        root.classList.add("is-open");
+        menu.classList.remove("hidden");
+        input.setAttribute("aria-expanded", "true");
+      }
+
+      export function closeSettingsModelCombobox(root) {
+        if (!root) return;
+        var input = root.querySelector(".model-combobox-input");
+        var menu = root.querySelector(".model-combobox-menu");
+        root.classList.remove("is-open");
+        if (menu) menu.classList.add("hidden");
+        if (input) {
+          input.setAttribute("aria-expanded", "false");
+          input.removeAttribute("aria-activedescendant");
+        }
+      }
+
+      export function selectSettingsModelOption(root, value) {
+        if (!root) return;
+        var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
+        if (!input) return;
+        var shouldRestoreInputFocus = document.activeElement === input;
+        input.value = value || "";
+        input.dataset.modelInitialized = "true";
+        input.dataset.modelDirty = "true";
+        updateSettingsModelStatus(root.getAttribute("data-provider") === "codex" ? "codex" : "claude");
+        closeSettingsModelCombobox(root);
+        if (shouldRestoreInputFocus) input.focus();
+      }
+
+      export function bindSettingsModelComboboxes() {
+        if (!(window as any).__wandSettingsModelOutsideBound) {
+          (window as any).__wandSettingsModelOutsideBound = true;
+          document.addEventListener("click", function(event) {
+            var target = event.target as Node | null;
+            document.querySelectorAll(".model-combobox.is-open").forEach(function(root) {
+              if (!target || !root.contains(target)) closeSettingsModelCombobox(root);
+            });
+          });
+        }
+        var roots = document.querySelectorAll(".model-combobox");
+        roots.forEach(function(root) {
+          if ((root as HTMLElement).dataset.bound === "true") return;
+          (root as HTMLElement).dataset.bound = "true";
+          var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
+          var toggle = root.querySelector(".model-combobox-toggle") as HTMLButtonElement | null;
+          var menu = root.querySelector(".model-combobox-menu");
+          if (!input || !toggle || !menu) return;
+          input.addEventListener("focus", function() { openSettingsModelCombobox(root); });
+          input.addEventListener("input", function() {
+            input.dataset.modelInitialized = "true";
+            input.dataset.modelDirty = "true";
+            openSettingsModelCombobox(root);
+          });
+          input.addEventListener("keydown", function(event) {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeSettingsModelCombobox(root);
+              return;
+            }
+            if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
+            if (!root.classList.contains("is-open")) {
+              if (event.key === "Enter") return;
+              openSettingsModelCombobox(root);
+            }
+            var options = menu.querySelectorAll(".model-combobox-option");
+            if (!options.length) return;
+            event.preventDefault();
+            var index = typeof (root as any)._wandModelActiveIndex === "number" ? (root as any)._wandModelActiveIndex : -1;
+            if (event.key === "ArrowDown") index = index < options.length - 1 ? index + 1 : 0;
+            if (event.key === "ArrowUp") index = index > 0 ? index - 1 : options.length - 1;
+            (root as any)._wandModelActiveIndex = index;
+            updateSettingsModelActiveOption(root);
+            if (event.key === "Enter") {
+              var active = options[index] as HTMLElement | undefined;
+              if (active) selectSettingsModelOption(root, active.getAttribute("data-model-value") || "");
+            } else {
+              var activeOption = options[index] as HTMLElement | undefined;
+              if (activeOption && typeof activeOption.scrollIntoView === "function") activeOption.scrollIntoView({ block: "nearest" });
+            }
+          });
+          toggle.addEventListener("mousedown", function(event) { event.preventDefault(); });
+          toggle.addEventListener("click", function() {
+            if (root.classList.contains("is-open")) {
+              closeSettingsModelCombobox(root);
+            } else {
+              openSettingsModelCombobox(root);
+            }
+          });
+          menu.addEventListener("mousedown", function(event) { event.preventDefault(); });
+          menu.addEventListener("click", function(event) {
+            var option = (event.target as HTMLElement).closest(".model-combobox-option");
+            if (!option) return;
+            selectSettingsModelOption(root, option.getAttribute("data-model-value") || "");
+          });
+          root.addEventListener("focusout", function() {
+            setTimeout(function() {
+              if (!root.contains(document.activeElement)) closeSettingsModelCombobox(root);
+            }, 0);
+          });
+          renderSettingsModelCombobox(root);
+        });
+      }
+
       export function updateSettingsDefaultModelSelect(data?) {
         var defaults = getConfigDefaultModels();
-        var claudeSelect = document.getElementById("cfg-default-model") as HTMLSelectElement | null;
-        if (claudeSelect) {
-          var previousClaude = claudeSelect.value;
-          var currentClaude = previousClaude || (state.configDefaultModels && state.configDefaultModels.claude) || defaults.claude || "";
-          claudeSelect.innerHTML = renderChatModelOptions(currentClaude, { provider: "claude" });
-          claudeSelect.value = currentClaude;
+        var claudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
+        if (claudeInput) {
+          if (claudeInput.dataset.modelInitialized !== "true") {
+            claudeInput.value = (state.configDefaultModels && state.configDefaultModels.claude) || defaults.claude || "";
+            claudeInput.dataset.modelInitialized = "true";
+          }
+          var claudeRoot = claudeInput.closest(".model-combobox");
+          if (claudeRoot) renderSettingsModelCombobox(claudeRoot);
         }
-        var codexSelect = document.getElementById("cfg-default-codex-model") as HTMLSelectElement | null;
-        if (codexSelect) {
-          var previousCodex = codexSelect.value;
-          var currentCodex = previousCodex || (state.configDefaultModels && state.configDefaultModels.codex) || defaults.codex || "";
-          codexSelect.innerHTML = renderChatModelOptions(currentCodex, { provider: "codex" });
-          codexSelect.value = currentCodex;
+        var codexInput = document.getElementById("cfg-default-codex-model") as HTMLInputElement | null;
+        if (codexInput) {
+          if (codexInput.dataset.modelInitialized !== "true") {
+            codexInput.value = (state.configDefaultModels && state.configDefaultModels.codex) || defaults.codex || "";
+            codexInput.dataset.modelInitialized = "true";
+          }
+          var codexRoot = codexInput.closest(".model-combobox");
+          if (codexRoot) renderSettingsModelCombobox(codexRoot);
         }
         var versionEl = document.getElementById("cfg-default-model-version");
         if (versionEl && data) {
-          versionEl.textContent = data.claudeVersion ? "已检测到 claude " + data.claudeVersion : "新建 Claude 会话时默认使用该模型。";
+          versionEl.textContent = data.claudeVersion
+            ? "已检测到 Claude CLI " + data.claudeVersion + "；列表已同时同步 Codex 可用模型。"
+            : "未读取到 Claude CLI 版本；仍可直接输入自定义模型名称。";
         }
       }
 
@@ -2212,6 +2450,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           hideSettingsMessages();
           setupFocusTrap(modal);
           bindSettingsTabKeyboardNavigation();
+          modal.querySelectorAll(".model-combobox-input").forEach(function(node) {
+            (node as HTMLInputElement).dataset.modelDirty = "false";
+            (node as HTMLInputElement).dataset.modelInitialized = "false";
+          });
           // Activate first tab
           switchSettingsTab("about");
           // Load settings data
@@ -2266,6 +2508,9 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function closeSettingsModal() {
         var modal = document.getElementById("settings-modal");
         if (modal) {
+          modal.querySelectorAll(".model-combobox.is-open").forEach(function(root) {
+            closeSettingsModelCombobox(root);
+          });
           // Remove focus trap before kicking off the exit animation
           if (state.focusTrapHandler) {
             document.removeEventListener("keydown", state.focusTrapHandler);
@@ -2333,6 +2578,9 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       // ── Settings tab/panel logic ──
 
       export function switchSettingsTab(tabName) {
+        document.querySelectorAll(".model-combobox.is-open").forEach(function(root) {
+          closeSettingsModelCombobox(root);
+        });
         var tabs = document.querySelectorAll(".settings-tab");
         var panels = document.querySelectorAll(".settings-panel");
         for (var i = 0; i < tabs.length; i++) {
@@ -2359,17 +2607,21 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function handleSettingsTabKeydown(event) {
         if (!event) return;
-        if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "Home" && event.key !== "End") {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") {
           return;
         }
         var tabs = Array.prototype.slice.call(document.querySelectorAll(".settings-tab"));
         if (!tabs.length) return;
+        var tabList = event.currentTarget && event.currentTarget.closest ? event.currentTarget.closest(".settings-tabs") : null;
+        var horizontal = tabList && tabList.getAttribute("aria-orientation") === "horizontal";
+        if (horizontal && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
+        if (!horizontal && (event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
         var currentIndex = tabs.indexOf(event.currentTarget);
         if (currentIndex === -1) return;
         event.preventDefault();
         var nextIndex = currentIndex;
-        if (event.key === "ArrowUp") nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1;
-        if (event.key === "ArrowDown") nextIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0;
+        if (event.key === "ArrowUp" || event.key === "ArrowLeft") nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1;
+        if (event.key === "ArrowDown" || event.key === "ArrowRight") nextIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0;
         if (event.key === "Home") nextIndex = 0;
         if (event.key === "End") nextIndex = tabs.length - 1;
         var nextTab = tabs[nextIndex];
@@ -2380,6 +2632,12 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function bindSettingsTabKeyboardNavigation() {
+        var tabList = document.querySelector(".settings-tabs");
+        if (tabList) {
+          var horizontal = false;
+          try { horizontal = !!(window.matchMedia && window.matchMedia("(max-width: 760px)").matches); } catch (_e) {}
+          tabList.setAttribute("aria-orientation", horizontal ? "horizontal" : "vertical");
+        }
         var tabs = document.querySelectorAll(".settings-tab");
         for (var i = 0; i < tabs.length; i++) {
           tabs[i].removeEventListener("keydown", handleSettingsTabKeydown);
@@ -2563,13 +2821,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
             // ── 原生包下载 helper（APK / DMG 共用）──
             function safeNotify(msg, type) {
-              if (typeof window.wandAlert === "function") {
-                window.wandAlert(msg, { type: type === "error" ? "danger" : "info" });
-              } else if (typeof showToast === "function") {
-                showToast(msg, type === "error" ? "error" : "info");
-              } else if (type === "error") {
-                alert(msg);
-              }
+              wandAlert(msg, { type: type === "error" ? "danger" : "info" });
             }
             // 同源本地下载：先 HEAD 探测状态码, 避免 window.open("_self") 把整页导航成裸 JSON;
             // 命中则用隐藏 <a download> 触发下载, 并给出明确反馈。
@@ -2914,6 +3166,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               codex: defaultModels.codex || ""
             };
             state.configDefaultModel = state.configDefaultModels.claude;
+            var defaultClaudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
+            var defaultCodexInput = document.getElementById("cfg-default-codex-model") as HTMLInputElement | null;
+            if (defaultClaudeInput && defaultClaudeInput.dataset.modelDirty !== "true") defaultClaudeInput.dataset.modelInitialized = "false";
+            if (defaultCodexInput && defaultCodexInput.dataset.modelDirty !== "true") defaultCodexInput.dataset.modelInitialized = "false";
             updateSettingsDefaultModelSelect();
             fetchAvailableModels().then(function() {
               updateSettingsDefaultModelSelect();
@@ -2961,6 +3217,9 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var msgEl = document.getElementById("config-message");
         if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
 
+        var defaultModelValue = ((document.getElementById("cfg-default-model") as HTMLInputElement | null || {} as any).value || "").trim();
+        var defaultCodexModelValue = ((document.getElementById("cfg-default-codex-model") as HTMLInputElement | null || {} as any).value || "").trim();
+
         var body = {
           host: (document.getElementById("cfg-host") as HTMLInputElement | null || {} as any).value,
           port: Number((document.getElementById("cfg-port") as HTMLInputElement | null || {} as any).value),
@@ -2969,11 +3228,11 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           defaultCwd: (document.getElementById("cfg-cwd") as HTMLInputElement | null || {} as any).value,
           shell: (document.getElementById("cfg-shell") as HTMLInputElement | null || {} as any).value,
           language: (document.getElementById("cfg-language") as HTMLSelectElement | null || {} as any).value || "",
-          defaultModel: (document.getElementById("cfg-default-model") as HTMLSelectElement | null || {} as any).value || "",
-          defaultCodexModel: (document.getElementById("cfg-default-codex-model") as HTMLSelectElement | null || {} as any).value || "",
+          defaultModel: defaultModelValue,
+          defaultCodexModel: defaultCodexModelValue,
           defaultModels: {
-            claude: (document.getElementById("cfg-default-model") as HTMLSelectElement | null || {} as any).value || "",
-            codex: (document.getElementById("cfg-default-codex-model") as HTMLSelectElement | null || {} as any).value || ""
+            claude: defaultModelValue,
+            codex: defaultCodexModelValue
           },
           structuredRunner: (document.getElementById("cfg-structured-runner") as HTMLSelectElement | null || {} as any).value || "cli",
           inheritEnv: (document.getElementById("cfg-inherit-env") as HTMLInputElement | null || {} as any).checked !== false,
@@ -3011,6 +3270,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             }
             state.configDefaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel };
             state.configDefaultModel = nextDefaultModel;
+            var savedClaudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
+            var savedCodexInput = document.getElementById("cfg-default-codex-model") as HTMLInputElement | null;
+            if (savedClaudeInput) savedClaudeInput.dataset.modelDirty = "false";
+            if (savedCodexInput) savedCodexInput.dataset.modelDirty = "false";
             if (nextDefaultModel !== previousDefaults.claude) {
               setChatModelForProvider("claude", "");
             }
