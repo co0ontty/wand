@@ -302,8 +302,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       // 两个使用点：
       //   · 结构化会话空状态：作为下拉菜单出现在"对话已开始"提示下方，让用户在开聊前调整
       //   · 结构化会话用户消息：作为紧凑徽章挂在头像/名称的左侧，点击任一徽章可改"当前状态"
-      // PTY 模式整体不展示（与按键透传无关）。两种 kind 共用一组 select，靠 data-mode-control
-      // 属性绑定全局委托 change 事件，让所有 trio 实例的状态自动保持同步。
+      // PTY 模式整体不展示（与按键透传无关）。模式/模型沿用原生 select，思考深度改为
+      // 按模型能力动态生成的离散滑杆；全局 change 委托负责最终提交。
       export function renderChatModeTrioHtml(session, opts) {
         opts = opts || {};
         // 三种 kind：dropdown（空状态横向）/ compact（用户消息徽章）/ popover（加号气泡纵向）
@@ -324,27 +324,31 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             '</select>' +
           '</span>';
         }
+        function thinkingSlider() {
+          return '<span class="composer-text-pill chat-mode-trio-pill thinking-slider-shell" data-mode-control-pill="thinking" title="思考深度">' +
+            (kind === "compact" ? "" : '<span class="chat-mode-trio-tag">思考</span>') +
+            '<span class="composer-text-label thinking-slider-value">' + escapeHtml(getThinkingLabel(thinkingText, session)) + '</span>' +
+            renderThinkingRange(thinkingText, session) +
+          '</span>';
+        }
         return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="会话设置">' +
           pill("mode", "模式", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) +
           '<span class="composer-text-sep" aria-hidden="true">·</span>' +
           pill("model", "模型", modelLabel, renderChatModelOptionsRaw(modelText, session)) +
           '<span class="composer-text-sep" aria-hidden="true">·</span>' +
-          pill("thinking", "思考", thinkingText, renderChatThinkingOptionsRaw(thinkingText)) +
+          thinkingSlider() +
         '</div>';
       }
 
-      export function getThinkingCompactLabel(id) {
-        if (id === "standard") return "低";
-        if (id === "deep") return "中";
-        if (id === "max") return "高";
+      export function getThinkingCompactLabel(id, session?) {
+        var effort = getThinkingLabel(id, session);
+        if (effort === "low") return "低";
+        if (effort === "medium") return "中";
+        if (effort === "high") return "高";
+        if (effort === "xhigh") return "超高";
+        if (effort === "max") return "极高";
+        if (effort === "ultra") return "极限";
         return "关";
-      }
-
-      export function getThinkingMenuLabel(id) {
-        if (id === "standard") return "低";
-        if (id === "deep") return "中";
-        if (id === "max") return "高";
-        return "关闭";
       }
 
       export function getModelDisplayLabel(model, session) {
@@ -380,16 +384,43 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         return label;
       }
 
-      export function renderChatThinkingOptionsCompact(selected) {
-        var v = selected || "off";
-        var html = "";
-        for (var i = 0; i < THINKING_LEVELS.length; i++) {
-          var lvl = THINKING_LEVELS[i];
-          html += '<option value="' + escapeHtml(lvl.id) + '"' + (lvl.id === v ? ' selected' : '') + ' title="' + escapeHtml(lvl.hint) + '">' +
-            escapeHtml(getThinkingMenuLabel(lvl.id)) +
-          '</option>';
-        }
-        return html;
+      function thinkingRangeMarkup(levels) {
+        if (levels.length <= 1) return '<span class="thinking-slider-node" style="left:50%"></span>';
+        return levels.map(function(_level, index) {
+          return '<span class="thinking-slider-node" style="left:' + ((index / (levels.length - 1)) * 100) + '%"></span>';
+        }).join("");
+      }
+
+      export function renderThinkingRange(selected, session?) {
+        var levels = getThinkingLevels(session);
+        var index = Math.max(0, levels.findIndex(function(level) { return level.id === selected; }));
+        var max = Math.max(0, levels.length - 1);
+        var progress = max ? (index / max) * 100 : 0;
+        var values = escapeHtml(JSON.stringify(levels.map(function(level) { return level.id; })));
+        var labels = escapeHtml(JSON.stringify(levels.map(function(level) { return level.label; })));
+        return '<span class="thinking-slider-rail" style="--thinking-progress:' + progress + '%">' +
+          '<span class="thinking-slider-nodes" aria-hidden="true">' + thinkingRangeMarkup(levels) + '</span>' +
+          '<input class="thinking-discrete-range" type="range" min="0" max="' + max + '" step="1" value="' + index + '" ' +
+            'data-mode-control="thinking" data-thinking-values="' + values + '" data-thinking-labels="' + labels + '" ' +
+            'aria-label="思考深度" aria-valuetext="' + escapeHtml(levels[index]?.label || "auto") + '">' +
+        '</span>';
+      }
+
+      function syncThinkingRange(container, selected, session?) {
+        var levels = getThinkingLevels(session);
+        var index = Math.max(0, levels.findIndex(function(level) { return level.id === selected; }));
+        var max = Math.max(0, levels.length - 1);
+        var input = container.querySelector('.thinking-discrete-range') as HTMLInputElement | null;
+        var rail = container.querySelector('.thinking-slider-rail') as HTMLElement | null;
+        var nodes = container.querySelector('.thinking-slider-nodes');
+        if (!input || !rail) return;
+        input.max = String(max);
+        input.value = String(index);
+        input.dataset.thinkingValues = JSON.stringify(levels.map(function(level) { return level.id; }));
+        input.dataset.thinkingLabels = JSON.stringify(levels.map(function(level) { return level.label; }));
+        input.setAttribute("aria-valuetext", levels[index]?.label || "auto");
+        rail.style.setProperty("--thinking-progress", (max ? (index / max) * 100 : 0) + "%");
+        if (nodes) nodes.innerHTML = thinkingRangeMarkup(levels);
       }
 
       export function renderComposerConfigControlsHtml(session) {
@@ -399,7 +430,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var thinking = getEffectiveThinking(session);
         var modeLabel = getModeLabel(mode);
         var modelLabel = getShortModelLabel(model, session);
-        var thinkingLabel = getThinkingCompactLabel(thinking);
+        var thinkingLabel = getThinkingCompactLabel(thinking, session);
         var title = "模式 " + modeLabel + " · 模型 " + modelLabel + " · 思考 " + thinkingLabel;
         return '<div class="composer-config-controls" role="group" aria-label="会话设置" title="' + escapeHtml(title) + '">' +
           '<span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="模式：' + escapeHtml(modeLabel) + '">' +
@@ -419,10 +450,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             '</span>' +
             '<span class="composer-config-part composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '">' +
               iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
-              '<span class="composer-config-label">' + escapeHtml(thinkingLabel) + '</span>' +
-              '<select class="composer-text-hidden-select" data-mode-control="thinking" tabindex="-1" aria-label="思考深度">' +
-                renderChatThinkingOptionsCompact(thinking) +
-              '</select>' +
+              '<span class="composer-config-label thinking-slider-value">' + escapeHtml(getThinkingLabel(thinking, session)) + '</span>' +
+              renderThinkingRange(thinking, session) +
             '</span>' +
           '</span>' +
         '</div>';
@@ -444,6 +473,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (!pillNode) return;
             var label = pillNode.querySelector(".composer-text-label");
             if (label) label.textContent = labelText || value;
+            if (ctrl === "thinking") {
+              syncThinkingRange(pillNode, value, session);
+              return;
+            }
             var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]') as HTMLSelectElement | null;
             if (!sel) return;
             if (optionsHtml) sel.innerHTML = optionsHtml;
@@ -451,7 +484,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           }
           setPair("mode", mode, renderChatModeOptionsRaw(preferredTool, mode));
           setPair("model", model, renderChatModelOptionsRaw(model, session), modelLabel);
-          setPair("thinking", thinking, renderChatThinkingOptionsRaw(thinking));
+          setPair("thinking", thinking, "", getThinkingLabel(thinking, session));
         });
         refreshComposerConfigControls(session, mode, getEffectiveModel(session) || "", thinking);
       }
@@ -460,7 +493,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var preferredTool = getPreferredTool();
         var modeLabel = getModeLabel(mode);
         var modelLabel = getShortModelLabel(model, session);
-        var thinkingLabel = getThinkingCompactLabel(thinking);
+        var thinkingLabel = getThinkingCompactLabel(thinking, session);
         var controls = document.querySelectorAll(".composer-config-controls");
         controls.forEach(function(control) {
           var title = "模式 " + modeLabel + " · 模型 " + modelLabel + " · 思考 " + thinkingLabel;
@@ -487,9 +520,9 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           var thinkingPart = control.querySelector('[data-mode-control-pill="thinking"]');
           if (thinkingPart) {
             var thinkingText = thinkingPart.querySelector(".composer-config-label");
-            if (thinkingText) thinkingText.textContent = thinkingLabel;
+            if (thinkingText) thinkingText.textContent = getThinkingLabel(thinking, session);
             thinkingPart.setAttribute("data-thinking", thinking);
-            updateSelect(thinkingPart, thinking, renderChatThinkingOptionsCompact(thinking));
+            syncThinkingRange(thinkingPart, thinking, session);
           }
           var pair = control.querySelector(".composer-config-model-thinking");
           if (pair) pair.setAttribute("data-thinking", thinking);
@@ -602,44 +635,58 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       // 标签直接用实际传给各 runner 的 effort 语义，避免把 Claude 的一次性深度提示词
       // 误解成会话级配置。
       export var THINKING_LEVELS = [
-        { id: "off",      label: "auto",   hint: "Claude CLI: auto/default · SDK 关闭 thinking · Codex minimal" },
+        { id: "off",      label: "auto",   hint: "Claude CLI: auto/default · SDK 关闭 thinking · Codex 使用模型默认值" },
         { id: "standard", label: "low",    hint: "Claude CLI: low · SDK budget 4096 · Codex low" },
         { id: "deep",     label: "medium", hint: "Claude CLI: medium · SDK budget 16000 · Codex medium" },
         { id: "max",      label: "max",    hint: "Claude CLI: max · SDK budget 31999 · Codex xhigh" }
       ];
 
-      export function getThinkingLabel(id) {
-        for (var i = 0; i < THINKING_LEVELS.length; i++) {
-          if (THINKING_LEVELS[i].id === id) return THINKING_LEVELS[i].label;
+      function codexThinkingId(effort) {
+        if (effort === "low") return "standard";
+        if (effort === "medium") return "deep";
+        if (effort === "xhigh") return "max";
+        return "codex:" + effort;
+      }
+
+      export function getThinkingLevels(session?) {
+        if (getProviderForSession(session) !== "codex") return THINKING_LEVELS;
+        var model = getEffectiveModel(session) || "default";
+        var models = state.availableCodexModels || [];
+        var info = models.find(function(item) { return item.id === model; })
+          || models.find(function(item) { return item.id === "default"; });
+        var efforts = info && Array.isArray(info.reasoningEfforts) ? info.reasoningEfforts : [];
+        if (!efforts.length) return THINKING_LEVELS;
+        var defaultEffort = info.defaultReasoningEffort || "";
+        return [{
+          id: "off",
+          label: "auto",
+          hint: defaultEffort ? "使用模型默认档位（" + defaultEffort + "）" : "使用模型默认档位"
+        }].concat(efforts.map(function(level) {
+          var effort = String(level.effort || "").toLowerCase();
+          return {
+            id: codexThinkingId(effort),
+            label: effort,
+            hint: level.description || effort
+          };
+        }).filter(function(level) { return level.label; }));
+      }
+
+      export function getThinkingLabel(id, session?) {
+        var levels = getThinkingLevels(session);
+        for (var i = 0; i < levels.length; i++) {
+          if (levels[i].id === id) return levels[i].label;
         }
-        return THINKING_LEVELS[0].label;
+        if (typeof id === "string" && id.indexOf("codex:") === 0) return id.slice(6);
+        for (var j = 0; j < THINKING_LEVELS.length; j++) {
+          if (THINKING_LEVELS[j].id === id) return THINKING_LEVELS[j].label;
+        }
+        return "auto";
       }
 
       export function getEffectiveThinking(session) {
         if (session && session.thinkingEffort) return session.thinkingEffort;
         if (state.chatThinking) return state.chatThinking;
         return "off";
-      }
-
-      export function renderChatThinkingOptions(selected) {
-        var v = selected || "off";
-        var html = "";
-        for (var i = 0; i < THINKING_LEVELS.length; i++) {
-          var lvl = THINKING_LEVELS[i];
-          html += '<option value="' + escapeHtml(lvl.id) + '"' + (lvl.id === v ? ' selected' : '') + ' title="' + escapeHtml(lvl.hint) + '">' + escapeHtml(lvl.label) + '</option>';
-        }
-        return html;
-      }
-
-      // thinking 选项 raw 版：option 文本直接是 id（off / standard / deep / max）。
-      export function renderChatThinkingOptionsRaw(selected) {
-        var v = selected || "off";
-        var html = "";
-        for (var i = 0; i < THINKING_LEVELS.length; i++) {
-          var lvl = THINKING_LEVELS[i];
-          html += '<option value="' + escapeHtml(lvl.id) + '"' + (lvl.id === v ? ' selected' : '') + '>' + escapeHtml(lvl.id) + '</option>';
-        }
-        return html;
       }
 
       export function syncComposerThinkingSelect(session) {
@@ -649,13 +696,14 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function onChatThinkingChange(value) {
         var normalized = (value || "off").trim();
-        if (normalized !== "off" && normalized !== "standard" && normalized !== "deep" && normalized !== "max") {
+        var session = getSelectedSession();
+        var supported = getThinkingLevels(session).some(function(level) { return level.id === normalized; });
+        if (!supported) {
           normalized = "off";
         }
         state.chatThinking = normalized;
         try { localStorage.setItem("wand-thinking-effort", normalized); } catch (e) {}
         refreshAllChatModeTrios();
-        var session = getSelectedSession();
         if (!session) return;
         fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
           method: "POST",
@@ -672,7 +720,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           if (data && data.id) {
             updateSessionSnapshot(data);
             if (typeof showToast === "function") {
-              showToast("已切换思考深度 → " + getThinkingLabel(normalized), "success");
+              showToast("已切换思考深度 → " + getThinkingLabel(normalized, session), "success");
             }
           }
         })

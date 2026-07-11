@@ -238,7 +238,7 @@
     chatThinking: (function() {
       try {
         var v = localStorage.getItem("wand-thinking-effort") || "off";
-        return v === "off" || v === "standard" || v === "deep" || v === "max" ? v : "off";
+        return v === "off" || v === "standard" || v === "deep" || v === "max" || /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(v) ? v : "off";
       } catch (e) {
         return "off";
       }
@@ -6750,12 +6750,39 @@
         if (dd) dd.classList.add("hidden");
       }
     });
+    document.addEventListener("input", function(e) {
+      var target = e.target;
+      if (!target || !target.matches('input[type="range"][data-mode-control="thinking"]')) return;
+      var labels = [];
+      try {
+        labels = JSON.parse(target.dataset.thinkingLabels || "[]");
+      } catch (_error) {
+      }
+      var index = Math.max(0, Math.min(labels.length - 1, Math.round(Number(target.value) || 0)));
+      var label = labels[index] || "auto";
+      var shell = target.closest('[data-mode-control-pill="thinking"]');
+      var valueLabel = shell && shell.querySelector(".thinking-slider-value");
+      if (valueLabel) valueLabel.textContent = label;
+      target.setAttribute("aria-valuetext", label);
+      var rail = target.closest(".thinking-slider-rail");
+      var max = Number(target.max) || 0;
+      if (rail) rail.style.setProperty("--thinking-progress", (max ? index / max * 100 : 0) + "%");
+    });
     document.addEventListener("change", function(e) {
       var target = e.target;
       if (!target || target.nodeType !== 1) return;
       if (typeof target.matches !== "function" || !target.matches("[data-mode-control]")) return;
       var ctrl = target.getAttribute("data-mode-control");
       var value = target.value;
+      var isThinkingRange = ctrl === "thinking" && target.matches('input[type="range"]');
+      if (isThinkingRange) {
+        try {
+          var values = JSON.parse(target.dataset.thinkingValues || "[]");
+          value = values[Math.round(Number(target.value) || 0)] || "off";
+        } catch (_error) {
+          value = "off";
+        }
+      }
       if (ctrl === "mode") {
         onChatModeChange(value);
       } else if (ctrl === "model") {
@@ -6763,7 +6790,7 @@
       } else if (ctrl === "thinking") {
         onChatThinkingChange(value);
       }
-      if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
+      if (!isThinkingRange && target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
     });
   }
   function attachEventListeners() {
@@ -14599,19 +14626,20 @@
       var tagHtml = kind === "compact" ? "" : '<span class="chat-mode-trio-tag">' + escapeHtml2(label) + "</span>";
       return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml2(label) + '">' + tagHtml + '<span class="composer-text-label">' + escapeHtml2(value) + '</span><select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" tabindex="-1" aria-label="' + escapeHtml2(label) + '">' + optionsHtml + "</select></span>";
     }
-    return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelLabel, renderChatModelOptionsRaw(modelText, session)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("thinking", "\u601D\u8003", thinkingText, renderChatThinkingOptionsRaw(thinkingText)) + "</div>";
+    function thinkingSlider() {
+      return '<span class="composer-text-pill chat-mode-trio-pill thinking-slider-shell" data-mode-control-pill="thinking" title="\u601D\u8003\u6DF1\u5EA6">' + (kind === "compact" ? "" : '<span class="chat-mode-trio-tag">\u601D\u8003</span>') + '<span class="composer-text-label thinking-slider-value">' + escapeHtml2(getThinkingLabel(thinkingText, session)) + "</span>" + renderThinkingRange(thinkingText, session) + "</span>";
+    }
+    return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelLabel, renderChatModelOptionsRaw(modelText, session)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + thinkingSlider() + "</div>";
   }
-  function getThinkingCompactLabel(id) {
-    if (id === "standard") return "\u4F4E";
-    if (id === "deep") return "\u4E2D";
-    if (id === "max") return "\u9AD8";
+  function getThinkingCompactLabel(id, session) {
+    var effort = getThinkingLabel(id, session);
+    if (effort === "low") return "\u4F4E";
+    if (effort === "medium") return "\u4E2D";
+    if (effort === "high") return "\u9AD8";
+    if (effort === "xhigh") return "\u8D85\u9AD8";
+    if (effort === "max") return "\u6781\u9AD8";
+    if (effort === "ultra") return "\u6781\u9650";
     return "\u5173";
-  }
-  function getThinkingMenuLabel(id) {
-    if (id === "standard") return "\u4F4E";
-    if (id === "deep") return "\u4E2D";
-    if (id === "max") return "\u9AD8";
-    return "\u5173\u95ED";
   }
   function getModelDisplayLabel(model, session) {
     var selected = model || "";
@@ -14644,14 +14672,48 @@
     if (label.length > 12) return label.slice(0, 10) + "\u2026";
     return label;
   }
-  function renderChatThinkingOptionsCompact(selected) {
-    var v = selected || "off";
-    var html = "";
-    for (var i = 0; i < THINKING_LEVELS.length; i++) {
-      var lvl = THINKING_LEVELS[i];
-      html += '<option value="' + escapeHtml2(lvl.id) + '"' + (lvl.id === v ? " selected" : "") + ' title="' + escapeHtml2(lvl.hint) + '">' + escapeHtml2(getThinkingMenuLabel(lvl.id)) + "</option>";
-    }
-    return html;
+  function thinkingRangeMarkup(levels) {
+    if (levels.length <= 1) return '<span class="thinking-slider-node" style="left:50%"></span>';
+    return levels.map(function(_level, index) {
+      return '<span class="thinking-slider-node" style="left:' + index / (levels.length - 1) * 100 + '%"></span>';
+    }).join("");
+  }
+  function renderThinkingRange(selected, session) {
+    var levels = getThinkingLevels(session);
+    var index = Math.max(0, levels.findIndex(function(level) {
+      return level.id === selected;
+    }));
+    var max = Math.max(0, levels.length - 1);
+    var progress = max ? index / max * 100 : 0;
+    var values = escapeHtml2(JSON.stringify(levels.map(function(level) {
+      return level.id;
+    })));
+    var labels = escapeHtml2(JSON.stringify(levels.map(function(level) {
+      return level.label;
+    })));
+    return '<span class="thinking-slider-rail" style="--thinking-progress:' + progress + '%"><span class="thinking-slider-nodes" aria-hidden="true">' + thinkingRangeMarkup(levels) + '</span><input class="thinking-discrete-range" type="range" min="0" max="' + max + '" step="1" value="' + index + '" data-mode-control="thinking" data-thinking-values="' + values + '" data-thinking-labels="' + labels + '" aria-label="\u601D\u8003\u6DF1\u5EA6" aria-valuetext="' + escapeHtml2(levels[index]?.label || "auto") + '"></span>';
+  }
+  function syncThinkingRange(container, selected, session) {
+    var levels = getThinkingLevels(session);
+    var index = Math.max(0, levels.findIndex(function(level) {
+      return level.id === selected;
+    }));
+    var max = Math.max(0, levels.length - 1);
+    var input = container.querySelector(".thinking-discrete-range");
+    var rail = container.querySelector(".thinking-slider-rail");
+    var nodes = container.querySelector(".thinking-slider-nodes");
+    if (!input || !rail) return;
+    input.max = String(max);
+    input.value = String(index);
+    input.dataset.thinkingValues = JSON.stringify(levels.map(function(level) {
+      return level.id;
+    }));
+    input.dataset.thinkingLabels = JSON.stringify(levels.map(function(level) {
+      return level.label;
+    }));
+    input.setAttribute("aria-valuetext", levels[index]?.label || "auto");
+    rail.style.setProperty("--thinking-progress", (max ? index / max * 100 : 0) + "%");
+    if (nodes) nodes.innerHTML = thinkingRangeMarkup(levels);
   }
   function renderComposerConfigControlsHtml(session) {
     var preferredTool = getPreferredTool();
@@ -14660,9 +14722,9 @@
     var thinking = getEffectiveThinking(session);
     var modeLabel = getModeLabel(mode);
     var modelLabel = getShortModelLabel(model, session);
-    var thinkingLabel = getThinkingCompactLabel(thinking);
+    var thinkingLabel = getThinkingCompactLabel(thinking, session);
     var title = "\u6A21\u5F0F " + modeLabel + " \xB7 \u6A21\u578B " + modelLabel + " \xB7 \u601D\u8003 " + thinkingLabel;
-    return '<div class="composer-config-controls" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E" title="' + escapeHtml2(title) + '"><span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="\u6A21\u5F0F\uFF1A' + escapeHtml2(modeLabel) + '">' + iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modeLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="mode" tabindex="-1" aria-label="\u6A21\u5F0F">' + renderChatModeOptionsRaw(preferredTool, mode) + '</select></span><span class="composer-config-model-thinking" data-thinking="' + escapeHtml2(thinking) + '" title="\u6A21\u578B\u4E0E\u601D\u8003\u6DF1\u5EA6"><span class="composer-config-part composer-config-model" data-mode-control-pill="model">' + iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modelLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="model" tabindex="-1" aria-label="\u6A21\u578B">' + renderChatModelOptions(model, session) + '</select></span><span class="composer-config-part composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml2(thinking) + '">' + iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(thinkingLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="thinking" tabindex="-1" aria-label="\u601D\u8003\u6DF1\u5EA6">' + renderChatThinkingOptionsCompact(thinking) + "</select></span></span></div>";
+    return '<div class="composer-config-controls" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E" title="' + escapeHtml2(title) + '"><span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="\u6A21\u5F0F\uFF1A' + escapeHtml2(modeLabel) + '">' + iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modeLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="mode" tabindex="-1" aria-label="\u6A21\u5F0F">' + renderChatModeOptionsRaw(preferredTool, mode) + '</select></span><span class="composer-config-model-thinking" data-thinking="' + escapeHtml2(thinking) + '" title="\u6A21\u578B\u4E0E\u601D\u8003\u6DF1\u5EA6"><span class="composer-config-part composer-config-model" data-mode-control-pill="model">' + iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modelLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="model" tabindex="-1" aria-label="\u6A21\u578B">' + renderChatModelOptions(model, session) + '</select></span><span class="composer-config-part composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml2(thinking) + '">' + iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label thinking-slider-value">' + escapeHtml2(getThinkingLabel(thinking, session)) + "</span>" + renderThinkingRange(thinking, session) + "</span></span></div>";
   }
   function refreshAllChatModeTrios2() {
     var session = getSelectedSession5();
@@ -14678,6 +14740,10 @@
         if (!pillNode) return;
         var label = pillNode.querySelector(".composer-text-label");
         if (label) label.textContent = labelText || value;
+        if (ctrl === "thinking") {
+          syncThinkingRange(pillNode, value, session);
+          return;
+        }
         var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]');
         if (!sel) return;
         if (optionsHtml) sel.innerHTML = optionsHtml;
@@ -14685,7 +14751,7 @@
       }
       setPair("mode", mode, renderChatModeOptionsRaw(preferredTool, mode));
       setPair("model", model, renderChatModelOptionsRaw(model, session), modelLabel);
-      setPair("thinking", thinking, renderChatThinkingOptionsRaw(thinking));
+      setPair("thinking", thinking, "", getThinkingLabel(thinking, session));
     });
     refreshComposerConfigControls(session, mode, getEffectiveModel(session) || "", thinking);
   }
@@ -14693,7 +14759,7 @@
     var preferredTool = getPreferredTool();
     var modeLabel = getModeLabel(mode);
     var modelLabel = getShortModelLabel(model, session);
-    var thinkingLabel = getThinkingCompactLabel(thinking);
+    var thinkingLabel = getThinkingCompactLabel(thinking, session);
     var controls = document.querySelectorAll(".composer-config-controls");
     controls.forEach(function(control) {
       var title = "\u6A21\u5F0F " + modeLabel + " \xB7 \u6A21\u578B " + modelLabel + " \xB7 \u601D\u8003 " + thinkingLabel;
@@ -14720,9 +14786,9 @@
       var thinkingPart = control.querySelector('[data-mode-control-pill="thinking"]');
       if (thinkingPart) {
         var thinkingText = thinkingPart.querySelector(".composer-config-label");
-        if (thinkingText) thinkingText.textContent = thinkingLabel;
+        if (thinkingText) thinkingText.textContent = getThinkingLabel(thinking, session);
         thinkingPart.setAttribute("data-thinking", thinking);
-        updateSelect(thinkingPart, thinking, renderChatThinkingOptionsCompact(thinking));
+        syncThinkingRange(thinkingPart, thinking, session);
       }
       var pair = control.querySelector(".composer-config-model-thinking");
       if (pair) pair.setAttribute("data-thinking", thinking);
@@ -14816,46 +14882,70 @@
     refreshAllChatModeTrios2();
   }
   var THINKING_LEVELS = [
-    { id: "off", label: "auto", hint: "Claude CLI: auto/default \xB7 SDK \u5173\u95ED thinking \xB7 Codex minimal" },
+    { id: "off", label: "auto", hint: "Claude CLI: auto/default \xB7 SDK \u5173\u95ED thinking \xB7 Codex \u4F7F\u7528\u6A21\u578B\u9ED8\u8BA4\u503C" },
     { id: "standard", label: "low", hint: "Claude CLI: low \xB7 SDK budget 4096 \xB7 Codex low" },
     { id: "deep", label: "medium", hint: "Claude CLI: medium \xB7 SDK budget 16000 \xB7 Codex medium" },
     { id: "max", label: "max", hint: "Claude CLI: max \xB7 SDK budget 31999 \xB7 Codex xhigh" }
   ];
-  function getThinkingLabel(id) {
-    for (var i = 0; i < THINKING_LEVELS.length; i++) {
-      if (THINKING_LEVELS[i].id === id) return THINKING_LEVELS[i].label;
+  function codexThinkingId(effort) {
+    if (effort === "low") return "standard";
+    if (effort === "medium") return "deep";
+    if (effort === "xhigh") return "max";
+    return "codex:" + effort;
+  }
+  function getThinkingLevels(session) {
+    if (getProviderForSession(session) !== "codex") return THINKING_LEVELS;
+    var model = getEffectiveModel(session) || "default";
+    var models = state.availableCodexModels || [];
+    var info = models.find(function(item) {
+      return item.id === model;
+    }) || models.find(function(item) {
+      return item.id === "default";
+    });
+    var efforts = info && Array.isArray(info.reasoningEfforts) ? info.reasoningEfforts : [];
+    if (!efforts.length) return THINKING_LEVELS;
+    var defaultEffort = info.defaultReasoningEffort || "";
+    return [{
+      id: "off",
+      label: "auto",
+      hint: defaultEffort ? "\u4F7F\u7528\u6A21\u578B\u9ED8\u8BA4\u6863\u4F4D\uFF08" + defaultEffort + "\uFF09" : "\u4F7F\u7528\u6A21\u578B\u9ED8\u8BA4\u6863\u4F4D"
+    }].concat(efforts.map(function(level) {
+      var effort = String(level.effort || "").toLowerCase();
+      return {
+        id: codexThinkingId(effort),
+        label: effort,
+        hint: level.description || effort
+      };
+    }).filter(function(level) {
+      return level.label;
+    }));
+  }
+  function getThinkingLabel(id, session) {
+    var levels = getThinkingLevels(session);
+    for (var i = 0; i < levels.length; i++) {
+      if (levels[i].id === id) return levels[i].label;
     }
-    return THINKING_LEVELS[0].label;
+    if (typeof id === "string" && id.indexOf("codex:") === 0) return id.slice(6);
+    for (var j = 0; j < THINKING_LEVELS.length; j++) {
+      if (THINKING_LEVELS[j].id === id) return THINKING_LEVELS[j].label;
+    }
+    return "auto";
   }
   function getEffectiveThinking(session) {
     if (session && session.thinkingEffort) return session.thinkingEffort;
     if (state.chatThinking) return state.chatThinking;
     return "off";
   }
-  function renderChatThinkingOptions(selected) {
-    var v = selected || "off";
-    var html = "";
-    for (var i = 0; i < THINKING_LEVELS.length; i++) {
-      var lvl = THINKING_LEVELS[i];
-      html += '<option value="' + escapeHtml2(lvl.id) + '"' + (lvl.id === v ? " selected" : "") + ' title="' + escapeHtml2(lvl.hint) + '">' + escapeHtml2(lvl.label) + "</option>";
-    }
-    return html;
-  }
-  function renderChatThinkingOptionsRaw(selected) {
-    var v = selected || "off";
-    var html = "";
-    for (var i = 0; i < THINKING_LEVELS.length; i++) {
-      var lvl = THINKING_LEVELS[i];
-      html += '<option value="' + escapeHtml2(lvl.id) + '"' + (lvl.id === v ? " selected" : "") + ">" + escapeHtml2(lvl.id) + "</option>";
-    }
-    return html;
-  }
   function syncComposerThinkingSelect(session) {
     refreshAllChatModeTrios2();
   }
   function onChatThinkingChange(value) {
     var normalized = (value || "off").trim();
-    if (normalized !== "off" && normalized !== "standard" && normalized !== "deep" && normalized !== "max") {
+    var session = getSelectedSession5();
+    var supported = getThinkingLevels(session).some(function(level) {
+      return level.id === normalized;
+    });
+    if (!supported) {
       normalized = "off";
     }
     state.chatThinking = normalized;
@@ -14864,7 +14954,6 @@
     } catch (e) {
     }
     refreshAllChatModeTrios2();
-    var session = getSelectedSession5();
     if (!session) return;
     fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
       method: "POST",
@@ -14881,7 +14970,7 @@
       if (data && data.id) {
         updateSessionSnapshot(data);
         if (typeof showToast2 === "function") {
-          showToast2("\u5DF2\u5207\u6362\u601D\u8003\u6DF1\u5EA6 \u2192 " + getThinkingLabel(normalized), "success");
+          showToast2("\u5DF2\u5207\u6362\u601D\u8003\u6DF1\u5EA6 \u2192 " + getThinkingLabel(normalized, session), "success");
         }
       }
     }).catch(function() {

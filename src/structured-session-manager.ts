@@ -66,6 +66,7 @@ export function normalizeThinkingEffort(
   if (typeof value !== "string") return null;
   const v = value.trim().toLowerCase();
   if (v === "off" || v === "standard" || v === "deep" || v === "max") return v;
+  if (/^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(v)) return v as SessionSnapshot["thinkingEffort"];
   return null;
 }
 
@@ -98,6 +99,9 @@ export function thinkingEffortToClaudeSlashEffort(effort: SessionSnapshot["think
 
 /** Codex CLI 用：把 thinkingEffort 映射到 model_reasoning_effort 配置。off → 不覆盖 Codex 默认。 */
 export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  if (typeof effort === "string" && effort.startsWith("codex:")) {
+    return effort.slice("codex:".length) || null;
+  }
   switch (effort) {
     case "standard": return "low";
     case "deep": return "medium";

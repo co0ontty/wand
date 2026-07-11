@@ -42,3 +42,13 @@ test("commit CLI preference rejects unsupported commands", () => {
     /无效 commit CLI/,
   );
 });
+
+test("Codex dynamic reasoning effort preference round-trips through storage", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+
+  writePreferenceToStorage(config, storage, "defaultThinkingEffort", "codex:ultra");
+
+  assert.equal(config.defaultThinkingEffort, "codex:ultra");
+  assert.equal(applyStoragePreferences(defaultConfig(), storage).defaultThinkingEffort, "codex:ultra");
+});

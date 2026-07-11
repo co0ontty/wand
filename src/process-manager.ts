@@ -18,7 +18,7 @@ import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./resume-policy.js";
-import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort } from "./structured-session-manager.js";
+import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort } from "./structured-session-manager.js";
 import { generateSessionTopic } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSessionCwd } from "./session-cwd.js";
@@ -2413,6 +2413,10 @@ export class ProcessManager extends EventEmitter {
       if (trimmedModel && trimmedModel !== "default" && !/--model\s/.test(command) && !/-m\s/.test(command)) {
         const escapedModel = trimmedModel.replace(/'/g, "'\\''");
         result += ` --model '${escapedModel}'`;
+      }
+      const reasoningEffort = thinkingEffortToCodexReasoningEffort(thinkingEffort ?? null);
+      if (reasoningEffort && !/model_reasoning_effort\s*=/.test(command)) {
+        result += ` -c 'model_reasoning_effort="${reasoningEffort}"'`;
       }
       if (mode === "full-access") {
         if (!/--dangerously-bypass-approvals-and-sandbox(?:\s|$)/.test(result)) {

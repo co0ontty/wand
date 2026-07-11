@@ -47,31 +47,67 @@ interface CodexModelEntry {
   display_name?: string;
   visibility?: string;
   priority?: number;
+  default_reasoning_level?: string;
+  supported_reasoning_levels?: Array<{
+    effort?: string;
+    description?: string;
+  }>;
 }
 
 async function probeCodexModels(): Promise<ClaudeModelInfo[]> {
   try {
     const { stdout } = await execAsync("codex debug models", { timeout: 8000 });
-    const data = JSON.parse(stdout) as { models: CodexModelEntry[] };
-    const visible = data.models
+    return parseCodexModels(stdout);
+  } catch {
+    return CODEX_FALLBACK_MODELS.map((m) => ({ ...m }));
+  }
+}
+
+/** Parse the machine-readable model registry emitted by the installed Codex CLI. */
+export function parseCodexModels(stdout: string): ClaudeModelInfo[] {
+  try {
+    const data = JSON.parse(stdout) as { models?: CodexModelEntry[] };
+    const visible = (Array.isArray(data.models) ? data.models : [])
+      .filter((m) => typeof m.slug === "string" && m.slug.length > 0)
       .filter((m) => m.visibility === "list")
       .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
     if (!visible.length) return CODEX_FALLBACK_MODELS.map((m) => ({ ...m }));
     const defaultModel = visible[0];
     const defaultLabel = formatCodexModelLabel(defaultModel);
     const result: ClaudeModelInfo[] = [
-      { id: "default", label: `${defaultLabel}（Codex 默认）`, alias: true },
+      {
+        id: "default",
+        label: `${defaultLabel}（Codex 默认）`,
+        alias: true,
+        ...codexReasoningMetadata(defaultModel),
+      },
     ];
     for (const m of visible) {
       result.push({
         id: m.slug,
         label: formatCodexModelLabel(m),
+        ...codexReasoningMetadata(m),
       });
     }
     return result;
   } catch {
     return CODEX_FALLBACK_MODELS.map((m) => ({ ...m }));
   }
+}
+
+function codexReasoningMetadata(model: CodexModelEntry): Pick<ClaudeModelInfo, "reasoningEfforts" | "defaultReasoningEffort"> {
+  const reasoningEfforts = (Array.isArray(model.supported_reasoning_levels) ? model.supported_reasoning_levels : [])
+    .filter((level) => typeof level?.effort === "string" && level.effort.length > 0)
+    .map((level) => ({
+      effort: level.effort as string,
+      ...(typeof level.description === "string" && level.description ? { description: level.description } : {}),
+    }));
+  return {
+    ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
+    ...(typeof model.default_reasoning_level === "string" && model.default_reasoning_level
+      ? { defaultReasoningEffort: model.default_reasoning_level }
+      : {}),
+  };
 }
 
 function formatCodexModelLabel(model: CodexModelEntry): string {

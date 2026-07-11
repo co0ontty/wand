@@ -3,10 +3,18 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, StructuredChatPersonaConfig, WandConfig } from "./types.js";
+import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
 type StructuredRunnerOption = WandConfig["structuredRunner"];
+
+function isThinkingEffort(value: unknown): value is ThinkingEffort {
+  return value === "off"
+    || value === "standard"
+    || value === "deep"
+    || value === "max"
+    || (typeof value === "string" && /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(value));
+}
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -288,7 +296,7 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
   }
   if (storage.hasPreference(preferenceStorageKey("defaultThinkingEffort"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultThinkingEffort"), defaults.defaultThinkingEffort ?? "off");
-    if (v === "off" || v === "standard" || v === "deep" || v === "max") config.defaultThinkingEffort = v;
+    if (isThinkingEffort(v)) config.defaultThinkingEffort = v;
   }
   if (storage.hasPreference(preferenceStorageKey("structuredRunner"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("structuredRunner"), defaults.structuredRunner ?? "cli");
@@ -355,7 +363,7 @@ export function writePreferenceToStorage(
       break;
     }
     case "defaultThinkingEffort": {
-      const v = value === "standard" || value === "deep" || value === "max" ? value : "off";
+      const v = isThinkingEffort(value) ? value : "off";
       storage.setPreference(dbKey, v);
       config.defaultThinkingEffort = v;
       break;
@@ -533,11 +541,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
     commitCli: input.commitCli === "codex" ? "codex" : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
-    defaultThinkingEffort: input.defaultThinkingEffort === "standard"
-      || input.defaultThinkingEffort === "deep"
-      || input.defaultThinkingEffort === "max"
-      ? input.defaultThinkingEffort
-      : "off",
+    defaultThinkingEffort: isThinkingEffort(input.defaultThinkingEffort) ? input.defaultThinkingEffort : "off",
     structuredRunner: (input.structuredRunner === "sdk" || input.structuredRunner === "cli") ? input.structuredRunner : defaults.structuredRunner,
     inheritEnv: typeof input.inheritEnv === "boolean" ? input.inheritEnv : (defaults.inheritEnv ?? true),
   };

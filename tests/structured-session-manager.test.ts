@@ -6,6 +6,7 @@ import {
   estimateCodexOutputTokens,
   getLastSubmittedStructuredInput,
   isDuplicateStructuredQueueInput,
+  normalizeThinkingEffort,
   normalizeStructuredToolResultContent,
   thinkingEffortToCodexReasoningEffort,
 } from "../src/structured-session-manager.js";
@@ -32,6 +33,10 @@ test("codex off thinking effort does not force minimal", () => {
   assert.equal(thinkingEffortToCodexReasoningEffort("off"), null);
   assert.equal(thinkingEffortToCodexReasoningEffort(null), null);
   assert.equal(thinkingEffortToCodexReasoningEffort("standard"), "low");
+  assert.equal(thinkingEffortToCodexReasoningEffort("codex:high"), "high");
+  assert.equal(thinkingEffortToCodexReasoningEffort("codex:ultra"), "ultra");
+  assert.equal(normalizeThinkingEffort("CODEX:Ultra"), "codex:ultra");
+  assert.equal(normalizeThinkingEffort("codex:not valid"), null);
 });
 
 test("codex live output usage estimate grows with streamed content", () => {

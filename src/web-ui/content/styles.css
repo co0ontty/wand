@@ -6286,8 +6286,14 @@
       max-width: 92px;
     }
     .composer-config-thinking {
-      min-width: 42px;
+      min-width: 132px;
       color: #a9652d;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      grid-template-rows: auto auto;
+      column-gap: 5px;
+      padding-top: 3px;
+      padding-bottom: 3px;
     }
     .composer-config-thinking[data-thinking="off"] {
       color: var(--text-muted);
@@ -6308,6 +6314,14 @@
       flex: 0 0 auto;
       width: 13px;
       height: 13px;
+    }
+    .composer-config-thinking .thinking-slider-rail {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
+    .composer-config-thinking .thinking-slider-value {
+      text-align: right;
+      font-family: var(--font-mono);
     }
     .composer-config-label {
       min-width: 0;
@@ -6364,6 +6378,107 @@
       -webkit-appearance: none;
     }
     .composer-text-hidden-select:focus { outline: none; }
+
+    /* 离散思考深度滑杆：档位数与 Codex 模型能力一致，每档一个可见节点。 */
+    .thinking-slider-shell {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      grid-template-rows: auto auto;
+      column-gap: 8px;
+      row-gap: 2px;
+      min-width: 150px;
+      max-width: 220px;
+      cursor: default;
+    }
+    .thinking-slider-shell .thinking-slider-value {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .thinking-slider-rail {
+      --thinking-progress: 0%;
+      position: relative;
+      display: block;
+      min-width: 88px;
+      height: 32px;
+    }
+    .thinking-slider-nodes {
+      position: absolute;
+      z-index: 1;
+      left: 8px;
+      right: 8px;
+      top: 50%;
+      height: 0;
+      pointer-events: none;
+    }
+    .thinking-slider-node {
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--surface, #fffaf5);
+      border: 1px solid var(--text-tertiary, #b5a89a);
+      transform: translate(-50%, -50%);
+    }
+    .thinking-discrete-range {
+      position: absolute;
+      z-index: 2;
+      inset: 0;
+      width: 100%;
+      height: 32px;
+      margin: 0;
+      padding: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent;
+      cursor: grab;
+      touch-action: manipulation;
+    }
+    .thinking-discrete-range:active { cursor: grabbing; }
+    .thinking-discrete-range::-webkit-slider-runnable-track {
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(to right, var(--accent) 0 var(--thinking-progress), var(--border-strong) var(--thinking-progress) 100%);
+    }
+    .thinking-discrete-range::-webkit-slider-thumb {
+      width: 16px;
+      height: 16px;
+      margin-top: -6px;
+      border: 2px solid var(--surface, #fffaf5);
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.32);
+      appearance: none;
+      -webkit-appearance: none;
+      transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .thinking-discrete-range::-moz-range-track {
+      height: 4px;
+      border-radius: 999px;
+      background: var(--border-strong);
+    }
+    .thinking-discrete-range::-moz-range-progress {
+      height: 4px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+    .thinking-discrete-range::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--surface, #fffaf5);
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 1px rgba(197, 101, 61, 0.32);
+    }
+    .thinking-discrete-range:active::-webkit-slider-thumb { transform: scale(1.08); }
+    .thinking-discrete-range:focus-visible {
+      outline: 2px solid rgba(197, 101, 61, 0.55);
+      outline-offset: 1px;
+      border-radius: 8px;
+    }
+    .thinking-discrete-range:focus-visible::-webkit-slider-thumb {
+      box-shadow: 0 0 0 3px rgba(197, 101, 61, 0.28);
+    }
     .composer-text-sep {
       color: var(--text-tertiary, #b5a89a);
       font-size: 0.7rem;
@@ -7774,6 +7889,10 @@
       border-radius: 8px;
       transition: background var(--transition-fast);
     }
+    .chat-mode-trio-dropdown .thinking-slider-shell {
+      min-width: 168px;
+      padding: 3px 6px;
+    }
     .chat-mode-trio-dropdown .chat-mode-trio-pill:hover {
       background: rgba(197, 101, 61, 0.06);
     }
@@ -7825,6 +7944,18 @@
       max-width: 88px;
       letter-spacing: 0.01em;
     }
+    .chat-mode-trio-compact .thinking-slider-shell {
+      grid-template-columns: 34px 92px;
+      min-width: 132px;
+      max-width: 132px;
+      padding: 3px 6px;
+    }
+    .chat-mode-trio-compact .thinking-slider-rail {
+      grid-column: 2;
+      grid-row: 1;
+      height: 32px;
+    }
+    .chat-mode-trio-compact .thinking-discrete-range { height: 32px; }
     .chat-mode-trio-compact .composer-text-sep {
       display: none; /* compact 形态不画分隔点，靠 pill 之间的 gap 区分 */
     }
@@ -7959,7 +8090,7 @@
       padding: 0 10px;
     }
     .plus-popover-trio-wrap .composer-config-thinking {
-      flex: 0 0 86px;
+      flex: 1 1 auto;
     }
 
     /* 三件套 popover 形态：纵向列表，每行 = tag + 当前值（点击触发原生 select）*/
@@ -8005,8 +8136,22 @@
       max-width: 100%;
       font-weight: 500;
     }
+    .chat-mode-trio-popover .thinking-slider-shell {
+      display: grid;
+      grid-template-columns: 36px 1fr;
+      min-width: 100%;
+      max-width: none;
+    }
+    .chat-mode-trio-popover .thinking-slider-rail {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
 
     @media (max-width: 720px) {
+      .thinking-slider-rail,
+      .thinking-discrete-range {
+        min-height: 44px;
+      }
       .composer-plus-popover {
         min-width: 220px;
         left: 10px;
@@ -8032,7 +8177,7 @@
         max-width: 76px;
       }
       .composer-config-thinking {
-        min-width: 38px;
+        min-width: 116px;
       }
       .composer-config-label {
         font-size: 0.68rem;
@@ -8060,9 +8205,13 @@
         display: none;
       }
       .composer-config-thinking {
-        min-width: 34px;
-        padding: 0 5px;
+        min-width: 104px;
+        padding: 3px 5px;
       }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .thinking-discrete-range::-webkit-slider-thumb { transition: none; }
     }
 
     /* 提示词优化按钮 —— v2 改为 has-text 时显示，挂在 .composer-input-wrap 内右下角，

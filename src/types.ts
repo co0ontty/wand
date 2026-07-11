@@ -122,7 +122,7 @@ export interface WandConfig {
   /** 快捷提交专用模型。留空则跟随所选 CLI 的默认模型。 */
   commitModel?: string;
   /** 新建会话时默认使用的思考深度。 */
-  defaultThinkingEffort?: "off" | "standard" | "deep" | "max";
+  defaultThinkingEffort?: ThinkingEffort;
   /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */
   structuredRunner?: "cli" | "sdk";
   /**
@@ -142,7 +142,22 @@ export interface ClaudeModelInfo {
   note?: string;
   /** 是否为别名（opus/sonnet 等）；完整 ID 为 false */
   alias?: boolean;
+  /** Codex 模型声明的可用推理档位；Claude 模型通常不提供。 */
+  reasoningEfforts?: ReasoningEffortInfo[];
+  /** Codex 模型的默认推理档位。 */
+  defaultReasoningEffort?: string;
 }
+
+export interface ReasoningEffortInfo {
+  effort: string;
+  description?: string;
+}
+
+/**
+ * 旧的四档值需要继续兼容已有会话。Codex 动态档位加 provider 前缀，
+ * 避免 `max`（旧值代表 xhigh）与 Codex 新增的原生 max 档位冲突。
+ */
+export type ThinkingEffort = "off" | "standard" | "deep" | "max" | `codex:${string}`;
 
 interface WorktreeInfo {
   branch: string;
@@ -266,7 +281,7 @@ export interface CommandRequest {
   /** 创建会话时由前端测得的真实行数。 */
   rows?: number;
   /** 思考深度。null/缺省 视为 off（不启用思考）。 */
-  thinkingEffort?: "off" | "standard" | "deep" | "max" | null;
+  thinkingEffort?: ThinkingEffort | null;
 }
 
 export interface InputRequest {
@@ -472,12 +487,13 @@ export interface SessionSnapshot {
   selectedModel?: string | null;
   /**
    * 用户选定的思考深度。
-   *   - off:      不覆盖默认思考深度（SDK: 不传 thinking；Claude CLI: auto/default；Codex: model_reasoning_effort minimal）
+   *   - off:      不覆盖默认思考深度（SDK: 不传 thinking；Claude CLI: auto/default；Codex: 使用模型默认值）
    *   - standard: 标准（SDK: budget 4096；Claude CLI: low；Codex: low）
    *   - deep:    深度（SDK: budget 16000；Claude CLI: medium；Codex: medium）
-   *   - max:     最深（SDK: budget 31999；Claude CLI: max；Codex: xhigh）
+   *   - max:     旧版最深档（SDK: budget 31999；Claude CLI: max；Codex: xhigh）
+   *   - codex:*: Codex CLI 动态声明的原生推理档位
    */
-  thinkingEffort?: "off" | "standard" | "deep" | "max" | null;
+  thinkingEffort?: ThinkingEffort | null;
   /** 当前 PTY 列宽，由最近一次 resize 决定。前端用它来判断本端 fit 是否需要校准。 */
   ptyCols?: number;
   /** 当前 PTY 行数，由最近一次 resize 决定。 */
