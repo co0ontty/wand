@@ -1,10 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-import { detectInstalledScope, type ServiceScope } from "./tui/commands.js";
+import { type ServiceScope } from "./tui/commands.js";
+import { resolveGlobalWandBin } from "./npm-update-utils.js";
 
 export interface DetachedUpdateOptions {
   installSpec: string;
@@ -32,60 +34,191 @@ function shellArray(values: string[]): string {
   return values.map((value) => shellQuote(value)).join(" ");
 }
 
-function boolShell(value: boolean): string {
-  return value ? "1" : "0";
-}
-
 function resolveBashPath(): string {
   return existsSync("/bin/bash") ? "/bin/bash" : "bash";
 }
 
-function detectServiceScope(): ServiceScope | null {
+function detectInstalledServiceScopes(): ServiceScope[] {
+  if (process.platform === "darwin") {
+    return [
+      existsSync("/Library/LaunchDaemons/com.wand.web.plist") ? "system" : null,
+      existsSync(path.join(os.homedir(), "Library/LaunchAgents/com.wand.web.plist")) ? "user" : null,
+    ].filter((scope): scope is ServiceScope => scope !== null);
+  }
+  if (process.platform === "linux") {
+    return [
+      existsSync("/etc/systemd/system/wand.service") ? "system" : null,
+      existsSync(path.join(os.homedir(), ".config/systemd/user/wand.service")) ? "user" : null,
+    ].filter((scope): scope is ServiceScope => scope !== null);
+  }
+  return [];
+}
+
+/** A manifest alone is not enough: only a process actually launched by its manager may rely on auto-restart. */
+export function resolveManagedServiceScope(
+  installedScope: ServiceScope | null,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  pid: number = process.pid,
+): ServiceScope | null {
+  if (platform === "darwin") {
+    return env.XPC_SERVICE_NAME === "com.wand.web" ? (installedScope ?? "system") : null;
+  }
+  if (platform === "linux") {
+    const hasSystemdPid = typeof env.SYSTEMD_EXEC_PID === "string" && env.SYSTEMD_EXEC_PID.length > 0;
+    const systemdPid = Number(env.SYSTEMD_EXEC_PID || "0");
+    const managed = hasSystemdPid
+      ? Number.isSafeInteger(systemdPid) && systemdPid === pid
+      : typeof env.INVOCATION_ID === "string" && env.INVOCATION_ID.length > 0;
+    return managed ? (installedScope ?? "system") : null;
+  }
+  return null;
+}
+
+export function resolveManagedServiceScopeCandidates(
+  installedScopes: ServiceScope[],
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  pid: number = process.pid,
+): ServiceScope | null {
+  const installedScope = installedScopes.length === 1 ? installedScopes[0] : null;
+  const managedScope = resolveManagedServiceScope(installedScope, platform, env, pid);
+  if (managedScope && installedScopes.length > 1) {
+    throw new Error("同时检测到 system 与 user 两份 wand 服务，无法安全判断当前托管 scope；请先卸载其中一份。");
+  }
+  return managedScope;
+}
+
+function detectManagedServiceScope(): ServiceScope | null {
+  return resolveManagedServiceScopeCandidates(detectInstalledServiceScopes());
+}
+
+export function isStableServiceEntrypoint(entrypoint: string | null, stableBin: string | null): boolean {
+  if (!entrypoint || !stableBin) return false;
   try {
-    return detectInstalledScope();
+    return path.resolve(entrypoint) === path.resolve(stableBin);
   } catch {
-    return null;
+    return false;
   }
 }
 
-function buildHelperScript(opts: DetachedUpdateOptions, logPath: string, serviceScope: ServiceScope | null): string {
-  const isSystemdManaged = !!process.env.INVOCATION_ID;
-  const isLaunchdManaged = !!process.env.LAUNCHD_SOCKET || !!process.env.XPC_SERVICE_NAME;
-  const shouldStartService = serviceScope !== null;
-  const shouldRestartStandalone = !shouldStartService;
-  const npmCache = opts.env.npm_config_cache || path.join(os.homedir(), ".npm");
-  const timeoutSec = Math.max(30, Math.ceil((opts.timeoutMs ?? 300_000) / 1000));
-  const cliArgArray = opts.cliArgs;
+function readManagedServiceEntrypoint(scope: ServiceScope): string | null {
+  if (process.platform === "darwin") {
+    const plist = scope === "system"
+      ? "/Library/LaunchDaemons/com.wand.web.plist"
+      : path.join(os.homedir(), "Library/LaunchAgents/com.wand.web.plist");
+    const result = spawnSync(
+      "plutil",
+      ["-extract", "ProgramArguments.1", "raw", "-o", "-", plist],
+      { encoding: "utf8", timeout: 5_000 },
+    );
+    return result.status === 0 ? (result.stdout || "").trim() || null : null;
+  }
+  if (process.platform === "linux") {
+    const unit = scope === "system"
+      ? "/etc/systemd/system/wand.service"
+      : path.join(os.homedir(), ".config/systemd/user/wand.service");
+    try {
+      const execStart = readFileSync(unit, "utf8").split("\n").find((line) => line.startsWith("ExecStart="));
+      if (!execStart) return null;
+      const tokens = execStart.slice("ExecStart=".length).trim().split(/\s+/);
+      return tokens[1] || null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function managedServiceUpdatePreflight(scope: ServiceScope): { ok: true } | { ok: false; message: string } {
+  const stableBin = resolveGlobalWandBin();
+  const entrypoint = readManagedServiceEntrypoint(scope);
+  if (isStableServiceEntrypoint(entrypoint, stableBin)) return { ok: true };
+  const command = scope === "system"
+    ? `sudo ${stableBin || "wand"} service:install -c <config-path>`
+    : `${stableBin || "wand"} service:install --user -c <config-path>`;
+  return {
+    ok: false,
+    message:
+      `检测到 ${scope} 服务仍指向不稳定入口 (${entrypoint || "无法读取"})，已取消 Web 更新以保持服务在线。` +
+      `请先在终端重注册到全局 shim：${command}`,
+  };
+}
+
+export function checkManagedServiceUpdatePreflight(): { ok: true } | { ok: false; message: string } {
+  try {
+    const scope = detectManagedServiceScope();
+    return scope ? managedServiceUpdatePreflight(scope) : { ok: true };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export function shouldUseSystemdRunForDetachedUpdate(serviceScope: ServiceScope | null): boolean {
+  return serviceScope !== null;
+}
+
+const DEFAULT_UPDATE_UTILS_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "npm-update-utils.js",
+);
+
+/** Exported so the safety-critical update flow can be exercised without starting a detached process. */
+export function buildDetachedUpdateHelperScript(
+  opts: DetachedUpdateOptions,
+  logPath: string,
+  serviceScope: ServiceScope | null,
+  updateUtilsPath = DEFAULT_UPDATE_UTILS_PATH,
+): string {
+  if (!Number.isSafeInteger(opts.parentPid) || opts.parentPid <= 1) {
+    throw new Error(`Invalid detached update parent pid: ${opts.parentPid}`);
+  }
+  const home = opts.env.HOME || os.homedir();
+  const npmCache = opts.env.npm_config_cache || path.join(home, ".npm");
+  const requestedTimeout = opts.timeoutMs ?? 300_000;
+  const timeoutMs = Number.isFinite(requestedTimeout)
+    ? Math.max(30_000, Math.trunc(requestedTimeout))
+    : 300_000;
 
   return `#!/usr/bin/env bash
-set -u
+set -euo pipefail
 LOG=${shellQuote(logPath)}
-exec >>"$LOG" 2>&1
-echo "[wand-update] started at $(date -Is)"
-echo "[wand-update] parent pid: ${opts.parentPid}"
-echo "[wand-update] install spec: ${opts.installSpec}"
-
-export PATH=${shellQuote(opts.env.PATH || process.env.PATH || "")}
-export HOME=${shellQuote(opts.env.HOME || os.homedir())}
-export npm_config_cache=${shellQuote(npmCache)}
-CONFIG_PATH=${shellQuote(opts.configPath)}
 INSTALL_SPEC=${shellQuote(opts.installSpec)}
 PARENT_PID=${opts.parentPid}
+exec >>"$LOG" 2>&1
+echo "[wand-update] started at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+echo "[wand-update] parent pid: $PARENT_PID"
+echo "[wand-update] install spec: $INSTALL_SPEC"
+
+export PATH=${shellQuote(opts.env.PATH || process.env.PATH || "")}
+export HOME=${shellQuote(home)}
+export npm_config_cache=${shellQuote(npmCache)}
+CONFIG_PATH=${shellQuote(opts.configPath)}
 SERVICE_SCOPE=${shellQuote(serviceScope ?? "")}
-SHOULD_START_SERVICE=${boolShell(shouldStartService)}
-SHOULD_RESTART_STANDALONE=${boolShell(shouldRestartStandalone)}
-TIMEOUT_SEC=${timeoutSec}
-CLI_ARGS=(${shellArray(cliArgArray)})
+TIMEOUT_MS=${timeoutMs}
+NODE_BIN=${shellQuote(process.execPath)}
+UPDATE_UTILS=${shellQuote(updateUtilsPath)}
+WORKING_DIRECTORY=${shellQuote(opts.cwd)}
+CLI_ARGS=(${shellArray(opts.cliArgs)})
+GLOBAL_CLI=""
+PARENT_EXITED=0
 
 run() {
   echo "+ $*"
   "$@"
 }
 
-run_best_effort() {
-  echo "+ $*"
-  "$@" || true
+on_exit() {
+  local status="$?"
+  if [ "$status" -ne 0 ]; then
+    if [ "$PARENT_EXITED" = "0" ]; then
+      echo "[wand-update] failed with exit code $status; parent service was left running"
+    else
+      echo "[wand-update] failed with exit code $status after parent service exited"
+    fi
+  fi
 }
+trap on_exit EXIT
 
 wait_for_parent_exit() {
   local pid="$1"
@@ -93,84 +226,68 @@ wait_for_parent_exit() {
   while kill -0 "$pid" 2>/dev/null; do
     i=$((i + 1))
     if [ "$i" -ge 120 ]; then
-      echo "[wand-update] parent still alive after 60s; continuing"
-      return 0
+      echo "[wand-update] parent still alive after SIGTERM timeout"
+      return 1
     fi
     sleep 0.5
   done
 }
 
-clean_leftovers() {
+resolve_global_cli() {
   local npm_root
-  npm_root="$(npm root -g 2>/dev/null || true)"
-  if [ -n "$npm_root" ] && [ -d "$npm_root/@co0ontty" ]; then
-    find "$npm_root/@co0ontty" -maxdepth 1 -name ".wand-*" -type d -print -exec rm -rf {} + 2>/dev/null || true
-  fi
-}
-
-npm_install_wand() {
-  if command -v timeout >/dev/null 2>&1; then
-    run timeout "$TIMEOUT_SEC" npm install -g "$INSTALL_SPEC"
-  else
-    run npm install -g "$INSTALL_SPEC"
-  fi
-}
-
-npm_install_wand_force() {
-  if command -v timeout >/dev/null 2>&1; then
-    run timeout "$TIMEOUT_SEC" npm install -g --force "$INSTALL_SPEC"
-  else
-    run npm install -g --force "$INSTALL_SPEC"
-  fi
-}
-
-restart_or_start_service() {
-  if [ "$SHOULD_START_SERVICE" = "1" ]; then
-    if [ "$SERVICE_SCOPE" = "user" ]; then
-      run_best_effort wand service:install --user -c "$CONFIG_PATH"
-      run_best_effort systemctl --user restart wand.service
-    else
-      run_best_effort wand service:install -c "$CONFIG_PATH"
-      run_best_effort systemctl restart wand.service
-    fi
-    return
-  fi
-
-  if [ "$SHOULD_RESTART_STANDALONE" = "1" ]; then
-    echo "[wand-update] starting standalone process"
-    cd ${shellQuote(opts.cwd)}
-    local global_cli
-    global_cli="$(npm root -g 2>/dev/null)/@co0ontty/wand/dist/cli.js"
-    if [ -f "$global_cli" ]; then
-      nohup ${shellQuote(process.execPath)} "$global_cli" "$\{CLI_ARGS[@]}" >>"$LOG" 2>&1 &
-    else
-      nohup wand "$\{CLI_ARGS[@]}" >>"$LOG" 2>&1 &
-    fi
+  npm_root="$(npm root -g)"
+  GLOBAL_CLI="$npm_root/@co0ontty/wand/dist/cli.js"
+  if [ ! -f "$GLOBAL_CLI" ]; then
+    echo "[wand-update] global CLI not found after install: $GLOBAL_CLI"
+    return 1
   fi
 }
 
 main() {
-  if [ "$SERVICE_SCOPE" = "user" ]; then
-    run_best_effort systemctl --user stop wand.service
-  elif [ "$SERVICE_SCOPE" = "system" ]; then
-    run_best_effort systemctl stop wand.service
+  echo "[wand-update] installing while parent service stays online"
+  if run "$NODE_BIN" --input-type=module - "$UPDATE_UTILS" "$INSTALL_SPEC" "$TIMEOUT_MS" <<'WAND_INSTALL_NODE'
+import { pathToFileURL } from "node:url";
+
+const [modulePath, installSpec, timeoutValue] = process.argv.slice(2);
+const timeoutMs = Number(timeoutValue);
+const updateUtils = await import(pathToFileURL(modulePath).href);
+if (typeof updateUtils.installPackageGloballyAsync !== "function") {
+  throw new Error("installPackageGloballyAsync is unavailable in " + modulePath);
+}
+await updateUtils.installPackageGloballyAsync(installSpec, timeoutMs, (line) => {
+  process.stdout.write(String(line) + "\\n");
+});
+WAND_INSTALL_NODE
+  then
+    echo "[wand-update] install completed"
+  else
+    local install_status="$?"
+    echo "[wand-update] install failed; keeping parent service online"
+    return "$install_status"
   fi
 
-  wait_for_parent_exit "$PARENT_PID"
-  clean_leftovers
+  resolve_global_cli
+  echo "[wand-update] initializing updated installation"
+  run "$NODE_BIN" "$GLOBAL_CLI" init -c "$CONFIG_PATH"
 
-  echo "[wand-update] installing"
-  if ! npm_install_wand; then
-    echo "[wand-update] first install failed; retrying with uninstall + force install"
-    clean_leftovers
-    run_best_effort npm uninstall -g @co0ontty/wand
-    clean_leftovers
-    npm_install_wand_force
+  if kill -0 "$PARENT_PID" 2>/dev/null; then
+    echo "[wand-update] sending SIGTERM to parent pid $PARENT_PID"
+    run kill -TERM "$PARENT_PID"
+    wait_for_parent_exit "$PARENT_PID"
+  else
+    echo "[wand-update] parent pid $PARENT_PID already exited"
   fi
+  PARENT_EXITED=1
 
-  run wand init -c "$CONFIG_PATH"
-  restart_or_start_service
-  echo "[wand-update] completed at $(date -Is)"
+  if [ -n "$SERVICE_SCOPE" ]; then
+    echo "[wand-update] $SERVICE_SCOPE service detected; waiting for Restart/KeepAlive relaunch"
+  else
+    echo "[wand-update] starting updated standalone process"
+    cd "$WORKING_DIRECTORY"
+    nohup "$NODE_BIN" "$GLOBAL_CLI" "$\{CLI_ARGS[@]}" >>"$LOG" 2>&1 </dev/null &
+    echo "[wand-update] standalone pid: $!"
+  fi
+  echo "[wand-update] completed at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
 
 main
@@ -210,29 +327,28 @@ function spawnDetached(
       });
       return res.status === 0 ? { method } : null;
     };
-    const userService =
-      runTransient(
-        ["--user", `--unit=${unitName}`, "--quiet", "--collect", bashPath, scriptPath],
-        "systemd-run --user",
-      ) ??
-      runTransient(
-        ["--user", `--unit=${unitName}`, "--quiet", bashPath, scriptPath],
-        "systemd-run --user",
-      );
-    if (userService) return userService;
+    if (shouldUseSystemdRunForDetachedUpdate(serviceScope)) {
+      const userService =
+        runTransient(
+          ["--user", `--unit=${unitName}`, "--quiet", "--collect", bashPath, scriptPath],
+          "systemd-run --user",
+        ) ??
+        runTransient(
+          ["--user", `--unit=${unitName}`, "--quiet", bashPath, scriptPath],
+          "systemd-run --user",
+        );
+      if (userService) return userService;
 
-    const systemService =
-      runTransient(
-        [`--unit=${unitName}`, "--quiet", "--collect", bashPath, scriptPath],
-        "systemd-run",
-      ) ??
-      runTransient(
-        [`--unit=${unitName}`, "--quiet", bashPath, scriptPath],
-        "systemd-run",
-      );
-    if (systemService) return systemService;
-
-    if (serviceScope) {
+      const systemService =
+        runTransient(
+          [`--unit=${unitName}`, "--quiet", "--collect", bashPath, scriptPath],
+          "systemd-run",
+        ) ??
+        runTransient(
+          [`--unit=${unitName}`, "--quiet", bashPath, scriptPath],
+          "systemd-run",
+        );
+      if (systemService) return systemService;
       return null;
     }
 
@@ -255,8 +371,32 @@ export function startDetachedUpdateHelper(opts: DetachedUpdateOptions): Detached
   const dir = mkdtempSync(path.join(os.tmpdir(), "wand-update-"));
   const scriptPath = path.join(dir, "update.sh");
   const logPath = path.join(dir, "update.log");
-  const serviceScope = detectServiceScope();
-  writeFileSync(scriptPath, buildHelperScript(opts, logPath, serviceScope), { encoding: "utf8", mode: 0o700 });
+  let serviceScope: ServiceScope | null;
+  try {
+    serviceScope = detectManagedServiceScope();
+  } catch (err) {
+    return {
+      started: false,
+      scriptPath,
+      logPath,
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+  if (serviceScope) {
+    const preflight = managedServiceUpdatePreflight(serviceScope);
+    if (!preflight.ok) {
+      return {
+        started: false,
+        scriptPath,
+        logPath,
+        message: preflight.message.replace("<config-path>", opts.configPath),
+      };
+    }
+  }
+  writeFileSync(scriptPath, buildDetachedUpdateHelperScript(opts, logPath, serviceScope), {
+    encoding: "utf8",
+    mode: 0o700,
+  });
   chmodSync(scriptPath, 0o700);
 
   const spawned = spawnDetached(scriptPath, logPath, opts.env, serviceScope);

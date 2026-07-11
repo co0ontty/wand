@@ -50,7 +50,11 @@ import {
 import { repairServiceUnitAfterUpdate } from "./service-self-repair.js";
 import { computeRelaunch } from "./relaunch.js";
 import { isServiceInstalled } from "./tui/commands.js";
-import { canUseDetachedUpdateHelper, startDetachedUpdateHelper } from "./update-helper.js";
+import {
+  canUseDetachedUpdateHelper,
+  checkManagedServiceUpdatePreflight,
+  startDetachedUpdateHelper,
+} from "./update-helper.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
@@ -2158,9 +2162,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         version: targetLabel,
         logPath: helper.logPath,
       });
-      setTimeout(() => {
-        shutdownForDetachedUpdate();
-      }, 500);
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "更新失败。") });
     } finally {
@@ -2776,18 +2777,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     setTimeout(() => process.exit(0), 5000);
   }
 
-  function shutdownForDetachedUpdate(): void {
-    try {
-      wss.clients.forEach((client) => client.close());
-    } catch {
-      /* noop */
-    }
-    server.close(() => {
-      process.exit(0);
-    });
-    setTimeout(() => process.exit(0), 3000);
-  }
-
   app.post("/api/restart", async (_req, res) => {
     res.json({ ok: true, message: "服务正在重启..." });
     wsManager.emitEvent({
@@ -2922,6 +2911,22 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         type: "notification",
         sessionId: "__system__",
         data: { kind: "update", current: info.current, latest: info.latest },
+      });
+      return;
+    }
+
+    const servicePreflight = checkManagedServiceUpdatePreflight();
+    if (!servicePreflight.ok) {
+      process.stdout.write(`[wand] 自动更新已取消: ${servicePreflight.message}\n`);
+      wsManager.emitEvent({
+        type: "notification",
+        sessionId: "__system__",
+        data: {
+          kind: "auto-update-failed",
+          current: info.current,
+          latest: info.latest,
+          error: servicePreflight.message,
+        },
       });
       return;
     }

@@ -14,7 +14,7 @@ import { getErrorMessage } from "./error-utils.js";
  *
  * 这里在装包成功后调用，best-effort：
  *   - 没装服务 → 跳过；
- *   - 装了服务 → 用 preferGlobalBin 重写 unit（ExecStart→全局 dist/cli.js，
+ *   - 装了服务 → 用 preferGlobalBin 重写 unit（ExecStart→全局稳定 wand shim，
  *     Environment=PATH 取当前已被 path-repair 修复过的 process.env.PATH）+ daemon-reload；
  *   - system scope 非 root 无法写 /etc → installService 返回失败，这里捕获成 warning，
  *     绝不抛错中断更新流程。
@@ -50,7 +50,7 @@ export function repairServiceUnitAfterUpdate(configPath: string): ServiceRepairR
       return {
         repaired: true,
         scope,
-        message: `已用全局安装重写 ${scope} 服务 unit（刷新 ExecStart / PATH）`,
+        message: `已用全局稳定入口重写 ${scope} 服务 unit（刷新 ExecStart / PATH）`,
       };
     }
     const tail =

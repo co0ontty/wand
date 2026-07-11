@@ -982,7 +982,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (!input || !menu) return;
         var rawValue = input.value || "";
         var value = rawValue.trim();
-        var query = value.toLowerCase();
+        // 已选模型是字段值，不等于用户正在输入的搜索词。普通展开时展示完整列表；
+        // 只有 input 事件触发的编辑态才按当前文字过滤，否则保存过默认模型后下拉里
+        // 永远只看得到那一个精确匹配项。
+        var query = root.classList.contains("is-filtering") ? value.toLowerCase() : "";
         var models = getSettingsModelsForProvider(provider);
         var defaultModel = null;
         var exactMatch = false;
@@ -1072,6 +1075,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var input = root.querySelector(".model-combobox-input");
         var menu = root.querySelector(".model-combobox-menu");
         root.classList.remove("is-open");
+        root.classList.remove("is-filtering");
         if (menu) menu.classList.add("hidden");
         if (input) {
           input.setAttribute("aria-expanded", "false");
@@ -1087,6 +1091,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         input.value = value || "";
         input.dataset.modelInitialized = "true";
         input.dataset.modelDirty = "true";
+        root.classList.remove("is-filtering");
         updateSettingsModelStatus(root);
         closeSettingsModelCombobox(root);
         if (shouldRestoreInputFocus) input.focus();
@@ -1114,6 +1119,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           input.addEventListener("input", function() {
             input.dataset.modelInitialized = "true";
             input.dataset.modelDirty = "true";
+            root.classList.add("is-filtering");
             openSettingsModelCombobox(root);
           });
           input.addEventListener("keydown", function(event) {
@@ -1240,6 +1246,9 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           }
           if (data && data.id) {
             updateSessionSnapshot(data);
+            // 思考深度档位来自当前模型的 reasoningEfforts。快照更新后立即重绘，
+            // 让滑杆可选项与新模型保持一致，而不是继续显示旧模型的档位。
+            refreshAllChatModeTrios();
             if (typeof showToast === "function") {
               var display = getModelDisplayLabel(normalized, session);
               var hint = session.provider === "codex" ? "（下次对话生效）" : "";

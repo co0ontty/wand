@@ -15171,7 +15171,7 @@
     if (!input || !menu) return;
     var rawValue = input.value || "";
     var value = rawValue.trim();
-    var query = value.toLowerCase();
+    var query = root.classList.contains("is-filtering") ? value.toLowerCase() : "";
     var models = getSettingsModelsForProvider(provider);
     var defaultModel = null;
     var exactMatch = false;
@@ -15251,6 +15251,7 @@
     var input = root.querySelector(".model-combobox-input");
     var menu = root.querySelector(".model-combobox-menu");
     root.classList.remove("is-open");
+    root.classList.remove("is-filtering");
     if (menu) menu.classList.add("hidden");
     if (input) {
       input.setAttribute("aria-expanded", "false");
@@ -15265,6 +15266,7 @@
     input.value = value || "";
     input.dataset.modelInitialized = "true";
     input.dataset.modelDirty = "true";
+    root.classList.remove("is-filtering");
     updateSettingsModelStatus(root);
     closeSettingsModelCombobox(root);
     if (shouldRestoreInputFocus) input.focus();
@@ -15293,6 +15295,7 @@
       input.addEventListener("input", function() {
         input.dataset.modelInitialized = "true";
         input.dataset.modelDirty = "true";
+        root.classList.add("is-filtering");
         openSettingsModelCombobox(root);
       });
       input.addEventListener("keydown", function(event) {
@@ -15417,6 +15420,7 @@
       }
       if (data && data.id) {
         updateSessionSnapshot(data);
+        refreshAllChatModeTrios2();
         if (typeof showToast2 === "function") {
           var display = getModelDisplayLabel(normalized, session);
           var hint = session.provider === "codex" ? "\uFF08\u4E0B\u6B21\u5BF9\u8BDD\u751F\u6548\uFF09" : "";

@@ -17,6 +17,7 @@ import {
   getInstallSpecForChannel,
   installPackageGloballySync,
   normalizeUpdateChannel,
+  resolveGlobalWandBin,
   resolveGlobalWandCli,
   type UpdateChannel,
 } from "../npm-update-utils.js";
@@ -126,6 +127,8 @@ export function checkUpdate(currentVersion: string, channel: UpdateChannel = "st
  * 返回 npm 输出供调试。
  */
 export function installUpdate(channel: UpdateChannel = "stable"): CommandResult {
+  const serviceSafety = checkInstalledServiceEntrypointsForUpdate();
+  if (!serviceSafety.ok) return serviceSafety;
   const res = installPackageGloballySync(getInstallSpecForChannel(channel), 180_000);
   const out = (res.stdout || "") + (res.stderr ? "\n" + res.stderr : "");
   const trail = res.attempts.length > 1
@@ -214,8 +217,8 @@ export interface ServiceContext {
   /** 显式指定作用域。不传走 DEFAULT_SERVICE_SCOPE。 */
   scope?: ServiceScope;
   /**
-   * 更新后自修复场景：优先把 ExecStart 钉到「全局安装的 wand」(npm root -g 下的
-   * dist/cli.js)，而不是 process.argv[1]。源码安装的用户更新到 npm/GitHub 版后，
+   * 更新后自修复场景：优先把 ExecStart 钉到 npm 全局 wand shim，而不是
+   * process.argv[1]。源码安装的用户更新到 npm/GitHub 版后，
    * argv[1] 仍是旧源码路径，沿用它会让重启跑回旧二进制。
    */
   preferGlobalBin?: boolean;
@@ -626,11 +629,58 @@ function servicePathFor(scope: ServiceScope): string {
   return "";
 }
 
+function readServiceEntrypointForUpdate(scope: ServiceScope): string | null {
+  const servicePath = servicePathFor(scope);
+  if (process.platform === "darwin") {
+    const result = spawnSync(
+      "plutil",
+      ["-extract", "ProgramArguments.1", "raw", "-o", "-", servicePath],
+      { encoding: "utf8", timeout: 5_000 },
+    );
+    return result.status === 0 ? (result.stdout || "").trim() || null : null;
+  }
+  if (process.platform === "linux") {
+    try {
+      const execStart = readFileSync(servicePath, "utf8").split("\n").find((line) => line.startsWith("ExecStart="));
+      if (!execStart) return null;
+      return execStart.slice("ExecStart=".length).trim().split(/\s+/)[1] || null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function checkInstalledServiceEntrypointsForUpdate(): CommandResult {
+  const scopes: ServiceScope[] = (["system", "user"] as const).filter((scope) => isServiceInstalled(scope));
+  if (scopes.length === 0) return { ok: true, message: "未安装服务" };
+  const stableBin = resolveGlobalWandBin();
+  if (!stableBin) {
+    return { ok: false, message: "npm 全局 wand shim 不存在，已取消更新以保护当前服务。" };
+  }
+  for (const scope of scopes) {
+    const entrypoint = readServiceEntrypointForUpdate(scope);
+    if (!entrypoint || path.resolve(entrypoint) !== path.resolve(stableBin)) {
+      const command = scope === "system"
+        ? `sudo ${stableBin} service:install`
+        : `${stableBin} service:install --user`;
+      return {
+        ok: false,
+        message: `检测到 ${scope} 服务仍指向不稳定入口，已取消更新。请先运行: ${command}`,
+        detail: `entrypoint: ${entrypoint || "无法读取"}\nstable shim: ${stableBin}`,
+      };
+    }
+  }
+  return { ok: true, message: "服务入口预检通过" };
+}
+
 function resolveWandBin(ctx: ServiceContext): string {
-  // 更新后自修复：优先全局安装的 dist/cli.js，避免沿用旧源码路径。
+  // 更新后自修复：优先 npm 全局稳定 shim，避免沿用旧源码路径；不能钉死到包目录
+  // dist/cli.js，因为事务回滚切换 canonical 目录时 shim 才能指向同盘安全备份。
   if (ctx.preferGlobalBin) {
-    const global = resolveGlobalWandCli();
-    if (global) return global;
+    const globalBin = resolveGlobalWandBin();
+    if (globalBin) return globalBin;
+    throw new Error("npm 全局 wand shim 不存在，拒绝把服务 unit 写到不稳定的包目录路径。");
   }
   if (ctx.wandBin && existsSync(ctx.wandBin)) return ctx.wandBin;
   const argv1 = process.argv[1];

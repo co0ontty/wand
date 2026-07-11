@@ -53,7 +53,9 @@ test("deepRepairRuntimePath follows login shell order for existing CLI directori
     deepProbe: "skipped",
     warnings: [],
   };
-  const result = await deepRepairRuntimePath(initial, { shell: probeShell, timeoutMs: 2_000 });
+  // The full suite runs test files in parallel; leave enough headroom for process startup
+  // on a busy machine so this integration-style shell probe does not become flaky.
+  const result = await deepRepairRuntimePath(initial, { shell: probeShell, timeoutMs: 5_000 });
   const segments = result.finalPath.split(path.delimiter);
 
   assert.equal(segments[0], preferredBin);
