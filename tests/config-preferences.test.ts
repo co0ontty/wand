@@ -52,3 +52,31 @@ test("Codex dynamic reasoning effort preference round-trips through storage", ()
   assert.equal(config.defaultThinkingEffort, "codex:ultra");
   assert.equal(applyStoragePreferences(defaultConfig(), storage).defaultThinkingEffort, "codex:ultra");
 });
+
+test("new-session provider and kind preferences round-trip through storage", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+
+  writePreferenceToStorage(config, storage, "defaultProvider", "codex");
+  writePreferenceToStorage(config, storage, "defaultSessionKind", "pty");
+
+  assert.equal(config.defaultProvider, "codex");
+  assert.equal(config.defaultSessionKind, "pty");
+
+  const restored = applyStoragePreferences(defaultConfig(), storage);
+  assert.equal(restored.defaultProvider, "codex");
+  assert.equal(restored.defaultSessionKind, "pty");
+});
+
+test("new-session preferences reject unsupported values", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+
+  assert.throws(
+    () => writePreferenceToStorage(defaultConfig(), storage, "defaultProvider", "cursor"),
+    /无效 Provider/,
+  );
+  assert.throws(
+    () => writePreferenceToStorage(defaultConfig(), storage, "defaultSessionKind", "terminal"),
+    /无效会话类型/,
+  );
+});

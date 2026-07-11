@@ -96,6 +96,10 @@ export interface WandConfig {
     keyPath?: string;
   };
   password: string;
+  /** 新建会话时默认使用的 Provider。 */
+  defaultProvider?: SessionProvider;
+  /** 新建会话时默认使用的承载类型。 */
+  defaultSessionKind?: SessionKind;
   defaultMode: ExecutionMode;
   shell: string;
   defaultCwd: string;

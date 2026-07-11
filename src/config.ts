@@ -27,6 +27,8 @@ const DEFAULT_CONFIG_FILE = "config.json";
  * 然后下一次 saveConfig 写回 JSON 时它们会被剥离（见 stripPreferenceFields）。
  */
 export const PREFERENCE_KEYS = [
+  "defaultProvider",
+  "defaultSessionKind",
   "defaultMode",
   "defaultCwd",
   "defaultModel",
@@ -57,6 +59,8 @@ export const defaultConfig = (): WandConfig => ({
   port: 8443,
   https: false,
   password: "change-me",
+  defaultProvider: "claude",
+  defaultSessionKind: "structured",
   // 非 root 启动时才有资格用 Claude 的 permission-bypass（root 会被 Claude CLI 拒绝），
   // 所以这种环境下把默认执行模式抬到「托管」——开箱即得自动确认权限的全自主体验。
   // root 启动则保守回落到「default」（托管在 root 下也只能降级成 acceptEdits）。
@@ -270,6 +274,14 @@ export function migrateLegacyPreferencesToDb(rawJsonInput: Partial<WandConfig> |
 export function applyStoragePreferences(config: WandConfig, storage: WandStorage): WandConfig {
   const defaults = defaultConfig();
 
+  if (storage.hasPreference(preferenceStorageKey("defaultProvider"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("defaultProvider"), defaults.defaultProvider ?? "claude");
+    if (v === "claude" || v === "codex") config.defaultProvider = v;
+  }
+  if (storage.hasPreference(preferenceStorageKey("defaultSessionKind"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("defaultSessionKind"), defaults.defaultSessionKind ?? "structured");
+    if (v === "pty" || v === "structured") config.defaultSessionKind = v;
+  }
   if (storage.hasPreference(preferenceStorageKey("defaultMode"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultMode"), defaults.defaultMode);
     if (isExecutionMode(v)) config.defaultMode = v;
@@ -326,6 +338,18 @@ export function writePreferenceToStorage(
 ): void {
   const dbKey = preferenceStorageKey(key);
   switch (key) {
+    case "defaultProvider": {
+      if (value !== "claude" && value !== "codex") throw new Error(`无效 Provider: ${value}`);
+      storage.setPreference(dbKey, value);
+      config.defaultProvider = value;
+      break;
+    }
+    case "defaultSessionKind": {
+      if (value !== "pty" && value !== "structured") throw new Error(`无效会话类型: ${value}`);
+      storage.setPreference(dbKey, value);
+      config.defaultSessionKind = value;
+      break;
+    }
     case "defaultMode": {
       if (!isExecutionMode(value)) throw new Error(`无效执行模式: ${value}`);
       storage.setPreference(dbKey, value);
@@ -537,6 +561,8 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
+    defaultProvider: input.defaultProvider === "codex" ? "codex" : "claude",
+    defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
     defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
     commitCli: input.commitCli === "codex" ? "codex" : "claude",

@@ -1603,6 +1603,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     res.json({
       host: config.host,
       port: config.port,
+      defaultProvider: config.defaultProvider ?? "claude",
+      defaultSessionKind: config.defaultSessionKind ?? "structured",
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,
       defaultModel: defaultModels.claude,
