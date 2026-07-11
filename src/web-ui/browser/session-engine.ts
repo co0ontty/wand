@@ -706,6 +706,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
               syncComposerModelSelect(getSelectedSession());
               updateSettingsDefaultModelSelect(data);
+              syncCommitModelProvider(false);
             }
             return data;
           })
@@ -715,14 +716,15 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function refreshAvailableModels() {
         if (state.modelsRefreshing) return Promise.resolve(null);
         state.modelsRefreshing = true;
-        var btn = document.getElementById("cfg-default-model-refresh") as HTMLButtonElement | null;
-        var btnLabel = btn && btn.querySelector("span");
-        if (btn) {
+        var buttons = document.querySelectorAll("#cfg-default-model-refresh, #cfg-commit-model-refresh");
+        buttons.forEach(function(element) {
+          var btn = element as HTMLButtonElement;
+          var btnLabel = btn.querySelector("span");
           btn.disabled = true;
           btn.classList.add("is-loading");
           btn.setAttribute("aria-busy", "true");
           if (btnLabel) btnLabel.textContent = "检测中";
-        }
+        });
         return fetch("/api/models/refresh", { method: "POST", credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
@@ -731,6 +733,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
               syncComposerModelSelect(getSelectedSession());
               updateSettingsDefaultModelSelect(data);
+              syncCommitModelProvider(false);
               if (typeof showToast === "function") {
                 showToast("模型列表已刷新" + (data.claudeVersion ? "（claude " + data.claudeVersion + "）" : ""), "success");
               }
@@ -743,12 +746,14 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           })
           .finally(function() {
             state.modelsRefreshing = false;
-            if (btn) {
+            buttons.forEach(function(element) {
+              var btn = element as HTMLButtonElement;
+              var btnLabel = btn.querySelector("span");
               btn.disabled = false;
               btn.classList.remove("is-loading");
               btn.removeAttribute("aria-busy");
               if (btnLabel) btnLabel.textContent = "刷新列表";
-            }
+            });
           });
       }
 
@@ -894,10 +899,12 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         return provider === "codex" ? (state.availableCodexModels || []) : (state.availableModels || []);
       }
 
-      export function updateSettingsModelStatus(provider) {
-        var inputId = provider === "codex" ? "cfg-default-codex-model" : "cfg-default-model";
-        var input = document.getElementById(inputId) as HTMLInputElement | null;
-        var status = document.querySelector('[data-model-status="' + provider + '"]');
+      export function updateSettingsModelStatus(root) {
+        if (!root) return;
+        var provider = root.getAttribute("data-provider") === "codex" ? "codex" : "claude";
+        var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
+        var field = root.closest(".settings-model-field");
+        var status = field ? field.querySelector("[data-model-status]") : null;
         if (!input || !status) return;
         var value = (input.value || "").trim();
         var models = getSettingsModelsForProvider(provider);
@@ -978,7 +985,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         }
         (root as any)._wandModelActiveIndex = activeIndex >= 0 ? activeIndex : (options.length ? 0 : -1);
         updateSettingsModelActiveOption(root);
-        updateSettingsModelStatus(provider);
+        updateSettingsModelStatus(root);
       }
 
       export function updateSettingsModelActiveOption(root) {
@@ -1032,7 +1039,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         input.value = value || "";
         input.dataset.modelInitialized = "true";
         input.dataset.modelDirty = "true";
-        updateSettingsModelStatus(root.getAttribute("data-provider") === "codex" ? "codex" : "claude");
+        updateSettingsModelStatus(root);
         closeSettingsModelCombobox(root);
         if (shouldRestoreInputFocus) input.focus();
       }
@@ -1109,6 +1116,23 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           });
           renderSettingsModelCombobox(root);
         });
+      }
+
+      export function syncCommitModelProvider(resetModel?) {
+        var cli = document.getElementById("cfg-commit-cli") as HTMLSelectElement | null;
+        var root = document.getElementById("cfg-commit-model-combobox");
+        var input = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
+        var label = document.getElementById("cfg-commit-model-provider");
+        if (!cli || !root || !input) return;
+        var provider = cli.value === "codex" ? "codex" : "claude";
+        root.setAttribute("data-provider", provider);
+        input.placeholder = provider === "codex" ? "跟随 Codex 默认" : "跟随 Claude Code 默认";
+        if (label) label.textContent = provider === "codex" ? "Codex CLI" : "Claude Code";
+        if (resetModel) {
+          input.value = "";
+          input.dataset.modelDirty = "true";
+        }
+        renderSettingsModelCombobox(root);
       }
 
       export function updateSettingsDefaultModelSelect(data?) {
@@ -3157,6 +3181,16 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             var inheritEnvEl = document.getElementById("cfg-inherit-env") as HTMLInputElement | null;
             if (inheritEnvEl) inheritEnvEl.checked = cfg.inheritEnv !== false;
 
+            var commitCliEl = document.getElementById("cfg-commit-cli") as HTMLSelectElement | null;
+            var commitModelEl = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
+            if (commitCliEl) commitCliEl.value = cfg.commitCli === "codex" ? "codex" : "claude";
+            if (commitModelEl) {
+              commitModelEl.value = cfg.commitModel || "";
+              commitModelEl.dataset.modelInitialized = "true";
+              commitModelEl.dataset.modelDirty = "false";
+            }
+            syncCommitModelProvider(false);
+
             // Default model
             var defaultModels = cfg.defaultModels && typeof cfg.defaultModels === "object"
               ? cfg.defaultModels
@@ -3219,6 +3253,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
         var defaultModelValue = ((document.getElementById("cfg-default-model") as HTMLInputElement | null || {} as any).value || "").trim();
         var defaultCodexModelValue = ((document.getElementById("cfg-default-codex-model") as HTMLInputElement | null || {} as any).value || "").trim();
+        var commitModelValue = ((document.getElementById("cfg-commit-model") as HTMLInputElement | null || {} as any).value || "").trim();
 
         var body = {
           host: (document.getElementById("cfg-host") as HTMLInputElement | null || {} as any).value,
@@ -3234,6 +3269,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             claude: defaultModelValue,
             codex: defaultCodexModelValue
           },
+          commitCli: (document.getElementById("cfg-commit-cli") as HTMLSelectElement | null || {} as any).value === "codex" ? "codex" : "claude",
+          commitModel: commitModelValue,
           structuredRunner: (document.getElementById("cfg-structured-runner") as HTMLSelectElement | null || {} as any).value || "cli",
           inheritEnv: (document.getElementById("cfg-inherit-env") as HTMLInputElement | null || {} as any).checked !== false,
         };
@@ -3267,6 +3304,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               state.config.defaultModel = nextDefaultModel;
               state.config.defaultCodexModel = nextDefaultCodexModel;
               state.config.defaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel };
+              state.config.commitCli = body.commitCli;
+              state.config.commitModel = body.commitModel;
             }
             state.configDefaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel };
             state.configDefaultModel = nextDefaultModel;
@@ -3274,6 +3313,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             var savedCodexInput = document.getElementById("cfg-default-codex-model") as HTMLInputElement | null;
             if (savedClaudeInput) savedClaudeInput.dataset.modelDirty = "false";
             if (savedCodexInput) savedCodexInput.dataset.modelDirty = "false";
+            var savedCommitInput = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
+            if (savedCommitInput) savedCommitInput.dataset.modelDirty = "false";
             if (nextDefaultModel !== previousDefaults.claude) {
               setChatModelForProvider("claude", "");
             }

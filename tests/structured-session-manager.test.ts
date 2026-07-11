@@ -4,9 +4,29 @@ import {
   buildCodexFileChangeBlocks,
   buildCodexPatchApplyBlocks,
   estimateCodexOutputTokens,
+  getLastSubmittedStructuredInput,
+  isDuplicateStructuredQueueInput,
   normalizeStructuredToolResultContent,
   thinkingEffortToCodexReasoningEffort,
 } from "../src/structured-session-manager.js";
+
+test("structured queue rejects a replay of the active or last queued input", () => {
+  const active = {
+    messages: [
+      { role: "user" as const, content: [{ type: "text" as const, text: "检查构建" }] },
+      { role: "assistant" as const, content: [{ type: "text" as const, text: "处理中" }] },
+    ],
+    queuedMessages: [],
+  };
+  assert.equal(getLastSubmittedStructuredInput(active), "检查构建");
+  assert.equal(isDuplicateStructuredQueueInput(active, "  检查构建\n"), true);
+  assert.equal(isDuplicateStructuredQueueInput(active, "检查测试"), false);
+
+  const queued = { ...active, queuedMessages: ["检查测试", "更新文档"] };
+  assert.equal(getLastSubmittedStructuredInput(queued), "更新文档");
+  assert.equal(isDuplicateStructuredQueueInput(queued, "更新文档"), true);
+  assert.equal(isDuplicateStructuredQueueInput(queued, "检查构建"), false);
+});
 
 test("codex off thinking effort does not force minimal", () => {
   assert.equal(thinkingEffortToCodexReasoningEffort("off"), null);

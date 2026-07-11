@@ -55,3 +55,27 @@ export function resolveSessionAiContext(
     inheritEnv: config.inheritEnv,
   };
 }
+
+/** Build the AI context for quick-commit actions from their global preferences. */
+export function resolveCommitAiContext(
+  snapshot: Pick<
+    SessionSnapshot,
+    "provider" | "structuredState" | "runner" | "command" | "selectedModel" | "thinkingEffort"
+  >,
+  config: Pick<
+    WandConfig,
+    | "defaultModel"
+    | "defaultCodexModel"
+    | "defaultThinkingEffort"
+    | "inheritEnv"
+    | "commitCli"
+    | "commitModel"
+  >,
+): SessionAiContext {
+  const sessionContext = resolveSessionAiContext(snapshot, config);
+  return {
+    ...sessionContext,
+    provider: config.commitCli === "codex" ? "codex" : "claude",
+    model: normalizeModel(config.commitModel),
+  };
+}

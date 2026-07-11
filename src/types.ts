@@ -117,6 +117,10 @@ export interface WandConfig {
   defaultModel?: string;
   /** 新建 Codex 会话时默认使用的模型。留空则不传 --model，由 codex 自行决定。 */
   defaultCodexModel?: string;
+  /** 快捷提交生成 commit message / tag 时使用的 CLI。 */
+  commitCli?: SessionProvider;
+  /** 快捷提交专用模型。留空则跟随所选 CLI 的默认模型。 */
+  commitModel?: string;
   /** 新建会话时默认使用的思考深度。 */
   defaultThinkingEffort?: "off" | "standard" | "deep" | "max";
   /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */

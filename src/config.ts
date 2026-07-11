@@ -23,6 +23,8 @@ export const PREFERENCE_KEYS = [
   "defaultCwd",
   "defaultModel",
   "defaultCodexModel",
+  "commitCli",
+  "commitModel",
   "defaultThinkingEffort",
   "structuredRunner",
   "language",
@@ -64,6 +66,8 @@ export const defaultConfig = (): WandConfig => ({
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
   defaultCodexModel: "",
+  commitCli: "claude",
+  commitModel: "",
   defaultThinkingEffort: "off",
   structuredRunner: "cli" as StructuredRunnerOption,
   inheritEnv: true,
@@ -274,6 +278,14 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultCodexModel"), defaults.defaultCodexModel ?? "");
     if (typeof v === "string") config.defaultCodexModel = v.trim();
   }
+  if (storage.hasPreference(preferenceStorageKey("commitCli"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("commitCli"), defaults.commitCli ?? "claude");
+    if (v === "claude" || v === "codex") config.commitCli = v;
+  }
+  if (storage.hasPreference(preferenceStorageKey("commitModel"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("commitModel"), defaults.commitModel ?? "");
+    if (typeof v === "string") config.commitModel = v.trim();
+  }
   if (storage.hasPreference(preferenceStorageKey("defaultThinkingEffort"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultThinkingEffort"), defaults.defaultThinkingEffort ?? "off");
     if (v === "off" || v === "standard" || v === "deep" || v === "max") config.defaultThinkingEffort = v;
@@ -328,6 +340,18 @@ export function writePreferenceToStorage(
       const v = typeof value === "string" ? value.trim() : "";
       storage.setPreference(dbKey, v);
       config.defaultCodexModel = v;
+      break;
+    }
+    case "commitCli": {
+      if (value !== "claude" && value !== "codex") throw new Error(`无效 commit CLI: ${value}`);
+      storage.setPreference(dbKey, value);
+      config.commitCli = value;
+      break;
+    }
+    case "commitModel": {
+      const v = typeof value === "string" ? value.trim() : "";
+      storage.setPreference(dbKey, v);
+      config.commitModel = v;
       break;
     }
     case "defaultThinkingEffort": {
@@ -507,6 +531,8 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
     defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
+    commitCli: input.commitCli === "codex" ? "codex" : "claude",
+    commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
     defaultThinkingEffort: input.defaultThinkingEffort === "standard"
       || input.defaultThinkingEffort === "deep"
       || input.defaultThinkingEffort === "max"

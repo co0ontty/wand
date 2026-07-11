@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveSessionAiContext, resolveSessionProvider } from "../src/session-ai-context.js";
+import { resolveCommitAiContext, resolveSessionAiContext, resolveSessionProvider } from "../src/session-ai-context.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 const config = {
@@ -9,6 +9,8 @@ const config = {
   defaultCodexModel: "gpt-5.5-codex",
   defaultThinkingEffort: "deep" as const,
   inheritEnv: true,
+  commitCli: "claude" as const,
+  commitModel: "claude-haiku-4-5",
 };
 
 function session(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
@@ -74,4 +76,34 @@ test("resolveSessionAiContext uses Codex default for legacy Codex sessions", () 
 
   assert.equal(context.provider, "codex");
   assert.equal(context.model, "gpt-5.5-codex");
+});
+
+test("resolveCommitAiContext uses commit CLI and model independently from the session", () => {
+  const context = resolveCommitAiContext(session({
+    provider: "claude",
+    selectedModel: "claude-opus-4-6",
+    thinkingEffort: "standard",
+  }), {
+    ...config,
+    commitCli: "codex",
+    commitModel: "gpt-5.4-mini",
+  });
+
+  assert.deepEqual(context, {
+    provider: "codex",
+    model: "gpt-5.4-mini",
+    thinkingEffort: "standard",
+    inheritEnv: true,
+  });
+});
+
+test("resolveCommitAiContext leaves model unset when commit model follows the CLI default", () => {
+  const context = resolveCommitAiContext(session({ provider: "codex" }), {
+    ...config,
+    commitCli: "claude",
+    commitModel: "default",
+  });
+
+  assert.equal(context.provider, "claude");
+  assert.equal(context.model, undefined);
 });

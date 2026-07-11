@@ -1402,6 +1402,55 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                   '</div>' +
                   '<p class="field-hint settings-model-version" id="cfg-default-model-version">模型名称仅在新建会话时作为默认值；运行中的结构化会话仍可单独切换。</p>' +
                 '</section>' +
+                '<section class="settings-model-card" aria-labelledby="settings-commit-model-card-title">' +
+                  '<div class="settings-model-card-header">' +
+                    '<div class="settings-model-card-heading">' +
+                      '<span class="settings-model-card-icon" aria-hidden="true">' + iconSvg("edit", { size: 18, strokeWidth: 1.8 }) + '</span>' +
+                      '<div>' +
+                        '<h4 class="settings-model-card-title" id="settings-commit-model-card-title">Commit 生成</h4>' +
+                        '<p class="settings-model-card-desc">指定快捷提交生成 message 与 tag 时使用的 CLI 和模型。</p>' +
+                      '</div>' +
+                    '</div>' +
+                    '<button type="button" id="cfg-commit-model-refresh" class="btn btn-secondary btn-sm settings-model-refresh" title="重新检测所选 CLI 的模型">' +
+                      '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>' +
+                      '<span>刷新列表</span>' +
+                    '</button>' +
+                  '</div>' +
+                  '<div class="settings-model-grid">' +
+                    '<div class="field settings-model-field">' +
+                      '<div class="settings-model-label-row">' +
+                        '<label class="field-label" for="cfg-commit-cli">CLI</label>' +
+                        '<span class="settings-model-provider">快捷提交</span>' +
+                      '</div>' +
+                      '<select id="cfg-commit-cli" class="field-input">' +
+                        '<option value="claude">Claude</option>' +
+                        '<option value="codex">Codex</option>' +
+                      '</select>' +
+                      '<div class="settings-model-meta">' +
+                        '<span class="settings-model-status">生成 commit message 与 tag</span>' +
+                      '</div>' +
+                    '</div>' +
+                    '<div class="field settings-model-field">' +
+                      '<div class="settings-model-label-row">' +
+                        '<label class="field-label" for="cfg-commit-model">模型</label>' +
+                        '<span class="settings-model-provider" id="cfg-commit-model-provider">Claude Code</span>' +
+                      '</div>' +
+                      '<div id="cfg-commit-model-combobox" class="model-combobox" data-provider="claude">' +
+                        '<div class="model-combobox-control">' +
+                          '<input id="cfg-commit-model" class="field-input model-combobox-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cfg-commit-model-listbox" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="跟随 Claude Code 默认" />' +
+                          '<button type="button" class="model-combobox-toggle" aria-label="展开 commit 模型列表">' +
+                            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>' +
+                          '</button>' +
+                        '</div>' +
+                        '<div id="cfg-commit-model-listbox" class="model-combobox-menu hidden" role="listbox" aria-label="Commit 模型"></div>' +
+                      '</div>' +
+                      '<div class="settings-model-meta">' +
+                        '<span class="settings-model-status" data-model-status>跟随 CLI 默认</span>' +
+                        '<span class="settings-model-help">列表来自自动检测</span>' +
+                      '</div>' +
+                    '</div>' +
+                  '</div>' +
+                '</section>' +
                 '<div class="field">' +
                   '<label class="field-label" for="cfg-cwd">默认工作目录</label>' +
                   '<input id="cfg-cwd" type="text" class="field-input" placeholder="/home/user" />' +

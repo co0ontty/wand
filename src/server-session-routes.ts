@@ -8,7 +8,7 @@ import { getDefaultModelForProvider, normalizeMode } from "./config.js";
 import { blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { resolveSessionAiContext } from "./session-ai-context.js";
+import { resolveCommitAiContext } from "./session-ai-context.js";
 import {
   getGitStatus,
   QuickCommitError,
@@ -31,6 +31,19 @@ function getInputErrorResponse(error: unknown, sessionId: string) {
         errorCode: error.code,
         sessionId,
         sessionStatus: error.sessionStatus ?? null,
+      },
+    };
+  }
+
+  const errorCode = (error as { code?: string } | null | undefined)?.code;
+  if (errorCode === "duplicate_queued_message" || errorCode === "duplicate_idempotency_key") {
+    return {
+      statusCode: 409,
+      payload: {
+        error: getErrorMessage(error, "检测到重复发送，已拦截。"),
+        errorCode,
+        sessionId,
+        sessionStatus: null,
       },
     };
   }
@@ -409,7 +422,7 @@ export function registerSessionRoutes(
       res.json(snapshot);
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;
-      const status = errorCode === "duplicate_idempotency_key" ? 409 : 400;
+      const status = errorCode === "duplicate_idempotency_key" || errorCode === "duplicate_queued_message" ? 409 : 400;
       res.status(status).json({
         error: getErrorMessage(error, "无法发送结构化消息。"),
         errorCode,
@@ -604,7 +617,7 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean; submodule?: boolean };
     try {
-      const ai = resolveSessionAiContext(snapshot, config);
+      const ai = resolveCommitAiContext(snapshot, config);
       const result = await runQuickCommitWithFallback({
         cwd: snapshot.cwd,
         language: config.language ?? "",
@@ -638,7 +651,7 @@ export function registerSessionRoutes(
       return;
     }
     try {
-      const ai = resolveSessionAiContext(snapshot, config);
+      const ai = resolveCommitAiContext(snapshot, config);
       const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "", {
         ...ai,
       });
@@ -664,7 +677,7 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { tag?: string; autoTag?: boolean; push?: boolean };
     try {
-      const ai = resolveSessionAiContext(snapshot, config);
+      const ai = resolveCommitAiContext(snapshot, config);
       const result = await runTagHead({
         cwd: snapshot.cwd,
         language: config.language ?? "",

@@ -210,7 +210,38 @@ import { getSessionStatusLabel } from "./session-ui";
       // 把一条消息送进某个结构化会话的服务端排队。沿用 inFlight→排队、当前回复
       // 结束后自动 --resume 续接的既有路径（与输入框上方「排队发送」按钮同一条
       // 链路），因此排队的这条消息天然带着该会话之前所有轮次的上下文。
+      export function getLastStructuredSubmittedInput(session) {
+        if (!session) return "";
+        var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages : [];
+        for (var qi = queue.length - 1; qi >= 0; qi--) {
+          var queued = typeof queue[qi] === "string" ? queue[qi].trim() : "";
+          if (queued) return queued;
+        }
+        var messages = Array.isArray(session.messages) ? session.messages : [];
+        for (var mi = messages.length - 1; mi >= 0; mi--) {
+          var turn = messages[mi];
+          if (!turn || turn.role !== "user" || !Array.isArray(turn.content)) continue;
+          var textParts = turn.content
+            .filter(function(block) { return block && block.type === "text" && typeof block.text === "string"; })
+            .map(function(block) { return block.text; });
+          if (textParts.length) return textParts.join("\n").trim();
+          for (var bi = 0; bi < turn.content.length; bi++) {
+            var block = turn.content[bi];
+            if (block && block.type === "tool_result" && typeof block.content === "string") {
+              return block.content.trim();
+            }
+          }
+          return "";
+        }
+        return "";
+      }
+
       export function continueStructuredSession(session, text) {
+        var normalizedText = typeof text === "string" ? text.trim() : "";
+        if (normalizedText && getLastStructuredSubmittedInput(session) === normalizedText) {
+          showToast("与上一条消息相同，已忽略，不会加入排队。", "warning");
+          return Promise.resolve();
+        }
         var idempotencyKey = (typeof crypto !== "undefined" && crypto.randomUUID)
           ? crypto.randomUUID()
           : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
@@ -774,6 +805,17 @@ import { getSessionStatusLabel } from "./session-ui";
           showToast("会话不存在，请重新选择或新建会话。", "error");
           return Promise.resolve();
         }
+        var sessionInFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
+        if (sessionInFlight && !requestedInterrupt && getLastStructuredSubmittedInput(session) === input.trim()) {
+          if (inputBox) {
+            inputBox.value = "";
+            autoResizeInput(inputBox);
+          }
+          setDraftValue("");
+          showToast("与上一条消息相同，已忽略，不会加入排队。", "warning");
+          updateInputHint("Enter 发送 · Shift+Enter 换行");
+          return Promise.resolve();
+        }
         // 短窗口内的连击当作重复点击丢掉；正常间隔的两次提交（哪怕第一次还在流式）
         // 都放行，让 queue / interrupt 真正生效。
         var nowTs = Date.now();
@@ -784,7 +826,6 @@ import { getSessionStatusLabel } from "./session-ui";
         }
         _structuredLastSubmitAt[session.id] = nowTs;
 
-        var sessionInFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
         var isInterrupting = sessionInFlight && requestedInterrupt;
         var isQueueing = sessionInFlight && !requestedInterrupt;
 

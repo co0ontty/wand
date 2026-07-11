@@ -789,6 +789,51 @@ function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["
   };
 }
 
+/**
+ * 返回最近一次真正提交给结构化会话的用户输入。
+ *
+ * 排队非空时，队尾才是“上一条提交”；否则回看当前正在处理的最后一个 user turn。
+ * 这里只接受可无损还原成字符串的 text / tool_result，避免把图片等结构化内容误判
+ * 成更早的纯文本输入。
+ */
+export function getLastSubmittedStructuredInput(snapshot: Pick<SessionSnapshot, "messages" | "queuedMessages">): string | null {
+  const queue = snapshot.queuedMessages ?? [];
+  for (let i = queue.length - 1; i >= 0; i--) {
+    const queued = queue[i]?.trim();
+    if (queued) return queued;
+  }
+
+  const messages = snapshot.messages ?? [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const turn = messages[i];
+    if (turn.role !== "user") continue;
+
+    const textParts = turn.content
+      .filter((block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text")
+      .map((block) => block.text);
+    if (textParts.length > 0) {
+      const text = textParts.join("\n").trim();
+      return text || null;
+    }
+
+    const toolResult = turn.content.find(
+      (block): block is Extract<ContentBlock, { type: "tool_result" }> => block.type === "tool_result" && typeof block.content === "string",
+    );
+    return toolResult && typeof toolResult.content === "string" ? toolResult.content.trim() || null : null;
+  }
+  return null;
+}
+
+/** 仅用于 in-flight 排队分支：连续两次内容相同则把后一次视为输入重放。 */
+export function isDuplicateStructuredQueueInput(
+  snapshot: Pick<SessionSnapshot, "messages" | "queuedMessages">,
+  input: string,
+): boolean {
+  const prompt = input.trim();
+  if (!prompt) return false;
+  return getLastSubmittedStructuredInput(snapshot) === prompt;
+}
+
 function buildIncrementalStructuredPayload(
   snapshot: SessionSnapshot,
   cardDefaults: CardExpandDefaults,
@@ -1098,6 +1143,11 @@ export class StructuredSessionManager {
         return session;
       } else {
         const queue = [...(session.queuedMessages ?? [])];
+        if (isDuplicateStructuredQueueInput(session, prompt)) {
+          const err = new Error("与上一条消息相同，已忽略，不会加入排队。") as Error & { code?: string };
+          err.code = "duplicate_queued_message";
+          throw err;
+        }
         if (queue.length >= 10) {
           throw new Error("排队消息已满（最多 10 条），请等待当前消息处理完成。");
         }
