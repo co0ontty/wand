@@ -3541,7 +3541,15 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var msgEl = document.getElementById("update-message");
         var updateBtn = document.getElementById("do-update-button") as HTMLButtonElement | null;
         if (!updateBtn) return;
+        var originalButtonText = updateBtn.textContent || "更新到最新版";
+        var resetUpdateButton = function() {
+          updateBtn.disabled = false;
+          updateBtn.textContent = originalButtonText;
+          updateBtn.removeAttribute("aria-busy");
+        };
         updateBtn.disabled = true;
+        updateBtn.textContent = "更新中...";
+        updateBtn.setAttribute("aria-busy", "true");
         if (msgEl) {
           msgEl.textContent = "正在更新，请稍候...";
           msgEl.style.color = "var(--text-secondary)";
@@ -3561,7 +3569,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               msgEl.style.color = "var(--error)";
               msgEl.classList.remove("hidden");
             }
-            updateBtn.disabled = false;
+            resetUpdateButton();
             return;
           }
           // \u5b89\u88c5\u6210\u529f\uff1a\u81ea\u52a8\u8c03\u7528 /api/restart\uff0c\u8ba9\u670d\u52a1\u91cd\u542f\u751f\u6548\uff0c
@@ -3571,6 +3579,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             msgEl.style.color = "var(--success)";
             msgEl.classList.remove("hidden");
           }
+          updateBtn.removeAttribute("aria-busy");
           updateBtn.classList.add("hidden");
           if (data.detachedUpdate) {
             showRestartOverlay();
@@ -3588,7 +3597,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             msgEl.style.color = "var(--error)";
             msgEl.classList.remove("hidden");
           }
-          updateBtn.disabled = false;
+          resetUpdateButton();
         });
       }
 

@@ -302,6 +302,23 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           var el = document.getElementById("sidebar-overflow-menu");
           if (el) el.classList.remove("open");
         });
+
+        // 设置页可能随 shell 重绘而替换节点。更新操作使用全局委托，避免按钮节点更新后
+        // 丢失 click listener，也确保后续局部初始化异常不会让更新入口失效。
+        document.addEventListener("click", function(e) {
+          var target = e.target as HTMLElement | null;
+          if (!target || typeof target.closest !== "function") return;
+          var button = target.closest("#check-update-button, #do-update-button, #do-restart-button") as HTMLButtonElement | null;
+          if (!button || button.disabled) return;
+          e.preventDefault();
+          if (button.id === "check-update-button") {
+            checkForUpdate();
+          } else if (button.id === "do-update-button") {
+            performUpdate();
+          } else {
+            performSettingsRestart();
+          }
+        });
         window.addEventListener("resize", function() {
           var el = document.getElementById("sidebar-overflow-menu");
           if (el) el.classList.remove("open");
@@ -662,12 +679,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
             });
           })(filePickerInputs[fpi] as HTMLInputElement);
         }
-        var checkUpdateBtn = document.getElementById("check-update-button");
-        if (checkUpdateBtn) checkUpdateBtn.addEventListener("click", checkForUpdate);
-        var doUpdateBtn = document.getElementById("do-update-button");
-        if (doUpdateBtn) doUpdateBtn.addEventListener("click", performUpdate);
-        var doRestartBtn = document.getElementById("do-restart-button");
-        if (doRestartBtn) doRestartBtn.addEventListener("click", performSettingsRestart);
         var autoUpdateWebToggle = document.getElementById("auto-update-web-toggle") as HTMLInputElement | null;
         if (autoUpdateWebToggle) autoUpdateWebToggle.addEventListener("change", function() {
           toggleAutoUpdate("web", autoUpdateWebToggle!.checked);

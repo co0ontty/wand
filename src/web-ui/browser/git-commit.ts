@@ -1060,9 +1060,9 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                     '<span class="settings-value" id="settings-latest-version">-</span>' +
                   '</div>' +
                   '<div class="settings-update-actions">' +
-                    '<button id="check-update-button" class="btn btn-secondary btn-sm">检查更新</button>' +
-                    '<button id="do-update-button" class="btn btn-primary btn-sm hidden">更新到最新版</button>' +
-                    '<button id="do-restart-button" class="btn btn-success btn-sm hidden">重启生效</button>' +
+                    '<button type="button" id="check-update-button" class="btn btn-secondary btn-sm">检查更新</button>' +
+                    '<button type="button" id="do-update-button" class="btn btn-primary btn-sm hidden">更新到最新版</button>' +
+                    '<button type="button" id="do-restart-button" class="btn btn-success btn-sm hidden">重启生效</button>' +
                   '</div>' +
                   '<p id="update-message" class="hint hidden"></p>' +
                   '<div class="settings-toggle-row">' +
