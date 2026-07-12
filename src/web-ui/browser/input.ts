@@ -2301,6 +2301,8 @@ import { getSessionStatusLabel } from "./session-ui";
 
       export function deleteSession(id) {
         var item = document.querySelector('.session-item[data-session-id="' + id + '"]');
+        var session = state.sessions.find(function(candidate: any) { return candidate.id === id; });
+        var providerSessionId = session && session.claudeSessionId;
         if (item) {
           item.classList.add("deleting");
         }
@@ -2314,6 +2316,14 @@ import { getSessionStatusLabel } from "./session-ui";
               if (state.selectedId === id) {
                 state.selectedId = null;
                 persistSelectedId();
+              }
+              if (providerSessionId) {
+                state.claudeHistory = state.claudeHistory.filter(function(history: any) {
+                  return history.claudeSessionId !== providerSessionId;
+                });
+                state.codexHistory = state.codexHistory.filter(function(history: any) {
+                  return history.claudeSessionId !== providerSessionId;
+                });
               }
               return refreshAll();
             })

@@ -68,6 +68,8 @@ jobs:
 
       - name: Build DMG
         working-directory: macos
+        env:
+          WAND_BUILD_STAMP: ${{ steps.version.outputs.build_stamp }}
         run: |
           chmod +x build.sh
           chmod +x scripts/generate-icons.swift

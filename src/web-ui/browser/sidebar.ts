@@ -356,6 +356,10 @@ document.addEventListener("click", function(event) {
         var sessionIds = getSelectedSessionIds();
         var historyIds = getSelectedClaudeHistoryIds();
         var codexIds = getSelectedCodexHistoryIds();
+        var managedProviderIds = state.sessions
+          .filter(function(session: any) { return sessionIds.indexOf(session.id) !== -1; })
+          .map(function(session: any) { return session.claudeSessionId; })
+          .filter(Boolean);
         var total = sessionIds.length + historyIds.length + codexIds.length;
         if (!total) return;
         confirmDelete('确认删除所选 ' + total + ' 项吗？此操作无法撤销。', {
@@ -396,10 +400,12 @@ document.addEventListener("click", function(event) {
                 persistSelectedId();
               }
               state.claudeHistory = state.claudeHistory.filter(function(session: any) {
-                return historyIds.indexOf(session.claudeSessionId) === -1;
+                return historyIds.indexOf(session.claudeSessionId) === -1
+                  && managedProviderIds.indexOf(session.claudeSessionId) === -1;
               });
               state.codexHistory = state.codexHistory.filter(function(session: any) {
-                return codexIds.indexOf(session.claudeSessionId) === -1;
+                return codexIds.indexOf(session.claudeSessionId) === -1
+                  && managedProviderIds.indexOf(session.claudeSessionId) === -1;
               });
               clearManageSelections();
               return refreshAll();

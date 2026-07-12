@@ -3630,6 +3630,11 @@
     var sessionIds = getSelectedSessionIds();
     var historyIds = getSelectedClaudeHistoryIds();
     var codexIds = getSelectedCodexHistoryIds();
+    var managedProviderIds = state.sessions.filter(function(session) {
+      return sessionIds.indexOf(session.id) !== -1;
+    }).map(function(session) {
+      return session.claudeSessionId;
+    }).filter(Boolean);
     var total = sessionIds.length + historyIds.length + codexIds.length;
     if (!total) return;
     confirmDelete("\u786E\u8BA4\u5220\u9664\u6240\u9009 " + total + " \u9879\u5417\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002", {
@@ -3673,10 +3678,10 @@
           persistSelectedId();
         }
         state.claudeHistory = state.claudeHistory.filter(function(session) {
-          return historyIds.indexOf(session.claudeSessionId) === -1;
+          return historyIds.indexOf(session.claudeSessionId) === -1 && managedProviderIds.indexOf(session.claudeSessionId) === -1;
         });
         state.codexHistory = state.codexHistory.filter(function(session) {
-          return codexIds.indexOf(session.claudeSessionId) === -1;
+          return codexIds.indexOf(session.claudeSessionId) === -1 && managedProviderIds.indexOf(session.claudeSessionId) === -1;
         });
         clearManageSelections();
         return refreshAll();
@@ -11048,6 +11053,10 @@
   }
   function deleteSession(id) {
     var item = document.querySelector('.session-item[data-session-id="' + id + '"]');
+    var session = state.sessions.find(function(candidate) {
+      return candidate.id === id;
+    });
+    var providerSessionId = session && session.claudeSessionId;
     if (item) {
       item.classList.add("deleting");
     }
@@ -11061,6 +11070,14 @@
         if (state.selectedId === id) {
           state.selectedId = null;
           persistSelectedId();
+        }
+        if (providerSessionId) {
+          state.claudeHistory = state.claudeHistory.filter(function(history2) {
+            return history2.claudeSessionId !== providerSessionId;
+          });
+          state.codexHistory = state.codexHistory.filter(function(history2) {
+            return history2.claudeSessionId !== providerSessionId;
+          });
         }
         return refreshAll();
       }).catch(function() {

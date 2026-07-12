@@ -103,6 +103,28 @@ function saveHiddenClaudeSessionIds(storage: WandStorage, ids: Set<string>): voi
   storage.setConfigValue("hidden_claude_session_ids", JSON.stringify(Array.from(ids)));
 }
 
+function addToHiddenClaudeSessionIds(storage: Pick<WandStorage, "getConfigValue" | "setConfigValue">, ids: string[]): void {
+  if (ids.length === 0) return;
+  const raw = storage.getConfigValue("hidden_claude_session_ids");
+  let hidden: Set<string>;
+  try {
+    const parsed = raw ? JSON.parse(raw) as unknown : [];
+    hidden = new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []);
+  } catch {
+    hidden = new Set();
+  }
+  let changed = false;
+  for (const id of ids) {
+    if (!hidden.has(id)) {
+      hidden.add(id);
+      changed = true;
+    }
+  }
+  if (changed) {
+    storage.setConfigValue("hidden_claude_session_ids", JSON.stringify(Array.from(hidden)));
+  }
+}
+
 function removeFromHiddenClaudeSessionIds(storage: WandStorage, ids: string[]): void {
   if (ids.length === 0) return;
   const hidden = getHiddenClaudeSessionIds(storage);
@@ -117,6 +139,59 @@ function removeFromHiddenClaudeSessionIds(storage: WandStorage, ids: string[]): 
 
 function getSessionById(processes: ProcessManager, structured: StructuredSessionManager, id: string) {
   return structured.get(id) ?? processes.get(id);
+}
+
+type SessionDeletionProcesses = Pick<
+  ProcessManager,
+  "get" | "delete" | "deleteClaudeHistoryFiles" | "deleteCodexHistoryFiles"
+>;
+
+type SessionDeletionStructured = Pick<StructuredSessionManager, "get" | "delete">;
+
+/**
+ * A Wand-managed session and its provider-native history represent the same
+ * conversation. Delete both in one operation so the native history cannot
+ * immediately reappear as a "non-Wand" session after the Wand row is removed.
+ */
+export function deleteSessionWithProviderHistory(
+  processes: SessionDeletionProcesses,
+  structured: SessionDeletionStructured,
+  storage: Pick<WandStorage, "getConfigValue" | "setConfigValue">,
+  id: string,
+): void {
+  const snapshot = structured.get(id) ?? processes.get(id);
+
+  if (snapshot && (snapshot.sessionKind ?? "pty") === "structured") {
+    structured.delete(id);
+  } else {
+    processes.delete(id);
+  }
+
+  const providerSessionId = snapshot?.claudeSessionId?.trim();
+  if (!snapshot || !providerSessionId) return;
+
+  const provider = snapshot.provider
+    ?? snapshot.structuredState?.provider
+    ?? (/^codex\b/i.test(snapshot.command.trim())
+      ? "codex"
+      : /^opencode\b/i.test(snapshot.command.trim())
+        ? "opencode"
+        : "claude");
+
+  if (provider === "claude") {
+    processes.deleteClaudeHistoryFiles([{
+      claudeSessionId: providerSessionId,
+      cwd: snapshot.cwd,
+    }]);
+  } else if (provider === "codex") {
+    processes.deleteCodexHistoryFiles([providerSessionId]);
+  } else {
+    return;
+  }
+
+  // History deletion is intentionally best-effort at the filesystem layer.
+  // Keep a tombstone as a fallback for permission errors or process tail writes.
+  addToHiddenClaudeSessionIds(storage, [providerSessionId]);
 }
 
 /** Lightweight session list — omits output and messages to reduce payload. */
@@ -772,11 +847,7 @@ export function registerSessionRoutes(
 
     for (const sessionId of sessionIds) {
       try {
-        if (structured.get(sessionId)) {
-          structured.delete(sessionId);
-        } else {
-          processes.delete(sessionId);
-        }
+        deleteSessionWithProviderHistory(processes, structured, storage, sessionId);
         deleted += 1;
       } catch {
         failed.push(sessionId);
@@ -1115,11 +1186,7 @@ export function registerSessionRoutes(
 
   app.delete("/api/sessions/:id", (req, res) => {
     try {
-      if (structured.get(req.params.id)) {
-        structured.delete(req.params.id);
-      } else {
-        processes.delete(req.params.id);
-      }
+      deleteSessionWithProviderHistory(processes, structured, storage, req.params.id);
       res.json({ ok: true });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法删除会话。") });

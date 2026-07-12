@@ -68,7 +68,7 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug \
-            -PAPP_VERSION_NAME=${{ steps.version.outputs.version }}
+            -PAPP_VERSION_NAME="${{ steps.version.outputs.asset_version }}"
 
       - name: Rename APK
         run: |

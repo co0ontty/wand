@@ -70,8 +70,45 @@ jobs:
           echo "build_stamp=$BUILD_STAMP" >> "$GITHUB_OUTPUT"
           echo "asset_version=$ASSET_VERSION" >> "$GITHUB_OUTPUT"
 
+      # 先编译新增的协议测试 target，避免 IPA 构建绕过 WandTests。
+      # target + simulator SDK 路径即使镜像没有 runtime 也能完成编译/链接；
+      # 资源目录与协议测试无关，排除它以避免 actool 强制要求 runtime。
+      - name: Build iOS tests
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -project Wand.xcodeproj \
+            -target WandTests \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            EXCLUDED_SOURCE_FILE_NAMES=Assets.xcassets \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Run iOS tests when a simulator is available
+        working-directory: ios
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/{print $2; exit}')"
+          if [[ -z "$DEVICE_ID" ]]; then
+            echo "No available iPhone simulator runtime; WandTests were compiled but cannot run on this image."
+            exit 0
+          fi
+          xcrun simctl boot "$DEVICE_ID" 2>/dev/null || true
+          xcodebuild \
+            -project Wand.xcodeproj \
+            -scheme Wand \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath build/test-dd \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            test
+
       - name: Build unsigned IPA
         working-directory: ios
+        env:
+          WAND_BUILD_STAMP: ${{ steps.version.outputs.build_stamp }}
         run: |
           chmod +x build.sh
           chmod +x scripts/generate-icons.swift
