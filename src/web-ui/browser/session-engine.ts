@@ -2251,6 +2251,43 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       // moved to state.state.lastFocusedElement
       // moved to state.state.focusTrapHandler
 
+      function applyNewSessionDefaults(config) {
+        if (!config || typeof config !== "object") return;
+        state.config = config;
+        var tool = config.defaultProvider === "codex" ? "codex" : "claude";
+        state.sessionTool = tool;
+        state.preferredCommand = tool;
+        state.sessionCreateKind = config.defaultSessionKind === "pty" ? "pty" : "structured";
+        state.modeValue = getSafeModeForTool(tool, config.defaultMode || "default");
+      }
+
+      var _newSessionPreferenceWrite = Promise.resolve();
+
+      export function persistNewSessionDefaults(fields) {
+        if (!fields || typeof fields !== "object") return Promise.resolve();
+        _newSessionPreferenceWrite = _newSessionPreferenceWrite
+          .catch(function() {})
+          .then(function() {
+            return fetch("/api/settings/config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify(fields)
+            });
+          })
+          .then(function(res) {
+            return res.json().then(function(data) {
+              if (!res.ok || data.error) throw new Error(data.error || "保存新建会话偏好失败");
+              if (data.config) state.config = data.config;
+              return data;
+            });
+          })
+          .catch(function(error) {
+            console.warn("[wand] Failed to persist new-session defaults", error);
+          });
+        return _newSessionPreferenceWrite;
+      }
+
       export function openSessionModal() {
         // Close settings modal first if open (mutual exclusion)
         closeSettingsModal();
@@ -2264,12 +2301,27 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           modal.classList.remove("closing");
           modal.classList.remove("hidden");
           state.lastFocusedElement = document.activeElement;
-          state.sessionTool = getPreferredTool();
+          state.sessionTool = state.config && state.config.defaultProvider === "codex" ? "codex" : "claude";
           state.preferredCommand = state.sessionTool;
-          state.sessionCreateKind = "structured";
+          state.sessionCreateKind = state.config && state.config.defaultSessionKind === "pty" ? "pty" : "structured";
           state.sessionCreateWorktree = false;
-          state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
+          state.modeValue = getSafeModeForTool(
+            state.sessionTool,
+            state.config && state.config.defaultMode ? state.config.defaultMode : "default"
+          );
           syncSessionModalUI();
+          // 页面可能长期打开；每次进入新建页都重新读取服务端，接收其它客户端
+          // 最近保存的 provider / 会话类型 / 模式，而不是沿用启动时缓存。
+          _newSessionPreferenceWrite.then(function() {
+            return fetch("/api/config", { credentials: "same-origin" });
+          })
+            .then(function(res) { return res.ok ? res.json() : null; })
+            .then(function(config) {
+              if (!config || !state.modalOpen) return;
+              applyNewSessionDefaults(config);
+              syncSessionModalUI();
+            })
+            .catch(function() {});
           loadRecentPathBubbles();
           setTimeout(function() {
             var modeCardsEl = document.getElementById("mode-cards");
@@ -4028,6 +4080,13 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var defaultCwd = getEffectiveCwd();
         var cwd = (cwdEl ? cwdEl.value.trim() : "") || defaultCwd;
         var selectedMode = getSafeModeForTool(command, state.modeValue);
+
+        // 最终选择再整体写一次，避免用户点选后立刻创建时零散请求乱序。
+        persistNewSessionDefaults({
+          defaultProvider: command,
+          defaultSessionKind: sessionKind,
+          defaultMode: selectedMode
+        });
 
         if (sessionKind === "structured") {
           startStructuredSessionFromModal(cwd, selectedMode, worktreeEnabled, errorEl);

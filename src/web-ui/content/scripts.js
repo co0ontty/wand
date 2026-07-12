@@ -6906,6 +6906,10 @@
         state.sessionTool = provider;
         state.preferredCommand = provider;
         syncSessionModalUI();
+        persistNewSessionDefaults({
+          defaultProvider: provider,
+          defaultMode: state.modeValue
+        });
       }
     });
     var kindCardsEl = document.getElementById("session-kind-cards");
@@ -6916,6 +6920,7 @@
       if (kind) {
         state.sessionCreateKind = kind;
         syncSessionModalUI();
+        persistNewSessionDefaults({ defaultSessionKind: kind });
       }
     });
     var modeCardsEl = document.getElementById("mode-cards");
@@ -6926,6 +6931,7 @@
       if (mode) {
         state.modeValue = mode;
         syncSessionModalUI();
+        persistNewSessionDefaults({ defaultMode: state.modeValue });
       }
     });
     var worktreeToggleEl = document.getElementById("session-worktree-toggle");
@@ -16286,6 +16292,37 @@
       menu.style.right = parentRect.right - (vw - margin) + "px";
     }
   }
+  function applyNewSessionDefaults(config) {
+    if (!config || typeof config !== "object") return;
+    state.config = config;
+    var tool = config.defaultProvider === "codex" ? "codex" : "claude";
+    state.sessionTool = tool;
+    state.preferredCommand = tool;
+    state.sessionCreateKind = config.defaultSessionKind === "pty" ? "pty" : "structured";
+    state.modeValue = getSafeModeForTool(tool, config.defaultMode || "default");
+  }
+  var _newSessionPreferenceWrite = Promise.resolve();
+  function persistNewSessionDefaults(fields) {
+    if (!fields || typeof fields !== "object") return Promise.resolve();
+    _newSessionPreferenceWrite = _newSessionPreferenceWrite.catch(function() {
+    }).then(function() {
+      return fetch("/api/settings/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(fields)
+      });
+    }).then(function(res) {
+      return res.json().then(function(data) {
+        if (!res.ok || data.error) throw new Error(data.error || "\u4FDD\u5B58\u65B0\u5EFA\u4F1A\u8BDD\u504F\u597D\u5931\u8D25");
+        if (data.config) state.config = data.config;
+        return data;
+      });
+    }).catch(function(error) {
+      console.warn("[wand] Failed to persist new-session defaults", error);
+    });
+    return _newSessionPreferenceWrite;
+  }
   function openSessionModal() {
     closeSettingsModal();
     state.modalOpen = true;
@@ -16301,12 +16338,25 @@
       modal.classList.remove("closing");
       modal.classList.remove("hidden");
       state.lastFocusedElement = document.activeElement;
-      state.sessionTool = getPreferredTool();
+      state.sessionTool = state.config && state.config.defaultProvider === "codex" ? "codex" : "claude";
       state.preferredCommand = state.sessionTool;
-      state.sessionCreateKind = "structured";
+      state.sessionCreateKind = state.config && state.config.defaultSessionKind === "pty" ? "pty" : "structured";
       state.sessionCreateWorktree = false;
-      state.modeValue = getSafeModeForTool(state.sessionTool, state.modeValue || state.chatMode);
+      state.modeValue = getSafeModeForTool(
+        state.sessionTool,
+        state.config && state.config.defaultMode ? state.config.defaultMode : "default"
+      );
       syncSessionModalUI();
+      _newSessionPreferenceWrite.then(function() {
+        return fetch("/api/config", { credentials: "same-origin" });
+      }).then(function(res) {
+        return res.ok ? res.json() : null;
+      }).then(function(config) {
+        if (!config || !state.modalOpen) return;
+        applyNewSessionDefaults(config);
+        syncSessionModalUI();
+      }).catch(function() {
+      });
       loadRecentPathBubbles();
       setTimeout(function() {
         var modeCardsEl = document.getElementById("mode-cards");
@@ -17926,6 +17976,11 @@
     var defaultCwd = getEffectiveCwd3();
     var cwd = (cwdEl ? cwdEl.value.trim() : "") || defaultCwd;
     var selectedMode = getSafeModeForTool(command, state.modeValue);
+    persistNewSessionDefaults({
+      defaultProvider: command,
+      defaultSessionKind: sessionKind,
+      defaultMode: selectedMode
+    });
     if (sessionKind === "structured") {
       startStructuredSessionFromModal(cwd, selectedMode, worktreeEnabled, errorEl);
       return;
