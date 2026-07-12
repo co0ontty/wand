@@ -38,7 +38,8 @@ import { getCachedModels, refreshModels } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
-import { getErrorMessage, parseSessionCreationOrigin, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { parseSessionCreationOrigin, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { getErrorMessage } from "./error-utils.js";
 import {
   checkPackageUpdateAsync,
   installPackageGloballyAsync,
@@ -84,14 +85,11 @@ import {
 import {
   CommandRequest,
   DirectoryListing,
-  ExecutionMode,
   FileEntry,
   FilePreviewKind,
   FilePreviewResponse,
   GitFileStatus,
-  InputRequest,
   PathSuggestion,
-  ResizeRequest,
   SessionProvider,
   StructuredChatPersonaConfig,
   WandConfig
@@ -766,20 +764,6 @@ function resolveAppConnectOrigin(origin: string, config: WandConfig): string {
   }
 }
 
-function decodeConnectCode(code: string): { url: string; token: string } | null {
-  try {
-    const decoded = Buffer.from(code, "base64").toString("utf8");
-    const hashIdx = decoded.lastIndexOf("#");
-    if (hashIdx < 1) return null;
-    const url = decoded.substring(0, hashIdx);
-    const token = decoded.substring(hashIdx + 1);
-    if (!url.startsWith("http") || token.length < 16) return null;
-    return { url, token };
-  } catch {
-    return null;
-  }
-}
-
 interface AndroidApkAsset {
   fileName: string;
   filePath: string;
@@ -1357,8 +1341,6 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
   const requireAuth = buildRequireAuth(useHttps, storage, config);
-  const nodeModulesDir = path.join(RUNTIME_ROOT_DIR, "node_modules");
-
   app.use(express.json({ limit: "1mb" }));
   app.use(compression({ threshold: 1024 }));
   app.use((req, res, next) => {
@@ -2102,7 +2084,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
-  app.post("/api/provider-cli-updates", express.json(), async (req, res) => {
+  app.post("/api/provider-cli-updates", async (req, res) => {
     if (providerCliUpdateInFlight || updateInFlight) {
       res.status(409).json({ error: "CLI 更新正在进行中，请稍候。" });
       return;
@@ -2936,7 +2918,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     res.json({ web, apk, dmg, cli });
   });
 
-  app.post("/api/auto-update", express.json(), (req, res) => {
+  app.post("/api/auto-update", (req, res) => {
     const { web, apk, dmg, cli } = req.body as { web?: boolean; apk?: boolean; dmg?: boolean; cli?: boolean };
     if (typeof web === "boolean") {
       storage.setConfigValue("autoUpdateWeb", String(web));
@@ -2972,7 +2954,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     });
   });
 
-  app.post("/api/update-channel", express.json(), (req, res) => {
+  app.post("/api/update-channel", (req, res) => {
     const body = (req.body ?? {}) as { channel?: string };
     const channel = body.channel === "beta" ? "beta" : "stable";
     storage.setConfigValue("updateChannel", channel);

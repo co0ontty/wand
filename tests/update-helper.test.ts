@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -17,6 +17,7 @@ import {
 
 interface Fixture {
   root: string;
+  globalCliPath: string;
   eventsPath: string;
   logPath: string;
   scriptPath: string;
@@ -46,13 +47,14 @@ function createFixture(parentPid: number, installFails = false): Fixture {
   makeExecutable(path.join(fakeBin, "npm"), `#!/usr/bin/env bash
 set -euo pipefail
 if [ "\${1:-}" = "root" ] && [ "\${2:-}" = "-g" ]; then
-  printf '%s\\n' '${globalRoot}'
+  printf '%s\\n' "\${WAND_TEST_SHELL_NPM_ROOT:-${globalRoot}}"
   exit 0
 fi
 exit 64
 `);
 
-  writeFileSync(path.join(globalCliDir, "cli.js"), `
+  const globalCliPath = path.join(globalCliDir, "cli.js");
+  writeFileSync(globalCliPath, `
 const fs = require("node:fs");
 fs.appendFileSync(process.env.WAND_TEST_EVENTS, "cli:" + process.argv.slice(2).join(" ") + "\\n");
 `, "utf8");
@@ -65,6 +67,7 @@ export async function installPackageGloballyAsync(spec, timeoutMs, log) {
   if (process.env.WAND_TEST_INSTALL_FAIL === "1") {
     throw new Error("stub install failure");
   }
+  return process.env.WAND_TEST_INSTALLED_CLI;
 }
 `, "utf8");
 
@@ -73,6 +76,7 @@ export async function installPackageGloballyAsync(spec, timeoutMs, log) {
     PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
     WAND_TEST_EVENTS: eventsPath,
     WAND_TEST_INSTALL_FAIL: installFails ? "1" : "0",
+    WAND_TEST_INSTALLED_CLI: globalCliPath,
   };
   const opts: DetachedUpdateOptions = {
     installSpec: "@co0ontty/wand@latest",
@@ -83,7 +87,7 @@ export async function installPackageGloballyAsync(spec, timeoutMs, log) {
     env,
     timeoutMs: 30_000,
   };
-  return { root, eventsPath, logPath, scriptPath, updateUtilsPath, opts };
+  return { root, globalCliPath, eventsPath, logPath, scriptPath, updateUtilsPath, opts };
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -227,11 +231,11 @@ test("helper uses the shared installer and keeps the parent alive when install f
   const script = readFileSync(fixture.scriptPath, "utf8");
   assert.match(script, /^set -euo pipefail$/m);
   assert.match(script, /installPackageGloballyAsync/);
-  assert.doesNotMatch(script, /npm uninstall|npm install|--force|systemctl|launchctl|service:install/);
+  assert.doesNotMatch(script, /npm root -g|npm uninstall|npm install|--force|systemctl|launchctl|service:install/);
 
   const log = readFileSync(fixture.logPath, "utf8");
   assert.match(log, /stub install failure/);
-  assert.match(log, /install failed; keeping parent service online/);
+  assert.match(log, /install or CLI resolution failed; keeping parent service online/);
   assert.match(log, /parent service was left running/);
   assert.deepEqual(readFileSync(fixture.eventsPath, "utf8").trim().split("\n"), [
     "install:@co0ontty/wand@latest:30000",
@@ -300,6 +304,38 @@ test("standalone helper initializes, terminates the parent, then starts the glob
   assert.match(events[1] ?? "", /^cli:init -c /);
   assert.equal(events[2], "parent:term");
   assert.match(events[3] ?? "", /^cli:web -c /);
+  assert.equal(isAlive(parent), false);
+});
+
+test("helper uses the CLI returned by the installer when shell npm points to another Node installation", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("bash helper is not supported on Windows");
+    return;
+  }
+  const fixture = createFixture(process.pid);
+  fixture.opts.env.WAND_TEST_SHELL_NPM_ROOT = path.join(fixture.root, "wrong-homebrew-global-root");
+  const parent = await spawnParent(fixture.root, fixture.eventsPath);
+  fixture.opts.parentPid = parent.pid!;
+  t.after(() => {
+    if (isAlive(parent)) parent.kill("SIGKILL");
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  const code = await runScript(fixture, null);
+  assert.equal(code, 0);
+  await waitFor(() => {
+    try {
+      return readFileSync(fixture.eventsPath, "utf8").includes("cli:web");
+    } catch {
+      return false;
+    }
+  });
+
+  const log = readFileSync(fixture.logPath, "utf8");
+  assert.match(log, /install completed/);
+  assert.match(log, /resolved global CLI:/);
+  assert.match(log, new RegExp(realpathSync(fixture.globalCliPath).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(log, /wrong-homebrew-global-root/);
   assert.equal(isAlive(parent), false);
 });
 

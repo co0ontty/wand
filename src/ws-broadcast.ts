@@ -4,7 +4,6 @@
  */
 
 import { WebSocketServer, WebSocket } from "ws";
-import { EventEmitter } from "node:events";
 import type { CardExpandDefaults, SessionSnapshot, ProcessEvent } from "./types.js";
 import { readSessionCookie, validateSession } from "./auth.js";
 import { blockWindowMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
@@ -58,7 +57,6 @@ export class WsBroadcastManager {
   private wss: WebSocketServer;
   private clients = new Set<WsClient>();
   private outputDebounceCache = new Map<string, { event: ProcessEvent; timer: NodeJS.Timeout }>();
-  private eventEmitter = new EventEmitter();
   private heartbeatTimer?: NodeJS.Timeout;
 
   private getCardDefaults: () => CardExpandDefaults;

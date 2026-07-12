@@ -10,7 +10,7 @@ import { prepareSessionWorktree } from "./git-worktree.js";
 import { SessionLogger } from "./session-logger.js";
 import { WandStorage } from "./storage.js";
 import {
-  CardExpandDefaults, ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
+  CardExpandDefaults, ContentBlock, ConversationTurn, EscalationScope,
   ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, StructuredSessionState,
   SubagentMeta, ToolUseBlock, WandConfig,
 } from "./types.js";
@@ -25,7 +25,6 @@ import { resolveSessionCwd } from "./session-cwd.js";
 interface CreateStructuredSessionOptions {
   cwd: string;
   mode: ExecutionMode;
-  prompt?: string;
   provider?: SessionProvider;
   runner?: SessionRunner;
   worktreeEnabled?: boolean;
@@ -1028,7 +1027,6 @@ export class StructuredSessionManager {
   createSession(options: CreateStructuredSessionOptions): SessionSnapshot {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
-    const prompt = options.prompt?.trim();
     const provider: SessionProvider = options.provider === "codex" || options.provider === "opencode" ? options.provider : "claude";
     const runner = options.runner ?? defaultStructuredRunner(provider);
     const baseCwd = resolveSessionCwd(options.cwd, this.config.defaultCwd);
@@ -3317,8 +3315,6 @@ export class StructuredSessionManager {
       killedForAskUserQuestion,
       sessionId: turnState.sessionId,
     });
-
-    const interruptedByUser = this.interruptedWith.has(sessionId);
 
     const msgs = this.buildCompletedAssistantMessages(current, turnState);
 

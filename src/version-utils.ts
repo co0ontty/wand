@@ -22,10 +22,8 @@ export function extractSemver(text: string): string | null {
 export function compareSemver(a: string, b: string): number {
   const pa = parseSemverLike(a);
   const pb = parseSemverLike(b);
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa.mainParts[i] || 0) - (pb.mainParts[i] || 0);
-    if (diff !== 0) return diff;
-  }
+  const mainOrder = compareMainParts(pa.mainParts, pb.mainParts);
+  if (mainOrder !== 0) return mainOrder;
   // Main version equal — apply semver prerelease rule: no prerelease > with prerelease.
   if (!pa.pre && pb.pre) return 1;
   if (pa.pre && !pb.pre) return -1;
@@ -76,12 +74,18 @@ function comparePrereleaseSegments(preA: string, preB: string): number {
 export function compareApkInstallOrder(a: string, b: string): number {
   const pa = parseSemverLike(a);
   const pb = parseSemverLike(b);
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa.mainParts[i] || 0) - (pb.mainParts[i] || 0);
-    if (diff !== 0) return diff;
-  }
+  const mainOrder = compareMainParts(pa.mainParts, pb.mainParts);
+  if (mainOrder !== 0) return mainOrder;
   if (pa.isDebug !== pb.isDebug) return pa.isDebug ? 1 : -1;
   if (pa.isDebug && pb.isDebug) return comparePrereleaseSegments(pa.pre, pb.pre);
+  return 0;
+}
+
+function compareMainParts(a: number[], b: number[]): number {
+  for (let i = 0; i < 3; i++) {
+    const diff = (a[i] || 0) - (b[i] || 0);
+    if (diff !== 0) return diff;
+  }
   return 0;
 }
 

@@ -33,10 +33,6 @@ function getCertificatePaths(configDir: string): CertificatePaths {
   };
 }
 
-function certificatesExist(paths: CertificatePaths): boolean {
-  return existsSync(paths.keyPath) && existsSync(paths.certPath);
-}
-
 function readPair(keyPath: string, certPath: string): { key: Buffer; cert: Buffer } | null {
   try {
     if (!existsSync(keyPath) || !existsSync(certPath)) return null;

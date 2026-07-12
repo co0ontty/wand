@@ -6988,19 +6988,27 @@
       stroke-dashoffset: calc(97.39 * (1 - var(--progress, 0)));
       transition: stroke-dashoffset 0.35s ease;
     }
+    /* A short orbiting arc communicates that the current step is still active.
+       The determinate ring underneath stays fixed, so completion remains readable. */
     .todo-progress-ring::after {
       content: "";
       position: absolute;
-      width: 4px;
-      height: 4px;
+      inset: -1px;
       border-radius: 50%;
-      background: var(--accent);
-      opacity: 0.6;
-      animation: ringPulse 1.4s ease-in-out infinite;
+      border: 1.5px solid transparent;
+      border-top-color: var(--accent);
+      border-right-color: rgba(var(--accent-rgb, 197, 101, 61), 0.35);
+      animation: todoProgressSpin 0.9s linear infinite;
+      pointer-events: none;
     }
-    @keyframes ringPulse {
-      0%, 100% { opacity: 0.35; transform: scale(0.85); }
-      50%      { opacity: 0.95; transform: scale(1.05); }
+    @keyframes todoProgressSpin {
+      to { transform: rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html:not(.is-wand-app) .todo-progress-ring::after {
+        animation: none;
+        transform: rotate(45deg);
+      }
     }
     .todo-progress-counter {
       font-size: 0.75rem;

@@ -1,4 +1,4 @@
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import type { Express, NextFunction, Request, Response } from "express";
@@ -23,9 +23,7 @@ export function registerUploadRoutes(app: Express, processes: ProcessManager): v
         return;
       }
       const uploadDir = path.join(cwd, ".wand-uploads");
-      if (!existsSync(uploadDir)) {
-        mkdirSync(uploadDir, { recursive: true });
-      }
+      mkdirSync(uploadDir, { recursive: true });
       cb(null, uploadDir);
     },
     filename(_req, file, cb) {

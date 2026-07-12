@@ -1,4 +1,4 @@
-import express, { Express } from "express";
+import type { Express } from "express";
 
 import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
@@ -19,7 +19,6 @@ import {
 } from "./git-quick-commit.js";
 
 import { getErrorMessage } from "./error-utils.js";
-export { getErrorMessage };
 
 export function parseSessionCreationOrigin(
   body: { sessionSource?: unknown; automationId?: unknown } | null | undefined,
@@ -120,11 +119,6 @@ function getSessionById(processes: ProcessManager, structured: StructuredSession
   return structured.get(id) ?? processes.get(id);
 }
 
-function listAllSessions(processes: ProcessManager, structured: StructuredSessionManager) {
-  return [...structured.list(), ...processes.list()]
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-}
-
 /** Lightweight session list — omits output and messages to reduce payload. */
 function listAllSessionsSlim(processes: ProcessManager, structured: StructuredSessionManager) {
   return [...structured.listSlim(), ...processes.listSlim()]
@@ -143,7 +137,6 @@ function requireWorktreeSession(snapshot: SessionSnapshot | null): SessionSnapsh
 
 function buildWorktreeMergeInfo(
   current: SessionSnapshot,
-  status: SessionSnapshot["worktreeMergeStatus"],
   info: SessionSnapshot["worktreeMergeInfo"]
 ): SessionSnapshot["worktreeMergeInfo"] {
   return {
@@ -160,7 +153,7 @@ function saveWorktreeMergeState(
   status: SessionSnapshot["worktreeMergeStatus"],
   info: SessionSnapshot["worktreeMergeInfo"]
 ): SessionSnapshot {
-  const mergedInfo = buildWorktreeMergeInfo(current, status, info);
+  const mergedInfo = buildWorktreeMergeInfo(current, info);
   const updated: SessionSnapshot = {
     ...current,
     worktreeMergeStatus: status,
@@ -171,14 +164,7 @@ function saveWorktreeMergeState(
 }
 
 function getWorktreeMergeResponseStatus(error: unknown): number {
-  const code = getWorktreeMergeErrorCode(error);
-  if (!code) {
-    return 400;
-  }
-  if (code === "WORKTREE_MERGE_CONFLICT") {
-    return 409;
-  }
-  return 400;
+  return getWorktreeMergeErrorCode(error) === "WORKTREE_MERGE_CONFLICT" ? 409 : 400;
 }
 
 function getWorktreeMergePayload(error: unknown, fallback: string) {
@@ -313,7 +299,7 @@ export function registerSessionRoutes(
     res.json(all);
   });
 
-  app.post("/api/structured-sessions", express.json(), async (req, res) => {
+  app.post("/api/structured-sessions", async (req, res) => {
     const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown };
     try {
       if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode") {
@@ -348,7 +334,7 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/sessions/:id/model", express.json(), (req, res) => {
+  app.post("/api/sessions/:id/model", (req, res) => {
     const body = req.body as { model?: string | null };
     const rawModel = typeof body?.model === "string" ? body.model.trim() : null;
     const id = req.params.id;
@@ -373,7 +359,7 @@ export function registerSessionRoutes(
 
   // 思考深度切换：与 /model 路由对称。结构化会话立即影响下一条 prompt（CLI/SDK 各自接入
   // --effort / thinking budget），PTY 会话通过 /effort 更新当前 Claude 进程。
-  app.post("/api/sessions/:id/thinking-effort", express.json(), (req, res) => {
+  app.post("/api/sessions/:id/thinking-effort", (req, res) => {
     const body = req.body as { thinkingEffort?: string | null };
     const raw = typeof body?.thinkingEffort === "string" ? body.thinkingEffort : null;
     const id = req.params.id;
@@ -397,7 +383,7 @@ export function registerSessionRoutes(
   // 执行模式切换：与 /model、/thinking-effort 路由对称。结构化会话立即影响下一条
   // prompt（权限策略 / 系统提示 / CLI flag 都按 session.mode 逐轮重新派生）；PTY 会话
   // 仅更新 wand 自身的权限自动放行判定，已启动的 claude 进程命令行 flag 不变。codex 锁 full-access。
-  app.post("/api/sessions/:id/mode", express.json(), (req, res) => {
+  app.post("/api/sessions/:id/mode", (req, res) => {
     const body = req.body as { mode?: string };
     const raw = typeof body?.mode === "string" ? body.mode.trim() : "";
     if (!raw) {
@@ -435,7 +421,7 @@ export function registerSessionRoutes(
     res.json({ id: snapshot.id, messages: snapshot.messages ?? [] });
   });
 
-  app.post("/api/structured-sessions/:id/messages", express.json(), async (req, res) => {
+  app.post("/api/structured-sessions/:id/messages", async (req, res) => {
     const input = String(req.body?.input ?? "");
     const interrupt = !!req.body?.interrupt;
     // preserveQueue: 仅在 interrupt 路径有意义。排队条「立即」会带这个 flag，
@@ -458,7 +444,7 @@ export function registerSessionRoutes(
   // ── Structured queued-messages management ──
   // 这些端点构成"排队消息条"的后端操作面：reorder、立即发送、单条删除、全部清空。
   // 全部走乐观更新模型，失败时前端会回滚到上一次 WS 推送的 queuedMessages。
-  app.patch("/api/structured-sessions/:id/queued", express.json(), (req, res) => {
+  app.patch("/api/structured-sessions/:id/queued", (req, res) => {
     const rawOrder = req.body?.order;
     if (!Array.isArray(rawOrder)) {
       res.status(400).json({ error: "缺少 order 数组。" });
@@ -486,7 +472,7 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/structured-sessions/:id/queued/:index/promote", express.json(), async (req, res) => {
+  app.post("/api/structured-sessions/:id/queued/:index/promote", async (req, res) => {
     const index = Number(req.params.index);
     if (!Number.isInteger(index)) {
       res.status(400).json({ error: "下标无效。" });
@@ -570,7 +556,7 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/sessions/:id/worktree/merge", express.json(), (req, res) => {
+  app.post("/api/sessions/:id/worktree/merge", (req, res) => {
     try {
       const current = requireWorktreeSession(getLatestSessionSnapshot(processes, structured, storage, req.params.id));
       if (!isMergeActionAllowed(current)) {
@@ -630,7 +616,7 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/sessions/:id/quick-commit", express.json(), async (req, res) => {
+  app.post("/api/sessions/:id/quick-commit", async (req, res) => {
     const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
@@ -665,7 +651,7 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/sessions/:id/generate-commit-message", express.json(), async (req, res) => {
+  app.post("/api/sessions/:id/generate-commit-message", async (req, res) => {
     const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
@@ -690,7 +676,7 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/sessions/:id/git/tag-head", express.json(), async (req, res) => {
+  app.post("/api/sessions/:id/git/tag-head", async (req, res) => {
     const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
@@ -722,7 +708,7 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/sessions/:id/git/push", express.json(), async (req, res) => {
+  app.post("/api/sessions/:id/git/push", async (req, res) => {
     const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
@@ -771,7 +757,7 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/sessions/batch-delete", express.json(), (req, res) => {
+  app.post("/api/sessions/batch-delete", (req, res) => {
     const sessionIds = Array.isArray(req.body?.sessionIds)
       ? req.body.sessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
       : [];
@@ -1001,7 +987,7 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/codex-sessions/:threadId/resume", express.json(), async (req, res) => {
+  app.post("/api/codex-sessions/:threadId/resume", async (req, res) => {
     const threadId = String(req.params.threadId || "").trim();
     const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean; sessionSource?: unknown; automationId?: unknown };
     try {
@@ -1201,7 +1187,7 @@ export function registerClaudeHistoryRoutes(app: Express, processes: ProcessMana
     }
   });
 
-  app.post("/api/claude-history/batch-delete", express.json(), (req, res) => {
+  app.post("/api/claude-history/batch-delete", (req, res) => {
     const claudeSessionIds = Array.isArray(req.body?.claudeSessionIds)
       ? req.body.claudeSessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
       : [];
@@ -1289,7 +1275,7 @@ export function registerClaudeHistoryRoutes(app: Express, processes: ProcessMana
     res.json({ ok: true });
   });
 
-  app.post("/api/codex-history/batch-delete", express.json(), (req, res) => {
+  app.post("/api/codex-history/batch-delete", (req, res) => {
     const threadIds = Array.isArray(req.body?.claudeSessionIds)
       ? req.body.claudeSessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
       : [];

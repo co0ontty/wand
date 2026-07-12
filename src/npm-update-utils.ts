@@ -457,11 +457,12 @@ function validateGlobalWandInstall(): { ok: true; packageDir: string } | { ok: f
   return { ok: true, packageDir };
 }
 
-function assertGlobalWandInstallComplete(): void {
+function assertGlobalWandInstallComplete(): string {
   const result = validateGlobalWandInstall();
   if (!result.ok) {
     throw new Error(result.message);
   }
+  return path.join(result.packageDir, "dist", "cli.js");
 }
 
 interface GlobalInstallBackup {
@@ -719,12 +720,13 @@ function releaseGlobalUpdateLock(lock: GlobalUpdateLock): void {
  * @param pkg 包名带版本，例如 `@co0ontty/wand@latest`
  * @param timeoutMs 单次 npm 调用超时
  * @param log 可选 logger，用来把过程写入控制台或前端日志
+ * @returns 与本次安装使用同一个 npm root 校验出的 dist/cli.js 绝对路径
  */
 export async function installPackageGloballyAsync(
   pkg: string,
   timeoutMs: number,
   log?: (line: string) => void,
-): Promise<void> {
+): Promise<string> {
   const note = (line: string) => {
     if (log) log(line);
   };
@@ -741,9 +743,9 @@ export async function installPackageGloballyAsync(
 
     try {
       await npmInstallGlobalAsync(pkg, timeoutMs);
-      assertGlobalWandInstallComplete();
+      const installedCli = assertGlobalWandInstallComplete();
       success = true;
-      return;
+      return installedCli;
     } catch (error) {
       const msg = getErrorMessage(error);
       if (!isRecoverableInstallError(msg)) {
@@ -756,9 +758,9 @@ export async function installPackageGloballyAsync(
         cleanupNpmLeftovers();
         try {
           await npmInstallGlobalAsync(pkg, timeoutMs);
-          assertGlobalWandInstallComplete();
+          const installedCli = assertGlobalWandInstallComplete();
           success = true;
-          return;
+          return installedCli;
         } catch (retryError) {
           const retryMsg = getErrorMessage(retryError);
           if (!isRecoverableInstallError(retryMsg)) {
@@ -779,8 +781,9 @@ export async function installPackageGloballyAsync(
     }
     cleanupNpmLeftovers();
     await npmInstallGlobalAsync(pkg, timeoutMs, ["--force"]);
-    assertGlobalWandInstallComplete();
+    const installedCli = assertGlobalWandInstallComplete();
     success = true;
+    return installedCli;
   } finally {
     try {
       let restored = false;

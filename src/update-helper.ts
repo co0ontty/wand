@@ -243,6 +243,7 @@ SERVICE_SCOPE=${shellQuote(serviceScope ?? "")}
 TIMEOUT_MS=${timeoutMs}
 NODE_BIN=${shellQuote(process.execPath)}
 UPDATE_UTILS=${shellQuote(updateUtilsPath)}
+GLOBAL_CLI_PATH_FILE=${shellQuote(`${logPath}.cli-path`)}
 WORKING_DIRECTORY=${shellQuote(opts.cwd)}
 CLI_ARGS=(${shellArray(opts.cliArgs)})
 GLOBAL_CLI=""
@@ -255,6 +256,7 @@ run() {
 
 on_exit() {
   local status="$?"
+  rm -f "$GLOBAL_CLI_PATH_FILE" 2>/dev/null || true
   if [ "$status" -ne 0 ]; then
     if [ "$PARENT_EXITED" = "0" ]; then
       echo "[wand-update] failed with exit code $status; parent service was left running"
@@ -278,22 +280,13 @@ wait_for_parent_exit() {
   done
 }
 
-resolve_global_cli() {
-  local npm_root
-  npm_root="$(npm root -g)"
-  GLOBAL_CLI="$npm_root/@co0ontty/wand/dist/cli.js"
-  if [ ! -f "$GLOBAL_CLI" ]; then
-    echo "[wand-update] global CLI not found after install: $GLOBAL_CLI"
-    return 1
-  fi
-}
-
 main() {
   echo "[wand-update] installing while parent service stays online"
-  if run "$NODE_BIN" ${nodeLoaderCommand}--input-type=module - "$UPDATE_UTILS" "$INSTALL_SPEC" "$TIMEOUT_MS" <<'WAND_INSTALL_NODE'
+  if run "$NODE_BIN" ${nodeLoaderCommand}--input-type=module - "$UPDATE_UTILS" "$INSTALL_SPEC" "$TIMEOUT_MS" "$GLOBAL_CLI_PATH_FILE" <<'WAND_INSTALL_NODE'
+import { realpathSync, statSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const [modulePath, installSpec, timeoutValue] = process.argv.slice(2);
+const [modulePath, installSpec, timeoutValue, cliPathFile] = process.argv.slice(2);
 const timeoutMs = Number(timeoutValue);
 const updateUtils = await import(pathToFileURL(modulePath).href);
 const installPackageGloballyAsync = updateUtils.installPackageGloballyAsync
@@ -301,19 +294,37 @@ const installPackageGloballyAsync = updateUtils.installPackageGloballyAsync
 if (typeof installPackageGloballyAsync !== "function") {
   throw new Error("installPackageGloballyAsync is unavailable in " + modulePath);
 }
-await installPackageGloballyAsync(installSpec, timeoutMs, (line) => {
+const installedCli = await installPackageGloballyAsync(installSpec, timeoutMs, (line) => {
   process.stdout.write(String(line) + "\\n");
 });
+if (typeof installedCli !== "string" || installedCli.trim().length === 0) {
+  throw new Error("installer did not return the installed Wand CLI path");
+}
+const resolvedCli = realpathSync(installedCli.trim());
+if (!statSync(resolvedCli).isFile()) {
+  throw new Error("installed Wand CLI is not a file: " + resolvedCli);
+}
+writeFileSync(cliPathFile, resolvedCli, { encoding: "utf8", mode: 0o600 });
 WAND_INSTALL_NODE
   then
     echo "[wand-update] install completed"
   else
     local install_status="$?"
-    echo "[wand-update] install failed; keeping parent service online"
+    echo "[wand-update] install or CLI resolution failed; keeping parent service online"
     return "$install_status"
   fi
 
-  resolve_global_cli
+  if [ ! -f "$GLOBAL_CLI_PATH_FILE" ]; then
+    echo "[wand-update] installer did not persist the global CLI path"
+    return 1
+  fi
+  GLOBAL_CLI="$(<"$GLOBAL_CLI_PATH_FILE")"
+  rm -f "$GLOBAL_CLI_PATH_FILE"
+  if [ ! -f "$GLOBAL_CLI" ]; then
+    echo "[wand-update] global CLI not found after install: $GLOBAL_CLI"
+    return 1
+  fi
+  echo "[wand-update] resolved global CLI: $GLOBAL_CLI"
   echo "[wand-update] initializing updated installation"
   run "$NODE_BIN" "$GLOBAL_CLI" init -c "$CONFIG_PATH"
 
@@ -415,8 +426,11 @@ function spawnDetached(
   }
 
   if (process.platform === "darwin") {
-    const nohupPath = existsSync("/usr/bin/nohup") ? "/usr/bin/nohup" : "nohup";
-    const result = trySpawn(nohupPath, [resolveBashPath(), scriptPath], "nohup");
+    // `detached: true` already creates an independent process group. Wrapping the
+    // helper in /usr/bin/nohup breaks when Wand itself is a launchd daemon:
+    // nohup exits immediately because it cannot adopt a Background session, while
+    // spawn() has already returned a PID and the API falsely reports success.
+    const result = trySpawn(resolveBashPath(), [scriptPath], "bash detached");
     if (result) return result;
   }
 

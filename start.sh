@@ -463,10 +463,14 @@ case "$ACTION" in
 esac
 
 PACKAGE_VERSION="$("$NODE_BIN" -e 'process.stdout.write(require("./package.json").version)' 2>/dev/null)"
+# 兼容曾经使用的 -dev.YYYYMMDDHHMM，以及现在与 Android 对齐的
+# -debug.tMMDDHHMM（npm semver 不允许纯数字段带前导零）；脚本退出时始终恢复
+# 纯正式版本，避免把临时版本留在工作区。
 RESTORE_VERSION="${PACKAGE_VERSION%%-dev.*}"
+RESTORE_VERSION="${RESTORE_VERSION%%-debug.*}"
 BASE_VERSION="$(latest_tag_version)"
 [[ -n "$BASE_VERSION" ]] || BASE_VERSION="$RESTORE_VERSION"
-DEV_VERSION="${BASE_VERSION}-dev.$(date +%Y%m%d%H%M)"
+DEV_VERSION="${BASE_VERSION}-debug.t$(date +%m%d%H%M)"
 PACK_DIR=""
 
 restore_version() {

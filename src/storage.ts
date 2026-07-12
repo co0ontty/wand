@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SessionSnapshot, WandConfig, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo } from "./types.js";
+import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo } from "./types.js";
 import {
   DEFAULT_PASSWORD_VAULT_ID,
   DEFAULT_PASSWORD_VAULT_NAME,
@@ -763,20 +763,6 @@ export class WandStorage {
 
   private mapSessionRow(row: SessionRow): SessionSnapshot {
     return mapSessionCore(row);
-  }
-
-  updateSessionWorktreeMergeState(id: string, status: SessionSnapshot["worktreeMergeStatus"], info: SessionSnapshot["worktreeMergeInfo"]): SessionSnapshot | null {
-    const current = this.getSession(id);
-    if (!current) {
-      return null;
-    }
-    const updated: SessionSnapshot = {
-      ...current,
-      worktreeMergeStatus: status,
-      worktreeMergeInfo: info,
-    };
-    this.saveSessionMetadata(updated);
-    return updated;
   }
 
   deleteSession(id: string): void {

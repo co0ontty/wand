@@ -113,22 +113,6 @@ export function removeSocketFile(configPath: string): void {
   }
 }
 
-/** 读取 pidfile 并校验进程是否还活着。Stale 文件会自动清理。 */
-export function readLiveInstance(configPath: string): PidInfo | null {
-  const info = readPidfile(configPath);
-  if (!info) return null;
-  if (info.pid === process.pid) return null; // 自身（防御性）
-  if (!isPidAlive(info.pid)) {
-    // stale，顺手清理
-    removePidfile(configPath);
-    removeSocketFile(configPath);
-    return null;
-  }
-  // 进程活着但 socket 不在 → 多半是异常崩溃后被某种监控拉起。视为不可用。
-  if (info.socket && !existsSync(info.socket)) return null;
-  return info;
-}
-
 function applyConfigDirOwnership(filePath: string, configPath: string, mode: number): void {
   try {
     const owner = statSync(path.dirname(configPath));

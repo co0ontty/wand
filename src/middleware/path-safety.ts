@@ -12,10 +12,7 @@ const BLOCKED_FOLDER_PATHS = ["/etc", "/root", "/boot"] as const;
 
 /** Check if targetPath is inside any blocked system folder. */
 export function isBlockedFolderPath(targetPath: string): boolean {
-  return BLOCKED_FOLDER_PATHS.some((blockedPath) => {
-    const relativePath = path.relative(blockedPath, targetPath);
-    return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
-  });
+  return BLOCKED_FOLDER_PATHS.some((blockedPath) => isPathWithinBase(targetPath, blockedPath));
 }
 
 /** Expand shell-style home shortcuts accepted by the UI. */

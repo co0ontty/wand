@@ -30,12 +30,6 @@ function resolveProviderFromCommand(command: string): SessionProvider {
 
 export type { ProcessEvent, ProcessEventHandler } from "./types.js";
 
-/** Human-readable task information for the UI */
-export interface TaskInfo {
-  title: string;
-  tool?: string;
-}
-
 export class SessionInputError extends Error {
   constructor(
     message: string,
@@ -85,12 +79,6 @@ interface SessionRecord extends SessionSnapshot {
   childProcess: ChildProcess | null;
   /** PTY bridge for parsing output and emitting events */
   ptyBridge: ClaudePtyBridge | null;
-  /** Current task title displayed in the UI (derived from tool_use blocks) */
-  currentTask: TaskInfo | null;
-  /** Debounce timer for task events */
-  taskDebounceTimer: NodeJS.Timeout | null;
-  /** Last emitted task title to avoid duplicate events */
-  lastEmittedTask: string | null;
   /** Current PTY dimensions, last applied by resize(). */
   ptyCols: number;
   ptyRows: number;
@@ -734,20 +722,7 @@ const MAX_SESSIONS = 200;
 const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
 const CONFIRM_WINDOW_SIZE = 800;
 
-// Claude 会话 ID 格式：UUID v4
-const CLAUDE_SESSION_ID_PATTERN = /"session_id"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function listClaudeTaskIds(): string[] {
-  const tasksDir = path.join(os.homedir(), ".claude", "tasks");
-  try {
-    return readdirSync(tasksDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && UUID_V4_PATTERN.test(entry.name))
-      .map((entry) => entry.name);
-  } catch {
-    return [];
-  }
-}
 
 function getClaudeProjectDir(cwd: string): string {
   // Claude Code encodes the project dir by replacing every non-alphanumeric
@@ -756,25 +731,6 @@ function getClaudeProjectDir(cwd: string): string {
   // directory Claude never wrote to, so the session ID is never discovered.
   const normalized = path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, "-");
   return path.join(os.homedir(), ".claude", "projects", normalized);
-}
-
-
-function getLatestClaudeTaskId(excludeIds: Set<string>): string | null {
-  const tasksDir = path.join(os.homedir(), ".claude", "tasks");
-  try {
-    const candidates = readdirSync(tasksDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && UUID_V4_PATTERN.test(entry.name) && !excludeIds.has(entry.name))
-      .map((entry) => {
-        const fullPath = path.join(tasksDir, entry.name);
-        const stats = statSync(fullPath);
-        return { id: entry.name, mtimeMs: stats.mtimeMs };
-      })
-      .sort((a, b) => b.mtimeMs - a.mtimeMs);
-
-    return candidates[0]?.id ?? null;
-  } catch {
-    return null;
-  }
 }
 
 /** Derive a short summary for a session from user messages or current task. */
@@ -811,7 +767,7 @@ function recoverMessagesFromSnapshot(snapshot: SessionSnapshot): ConversationTur
   return snapshot.messages ?? [];
 }
 
-function deriveSessionSummary(messages: ConversationTurn[], currentTaskTitle: string | null): string | undefined {
+function deriveSessionSummary(messages: ConversationTurn[]): string | undefined {
   // Prefer first user message as summary
   for (const msg of messages) {
     if (msg.role !== "user") continue;
@@ -822,7 +778,6 @@ function deriveSessionSummary(messages: ConversationTurn[], currentTaskTitle: st
     }
     break;
   }
-  if (currentTaskTitle) return currentTaskTitle.slice(0, 120);
   return undefined;
 }
 
@@ -918,9 +873,6 @@ export class ProcessManager extends EventEmitter {
           messages: snapshot.messages ?? [],
           childProcess: null,
           ptyBridge: null,
-          currentTask: null,
-          taskDebounceTimer: null,
-          lastEmittedTask: null,
           knownClaudeTaskIds: undefined,
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
@@ -963,9 +915,6 @@ export class ProcessManager extends EventEmitter {
           messages: snapshot.messages ?? [],
           childProcess: null,
           ptyBridge: null,
-          currentTask: null,
-          taskDebounceTimer: null,
-          lastEmittedTask: null,
           knownClaudeTaskIds: undefined,
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
@@ -987,7 +936,7 @@ export class ProcessManager extends EventEmitter {
     this.archiveTimer.unref?.();
   }
 
-  on(event: "process", listener: ProcessEventHandler): this {
+  on(_event: "process", listener: ProcessEventHandler): this {
     return super.on("process", listener);
   }
 
@@ -1139,9 +1088,6 @@ export class ProcessManager extends EventEmitter {
       messages: priorMessages,
       childProcess: null,
       ptyBridge: null,
-      currentTask: null,
-      taskDebounceTimer: null,
-      lastEmittedTask: null,
       knownClaudeTaskIds: knownClaudeTaskIds ?? undefined,
       claudeTaskDiscoveryTimer: null,
       knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
@@ -1162,7 +1108,6 @@ export class ProcessManager extends EventEmitter {
         sessionId: id,
         isClaudeCommand: true,
         autoApprove: record.autoApprovePermissions,
-        approvalPolicy: record.approvalPolicy,
         initialMessages: priorMessages,
       });
       record.ptyBridge.on("event", (event: SessionEvent) => {
@@ -1687,36 +1632,6 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
-  /** Emit a task event for a session, debounced to avoid flooding */
-  private emitTask(record: SessionRecord, task: TaskInfo | null): void {
-    // Clear existing debounce timer
-    if (record.taskDebounceTimer) {
-      clearTimeout(record.taskDebounceTimer);
-      record.taskDebounceTimer = null;
-    }
-
-    // Don't re-emit the same task
-    if (task && task.title === record.lastEmittedTask) return;
-
-    if (task === null) {
-      // Clear task after a delay — allows a brief display of "idle" state
-      record.taskDebounceTimer = setTimeout(() => {
-        record.currentTask = null;
-        record.lastEmittedTask = null;
-        this.emitEvent({ type: "task", sessionId: record.id, data: null });
-      }, 2000);
-      return;
-    }
-
-    // Debounce task changes by 100ms to avoid flickering on rapid tool switches
-    record.taskDebounceTimer = setTimeout(() => {
-      record.taskDebounceTimer = null;
-      record.currentTask = task;
-      record.lastEmittedTask = task.title;
-      this.emitEvent({ type: "task", sessionId: record.id, data: task });
-    }, 100);
-  }
-
   resize(id: string, cols: number, rows: number): SessionSnapshot {
     const record = this.mustGet(id);
     if (!record.ptyProcess || record.status !== "running") {
@@ -1748,11 +1663,6 @@ export class ProcessManager extends EventEmitter {
       return this.snapshot(record);
     }
 
-    // Clear any pending task debounce timer
-    if (record.taskDebounceTimer) {
-      clearTimeout(record.taskDebounceTimer);
-      record.taskDebounceTimer = null;
-    }
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
       record.claudeTaskDiscoveryTimer = null;
@@ -1798,10 +1708,6 @@ export class ProcessManager extends EventEmitter {
   }
 
   private cleanupRecord(record: SessionRecord): void {
-    if (record.taskDebounceTimer) {
-      clearTimeout(record.taskDebounceTimer);
-      record.taskDebounceTimer = null;
-    }
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
       record.claudeTaskDiscoveryTimer = null;
@@ -1840,10 +1746,6 @@ export class ProcessManager extends EventEmitter {
     const record = this.mustGet(id);
 
     // Always clear pending timers
-    if (record.taskDebounceTimer) {
-      clearTimeout(record.taskDebounceTimer);
-      record.taskDebounceTimer = null;
-    }
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
       record.claudeTaskDiscoveryTimer = null;
@@ -1969,10 +1871,9 @@ export class ProcessManager extends EventEmitter {
       autoRecovered: record.autoRecovered ?? false,
       autoApprovePermissions: record.autoApprovePermissions || undefined,
       approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined,
-      summary: record.description ?? deriveSessionSummary(messages, record.currentTask?.title ?? null),
+      summary: record.description ?? deriveSessionSummary(messages),
       title: record.title,
       description: record.description,
-      currentTaskTitle: record.status === "running" ? record.currentTask?.title ?? undefined : undefined,
       selectedModel: record.selectedModel ?? null,
       thinkingEffort: record.thinkingEffort ?? null,
       ptyCols: record.ptyCols,

@@ -9,7 +9,6 @@
 
 import { EventEmitter } from "node:events";
 import type {
-  ApprovalPolicy,
   ConversationTurn,
   EscalationScope,
   SessionEvent,
@@ -17,7 +16,6 @@ import type {
   ChatTurnData,
   PermissionPromptData,
   SessionIdData,
-  TaskData,
   SessionEndData,
   RawOutputData,
 } from "./types.js";
@@ -104,8 +102,6 @@ export interface ClaudePtyBridgeOptions {
   isClaudeCommand?: boolean;
   /** Whether to auto-approve permission prompts */
   autoApprove?: boolean;
-  /** Approval policy for permission handling */
-  approvalPolicy?: ApprovalPolicy;
   /** PTY write function for sending approval input */
   ptyWrite?: (input: string) => void;
 }
@@ -120,7 +116,6 @@ export interface ClaudePtyBridgeOptions {
  * - "permission.prompt" - Permission request detected
  * - "permission.resolved" - Permission resolved
  * - "session.id" - Claude session ID captured
- * - "task" - Task info update
  * - "ended" - Session ended
  */
 export class ClaudePtyBridge extends EventEmitter {
@@ -140,15 +135,9 @@ export class ClaudePtyBridge extends EventEmitter {
   private sessionIdWindow: string;
   private claudeSessionId: string | null = null;
 
-  // Task tracking
-  private currentTask: TaskData | null = null;
-  private taskDebounceTimer: NodeJS.Timeout | null = null;
-  private lastEmittedTask: string | null = null;
-
   // Options
   private isClaudeCommand: boolean;
   private autoApprove: boolean;
-  private approvalPolicy: ApprovalPolicy;
   private ptyWrite: ((input: string) => void) | null;
 
   /** Set to true once onExit() has been called; guards against post-exit method calls */
@@ -175,7 +164,6 @@ export class ClaudePtyBridge extends EventEmitter {
     this.rawOutput = options.initialOutput ?? "";
     this.isClaudeCommand = options.isClaudeCommand ?? false;
     this.autoApprove = options.autoApprove ?? false;
-    this.approvalPolicy = options.approvalPolicy ?? "ask-every-time";
     this.ptyWrite = options.ptyWrite ?? null;
 
     this.chatState = {
@@ -311,12 +299,6 @@ export class ClaudePtyBridge extends EventEmitter {
       this.finalizeResponse();
     }
 
-    // Clear task debounce timer
-    if (this.taskDebounceTimer) {
-      clearTimeout(this.taskDebounceTimer);
-      this.taskDebounceTimer = null;
-    }
-
     // Flush pending chat emit
     if (this.chatEmitTimer) {
       clearTimeout(this.chatEmitTimer);
@@ -359,10 +341,6 @@ export class ClaudePtyBridge extends EventEmitter {
 
   getPermissionState(): PermissionState {
     return this.permissionState;
-  }
-
-  getCurrentTask(): TaskData | null {
-    return this.currentTask;
   }
 
   /**
@@ -580,11 +558,9 @@ export class ClaudePtyBridge extends EventEmitter {
     if (!blocked && !this.permissionState.isBlocked && this.autoApprove) {
       const { score, matched } = scorePermissionLikelihood(normalized);
       if (score >= FALLBACK_SCORE_THRESHOLD) {
-        const target = this.extractPermissionTarget(normalized);
-        const scope = this.inferScope(normalized, target);
         const lines = normalized.split("\n");
         const tailText = lines.slice(-8).join("\n");
-        this.scheduleFallbackAutoApprove(scope, target, { score, matched, text: tailText });
+        this.scheduleFallbackAutoApprove({ score, matched, text: tailText });
         return;
       }
     }
@@ -596,7 +572,7 @@ export class ClaudePtyBridge extends EventEmitter {
         if (prompt !== this.permissionState.lastPrompt) {
           // New permission prompt while already blocked — update and re-process
           const target = this.extractPermissionTarget(normalized);
-          const scope = this.inferScope(normalized, target);
+          const scope = this.inferScope(normalized);
           this.permissionState.lastPrompt = prompt;
           this.permissionState.lastScope = scope;
           this.permissionState.lastTarget = target ?? null;
@@ -622,7 +598,7 @@ export class ClaudePtyBridge extends EventEmitter {
     if (blocked) {
       const prompt = this.extractPromptText(normalized);
       const target = this.extractPermissionTarget(normalized);
-      const scope = this.inferScope(normalized, target);
+      const scope = this.inferScope(normalized);
 
       this.permissionState.lastPrompt = prompt;
       this.permissionState.lastScope = scope;
@@ -712,11 +688,7 @@ export class ClaudePtyBridge extends EventEmitter {
    * Schedule a fallback auto-approve with false-positive verification.
    * Similar to scheduleAutoApprove but sets up post-approve monitoring.
    */
-  private scheduleFallbackAutoApprove(
-    scope: EscalationScope,
-    target: string | undefined,
-    context: { score: number; matched: string[]; text: string }
-  ): void {
+  private scheduleFallbackAutoApprove(context: { score: number; matched: string[]; text: string }): void {
     const now = Date.now();
     if (now - this.permissionState.lastAutoConfirmAt < 500) return;
     if (this.permissionState.pendingAutoApproveTimer) return;
@@ -857,7 +829,7 @@ export class ClaudePtyBridge extends EventEmitter {
     return match?.[1]?.trim();
   }
 
-  private inferScope(normalized: string, target?: string): EscalationScope {
+  private inferScope(normalized: string): EscalationScope {
     const lower = normalized.toLowerCase();
     if (lower.includes("write") || lower.includes("redirection") || lower.includes("output redirection")) {
       return "write_file";
