@@ -156,9 +156,10 @@ export var state: AppState = {
       return {
         claude: localStorage.getItem("wand-chat-model-claude") || legacy,
         codex: localStorage.getItem("wand-chat-model-codex") || "",
+        opencode: localStorage.getItem("wand-chat-model-opencode") || "",
       };
     } catch (e) {
-      return { claude: "", codex: "" };
+      return { claude: "", codex: "", opencode: "" };
     }
   })(),
   chatModel: (function() {
@@ -172,6 +173,7 @@ export var state: AppState = {
   })(),
   availableModels: [],
   availableCodexModels: [],
+  availableOpenCodeModels: [],
   modelsRefreshing: false,
   sessionCreateKind: "structured",
   sessionCreateWorktree: false,

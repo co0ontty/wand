@@ -64,7 +64,11 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
 
         var infoItems = "";
         if (hasClaudeId) {
-          var historyIdLabel = session.provider === "codex" ? "复制 Codex thread ID" : "复制 Claude 会话 ID";
+          var historyIdLabel = session.provider === "codex"
+            ? "复制 Codex thread ID"
+            : session.provider === "opencode"
+              ? "复制 OpenCode session ID"
+              : "复制 Claude 会话 ID";
           infoItems += '<button class="topbar-more-item" data-action="copy-claude-session-id" type="button" role="menuitem">' + cloudIconSvg + '<span>' + historyIdLabel + '</span></button>';
         }
         if (hasCwd) {
@@ -1086,6 +1090,33 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                     '</label>' +
                   '</div>' +
                 '</div>' +
+                '<div class="settings-update-section" id="provider-cli-update-section">' +
+                  '<div class="settings-section-head">' +
+                    '<span class="settings-section-icon">' + iconSvg("terminal", { size: 18, strokeWidth: 1.7 }) + '</span>' +
+                    '<div class="settings-section-head-text">' +
+                      '<h4 class="settings-section-heading">开发 CLI</h4>' +
+                      '<p class="settings-section-sub">Claude Code、Codex 与 OpenCode 的服务端版本</p>' +
+                    '</div>' +
+                  '</div>' +
+                  '<div class="settings-about-row"><span class="settings-label">Claude Code</span><span class="settings-value" id="provider-cli-status-claude">检测中…</span></div>' +
+                  '<div class="settings-about-row"><span class="settings-label">Codex</span><span class="settings-value" id="provider-cli-status-codex">检测中…</span></div>' +
+                  '<div class="settings-about-row"><span class="settings-label">OpenCode</span><span class="settings-value" id="provider-cli-status-opencode">检测中…</span></div>' +
+                  '<div class="settings-update-actions">' +
+                    '<button type="button" id="check-provider-cli-updates" class="btn btn-secondary btn-sm">检查更新</button>' +
+                    '<button type="button" id="update-provider-clis" class="btn btn-primary btn-sm hidden">快速更新</button>' +
+                  '</div>' +
+                  '<p id="provider-cli-update-message" class="hint hidden"></p>' +
+                  '<div class="settings-toggle-row">' +
+                    '<div class="settings-toggle-text">' +
+                      '<span class="settings-toggle-title">自动更新 CLI</span>' +
+                      '<span class="settings-toggle-desc">服务端每 30 分钟检查一次，并调用各 CLI 官方 updater 更新到最新版。</span>' +
+                    '</div>' +
+                    '<label class="settings-switch">' +
+                      '<input type="checkbox" id="auto-update-cli-toggle" class="switch-toggle">' +
+                      '<span class="switch-slider"></span>' +
+                    '</label>' +
+                  '</div>' +
+                '</div>' +
                 '<div class="settings-update-section hidden" id="android-apk-section">' +
                   '<div class="settings-section-head">' +
                     '<span class="settings-section-icon">' + iconSvg("smartphone", { size: 18, strokeWidth: 1.7 }) + '</span>' +
@@ -1336,7 +1367,7 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                 '<div class="settings-toggle-row">' +
                   '<div class="settings-toggle-text">' +
                     '<label class="settings-toggle-title" for="cfg-inherit-env">继承环境变量</label>' +
-                    '<span class="settings-toggle-desc">启动 PTY / 结构化子进程时，把当前服务进程的环境变量传给 claude / codex。关闭后子进程仅获得最小可用环境（PATH/HOME/SHELL/LANG/TERM 等），可用于隔离 API key 等敏感凭据。</span>' +
+                    '<span class="settings-toggle-desc">启动 PTY / 结构化子进程时，把当前服务进程的环境变量传给 claude / codex / opencode。关闭后子进程仅获得最小可用环境（PATH/HOME/SHELL/LANG/TERM 等），可用于隔离 API key 等敏感凭据。</span>' +
                   '</div>' +
                   '<div class="settings-toggle-aside">' +
                     '<button type="button" id="cfg-view-env-btn" class="btn btn-secondary btn-sm" title="查看实际会注入到子进程的环境变量">查看</button>' +
@@ -1355,7 +1386,7 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                         '<p class="settings-model-card-desc">从已检测列表中选择，或直接输入自定义模型名称 / ID。</p>' +
                       '</div>' +
                     '</div>' +
-                    '<button type="button" id="cfg-default-model-refresh" class="btn btn-secondary btn-sm settings-model-refresh" title="重新检测 Claude 与 Codex 模型">' +
+                    '<button type="button" id="cfg-default-model-refresh" class="btn btn-secondary btn-sm settings-model-refresh" title="重新检测 Claude、Codex 与 OpenCode 模型">' +
                       '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>' +
                       '<span>刷新列表</span>' +
                     '</button>' +
@@ -1399,6 +1430,25 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                         '<span class="settings-model-help">留空则不传模型参数</span>' +
                       '</div>' +
                     '</div>' +
+                    '<div class="field settings-model-field">' +
+                      '<div class="settings-model-label-row">' +
+                        '<label class="field-label" for="cfg-default-opencode-model">OpenCode</label>' +
+                        '<span class="settings-model-provider">OpenCode CLI</span>' +
+                      '</div>' +
+                      '<div class="model-combobox" data-provider="opencode">' +
+                        '<div class="model-combobox-control">' +
+                          '<input id="cfg-default-opencode-model" class="field-input model-combobox-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cfg-default-opencode-model-listbox" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="跟随 OpenCode 默认" />' +
+                          '<button type="button" class="model-combobox-toggle" aria-label="展开 OpenCode 模型列表">' +
+                            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>' +
+                          '</button>' +
+                        '</div>' +
+                        '<div id="cfg-default-opencode-model-listbox" class="model-combobox-menu hidden" role="listbox" aria-label="OpenCode 模型"></div>' +
+                      '</div>' +
+                      '<div class="settings-model-meta">' +
+                        '<span class="settings-model-status" data-model-status="opencode">跟随 CLI 默认</span>' +
+                        '<span class="settings-model-help">格式为 provider/model</span>' +
+                      '</div>' +
+                    '</div>' +
                   '</div>' +
                   '<p class="field-hint settings-model-version" id="cfg-default-model-version">模型名称仅在新建会话时作为默认值；运行中的结构化会话仍可单独切换。</p>' +
                 '</section>' +
@@ -1425,6 +1475,7 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                       '<select id="cfg-commit-cli" class="field-input">' +
                         '<option value="claude">Claude</option>' +
                         '<option value="codex">Codex</option>' +
+                        '<option value="opencode">OpenCode</option>' +
                       '</select>' +
                       '<div class="settings-model-meta">' +
                         '<span class="settings-model-status">生成 commit message 与 tag</span>' +

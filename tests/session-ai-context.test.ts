@@ -7,6 +7,7 @@ import type { SessionSnapshot } from "../src/types.js";
 const config = {
   defaultModel: "claude-sonnet-4-6",
   defaultCodexModel: "gpt-5.5-codex",
+  defaultOpenCodeModel: "anthropic/claude-sonnet-4-6",
   defaultThinkingEffort: "deep" as const,
   inheritEnv: true,
   commitCli: "claude" as const,
@@ -42,6 +43,18 @@ test("resolveSessionProvider recognizes legacy Codex session representations", (
   } })), "codex");
   assert.equal(resolveSessionProvider(session({ provider: undefined, runner: "codex-cli-exec" })), "codex");
   assert.equal(resolveSessionProvider(session({ provider: undefined, command: "codex exec --json" })), "codex");
+});
+
+test("resolveSessionProvider recognizes OpenCode session representations", () => {
+  assert.equal(resolveSessionProvider(session({ provider: "opencode" })), "opencode");
+  assert.equal(resolveSessionProvider(session({ provider: undefined, runner: "opencode-cli-run" })), "opencode");
+  assert.equal(resolveSessionProvider(session({ provider: undefined, command: "opencode run --format json" })), "opencode");
+});
+
+test("resolveSessionAiContext uses the OpenCode default model", () => {
+  const context = resolveSessionAiContext(session({ provider: "opencode", command: "opencode" }), config);
+  assert.equal(context.provider, "opencode");
+  assert.equal(context.model, "anthropic/claude-sonnet-4-6");
 });
 
 test("resolveSessionAiContext keeps provider-specific model and effort", () => {

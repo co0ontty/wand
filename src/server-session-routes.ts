@@ -316,18 +316,18 @@ export function registerSessionRoutes(
   app.post("/api/structured-sessions", express.json(), async (req, res) => {
     const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown };
     try {
-      if (body.provider && body.provider !== "claude" && body.provider !== "codex") {
-        res.status(400).json({ error: "结构化会话当前仅支持 Claude 或 Codex provider。" });
+      if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode") {
+        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex 或 OpenCode provider。" });
         return;
       }
-      const provider = body.provider === "codex" ? "codex" : "claude";
+      const provider: SessionProvider = body.provider === "codex" || body.provider === "opencode" ? body.provider : "claude";
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
       const snapshot = structured.createSession({
         cwd: resolveSessionCwd(body.cwd, config.defaultCwd),
         mode: normalizeMode(body.mode, defaultMode),
         provider,
-        runner: body.runner ?? (provider === "codex" ? "codex-cli-exec" : "claude-cli-print"),
+        runner: body.runner ?? (provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : "claude-cli-print"),
         worktreeEnabled: body.worktreeEnabled === true,
         model: rawModel || getDefaultModelForProvider(config, provider) || undefined,
         thinkingEffort: typeof body.thinkingEffort === "string"

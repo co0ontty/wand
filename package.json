@@ -1,7 +1,7 @@
 {
   "name": "@co0ontty/wand",
   "version": "1.43.2",
-  "description": "A web terminal for local CLI tools like Claude.",
+  "description": "A web console for Claude Code, Codex, OpenCode, and other local CLI tools.",
   "type": "module",
   "bin": {
     "wand": "dist/cli.js"

@@ -20,10 +20,16 @@ const CODEX_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "default", label: "GPT-5.5 · gpt-5.5（Codex 默认）", alias: true },
 ];
 
+const OPENCODE_FALLBACK_MODELS: ClaudeModelInfo[] = [
+  { id: "default", label: "跟随 OpenCode 默认", alias: true },
+];
+
 interface ModelCache {
   models: ClaudeModelInfo[];
   codexModels: ClaudeModelInfo[];
+  opencodeModels: ClaudeModelInfo[];
   claudeVersion: string | null;
+  opencodeVersion: string | null;
   refreshedAt: string;
 }
 
@@ -61,6 +67,35 @@ async function probeCodexModels(): Promise<ClaudeModelInfo[]> {
   } catch {
     return CODEX_FALLBACK_MODELS.map((m) => ({ ...m }));
   }
+}
+
+async function probeOpenCode(): Promise<{ models: ClaudeModelInfo[]; version: string | null }> {
+  const [modelsResult, versionResult] = await Promise.allSettled([
+    execAsync("opencode models", { timeout: 8000 }),
+    execAsync("opencode --version", { timeout: 5000 }),
+  ]);
+  const models = modelsResult.status === "fulfilled"
+    ? parseOpenCodeModels(modelsResult.value.stdout)
+    : OPENCODE_FALLBACK_MODELS.map((m) => ({ ...m }));
+  const version = versionResult.status === "fulfilled"
+    ? extractSemver(versionResult.value.stdout) ?? (versionResult.value.stdout.trim().slice(0, 64) || null)
+    : null;
+  return { models, version };
+}
+
+/** Parse `opencode models`, whose stable machine-friendly output is one provider/model id per line. */
+export function parseOpenCodeModels(stdout: string): ClaudeModelInfo[] {
+  const ids = Array.from(new Set(
+    stdout
+      .split(/\r?\n/)
+      .map((line) => line.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "").trim())
+      .filter((line) => /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i.test(line)),
+  ));
+  if (!ids.length) return OPENCODE_FALLBACK_MODELS.map((m) => ({ ...m }));
+  return [
+    { id: "default", label: "跟随 OpenCode 默认", alias: true },
+    ...ids.map((id) => ({ id, label: id })),
+  ];
 }
 
 /** Parse the machine-readable model registry emitted by the installed Codex CLI. */
@@ -121,7 +156,9 @@ export function getCachedModels(): ModelCache {
     cache = {
       models: cloneClaudeModels(),
       codexModels: CODEX_FALLBACK_MODELS.map((m) => ({ ...m })),
+      opencodeModels: OPENCODE_FALLBACK_MODELS.map((m) => ({ ...m })),
       claudeVersion: null,
+      opencodeVersion: null,
       refreshedAt: new Date().toISOString(),
     };
   }
@@ -129,14 +166,17 @@ export function getCachedModels(): ModelCache {
 }
 
 export async function refreshModels(): Promise<ModelCache> {
-  const [version, codexModels] = await Promise.all([
+  const [version, codexModels, opencode] = await Promise.all([
     probeClaudeVersion(),
     probeCodexModels(),
+    probeOpenCode(),
   ]);
   cache = {
     models: cloneClaudeModels(),
     codexModels,
+    opencodeModels: opencode.models,
     claudeVersion: version,
+    opencodeVersion: opencode.version,
     refreshedAt: new Date().toISOString(),
   };
   return cache;

@@ -2407,17 +2407,18 @@ import { getSessionStatusLabel } from "./session-ui";
       }
 
       export function startCommand(command, cwd, errorEl) {
-        if (command === "claude") {
+        if (command === "claude" || command === "codex" || command === "opencode") {
           state.preferredCommand = command;
           state.chatMode = getSafeModeForTool(command, state.chatMode);
         }
-        var modelPref = (command === "claude" || command === "codex") ? getChatModelForProvider(command) : "";
+        var modelPref = (command === "claude" || command === "codex" || command === "opencode") ? getChatModelForProvider(command) : "";
         return fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify(withTerminalDimensions({
             command: command,
+            provider: command === "claude" || command === "codex" || command === "opencode" ? command : undefined,
             cwd: cwd || "",
             mode: state.chatMode || state.config.defaultMode || "default",
             model: modelPref || undefined,

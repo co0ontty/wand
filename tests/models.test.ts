@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseCodexModels } from "../src/models.js";
+import { parseCodexModels, parseOpenCodeModels } from "../src/models.js";
 
 test("Codex model discovery preserves per-model reasoning levels", () => {
   const models = parseCodexModels(JSON.stringify({
@@ -45,4 +45,25 @@ test("Codex model discovery falls back when output is invalid", () => {
   const models = parseCodexModels("not json");
   assert.equal(models[0]?.id, "default");
   assert.equal(models[0]?.alias, true);
+});
+
+test("OpenCode model discovery parses provider/model lines and removes duplicates", () => {
+  const models = parseOpenCodeModels([
+    "anthropic/claude-sonnet-4-6",
+    "openai/gpt-5.4",
+    "anthropic/claude-sonnet-4-6",
+    "diagnostic noise",
+  ].join("\n"));
+
+  assert.deepEqual(models.map((model) => model.id), [
+    "default",
+    "anthropic/claude-sonnet-4-6",
+    "openai/gpt-5.4",
+  ]);
+  assert.equal(models[0]?.alias, true);
+});
+
+test("OpenCode model discovery falls back when no model ids are present", () => {
+  const models = parseOpenCodeModels("old opencode output");
+  assert.deepEqual(models.map((model) => model.id), ["default"]);
 });

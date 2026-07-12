@@ -33,6 +33,7 @@ export const PREFERENCE_KEYS = [
   "defaultCwd",
   "defaultModel",
   "defaultCodexModel",
+  "defaultOpenCodeModel",
   "commitCli",
   "commitModel",
   "defaultThinkingEffort",
@@ -78,6 +79,7 @@ export const defaultConfig = (): WandConfig => ({
   cardDefaults: defaultCardExpandDefaults(),
   defaultModel: "",
   defaultCodexModel: "",
+  defaultOpenCodeModel: "",
   commitCli: "claude",
   commitModel: "",
   defaultThinkingEffort: "off",
@@ -276,7 +278,7 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
 
   if (storage.hasPreference(preferenceStorageKey("defaultProvider"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultProvider"), defaults.defaultProvider ?? "claude");
-    if (v === "claude" || v === "codex") config.defaultProvider = v;
+    if (v === "claude" || v === "codex" || v === "opencode") config.defaultProvider = v;
   }
   if (storage.hasPreference(preferenceStorageKey("defaultSessionKind"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultSessionKind"), defaults.defaultSessionKind ?? "structured");
@@ -298,9 +300,13 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultCodexModel"), defaults.defaultCodexModel ?? "");
     if (typeof v === "string") config.defaultCodexModel = v.trim();
   }
+  if (storage.hasPreference(preferenceStorageKey("defaultOpenCodeModel"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("defaultOpenCodeModel"), defaults.defaultOpenCodeModel ?? "");
+    if (typeof v === "string") config.defaultOpenCodeModel = v.trim();
+  }
   if (storage.hasPreference(preferenceStorageKey("commitCli"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("commitCli"), defaults.commitCli ?? "claude");
-    if (v === "claude" || v === "codex") config.commitCli = v;
+    if (v === "claude" || v === "codex" || v === "opencode") config.commitCli = v;
   }
   if (storage.hasPreference(preferenceStorageKey("commitModel"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("commitModel"), defaults.commitModel ?? "");
@@ -339,7 +345,7 @@ export function writePreferenceToStorage(
   const dbKey = preferenceStorageKey(key);
   switch (key) {
     case "defaultProvider": {
-      if (value !== "claude" && value !== "codex") throw new Error(`无效 Provider: ${value}`);
+      if (value !== "claude" && value !== "codex" && value !== "opencode") throw new Error(`无效 Provider: ${value}`);
       storage.setPreference(dbKey, value);
       config.defaultProvider = value;
       break;
@@ -374,8 +380,14 @@ export function writePreferenceToStorage(
       config.defaultCodexModel = v;
       break;
     }
+    case "defaultOpenCodeModel": {
+      const v = typeof value === "string" ? value.trim() : "";
+      storage.setPreference(dbKey, v);
+      config.defaultOpenCodeModel = v;
+      break;
+    }
     case "commitCli": {
-      if (value !== "claude" && value !== "codex") throw new Error(`无效 commit CLI: ${value}`);
+      if (value !== "claude" && value !== "codex" && value !== "opencode") throw new Error(`无效 commit CLI: ${value}`);
       storage.setPreference(dbKey, value);
       config.commitCli = value;
       break;
@@ -561,11 +573,12 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
-    defaultProvider: input.defaultProvider === "codex" ? "codex" : "claude",
+    defaultProvider: input.defaultProvider === "codex" || input.defaultProvider === "opencode" ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
     defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
-    commitCli: input.commitCli === "codex" ? "codex" : "claude",
+    defaultOpenCodeModel: typeof input.defaultOpenCodeModel === "string" ? input.defaultOpenCodeModel.trim() : defaults.defaultOpenCodeModel,
+    commitCli: input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
     defaultThinkingEffort: isThinkingEffort(input.defaultThinkingEffort) ? input.defaultThinkingEffort : "off",
     structuredRunner: (input.structuredRunner === "sdk" || input.structuredRunner === "cli") ? input.structuredRunner : defaults.structuredRunner,
@@ -577,16 +590,17 @@ export function isExecutionMode(value: unknown): value is ExecutionMode {
   return value === "assist" || value === "agent" || value === "agent-max" || value === "auto-edit" || value === "default" || value === "full-access" || value === "native" || value === "managed";
 }
 
-export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel">): { claude: string; codex: string } {
+export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel">): { claude: string; codex: string; opencode: string } {
   return {
     claude: (config.defaultModel ?? "").trim(),
     codex: (config.defaultCodexModel ?? "").trim(),
+    opencode: (config.defaultOpenCodeModel ?? "").trim(),
   };
 }
 
-export function getDefaultModelForProvider(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel">, provider: "claude" | "codex" | undefined): string {
+export function getDefaultModelForProvider(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel">, provider: "claude" | "codex" | "opencode" | undefined): string {
   const defaults = getProviderDefaultModels(config);
-  return provider === "codex" ? defaults.codex : defaults.claude;
+  return provider === "codex" ? defaults.codex : provider === "opencode" ? defaults.opencode : defaults.claude;
 }
 
 export function normalizeMode(input: string | undefined, fallback: ExecutionMode): ExecutionMode {

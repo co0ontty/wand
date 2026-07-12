@@ -203,6 +203,11 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (tool === "codex") {
           return "Codex 支持 PTY 终端与结构化（JSONL）两种会话，结构化模式按 full-access 启动。";
         }
+        if (tool === "opencode") {
+          return mode === "full-access" || mode === "managed" || mode === "auto-edit"
+            ? "OpenCode 将自动批准未显式拒绝的权限；支持 TUI 与 JSON 结构化会话。"
+            : "OpenCode 使用自身权限配置；结构化模式会自动拒绝未批准的权限请求。";
+        }
         if (mode === "full-access") {
           return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
         }
@@ -222,6 +227,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (tool === "codex") {
           return ["full-access"];
         }
+        if (tool === "opencode") return ["default", "full-access", "managed"];
         return ["default", "full-access", "auto-edit", "native", "managed"];
       }
 
@@ -538,7 +544,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function getProviderKey(provider) {
-        return provider === "codex" ? "codex" : "claude";
+        return provider === "codex" || provider === "opencode" ? provider : "claude";
       }
 
       export function getProviderForSession(session) {
@@ -551,13 +557,15 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           : {};
         return {
           claude: typeof configured.claude === "string" ? configured.claude : ((state.config && state.config.defaultModel) || ""),
-          codex: typeof configured.codex === "string" ? configured.codex : ((state.config && state.config.defaultCodexModel) || "")
+          codex: typeof configured.codex === "string" ? configured.codex : ((state.config && state.config.defaultCodexModel) || ""),
+          opencode: typeof configured.opencode === "string" ? configured.opencode : ((state.config && state.config.defaultOpenCodeModel) || "")
         };
       }
 
       export function getConfigDefaultModelForProvider(provider) {
         var defaults = getConfigDefaultModels();
-        return getProviderKey(provider) === "codex" ? (defaults.codex || "") : (defaults.claude || "");
+        var key = getProviderKey(provider);
+        return key === "codex" ? (defaults.codex || "") : key === "opencode" ? (defaults.opencode || "") : (defaults.claude || "");
       }
 
       export function getChatModelForProvider(provider) {
@@ -570,7 +578,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function setChatModelForProvider(provider, model) {
         var key = getProviderKey(provider);
         var normalized = (model || "").trim();
-        if (!state.chatModels) state.chatModels = { claude: "", codex: "" };
+        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "" };
         state.chatModels[key] = normalized;
         state.chatModel = normalized;
         try {
@@ -589,6 +597,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function getModelsForCurrentProvider(session) {
         var provider = (session && session.provider) || state.sessionTool || "claude";
         if (provider === "codex") return state.availableCodexModels || [];
+        if (provider === "opencode") return state.availableOpenCodeModels || [];
         return state.availableModels || [];
       }
 
@@ -635,10 +644,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       // 标签直接用实际传给各 runner 的 effort 语义，避免把 Claude 的一次性深度提示词
       // 误解成会话级配置。
       export var THINKING_LEVELS = [
-        { id: "off",      label: "auto",   hint: "Claude CLI: auto/default · SDK 关闭 thinking · Codex 使用模型默认值" },
-        { id: "standard", label: "low",    hint: "Claude CLI: low · SDK budget 4096 · Codex low" },
-        { id: "deep",     label: "medium", hint: "Claude CLI: medium · SDK budget 16000 · Codex medium" },
-        { id: "max",      label: "max",    hint: "Claude CLI: max · SDK budget 31999 · Codex xhigh" }
+        { id: "off",      label: "auto",   hint: "使用 provider / 模型默认思考档位" },
+        { id: "standard", label: "low",    hint: "Claude/Codex: low · OpenCode variant: low" },
+        { id: "deep",     label: "medium", hint: "Claude/Codex: medium · OpenCode variant: high" },
+        { id: "max",      label: "max",    hint: "Claude: max · Codex: xhigh · OpenCode variant: max" }
       ];
 
       function codexThinkingId(effort) {
@@ -752,6 +761,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (data && Array.isArray(data.models)) {
               state.availableModels = data.models;
               state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
+              state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
               syncComposerModelSelect(getSelectedSession());
               updateSettingsDefaultModelSelect(data);
               syncCommitModelProvider(false);
@@ -779,6 +789,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (data && Array.isArray(data.models)) {
               state.availableModels = data.models;
               state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
+              state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
               syncComposerModelSelect(getSelectedSession());
               updateSettingsDefaultModelSelect(data);
               syncCommitModelProvider(false);
@@ -820,7 +831,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               '<div class="modal-header">' +
                 '<div>' +
                   '<h2 class="modal-title" id="env-preview-title">将注入子进程的环境变量</h2>' +
-                  '<p class="modal-subtitle" id="env-preview-subtitle">这些变量会被传给 claude / codex（PTY 与结构化运行器一致）。</p>' +
+                  '<p class="modal-subtitle" id="env-preview-subtitle">这些变量会被传给 claude / codex / opencode（PTY 与结构化运行器一致）。</p>' +
                 '</div>' +
                 '<button id="env-preview-close" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭">' +
                   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">' +
@@ -944,12 +955,16 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function getSettingsModelsForProvider(provider) {
-        return provider === "codex" ? (state.availableCodexModels || []) : (state.availableModels || []);
+        return provider === "codex"
+          ? (state.availableCodexModels || [])
+          : provider === "opencode"
+            ? (state.availableOpenCodeModels || [])
+            : (state.availableModels || []);
       }
 
       export function updateSettingsModelStatus(root) {
         if (!root) return;
-        var provider = root.getAttribute("data-provider") === "codex" ? "codex" : "claude";
+        var provider = getProviderKey(root.getAttribute("data-provider"));
         var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
         var field = root.closest(".settings-model-field");
         var status = field ? field.querySelector("[data-model-status]") : null;
@@ -976,7 +991,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
       export function renderSettingsModelCombobox(root) {
         if (!root) return;
-        var provider = root.getAttribute("data-provider") === "codex" ? "codex" : "claude";
+        var provider = getProviderKey(root.getAttribute("data-provider"));
         var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
         var menu = root.querySelector(".model-combobox-menu");
         if (!input || !menu) return;
@@ -1002,7 +1017,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           rows.push({ value: model.id, label: label, meta: label === model.id ? "已检测模型" : model.id, custom: false });
         }
 
-        var defaultLabel = provider === "codex" ? "跟随 Codex 默认" : "跟随 Claude Code 默认";
+        var defaultLabel = provider === "codex" ? "跟随 Codex 默认" : provider === "opencode" ? "跟随 OpenCode 默认" : "跟随 Claude Code 默认";
         var defaultMeta = defaultModel && defaultModel.label ? defaultModel.label : "不传 --model 参数";
         var html = "";
         if (!query || defaultLabel.toLowerCase().indexOf(query) !== -1 || defaultMeta.toLowerCase().indexOf(query) !== -1) {
@@ -1178,10 +1193,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var input = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
         var label = document.getElementById("cfg-commit-model-provider");
         if (!cli || !root || !input) return;
-        var provider = cli.value === "codex" ? "codex" : "claude";
+        var provider = getProviderKey(cli.value);
         root.setAttribute("data-provider", provider);
-        input.placeholder = provider === "codex" ? "跟随 Codex 默认" : "跟随 Claude Code 默认";
-        if (label) label.textContent = provider === "codex" ? "Codex CLI" : "Claude Code";
+        input.placeholder = provider === "codex" ? "跟随 Codex 默认" : provider === "opencode" ? "跟随 OpenCode 默认" : "跟随 Claude Code 默认";
+        if (label) label.textContent = provider === "codex" ? "Codex CLI" : provider === "opencode" ? "OpenCode CLI" : "Claude Code";
         if (resetModel) {
           input.value = "";
           input.dataset.modelDirty = "true";
@@ -1209,10 +1224,19 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           var codexRoot = codexInput.closest(".model-combobox");
           if (codexRoot) renderSettingsModelCombobox(codexRoot);
         }
+        var openCodeInput = document.getElementById("cfg-default-opencode-model") as HTMLInputElement | null;
+        if (openCodeInput) {
+          if (openCodeInput.dataset.modelInitialized !== "true") {
+            openCodeInput.value = (state.configDefaultModels && state.configDefaultModels.opencode) || defaults.opencode || "";
+            openCodeInput.dataset.modelInitialized = "true";
+          }
+          var openCodeRoot = openCodeInput.closest(".model-combobox");
+          if (openCodeRoot) renderSettingsModelCombobox(openCodeRoot);
+        }
         var versionEl = document.getElementById("cfg-default-model-version");
         if (versionEl && data) {
           versionEl.textContent = data.claudeVersion
-            ? "已检测到 Claude CLI " + data.claudeVersion + "；列表已同时同步 Codex 可用模型。"
+            ? "已检测到 Claude CLI " + data.claudeVersion + "；列表已同步 Codex 与 OpenCode 可用模型。"
             : "未读取到 Claude CLI 版本；仍可直接输入自定义模型名称。";
         }
       }
@@ -1294,14 +1318,14 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function createStructuredSession(prompt?, cwdOverride?, modeOverride?, worktreeEnabled?) {
-        var provider = state.sessionTool === "codex" ? "codex" : "claude";
+        var provider = getProviderKey(state.sessionTool);
         var modelPref = getChatModelForProvider(provider);
         var thinkingPref = state.chatThinking || "off";
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
           provider: provider,
-          runner: provider === "codex" ? "codex-cli-exec" : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print")),
+          runner: provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print")),
           prompt: prompt || undefined,
           worktreeEnabled: worktreeEnabled === true,
           model: modelPref || undefined,
@@ -2255,7 +2279,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       function applyNewSessionDefaults(config) {
         if (!config || typeof config !== "object") return;
         state.config = config;
-        var tool = config.defaultProvider === "codex" ? "codex" : "claude";
+        var tool = getProviderKey(config.defaultProvider);
         state.sessionTool = tool;
         state.preferredCommand = tool;
         state.sessionCreateKind = config.defaultSessionKind === "pty" ? "pty" : "structured";
@@ -2302,7 +2326,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           modal.classList.remove("closing");
           modal.classList.remove("hidden");
           state.lastFocusedElement = document.activeElement;
-          state.sessionTool = state.config && state.config.defaultProvider === "codex" ? "codex" : "claude";
+          state.sessionTool = getProviderKey(state.config && state.config.defaultProvider);
           state.preferredCommand = state.sessionTool;
           state.sessionCreateKind = state.config && state.config.defaultSessionKind === "pty" ? "pty" : "structured";
           state.sessionCreateWorktree = false;
@@ -2952,6 +2976,9 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (autoUpdateApkToggle) autoUpdateApkToggle.checked = !!_apkVersion && !!autoUpdate.apk;
             var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle") as HTMLInputElement | null;
             if (autoUpdateDmgToggle) autoUpdateDmgToggle.checked = !!_macAppVersion && !!autoUpdate.dmg;
+            var autoUpdateCliToggle = document.getElementById("auto-update-cli-toggle") as HTMLInputElement | null;
+            if (autoUpdateCliToggle) autoUpdateCliToggle.checked = !!autoUpdate.cli;
+            loadProviderCliUpdates(false);
 
             // ── 原生包下载 helper（APK / DMG 共用）──
             function safeNotify(msg, type) {
@@ -3293,7 +3320,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
             var commitCliEl = document.getElementById("cfg-commit-cli") as HTMLSelectElement | null;
             var commitModelEl = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
-            if (commitCliEl) commitCliEl.value = cfg.commitCli === "codex" ? "codex" : "claude";
+            if (commitCliEl) commitCliEl.value = getProviderKey(cfg.commitCli);
             if (commitModelEl) {
               commitModelEl.value = cfg.commitModel || "";
               commitModelEl.dataset.modelInitialized = "true";
@@ -3304,16 +3331,19 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             // Default model
             var defaultModels = cfg.defaultModels && typeof cfg.defaultModels === "object"
               ? cfg.defaultModels
-              : { claude: cfg.defaultModel || "", codex: cfg.defaultCodexModel || "" };
+              : { claude: cfg.defaultModel || "", codex: cfg.defaultCodexModel || "", opencode: cfg.defaultOpenCodeModel || "" };
             state.configDefaultModels = {
               claude: defaultModels.claude || "",
-              codex: defaultModels.codex || ""
+              codex: defaultModels.codex || "",
+              opencode: defaultModels.opencode || ""
             };
             state.configDefaultModel = state.configDefaultModels.claude;
             var defaultClaudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
             var defaultCodexInput = document.getElementById("cfg-default-codex-model") as HTMLInputElement | null;
+            var defaultOpenCodeInput = document.getElementById("cfg-default-opencode-model") as HTMLInputElement | null;
             if (defaultClaudeInput && defaultClaudeInput.dataset.modelDirty !== "true") defaultClaudeInput.dataset.modelInitialized = "false";
             if (defaultCodexInput && defaultCodexInput.dataset.modelDirty !== "true") defaultCodexInput.dataset.modelInitialized = "false";
+            if (defaultOpenCodeInput && defaultOpenCodeInput.dataset.modelDirty !== "true") defaultOpenCodeInput.dataset.modelInitialized = "false";
             updateSettingsDefaultModelSelect();
             fetchAvailableModels().then(function() {
               updateSettingsDefaultModelSelect();
@@ -3363,6 +3393,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
         var defaultModelValue = ((document.getElementById("cfg-default-model") as HTMLInputElement | null || {} as any).value || "").trim();
         var defaultCodexModelValue = ((document.getElementById("cfg-default-codex-model") as HTMLInputElement | null || {} as any).value || "").trim();
+        var defaultOpenCodeModelValue = ((document.getElementById("cfg-default-opencode-model") as HTMLInputElement | null || {} as any).value || "").trim();
         var commitModelValue = ((document.getElementById("cfg-commit-model") as HTMLInputElement | null || {} as any).value || "").trim();
 
         var body = {
@@ -3375,11 +3406,13 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           language: (document.getElementById("cfg-language") as HTMLSelectElement | null || {} as any).value || "",
           defaultModel: defaultModelValue,
           defaultCodexModel: defaultCodexModelValue,
+          defaultOpenCodeModel: defaultOpenCodeModelValue,
           defaultModels: {
             claude: defaultModelValue,
-            codex: defaultCodexModelValue
+            codex: defaultCodexModelValue,
+            opencode: defaultOpenCodeModelValue
           },
-          commitCli: (document.getElementById("cfg-commit-cli") as HTMLSelectElement | null || {} as any).value === "codex" ? "codex" : "claude",
+          commitCli: getProviderKey((document.getElementById("cfg-commit-cli") as HTMLSelectElement | null || {} as any).value),
           commitModel: commitModelValue,
           structuredRunner: (document.getElementById("cfg-structured-runner") as HTMLSelectElement | null || {} as any).value || "cli",
           inheritEnv: (document.getElementById("cfg-inherit-env") as HTMLInputElement | null || {} as any).checked !== false,
@@ -3388,6 +3421,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var previousDefaults = getConfigDefaultModels();
         var nextDefaultModel = body.defaultModel || "";
         var nextDefaultCodexModel = body.defaultCodexModel || "";
+        var nextDefaultOpenCodeModel = body.defaultOpenCodeModel || "";
 
         fetch("/api/settings/config", {
           method: "POST",
@@ -3413,16 +3447,19 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (state.config) {
               state.config.defaultModel = nextDefaultModel;
               state.config.defaultCodexModel = nextDefaultCodexModel;
-              state.config.defaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel };
+              state.config.defaultOpenCodeModel = nextDefaultOpenCodeModel;
+              state.config.defaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel, opencode: nextDefaultOpenCodeModel };
               state.config.commitCli = body.commitCli;
               state.config.commitModel = body.commitModel;
             }
-            state.configDefaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel };
+            state.configDefaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel, opencode: nextDefaultOpenCodeModel };
             state.configDefaultModel = nextDefaultModel;
             var savedClaudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
             var savedCodexInput = document.getElementById("cfg-default-codex-model") as HTMLInputElement | null;
+            var savedOpenCodeInput = document.getElementById("cfg-default-opencode-model") as HTMLInputElement | null;
             if (savedClaudeInput) savedClaudeInput.dataset.modelDirty = "false";
             if (savedCodexInput) savedCodexInput.dataset.modelDirty = "false";
+            if (savedOpenCodeInput) savedOpenCodeInput.dataset.modelDirty = "false";
             var savedCommitInput = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
             if (savedCommitInput) savedCommitInput.dataset.modelDirty = "false";
             if (nextDefaultModel !== previousDefaults.claude) {
@@ -3431,7 +3468,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (nextDefaultCodexModel !== previousDefaults.codex) {
               setChatModelForProvider("codex", "");
             }
-            if (nextDefaultModel !== previousDefaults.claude || nextDefaultCodexModel !== previousDefaults.codex) {
+            if (nextDefaultOpenCodeModel !== previousDefaults.opencode) {
+              setChatModelForProvider("opencode", "");
+            }
+            if (nextDefaultModel !== previousDefaults.claude || nextDefaultCodexModel !== previousDefaults.codex || nextDefaultOpenCodeModel !== previousDefaults.opencode) {
               syncComposerModelSelect(getSelectedSession());
             }
           }
@@ -3592,6 +3632,112 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           });
       }
 
+      export function renderProviderCliUpdates(data) {
+        var items = data && Array.isArray(data.items) ? data.items : [];
+        var available = 0;
+        ["claude", "codex", "opencode"].forEach(function(id) {
+          var el = document.getElementById("provider-cli-status-" + id);
+          if (!el) return;
+          var item = items.find(function(candidate) { return candidate.id === id; });
+          if (!item) {
+            el.textContent = "检测失败";
+            return;
+          }
+          el.setAttribute("title", item.error || item.executable || "");
+          if (!item.installed) {
+            el.textContent = "未安装";
+            return;
+          }
+          var current = item.currentVersion || "未知版本";
+          if (item.updateAvailable && item.updateSupported) {
+            available++;
+            el.textContent = current + " → " + (item.latestVersion || "最新版");
+            return;
+          }
+          if (item.updateAvailable && !item.updateSupported) {
+            el.textContent = current + " · 需迁移";
+            return;
+          }
+          el.textContent = item.latestVersion ? current + " · 最新" : current + " · 未读取到最新版";
+        });
+        var updateButton = document.getElementById("update-provider-clis") as HTMLButtonElement | null;
+        if (updateButton) {
+          updateButton.classList.toggle("hidden", available === 0);
+          updateButton.textContent = available > 0 ? "快速更新 (" + available + ")" : "快速更新";
+        }
+        var autoToggle = document.getElementById("auto-update-cli-toggle") as HTMLInputElement | null;
+        if (autoToggle && typeof data.autoUpdate === "boolean") autoToggle.checked = data.autoUpdate;
+      }
+
+      export function loadProviderCliUpdates(force?) {
+        var checkButton = document.getElementById("check-provider-cli-updates") as HTMLButtonElement | null;
+        var message = document.getElementById("provider-cli-update-message");
+        if (checkButton) { checkButton.disabled = true; checkButton.textContent = "检测中…"; }
+        return fetch("/api/provider-cli-updates" + (force ? "?refresh=1" : ""), { credentials: "same-origin" })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data.error) throw new Error(data.error);
+            renderProviderCliUpdates(data);
+            if (message && force) {
+              message.textContent = "CLI 版本检查完成。";
+              message.style.color = "var(--success)";
+              message.classList.remove("hidden");
+            }
+            return data;
+          })
+          .catch(function(error) {
+            if (message) {
+              message.textContent = (error && error.message) || "CLI 版本检查失败。";
+              message.style.color = "var(--error)";
+              message.classList.remove("hidden");
+            }
+            return null;
+          })
+          .finally(function() {
+            if (checkButton) { checkButton.disabled = false; checkButton.textContent = "检查更新"; }
+          });
+      }
+
+      export function performProviderCliUpdates() {
+        var updateButton = document.getElementById("update-provider-clis") as HTMLButtonElement | null;
+        var checkButton = document.getElementById("check-provider-cli-updates") as HTMLButtonElement | null;
+        var message = document.getElementById("provider-cli-update-message");
+        if (updateButton) { updateButton.disabled = true; updateButton.textContent = "更新中…"; }
+        if (checkButton) checkButton.disabled = true;
+        if (message) {
+          message.textContent = "正在依次更新 CLI，请勿关闭服务…";
+          message.style.color = "var(--text-secondary)";
+          message.classList.remove("hidden");
+        }
+        fetch("/api/provider-cli-updates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({}),
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) throw new Error(data.error);
+          renderProviderCliUpdates(data);
+          var results = Array.isArray(data.results) ? data.results : [];
+          var failures = results.filter(function(item) { return !item.ok; });
+          if (message) {
+            message.textContent = results.map(function(item) { return item.message; }).join(" ") || "没有需要更新的 CLI。";
+            message.style.color = failures.length ? "var(--warning)" : "var(--success)";
+          }
+        })
+        .catch(function(error) {
+          if (message) {
+            message.textContent = (error && error.message) || "CLI 更新失败。";
+            message.style.color = "var(--error)";
+          }
+        })
+        .finally(function() {
+          if (updateButton) updateButton.disabled = false;
+          if (checkButton) checkButton.disabled = false;
+        });
+      }
+
       export function performUpdate() {
         var msgEl = document.getElementById("update-message");
         var updateBtn = document.getElementById("do-update-button") as HTMLButtonElement | null;
@@ -3713,9 +3859,11 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           var webToggle = document.getElementById("auto-update-web-toggle") as HTMLInputElement | null;
           var apkToggle = document.getElementById("auto-update-apk-toggle") as HTMLInputElement | null;
           var dmgToggle = document.getElementById("auto-update-dmg-toggle") as HTMLInputElement | null;
+          var cliToggle = document.getElementById("auto-update-cli-toggle") as HTMLInputElement | null;
           if (webToggle) webToggle.checked = !!data.web;
           if (apkToggle) apkToggle.checked = !!data.apk;
           if (dmgToggle) dmgToggle.checked = !!data.dmg;
+          if (cliToggle) cliToggle.checked = !!data.cli;
         })
         .catch(function() {
           // Revert toggle on failure
@@ -4100,7 +4248,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function startStructuredSessionFromModal(cwd, mode, worktreeEnabled, errorEl) {
-        var provider = state.sessionTool === "codex" ? "codex" : "claude";
+        var provider = getProviderKey(state.sessionTool);
         _sessionCreating = true;
         state.modeValue = mode;
         state.chatMode = mode;
@@ -4173,7 +4321,9 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         .catch(function() {
           showError(errorEl, command === "codex"
             ? "无法启动 Codex 会话，请确认 codex 已正确安装并可在终端中执行。"
-            : "无法启动 Claude 会话，请确认 Claude 已正确安装。");
+            : command === "opencode"
+              ? "无法启动 OpenCode 会话，请确认 opencode-ai 已正确安装。"
+              : "无法启动 Claude 会话，请确认 Claude 已正确安装。");
         })
         .finally(function() { _sessionCreating = false; });
       }

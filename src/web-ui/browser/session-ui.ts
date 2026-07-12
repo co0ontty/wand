@@ -312,7 +312,8 @@ import { renderManageCheckbox } from "./sidebar";
       export function renderProviderOptions(selectedTool) {
         var tools = [
           { id: "claude", label: "Claude", desc: "完整 Claude 会话能力" },
-          { id: "codex", label: "Codex", desc: "结构化 JSONL 或 PTY 会话" }
+          { id: "codex", label: "Codex", desc: "结构化 JSONL 或 PTY 会话" },
+          { id: "opencode", label: "OpenCode", desc: "多模型结构化或 PTY 会话" }
         ];
         return tools.map(function(tool) {
           var active = tool.id === selectedTool ? " active" : "";
@@ -358,11 +359,14 @@ import { renderManageCheckbox } from "./sidebar";
         if (kind === "structured") {
           return tool === "codex"
             ? "Codex JSONL 结构化聊天界面，支持多轮对话和工具调用展示。"
+            : tool === "opencode"
+              ? "OpenCode JSON 结构化聊天界面，支持续聊、思考过程和工具调用展示。"
             : "结构化聊天界面，支持多轮对话、流式输出和工具调用展示。";
         }
         if (tool === "codex") {
           return "Codex PTY 终端会话；terminal 是原始输出，chat 是解析后的阅读视图。";
         }
+        if (tool === "opencode") return "OpenCode TUI 的原始 PTY 终端会话。";
         return "原始 PTY 终端会话，支持持续交互、终端视图和权限流。";
       }
 
@@ -376,7 +380,7 @@ import { renderManageCheckbox } from "./sidebar";
             '<div class="modal-header">' +
               '<div>' +
                 '<h2 class="modal-title">新对话</h2>' +
-                '<p class="modal-subtitle">启动 Claude 或 Codex 会话，选择 provider、会话类型、模式和工作目录。</p>' +
+                '<p class="modal-subtitle">启动 Claude、Codex 或 OpenCode 会话，选择 provider、会话类型、模式和工作目录。</p>' +
               '</div>' +
               '<button id="close-modal-button" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
             '</div>' +

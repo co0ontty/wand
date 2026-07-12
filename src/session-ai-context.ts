@@ -17,18 +17,20 @@ export function resolveSessionProvider(snapshot: Pick<
   SessionSnapshot,
   "provider" | "structuredState" | "runner" | "command"
 >): SessionProvider {
-  if (snapshot.provider === "claude" || snapshot.provider === "codex") {
+  if (snapshot.provider === "claude" || snapshot.provider === "codex" || snapshot.provider === "opencode") {
     return snapshot.provider;
   }
-  if (snapshot.structuredState?.provider === "claude" || snapshot.structuredState?.provider === "codex") {
+  if (snapshot.structuredState?.provider === "claude" || snapshot.structuredState?.provider === "codex" || snapshot.structuredState?.provider === "opencode") {
     return snapshot.structuredState.provider;
   }
 
   const runner = snapshot.runner ?? snapshot.structuredState?.runner;
   if (runner === "codex-cli-exec") return "codex";
+  if (runner === "opencode-cli-run") return "opencode";
   if (runner === "claude-cli" || runner === "claude-cli-print" || runner === "claude-sdk") return "claude";
 
-  return /^codex\b/i.test(snapshot.command.trim()) ? "codex" : "claude";
+  if (/^codex\b/i.test(snapshot.command.trim())) return "codex";
+  return /^opencode\b/i.test(snapshot.command.trim()) ? "opencode" : "claude";
 }
 
 function normalizeModel(value: string | null | undefined): string | undefined {
@@ -42,7 +44,7 @@ export function resolveSessionAiContext(
     SessionSnapshot,
     "provider" | "structuredState" | "runner" | "command" | "selectedModel" | "thinkingEffort"
   >,
-  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultThinkingEffort" | "inheritEnv">,
+  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultThinkingEffort" | "inheritEnv">,
 ): SessionAiContext {
   const provider = resolveSessionProvider(snapshot);
   const sessionModel = normalizeModel(snapshot.selectedModel) ?? normalizeModel(snapshot.structuredState?.model);
@@ -66,6 +68,7 @@ export function resolveCommitAiContext(
     WandConfig,
     | "defaultModel"
     | "defaultCodexModel"
+    | "defaultOpenCodeModel"
     | "defaultThinkingEffort"
     | "inheritEnv"
     | "commitCli"
@@ -75,7 +78,7 @@ export function resolveCommitAiContext(
   const sessionContext = resolveSessionAiContext(snapshot, config);
   return {
     ...sessionContext,
-    provider: config.commitCli === "codex" ? "codex" : "claude",
+    provider: config.commitCli === "codex" || config.commitCli === "opencode" ? config.commitCli : "claude",
     model: normalizeModel(config.commitModel),
   };
 }

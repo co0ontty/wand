@@ -9,6 +9,7 @@ import {
   normalizeThinkingEffort,
   normalizeStructuredToolResultContent,
   thinkingEffortToCodexReasoningEffort,
+  thinkingEffortToOpenCodeVariant,
 } from "../src/structured-session-manager.js";
 
 test("structured queue rejects a replay of the active or last queued input", () => {
@@ -37,6 +38,14 @@ test("codex off thinking effort does not force minimal", () => {
   assert.equal(thinkingEffortToCodexReasoningEffort("codex:ultra"), "ultra");
   assert.equal(normalizeThinkingEffort("CODEX:Ultra"), "codex:ultra");
   assert.equal(normalizeThinkingEffort("codex:not valid"), null);
+});
+
+test("OpenCode thinking effort maps to CLI variants", () => {
+  assert.equal(thinkingEffortToOpenCodeVariant("off"), null);
+  assert.equal(thinkingEffortToOpenCodeVariant("standard"), "low");
+  assert.equal(thinkingEffortToOpenCodeVariant("deep"), "high");
+  assert.equal(thinkingEffortToOpenCodeVariant("max"), "max");
+  assert.equal(thinkingEffortToOpenCodeVariant("codex:ultra"), "ultra");
 });
 
 test("codex live output usage estimate grows with streamed content", () => {

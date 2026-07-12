@@ -75,6 +75,13 @@ import { WsBroadcastManager } from "./ws-broadcast.js";
 import { checkRateLimit, recordFailedLogin, resetRateLimit } from "./middleware/rate-limit.js";
 import { isPathWithinBase, isBlockedFolderPath, normalizeFolderPath } from "./middleware/path-safety.js";
 import {
+  checkProviderCliUpdates,
+  updateProviderClis,
+  verifyProviderCliUpdateResults,
+  type ProviderCliId,
+  type ProviderCliUpdateStatus,
+} from "./provider-cli-updater.js";
+import {
   CommandRequest,
   DirectoryListing,
   ExecutionMode,
@@ -1338,6 +1345,15 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   const processes = new ProcessManager(config, storage, configDir);
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger);
+  let providerCliUpdateCache: { items: ProviderCliUpdateStatus[]; checkedAt: string } | null = null;
+  let providerCliUpdateInFlight = false;
+  let updateInFlight = false;
+  const refreshProviderCliUpdates = async (): Promise<{ items: ProviderCliUpdateStatus[]; checkedAt: string }> => {
+    const items = await checkProviderCliUpdates({ inheritEnv: config.inheritEnv !== false });
+    const result = { items, checkedAt: new Date().toISOString() };
+    providerCliUpdateCache = result;
+    return result;
+  };
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
   const requireAuth = buildRequireAuth(useHttps, storage, config);
@@ -1614,6 +1630,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       defaultCwd: config.defaultCwd,
       defaultModel: defaultModels.claude,
       defaultCodexModel: defaultModels.codex,
+      defaultOpenCodeModel: defaultModels.opencode,
       defaultModels,
       defaultThinkingEffort: config.defaultThinkingEffort ?? "off",
       commandPresets: config.commandPresets,
@@ -1621,6 +1638,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       structuredRunners: [
         { label: "Claude Structured", runner: "claude-cli-print" },
         { label: "Codex Structured", runner: "codex-cli-exec" },
+        { label: "OpenCode Structured", runner: "opencode-cli-run" },
       ],
       structuredChatPersona,
       cardDefaults: config.cardDefaults,
@@ -1793,6 +1811,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         ...safeConfig,
         defaultModel: defaultModels.claude,
         defaultCodexModel: defaultModels.codex,
+        defaultOpenCodeModel: defaultModels.opencode,
         defaultModels,
       },
       hasCert: existsSync(certPaths.keyPath) && existsSync(certPaths.certPath),
@@ -1809,6 +1828,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         web: storage.getConfigValue("autoUpdateWeb") === "true",
         apk: storage.getConfigValue("autoUpdateApk") === "true",
         dmg: storage.getConfigValue("autoUpdateDmg") === "true",
+        cli: storage.getConfigValue("autoUpdateProviderClis") === "true",
       },
       androidApk: {
         enabled: config.android?.enabled === true,
@@ -1940,7 +1960,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   });
 
   app.post("/api/settings/config", async (req, res) => {
-    const body = req.body as Partial<WandConfig> & { defaultModels?: { claude?: unknown; codex?: unknown } };
+    const body = req.body as Partial<WandConfig> & { defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown } };
     // 部署字段：写 JSON，需要重启服务才生效（host/port/https 影响监听，shell 影响新 PTY）
     const deployFields = ["host", "port", "https", "shell"] as const;
     let touchedDeployField = false;
@@ -1982,6 +2002,10 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           writePreferenceToStorage(config, storage, "defaultCodexModel", modelDefaults.codex);
           touchedPreferenceField = true;
         }
+        if (Object.prototype.hasOwnProperty.call(modelDefaults, "opencode")) {
+          writePreferenceToStorage(config, storage, "defaultOpenCodeModel", modelDefaults.opencode);
+          touchedPreferenceField = true;
+        }
       } catch (err) {
         res.status(400).json({ error: getErrorMessage(err, "默认模型配置校验失败") });
         return;
@@ -2016,6 +2040,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           ...safeConfig,
           defaultModel: defaultModels.claude,
           defaultCodexModel: defaultModels.codex,
+          defaultOpenCodeModel: defaultModels.opencode,
           defaultModels,
         },
         restartRequired: touchedDeployField,
@@ -2031,10 +2056,13 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     res.json({
       models: cached.models,
       codexModels: cached.codexModels,
+      opencodeModels: cached.opencodeModels,
       claudeVersion: cached.claudeVersion,
+      opencodeVersion: cached.opencodeVersion,
       refreshedAt: cached.refreshedAt,
       defaultModel: defaultModels.claude,
       defaultCodexModel: defaultModels.codex,
+      defaultOpenCodeModel: defaultModels.opencode,
       defaultModels,
     });
   });
@@ -2046,14 +2074,56 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       res.json({
         models: refreshed.models,
         codexModels: refreshed.codexModels,
+        opencodeModels: refreshed.opencodeModels,
         claudeVersion: refreshed.claudeVersion,
+        opencodeVersion: refreshed.opencodeVersion,
         refreshedAt: refreshed.refreshedAt,
         defaultModel: defaultModels.claude,
         defaultCodexModel: defaultModels.codex,
+        defaultOpenCodeModel: defaultModels.opencode,
         defaultModels,
       });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "刷新模型列表失败。") });
+    }
+  });
+
+  app.get("/api/provider-cli-updates", async (req, res) => {
+    try {
+      const force = req.query.refresh === "1" || !providerCliUpdateCache;
+      const data = force ? await refreshProviderCliUpdates() : providerCliUpdateCache as { items: ProviderCliUpdateStatus[]; checkedAt: string };
+      res.json({
+        ...data,
+        updating: providerCliUpdateInFlight,
+        autoUpdate: storage.getConfigValue("autoUpdateProviderClis") === "true",
+      });
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "检查 CLI 更新失败。") });
+    }
+  });
+
+  app.post("/api/provider-cli-updates", express.json(), async (req, res) => {
+    if (providerCliUpdateInFlight || updateInFlight) {
+      res.status(409).json({ error: "CLI 更新正在进行中，请稍候。" });
+      return;
+    }
+    const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const ids = rawIds.filter((value: unknown): value is ProviderCliId => value === "claude" || value === "codex" || value === "opencode");
+    providerCliUpdateInFlight = true;
+    try {
+      const before = await refreshProviderCliUpdates();
+      const commandResults = await updateProviderClis(before.items, ids.length ? ids : undefined, {
+        inheritEnv: config.inheritEnv !== false,
+        onLog: (line) => process.stdout.write(`[wand] ${line}\n`),
+      });
+      const after = await refreshProviderCliUpdates();
+      const results = verifyProviderCliUpdateResults(commandResults, after.items);
+      refreshModels().catch(() => {});
+      res.json({ ok: results.every((item) => item.ok), results, ...after, autoUpdate: storage.getConfigValue("autoUpdateProviderClis") === "true" });
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "更新 CLI 失败。") });
+    } finally {
+      providerCliUpdateInFlight = false;
     }
   });
 
@@ -2112,9 +2182,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   });
 
-  let updateInFlight = false;
   app.post("/api/update", async (_req, res) => {
-    if (updateInFlight) {
+    if (updateInFlight || providerCliUpdateInFlight) {
       res.status(409).json({ error: "更新正在进行中，请稍候。" });
       return;
     }
@@ -2657,7 +2726,11 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     try {
       const origin = parseSessionCreationOrigin(body);
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
-      const provider: SessionProvider = body.provider === "codex" || /^codex\b/.test(body.command.trim()) ? "codex" : "claude";
+      const provider: SessionProvider = body.provider === "codex" || /^codex\b/.test(body.command.trim())
+        ? "codex"
+        : body.provider === "opencode" || /^opencode\b/.test(body.command.trim())
+          ? "opencode"
+          : "claude";
       const effectiveModel = rawModel || getDefaultModelForProvider(config, provider) || undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
@@ -2859,11 +2932,12 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     const web = storage.getConfigValue("autoUpdateWeb") === "true";
     const apk = storage.getConfigValue("autoUpdateApk") === "true";
     const dmg = storage.getConfigValue("autoUpdateDmg") === "true";
-    res.json({ web, apk, dmg });
+    const cli = storage.getConfigValue("autoUpdateProviderClis") === "true";
+    res.json({ web, apk, dmg, cli });
   });
 
   app.post("/api/auto-update", express.json(), (req, res) => {
-    const { web, apk, dmg } = req.body as { web?: boolean; apk?: boolean; dmg?: boolean };
+    const { web, apk, dmg, cli } = req.body as { web?: boolean; apk?: boolean; dmg?: boolean; cli?: boolean };
     if (typeof web === "boolean") {
       storage.setConfigValue("autoUpdateWeb", String(web));
     }
@@ -2873,10 +2947,14 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     if (typeof dmg === "boolean") {
       storage.setConfigValue("autoUpdateDmg", String(dmg));
     }
+    if (typeof cli === "boolean") {
+      storage.setConfigValue("autoUpdateProviderClis", String(cli));
+    }
     res.json({
       web: storage.getConfigValue("autoUpdateWeb") === "true",
       apk: storage.getConfigValue("autoUpdateApk") === "true",
       dmg: storage.getConfigValue("autoUpdateDmg") === "true",
+      cli: storage.getConfigValue("autoUpdateProviderClis") === "true",
     });
   });
 
@@ -2986,7 +3064,32 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     }
   }
 
+  async function performProviderCliAutoUpdate(): Promise<void> {
+    if (storage.getConfigValue("autoUpdateProviderClis") !== "true" || providerCliUpdateInFlight || updateInFlight) return;
+    providerCliUpdateInFlight = true;
+    try {
+      const before = await refreshProviderCliUpdates();
+      const available = before.items.filter((item) => item.updateAvailable && item.updateSupported);
+      if (!available.length) return;
+      const commandResults = await updateProviderClis(before.items, available.map((item) => item.id), {
+        inheritEnv: config.inheritEnv !== false,
+        onLog: (line) => process.stdout.write(`[wand] ${line}\n`),
+      });
+      const after = await refreshProviderCliUpdates();
+      const results = verifyProviderCliUpdateResults(commandResults, after.items);
+      for (const result of results) {
+        process.stdout.write(`[wand] CLI 自动更新 ${result.ok ? "完成" : "失败"}: ${result.message}\n`);
+      }
+      refreshModels().catch(() => {});
+    } catch (error) {
+      process.stdout.write(`[wand] CLI 自动更新失败: ${getErrorMessage(error)}\n`);
+    } finally {
+      providerCliUpdateInFlight = false;
+    }
+  }
+
   let updateCheckTimer: NodeJS.Timeout | null = null;
+  let providerCliUpdateTimer: NodeJS.Timeout | null = null;
   if (updateChecksEnabled) {
     // Background update check on startup
     performAutoUpdate().catch(() => {});
@@ -2996,6 +3099,16 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       performAutoUpdate().catch(() => {});
     }, 30 * 60 * 1000);
     updateCheckTimer.unref();
+
+    // 与 Wand 自身 npm 更新错峰，避免两个全局 updater 同时改 PATH / bin 链接。
+    providerCliUpdateTimer = setTimeout(() => {
+      performProviderCliAutoUpdate().catch(() => {});
+      providerCliUpdateTimer = setInterval(() => {
+        performProviderCliAutoUpdate().catch(() => {});
+      }, 30 * 60 * 1000);
+      providerCliUpdateTimer.unref();
+    }, 2 * 60 * 1000);
+    providerCliUpdateTimer.unref();
   }
 
   const close = (): Promise<void> => new Promise<void>((resolve) => {
@@ -3009,6 +3122,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     try { wss.clients.forEach((c) => c.close()); } catch { /* ignore */ }
     try { wss.close(); } catch { /* ignore */ }
     if (updateCheckTimer) clearInterval(updateCheckTimer);
+    if (providerCliUpdateTimer) clearInterval(providerCliUpdateTimer);
     try {
       server.close(() => finish());
     } catch {

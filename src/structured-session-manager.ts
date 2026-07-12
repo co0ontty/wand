@@ -45,7 +45,7 @@ interface CreateStructuredSessionOptions {
 }
 
 function defaultStructuredRunner(provider: SessionProvider): SessionRunner {
-  return provider === "codex" ? "codex-cli-exec" : "claude-cli-print";
+  return provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : "claude-cli-print";
 }
 
 function defaultStructuredState(provider: SessionProvider, runner = defaultStructuredRunner(provider)): StructuredSessionState {
@@ -111,6 +111,15 @@ export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["th
     case "off": return null;
     default: return null;
   }
+}
+
+/** OpenCode exposes provider-specific reasoning presets through `--variant`. */
+export function thinkingEffortToOpenCodeVariant(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  if (!effort || effort === "off") return null;
+  if (effort === "standard") return "low";
+  if (effort === "deep") return "high";
+  if (effort === "max") return "max";
+  return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -1020,7 +1029,7 @@ export class StructuredSessionManager {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
     const prompt = options.prompt?.trim();
-    const provider: SessionProvider = options.provider === "codex" ? "codex" : "claude";
+    const provider: SessionProvider = options.provider === "codex" || options.provider === "opencode" ? options.provider : "claude";
     const runner = options.runner ?? defaultStructuredRunner(provider);
     const baseCwd = resolveSessionCwd(options.cwd, this.config.defaultCwd);
     const worktreeSetup = options.worktreeEnabled
@@ -1038,6 +1047,8 @@ export class StructuredSessionManager {
       command:
         provider === "codex"
           ? "codex exec --json"
+          : provider === "opencode"
+            ? "opencode run --format json"
           : runner === "claude-sdk"
             ? "claude-agent-sdk (stream-json)"
             : "claude -p --output-format stream-json",
@@ -1229,6 +1240,8 @@ export class StructuredSessionManager {
     try {
       if ((updated.provider ?? "claude") === "codex") {
         await this.runCodexStreaming(id, updated, prompt);
+      } else if ((updated.provider ?? "claude") === "opencode") {
+        await this.runOpenCodeStreaming(id, updated, prompt);
       } else if (this.config.structuredRunner === "sdk") {
         await this.runClaudeSdkStreaming(id, updated, prompt);
       } else {
@@ -1965,6 +1978,268 @@ export class StructuredSessionManager {
                 this.storage.saveSession(recovered);
                 this.emitStructuredSnapshot(recovered);
               }
+            });
+          });
+          return;
+        }
+        resolve();
+        setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
+      });
+    });
+  }
+
+  private buildOpenCodeArgs(session: SessionSnapshot): string[] {
+    const args = ["run", "--format", "json", "--thinking"];
+    const modelChoice = session.selectedModel?.trim();
+    if (modelChoice && modelChoice !== "default") {
+      args.push("--model", modelChoice);
+    }
+    const variant = thinkingEffortToOpenCodeVariant(session.thinkingEffort);
+    if (variant) args.push("--variant", variant);
+    if (session.autoApprovePermissions === true || session.mode === "full-access" || session.mode === "managed" || session.mode === "auto-edit") {
+      args.push("--dangerously-skip-permissions");
+    }
+    if (session.claudeSessionId) {
+      args.push("--session", session.claudeSessionId);
+    }
+    return args;
+  }
+
+  private openCodeToolName(name: string): string {
+    const mapped: Record<string, string> = {
+      bash: "Bash",
+      shell: "Bash",
+      read: "Read",
+      edit: "Edit",
+      write: "Write",
+      glob: "Glob",
+      grep: "Grep",
+      webfetch: "WebFetch",
+      websearch: "WebSearch",
+      todowrite: "TodoWrite",
+      task: "Task",
+      skill: "Skill",
+    };
+    return mapped[name.toLowerCase()] ?? `OpenCode/${name}`;
+  }
+
+  private applyOpenCodeEvent(turnState: StreamingTurnState, event: Record<string, unknown>): string | null {
+    if (typeof event.sessionID === "string" && event.sessionID) turnState.sessionId = event.sessionID;
+    const type = typeof event.type === "string" ? event.type : "";
+    const part = asRecord(event.part);
+    if (!part) {
+      if (type === "error") return this.extractCodexText(event.error) || "OpenCode run failed";
+      return null;
+    }
+
+    if (type === "text" && typeof part.text === "string" && part.text.trim()) {
+      turnState.blocks.push({ type: "text", text: part.text });
+      turnState.result += (turnState.result ? "\n" : "") + part.text;
+      return null;
+    }
+    if (type === "reasoning" && typeof part.text === "string" && part.text.trim()) {
+      turnState.blocks.push({ type: "thinking", thinking: part.text });
+      return null;
+    }
+    if (type === "tool_use") {
+      const state = asRecord(part.state) ?? {};
+      const tool = typeof part.tool === "string" && part.tool ? part.tool : "tool";
+      const toolId = typeof part.callID === "string" && part.callID
+        ? part.callID
+        : typeof part.id === "string" && part.id
+          ? part.id
+          : randomUUID();
+      const input = asRecord(state.input) ?? {};
+      turnState.blocks.push({
+        type: "tool_use",
+        id: toolId,
+        name: this.openCodeToolName(tool),
+        description: typeof state.title === "string" ? state.title : undefined,
+        input,
+      });
+      const failed = state.status === "error";
+      const content = failed
+        ? (typeof state.error === "string" ? state.error : "OpenCode tool failed")
+        : (typeof state.output === "string" ? state.output : "");
+      turnState.blocks.push({ type: "tool_result", tool_use_id: toolId, content, is_error: failed });
+      return null;
+    }
+    if (type === "step_finish") {
+      const tokens = asRecord(part.tokens);
+      const cache = asRecord(tokens?.cache);
+      const previous = turnState.usage ?? {};
+      turnState.usage = {
+        inputTokens: (previous.inputTokens ?? 0) + (typeof tokens?.input === "number" ? tokens.input : 0),
+        outputTokens: (previous.outputTokens ?? 0) + (typeof tokens?.output === "number" ? tokens.output : 0),
+        reasoningOutputTokens: (previous.reasoningOutputTokens ?? 0) + (typeof tokens?.reasoning === "number" ? tokens.reasoning : 0),
+        cacheReadInputTokens: (previous.cacheReadInputTokens ?? 0) + (typeof cache?.read === "number" ? cache.read : 0),
+        cacheCreationInputTokens: (previous.cacheCreationInputTokens ?? 0) + (typeof cache?.write === "number" ? cache.write : 0),
+        totalCostUsd: (previous.totalCostUsd ?? 0) + (typeof part.cost === "number" ? part.cost : 0),
+      };
+    }
+    return null;
+  }
+
+  private runOpenCodeStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
+    this.userStopped.delete(sessionId);
+    return new Promise<void>((resolve, reject) => {
+      const args = this.buildOpenCodeArgs(session);
+      const spawnedAt = new Date().toISOString();
+      const child = spawn("opencode", args, {
+        cwd: session.cwd,
+        env: buildChildEnv(this.config.inheritEnv !== false),
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      this.logger?.appendStructuredSpawn(sessionId, {
+        kind: "opencode-run",
+        provider: "opencode",
+        pid: child.pid ?? null,
+        cwd: session.cwd,
+        args,
+        prompt: prompt.slice(0, 2048),
+        promptLength: prompt.length,
+        sessionId: session.claudeSessionId,
+        spawnedAt,
+      });
+      this.pendingChildren.set(sessionId, child);
+      child.stdin?.end(prompt);
+
+      const turnState: StreamingTurnState = {
+        blocks: [],
+        result: "",
+        sessionId: session.claudeSessionId,
+        model: session.selectedModel ?? session.structuredState?.model,
+        usage: undefined,
+        codexBlockIndex: new Map(),
+        cwd: session.cwd,
+      };
+      let lineBuf = "";
+      let stderr = "";
+      let primaryError: string | null = null;
+      let emitTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const syncSnapshot = (): void => {
+        const current = this.sessions.get(sessionId);
+        if (!current) return;
+        const turn: ConversationTurn = {
+          role: "assistant",
+          content: this.compactContentBlocks([...turnState.blocks], turnState.result),
+          usage: turnState.usage,
+        };
+        const messages = [...(current.messages ?? [])];
+        if (messages[messages.length - 1]?.role === "assistant") messages[messages.length - 1] = turn;
+        else messages.push(turn);
+        const patched: SessionSnapshot = {
+          ...current,
+          claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+          messages,
+          output: turnState.result || current.output,
+        };
+        this.sessions.set(sessionId, patched);
+        this.saveStreamingSnapshot(patched);
+      };
+      const flushEmit = (): void => {
+        if (emitTimer) clearTimeout(emitTimer);
+        emitTimer = null;
+        const current = this.sessions.get(sessionId);
+        if (current) this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}) });
+      };
+      const scheduleEmit = (): void => {
+        if (!emitTimer) emitTimer = setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS);
+      };
+      const processLine = (line: string): void => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let event: Record<string, unknown>;
+        try { event = JSON.parse(trimmed) as Record<string, unknown>; } catch { return; }
+        this.logger?.appendStreamEvent(sessionId, event);
+        const error = this.applyOpenCodeEvent(turnState, event);
+        if (error) primaryError = error;
+        syncSnapshot();
+        scheduleEmit();
+      };
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        this.logger?.appendStructuredStdout(sessionId, text);
+        lineBuf += text;
+        const lines = lineBuf.split("\n");
+        lineBuf = lines.pop() ?? "";
+        for (const line of lines) processLine(line);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        this.logger?.appendStructuredStderr(sessionId, text);
+        stderr += text;
+      });
+      child.on("error", (error) => {
+        this.pendingChildren.delete(sessionId);
+        this.lastStreamSaveAt.delete(sessionId);
+        if (emitTimer) clearTimeout(emitTimer);
+        const nodeError = error as NodeJS.ErrnoException;
+        const hint = nodeError.code === "ENOENT"
+          ? "（PATH 中找不到 opencode；请安装 opencode-ai，或重跑 `wand service:install` 刷新服务 PATH）"
+          : "";
+        reject(new Error(`opencode run 启动失败：${error.message}${hint}`));
+      });
+      child.on("close", (code, signal) => {
+        this.pendingChildren.delete(sessionId);
+        this.lastStreamSaveAt.delete(sessionId);
+        if (lineBuf.trim()) processLine(lineBuf);
+        flushEmit();
+        const current = this.sessions.get(sessionId);
+        if (!current) {
+          reject(new Error("Session removed during execution."));
+          return;
+        }
+        const interruptedByUser = this.interruptedWith.has(sessionId);
+        const interruptPrompt = this.interruptedWith.get(sessionId);
+        const userStopped = this.userStopped.delete(sessionId);
+        if ((primaryError || (code !== 0 && code !== null) || signal) && !interruptedByUser && !userStopped) {
+          const legacyHint = /unknown command|unknown flag|No help topic for 'run'/i.test(stderr)
+            ? "\n检测到旧版 OpenCode CLI；请卸载 0.0.x 旧包并安装 `opencode-ai@latest`。"
+            : "";
+          const errorText = this.formatStructuredExitError("opencode run", code, signal, { stderr, primary: primaryError }) + legacyHint;
+          const failed = this.finishStructuredFailure(current, typeof code === "number" ? code : 1, errorText, turnState);
+          this.sessions.set(sessionId, failed);
+          this.storage.saveSession(failed);
+          this.emitStructuredSnapshot(failed);
+          this.emitStructuredSnapshot(failed, "ended");
+          reject(new Error(errorText));
+          return;
+        }
+        const messages = this.buildCompletedAssistantMessages(current, turnState);
+        const keepRunning = !!interruptPrompt;
+        const finished: SessionSnapshot = {
+          ...current,
+          status: keepRunning ? "running" : "idle",
+          exitCode: keepRunning ? null : 0,
+          endedAt: keepRunning ? null : new Date().toISOString(),
+          output: turnState.result,
+          claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+          messages,
+          queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
+          pendingEscalation: null,
+          permissionBlocked: false,
+          structuredState: {
+            ...(current.structuredState as StructuredSessionState),
+            model: turnState.model ?? current.structuredState?.model,
+            inFlight: false,
+            activeRequestId: null,
+            lastError: null,
+          },
+        };
+        this.sessions.set(sessionId, finished);
+        this.storage.saveSession(finished);
+        this.emitStructuredSnapshot(finished);
+        if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
+        if (interruptPrompt) {
+          this.interruptedWith.delete(sessionId);
+          this.preserveQueueOnInterrupt.delete(sessionId);
+          resolve();
+          setImmediate(() => {
+            this.sendMessage(sessionId, interruptPrompt).catch((error) => {
+              console.error("[WAND] opencode interrupt-and-send failed:", error);
             });
           });
           return;
@@ -3868,7 +4143,7 @@ export class StructuredSessionManager {
    * 事件 / 最后一段 stdout 之类的上下文跟在后面，方便定位。
    */
   private formatStructuredExitError(
-    provider: "claude -p" | "codex exec",
+    provider: "claude -p" | "codex exec" | "opencode run",
     code: number | null,
     signal: NodeJS.Signals | null,
     options: {

@@ -18,13 +18,14 @@ import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./resume-policy.js";
-import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort } from "./structured-session-manager.js";
+import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-session-manager.js";
 import { generateSessionTopic } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {
-  return /^codex\b/.test(command.trim()) ? "codex" : "claude";
+  if (/^codex\b/.test(command.trim())) return "codex";
+  return /^opencode\b/.test(command.trim()) ? "opencode" : "claude";
 }
 
 export type { ProcessEvent, ProcessEventHandler } from "./types.js";
@@ -1197,7 +1198,7 @@ export class ProcessManager extends EventEmitter {
         }),
         name: "xterm-color",
         // 使用 record 上由前端协商好的真实尺寸，避免"先 120 列、几百毫秒后再 resize"
-        // 期间 Claude/Codex 用错列宽渲染出 \x1b[120G 这类绝对列定位序列。
+        // 期间 provider TUI 用错列宽渲染出 \x1b[120G 这类绝对列定位序列。
         cols: record.ptyCols,
         rows: record.ptyRows
       });
@@ -1622,7 +1623,7 @@ export class ProcessManager extends EventEmitter {
 
   /**
    * Switch the execution mode of a PTY session mid-flight. The already-launched
-   * claude/codex process keeps its original CLI flags, but wand's own permission
+   * provider process keeps its original CLI flags, but wand's own permission
    * auto-approval (shouldAutoApprovePermissions / escalation handling) reads
    * record.mode, so this changes the permission posture for subsequent prompts.
    * Mirrors setSessionModel/setSessionThinkingEffort.
@@ -2252,7 +2253,7 @@ export class ProcessManager extends EventEmitter {
           permissionBlocked: this.isPermissionBlocked(record),
         };
         // 透传 bridge 给出的 isResponding（true=流式中, false=本轮已完成）。
-        // 前端用它检测 thinking→idle 边界并主动做一次终端 resync，把 Claude/Codex
+        // 前端用它检测 thinking→idle 边界并主动做一次终端 resync，把 provider TUI
         // 在流式渲染过程中残留的错位光标定位序列洗掉（等价于按一次右上角缩放）。
         if (bridgeData && typeof bridgeData.isResponding === "boolean") {
           data.isResponding = bridgeData.isResponding;
@@ -2435,6 +2436,23 @@ export class ProcessManager extends EventEmitter {
         if (!/--dangerously-bypass-approvals-and-sandbox(?:\s|$)/.test(result)) {
           result += " --dangerously-bypass-approvals-and-sandbox";
         }
+      }
+      return result;
+    }
+
+    if (provider === "opencode") {
+      let result = command;
+      const trimmedModel = model?.trim();
+      if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result) && !/(?:^|\s)-m(?:\s|$)/.test(result)) {
+        const escapedModel = trimmedModel.replace(/'/g, "'\\''");
+        result += ` --model '${escapedModel}'`;
+      }
+      const variant = thinkingEffortToOpenCodeVariant(thinkingEffort ?? null);
+      if (variant && !/--variant(?:\s|=)/.test(result)) {
+        result += ` --variant '${variant.replace(/'/g, "'\\''")}'`;
+      }
+      if ((mode === "managed" || mode === "full-access" || mode === "auto-edit") && !/--auto(?:\s|$)/.test(result)) {
+        result += " --auto";
       }
       return result;
     }

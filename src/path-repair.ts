@@ -55,7 +55,7 @@ export interface PathRepairResult {
 }
 
 /** 关键的 CLI 工具，会被诊断输出。 */
-const PROBE_COMMANDS = ["claude", "codex"] as const;
+const PROBE_COMMANDS = ["claude", "codex", "opencode"] as const;
 
 const DEEP_PROBE_TIMEOUT_MS = 4000;
 
@@ -222,7 +222,7 @@ export function repairRuntimePath(): PathRepairResult {
  * 这种动态注入的 PATH。
  *
  * 行为：
- *   - 跑 `${shell} -l -c '...'` 拉 $PATH 和 command -v claude/codex（4s 超时）
+ *   - 跑 `${shell} -l -c '...'` 拉 $PATH 和 command -v claude/codex/opencode（4s 超时）
  *   - 按 login shell 的 PATH 顺序重排 process.env.PATH，再把仅存在于 service 的
  *     目录追加回去。不能只前插新增目录：同一个 CLI 同时装在 nvm 和 Homebrew 时，
  *     两个目录本来都存在，旧实现不会重排，structured 与 PTY 会命中不同版本。
@@ -266,13 +266,14 @@ export async function deepRepairRuntimePath(
     .filter((seg) => seg.length > 0);
   const existing = new Set(currentSegments);
 
-  // login shell 报告的所有 PATH 段 + claude/codex 解析出的目录都纳入候选。
+  // login shell 报告的所有 PATH 段 + provider CLI 解析出的目录都纳入候选。
   const fromShell: string[] = [];
   for (const seg of probe.path.split(delim).map((s) => s.trim()).filter(Boolean)) {
     fromShell.push(seg);
   }
   if (probe.claude) fromShell.push(path.dirname(probe.claude));
   if (probe.codex) fromShell.push(path.dirname(probe.codex));
+  if (probe.opencode) fromShell.push(path.dirname(probe.opencode));
 
   const preferred: string[] = [];
   const preferredSet = new Set<string>();
@@ -308,6 +309,7 @@ interface ProbeResult {
   path: string;
   claude: string | null;
   codex: string | null;
+  opencode: string | null;
 }
 
 function pickProbeShell(configured?: string): string | null {
@@ -327,14 +329,15 @@ function pickProbeShell(configured?: string): string | null {
 }
 
 /**
- * 用 login shell 跑一段最小脚本，拿到用户实际的 PATH 和 claude/codex 解析路径。
+ * 用 login shell 跑一段最小脚本，拿到用户实际的 PATH 和 provider CLI 解析路径。
  * 用 \x1f（ASCII Unit Separator）作字段分隔符避免和路径里的字符冲突。
  */
 function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult> {
   const script =
     `printf 'PATH\\x1f%s\\n' "$PATH"; ` +
     `printf 'CLAUDE\\x1f%s\\n' "$(command -v claude 2>/dev/null)"; ` +
-    `printf 'CODEX\\x1f%s\\n' "$(command -v codex 2>/dev/null)"`;
+    `printf 'CODEX\\x1f%s\\n' "$(command -v codex 2>/dev/null)"; ` +
+    `printf 'OPENCODE\\x1f%s\\n' "$(command -v opencode 2>/dev/null)"`;
 
   return new Promise((resolve, reject) => {
     const child = spawn(shell, ["-l", "-c", script], {
@@ -371,7 +374,7 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
           reject(new Error(`login shell exited ${code}: ${stderr.trim().slice(0, 200)}`));
           return;
         }
-        const out: ProbeResult = { path: "", claude: null, codex: null };
+        const out: ProbeResult = { path: "", claude: null, codex: null, opencode: null };
         for (const line of stdout.split("\n")) {
           const idx = line.indexOf("\x1f");
           if (idx < 0) continue;
@@ -381,6 +384,7 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
           if (key === "PATH") out.path = val;
           else if (key === "CLAUDE") out.claude = val;
           else if (key === "CODEX") out.codex = val;
+          else if (key === "OPENCODE") out.opencode = val;
         }
         resolve(out);
       });

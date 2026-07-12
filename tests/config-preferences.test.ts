@@ -68,6 +68,20 @@ test("new-session provider and kind preferences round-trip through storage", () 
   assert.equal(restored.defaultSessionKind, "pty");
 });
 
+test("OpenCode provider and model preferences round-trip through storage", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+
+  writePreferenceToStorage(config, storage, "defaultProvider", "opencode");
+  writePreferenceToStorage(config, storage, "defaultOpenCodeModel", "  anthropic/claude-sonnet-4-6  ");
+  writePreferenceToStorage(config, storage, "commitCli", "opencode");
+
+  const restored = applyStoragePreferences(defaultConfig(), storage);
+  assert.equal(restored.defaultProvider, "opencode");
+  assert.equal(restored.defaultOpenCodeModel, "anthropic/claude-sonnet-4-6");
+  assert.equal(restored.commitCli, "opencode");
+});
+
 test("new-session preferences reject unsupported values", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorage;
 

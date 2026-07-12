@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
 import { buildChildEnv } from "./env-utils.js";
 import { runGit as runGitBase, runGitRaw as runGitRawBase, getGitErrorMessage } from "./git-utils.js";
-import { thinkingEffortToClaudeCliEffort, thinkingEffortToCodexReasoningEffort } from "./structured-session-manager.js";
+import { thinkingEffortToClaudeCliEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-session-manager.js";
 import {
   GitStatusFileEntry,
   GitStatusResult,
@@ -340,7 +340,7 @@ async function callClaudeText(prompt: string, cwd: string, language?: string, mo
 }
 
 function normalizeProvider(provider: SessionProvider | undefined): SessionProvider {
-  return provider === "codex" ? "codex" : "claude";
+  return provider === "codex" || provider === "opencode" ? provider : "claude";
 }
 
 function stripFences(raw: string): string {
@@ -373,6 +373,23 @@ function extractCodexText(stdout: string): string {
     if (!noise.test(lines[i])) return lines[i];
   }
   return "";
+}
+
+function extractOpenCodeText(stdout: string): string {
+  const texts: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as { type?: string; part?: { text?: unknown } };
+      if (parsed.type === "text" && typeof parsed.part?.text === "string" && parsed.part.text.trim()) {
+        texts.push(parsed.part.text.trim());
+      }
+    } catch {
+      // ignore diagnostics mixed into stdout
+    }
+  }
+  return texts.join("\n").trim();
 }
 
 function runCliText(
@@ -437,10 +454,28 @@ async function callCodexText(prompt: string, cwd: string, opts: QuickCommitAiOpt
   return text;
 }
 
+async function callOpenCodeText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+  const args = ["run", "--format", "json"];
+  const model = opts.model?.trim();
+  if (model && model !== "default") args.push("--model", model);
+  const variant = thinkingEffortToOpenCodeVariant(opts.thinkingEffort ?? "off");
+  if (variant) args.push("--variant", variant);
+  const stdout = await runCliText("opencode", args, prompt, {
+    cwd,
+    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    inheritEnv: opts.inheritEnv,
+  });
+  const text = extractOpenCodeText(stdout);
+  if (!text) throw new QuickCommitError("OpenCode 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+  return text;
+}
+
 async function callAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
-  if (normalizeProvider(opts.provider) === "codex") {
+  const provider = normalizeProvider(opts.provider);
+  if (provider === "codex") {
     return callCodexText(prompt, cwd, opts);
   }
+  if (provider === "opencode") return callOpenCodeText(prompt, cwd, opts);
   return callClaudeText(prompt, cwd, language, opts.model);
 }
 
@@ -1083,6 +1118,17 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     if (reasoningEffort) args.push("-c", `model_reasoning_effort=${reasoningEffort}`);
     args.push("-");
     await runCliText("codex", args, prompt, {
+      cwd: opts.cwd,
+      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      inheritEnv: opts.inheritEnv,
+    });
+  } else if (provider === "opencode") {
+    const args = ["run", "--format", "json", "--dangerously-skip-permissions"];
+    const model = opts.model?.trim();
+    if (model && model !== "default") args.push("--model", model);
+    const variant = thinkingEffortToOpenCodeVariant(opts.thinkingEffort ?? "off");
+    if (variant) args.push("--variant", variant);
+    await runCliText("opencode", args, prompt, {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,

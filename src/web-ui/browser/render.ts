@@ -708,6 +708,9 @@ export function renderAppShell() {
               '<button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button">' +
                 '<span class="tool-icon tool-icon-text">⌘</span>新建 Codex 会话' +
               '</button>' +
+              '<button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button">' +
+                '<span class="tool-icon tool-icon-text">OC</span>新建 OpenCode 会话' +
+              '</button>' +
               '<button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button">' +
                 '<span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>新建结构化会话' +
               '</button>' +

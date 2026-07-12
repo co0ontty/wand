@@ -29,59 +29,64 @@ export function stripAnsi(text: string): string {
     .replace(/\n{3,}/g, "\n\n");
 }
 
+const NOISE_LINE_FRAGMENTS = [
+  "esc to interrupt",
+  "Claude Code v",
+  "Failed to install Anthropic",
+  "Claude Code has switched",
+  "? for shortcuts",
+  "Claude is waiting",
+  "[wand]",
+  "ctrl+g",
+  "/effort",
+  "auto mode is unavailable",
+  "Germinating",
+  "Doodling",
+  "Brewing",
+  "Captured Claude session ID",
+];
+
+const NOISE_LINE_PATTERNS = [
+  /^────/,
+  /^[❯›]$/,
+  /^[╭╰│┌└┐┘├┤┬┴┼─═]{2,}$/,
+  /^[▁▂▃▄▅▆▇█▔▕▏▐]+$/,
+  /^Sonnet\b/,
+  /^(?:0;|9;)/,
+  /^Using .* for .* session/,
+  /MCP server.*failed/i,
+  /^●.*·/,
+  /^\[[<>]/,
+  /^>_\s*OpenAI Codex\b/,
+  /^OpenAI Codex\b/i,
+  /^(model|directory):\s+/i,
+  /^(tip|context):\s+/i,
+  /^work(tree|space):\s+/i,
+  /^(approvals?|sandbox|provider|session id):\s+/i,
+  /^(thinking|working)(\.\.\.|…)?$/i,
+  /^[•◦·]\s+Working\b/i,
+  /^[•◦·]\s+(Running|Planning|Applying|Reading|Searching)\b/i,
+  /^[•◦·]\s+(Inspecting|Reviewing|Summarizing|Editing|Updating|Writing)\b/i,
+  /^[•◦·]\s+Completed\b/i,
+  /^(ctrl|enter|tab|shift|esc|alt)\+/i,
+  /\b(open|close|toggle) (chat|terminal)\b/i,
+  /\b(approve|deny)\b.*\b(permission|approval)\b/i,
+  /^(use|press) .* (to|for) .*/i,
+  /^(?:token|context window|remaining context|conversation):\s+/i,
+  /^(?:cwd|path):\s+\//i,
+];
+
 /** Lines considered as UI noise that should be excluded from chat view. */
 export function isNoiseLine(line: string): boolean {
-  if (!line) return false;
-
   const trimmed = line.trim();
   if (!trimmed) return false;
 
-  if (trimmed.startsWith("────")) return true;
-  if (trimmed === "❯" || trimmed === "›") return true;
-  if (/^[╭╰│┌└┐┘├┤┬┴┼─═]{2,}$/.test(trimmed)) return true;
-  if (/^[▁▂▃▄▅▆▇█▔▕▏▐]+$/.test(trimmed)) return true;
-  if (trimmed.includes("esc to interrupt")) return true;
-  if (trimmed.includes("Claude Code v")) return true;
-  if (/^Sonnet\b/.test(trimmed)) return true;
-  if (trimmed.includes("Failed to install Anthropic")) return true;
-  if (trimmed.includes("Claude Code has switched")) return true;
-  if (trimmed.includes("? for shortcuts")) return true;
-  if (trimmed.includes("Claude is waiting")) return true;
-  if (trimmed.includes("[wand]")) return true;
-  if (trimmed.startsWith("0;") || trimmed.startsWith("9;")) return true;
-  if (trimmed.includes("ctrl+g")) return true;
-  if (trimmed.includes("/effort")) return true;
-  if (/^Using .* for .* session/.test(trimmed)) return true;
-  if (trimmed.startsWith("Press ") && trimmed.includes(" for")) return true;
-  if (trimmed.startsWith("type ") && trimmed.includes(" to ")) return true;
-  if (trimmed.includes("auto mode is unavailable")) return true;
-  if (/MCP server.*failed/i.test(trimmed)) return true;
-  if (trimmed.includes("Germinating") || trimmed.includes("Doodling") || trimmed.includes("Brewing")) return true;
-  if (trimmed.includes("Permissions") && trimmed.includes("mode")) return true;
-  if (trimmed.startsWith("●") && trimmed.includes("·")) return true;
-  if (trimmed.startsWith("[>") || trimmed.startsWith("[<")) return true;
-  if (trimmed.includes("Captured Claude session ID")) return true;
-
-  if (/^>_\s*OpenAI Codex\b/.test(trimmed)) return true;
-  if (/^OpenAI Codex\b/i.test(trimmed)) return true;
-  if (/^(model|directory):\s+/i.test(trimmed)) return true;
-  if (/^(tip|context):\s+/i.test(trimmed)) return true;
-  if (/^work(tree|space):\s+/i.test(trimmed)) return true;
-  if (/^(approvals?|sandbox|provider|session id):\s+/i.test(trimmed)) return true;
-  if (/^(thinking|working)(\.\.\.|…)?$/i.test(trimmed)) return true;
-  if (/^[•◦·]\s+Working\b/i.test(trimmed)) return true;
-  if (/^[•◦·]\s+(Running|Planning|Applying|Reading|Searching)\b/i.test(trimmed)) return true;
-  if (/^[•◦·]\s+(Inspecting|Reviewing|Summarizing|Editing|Updating|Writing)\b/i.test(trimmed)) return true;
-  if (/^[•◦·]\s+Completed\b/i.test(trimmed)) return true;
-  if (/^(ctrl|enter|tab|shift|esc|alt)\+/i.test(trimmed)) return true;
-  if (/\b(open|close|toggle) (chat|terminal)\b/i.test(trimmed)) return true;
-  if (/\b(approve|deny)\b.*\b(permission|approval)\b/i.test(trimmed)) return true;
-  if (/^(use|press) .* (to|for) .*/i.test(trimmed)) return true;
-  if (/^(?:token|context window|remaining context|conversation):\s+/i.test(trimmed)) return true;
-  if (/^(?:cwd|path):\s+\//i.test(trimmed)) return true;
-  if (/^[<>│┆╎].*[<>│┆╎]$/.test(trimmed) && trimmed.length < 8) return true;
-
-  return false;
+  return NOISE_LINE_FRAGMENTS.some((fragment) => trimmed.includes(fragment))
+    || NOISE_LINE_PATTERNS.some((pattern) => pattern.test(trimmed))
+    || (trimmed.startsWith("Press ") && trimmed.includes(" for"))
+    || (trimmed.startsWith("type ") && trimmed.includes(" to "))
+    || (trimmed.includes("Permissions") && trimmed.includes("mode"))
+    || (/^[<>│┆╎].*[<>│┆╎]$/.test(trimmed) && trimmed.length < 8);
 }
 
 /**
@@ -116,9 +121,8 @@ function safeSliceTail(text: string, maxSize: number): string {
   //    in well-formed terminal output) and keep lines aligned for replay.
   const LOOKAHEAD = 4096;
   const upper = Math.min(start + LOOKAHEAD, text.length);
-  for (let i = start; i < upper; i++) {
-    if (text.charCodeAt(i) === 0x0a) return text.slice(i + 1);
-  }
+  const newlineAt = text.indexOf("\n", start);
+  if (newlineAt !== -1 && newlineAt < upper) return text.slice(newlineAt + 1);
 
   // 3. No nearby newline. Detect whether `start` lands inside an open ANSI
   //    escape sequence by scanning backward for an ESC (0x1b). If we find one
@@ -137,36 +141,28 @@ function safeSliceTail(text: string, maxSize: number): string {
     // ST (`ESC \\` = 0x1b 0x5c) 终止。其它范围内字节（包括裸 `\`）
     // 都属于 payload，不能当终止符。CSI 等序列才用 0x40-0x7e final byte。
     const isOsc = escAt + 1 < text.length && text.charCodeAt(escAt + 1) === 0x5d;
-    let terminated = false;
-    for (let i = escAt + 1; i < start; i++) {
-      const code = text.charCodeAt(i);
-      if (code === 0x07) { terminated = true; break; }
-      if (isOsc) {
-        if (code === 0x1b && i + 1 < start && text.charCodeAt(i + 1) === 0x5c) {
-          terminated = true;
-          break;
-        }
-        continue;
-      }
-      if (code >= 0x40 && code <= 0x7e) { terminated = true; break; }
-    }
-    if (!terminated) {
+    if (findAnsiEnd(text, escAt + 1, start, isOsc) === -1) {
       const ansiUpper = Math.min(start + 256, text.length);
-      for (let i = start; i < ansiUpper; i++) {
-        const code = text.charCodeAt(i);
-        if (code === 0x07) return text.slice(i + 1);
-        if (isOsc) {
-          if (code === 0x1b && i + 1 < ansiUpper && text.charCodeAt(i + 1) === 0x5c) {
-            return text.slice(i + 2);
-          }
-          continue;
-        }
-        if (code >= 0x40 && code <= 0x7e) return text.slice(i + 1);
-      }
+      const ansiEnd = findAnsiEnd(text, start, ansiUpper, isOsc);
+      if (ansiEnd !== -1) return text.slice(ansiEnd);
     }
   }
 
   return text.slice(start);
+}
+
+/** Return the index after an ANSI terminator, or -1 if none exists in the range. */
+function findAnsiEnd(text: string, start: number, upper: number, isOsc: boolean): number {
+  for (let i = start; i < upper; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0x07) return i + 1;
+    if (isOsc) {
+      if (code === 0x1b && i + 1 < upper && text.charCodeAt(i + 1) === 0x5c) return i + 2;
+    } else if (code >= 0x40 && code <= 0x7e) {
+      return i + 1;
+    }
+  }
+  return -1;
 }
 
 function isLikelyAnsiBody(text: string, idx: number): boolean {
@@ -189,8 +185,7 @@ export function stripForEchoMatch(input: string): string {
       i = skipAnsiSequence(input, i) - 1;
       continue;
     }
-    if (code < 0x20 || code === 0x7f) continue;
-    if (code === 0x20) continue;
+    if (code <= 0x20 || code === 0x7f) continue;
     out += input[i];
   }
   return out;
@@ -297,8 +292,7 @@ export const FALLBACK_SCORE_THRESHOLD = 8;
  */
 export function scorePermissionLikelihood(normalized: string): PermissionScore {
   // Take the last ~5 lines
-  const lines = normalized.split("\n");
-  const tail = lines.slice(-8).join("\n");
+  const tail = normalized.split("\n").slice(-8).join("\n");
 
   // Slash-command menus are never permission prompts — zero the score so
   // fallback auto-approve and idle-probe both skip them.

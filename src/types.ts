@@ -1,6 +1,6 @@
 export type SessionKind = "pty" | "structured";
-export type SessionProvider = "claude" | "codex";
-export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "pty";
+export type SessionProvider = "claude" | "codex" | "opencode";
+export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "pty";
 export type SessionSource = "interactive" | "automation" | "startup";
 
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
@@ -122,6 +122,8 @@ export interface WandConfig {
   defaultModel?: string;
   /** 新建 Codex 会话时默认使用的模型。留空则不传 --model，由 codex 自行决定。 */
   defaultCodexModel?: string;
+  /** 新建 OpenCode 会话时默认使用的 provider/model。留空则由 opencode 自行决定。 */
+  defaultOpenCodeModel?: string;
   /** 快捷提交生成 commit message / tag 时使用的 CLI。 */
   commitCli?: SessionProvider;
   /** 快捷提交专用模型。留空则跟随所选 CLI 的默认模型。 */

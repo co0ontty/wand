@@ -8,7 +8,7 @@ import { attachQuickCommitModalListeners, closeQuickCommitModal, loadGitStatus, 
 import { attachQueueBarDelegates, bindInputTouchScroll, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, handleVoiceMove, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, startVoiceRecording, stopSession, stopVoiceRecording, toggleTerminalInteractive, toggleVoiceMode, updateQueueBar, welcomeInputSend } from "./input";
 import { _doPlaySound, _hasNativeBridge, _vibrate, hideError, showError, showToast, wandAlert, wandConfirm } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
-import { _updateAppIconSelection, addPendingAttachment, backToNativeApp, bindSettingsModelComboboxes, checkForUpdate, closePlusPopover, closeSessionModal, closeSessionsDrawer, closeSettingsModal, closeWorktreeMergeModal, confirmWorktreeMerge, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, hidePathSuggestions, initBlankChatCwd, isStructuredSession, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openEnvPreviewModal, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, performSettingsRestart, performUpdate, persistNewSessionDefaults, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, resetNotificationPermission, retryWorktreeCleanup, runCommand, saveConfigSettings, saveDisplaySettings, savePassword, schedulePathSuggestions, scheduleTestNotification, selectSession, setDraftValue, setUpdateChannel, switchServer, switchSettingsTab, syncCommitModelProvider, syncComposerHasText, syncSessionModalUI, testNotification, toggleAutoUpdate, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin, updateNotificationStatus, uploadCertificates } from "./session-engine";
+import { _updateAppIconSelection, addPendingAttachment, backToNativeApp, bindSettingsModelComboboxes, checkForUpdate, closePlusPopover, closeSessionModal, closeSessionsDrawer, closeSettingsModal, closeWorktreeMergeModal, confirmWorktreeMerge, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, hidePathSuggestions, initBlankChatCwd, isStructuredSession, loadProviderCliUpdates, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openEnvPreviewModal, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, performProviderCliUpdates, performSettingsRestart, performUpdate, persistNewSessionDefaults, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, resetNotificationPermission, retryWorktreeCleanup, runCommand, saveConfigSettings, saveDisplaySettings, savePassword, schedulePathSuggestions, scheduleTestNotification, selectSession, setDraftValue, setUpdateChannel, switchServer, switchSettingsTab, syncCommitModelProvider, syncComposerHasText, syncSessionModalUI, testNotification, toggleAutoUpdate, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin, updateNotificationStatus, uploadCertificates } from "./session-engine";
 import { batchDeleteSelected, clearSelections, confirmDelete, renderSessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { activateSessionItem, addRecentPath, copySelectedSessionField, fetchRecentPaths, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, saveWorkingDir, softResyncTerminal } from "./terminal";
 import { ensureTerminalFit, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
@@ -308,13 +308,17 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         document.addEventListener("click", function(e) {
           var target = e.target as HTMLElement | null;
           if (!target || typeof target.closest !== "function") return;
-          var button = target.closest("#check-update-button, #do-update-button, #do-restart-button") as HTMLButtonElement | null;
+          var button = target.closest("#check-update-button, #do-update-button, #do-restart-button, #check-provider-cli-updates, #update-provider-clis") as HTMLButtonElement | null;
           if (!button || button.disabled) return;
           e.preventDefault();
           if (button.id === "check-update-button") {
             checkForUpdate();
           } else if (button.id === "do-update-button") {
             performUpdate();
+          } else if (button.id === "check-provider-cli-updates") {
+            loadProviderCliUpdates(true);
+          } else if (button.id === "update-provider-clis") {
+            performProviderCliUpdates();
           } else {
             performSettingsRestart();
           }
@@ -489,6 +493,15 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
             state.sessionTool = "codex";
             state.preferredCommand = "codex";
             state.modeValue = "full-access";
+            quickStartSession();
+          });
+        }
+        var welcomeOpenCodeBtn = document.getElementById("welcome-tool-opencode");
+        if (welcomeOpenCodeBtn) {
+          welcomeOpenCodeBtn.addEventListener("click", function() {
+            state.sessionTool = "opencode";
+            state.preferredCommand = "opencode";
+            state.modeValue = "managed";
             quickStartSession();
           });
         }
@@ -696,6 +709,10 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle") as HTMLInputElement | null;
         if (autoUpdateDmgToggle) autoUpdateDmgToggle.addEventListener("change", function() {
           toggleAutoUpdate("dmg", autoUpdateDmgToggle!.checked);
+        });
+        var autoUpdateCliToggle = document.getElementById("auto-update-cli-toggle") as HTMLInputElement | null;
+        if (autoUpdateCliToggle) autoUpdateCliToggle.addEventListener("change", function() {
+          toggleAutoUpdate("cli", autoUpdateCliToggle!.checked);
         });
         var betaChannelToggle = document.getElementById("beta-channel-toggle") as HTMLInputElement | null;
         if (betaChannelToggle) betaChannelToggle.addEventListener("change", function() {
@@ -1027,7 +1044,8 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
             topbarMoreBtn!.setAttribute("aria-expanded", "false");
             switch (action) {
               case "copy-claude-session-id":
-                copySelectedSessionField("claudeSessionId", getSelectedSession() && getSelectedSession().provider === "codex" ? "Codex thread ID 已复制" : "Claude 会话 ID 已复制");
+                var copyProvider = getSelectedSession() && getSelectedSession().provider;
+                copySelectedSessionField("claudeSessionId", copyProvider === "codex" ? "Codex thread ID 已复制" : copyProvider === "opencode" ? "OpenCode session ID 已复制" : "Claude 会话 ID 已复制");
                 break;
               case "copy-cwd":
                 copySelectedSessionField("cwd", "工作目录已复制");
