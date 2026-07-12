@@ -1,6 +1,7 @@
 export type SessionKind = "pty" | "structured";
 export type SessionProvider = "claude" | "codex";
 export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "pty";
+export type SessionSource = "interactive" | "automation" | "startup";
 
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
 
@@ -436,6 +437,10 @@ export interface StructuredSessionState {
 
 export interface SessionSnapshot {
   id: string;
+  /** 会话创建来源。旧数据和缺省值按 interactive 处理。 */
+  sessionSource?: SessionSource;
+  /** 自动化创建会话时关联的自动化任务 ID。 */
+  automationId?: string;
   sessionKind?: SessionKind;
   provider?: SessionProvider;
   runner?: SessionRunner;

@@ -7,41 +7,110 @@ import { showError, wandConfirm } from "./notifications";
 import { updateSessionsList, refreshAll, isStructuredSession } from "./session-engine";
 import { renderSessionItem } from "./session-ui";
 
+const NON_WAND_SESSIONS_EXPANDED_KEY = "wand-non-wand-sessions-expanded";
+const AUTOMATION_SESSIONS_EXPANDED_KEY = "wand-automation-sessions-expanded";
+
+function getSecondaryGroupStorageKey(group: HTMLDetailsElement) {
+  if (group.classList.contains("automation-session-group")) return AUTOMATION_SESSIONS_EXPANDED_KEY;
+  if (group.classList.contains("non-wand-session-group")) return NON_WAND_SESSIONS_EXPANDED_KEY;
+  return "";
+}
+
+// Native <details> keeps the interaction lightweight. Persist its state so a
+// background list refresh does not unexpectedly collapse the group.
+document.addEventListener("toggle", function(event) {
+  var group = event.target as HTMLDetailsElement | null;
+  if (!group || !group.classList) return;
+  var storageKey = getSecondaryGroupStorageKey(group);
+  if (!storageKey) return;
+  if (state.sessionsManageMode) {
+    if (!group.open) group.open = true;
+    return;
+  }
+  writeStoredBoolean(storageKey, group.open);
+}, true);
+
+document.addEventListener("click", function(event) {
+  var target = event.target as Element | null;
+  if (!target || typeof target.closest !== "function") return;
+
+  // Keep every selectable item visible while batch management is active.
+  if (target.closest(".non-wand-session-group.manage-mode > summary, .automation-session-group.manage-mode > summary")) {
+    event.preventDefault();
+    return;
+  }
+
+  var compactTrigger = target.closest("[data-expand-session-group]") as HTMLElement | null;
+  if (!compactTrigger) return;
+  var targetGroup = compactTrigger.dataset.expandSessionGroup;
+  var storageKey = targetGroup === "automation"
+    ? AUTOMATION_SESSIONS_EXPANDED_KEY
+    : targetGroup === "non-wand"
+      ? NON_WAND_SESSIONS_EXPANDED_KEY
+      : "";
+  if (!storageKey) return;
+  writeStoredBoolean(storageKey, true);
+  var collapseButton = document.getElementById("sidebar-collapse-btn");
+  if (collapseButton) collapseButton.click();
+});
+
 // Functions defined in other modules (scripts.js IIFE scope)
 
-      // 单一会话列表的数据源：Wand 会话（含已归档）与本机可恢复会话
-      // 一起按创建/修改时间倒序排列。展开侧栏与折叠窄条共用这份顺序。
-      export function getSessionEntries() {
-        var entries: any[] = [];
+      export function isAutomationSession(session: any) {
+        var source = String(session && session.sessionSource || "").toLowerCase();
+        return source === "automation" || source === "startup";
+      }
+
+      function sortSessionEntries(entries: any[]) {
+        return entries.sort(function(a, b) { return b.t - a.t; });
+      }
+
+      // 三个来源各自在组内按时间倒序，辅助会话不会再改变普通 Wand 会话
+      // 的展示顺序或窄栏编号。缺失来源按 interactive 兼容旧数据。
+      export function getSessionEntryGroups() {
+        var wandEntries: any[] = [];
+        var automationEntries: any[] = [];
+        var nonWandEntries: any[] = [];
         state.sessions.forEach(function(s: any) {
           var t = s.startedAt ? new Date(s.startedAt).getTime() : 0;
-          entries.push({ kind: "session", ref: s, t: isFinite(t) ? t : 0 });
+          var entry = { kind: "session", ref: s, t: isFinite(t) ? t : 0 };
+          (isAutomationSession(s) ? automationEntries : wandEntries).push(entry);
         });
         if (state.claudeHistoryLoaded) {
           getVisibleClaudeHistorySessions().forEach(function(h: any) {
             var t = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
             if (!isFinite(t)) t = Number(h.mtimeMs) || 0;
-            entries.push({ kind: "history", ref: h, t: t });
+            nonWandEntries.push({ kind: "history", ref: h, t: t });
           });
         }
         if (state.codexHistoryLoaded) {
           getVisibleCodexHistorySessions().forEach(function(h: any) {
             var t = h.timestamp ? new Date(h.timestamp).getTime() : Number(h.mtimeMs) || 0;
-            entries.push({ kind: "codex", ref: h, t: isFinite(t) ? t : 0 });
+            nonWandEntries.push({ kind: "codex", ref: h, t: isFinite(t) ? t : 0 });
           });
         }
-        entries.sort(function(a, b) { return b.t - a.t; });
-        return entries;
+        return {
+          wand: sortSessionEntries(wandEntries),
+          automation: sortSessionEntries(automationEntries),
+          nonWand: sortSessionEntries(nonWandEntries)
+        };
+      }
+
+      export function getSessionEntries() {
+        var groups = getSessionEntryGroups();
+        return groups.wand.concat(groups.automation, groups.nonWand);
       }
 
       export function renderSessions() {
         var groups: any[] = [];
         groups.push(renderSessionManageBar());
-        var entries = getSessionEntries();
-        if (entries.length === 0) {
+        var entries = getSessionEntryGroups();
+        if (entries.wand.length + entries.automation.length + entries.nonWand.length === 0) {
           return renderSessionManageBar() + '<div class="empty-state"><strong>还没有会话记录</strong><br>点击上方「新对话」开始你的第一次对话。</div>';
         }
-        groups.push(renderSessionEntries(entries));
+        if (entries.wand.length > 0) groups.push(renderSessionEntries(entries.wand));
+        if (entries.automation.length > 0) groups.push(renderAutomationSessionGroup(entries.automation));
+        if (entries.nonWand.length > 0) groups.push(renderNonWandSessionGroup(entries.nonWand));
         return groups.join("");
       }
 
@@ -52,25 +121,34 @@ import { renderSessionItem } from "./session-ui";
       }
 
       export function renderCollapsedSessionTiles() {
-        var entries = getSessionEntries();
-        var tiles = entries.map(function(e: any, i: any) {
+        var entries = getSessionEntryGroups();
+        var tiles = entries.wand.map(function(e: any, i: any) {
           var idx = i + 1;
-          if (e.kind === "session") {
-            var s = e.ref;
-            var activeCls = s.id === state.selectedId ? " active" : "";
-            var title = s.title || s.description || s.summary || s.command || ("会话 " + idx);
-            return '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + idx + '</button>';
-          }
-          var h = e.ref;
-          var preview = h.firstUserMessage || "(空会话)";
-          var hTitle = preview + " · " + formatHistoryTime(h.timestamp);
-          return '<button class="sidebar-collapsed-tile" type="button" data-collapsed-history-id="' + escapeHtml(h.claudeSessionId) + '" data-provider="' + escapeHtml(e.kind === "codex" ? "codex" : "claude") + '" data-cwd="' + escapeHtml(h.cwd || "") + '" title="' + escapeHtml(hTitle) + '">' + idx + '</button>';
+          var s = e.ref;
+          var activeCls = s.id === state.selectedId ? " active" : "";
+          var title = s.title || s.description || s.summary || s.command || ("会话 " + idx);
+          return '<button class="sidebar-collapsed-tile' + activeCls + '" type="button" data-collapsed-session-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(title) + '">' + idx + '</button>';
         }).join("");
+        var automationCount = entries.automation.length;
+        var automationActive = entries.automation.some(function(entry: any) { return entry.ref.id === state.selectedId; });
+        var automationTile = automationCount > 0
+          ? '<button class="sidebar-collapsed-tile automation-count-tile' + (automationActive ? ' active-group' : '') + '" type="button" data-expand-session-group="automation" title="展开查看 ' + automationCount + ' 个自动化会话" aria-label="展开查看 ' + automationCount + ' 个自动化会话">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>' +
+              '<span class="non-wand-count-badge">' + (automationCount > 99 ? "99+" : automationCount) + '</span>' +
+            '</button>'
+          : '';
+        var nonWandCount = entries.nonWand.length;
+        var nonWandTile = nonWandCount > 0
+          ? '<button class="sidebar-collapsed-tile non-wand-count-tile" type="button" data-expand-session-group="non-wand" title="展开查看 ' + nonWandCount + ' 个非 Wand 会话" aria-label="展开查看 ' + nonWandCount + ' 个非 Wand 会话">' +
+              '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>' +
+              '<span class="non-wand-count-badge">' + (nonWandCount > 99 ? "99+" : nonWandCount) + '</span>' +
+            '</button>'
+          : '';
         // 窄条底部固定一个「+」快速新建会话方块，替代被隐藏的 footer 新会话入口。
         var addTile = '<button class="sidebar-collapsed-tile add" type="button" data-collapsed-new-session="1" title="新建会话" aria-label="新建会话">' +
           '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' +
           '</button>';
-        return '<div class="sidebar-collapsed-tiles">' + tiles + addTile + '</div>';
+        return '<div class="sidebar-collapsed-tiles">' + tiles + automationTile + nonWandTile + addTile + '</div>';
       }
 
       export function renderSessionsListContent() {
@@ -80,7 +158,7 @@ import { renderSessionItem } from "./session-ui";
       export function renderSessionManageBar() {
         if (!state.sessionsManageMode) {
           return '<div class="session-manage-bar">' +
-            '<span class="sidebar-intro">全部会话</span>' +
+            '<span class="sidebar-intro">Wand 会话</span>' +
             '<button class="btn btn-ghost btn-xs session-manage-toggle" data-action="toggle-manage-mode" type="button">' +
               '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>' +
               '<span>管理</span>' +
@@ -118,8 +196,8 @@ import { renderSessionItem } from "./session-ui";
         '</div>';
       }
 
-      export function renderSessionEntries(entries: any) {
-        var html = '<section class="session-group">';
+      export function renderSessionEntries(entries: any, extraClass?: any) {
+        var html = '<section class="session-group' + (extraClass ? ' ' + extraClass : '') + '">';
         html += entries.map(function(e: any) {
           return e.kind === "session"
             ? renderSessionItem(e.ref, "sessions")
@@ -127,6 +205,36 @@ import { renderSessionItem } from "./session-ui";
         }).join("");
         html += '</section>';
         return html;
+      }
+
+      export function renderNonWandSessionGroup(entries: any) {
+        var expanded = state.sessionsManageMode || readStoredBoolean(NON_WAND_SESSIONS_EXPANDED_KEY, false);
+        return '<details class="non-wand-session-group' + (state.sessionsManageMode ? ' manage-mode' : '') + '"' + (expanded ? ' open' : '') + '>' +
+          '<summary class="non-wand-session-summary" title="Claude 与 Codex 的本机原生会话，不参与 Wand 会话排序">' +
+            '<span class="non-wand-session-icon" aria-hidden="true">' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>' +
+            '</span>' +
+            '<span class="non-wand-session-title">非 Wand 会话</span>' +
+            '<span class="non-wand-session-count" aria-label="' + entries.length + ' 个会话">' + entries.length + '</span>' +
+            '<svg class="non-wand-session-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>' +
+          '</summary>' +
+          renderSessionEntries(entries, "non-wand-session-list") +
+        '</details>';
+      }
+
+      export function renderAutomationSessionGroup(entries: any) {
+        var expanded = state.sessionsManageMode || readStoredBoolean(AUTOMATION_SESSIONS_EXPANDED_KEY, false);
+        return '<details class="automation-session-group' + (state.sessionsManageMode ? ' manage-mode' : '') + '"' + (expanded ? ' open' : '') + '>' +
+          '<summary class="automation-session-summary" title="由自动化或启动任务创建，不参与普通 Wand 会话排序">' +
+            '<span class="automation-session-icon" aria-hidden="true">' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>' +
+            '</span>' +
+            '<span class="automation-session-title">自动化</span>' +
+            '<span class="automation-session-count" aria-label="' + entries.length + ' 个会话">' + entries.length + '</span>' +
+            '<svg class="automation-session-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>' +
+          '</summary>' +
+          renderSessionEntries(entries, "automation-session-list") +
+        '</details>';
       }
 
       export function getVisibleClaudeHistorySessions() {
@@ -356,7 +464,7 @@ import { renderSessionItem } from "./session-ui";
           session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) +
           '" type="button" aria-label="恢复会话" title="' + (isCodex ? "恢复此 Codex 会话" : "恢复此 Claude 会话") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
 
-        return '<div class="session-item' + (state.sessionsManageMode && selMap[session.claudeSessionId] ? ' selected' : '') + '" data-claude-history-id="' + session.claudeSessionId + '" data-provider="' + (isCodex ? 'codex' : 'claude') + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
+        return '<div class="session-item non-wand-session' + (state.sessionsManageMode && selMap[session.claudeSessionId] ? ' selected' : '') + '" data-claude-history-id="' + session.claudeSessionId + '" data-provider="' + (isCodex ? 'codex' : 'claude') + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +
               checkbox +

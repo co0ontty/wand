@@ -1305,7 +1305,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           prompt: prompt || undefined,
           worktreeEnabled: worktreeEnabled === true,
           model: modelPref || undefined,
-          thinkingEffort: thinkingPref
+          thinkingEffort: thinkingPref,
+          sessionSource: "interactive"
         };
         return fetch("/api/structured-sessions", {
           method: "POST",
@@ -3574,8 +3575,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               }
               return;
             }
-            if (data.updateAvailable && updateBtn) {
-              updateBtn.textContent = isBeta ? "更新到 Beta" : "更新到最新版";
+            if (updateBtn) {
+              updateBtn.textContent = data.updateAvailable
+                ? (isBeta ? "更新到 Beta" : "更新到最新版")
+                : (isBeta ? "重新安装 Beta" : "重新安装最新版");
               updateBtn.classList.remove("hidden");
             }
             if (!data.updateAvailable && msgEl) {
@@ -4044,7 +4047,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({ command: command, provider: command, cwd: defaultCwd, mode: defaultMode }))
+          body: JSON.stringify(withTerminalDimensions({ command: command, provider: command, cwd: defaultCwd, mode: defaultMode, sessionSource: "interactive" }))
         });
         })
         .then(function(res) { return res.json(); })
@@ -4139,7 +4142,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             provider: command,
             cwd: cwd,
             mode: mode,
-            worktreeEnabled: worktreeEnabled
+            worktreeEnabled: worktreeEnabled,
+            sessionSource: "interactive"
           }))
         });
         })

@@ -15,12 +15,24 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  buildPackageUpdateInfo,
   installPackageGloballySync,
   requiredUpdateFreeBytes,
   resolveGlobalWandBin,
 } from "../src/npm-update-utils.js";
 
 const MIB = 1024 * 1024;
+
+test("npm dist-tags remain authoritative for every local version state", () => {
+  assert.equal(buildPackageUpdateInfo("2.0.0", "stable", "3.0.0").updateAvailable, true);
+  assert.equal(buildPackageUpdateInfo("4.0.0", "stable", "3.0.0").updateAvailable, true);
+  assert.equal(buildPackageUpdateInfo("3.0.0-local.1", "stable", "3.0.0").updateAvailable, true);
+  assert.equal(buildPackageUpdateInfo("dev", "stable", "3.0.0").updateAvailable, true);
+  assert.equal(buildPackageUpdateInfo("v3.0.0", "stable", "3.0.0").updateAvailable, false);
+
+  assert.equal(buildPackageUpdateInfo("4.0.0-beta.local", "beta", "3.0.0-beta.remote").updateAvailable, true);
+  assert.equal(buildPackageUpdateInfo("3.0.0-beta.remote", "beta", "3.0.0-beta.remote").updateAvailable, false);
+});
 
 test("requiredUpdateFreeBytes keeps rollback and reserve headroom", () => {
   assert.equal(requiredUpdateFreeBytes(0), 512 * MIB);

@@ -17562,8 +17562,8 @@
         }
         return;
       }
-      if (data.updateAvailable && updateBtn) {
-        updateBtn.textContent = isBeta ? "\u66F4\u65B0\u5230 Beta" : "\u66F4\u65B0\u5230\u6700\u65B0\u7248";
+      if (updateBtn) {
+        updateBtn.textContent = data.updateAvailable ? isBeta ? "\u66F4\u65B0\u5230 Beta" : "\u66F4\u65B0\u5230\u6700\u65B0\u7248" : isBeta ? "\u91CD\u65B0\u5B89\u88C5 Beta" : "\u91CD\u65B0\u5B89\u88C5\u6700\u65B0\u7248";
         updateBtn.classList.remove("hidden");
       }
       if (!data.updateAvailable && msgEl) {

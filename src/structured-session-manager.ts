@@ -11,7 +11,7 @@ import { SessionLogger } from "./session-logger.js";
 import { WandStorage } from "./storage.js";
 import {
   CardExpandDefaults, ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
-  ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState,
+  ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, StructuredSessionState,
   SubagentMeta, ToolUseBlock, WandConfig,
 } from "./types.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
@@ -33,6 +33,8 @@ interface CreateStructuredSessionOptions {
   model?: string;
   /** 用户预设的思考深度。留空 / null 视为 off。 */
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
+  sessionSource?: SessionSource;
+  automationId?: string;
   /**
    * 恢复用的初始会话 id：
    *   - Codex：历史 thread id，首条消息即 `codex exec ... resume <id>` 续接。
@@ -908,6 +910,8 @@ export class StructuredSessionManager {
       const restored: SessionSnapshot = {
         ...snapshot,
         sessionKind: "structured",
+        sessionSource: snapshot.sessionSource ?? "interactive",
+        automationId: snapshot.automationId,
         provider: snapshot.provider ?? snapshot.structuredState?.provider ?? "claude",
         runner: snapshot.runner ?? snapshot.structuredState?.runner ?? defaultStructuredRunner(snapshot.provider ?? snapshot.structuredState?.provider ?? "claude"),
         status: restoredStatus,
@@ -1027,6 +1031,8 @@ export class StructuredSessionManager {
     const snapshot: SessionSnapshot = {
       id,
       sessionKind: "structured",
+      sessionSource: options.sessionSource ?? "interactive",
+      automationId: options.automationId,
       provider,
       runner,
       command:

@@ -3,7 +3,7 @@ import express, { Express } from "express";
 import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
-import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, WandConfig } from "./types.js";
+import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
 import { getDefaultModelForProvider, normalizeMode } from "./config.js";
 import { blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
@@ -20,6 +20,29 @@ import {
 
 import { getErrorMessage } from "./error-utils.js";
 export { getErrorMessage };
+
+export function parseSessionCreationOrigin(
+  body: { sessionSource?: unknown; automationId?: unknown } | null | undefined,
+): { sessionSource: SessionSource; automationId?: string } {
+  const rawSource = body?.sessionSource;
+  if (rawSource !== undefined && rawSource !== "interactive" && rawSource !== "automation" && rawSource !== "startup") {
+    throw new Error("sessionSource 必须是 interactive、automation 或 startup。");
+  }
+
+  const rawAutomationId = body?.automationId;
+  if (rawAutomationId !== undefined && typeof rawAutomationId !== "string") {
+    throw new Error("automationId 必须是非空字符串。");
+  }
+  const automationId = rawAutomationId?.trim();
+  if (rawAutomationId !== undefined && !automationId) {
+    throw new Error("automationId 必须是非空字符串。");
+  }
+
+  return {
+    sessionSource: rawSource ?? "interactive",
+    ...(automationId ? { automationId } : {}),
+  };
+}
 
 function getInputErrorResponse(error: unknown, sessionId: string) {
   if (error instanceof SessionInputError) {
@@ -291,7 +314,7 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", express.json(), async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string };
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown };
     try {
       if (body.provider && body.provider !== "claude" && body.provider !== "codex") {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude 或 Codex provider。" });
@@ -299,6 +322,7 @@ export function registerSessionRoutes(
       }
       const provider = body.provider === "codex" ? "codex" : "claude";
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
+      const origin = parseSessionCreationOrigin(body);
       const snapshot = structured.createSession({
         cwd: resolveSessionCwd(body.cwd, config.defaultCwd),
         mode: normalizeMode(body.mode, defaultMode),
@@ -309,6 +333,7 @@ export function registerSessionRoutes(
         thinkingEffort: typeof body.thinkingEffort === "string"
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
           : config.defaultThinkingEffort,
+        ...origin,
       });
       onSessionCreated?.(snapshot.cwd);
       const prompt = body.prompt?.trim();
@@ -883,8 +908,11 @@ export function registerSessionRoutes(
 
   app.post("/api/claude-sessions/:claudeSessionId/resume", (req, res) => {
     const claudeSessionId = String(req.params.claudeSessionId || "").trim();
-    const body = req.body as { mode?: ExecutionMode; cwd?: string; cols?: number; rows?: number };
+    const body = req.body as { mode?: ExecutionMode; cwd?: string; cols?: number; rows?: number; sessionSource?: unknown; automationId?: unknown };
     try {
+      const requestedOrigin = body.sessionSource !== undefined || body.automationId !== undefined
+        ? parseSessionCreationOrigin(body)
+        : null;
       if (!claudeSessionId) {
         res.status(400).json({ error: "Claude 会话 ID 不能为空。" });
         return;
@@ -912,7 +940,12 @@ export function registerSessionRoutes(
         const resumeCommand = `${command} --resume ${claudeSessionId}`;
         const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
         const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
-        const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, { reuseId: existingSession.id, cols: reqCols, rows: reqRows });
+        const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, {
+          reuseId: existingSession.id,
+          cols: reqCols,
+          rows: reqRows,
+          ...(requestedOrigin ?? {}),
+        });
         res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
       } else {
         const cwd = body.cwd?.trim();
@@ -924,7 +957,11 @@ export function registerSessionRoutes(
         const resumeCommand = `claude --resume ${claudeSessionId}`;
         const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
         const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
-        const newSnapshot = processes.start(resumeCommand, cwd, newMode, undefined, { cols: reqCols, rows: reqRows });
+        const newSnapshot = processes.start(resumeCommand, cwd, newMode, undefined, {
+          cols: reqCols,
+          rows: reqRows,
+          ...(requestedOrigin ?? {}),
+        });
         res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
       }
     } catch (error) {
@@ -966,7 +1003,7 @@ export function registerSessionRoutes(
 
   app.post("/api/codex-sessions/:threadId/resume", express.json(), async (req, res) => {
     const threadId = String(req.params.threadId || "").trim();
-    const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean };
+    const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean; sessionSource?: unknown; automationId?: unknown };
     try {
       if (!threadId) {
         res.status(400).json({ error: "Codex 会话 ID 不能为空。" });
@@ -983,6 +1020,7 @@ export function registerSessionRoutes(
         return;
       }
       const newMode = normalizeMode(body.mode, defaultMode);
+      const origin = parseSessionCreationOrigin(body);
       const snapshot = structured.createSession({
         cwd,
         mode: newMode,
@@ -990,6 +1028,7 @@ export function registerSessionRoutes(
         runner: "codex-cli-exec",
         worktreeEnabled: body.worktreeEnabled === true,
         claudeSessionId: threadId,
+        ...origin,
       });
       onSessionCreated?.(cwd);
       res.status(201).json({ resumedClaudeSessionId: threadId, ...snapshot });

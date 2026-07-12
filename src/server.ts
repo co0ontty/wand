@@ -38,7 +38,7 @@ import { getCachedModels, refreshModels } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
-import { getErrorMessage, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { getErrorMessage, parseSessionCreationOrigin, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
 import {
   checkPackageUpdateAsync,
   installPackageGloballyAsync,
@@ -2126,11 +2126,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         res.status(502).json({ error: "无法连接到 npm registry。" });
         return;
       }
-      if (!info.updateAvailable) {
-        res.json({ ok: true, message: channel === "beta" ? "已是最新 Beta 版本。" : "已经是最新版本。" });
-        return;
-      }
       const targetLabel = info.latest;
+      const reinstalling = !info.updateAvailable;
 
       if (!canUseDetachedUpdateHelper()) {
         res.status(500).json({ error: "当前平台暂不支持 Web 异步更新，请在终端运行 install.sh 更新。" });
@@ -2164,7 +2161,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
 
       res.json({
         ok: true,
-        message: `已开始更新到 ${targetLabel}`,
+        message: reinstalling ? `已开始重新安装 ${targetLabel}` : `已开始更新到 ${targetLabel}`,
         restartRequired: false,
         detachedUpdate: true,
         version: targetLabel,
@@ -2651,13 +2648,14 @@ export async function startServer(config: WandConfig, configPath: string): Promi
   // ── Session control ──
 
   app.post("/api/commands", (req, res) => {
-    const body = req.body as CommandRequest;
+    const body = req.body as CommandRequest & { sessionSource?: unknown; automationId?: unknown };
     if (!body.command?.trim()) {
       res.status(400).json({ error: "请输入要执行的命令。" });
       return;
     }
     const initialInput = body.initialInput?.trim();
     try {
+      const origin = parseSessionCreationOrigin(body);
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const provider: SessionProvider = body.provider === "codex" || /^codex\b/.test(body.command.trim()) ? "codex" : "claude";
       const effectiveModel = rawModel || getDefaultModelForProvider(config, provider) || undefined;
@@ -2675,6 +2673,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
           cols: reqCols,
           rows: reqRows,
           thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
+          ...origin,
         }
       );
       recordRecentPath(storage, snapshot.cwd);

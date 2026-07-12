@@ -36,7 +36,6 @@ import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 import { whichSync } from "./path-repair.js";
-import { compareSemver } from "./version-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 
 const execFileAsync = promisify(execFile);
@@ -89,25 +88,14 @@ function computeUpdateAvailable(currentVersion: string, latestVersion: string | 
   if (!latestVersion) return false;
 
   const current = cleanVersion(currentVersion);
-  const latest = cleanVersion(latestVersion);
-  const currentTag = getStableTagVersion(current);
-  const latestTag = getStableTagVersion(latest);
-  const tagCompare = compareSemver(latestTag, currentTag);
+  const target = channel === "stable"
+    ? getStableTagVersion(latestVersion)
+    : cleanVersion(latestVersion);
 
-  if (channel === "beta") {
-    if (tagCompare < 0) return false;
-    if (tagCompare > 0) return true;
-    // Beta follows the beta npm dist-tag exactly. The suffix contains the short
-    // git SHA, so recency comes from the dist-tag pointer instead of semver order.
-    return latest !== current;
-  }
-
-  if (tagCompare < 0) return false;
-  if (tagCompare > 0) return true;
-  // Stable intentionally tracks only the pure tag version. If the current build
-  // is a beta with the same base tag, switching back to stable should reinstall
-  // the clean npm @latest package.
-  return current !== latestTag;
+  // npm's selected dist-tag is authoritative. Manual/local builds can have a
+  // numerically higher, lower, invalid, or suffixed version; any mismatch must
+  // still allow switching to the exact package selected by @latest or @beta.
+  return current !== target;
 }
 
 export function buildPackageUpdateInfo(

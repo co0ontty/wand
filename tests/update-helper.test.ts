@@ -238,6 +238,40 @@ test("helper uses the shared installer and keeps the parent alive when install f
   ]);
 });
 
+test("helper can import the TypeScript installer used by npm run dev", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("bash helper is not supported on Windows");
+    return;
+  }
+  const fixture = createFixture(process.pid, true);
+  const sourceInstaller = path.join(fixture.root, "npm-update-utils.ts");
+  writeFileSync(sourceInstaller, `
+import fs from "node:fs";
+const eventName: string = "typescript-install";
+export async function installPackageGloballyAsync(spec: string, timeoutMs: number): Promise<void> {
+  fs.appendFileSync(process.env.WAND_TEST_EVENTS!, eventName + ":" + spec + ":" + timeoutMs + "\\n");
+  throw new Error("expected TypeScript installer failure");
+}
+`, "utf8");
+  fixture.updateUtilsPath = sourceInstaller;
+  fixture.opts.nodeLoaderArgs = ["--import", import.meta.resolve("tsx")];
+  const parent = await spawnParent(fixture.root, fixture.eventsPath);
+  fixture.opts.parentPid = parent.pid!;
+  t.after(() => {
+    if (isAlive(parent)) parent.kill("SIGKILL");
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  const code = await runScript(fixture, null);
+  assert.notEqual(code, 0);
+  assert.equal(isAlive(parent), true);
+  assert.match(readFileSync(fixture.logPath, "utf8"), /expected TypeScript installer failure/);
+  assert.equal(
+    readFileSync(fixture.eventsPath, "utf8").trim(),
+    "typescript-install:@co0ontty/wand@latest:30000",
+  );
+});
+
 test("standalone helper initializes, terminates the parent, then starts the global CLI", async (t) => {
   if (process.platform === "win32") {
     t.skip("bash helper is not supported on Windows");

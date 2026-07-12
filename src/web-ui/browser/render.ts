@@ -550,7 +550,7 @@ export function renderAppShell() {
           '<div class="sidebar-header-main">' +
             '<div class="topbar-logo-icon">W</div>' +
             '<span class="sidebar-title">会话</span>' +
-            '<span class="session-count" id="session-count">' + String(state.sessions.length) + '</span>' +
+            '<span class="session-count" id="session-count">' + String(state.sessions.filter(function(session: any) { var source = String(session && session.sessionSource || "").toLowerCase(); return source !== "automation" && source !== "startup"; }).length) + '</span>' +
           '</div>' +
           '<div class="sidebar-header-actions">' +
             '<div class="sidebar-header-more">' +

@@ -13,6 +13,7 @@ export interface DetachedUpdateOptions {
   configPath: string;
   parentPid: number;
   cliArgs: string[];
+  nodeLoaderArgs?: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
   timeoutMs?: number;
@@ -182,10 +183,23 @@ export function shouldUseSystemdRunForDetachedUpdate(serviceScope: ServiceScope 
   return serviceScope !== null;
 }
 
-const DEFAULT_UPDATE_UTILS_PATH = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "npm-update-utils.js",
-);
+function resolveDefaultUpdateUtilsPath(): string {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const compiledPath = path.join(moduleDir, "npm-update-utils.js");
+  if (existsSync(compiledPath)) return compiledPath;
+  const sourcePath = path.join(moduleDir, "npm-update-utils.ts");
+  return existsSync(sourcePath) ? sourcePath : compiledPath;
+}
+
+function resolveTypeScriptLoaderArgs(): string[] {
+  try {
+    return ["--import", import.meta.resolve("tsx")];
+  } catch {
+    return [];
+  }
+}
+
+const DEFAULT_UPDATE_UTILS_PATH = resolveDefaultUpdateUtilsPath();
 
 /** Exported so the safety-critical update flow can be exercised without starting a detached process. */
 export function buildDetachedUpdateHelperScript(
@@ -203,6 +217,13 @@ export function buildDetachedUpdateHelperScript(
   const timeoutMs = Number.isFinite(requestedTimeout)
     ? Math.max(30_000, Math.trunc(requestedTimeout))
     : 300_000;
+  const nodeLoaderArgs = opts.nodeLoaderArgs
+    ?? (updateUtilsPath.endsWith(".ts") ? resolveTypeScriptLoaderArgs() : []);
+
+  if (updateUtilsPath.endsWith(".ts") && nodeLoaderArgs.length === 0) {
+    throw new Error("本地 TypeScript 更新 helper 无法解析 tsx loader，请先运行 npm install。");
+  }
+  const nodeLoaderCommand = nodeLoaderArgs.length > 0 ? `${shellArray(nodeLoaderArgs)} ` : "";
 
   return `#!/usr/bin/env bash
 set -euo pipefail
@@ -269,16 +290,18 @@ resolve_global_cli() {
 
 main() {
   echo "[wand-update] installing while parent service stays online"
-  if run "$NODE_BIN" --input-type=module - "$UPDATE_UTILS" "$INSTALL_SPEC" "$TIMEOUT_MS" <<'WAND_INSTALL_NODE'
+  if run "$NODE_BIN" ${nodeLoaderCommand}--input-type=module - "$UPDATE_UTILS" "$INSTALL_SPEC" "$TIMEOUT_MS" <<'WAND_INSTALL_NODE'
 import { pathToFileURL } from "node:url";
 
 const [modulePath, installSpec, timeoutValue] = process.argv.slice(2);
 const timeoutMs = Number(timeoutValue);
 const updateUtils = await import(pathToFileURL(modulePath).href);
-if (typeof updateUtils.installPackageGloballyAsync !== "function") {
+const installPackageGloballyAsync = updateUtils.installPackageGloballyAsync
+  ?? updateUtils.default?.installPackageGloballyAsync;
+if (typeof installPackageGloballyAsync !== "function") {
   throw new Error("installPackageGloballyAsync is unavailable in " + modulePath);
 }
-await updateUtils.installPackageGloballyAsync(installSpec, timeoutMs, (line) => {
+await installPackageGloballyAsync(installSpec, timeoutMs, (line) => {
   process.stdout.write(String(line) + "\\n");
 });
 WAND_INSTALL_NODE

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SessionSnapshot, WandConfig, ConversationTurn, SessionKind, SessionProvider, SessionRunner, StructuredSessionState, WorktreeMergeInfo } from "./types.js";
+import { SessionSnapshot, WandConfig, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo } from "./types.js";
 import {
   DEFAULT_PASSWORD_VAULT_ID,
   DEFAULT_PASSWORD_VAULT_NAME,
@@ -19,6 +19,8 @@ import {
 
 interface SessionRow {
   id: string;
+  session_source: string | null;
+  automation_id: string | null;
   provider: SessionProvider | null;
   session_kind: SessionKind | null;
   runner: SessionRunner | null;
@@ -127,6 +129,10 @@ function normalizeWorktreeMergeStatus(raw: string | null | undefined): SessionSn
   return undefined;
 }
 
+function normalizeSessionSource(raw: unknown): SessionSource {
+  return raw === "automation" || raw === "startup" || raw === "interactive" ? raw : "interactive";
+}
+
 
 
 function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktreeMergeStatus" | "worktreeMergeInfo"> {
@@ -137,18 +143,20 @@ function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktre
 }
 
 function sessionSelectFields(): string {
-  return `id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
+  return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
              , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description`;
 }
 
 function sessionPersistFields(): string {
-  return `id, command, cwd, mode, status, exit_code, started_at, ended_at, output
+  return `id, session_source, automation_id, command, cwd, mode, status, exit_code, started_at, ended_at, output
              , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, structured_state
              , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description`;
 }
 
 function sessionPersistAssignments(): string {
-  return `command = excluded.command,
+  return `session_source = excluded.session_source,
+             automation_id = excluded.automation_id,
+             command = excluded.command,
              cwd = excluded.cwd,
              mode = excluded.mode,
              status = excluded.status,
@@ -176,7 +184,8 @@ function sessionPersistAssignments(): string {
 }
 
 function sessionMetadataAssignments(): string {
-  return `command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
+  return `session_source = ?, automation_id = ?,
+           command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
            started_at = ?, ended_at = ?, output = ?,
            archived = ?, archived_at = ?, claude_session_id = ?,
            provider = ?, session_kind = ?, runner = ?, structured_state = ?,
@@ -188,6 +197,8 @@ function sessionMetadataAssignments(): string {
 function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number | null> {
   return [
     snapshot.id,
+    normalizeSessionSource(snapshot.sessionSource),
+    snapshot.automationId ?? null,
     snapshot.command,
     snapshot.cwd,
     snapshot.mode,
@@ -218,6 +229,8 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
 
 function sessionMetadataValues(snapshot: SessionSnapshot): Array<string | number | null> {
   return [
+    normalizeSessionSource(snapshot.sessionSource),
+    snapshot.automationId ?? null,
     snapshot.command,
     snapshot.cwd,
     snapshot.mode,
@@ -249,6 +262,8 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
   const provider = inferSessionProvider(row);
   return {
     id: row.id,
+    sessionSource: normalizeSessionSource(row.session_source),
+    automationId: row.automation_id ?? undefined,
     sessionKind: row.session_kind ?? "pty",
     provider,
     runner: row.runner ?? undefined,
@@ -299,6 +314,8 @@ const INIT_SQL = `
 
   CREATE TABLE IF NOT EXISTS command_sessions (
     id TEXT PRIMARY KEY,
+    session_source TEXT NOT NULL DEFAULT 'interactive',
+    automation_id TEXT,
     command TEXT NOT NULL,
     cwd TEXT NOT NULL,
     mode TEXT NOT NULL,
@@ -675,7 +692,7 @@ export class WandStorage {
         .prepare(
           `INSERT INTO command_sessions (
            ${sessionPersistFields()}
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              ${sessionPersistAssignments()}`
         )
@@ -793,6 +810,8 @@ function mapPasswordItemRow(row: PasswordVaultItemRow): PasswordVaultItem {
 }
 
 const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
+  ["session_source", "ALTER TABLE command_sessions ADD COLUMN session_source TEXT NOT NULL DEFAULT 'interactive'"],
+  ["automation_id", "ALTER TABLE command_sessions ADD COLUMN automation_id TEXT"],
   ["archived", "ALTER TABLE command_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"],
   ["archived_at", "ALTER TABLE command_sessions ADD COLUMN archived_at TEXT"],
   ["claude_session_id", "ALTER TABLE command_sessions ADD COLUMN claude_session_id TEXT"],

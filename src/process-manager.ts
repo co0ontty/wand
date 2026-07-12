@@ -9,7 +9,7 @@ import os from "node:os";
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
 import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
-import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
+import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
 import { ClaudePtyBridge } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
@@ -881,6 +881,7 @@ export class ProcessManager extends EventEmitter {
         const recoveredMessages = recoverMessagesFromSnapshot(snapshot);
         const updated = {
           ...snapshot,
+          sessionSource: snapshot.sessionSource ?? "interactive",
           status: "exited" as const,
           endedAt: orphanEndedAt,
           claudeSessionId: restoredSessionId ?? null,
@@ -893,6 +894,7 @@ export class ProcessManager extends EventEmitter {
         }
         this.sessions.set(snapshot.id, {
           ...updated,
+          sessionSource: snapshot.sessionSource ?? "interactive",
           provider,
           processId: null,
           ptyProcess: null,
@@ -1043,7 +1045,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"] }): SessionSnapshot {
+  start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string }): SessionSnapshot {
     this.assertCommandAllowed(command);
 
     const baseCwd = resolveSessionCwd(cwd, this.config.defaultCwd);
@@ -1055,14 +1057,21 @@ export class ProcessManager extends EventEmitter {
     // re-prints its own banner and replayed history into the new PTY, and
     // mixing the two would surface every line twice in the terminal view.
     let priorMessages: ConversationTurn[] = [];
+    let inheritedSessionSource: SessionSource | undefined;
+    let inheritedAutomationId: string | undefined;
     if (opts?.reuseId) {
       const oldRecord = this.sessions.get(id);
       if (oldRecord) {
         priorMessages = oldRecord.ptyBridge?.getMessages() ?? oldRecord.messages ?? [];
+        inheritedSessionSource = oldRecord.sessionSource;
+        inheritedAutomationId = oldRecord.automationId;
         this.cleanupRecord(oldRecord);
         this.sessions.delete(id);
       } else {
-        priorMessages = this.storage.getSession(id)?.messages ?? [];
+        const stored = this.storage.getSession(id);
+        priorMessages = stored?.messages ?? [];
+        inheritedSessionSource = stored?.sessionSource;
+        inheritedAutomationId = stored?.automationId;
       }
     }
     const worktreeSetup = opts?.worktreeEnabled
@@ -1092,6 +1101,8 @@ export class ProcessManager extends EventEmitter {
 
     const record: SessionRecord = {
       id,
+      sessionSource: opts?.sessionSource ?? inheritedSessionSource ?? "interactive",
+      automationId: opts?.automationId ?? inheritedAutomationId,
       provider,
       command,
       cwd: resolvedCwd,
@@ -1919,7 +1930,7 @@ export class ProcessManager extends EventEmitter {
 
   runStartupCommands(): SessionSnapshot[] {
     return this.config.startupCommands.map((command) =>
-      this.start(command, this.config.defaultCwd, this.config.defaultMode)
+      this.start(command, this.config.defaultCwd, this.config.defaultMode, undefined, { sessionSource: "startup" })
     );
   }
 
@@ -1929,6 +1940,8 @@ export class ProcessManager extends EventEmitter {
     return {
       id: record.id,
       sessionKind: "pty",
+      sessionSource: record.sessionSource ?? "interactive",
+      automationId: record.automationId,
       provider: record.provider,
       runner: "pty",
       command: record.command,
