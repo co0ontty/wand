@@ -4243,9 +4243,13 @@
           if (msg.data.kind === "update") {
             notifyUpdateAvailable(msg.data.current || "-", msg.data.latest || "-");
           } else if (msg.data.kind === "auto-update-start") {
-            showAutoUpdateOverlay(msg.data.current || "-", msg.data.latest || "-");
+            showAutoUpdateOverlay(
+              msg.data.current || "-",
+              msg.data.latest || "-",
+              msg.data.previousInstanceId || null
+            );
           } else if (msg.data.kind === "auto-update-restart") {
-            showRestartOverlay();
+            showRestartOverlay(msg.data.previousInstanceId || null, msg.data.latest || null);
           } else if (msg.data.kind === "restart") {
             showRestartOverlay();
           }
@@ -9010,22 +9014,33 @@
       showRestartOverlay();
     });
   }
-  function showRestartOverlay() {
-    if (document.getElementById("restart-overlay")) return;
-    var overlay = document.createElement("div");
-    overlay.id = "restart-overlay";
-    overlay.className = "restart-overlay";
-    overlay.innerHTML = '<div class="restart-overlay-content"><div class="restart-spinner"></div><div class="restart-title">\u670D\u52A1\u6B63\u5728\u91CD\u542F</div><div class="restart-subtitle">\u7A0D\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u2026</div></div>';
-    document.body.appendChild(overlay);
+  function normalizeUpdateVersion(value) {
+    return typeof value === "string" ? value.trim().replace(/^v/, "").split("+")[0] : "";
+  }
+  function setRestartTarget(overlay, previousInstanceId, expectedVersion) {
+    if (previousInstanceId) overlay.dataset.previousInstanceId = previousInstanceId;
+    if (expectedVersion) overlay.dataset.expectedVersion = expectedVersion;
+  }
+  function startRestartPolling(overlay) {
+    if (overlay.dataset.restartPolling === "true") return;
+    overlay.dataset.restartPolling = "true";
     var attempts = 0;
     var maxAttempts = 180;
     var timer = setInterval(function() {
       attempts++;
       fetch("/api/config", { credentials: "same-origin" }).then(function(res) {
-        if (res.ok) {
-          clearInterval(timer);
-          location.reload();
-        }
+        if (!res.ok) throw new Error("server not ready");
+        return res.json();
+      }).then(function(config) {
+        var previousInstanceId = overlay.dataset.previousInstanceId || "";
+        var expectedVersion = normalizeUpdateVersion(overlay.dataset.expectedVersion || "");
+        var currentInstanceId = typeof config.serverInstanceId === "string" ? config.serverInstanceId : "";
+        var currentVersion = normalizeUpdateVersion(config.packageVersion || config.currentVersion);
+        var instanceReady = !previousInstanceId || currentInstanceId.length > 0 && currentInstanceId !== previousInstanceId;
+        var versionReady = !expectedVersion || currentVersion === expectedVersion;
+        if (!instanceReady || !versionReady) return;
+        clearInterval(timer);
+        location.reload();
       }).catch(function() {
       });
       if (attempts >= maxAttempts) {
@@ -9037,13 +9052,35 @@
       }
     }, 2e3);
   }
-  function showAutoUpdateOverlay(currentVer, latestVer) {
-    if (document.getElementById("restart-overlay")) return;
-    var overlay = document.createElement("div");
-    overlay.id = "restart-overlay";
-    overlay.className = "restart-overlay";
-    overlay.innerHTML = '<div class="restart-overlay-content"><div class="restart-spinner"></div><div class="restart-title">\u81EA\u52A8\u66F4\u65B0\u4E2D</div><div class="restart-subtitle">' + escapeHtml2(currentVer) + " \u2192 " + escapeHtml2(latestVer) + "<br>\u6B63\u5728\u4E0B\u8F7D\u5E76\u5B89\u88C5\u65B0\u7248\u672C\uFF0C\u7A0D\u540E\u5C06\u81EA\u52A8\u91CD\u542F\u2026</div></div>";
-    document.body.appendChild(overlay);
+  function showRestartOverlay(previousInstanceId, expectedVersion) {
+    var overlay = document.getElementById("restart-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "restart-overlay";
+      overlay.className = "restart-overlay";
+      overlay.innerHTML = '<div class="restart-overlay-content"><div class="restart-spinner"></div><div class="restart-title"></div><div class="restart-subtitle"></div></div>';
+      document.body.appendChild(overlay);
+    }
+    setRestartTarget(overlay, previousInstanceId, expectedVersion);
+    var title = overlay.querySelector(".restart-title");
+    var subtitle = overlay.querySelector(".restart-subtitle");
+    if (title) title.textContent = expectedVersion ? "\u6B63\u5728\u5B8C\u6210\u66F4\u65B0" : "\u670D\u52A1\u6B63\u5728\u91CD\u542F";
+    if (subtitle) {
+      subtitle.textContent = expectedVersion ? "\u5B89\u88C5\u5B8C\u6210\u5E76\u542F\u52A8\u65B0\u7248\u672C\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u2026" : "\u7A0D\u540E\u5C06\u81EA\u52A8\u5237\u65B0\u9875\u9762\u2026";
+    }
+    startRestartPolling(overlay);
+  }
+  function showAutoUpdateOverlay(currentVer, latestVer, previousInstanceId) {
+    var overlay = document.getElementById("restart-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "restart-overlay";
+      overlay.className = "restart-overlay";
+      overlay.innerHTML = '<div class="restart-overlay-content"><div class="restart-spinner"></div><div class="restart-title">\u81EA\u52A8\u66F4\u65B0\u4E2D</div><div class="restart-subtitle">' + escapeHtml2(currentVer) + " \u2192 " + escapeHtml2(latestVer) + "<br>\u6B63\u5728\u4E0B\u8F7D\u5E76\u5B89\u88C5\u65B0\u7248\u672C\uFF0C\u7A0D\u540E\u5C06\u81EA\u52A8\u91CD\u542F\u2026</div></div>";
+      document.body.appendChild(overlay);
+    }
+    setRestartTarget(overlay, previousInstanceId, latestVer);
+    startRestartPolling(overlay);
   }
   var _macUaMatch;
   var _macHandler;
@@ -17580,7 +17617,7 @@
       updateBtn.removeAttribute("aria-busy");
       updateBtn.classList.add("hidden");
       if (data.detachedUpdate) {
-        showRestartOverlay();
+        showRestartOverlay(data.previousInstanceId || null, data.version || null);
       } else if (data.restartRequired !== false) {
         performRestart(null, msgEl);
       } else {

@@ -3634,7 +3634,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           updateBtn.removeAttribute("aria-busy");
           updateBtn.classList.add("hidden");
           if (data.detachedUpdate) {
-            showRestartOverlay();
+            showRestartOverlay(data.previousInstanceId || null, data.version || null);
           } else if (data.restartRequired !== false) {
             performRestart(null, msgEl);
           } else {

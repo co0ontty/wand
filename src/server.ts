@@ -164,6 +164,7 @@ function readBuildInfo(): WandBuildInfo {
 
 const BUILD_INFO = readBuildInfo();
 const DISPLAY_VERSION = BUILD_INFO.version || PKG_VERSION;
+const SERVER_INSTANCE_ID = crypto.randomUUID();
 
 // ── Android APK update check cache ──
 
@@ -1630,6 +1631,8 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       latestVersion: cachedUpdateInfo?.latest ?? null,
       updateChannel: getUpdateChannel(),
       currentVersion: DISPLAY_VERSION,
+      packageVersion: PKG_VERSION,
+      serverInstanceId: SERVER_INSTANCE_ID,
     });
   });
 
@@ -2151,7 +2154,12 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       wsManager.emitEvent({
         type: "notification",
         sessionId: "__system__",
-        data: { kind: "auto-update-restart", current: info.current, latest: targetLabel },
+        data: {
+          kind: "auto-update-restart",
+          current: info.current,
+          latest: targetLabel,
+          previousInstanceId: SERVER_INSTANCE_ID,
+        },
       });
 
       res.json({
@@ -2160,6 +2168,7 @@ export async function startServer(config: WandConfig, configPath: string): Promi
         restartRequired: false,
         detachedUpdate: true,
         version: targetLabel,
+        previousInstanceId: SERVER_INSTANCE_ID,
         logPath: helper.logPath,
       });
     } catch (error) {
@@ -2938,7 +2947,12 @@ export async function startServer(config: WandConfig, configPath: string): Promi
     wsManager.emitEvent({
       type: "notification",
       sessionId: "__system__",
-      data: { kind: "auto-update-start", current: info.current, latest: info.latest },
+      data: {
+        kind: "auto-update-start",
+        current: info.current,
+        latest: info.latest,
+        previousInstanceId: SERVER_INSTANCE_ID,
+      },
     });
 
     try {
@@ -2950,7 +2964,12 @@ export async function startServer(config: WandConfig, configPath: string): Promi
       wsManager.emitEvent({
         type: "notification",
         sessionId: "__system__",
-        data: { kind: "auto-update-restart", current: info.current, latest: info.latest },
+        data: {
+          kind: "auto-update-restart",
+          current: info.current,
+          latest: info.latest,
+          previousInstanceId: SERVER_INSTANCE_ID,
+        },
       });
       // Restart after a brief delay
       setTimeout(() => {

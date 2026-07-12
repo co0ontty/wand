@@ -632,9 +632,13 @@ import { render, restoreLoginSession } from "./render";
               if (msg.data.kind === "update") {
                 notifyUpdateAvailable(msg.data.current || "-", msg.data.latest || "-");
               } else if (msg.data.kind === "auto-update-start") {
-                showAutoUpdateOverlay(msg.data.current || "-", msg.data.latest || "-");
+                showAutoUpdateOverlay(
+                  msg.data.current || "-",
+                  msg.data.latest || "-",
+                  msg.data.previousInstanceId || null,
+                );
               } else if (msg.data.kind === "auto-update-restart") {
-                showRestartOverlay();
+                showRestartOverlay(msg.data.previousInstanceId || null, msg.data.latest || null);
               } else if (msg.data.kind === "restart") {
                 showRestartOverlay();
               }

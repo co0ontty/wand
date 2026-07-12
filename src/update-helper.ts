@@ -54,6 +54,25 @@ function detectInstalledServiceScopes(): ServiceScope[] {
   return [];
 }
 
+function readLaunchdJobPid(domain: string): number | null {
+  const result = spawnSync("launchctl", ["print", `${domain}/com.wand.web`], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  if (result.status !== 0) return null;
+  const match = (result.stdout || "").match(/(?:^|\n)\s*pid = (\d+)\s*(?:\n|$)/);
+  if (!match) return null;
+  const pid = Number(match[1]);
+  return Number.isSafeInteger(pid) && pid > 1 ? pid : null;
+}
+
+function detectActiveDarwinServiceScope(pid: number): ServiceScope | null {
+  if (readLaunchdJobPid("system") === pid) return "system";
+  const uid = typeof process.getuid === "function" ? process.getuid() : null;
+  if (uid !== null && readLaunchdJobPid(`gui/${uid}`) === pid) return "user";
+  return null;
+}
+
 /** A manifest alone is not enough: only a process actually launched by its manager may rely on auto-restart. */
 export function resolveManagedServiceScope(
   installedScope: ServiceScope | null,
@@ -90,7 +109,12 @@ export function resolveManagedServiceScopeCandidates(
 }
 
 function detectManagedServiceScope(): ServiceScope | null {
-  return resolveManagedServiceScopeCandidates(detectInstalledServiceScopes());
+  const installedScopes = detectInstalledServiceScopes();
+  if (process.platform === "darwin" && process.env.XPC_SERVICE_NAME === "com.wand.web") {
+    const activeScope = detectActiveDarwinServiceScope(process.pid);
+    if (activeScope && installedScopes.includes(activeScope)) return activeScope;
+  }
+  return resolveManagedServiceScopeCandidates(installedScopes);
 }
 
 export function isStableServiceEntrypoint(entrypoint: string | null, stableBin: string | null): boolean {
@@ -308,6 +332,14 @@ function spawnDetached(
         stdio: "ignore",
         env: baseEnv,
       });
+      child.once("error", (error) => {
+        try {
+          writeFileSync(_logPath, `[wand-update] helper spawn failed: ${error.message}\n`, { flag: "a" });
+        } catch {
+          /* best effort */
+        }
+      });
+      if (!child.pid) return null;
       child.unref();
       return { pid: child.pid, method };
     } catch {
@@ -360,7 +392,8 @@ function spawnDetached(
   }
 
   if (process.platform === "darwin") {
-    const result = trySpawn("nohup", [resolveBashPath(), scriptPath], "nohup");
+    const nohupPath = existsSync("/usr/bin/nohup") ? "/usr/bin/nohup" : "nohup";
+    const result = trySpawn(nohupPath, [resolveBashPath(), scriptPath], "nohup");
     if (result) return result;
   }
 
@@ -398,6 +431,7 @@ export function startDetachedUpdateHelper(opts: DetachedUpdateOptions): Detached
     mode: 0o700,
   });
   chmodSync(scriptPath, 0o700);
+  writeFileSync(logPath, `[wand-update] helper queued at ${new Date().toISOString()}\n`, "utf8");
 
   const spawned = spawnDetached(scriptPath, logPath, opts.env, serviceScope);
   if (!spawned) {

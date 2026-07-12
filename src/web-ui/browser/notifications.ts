@@ -1084,35 +1084,43 @@ export function performRestart(btn?: HTMLButtonElement | null, msgEl?: HTMLEleme
   });
 }
 
-/**
- * Full-screen overlay shown during server restart.
- * Polls /api/config until the server comes back, then reloads the page.
- */
-export function showRestartOverlay() {
-  // Avoid duplicates
-  if (document.getElementById("restart-overlay")) return;
+function normalizeUpdateVersion(value: unknown): string {
+  return typeof value === "string" ? value.trim().replace(/^v/, "").split("+")[0] : "";
+}
 
-  var overlay = document.createElement("div");
-  overlay.id = "restart-overlay";
-  overlay.className = "restart-overlay";
-  overlay.innerHTML =
-    '<div class="restart-overlay-content">' +
-      '<div class="restart-spinner"></div>' +
-      '<div class="restart-title">服务正在重启</div>' +
-      '<div class="restart-subtitle">稍后将自动刷新页面…</div>' +
-    '</div>';
-  document.body.appendChild(overlay);
+function setRestartTarget(
+  overlay: HTMLElement,
+  previousInstanceId?: string | null,
+  expectedVersion?: string | null,
+): void {
+  if (previousInstanceId) overlay.dataset.previousInstanceId = previousInstanceId;
+  if (expectedVersion) overlay.dataset.expectedVersion = expectedVersion;
+}
 
+function startRestartPolling(overlay: HTMLElement): void {
+  if (overlay.dataset.restartPolling === "true") return;
+  overlay.dataset.restartPolling = "true";
   var attempts = 0;
   var maxAttempts = 180; // 180 * 2s = 6min; beta git installs can be slow
   var timer = setInterval(function() {
     attempts++;
     fetch("/api/config", { credentials: "same-origin" })
       .then(function(res) {
-        if (res.ok) {
-          clearInterval(timer);
-          location.reload();
-        }
+        if (!res.ok) throw new Error("server not ready");
+        return res.json();
+      })
+      .then(function(config) {
+        var previousInstanceId = overlay.dataset.previousInstanceId || "";
+        var expectedVersion = normalizeUpdateVersion(overlay.dataset.expectedVersion || "");
+        var currentInstanceId = typeof config.serverInstanceId === "string" ? config.serverInstanceId : "";
+        var currentVersion = normalizeUpdateVersion(config.packageVersion || config.currentVersion);
+        var instanceReady = !previousInstanceId || (
+          currentInstanceId.length > 0 && currentInstanceId !== previousInstanceId
+        );
+        var versionReady = !expectedVersion || currentVersion === expectedVersion;
+        if (!instanceReady || !versionReady) return;
+        clearInterval(timer);
+        location.reload();
       })
       .catch(function() {
         // Server not ready yet
@@ -1127,19 +1135,58 @@ export function showRestartOverlay() {
   }, 2000);
 }
 
-export function showAutoUpdateOverlay(currentVer: string, latestVer: string) {
-  if (document.getElementById("restart-overlay")) return;
-  var overlay = document.createElement("div");
-  overlay.id = "restart-overlay";
-  overlay.className = "restart-overlay";
-  overlay.innerHTML =
-    '<div class="restart-overlay-content">' +
-      '<div class="restart-spinner"></div>' +
-      '<div class="restart-title">自动更新中</div>' +
-      '<div class="restart-subtitle">' +
-        escapeHtml(currentVer) + ' → ' + escapeHtml(latestVer) +
-        '<br>正在下载并安装新版本，稍后将自动重启…' +
-      '</div>' +
-    '</div>';
-  document.body.appendChild(overlay);
+/**
+ * Full-screen overlay shown during server restart or detached update.
+ * An update only completes after both the process instance and package version change.
+ */
+export function showRestartOverlay(previousInstanceId?: string | null, expectedVersion?: string | null) {
+  var overlay = document.getElementById("restart-overlay") as HTMLElement | null;
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "restart-overlay";
+    overlay.className = "restart-overlay";
+    overlay.innerHTML =
+      '<div class="restart-overlay-content">' +
+        '<div class="restart-spinner"></div>' +
+        '<div class="restart-title"></div>' +
+        '<div class="restart-subtitle"></div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+  }
+
+  setRestartTarget(overlay, previousInstanceId, expectedVersion);
+  var title = overlay.querySelector(".restart-title");
+  var subtitle = overlay.querySelector(".restart-subtitle");
+  if (title) title.textContent = expectedVersion ? "正在完成更新" : "服务正在重启";
+  if (subtitle) {
+    subtitle.textContent = expectedVersion
+      ? "安装完成并启动新版本后将自动刷新页面…"
+      : "稍后将自动刷新页面…";
+  }
+  startRestartPolling(overlay);
+}
+
+export function showAutoUpdateOverlay(
+  currentVer: string,
+  latestVer: string,
+  previousInstanceId?: string | null,
+) {
+  var overlay = document.getElementById("restart-overlay") as HTMLElement | null;
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "restart-overlay";
+    overlay.className = "restart-overlay";
+    overlay.innerHTML =
+      '<div class="restart-overlay-content">' +
+        '<div class="restart-spinner"></div>' +
+        '<div class="restart-title">自动更新中</div>' +
+        '<div class="restart-subtitle">' +
+          escapeHtml(currentVer) + ' → ' + escapeHtml(latestVer) +
+          '<br>正在下载并安装新版本，稍后将自动重启…' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+  }
+  setRestartTarget(overlay, previousInstanceId, latestVer);
+  startRestartPolling(overlay);
 }
