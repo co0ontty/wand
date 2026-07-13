@@ -839,6 +839,18 @@ export async function runPush(opts: PushOptions): Promise<PushResult> {
     }
   }
 
+  // 父仓库 commit/tag 一旦先上远端就可能立即触发 release workflow；此时任一
+  // submodule push 失败都会让 CI 永远检出不到父仓库记录的 gitlink。保留父仓库的
+  // 本地 commit/tag，等用户补推成功后再一起发布，不能带着部分失败继续 push。
+  if (subPushErrors.length > 0) {
+    return {
+      ok: false,
+      pushedCommits: false,
+      pushedTags: false,
+      error: subPushErrors.join("；"),
+    };
+  }
+
   const outcome = doPush({ cwd, pushCommits, pushTags, recurseSubmodules: submodule ? "no" : "check" });
   return {
     ok: !outcome.error && subPushErrors.length === 0,
@@ -1316,15 +1328,21 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
       const subPush = pushSubmodules(cwd, submoduleOutcome.commits, { pushTags: !!tagName, tagName });
       subPushErrors = subPush.errors;
     }
-    const outcome = doPush({
-      cwd,
-      pushCommits: true,
-      // Push only the freshly-created tag — avoids surprising users by pushing stale local tags.
-      pushTags: tagName ? [tagName] : false,
-      recurseSubmodules: includeSub ? "no" : "check",
-    });
-    pushed = outcome.pushedCommits && (tagName ? outcome.pushedTags : true) && subPushErrors.length === 0;
-    pushError = outcome.error || (subPushErrors.length ? subPushErrors.join("；") : undefined);
+    if (subPushErrors.length > 0) {
+      // 不把引用了未推送 gitlink 的父仓库 commit/tag 发布出去；结果面板会保留
+      // Submodule 意图，用户可直接用“Push & Close”补推。
+      pushError = subPushErrors.join("；");
+    } else {
+      const outcome = doPush({
+        cwd,
+        pushCommits: true,
+        // Push only the freshly-created tag — avoids surprising users by pushing stale local tags.
+        pushTags: tagName ? [tagName] : false,
+        recurseSubmodules: includeSub ? "no" : "check",
+      });
+      pushed = outcome.pushedCommits && (tagName ? outcome.pushedTags : true);
+      pushError = outcome.error;
+    }
   }
 
   return {
