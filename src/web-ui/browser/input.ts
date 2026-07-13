@@ -1974,8 +1974,8 @@ import { getSessionStatusLabel } from "./session-ui";
           ? !!(selectedSession && selectedSession.structuredState && selectedSession.structuredState.inFlight)
           : !!selectedSession && selectedSession.status === "running";
         var composer = document.getElementById("input-box") as HTMLInputElement | null;
-        // 终端交互 toggle 现在挂在加号 popover 内的 menuitem 上。.active 保留兼容；
-        // .is-on 给 popover-item 提供独立的"已开启"视觉；同时刷新 aria-checked 与 "开/关" 文本。
+        // 终端交互 toggle 现在挂在加号 popover 内。.active 保留兼容；
+        // .is-on 给 popover-item 提供独立的"已开启"视觉；同时刷新 aria-pressed 与 "开/关" 文本。
         var toggles = ["terminal-interactive-toggle-top"];
         toggles.forEach(function(id) {
           var toggle = document.getElementById(id);
@@ -1983,7 +1983,7 @@ import { getSessionStatusLabel } from "./session-ui";
             toggle.classList.toggle("active", state.terminalInteractive);
             toggle.classList.toggle("is-on", state.terminalInteractive);
             toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession);
-            toggle.setAttribute("aria-checked", state.terminalInteractive ? "true" : "false");
+            toggle.setAttribute("aria-pressed", state.terminalInteractive ? "true" : "false");
             var stateLabel = toggle.querySelector(".plus-popover-toggle-state");
             if (stateLabel) stateLabel.textContent = state.terminalInteractive ? "开" : "关";
           }

@@ -381,23 +381,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           }
         });
 
-        // 思考滑杆拖动时只更新本地预览，松手后的 change 才提交，避免连续请求。
-        document.addEventListener("input", function(e) {
-          var target = e.target as HTMLInputElement | null;
-          if (!target || !target.matches('input[type="range"][data-mode-control="thinking"]')) return;
-          var labels: string[] = [];
-          try { labels = JSON.parse(target.dataset.thinkingLabels || "[]"); } catch (_error) {}
-          var index = Math.max(0, Math.min(labels.length - 1, Math.round(Number(target.value) || 0)));
-          var label = labels[index] || "auto";
-          var shell = target.closest('[data-mode-control-pill="thinking"]');
-          var valueLabel = shell && shell.querySelector(".thinking-slider-value");
-          if (valueLabel) valueLabel.textContent = label;
-          target.setAttribute("aria-valuetext", label);
-          var rail = target.closest(".thinking-slider-rail") as HTMLElement | null;
-          var max = Number(target.max) || 0;
-          if (rail) rail.style.setProperty("--thinking-progress", (max ? index / max * 100 : 0) + "%");
-        });
-
         // 三件套（模式 / 模型 / 思考）走全局委托，多个实例共用同一状态源。
         document.addEventListener("change", function(e) {
           var target = e.target as HTMLElement;
@@ -405,13 +388,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           if (typeof target.matches !== "function" || !target.matches("[data-mode-control]")) return;
           var ctrl = target.getAttribute("data-mode-control");
           var value = (target as HTMLSelectElement).value;
-          var isThinkingRange = ctrl === "thinking" && target.matches('input[type="range"]');
-          if (isThinkingRange) {
-            try {
-              var values = JSON.parse((target as HTMLInputElement).dataset.thinkingValues || "[]");
-              value = values[Math.round(Number((target as HTMLInputElement).value) || 0)] || "off";
-            } catch (_error) { value = "off"; }
-          }
           if (ctrl === "mode") {
             onChatModeChange(value);
           } else if (ctrl === "model") {
@@ -420,7 +396,7 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
             onChatThinkingChange(value);
           }
           // 在加号 popover 内改完三件套之后顺手关掉，反馈立即由 toast + 用户消息头像左侧徽章接管。
-          if (!isThinkingRange && target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
+          if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
         });
       }
 

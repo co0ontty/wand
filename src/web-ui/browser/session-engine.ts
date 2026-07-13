@@ -303,13 +303,69 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         refreshAllChatModeTrios();
       }
 
+      // 会话级的 mode / model / thinking 共享一条串行队列。快速连选时，服务端
+      // 会按用户操作顺序落盘；只有最新 revision 的回包可以合并全量快照。
+      var sessionConfigMutationTails = Object.create(null);
+      var sessionConfigMutationRevisions = Object.create(null);
+      var pendingSessionConfig = Object.create(null);
+
+      function getPendingSessionConfig(sessionId) {
+        return sessionId ? pendingSessionConfig[sessionId] || null : null;
+      }
+
+      function setPendingSessionConfig(sessionId, key, value) {
+        if (!sessionId) return;
+        var pending = pendingSessionConfig[sessionId] || (pendingSessionConfig[sessionId] = {});
+        pending[key] = value;
+      }
+
+      function clearPendingSessionConfig(sessionId) {
+        if (sessionId) delete pendingSessionConfig[sessionId];
+      }
+
+      function enqueueSessionConfigMutation(sessionId, task) {
+        var revision = (sessionConfigMutationRevisions[sessionId] || 0) + 1;
+        sessionConfigMutationRevisions[sessionId] = revision;
+        var previous = sessionConfigMutationTails[sessionId] || Promise.resolve();
+        var request = previous.catch(function() {}).then(task);
+        sessionConfigMutationTails[sessionId] = request.catch(function() {});
+        return request.then(function(data) {
+          return { data: data, latest: sessionConfigMutationRevisions[sessionId] === revision };
+        }, function(error) {
+          return Promise.reject({ error: error, latest: sessionConfigMutationRevisions[sessionId] === revision });
+        });
+      }
+
+      function recoverLatestSessionConfigMutation(sessionId, message) {
+        clearPendingSessionConfig(sessionId);
+        // 旧 revision 成功、最新 revision 失败时，本地故意没合并旧快照。重拉一次
+        // 才能同时恢复服务端已落盘的前序修改和本次失败的回滚状态。
+        Promise.resolve(loadSessions())
+          .catch(function() {})
+          .finally(function() { refreshAllChatModeTrios(); });
+        showToast(message, "error");
+      }
+
+      function applyLatestSessionConfigSnapshot(sessionId, outcome) {
+        if (!outcome.latest) return false;
+        var data = outcome.data;
+        if (data && data.error) {
+          recoverLatestSessionConfigMutation(sessionId, data.error);
+          return false;
+        }
+        if (!data || !data.id) {
+          recoverLatestSessionConfigMutation(sessionId, "会话设置更新失败");
+          return false;
+        }
+        updateSessionSnapshot(data);
+        clearPendingSessionConfig(sessionId);
+        refreshAllChatModeTrios();
+        return true;
+      }
+
       // 三件套 raw 选项渲染：option 文本直接是 id（不带括号注释 / 不本地化）。
-      // ── 三件套（模式 / 模型 / 思考深度）的统一渲染器 ──
-      // 两个使用点：
-      //   · 结构化会话空状态：作为下拉菜单出现在"对话已开始"提示下方，让用户在开聊前调整
-      //   · 结构化会话用户消息：作为紧凑徽章挂在头像/名称的左侧，点击任一徽章可改"当前状态"
-      // PTY 模式整体不展示（与按键透传无关）。模式/模型沿用原生 select，思考深度改为
-      // 按模型能力动态生成的离散滑杆；全局 change 委托负责最终提交。
+      // 空会话入口使用这套统一渲染器；composer 与 + 弹层复用下方的 chip 渲染器。
+      // 三者都使用原生 select，思考深度的选项仍根据当前模型能力动态生成。
       export function renderChatModeTrioHtml(session, opts) {
         opts = opts || {};
         // 三种 kind：dropdown（空状态横向）/ compact（用户消息徽章）/ popover（加号气泡纵向）
@@ -325,16 +381,9 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml(label) + '">' +
             tagHtml +
             '<span class="composer-text-label">' + escapeHtml(value) + '</span>' +
-            '<select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" tabindex="-1" aria-label="' + escapeHtml(label) + '">' +
+            '<select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" aria-label="' + escapeHtml(label) + '">' +
               optionsHtml +
             '</select>' +
-          '</span>';
-        }
-        function thinkingSlider() {
-          return '<span class="composer-text-pill chat-mode-trio-pill thinking-slider-shell" data-mode-control-pill="thinking" title="思考深度">' +
-            (kind === "compact" ? "" : '<span class="chat-mode-trio-tag">思考</span>') +
-            '<span class="composer-text-label thinking-slider-value">' + escapeHtml(getThinkingLabel(thinkingText, session)) + '</span>' +
-            renderThinkingRange(thinkingText, session) +
           '</span>';
         }
         return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="会话设置">' +
@@ -342,7 +391,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           '<span class="composer-text-sep" aria-hidden="true">·</span>' +
           pill("model", "模型", modelLabel, renderChatModelOptionsRaw(modelText, session)) +
           '<span class="composer-text-sep" aria-hidden="true">·</span>' +
-          thinkingSlider() +
+          pill("thinking", "思考", getThinkingCompactLabel(thinkingText, session), renderThinkingOptions(thinkingText, session)) +
         '</div>';
       }
 
@@ -354,7 +403,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (effort === "xhigh") return "超高";
         if (effort === "max") return "极高";
         if (effort === "ultra") return "极限";
-        return "关";
+        return "自动";
       }
 
       export function getModelDisplayLabel(model, session) {
@@ -390,43 +439,22 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         return label;
       }
 
-      function thinkingRangeMarkup(levels) {
-        if (levels.length <= 1) return '<span class="thinking-slider-node" style="left:50%"></span>';
-        return levels.map(function(_level, index) {
-          return '<span class="thinking-slider-node" style="left:' + ((index / (levels.length - 1)) * 100) + '%"></span>';
+      export function renderThinkingOptions(selected, session?) {
+        var levels = getThinkingLevels(session);
+        var normalized = levels.some(function(level) { return level.id === selected; }) ? selected : "off";
+        return levels.map(function(level) {
+          var label = level.id === "off" ? "自动（模型默认）" : getThinkingCompactLabel(level.id, session);
+          return '<option value="' + escapeHtml(level.id) + '"' + (level.id === normalized ? " selected" : "") + '>' +
+            escapeHtml(label) +
+          '</option>';
         }).join("");
       }
 
-      export function renderThinkingRange(selected, session?) {
-        var levels = getThinkingLevels(session);
-        var index = Math.max(0, levels.findIndex(function(level) { return level.id === selected; }));
-        var max = Math.max(0, levels.length - 1);
-        var progress = max ? (index / max) * 100 : 0;
-        var values = escapeHtml(JSON.stringify(levels.map(function(level) { return level.id; })));
-        var labels = escapeHtml(JSON.stringify(levels.map(function(level) { return level.label; })));
-        return '<span class="thinking-slider-rail" style="--thinking-progress:' + progress + '%">' +
-          '<span class="thinking-slider-nodes" aria-hidden="true">' + thinkingRangeMarkup(levels) + '</span>' +
-          '<input class="thinking-discrete-range" type="range" min="0" max="' + max + '" step="1" value="' + index + '" ' +
-            'data-mode-control="thinking" data-thinking-values="' + values + '" data-thinking-labels="' + labels + '" ' +
-            'aria-label="思考深度" aria-valuetext="' + escapeHtml(levels[index]?.label || "auto") + '">' +
-        '</span>';
-      }
-
-      function syncThinkingRange(container, selected, session?) {
-        var levels = getThinkingLevels(session);
-        var index = Math.max(0, levels.findIndex(function(level) { return level.id === selected; }));
-        var max = Math.max(0, levels.length - 1);
-        var input = container.querySelector('.thinking-discrete-range') as HTMLInputElement | null;
-        var rail = container.querySelector('.thinking-slider-rail') as HTMLElement | null;
-        var nodes = container.querySelector('.thinking-slider-nodes');
-        if (!input || !rail) return;
-        input.max = String(max);
-        input.value = String(index);
-        input.dataset.thinkingValues = JSON.stringify(levels.map(function(level) { return level.id; }));
-        input.dataset.thinkingLabels = JSON.stringify(levels.map(function(level) { return level.label; }));
-        input.setAttribute("aria-valuetext", levels[index]?.label || "auto");
-        rail.style.setProperty("--thinking-progress", (max ? (index / max) * 100 : 0) + "%");
-        if (nodes) nodes.innerHTML = thinkingRangeMarkup(levels);
+      function syncThinkingSelect(container, selected, session?) {
+        var select = container.querySelector('[data-mode-control="thinking"]') as HTMLSelectElement | null;
+        if (!select) return;
+        select.innerHTML = renderThinkingOptions(selected, session);
+        select.value = getThinkingLevels(session).some(function(level) { return level.id === selected; }) ? selected : "off";
       }
 
       export function renderComposerConfigControlsHtml(session) {
@@ -442,23 +470,23 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           '<span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="模式：' + escapeHtml(modeLabel) + '">' +
             iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
             '<span class="composer-config-label">' + escapeHtml(modeLabel) + '</span>' +
-            '<select class="composer-text-hidden-select" data-mode-control="mode" tabindex="-1" aria-label="模式">' +
+            '<select class="composer-text-hidden-select" data-mode-control="mode" aria-label="模式">' +
               renderChatModeOptionsRaw(preferredTool, mode) +
             '</select>' +
           '</span>' +
-          '<span class="composer-config-model-thinking" data-thinking="' + escapeHtml(thinking) + '" title="模型与思考深度">' +
-            '<span class="composer-config-part composer-config-model" data-mode-control-pill="model">' +
-              iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
-              '<span class="composer-config-label">' + escapeHtml(modelLabel) + '</span>' +
-              '<select class="composer-text-hidden-select" data-mode-control="model" tabindex="-1" aria-label="模型">' +
-                renderChatModelOptions(model, session) +
-              '</select>' +
-            '</span>' +
-            '<span class="composer-config-part composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '">' +
-              iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
-              '<span class="composer-config-label thinking-slider-value">' + escapeHtml(getThinkingLabel(thinking, session)) + '</span>' +
-              renderThinkingRange(thinking, session) +
-            '</span>' +
+          '<span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="模型：' + escapeHtml(modelLabel) + '">' +
+            iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
+            '<span class="composer-config-label">' + escapeHtml(modelLabel) + '</span>' +
+            '<select class="composer-text-hidden-select" data-mode-control="model" aria-label="模型">' +
+              renderChatModelOptions(model, session) +
+            '</select>' +
+          '</span>' +
+          '<span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '" title="思考深度：' + escapeHtml(thinkingLabel) + '">' +
+            iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
+            '<span class="composer-config-label">' + escapeHtml(thinkingLabel) + '</span>' +
+            '<select class="composer-text-hidden-select" data-mode-control="thinking" aria-label="思考深度">' +
+              renderThinkingOptions(thinking, session) +
+            '</select>' +
           '</span>' +
         '</div>';
       }
@@ -480,7 +508,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             var label = pillNode.querySelector(".composer-text-label");
             if (label) label.textContent = labelText || value;
             if (ctrl === "thinking") {
-              syncThinkingRange(pillNode, value, session);
+              syncThinkingSelect(pillNode, value, session);
               return;
             }
             var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]') as HTMLSelectElement | null;
@@ -490,7 +518,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           }
           setPair("mode", mode, renderChatModeOptionsRaw(preferredTool, mode));
           setPair("model", model, renderChatModelOptionsRaw(model, session), modelLabel);
-          setPair("thinking", thinking, "", getThinkingLabel(thinking, session));
+          setPair("thinking", thinking, "", getThinkingCompactLabel(thinking, session));
         });
         refreshComposerConfigControls(session, mode, getEffectiveModel(session) || "", thinking);
       }
@@ -521,17 +549,17 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           if (modelPart) {
             var modelText = modelPart.querySelector(".composer-config-label");
             if (modelText) modelText.textContent = modelLabel;
+            modelPart.setAttribute("title", "模型：" + modelLabel);
             updateSelect(modelPart, model, renderChatModelOptions(model, session));
           }
           var thinkingPart = control.querySelector('[data-mode-control-pill="thinking"]');
           if (thinkingPart) {
             var thinkingText = thinkingPart.querySelector(".composer-config-label");
-            if (thinkingText) thinkingText.textContent = getThinkingLabel(thinking, session);
+            if (thinkingText) thinkingText.textContent = thinkingLabel;
             thinkingPart.setAttribute("data-thinking", thinking);
-            syncThinkingRange(thinkingPart, thinking, session);
+            thinkingPart.setAttribute("title", "思考深度：" + thinkingLabel);
+            syncThinkingSelect(thinkingPart, thinking, session);
           }
-          var pair = control.querySelector(".composer-config-model-thinking");
-          if (pair) pair.setAttribute("data-thinking", thinking);
         });
       }
 
@@ -588,6 +616,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function getEffectiveModel(session) {
+        var pending = session && session.id ? getPendingSessionConfig(session.id) : null;
+        if (pending && Object.prototype.hasOwnProperty.call(pending, "model")) return pending.model || "";
         if (session && session.selectedModel) return session.selectedModel;
         var provider = getProviderForSession(session);
         var selected = getChatModelForProvider(provider);
@@ -693,6 +723,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function getEffectiveThinking(session) {
+        var pending = session && session.id ? getPendingSessionConfig(session.id) : null;
+        if (pending && Object.prototype.hasOwnProperty.call(pending, "thinking")) return pending.thinking || "off";
         if (session && session.thinkingEffort) return session.thinkingEffort;
         if (state.chatThinking) return state.chatThinking;
         return "off";
@@ -703,6 +735,33 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         refreshAllChatModeTrios();
       }
 
+      function persistThinkingPreference(value) {
+        state.chatThinking = value;
+        try { localStorage.setItem("wand-thinking-effort", value); } catch (e) {}
+      }
+
+      function submitThinkingMutation(session, normalized, successMessage, prerequisite?) {
+        return enqueueSessionConfigMutation(session.id, function() {
+          if (prerequisite && !prerequisite.ok) {
+            return { error: prerequisite.error || "切换模型失败" };
+          }
+          return fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ thinkingEffort: normalized })
+          }).then(function(res) { return res.json(); });
+        })
+        .then(function(outcome) {
+          if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast === "function") {
+            showToast(successMessage || ("已切换思考深度 → " + getThinkingCompactLabel(normalized, getSelectedSession())), "success");
+          }
+        })
+        .catch(function(failure) {
+          if (failure && failure.latest) recoverLatestSessionConfigMutation(session.id, "切换思考深度失败");
+        });
+      }
+
       export function onChatThinkingChange(value) {
         var normalized = (value || "off").trim();
         var session = getSelectedSession();
@@ -710,30 +769,11 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (!supported) {
           normalized = "off";
         }
-        state.chatThinking = normalized;
-        try { localStorage.setItem("wand-thinking-effort", normalized); } catch (e) {}
+        persistThinkingPreference(normalized);
+        if (session) setPendingSessionConfig(session.id, "thinking", normalized);
         refreshAllChatModeTrios();
         if (!session) return;
-        fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ thinkingEffort: normalized })
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data && data.error) {
-            showToast(data.error, "error");
-            return;
-          }
-          if (data && data.id) {
-            updateSessionSnapshot(data);
-            if (typeof showToast === "function") {
-              showToast("已切换思考深度 → " + getThinkingLabel(normalized, session), "success");
-            }
-          }
-        })
-        .catch(function() { showToast("切换思考深度失败", "error"); });
+        submitThinkingMutation(session, normalized, "已切换思考深度 → " + getThinkingCompactLabel(normalized, session));
       }
 
       // 自动批准 chip：与原 .auto-approve-indicator 等价，但用统一的 .composer-pill 风格放主行。
@@ -1254,67 +1294,85 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var session = getSelectedSession();
         var provider = getProviderForSession(session);
         setChatModelForProvider(provider, normalized);
+        if (session) setPendingSessionConfig(session.id, "model", normalized);
+
+        // 先用新模型的 reasoningEfforts 验证当前思考档位。不支持时不只让
+        // select 看起来回到“自动”，还要把真实默认和会话状态一起串行提交。
+        var thinkingFallback = false;
+        if (!getThinkingLevels(session).some(function(level) { return level.id === getEffectiveThinking(session); })) {
+          thinkingFallback = true;
+          persistThinkingPreference("off");
+          if (session) setPendingSessionConfig(session.id, "thinking", "off");
+        }
         refreshAllChatModeTrios();
         if (!session) return;
-        fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ model: normalized || null })
+        var prerequisite = { ok: false, error: "" };
+        enqueueSessionConfigMutation(session.id, function() {
+          return fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ model: normalized || null })
+          }).then(function(res) { return res.json(); }).then(function(data) {
+            prerequisite.ok = !!(data && data.id && !data.error);
+            prerequisite.error = data && data.error ? data.error : "";
+            return data;
+          });
         })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data && data.error) {
-            showToast(data.error, "error");
-            return;
-          }
-          if (data && data.id) {
-            updateSessionSnapshot(data);
-            // 思考深度档位来自当前模型的 reasoningEfforts。快照更新后立即重绘，
-            // 让滑杆可选项与新模型保持一致，而不是继续显示旧模型的档位。
-            refreshAllChatModeTrios();
-            if (typeof showToast === "function") {
-              var display = getModelDisplayLabel(normalized, session);
-              var hint = session.provider === "codex" ? "（下次对话生效）" : "";
-              showToast("已切换模型 → " + display + hint, "success");
-            }
+        .then(function(outcome) {
+          if (thinkingFallback) return;
+          if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast === "function") {
+            var display = getModelDisplayLabel(normalized, getSelectedSession() || session);
+            var hint = session.provider === "codex" ? "（下次对话生效）" : "";
+            showToast("已切换模型 → " + display + hint, "success");
           }
         })
-        .catch(function() { showToast("切换模型失败", "error"); });
+        .catch(function(failure) {
+          prerequisite.ok = false;
+          if (!thinkingFallback && failure && failure.latest) {
+            recoverLatestSessionConfigMutation(session.id, "切换模型失败");
+          }
+        });
+
+        if (thinkingFallback) {
+          var display = getModelDisplayLabel(normalized, session);
+          submitThinkingMutation(session, "off", "已切换模型 → " + display + "；思考深度已回落为自动", prerequisite);
+        }
       }
 
-      // 模式切换：与 model / thinking 三件套对称。没有选中会话时只改"下次新会话"的默认；
-      // 选中了进行中的结构化会话时，POST /mode 让它中途生效（结构化下一轮，对齐 iOS / Android）。
+      // 模式切换：无会话时修改新会话默认；有会话时结构化 / PTY 都提交。
+      // PTY 的已启动 CLI flag 不变，但 Wand 权限放行策略会更新；Codex 仍由服务端锁定 full-access。
       export function onChatModeChange(value) {
         var normalized = getSafeModeForTool(getPreferredTool(), (value || "default").trim());
         state.chatMode = normalized;
         refreshAllChatModeTrios();
         var session = getSelectedSession();
-        if (!session || !session.id || session.sessionKind !== "structured") {
+        if (!session || !session.id) {
           showToast && showToast("新会话模式：" + normalized, "info");
           return;
         }
-        fetch("/api/sessions/" + encodeURIComponent(session.id) + "/mode", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ mode: normalized })
+        setPendingSessionConfig(session.id, "mode", normalized);
+        enqueueSessionConfigMutation(session.id, function() {
+          return fetch("/api/sessions/" + encodeURIComponent(session.id) + "/mode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ mode: normalized })
+          }).then(function(res) { return res.json(); });
         })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data && data.error) {
-            showToast(data.error, "error");
-            return;
-          }
-          if (data && data.id) {
-            updateSessionSnapshot(data);
-            if (typeof showToast === "function") {
-              var hint = session.provider === "codex" ? "（Codex 固定全权限）" : "";
-              showToast("已切换模式 → " + normalized + hint, "success");
-            }
+        .then(function(outcome) {
+          if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast === "function") {
+            var updated = state.sessions.find(function(item) { return item.id === session.id; }) || session;
+            var effectiveMode = updated.mode || normalized;
+            state.chatMode = getSafeModeForTool(updated.provider || getPreferredTool(), effectiveMode);
+            refreshAllChatModeTrios();
+            var hint = session.provider === "codex" ? "（Codex 固定全权限）" : "";
+            showToast("已切换模式 → " + effectiveMode + hint, "success");
           }
         })
-        .catch(function() { showToast("切换模式失败", "error"); });
+        .catch(function(failure) {
+          if (failure && failure.latest) recoverLatestSessionConfigMutation(session.id, "切换模式失败");
+        });
       }
 
       export function createStructuredSession(prompt?, cwdOverride?, modeOverride?, worktreeEnabled?) {

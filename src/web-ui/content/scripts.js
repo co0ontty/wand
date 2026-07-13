@@ -6843,39 +6843,12 @@
         if (dd) dd.classList.add("hidden");
       }
     });
-    document.addEventListener("input", function(e) {
-      var target = e.target;
-      if (!target || !target.matches('input[type="range"][data-mode-control="thinking"]')) return;
-      var labels = [];
-      try {
-        labels = JSON.parse(target.dataset.thinkingLabels || "[]");
-      } catch (_error) {
-      }
-      var index = Math.max(0, Math.min(labels.length - 1, Math.round(Number(target.value) || 0)));
-      var label = labels[index] || "auto";
-      var shell = target.closest('[data-mode-control-pill="thinking"]');
-      var valueLabel = shell && shell.querySelector(".thinking-slider-value");
-      if (valueLabel) valueLabel.textContent = label;
-      target.setAttribute("aria-valuetext", label);
-      var rail = target.closest(".thinking-slider-rail");
-      var max = Number(target.max) || 0;
-      if (rail) rail.style.setProperty("--thinking-progress", (max ? index / max * 100 : 0) + "%");
-    });
     document.addEventListener("change", function(e) {
       var target = e.target;
       if (!target || target.nodeType !== 1) return;
       if (typeof target.matches !== "function" || !target.matches("[data-mode-control]")) return;
       var ctrl = target.getAttribute("data-mode-control");
       var value = target.value;
-      var isThinkingRange = ctrl === "thinking" && target.matches('input[type="range"]');
-      if (isThinkingRange) {
-        try {
-          var values = JSON.parse(target.dataset.thinkingValues || "[]");
-          value = values[Math.round(Number(target.value) || 0)] || "off";
-        } catch (_error) {
-          value = "off";
-        }
-      }
       if (ctrl === "mode") {
         onChatModeChange(value);
       } else if (ctrl === "model") {
@@ -6883,7 +6856,7 @@
       } else if (ctrl === "thinking") {
         onChatThinkingChange(value);
       }
-      if (!isThinkingRange && target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
+      if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
     });
   }
   function attachEventListeners() {
@@ -8243,7 +8216,7 @@
     return '<div class="app-container"><div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div><div class="main-layout' + (state.sessionsDrawerOpen ? " sidebar-open" : "") + (isAnchored ? " sidebar-pinned" : "") + collapsedCls + '"><aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? " pinned" : "") + sidebarCollapsedCls + '"><div class="sidebar-header"><div class="sidebar-header-main"><div class="topbar-logo-icon">W</div><span class="sidebar-title">\u4F1A\u8BDD</span><span class="session-count" id="session-count">' + String(state.sessions.filter(function(session) {
       var source = String(session && session.sessionSource || "").toLowerCase();
       return source !== "automation" && source !== "startup";
-    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title" title="' + escapeHtml2(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml2(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml2(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml2(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml2(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml2(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd3(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div><div class="blank-chat-cwd-dropdown hidden" id="blank-chat-cwd-dropdown"></div></div></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><div class="todo-progress-header" id="todo-progress-toggle"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div><svg class="todo-progress-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></div></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer' + (currentDraft ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A" aria-haspopup="menu" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml2(currentDraft) + '</textarea><button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09" aria-label="\u63D0\u793A\u8BCD\u4F18\u5316"><svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/><path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/></svg><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><div class="voice-input-mode hidden" id="voice-input-mode"><button id="voice-record-btn" class="voice-record-btn" type="button"><span class="voice-record-pulse" aria-hidden="true"></span><span class="voice-record-label">\u6309\u4F4F \u8BF4\u8BDD</span></button><button id="voice-cancel-btn" class="voice-cancel-btn" type="button" title="\u9000\u51FA\u8BED\u97F3\u6A21\u5F0F" aria-label="\u9000\u51FA\u8BED\u97F3\u6A21\u5F0F">' + iconSvg("x", { size: 14, strokeWidth: 2 }) + '</button></div></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" title="\u505C\u6B62"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="send-input-button" class="btn-circle btn-circle-send" title="\u53D1\u9001"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="menu" aria-label="\u66F4\u591A\u64CD\u4F5C"><button class="plus-popover-item" id="plus-attach-item" type="button" role="menuitem">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" role="menuitemcheckbox" aria-checked="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + '</div></div><div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div><section id="folder-picker-modal" class="modal-backdrop hidden"><div class="modal folder-picker-modal"><div class="modal-header"><h2 class="modal-title">\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55</h2><button id="close-folder-picker" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="\u5173\u95ED"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div><div class="modal-body"><div class="folder-picker-quick-row"><button class="folder-picker-quick-btn btn-with-icon" data-path="/tmp">' + iconSvg("trash", { size: 13, strokeWidth: 1.7 }) + '<span>\u4E34\u65F6\u76EE\u5F55</span></button><button class="folder-picker-quick-btn btn-with-icon" data-path="/">' + iconSvg("folder", { size: 13, strokeWidth: 1.7 }) + '<span>\u6839\u76EE\u5F55</span></button></div><div id="folder-breadcrumb" class="folder-breadcrumb"></div><div class="folder-picker"><span class="folder-picker-icon">' + iconSvg("folder", { size: 15, strokeWidth: 1.7 }) + '</span><input type="text" id="folder-picker-input" class="folder-picker-input" value="" placeholder="\u8F93\u5165\u6216\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /></div><div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div><div id="folder-picker-validation" class="folder-picker-validation"></div></div></div></section></main></div></div>' + renderSessionModal() + renderWorktreeMergeModal() + renderSettingsModal() + renderQuickCommitModal();
+    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title" title="' + escapeHtml2(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml2(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml2(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml2(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml2(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml2(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd3(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div><div class="blank-chat-cwd-dropdown hidden" id="blank-chat-cwd-dropdown"></div></div></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><div class="todo-progress-header" id="todo-progress-toggle"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div><svg class="todo-progress-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></div></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer' + (currentDraft ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A" aria-haspopup="dialog" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml2(currentDraft) + '</textarea><button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09" aria-label="\u63D0\u793A\u8BCD\u4F18\u5316"><svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/><path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/></svg><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><div class="voice-input-mode hidden" id="voice-input-mode"><button id="voice-record-btn" class="voice-record-btn" type="button"><span class="voice-record-pulse" aria-hidden="true"></span><span class="voice-record-label">\u6309\u4F4F \u8BF4\u8BDD</span></button><button id="voice-cancel-btn" class="voice-cancel-btn" type="button" title="\u9000\u51FA\u8BED\u97F3\u6A21\u5F0F" aria-label="\u9000\u51FA\u8BED\u97F3\u6A21\u5F0F">' + iconSvg("x", { size: 14, strokeWidth: 2 }) + '</button></div></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" title="\u505C\u6B62"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="send-input-button" class="btn-circle btn-circle-send" title="\u53D1\u9001"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + '</div></div><div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div><section id="folder-picker-modal" class="modal-backdrop hidden"><div class="modal folder-picker-modal"><div class="modal-header"><h2 class="modal-title">\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55</h2><button id="close-folder-picker" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="\u5173\u95ED"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div><div class="modal-body"><div class="folder-picker-quick-row"><button class="folder-picker-quick-btn btn-with-icon" data-path="/tmp">' + iconSvg("trash", { size: 13, strokeWidth: 1.7 }) + '<span>\u4E34\u65F6\u76EE\u5F55</span></button><button class="folder-picker-quick-btn btn-with-icon" data-path="/">' + iconSvg("folder", { size: 13, strokeWidth: 1.7 }) + '<span>\u6839\u76EE\u5F55</span></button></div><div id="folder-breadcrumb" class="folder-breadcrumb"></div><div class="folder-picker"><span class="folder-picker-icon">' + iconSvg("folder", { size: 15, strokeWidth: 1.7 }) + '</span><input type="text" id="folder-picker-input" class="folder-picker-input" value="" placeholder="\u8F93\u5165\u6216\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /></div><div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div><div id="folder-picker-validation" class="folder-picker-validation"></div></div></div></section></main></div></div>' + renderSessionModal() + renderWorktreeMergeModal() + renderSettingsModal() + renderQuickCommitModal();
   }
 
   // src/web-ui/browser/notifications.ts
@@ -10795,7 +10768,7 @@
         toggle.classList.toggle("active", state.terminalInteractive);
         toggle.classList.toggle("is-on", state.terminalInteractive);
         toggle.classList.toggle("hidden", structured || state.currentView !== "terminal" || !selectedSession);
-        toggle.setAttribute("aria-checked", state.terminalInteractive ? "true" : "false");
+        toggle.setAttribute("aria-pressed", state.terminalInteractive ? "true" : "false");
         var stateLabel = toggle.querySelector(".plus-popover-toggle-state");
         if (stateLabel) stateLabel.textContent = state.terminalInteractive ? "\u5F00" : "\u5173";
       }
@@ -13055,18 +13028,11 @@
     var persona = getStructuredChatPersona(role === "user" ? "user" : "assistant");
     img.outerHTML = renderAvatarFallback(persona.avatarSvg);
   }
-  function chatAvatar(role, opts) {
-    opts = opts || {};
+  function chatAvatar(role) {
     var personaRole = role === "user" ? "user" : "assistant";
     var persona = getStructuredChatPersona(personaRole);
     var avatarInner = persona.avatar ? '<img class="pixel-avatar-image" src="' + escapeHtml2(persona.avatar) + '" alt="' + escapeHtml2(persona.name) + '" onerror="handleChatAvatarImageError(this, ' + JSON.stringify(personaRole) + ')" />' : renderAvatarFallback(persona.avatarSvg);
-    var leftSlotHtml = opts.leftSlot ? opts.leftSlot : "";
-    return '<div class="chat-message-avatar ' + role + '">' + avatarInner + '<span class="avatar-name">' + escapeHtml2(persona.name) + "</span>" + leftSlotHtml + "</div>";
-  }
-  function buildUserAvatarTrioHtml() {
-    var session = getSelectedSession3();
-    if (!session || !isStructuredSession2(session)) return "";
-    return renderChatModeTrioHtml(session, { kind: "compact" });
+    return '<div class="chat-message-avatar ' + role + '">' + avatarInner + '<span class="avatar-name">' + escapeHtml2(persona.name) + "</span></div>";
   }
   function renderChatMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
     if (msg.role === "thinking") {
@@ -13687,13 +13653,12 @@
       });
       var queuedClass = isQueued ? " queued" : "";
       var queuedBadge = isQueued ? '<span class="queued-badge">\u6392\u961F\u4E2D</span>' : "";
-      var userTrioSlot = buildUserAvatarTrioHtml();
       if (userHasSub) {
         var userMultiHtml = buildMultiAgentHtml(userSegments, role, parentPersona.name, toolResults, messageKey, { showHandoff: false });
         return '<div class="chat-message ' + role + queuedClass + ' multi-agent" data-message-key="' + escapeHtml2(messageKey) + '">' + userMultiHtml + queuedBadge + "</div>";
       }
       var userHtml = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
-      return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml2(messageKey) + '">' + chatAvatar(role, { leftSlot: userTrioSlot }) + '<div class="chat-message-content">' + userHtml + queuedBadge + "</div></div>";
+      return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml2(messageKey) + '">' + chatAvatar(role) + '<div class="chat-message-content">' + userHtml + queuedBadge + "</div></div>";
     }
     var segments = splitTurnBySubagent(msg.content, legacyTaskMap);
     var hasSubagent = segments.some(function(s) {
@@ -14774,6 +14739,58 @@
     if (modeHint) modeHint.textContent = getModeHint(state.chatMode);
     refreshAllChatModeTrios2();
   }
+  var sessionConfigMutationTails = /* @__PURE__ */ Object.create(null);
+  var sessionConfigMutationRevisions = /* @__PURE__ */ Object.create(null);
+  var pendingSessionConfig = /* @__PURE__ */ Object.create(null);
+  function getPendingSessionConfig(sessionId) {
+    return sessionId ? pendingSessionConfig[sessionId] || null : null;
+  }
+  function setPendingSessionConfig(sessionId, key, value) {
+    if (!sessionId) return;
+    var pending = pendingSessionConfig[sessionId] || (pendingSessionConfig[sessionId] = {});
+    pending[key] = value;
+  }
+  function clearPendingSessionConfig(sessionId) {
+    if (sessionId) delete pendingSessionConfig[sessionId];
+  }
+  function enqueueSessionConfigMutation(sessionId, task) {
+    var revision = (sessionConfigMutationRevisions[sessionId] || 0) + 1;
+    sessionConfigMutationRevisions[sessionId] = revision;
+    var previous = sessionConfigMutationTails[sessionId] || Promise.resolve();
+    var request = previous.catch(function() {
+    }).then(task);
+    sessionConfigMutationTails[sessionId] = request.catch(function() {
+    });
+    return request.then(function(data) {
+      return { data, latest: sessionConfigMutationRevisions[sessionId] === revision };
+    }, function(error) {
+      return Promise.reject({ error, latest: sessionConfigMutationRevisions[sessionId] === revision });
+    });
+  }
+  function recoverLatestSessionConfigMutation(sessionId, message) {
+    clearPendingSessionConfig(sessionId);
+    Promise.resolve(loadSessions()).catch(function() {
+    }).finally(function() {
+      refreshAllChatModeTrios2();
+    });
+    showToast2(message, "error");
+  }
+  function applyLatestSessionConfigSnapshot(sessionId, outcome) {
+    if (!outcome.latest) return false;
+    var data = outcome.data;
+    if (data && data.error) {
+      recoverLatestSessionConfigMutation(sessionId, data.error);
+      return false;
+    }
+    if (!data || !data.id) {
+      recoverLatestSessionConfigMutation(sessionId, "\u4F1A\u8BDD\u8BBE\u7F6E\u66F4\u65B0\u5931\u8D25");
+      return false;
+    }
+    updateSessionSnapshot(data);
+    clearPendingSessionConfig(sessionId);
+    refreshAllChatModeTrios2();
+    return true;
+  }
   function renderChatModeTrioHtml(session, opts) {
     opts = opts || {};
     var kind = opts.kind === "compact" || opts.kind === "popover" ? opts.kind : "dropdown";
@@ -14784,12 +14801,9 @@
     var thinkingText = getEffectiveThinking(session);
     function pill(ctrl, label, value, optionsHtml) {
       var tagHtml = kind === "compact" ? "" : '<span class="chat-mode-trio-tag">' + escapeHtml2(label) + "</span>";
-      return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml2(label) + '">' + tagHtml + '<span class="composer-text-label">' + escapeHtml2(value) + '</span><select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" tabindex="-1" aria-label="' + escapeHtml2(label) + '">' + optionsHtml + "</select></span>";
+      return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml2(label) + '">' + tagHtml + '<span class="composer-text-label">' + escapeHtml2(value) + '</span><select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" aria-label="' + escapeHtml2(label) + '">' + optionsHtml + "</select></span>";
     }
-    function thinkingSlider() {
-      return '<span class="composer-text-pill chat-mode-trio-pill thinking-slider-shell" data-mode-control-pill="thinking" title="\u601D\u8003\u6DF1\u5EA6">' + (kind === "compact" ? "" : '<span class="chat-mode-trio-tag">\u601D\u8003</span>') + '<span class="composer-text-label thinking-slider-value">' + escapeHtml2(getThinkingLabel(thinkingText, session)) + "</span>" + renderThinkingRange(thinkingText, session) + "</span>";
-    }
-    return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelLabel, renderChatModelOptionsRaw(modelText, session)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + thinkingSlider() + "</div>";
+    return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelLabel, renderChatModelOptionsRaw(modelText, session)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("thinking", "\u601D\u8003", getThinkingCompactLabel(thinkingText, session), renderThinkingOptions(thinkingText, session)) + "</div>";
   }
   function getThinkingCompactLabel(id, session) {
     var effort = getThinkingLabel(id, session);
@@ -14799,7 +14813,7 @@
     if (effort === "xhigh") return "\u8D85\u9AD8";
     if (effort === "max") return "\u6781\u9AD8";
     if (effort === "ultra") return "\u6781\u9650";
-    return "\u5173";
+    return "\u81EA\u52A8";
   }
   function getModelDisplayLabel(model, session) {
     var selected = model || "";
@@ -14832,48 +14846,23 @@
     if (label.length > 12) return label.slice(0, 10) + "\u2026";
     return label;
   }
-  function thinkingRangeMarkup(levels) {
-    if (levels.length <= 1) return '<span class="thinking-slider-node" style="left:50%"></span>';
-    return levels.map(function(_level, index) {
-      return '<span class="thinking-slider-node" style="left:' + index / (levels.length - 1) * 100 + '%"></span>';
+  function renderThinkingOptions(selected, session) {
+    var levels = getThinkingLevels(session);
+    var normalized = levels.some(function(level) {
+      return level.id === selected;
+    }) ? selected : "off";
+    return levels.map(function(level) {
+      var label = level.id === "off" ? "\u81EA\u52A8\uFF08\u6A21\u578B\u9ED8\u8BA4\uFF09" : getThinkingCompactLabel(level.id, session);
+      return '<option value="' + escapeHtml2(level.id) + '"' + (level.id === normalized ? " selected" : "") + ">" + escapeHtml2(label) + "</option>";
     }).join("");
   }
-  function renderThinkingRange(selected, session) {
-    var levels = getThinkingLevels(session);
-    var index = Math.max(0, levels.findIndex(function(level) {
+  function syncThinkingSelect(container, selected, session) {
+    var select = container.querySelector('[data-mode-control="thinking"]');
+    if (!select) return;
+    select.innerHTML = renderThinkingOptions(selected, session);
+    select.value = getThinkingLevels(session).some(function(level) {
       return level.id === selected;
-    }));
-    var max = Math.max(0, levels.length - 1);
-    var progress = max ? index / max * 100 : 0;
-    var values = escapeHtml2(JSON.stringify(levels.map(function(level) {
-      return level.id;
-    })));
-    var labels = escapeHtml2(JSON.stringify(levels.map(function(level) {
-      return level.label;
-    })));
-    return '<span class="thinking-slider-rail" style="--thinking-progress:' + progress + '%"><span class="thinking-slider-nodes" aria-hidden="true">' + thinkingRangeMarkup(levels) + '</span><input class="thinking-discrete-range" type="range" min="0" max="' + max + '" step="1" value="' + index + '" data-mode-control="thinking" data-thinking-values="' + values + '" data-thinking-labels="' + labels + '" aria-label="\u601D\u8003\u6DF1\u5EA6" aria-valuetext="' + escapeHtml2(levels[index]?.label || "auto") + '"></span>';
-  }
-  function syncThinkingRange(container, selected, session) {
-    var levels = getThinkingLevels(session);
-    var index = Math.max(0, levels.findIndex(function(level) {
-      return level.id === selected;
-    }));
-    var max = Math.max(0, levels.length - 1);
-    var input = container.querySelector(".thinking-discrete-range");
-    var rail = container.querySelector(".thinking-slider-rail");
-    var nodes = container.querySelector(".thinking-slider-nodes");
-    if (!input || !rail) return;
-    input.max = String(max);
-    input.value = String(index);
-    input.dataset.thinkingValues = JSON.stringify(levels.map(function(level) {
-      return level.id;
-    }));
-    input.dataset.thinkingLabels = JSON.stringify(levels.map(function(level) {
-      return level.label;
-    }));
-    input.setAttribute("aria-valuetext", levels[index]?.label || "auto");
-    rail.style.setProperty("--thinking-progress", (max ? index / max * 100 : 0) + "%");
-    if (nodes) nodes.innerHTML = thinkingRangeMarkup(levels);
+    }) ? selected : "off";
   }
   function renderComposerConfigControlsHtml(session) {
     var preferredTool = getPreferredTool();
@@ -14884,7 +14873,7 @@
     var modelLabel = getShortModelLabel(model, session);
     var thinkingLabel = getThinkingCompactLabel(thinking, session);
     var title = "\u6A21\u5F0F " + modeLabel + " \xB7 \u6A21\u578B " + modelLabel + " \xB7 \u601D\u8003 " + thinkingLabel;
-    return '<div class="composer-config-controls" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E" title="' + escapeHtml2(title) + '"><span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="\u6A21\u5F0F\uFF1A' + escapeHtml2(modeLabel) + '">' + iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modeLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="mode" tabindex="-1" aria-label="\u6A21\u5F0F">' + renderChatModeOptionsRaw(preferredTool, mode) + '</select></span><span class="composer-config-model-thinking" data-thinking="' + escapeHtml2(thinking) + '" title="\u6A21\u578B\u4E0E\u601D\u8003\u6DF1\u5EA6"><span class="composer-config-part composer-config-model" data-mode-control-pill="model">' + iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modelLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="model" tabindex="-1" aria-label="\u6A21\u578B">' + renderChatModelOptions(model, session) + '</select></span><span class="composer-config-part composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml2(thinking) + '">' + iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label thinking-slider-value">' + escapeHtml2(getThinkingLabel(thinking, session)) + "</span>" + renderThinkingRange(thinking, session) + "</span></span></div>";
+    return '<div class="composer-config-controls" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E" title="' + escapeHtml2(title) + '"><span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="\u6A21\u5F0F\uFF1A' + escapeHtml2(modeLabel) + '">' + iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modeLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="mode" aria-label="\u6A21\u5F0F">' + renderChatModeOptionsRaw(preferredTool, mode) + '</select></span><span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="\u6A21\u578B\uFF1A' + escapeHtml2(modelLabel) + '">' + iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modelLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="model" aria-label="\u6A21\u578B">' + renderChatModelOptions(model, session) + '</select></span><span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml2(thinking) + '" title="\u601D\u8003\u6DF1\u5EA6\uFF1A' + escapeHtml2(thinkingLabel) + '">' + iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(thinkingLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="thinking" aria-label="\u601D\u8003\u6DF1\u5EA6">' + renderThinkingOptions(thinking, session) + "</select></span></div>";
   }
   function refreshAllChatModeTrios2() {
     var session = getSelectedSession5();
@@ -14901,7 +14890,7 @@
         var label = pillNode.querySelector(".composer-text-label");
         if (label) label.textContent = labelText || value;
         if (ctrl === "thinking") {
-          syncThinkingRange(pillNode, value, session);
+          syncThinkingSelect(pillNode, value, session);
           return;
         }
         var sel = pillNode.querySelector('[data-mode-control="' + ctrl + '"]');
@@ -14911,7 +14900,7 @@
       }
       setPair("mode", mode, renderChatModeOptionsRaw(preferredTool, mode));
       setPair("model", model, renderChatModelOptionsRaw(model, session), modelLabel);
-      setPair("thinking", thinking, "", getThinkingLabel(thinking, session));
+      setPair("thinking", thinking, "", getThinkingCompactLabel(thinking, session));
     });
     refreshComposerConfigControls(session, mode, getEffectiveModel(session) || "", thinking);
   }
@@ -14941,17 +14930,17 @@
       if (modelPart) {
         var modelText = modelPart.querySelector(".composer-config-label");
         if (modelText) modelText.textContent = modelLabel;
+        modelPart.setAttribute("title", "\u6A21\u578B\uFF1A" + modelLabel);
         updateSelect(modelPart, model, renderChatModelOptions(model, session));
       }
       var thinkingPart = control.querySelector('[data-mode-control-pill="thinking"]');
       if (thinkingPart) {
         var thinkingText = thinkingPart.querySelector(".composer-config-label");
-        if (thinkingText) thinkingText.textContent = getThinkingLabel(thinking, session);
+        if (thinkingText) thinkingText.textContent = thinkingLabel;
         thinkingPart.setAttribute("data-thinking", thinking);
-        syncThinkingRange(thinkingPart, thinking, session);
+        thinkingPart.setAttribute("title", "\u601D\u8003\u6DF1\u5EA6\uFF1A" + thinkingLabel);
+        syncThinkingSelect(thinkingPart, thinking, session);
       }
-      var pair = control.querySelector(".composer-config-model-thinking");
-      if (pair) pair.setAttribute("data-thinking", thinking);
     });
   }
   function renderChatModeOptionsRaw(tool, selectedMode) {
@@ -14997,6 +14986,8 @@
     }
   }
   function getEffectiveModel(session) {
+    var pending = session && session.id ? getPendingSessionConfig(session.id) : null;
+    if (pending && Object.prototype.hasOwnProperty.call(pending, "model")) return pending.model || "";
     if (session && session.selectedModel) return session.selectedModel;
     var provider = getProviderForSession(session);
     var selected = getChatModelForProvider(provider);
@@ -15095,12 +15086,42 @@
     return "auto";
   }
   function getEffectiveThinking(session) {
+    var pending = session && session.id ? getPendingSessionConfig(session.id) : null;
+    if (pending && Object.prototype.hasOwnProperty.call(pending, "thinking")) return pending.thinking || "off";
     if (session && session.thinkingEffort) return session.thinkingEffort;
     if (state.chatThinking) return state.chatThinking;
     return "off";
   }
   function syncComposerThinkingSelect(session) {
     refreshAllChatModeTrios2();
+  }
+  function persistThinkingPreference(value) {
+    state.chatThinking = value;
+    try {
+      localStorage.setItem("wand-thinking-effort", value);
+    } catch (e) {
+    }
+  }
+  function submitThinkingMutation(session, normalized, successMessage, prerequisite) {
+    return enqueueSessionConfigMutation(session.id, function() {
+      if (prerequisite && !prerequisite.ok) {
+        return { error: prerequisite.error || "\u5207\u6362\u6A21\u578B\u5931\u8D25" };
+      }
+      return fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ thinkingEffort: normalized })
+      }).then(function(res) {
+        return res.json();
+      });
+    }).then(function(outcome) {
+      if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast2 === "function") {
+        showToast2(successMessage || "\u5DF2\u5207\u6362\u601D\u8003\u6DF1\u5EA6 \u2192 " + getThinkingCompactLabel(normalized, getSelectedSession5()), "success");
+      }
+    }).catch(function(failure) {
+      if (failure && failure.latest) recoverLatestSessionConfigMutation(session.id, "\u5207\u6362\u601D\u8003\u6DF1\u5EA6\u5931\u8D25");
+    });
   }
   function onChatThinkingChange(value) {
     var normalized = (value || "off").trim();
@@ -15111,34 +15132,11 @@
     if (!supported) {
       normalized = "off";
     }
-    state.chatThinking = normalized;
-    try {
-      localStorage.setItem("wand-thinking-effort", normalized);
-    } catch (e) {
-    }
+    persistThinkingPreference(normalized);
+    if (session) setPendingSessionConfig(session.id, "thinking", normalized);
     refreshAllChatModeTrios2();
     if (!session) return;
-    fetch("/api/sessions/" + encodeURIComponent(session.id) + "/thinking-effort", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ thinkingEffort: normalized })
-    }).then(function(res) {
-      return res.json();
-    }).then(function(data) {
-      if (data && data.error) {
-        showToast2(data.error, "error");
-        return;
-      }
-      if (data && data.id) {
-        updateSessionSnapshot(data);
-        if (typeof showToast2 === "function") {
-          showToast2("\u5DF2\u5207\u6362\u601D\u8003\u6DF1\u5EA6 \u2192 " + getThinkingLabel(normalized, session), "success");
-        }
-      }
-    }).catch(function() {
-      showToast2("\u5207\u6362\u601D\u8003\u6DF1\u5EA6\u5931\u8D25", "error");
-    });
+    submitThinkingMutation(session, normalized, "\u5DF2\u5207\u6362\u601D\u8003\u6DF1\u5EA6 \u2192 " + getThinkingCompactLabel(normalized, session));
   }
   function isAutoApproveImpliedByMode(session) {
     if (!session) return false;
@@ -15578,63 +15576,81 @@
     var session = getSelectedSession5();
     var provider = getProviderForSession(session);
     setChatModelForProvider(provider, normalized);
+    if (session) setPendingSessionConfig(session.id, "model", normalized);
+    var thinkingFallback = false;
+    if (!getThinkingLevels(session).some(function(level) {
+      return level.id === getEffectiveThinking(session);
+    })) {
+      thinkingFallback = true;
+      persistThinkingPreference("off");
+      if (session) setPendingSessionConfig(session.id, "thinking", "off");
+    }
     refreshAllChatModeTrios2();
     if (!session) return;
-    fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ model: normalized || null })
-    }).then(function(res) {
-      return res.json();
-    }).then(function(data) {
-      if (data && data.error) {
-        showToast2(data.error, "error");
-        return;
+    var prerequisite = { ok: false, error: "" };
+    enqueueSessionConfigMutation(session.id, function() {
+      return fetch("/api/sessions/" + encodeURIComponent(session.id) + "/model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ model: normalized || null })
+      }).then(function(res) {
+        return res.json();
+      }).then(function(data) {
+        prerequisite.ok = !!(data && data.id && !data.error);
+        prerequisite.error = data && data.error ? data.error : "";
+        return data;
+      });
+    }).then(function(outcome) {
+      if (thinkingFallback) return;
+      if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast2 === "function") {
+        var display2 = getModelDisplayLabel(normalized, getSelectedSession5() || session);
+        var hint = session.provider === "codex" ? "\uFF08\u4E0B\u6B21\u5BF9\u8BDD\u751F\u6548\uFF09" : "";
+        showToast2("\u5DF2\u5207\u6362\u6A21\u578B \u2192 " + display2 + hint, "success");
       }
-      if (data && data.id) {
-        updateSessionSnapshot(data);
-        refreshAllChatModeTrios2();
-        if (typeof showToast2 === "function") {
-          var display = getModelDisplayLabel(normalized, session);
-          var hint = session.provider === "codex" ? "\uFF08\u4E0B\u6B21\u5BF9\u8BDD\u751F\u6548\uFF09" : "";
-          showToast2("\u5DF2\u5207\u6362\u6A21\u578B \u2192 " + display + hint, "success");
-        }
+    }).catch(function(failure) {
+      prerequisite.ok = false;
+      if (!thinkingFallback && failure && failure.latest) {
+        recoverLatestSessionConfigMutation(session.id, "\u5207\u6362\u6A21\u578B\u5931\u8D25");
       }
-    }).catch(function() {
-      showToast2("\u5207\u6362\u6A21\u578B\u5931\u8D25", "error");
     });
+    if (thinkingFallback) {
+      var display = getModelDisplayLabel(normalized, session);
+      submitThinkingMutation(session, "off", "\u5DF2\u5207\u6362\u6A21\u578B \u2192 " + display + "\uFF1B\u601D\u8003\u6DF1\u5EA6\u5DF2\u56DE\u843D\u4E3A\u81EA\u52A8", prerequisite);
+    }
   }
   function onChatModeChange(value) {
     var normalized = getSafeModeForTool(getPreferredTool(), (value || "default").trim());
     state.chatMode = normalized;
     refreshAllChatModeTrios2();
     var session = getSelectedSession5();
-    if (!session || !session.id || session.sessionKind !== "structured") {
+    if (!session || !session.id) {
       showToast2 && showToast2("\u65B0\u4F1A\u8BDD\u6A21\u5F0F\uFF1A" + normalized, "info");
       return;
     }
-    fetch("/api/sessions/" + encodeURIComponent(session.id) + "/mode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ mode: normalized })
-    }).then(function(res) {
-      return res.json();
-    }).then(function(data) {
-      if (data && data.error) {
-        showToast2(data.error, "error");
-        return;
+    setPendingSessionConfig(session.id, "mode", normalized);
+    enqueueSessionConfigMutation(session.id, function() {
+      return fetch("/api/sessions/" + encodeURIComponent(session.id) + "/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ mode: normalized })
+      }).then(function(res) {
+        return res.json();
+      });
+    }).then(function(outcome) {
+      if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast2 === "function") {
+        var updated = state.sessions.find(function(item) {
+          return item.id === session.id;
+        }) || session;
+        var effectiveMode = updated.mode || normalized;
+        state.chatMode = getSafeModeForTool(updated.provider || getPreferredTool(), effectiveMode);
+        refreshAllChatModeTrios2();
+        var hint = session.provider === "codex" ? "\uFF08Codex \u56FA\u5B9A\u5168\u6743\u9650\uFF09" : "";
+        showToast2("\u5DF2\u5207\u6362\u6A21\u5F0F \u2192 " + effectiveMode + hint, "success");
       }
-      if (data && data.id) {
-        updateSessionSnapshot(data);
-        if (typeof showToast2 === "function") {
-          var hint = session.provider === "codex" ? "\uFF08Codex \u56FA\u5B9A\u5168\u6743\u9650\uFF09" : "";
-          showToast2("\u5DF2\u5207\u6362\u6A21\u5F0F \u2192 " + normalized + hint, "success");
-        }
-      }
-    }).catch(function() {
-      showToast2("\u5207\u6362\u6A21\u5F0F\u5931\u8D25", "error");
+    }).catch(function(failure) {
+      if (failure && failure.latest) recoverLatestSessionConfigMutation(session.id, "\u5207\u6362\u6A21\u5F0F\u5931\u8D25");
     });
   }
   function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled) {

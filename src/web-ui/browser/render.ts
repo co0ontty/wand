@@ -755,14 +755,9 @@ export function renderAppShell() {
           // 垂直排列，一行一个液态玻璃气泡（编号 + 文本 + 立即/删除）。
           // updateQueueBar() 在 queuedMessages 非空时去掉 hidden。
           '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
-          // v2 单行布局：
-          //   ┌─────────────────────────────────────────────────────────────────────┐
-          //   │ [+] [🎤] [⌨]  ────textarea（空时浮 mode·model·thinking 鬼影）──── [⏹] [➤] │
-          //   └─────────────────────────────────────────────────────────────────────┘
-          // 关键点：
-          //  · 三件套（mode / model / thinking）从 bar 搬到 textarea 上方的 ghost layer，
-          //    空输入时浮在 placeholder 位上显示；用户开始输入即淡出隐藏。
-          //  · 附件改成 + 图标；新增麦克风按钮，整体输入框可切到「按住说话」语音模式。
+          // 输入主行：桌面端在 + 与 textarea 之间显示模式 / 模型 / 思考三个 chip；
+          // 窄屏隐藏这组三件套，统一从 + 弹层调整，保证输入区和发送键不被挤压。
+          //  · 附件收进 + 弹层；语音模式 UI 保留，等待接入 STT。
           //  · 提示词优化按钮（✨）改成只在 textarea 有内容时显示，绝对定位浮在右侧。
           //  · 自动批准 / 权限操作行统一搬到 textarea 上方的状态行，
           //    输入主行保持极简。
@@ -782,7 +777,7 @@ export function renderAppShell() {
             '<div class="composer-main-row">' +
               '<div class="composer-actions-left">' +
                 // 加号按钮 —— 点击向上展开 popover：附件 / 终端交互 / 三件套（模式·模型·思考）
-                '<button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="更多" aria-label="更多" aria-haspopup="menu" aria-expanded="false">' +
+                '<button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="更多" aria-label="更多" aria-haspopup="dialog" aria-expanded="false">' +
                   iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
                 '</button>' +
                 // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
@@ -805,10 +800,6 @@ export function renderAppShell() {
                   '</svg>' +
                   '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
                 '</button>' +
-                // 三件套（mode/model/thinking）的入口已从输入框搬走（避免与 placeholder 视觉重合）：
-                //   · 结构化会话空状态 → renderChatEmptyState 那条提示下方的下拉
-                //   · 结构化会话进行中 → 每条用户消息头像左侧的徽章按钮
-                // PTY 模式整体不展示。
                 // 语音模式 UI（v1 仅 UI scaffolding；MediaRecorder 接入留待后续）
                 '<div class="voice-input-mode hidden" id="voice-input-mode">' +
                   '<button id="voice-record-btn" class="voice-record-btn" type="button">' +
@@ -837,20 +828,19 @@ export function renderAppShell() {
           // 加号气泡 —— 浮在 + 按钮上方（.input-composer 之外，绕开它的 overflow:hidden）。
           // 内容：附件 / 终端交互 / 三件套（模式·模型·思考）。默认 hidden，点 + 切换；
           // 点 popover 外部 / Esc / 选完任一项后自动关闭。
-          '<div class="composer-plus-popover hidden" id="composer-plus-popover" role="menu" aria-label="更多操作">' +
-            '<button class="plus-popover-item" id="plus-attach-item" type="button" role="menuitem">' +
+          '<div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="更多操作">' +
+            '<button class="plus-popover-item" id="plus-attach-item" type="button">' +
               iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +
               '<span class="plus-popover-label">上传附件</span>' +
             '</button>' +
-            '<button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" role="menuitemcheckbox" aria-checked="' + (state.terminalInteractive ? "true" : "false") + '">' +
+            '<button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' +
               iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +
               '<span class="plus-popover-label">终端交互</span>' +
               '<span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "开" : "关") + '</span>' +
             '</button>' +
             // 模式 + 模型/思考：复用 data-mode-control 的 select 委托链。
-            // 对所有会话都展示——
-            // PTY 会话当前进程的 mode/model/thinking 改不了，但 state 变更会
-            // 影响"新建会话"的默认值，所以露出来仍有意义。
+            // 对所有会话都展示；服务端负责落盘当前会话可变的设置，不能即时应用的
+            // CLI 启动参数会作为后续轮次 / 新会话默认值生效。
             '<div class="plus-popover-sep" aria-hidden="true"></div>' +
             '<div class="plus-popover-trio-wrap">' +
               renderComposerConfigControlsHtml(selectedSession) +

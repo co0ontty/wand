@@ -181,8 +181,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
         if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
-            // 结构化会话：在提示下方挂三件套（模式 / 模型 / 思考）。开聊前是修改这三个状态
-            // 的「主入口」，开聊之后就改到每条用户消息头像左侧的徽章里。PTY 会话不展示。
+            // 结构化空会话在提示下方提供一次三件套入口。开聊后统一从 composer /
+            // 加号 popover 修改，不把“当前设置”重复伪装成每条历史消息的发送快照。
             var emptyTrioHtml = "";
             if (isStructuredSession(selectedSession)) {
               emptyTrioHtml = '<div class="empty-state-trio-wrap">' +
@@ -1782,30 +1782,16 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         img.outerHTML = renderAvatarFallback(persona.avatarSvg);
       }
 
-      export function chatAvatar(role, opts?) {
-        opts = opts || {};
+      export function chatAvatar(role) {
         var personaRole = role === "user" ? "user" : "assistant";
         var persona = getStructuredChatPersona(personaRole);
         var avatarInner = persona.avatar
           ? '<img class="pixel-avatar-image" src="' + escapeHtml(persona.avatar) + '" alt="' + escapeHtml(persona.name) + '" onerror="handleChatAvatarImageError(this, ' + JSON.stringify(personaRole) + ')" />'
           : renderAvatarFallback(persona.avatarSvg);
-        // leftSlot 用来挂三件套徽章。.chat-message-avatar.user 是 row-reverse，所以 DOM
-        // 中放在最后的节点会渲染到最左侧（"名字左侧"），正好满足需求；assistant 是 row，
-        // 不传 leftSlot 就不会有节点跑到右边来。
-        var leftSlotHtml = opts.leftSlot ? opts.leftSlot : "";
         return '<div class="chat-message-avatar ' + role + '">' +
           avatarInner +
           '<span class="avatar-name">' + escapeHtml(persona.name) + '</span>' +
-          leftSlotHtml +
         '</div>';
-      }
-
-      // 用户消息专用 trio：仅结构化会话渲染，PTY 不显示。
-      // 注意 doRenderChat 拿不到 session 引用（msg 没带），这里通过 getSelectedSession 取。
-      export function buildUserAvatarTrioHtml() {
-        var session = getSelectedSession();
-        if (!session || !isStructuredSession(session)) return "";
-        return renderChatModeTrioHtml(session, { kind: "compact" });
       }
 
       export function renderChatMessage(msg, roundUsage, messageIndex, legacyTaskMap) {
@@ -2622,7 +2608,6 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           var userHasSub = userSegments.some(function(s) { return s.subagent; });
           var queuedClass = isQueued ? " queued" : "";
           var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
-          var userTrioSlot = buildUserAvatarTrioHtml();
           if (userHasSub) {
             var userMultiHtml = buildMultiAgentHtml(userSegments, role, parentPersona.name, toolResults, messageKey, { showHandoff: false });
             return '<div class="chat-message ' + role + queuedClass + ' multi-agent" data-message-key="' + escapeHtml(messageKey) + '">' +
@@ -2631,7 +2616,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           }
           var userHtml = buildSegmentBlocksHtml(msg.content, 0, role, toolResults, messageKey);
           return '<div class="chat-message ' + role + queuedClass + '" data-message-key="' + escapeHtml(messageKey) + '">' +
-            chatAvatar(role, { leftSlot: userTrioSlot }) +
+            chatAvatar(role) +
             '<div class="chat-message-content">' + userHtml + queuedBadge + '</div>' +
           '</div>';
         }
