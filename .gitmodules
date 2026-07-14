@@ -7,3 +7,6 @@
 [submodule "ios"]
 	path = ios
 	url = https://github.com/co0ontty/wand-ios.git
+[submodule "mobile"]
+	path = mobile
+	url = https://github.com/co0ontty/wand-mobile.git
