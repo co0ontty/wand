@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo } from "./types.js";
@@ -46,6 +46,7 @@ interface SessionRow {
   worktree_merge_info: string | null;
   title: string | null;
   description: string | null;
+  session_options: string | null;
 }
 
 interface PasswordVaultRow {
@@ -81,6 +82,183 @@ function safeJsonParse<T>(raw: string | null): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+const SESSION_OPTIONS_SCHEMA_VERSION = 1 as const;
+
+type DurableSessionOptions = Pick<SessionSnapshot,
+  | "autonomyPolicy"
+  | "approvalPolicy"
+  | "allowedScopes"
+  | "pendingEscalation"
+  | "lastEscalationResult"
+  | "autoApprovePermissions"
+  | "approvalStats"
+  | "selectedModel"
+  | "thinkingEffort"
+  | "ptyCols"
+  | "ptyRows"
+  | "currentTaskTitle"
+  | "summary"
+>;
+
+type PersistedSessionOptions = DurableSessionOptions & {
+  schemaVersion: typeof SESSION_OPTIONS_SCHEMA_VERSION;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAutonomyPolicy(value: unknown): value is NonNullable<SessionSnapshot["autonomyPolicy"]> {
+  return value === "assist" || value === "agent" || value === "agent-max";
+}
+
+function isApprovalPolicy(value: unknown): value is NonNullable<SessionSnapshot["approvalPolicy"]> {
+  return value === "ask-every-time" || value === "approve-once" || value === "remember-this-turn";
+}
+
+function isEscalationScope(value: unknown): value is NonNullable<SessionSnapshot["allowedScopes"]>[number] {
+  return value === "write_file"
+    || value === "run_command"
+    || value === "network"
+    || value === "outside_workspace"
+    || value === "dangerous_shell"
+    || value === "unknown";
+}
+
+function isEscalationResolution(
+  value: unknown,
+): value is NonNullable<NonNullable<SessionSnapshot["lastEscalationResult"]>["resolution"]> {
+  return value === "approve_once" || value === "approve_turn" || value === "deny" || value === "fallback_manual";
+}
+
+function parsePendingEscalation(
+  value: unknown,
+): NonNullable<SessionSnapshot["pendingEscalation"]> | undefined {
+  if (!isRecord(value)
+    || typeof value.requestId !== "string"
+    || !isEscalationScope(value.scope)
+    || (value.runner !== "json" && value.runner !== "pty")
+    || (value.source !== "tool_permission_request"
+      && value.source !== "sandbox_hard_block"
+      && value.source !== "workspace_policy_limit"
+      && value.source !== "cli_capability_limit"
+      && value.source !== "unknown")
+    || typeof value.reason !== "string") {
+    return undefined;
+  }
+
+  const parsed: NonNullable<SessionSnapshot["pendingEscalation"]> = {
+    requestId: value.requestId,
+    scope: value.scope,
+    runner: value.runner,
+    source: value.source,
+    reason: value.reason,
+  };
+  if (isEscalationResolution(value.resolution)) parsed.resolution = value.resolution;
+  if (typeof value.target === "string") parsed.target = value.target;
+  return parsed;
+}
+
+function parseLastEscalationResult(
+  value: unknown,
+): NonNullable<SessionSnapshot["lastEscalationResult"]> | undefined {
+  if (!isRecord(value)
+    || typeof value.requestId !== "string"
+    || !isEscalationResolution(value.resolution)
+    || typeof value.reason !== "string") {
+    return undefined;
+  }
+  return {
+    requestId: value.requestId,
+    resolution: value.resolution,
+    reason: value.reason,
+  };
+}
+
+function parseApprovalStats(value: unknown): NonNullable<SessionSnapshot["approvalStats"]> | undefined {
+  if (!isRecord(value)) return undefined;
+  const counts = [value.tool, value.command, value.file, value.total];
+  if (!counts.every((count) => Number.isSafeInteger(count) && (count as number) >= 0)) return undefined;
+  return {
+    tool: value.tool as number,
+    command: value.command as number,
+    file: value.file as number,
+    total: value.total as number,
+  };
+}
+
+function isThinkingEffort(value: unknown): value is NonNullable<SessionSnapshot["thinkingEffort"]> {
+  return value === "off"
+    || value === "standard"
+    || value === "deep"
+    || value === "max"
+    || (typeof value === "string" && /^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(value));
+}
+
+function serializeSessionOptions(snapshot: SessionSnapshot): string {
+  const options: PersistedSessionOptions = {
+    schemaVersion: SESSION_OPTIONS_SCHEMA_VERSION,
+    autonomyPolicy: snapshot.autonomyPolicy,
+    approvalPolicy: snapshot.approvalPolicy,
+    allowedScopes: snapshot.allowedScopes,
+    pendingEscalation: snapshot.pendingEscalation,
+    lastEscalationResult: snapshot.lastEscalationResult,
+    autoApprovePermissions: snapshot.autoApprovePermissions,
+    approvalStats: snapshot.approvalStats,
+    selectedModel: snapshot.selectedModel,
+    thinkingEffort: snapshot.thinkingEffort,
+    ptyCols: snapshot.ptyCols,
+    ptyRows: snapshot.ptyRows,
+    currentTaskTitle: snapshot.currentTaskTitle,
+    summary: snapshot.summary,
+  };
+  return JSON.stringify(options);
+}
+
+function parseSessionOptions(raw: string | null): DurableSessionOptions {
+  const parsed = safeJsonParse<unknown>(raw);
+  if (!isRecord(parsed) || parsed.schemaVersion !== SESSION_OPTIONS_SCHEMA_VERSION) return {};
+
+  const options: DurableSessionOptions = {};
+  if (isAutonomyPolicy(parsed.autonomyPolicy)) options.autonomyPolicy = parsed.autonomyPolicy;
+  if (isApprovalPolicy(parsed.approvalPolicy)) options.approvalPolicy = parsed.approvalPolicy;
+  if (Array.isArray(parsed.allowedScopes)) {
+    options.allowedScopes = parsed.allowedScopes.filter(isEscalationScope);
+  }
+  if (parsed.pendingEscalation === null) {
+    options.pendingEscalation = null;
+  } else {
+    const pendingEscalation = parsePendingEscalation(parsed.pendingEscalation);
+    if (pendingEscalation) options.pendingEscalation = pendingEscalation;
+  }
+  if (parsed.lastEscalationResult === null) {
+    options.lastEscalationResult = null;
+  } else {
+    const lastEscalationResult = parseLastEscalationResult(parsed.lastEscalationResult);
+    if (lastEscalationResult) options.lastEscalationResult = lastEscalationResult;
+  }
+  if (typeof parsed.autoApprovePermissions === "boolean") {
+    options.autoApprovePermissions = parsed.autoApprovePermissions;
+  }
+  const approvalStats = parseApprovalStats(parsed.approvalStats);
+  if (approvalStats) options.approvalStats = approvalStats;
+  if (parsed.selectedModel === null || typeof parsed.selectedModel === "string") {
+    options.selectedModel = parsed.selectedModel;
+  }
+  if (parsed.thinkingEffort === null || isThinkingEffort(parsed.thinkingEffort)) {
+    options.thinkingEffort = parsed.thinkingEffort;
+  }
+  if (Number.isSafeInteger(parsed.ptyCols) && (parsed.ptyCols as number) > 0) {
+    options.ptyCols = parsed.ptyCols as number;
+  }
+  if (Number.isSafeInteger(parsed.ptyRows) && (parsed.ptyRows as number) > 0) {
+    options.ptyRows = parsed.ptyRows as number;
+  }
+  if (typeof parsed.currentTaskTitle === "string") options.currentTaskTitle = parsed.currentTaskTitle;
+  if (typeof parsed.summary === "string") options.summary = parsed.summary;
+  return options;
 }
 
 function parseQueuedMessages(raw: string | null): string[] | undefined {
@@ -148,13 +326,13 @@ function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktre
 
 function sessionSelectFields(): string {
   return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
-             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description`;
+             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options`;
 }
 
 function sessionPersistFields(): string {
   return `id, session_source, automation_id, command, cwd, mode, status, exit_code, started_at, ended_at, output
              , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, structured_state
-             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description`;
+             , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options`;
 }
 
 function sessionPersistAssignments(): string {
@@ -184,18 +362,19 @@ function sessionPersistAssignments(): string {
              worktree_merge_status = excluded.worktree_merge_status,
              worktree_merge_info = excluded.worktree_merge_info,
              title = excluded.title,
-             description = excluded.description`;
+             description = excluded.description,
+             session_options = excluded.session_options`;
 }
 
-function sessionMetadataAssignments(): string {
+function sessionRuntimeMetadataAssignments(): string {
   return `session_source = ?, automation_id = ?,
            command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
-           started_at = ?, ended_at = ?, output = ?,
+           started_at = ?, ended_at = ?,
            archived = ?, archived_at = ?, claude_session_id = ?,
-           provider = ?, session_kind = ?, runner = ?, structured_state = ?,
+           provider = ?, session_kind = ?, runner = ?, queued_messages = ?, structured_state = ?,
            resumed_from_session_id = ?, auto_recovered = ?,
            worktree_enabled = ?, worktree_info = ?, worktree_merge_status = ?, worktree_merge_info = ?,
-           title = ?, description = ?`;
+           title = ?, description = ?, session_options = ?`;
 }
 
 function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number | null> {
@@ -228,10 +407,11 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo),
     snapshot.title ?? null,
     snapshot.description ?? null,
+    serializeSessionOptions(snapshot),
   ];
 }
 
-function sessionMetadataValues(snapshot: SessionSnapshot): Array<string | number | null> {
+function sessionRuntimeMetadataValues(snapshot: SessionSnapshot): Array<string | number | null> {
   return [
     normalizeSessionSource(snapshot.sessionSource),
     snapshot.automationId ?? null,
@@ -242,13 +422,13 @@ function sessionMetadataValues(snapshot: SessionSnapshot): Array<string | number
     snapshot.exitCode,
     snapshot.startedAt,
     snapshot.endedAt,
-    snapshot.output,
     snapshot.archived ? 1 : 0,
     snapshot.archivedAt,
     snapshot.claudeSessionId,
     snapshot.provider ?? null,
     snapshot.sessionKind ?? "pty",
     snapshot.runner ?? null,
+    snapshot.queuedMessages ? JSON.stringify(snapshot.queuedMessages) : null,
     snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
     snapshot.resumedFromSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
@@ -258,12 +438,14 @@ function sessionMetadataValues(snapshot: SessionSnapshot): Array<string | number
     serializeWorktreeMergeInfo(snapshot.worktreeMergeInfo),
     snapshot.title ?? null,
     snapshot.description ?? null,
+    serializeSessionOptions(snapshot),
     snapshot.id,
   ];
 }
 
 function mapSessionCore(row: SessionRow): SessionSnapshot {
   const provider = inferSessionProvider(row);
+  const sessionOptions = parseSessionOptions(row.session_options);
   return {
     id: row.id,
     sessionSource: normalizeSessionSource(row.session_source),
@@ -292,6 +474,10 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     title: row.title ?? undefined,
     description: row.description ?? undefined,
     ...mapWorktreeMergeFields(row),
+    ...sessionOptions,
+    ...(Object.prototype.hasOwnProperty.call(sessionOptions, "pendingEscalation")
+      ? { permissionBlocked: Boolean(sessionOptions.pendingEscalation) }
+      : {}),
   };
 }
 
@@ -301,9 +487,18 @@ function sessionRowQuery(base: string): string {
 
 export const DEFAULT_DB_FILE = "wand.db";
 
+export type AuthPrincipalKind = "browser-admin" | "connected-app";
+export type AuthScope = "admin" | "sessions" | "files" | "password-vault" | "session-preferences";
+
+export interface AuthPrincipal {
+  kind: AuthPrincipalKind;
+  scopes: AuthScope[];
+}
+
 export interface PersistedAuthSession {
   token: string;
   expiresAt: number;
+  principal: AuthPrincipal;
 }
 
 export function resolveDatabasePath(configPath: string): string {
@@ -313,7 +508,9 @@ export function resolveDatabasePath(configPath: string): string {
 const INIT_SQL = `
   CREATE TABLE IF NOT EXISTS auth_sessions (
     token TEXT PRIMARY KEY,
-    expires_at INTEGER NOT NULL
+    expires_at INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'browser-admin',
+    scopes TEXT NOT NULL DEFAULT '["admin"]'
   );
 
   CREATE TABLE IF NOT EXISTS command_sessions (
@@ -345,7 +542,8 @@ const INIT_SQL = `
     worktree_merge_status TEXT,
     worktree_merge_info TEXT,
     title TEXT,
-    description TEXT
+    description TEXT,
+    session_options TEXT NOT NULL DEFAULT '{"schemaVersion":1}'
   );
 
   CREATE TABLE IF NOT EXISTS app_config (
@@ -386,12 +584,16 @@ const INIT_SQL = `
 `;
 
 export function ensureDatabaseFile(dbPath: string): boolean {
-  mkdirSync(path.dirname(dbPath), { recursive: true });
+  const dir = path.dirname(dbPath);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
   const created = !existsSync(dbPath);
   const db = new DatabaseSync(dbPath);
   db.exec(INIT_SQL);
+  ensureAuthSessionSchema(db);
   ensureCommandSessionSchema(db);
   db.close();
+  chmodSync(dbPath, 0o600);
   return created;
 }
 
@@ -399,15 +601,35 @@ export class WandStorage {
   private readonly db: DatabaseSync;
 
   constructor(dbPath: string) {
-    mkdirSync(path.dirname(dbPath), { recursive: true });
+    const dir = path.dirname(dbPath);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(dir, 0o700);
     this.db = new DatabaseSync(dbPath);
+    chmodSync(dbPath, 0o600);
     this.db.exec(INIT_SQL);
+    ensureAuthSessionSchema(this.db);
     ensureCommandSessionSchema(this.db);
     this.ensureDefaultPasswordVault();
   }
 
   close(): void {
     this.db.close();
+  }
+
+  /**
+   * Run a synchronous group of storage operations atomically. Calls must not
+   * be nested because SQLite does not support a second BEGIN on this connection.
+   */
+  transaction<T>(action: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = action();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* preserve the original error */ }
+      throw error;
+    }
   }
 
   // ============ Config Methods ============
@@ -656,20 +878,27 @@ export class WandStorage {
 
   // ============ Auth Session Methods ============
 
-  saveAuthSession(token: string, expiresAt: number): void {
+  saveAuthSession(
+    token: string,
+    expiresAt: number,
+    principal: AuthPrincipal = { kind: "browser-admin", scopes: ["admin"] },
+  ): void {
     this.db
       .prepare(
-        `INSERT INTO auth_sessions (token, expires_at)
-         VALUES (?, ?)
-         ON CONFLICT(token) DO UPDATE SET expires_at = excluded.expires_at`
+        `INSERT INTO auth_sessions (token, expires_at, kind, scopes)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(token) DO UPDATE SET
+           expires_at = excluded.expires_at,
+           kind = excluded.kind,
+           scopes = excluded.scopes`
       )
-      .run(token, expiresAt);
+      .run(token, expiresAt, principal.kind, JSON.stringify(principal.scopes));
   }
 
   getAuthSession(token: string): PersistedAuthSession | null {
     const row = this.db
-      .prepare("SELECT token, expires_at FROM auth_sessions WHERE token = ?")
-      .get(token) as { token: string; expires_at: number } | undefined;
+      .prepare("SELECT token, expires_at, kind, scopes FROM auth_sessions WHERE token = ?")
+      .get(token) as { token: string; expires_at: number; kind: string; scopes: string } | undefined;
 
     if (!row) {
       return null;
@@ -677,7 +906,8 @@ export class WandStorage {
 
     return {
       token: row.token,
-      expiresAt: row.expires_at
+      expiresAt: row.expires_at,
+      principal: parseAuthPrincipal(row.kind, row.scopes),
     };
   }
 
@@ -685,42 +915,73 @@ export class WandStorage {
     this.db.prepare("DELETE FROM auth_sessions WHERE token = ?").run(token);
   }
 
+  deleteAllAuthSessions(): void {
+    this.db.prepare("DELETE FROM auth_sessions").run();
+  }
+
   deleteExpiredAuthSessions(now: number): void {
     this.db.prepare("DELETE FROM auth_sessions WHERE expires_at < ?").run(now);
   }
 
   saveSession(snapshot: SessionSnapshot): void {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.db
-        .prepare(
-          `INSERT INTO command_sessions (
-           ${sessionPersistFields()}
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET
-             ${sessionPersistAssignments()}`
-        )
-        .run(...sessionPersistValues(snapshot));
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    // A single SQLite statement is already atomic. Avoid BEGIN IMMEDIATE in
+    // this hot path so streaming checkpoints do not take an unnecessary write
+    // lock and saveSession can also participate in a caller-owned transaction.
+    this.db
+      .prepare(
+        `INSERT INTO command_sessions (
+         ${sessionPersistFields()}
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           ${sessionPersistAssignments()}`
+      )
+      .run(...sessionPersistValues(snapshot));
   }
 
-  /**
-   * Lightweight update — only touches scalar session fields, skips messages.
-   * Use this in the hot persist path to avoid serializing large message arrays.
-   * Full messages are written by saveSession() at state transitions (exit/stop).
-   */
-  saveSessionMetadata(snapshot: SessionSnapshot): void {
+  /** Update runtime/scalar fields without serializing or rewriting messages/output. */
+  updateSessionRuntimeMetadata(snapshot: SessionSnapshot): void {
     this.db
       .prepare(
         `UPDATE command_sessions SET
-           ${sessionMetadataAssignments()}
+           ${sessionRuntimeMetadataAssignments()}
          WHERE id = ?`
       )
-      .run(...sessionMetadataValues(snapshot));
+      .run(...sessionRuntimeMetadataValues(snapshot));
+  }
+
+  /** Compatibility alias for older callers; intentionally excludes output/messages. */
+  saveSessionMetadata(snapshot: SessionSnapshot): void {
+    this.updateSessionRuntimeMetadata(snapshot);
+  }
+
+  /** Checkpoint only the PTY/structured text output window. */
+  checkpointSessionOutput(id: string, output: string): void {
+    this.db.prepare("UPDATE command_sessions SET output = ? WHERE id = ?").run(output, id);
+  }
+
+  /**
+   * Checkpoint the conversation payload once, optionally folding the matching
+   * structured state/output into the same statement.
+   */
+  checkpointSessionMessages(
+    id: string,
+    messages: ConversationTurn[],
+    structuredState?: StructuredSessionState | null,
+    output?: string,
+  ): void {
+    const assignments = ["messages = ?"];
+    const values: Array<string | null> = [JSON.stringify(messages)];
+    if (structuredState !== undefined) {
+      assignments.push("structured_state = ?");
+      values.push(structuredState ? JSON.stringify(structuredState) : null);
+    }
+    if (output !== undefined) {
+      assignments.push("output = ?");
+      values.push(output);
+    }
+    this.db
+      .prepare(`UPDATE command_sessions SET ${assignments.join(", ")} WHERE id = ?`)
+      .run(...values, id);
   }
 
   getSession(id: string): SessionSnapshot | null {
@@ -820,7 +1081,21 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["worktree_merge_info", "ALTER TABLE command_sessions ADD COLUMN worktree_merge_info TEXT"],
   ["title", "ALTER TABLE command_sessions ADD COLUMN title TEXT"],
   ["description", "ALTER TABLE command_sessions ADD COLUMN description TEXT"],
+  ["session_options", `ALTER TABLE command_sessions ADD COLUMN session_options TEXT NOT NULL DEFAULT '{"schemaVersion":1}'`],
 ];
+
+const AUTH_SESSION_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
+  ["kind", "ALTER TABLE auth_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'browser-admin'"],
+  ["scopes", `ALTER TABLE auth_sessions ADD COLUMN scopes TEXT NOT NULL DEFAULT '["admin"]'`],
+];
+
+function ensureAuthSessionSchema(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(auth_sessions)").all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  for (const [column, sql] of AUTH_SESSION_MIGRATIONS) {
+    if (!names.has(column)) db.exec(sql);
+  }
+}
 
 function ensureCommandSessionSchema(db: DatabaseSync): void {
   const columns = db.prepare("PRAGMA table_info(command_sessions)").all() as Array<{ name: string }>;
@@ -830,4 +1105,26 @@ function ensureCommandSessionSchema(db: DatabaseSync): void {
       db.exec(sql);
     }
   }
+}
+
+const AUTH_SCOPES = new Set<AuthScope>([
+  "admin",
+  "sessions",
+  "files",
+  "password-vault",
+  "session-preferences",
+]);
+
+function parseAuthPrincipal(kind: string, rawScopes: string): AuthPrincipal {
+  const normalizedKind: AuthPrincipalKind = kind === "browser-admin" ? "browser-admin" : "connected-app";
+  const parsed = safeJsonParse<unknown[]>(rawScopes);
+  const scopes = Array.isArray(parsed)
+    ? parsed.filter((scope): scope is AuthScope => typeof scope === "string" && AUTH_SCOPES.has(scope as AuthScope))
+    : [];
+  return {
+    kind: normalizedKind,
+    scopes: normalizedKind === "browser-admin" && !scopes.includes("admin")
+      ? ["admin", ...scopes]
+      : scopes,
+  };
 }

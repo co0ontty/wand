@@ -93,4 +93,16 @@ test("new-session preferences reject unsupported values", () => {
     () => writePreferenceToStorage(defaultConfig(), storage, "defaultSessionKind", "terminal"),
     /无效会话类型/,
   );
+  assert.throws(
+    () => writePreferenceToStorage(defaultConfig(), storage, "structuredRunner", "unknown"),
+    /无效 structured runner/,
+  );
+  assert.throws(
+    () => writePreferenceToStorage(defaultConfig(), storage, "defaultThinkingEffort", "turbo"),
+    /无效思考深度/,
+  );
+  assert.throws(
+    () => writePreferenceToStorage(defaultConfig(), storage, "inheritEnv", "false"),
+    /必须是布尔值/,
+  );
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { ChildProcess } from "node:child_process";
-import { existsSync, unlinkSync, rmSync, openSync, readSync, closeSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, unlinkSync, rmSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
@@ -10,7 +10,7 @@ import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
 import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
-import { ClaudePtyBridge } from "./claude-pty-bridge.js";
+import { ClaudePtyBridge, type PermissionResolution } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
@@ -18,14 +18,137 @@ import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./resume-policy.js";
-import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-session-manager.js";
+import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-provider-common.js";
 import { generateSessionTopic } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import {
+  ProviderHistoryScanner,
+  type ClaudeHistorySession,
+  type CodexHistorySession,
+} from "./provider-history-scanner.js";
+
+export type { ClaudeHistorySession, CodexHistorySession } from "./provider-history-scanner.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {
   if (/^codex\b/.test(command.trim())) return "codex";
   return /^opencode\b/.test(command.trim()) ? "opencode" : "claude";
+}
+
+/**
+ * Tokenize the restricted shell-command subset accepted by the command
+ * allowlist. Commands still run through a login shell, so accepting raw string
+ * prefixes here would let an allowed executable be followed by another command
+ * (`claude; evil`) or be replaced with a similarly-named binary
+ * (`claude-malicious`).
+ *
+ * Quoted and escaped operator characters are retained as ordinary argument
+ * data. Unquoted shell control operators and command substitutions are rejected
+ * because they can introduce additional executable commands.
+ */
+function tokenizeAllowedCommand(value: string): string[] | null {
+  const tokens: string[] = [];
+  let token = "";
+  let tokenStarted = false;
+  let quote: "single" | "double" | null = null;
+
+  const pushToken = () => {
+    if (!tokenStarted) return;
+    tokens.push(token);
+    token = "";
+    tokenStarted = false;
+  };
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+
+    if (char === "\n" || char === "\r") {
+      return null;
+    }
+
+    if (quote === "single") {
+      if (char === "'") {
+        quote = null;
+      } else {
+        token += char;
+      }
+      continue;
+    }
+
+    if (quote === "double") {
+      if (char === '"') {
+        quote = null;
+        continue;
+      }
+      if (char === "\\") {
+        const escaped = value[index + 1];
+        if (escaped === undefined || escaped === "\n" || escaped === "\r") return null;
+        token += escaped === "$" || escaped === "`" || escaped === '"' || escaped === "\\"
+          ? escaped
+          : `\\${escaped}`;
+        tokenStarted = true;
+        index += 1;
+        continue;
+      }
+      if (char === "`" || (char === "$" && value[index + 1] === "(")) {
+        return null;
+      }
+      token += char;
+      tokenStarted = true;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      pushToken();
+      continue;
+    }
+    if (char === "'") {
+      quote = "single";
+      tokenStarted = true;
+      continue;
+    }
+    if (char === '"') {
+      quote = "double";
+      tokenStarted = true;
+      continue;
+    }
+    if (char === "\\") {
+      const escaped = value[index + 1];
+      if (escaped === undefined || escaped === "\n" || escaped === "\r") return null;
+      token += escaped;
+      tokenStarted = true;
+      index += 1;
+      continue;
+    }
+    if (char === ";" || char === "|" || char === "&" || char === "<" || char === ">" || char === "`") {
+      return null;
+    }
+    if (char === "$" && value[index + 1] === "(") {
+      return null;
+    }
+
+    token += char;
+    tokenStarted = true;
+  }
+
+  if (quote !== null) return null;
+  pushToken();
+  return tokens;
+}
+
+/** Exported for focused policy tests. */
+export function isCommandAllowedByPrefixes(command: string, allowedPrefixes: readonly string[]): boolean {
+  if (allowedPrefixes.length === 0) return true;
+
+  const commandTokens = tokenizeAllowedCommand(command);
+  if (!commandTokens || commandTokens.length === 0) return false;
+
+  return allowedPrefixes.some((prefix) => {
+    const prefixTokens = tokenizeAllowedCommand(prefix);
+    if (!prefixTokens) return false;
+    if (prefixTokens.length === 0 || prefixTokens.length > commandTokens.length) return false;
+    return prefixTokens.every((token, index) => token === commandTokens[index]);
+  });
 }
 
 export type { ProcessEvent, ProcessEventHandler } from "./types.js";
@@ -42,18 +165,6 @@ export class SessionInputError extends Error {
   }
 }
 
-
-/** A Claude Code session discovered by scanning ~/.claude/projects/ directories. */
-export interface ClaudeHistorySession {
-  claudeSessionId: string;
-  projectDir: string;
-  cwd: string;
-  firstUserMessage: string;
-  timestamp: string;
-  mtimeMs: number;
-  hasConversation: boolean;
-  managedByWand: boolean;
-}
 
 interface SessionRecord extends SessionSnapshot {
   provider: SessionProvider;
@@ -112,6 +223,12 @@ interface ClaudeProjectSessionDetails extends ClaudeProjectSessionCandidate {
 interface PersistedMessageState {
   count: number;
   signature: string;
+}
+
+interface SessionDirtyState {
+  metadata: boolean;
+  output: boolean;
+  messages: boolean;
 }
 
 const REAL_CONVERSATION_MIN_LINES = 2;
@@ -294,320 +411,8 @@ function isClaudeSessionFileAvailable(cwd: string, claudeSessionId: string): boo
   return Boolean(readClaudeProjectSessionDetails(filePath, claudeSessionId));
 }
 
-/**
- * Reverse the normalization done by getClaudeProjectDir.
- * "-vol1-1000-yolo-claude-wand" → "/vol1/1000/yolo-claude/wand"
- * This is lossy (real hyphens become slashes), so we try all possible
- * interpretations and validate with existsSync, falling back to naive replacement.
- */
-function invertNormalizedProjectDir(dirName: string): string {
-  // The normalization replaces every non-alphanumeric char with "-", so this
-  // inversion is best-effort: "-" most often maps back to "/", but may also be
-  // a literal "-", ".", or "_". We try "/" vs "-" per position and validate with
-  // existsSync; dots/underscores in the original path can't be recovered here.
-  const naive = dirName.replace(/-/g, "/");
-  if (existsSync(naive)) return naive;
-
-  // BFS: at each hyphen position, try "/" (path separator) or "-" (literal hyphen).
-  // Prune candidates that don't exist as directories, but only if at least one
-  // candidate survives pruning. Otherwise keep all to allow deeper merges.
-  const parts = dirName.split("-").filter(Boolean);
-  if (parts.length === 0 || parts.length > 20) return naive;
-
-  let candidates = ["/" + parts[0]];
-
-  for (let i = 1; i < parts.length; i++) {
-    const next: string[] = [];
-    for (const prefix of candidates) {
-      next.push(prefix + "/" + parts[i]);
-      next.push(prefix + "-" + parts[i]);
-    }
-
-    if (i < parts.length - 1) {
-      // Prune non-existent prefixes, but keep all if none exist
-      const valid = next.filter((c) => { try { return existsSync(c); } catch { return false; } });
-      candidates = valid.length > 0 ? valid : next;
-    } else {
-      candidates = next;
-    }
-
-    if (candidates.length > 200) candidates = candidates.slice(0, 200);
-  }
-
-  // Return the first candidate that exists, or the first one, or naive
-  for (const c of candidates) {
-    if (existsSync(c)) return c;
-  }
-  return candidates[0] || naive;
-}
-
-/** Read only the first ~8KB of a JSONL file to extract summary metadata. */
-function readClaudeSessionSummary(filePath: string, id: string, cwd: string): ClaudeHistorySession | null {
-  try {
-    const stats = statSync(filePath);
-    const fd = openSync(filePath, "r");
-    const buffer = Buffer.alloc(8192);
-    const bytesRead = readSync(fd, buffer, 0, 8192, 0);
-    closeSync(fd);
-    const chunk = buffer.toString("utf8", 0, bytesRead);
-    const lines = chunk.split("\n").filter((line) => line.trim().length > 0);
-
-    let timestamp = "";
-    let firstUserMessage = "";
-    let hasUser = false;
-    let hasAssistant = false;
-
-    for (const line of lines) {
-      try {
-        const parsed = JSON.parse(line) as {
-          sessionId?: string;
-          type?: string;
-          timestamp?: string;
-          content?: string;
-          message?: { role?: string; content?: unknown };
-        };
-        if (!timestamp && parsed.timestamp) {
-          timestamp = parsed.timestamp;
-        }
-        if (parsed.type === "user" || parsed.message?.role === "user") {
-          hasUser = true;
-          if (!firstUserMessage) {
-            if (typeof parsed.content === "string" && parsed.content.trim()) {
-              firstUserMessage = parsed.content.trim().slice(0, 120);
-            } else if (parsed.message?.content && typeof parsed.message.content === "string") {
-              firstUserMessage = parsed.message.content.trim().slice(0, 120);
-            }
-          }
-        }
-        if (parsed.type === "assistant" || parsed.message?.role === "assistant") {
-          hasAssistant = true;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    // cwd is passed in from the caller
-    return {
-      claudeSessionId: id,
-      projectDir: path.basename(path.dirname(filePath)),
-      cwd,
-      firstUserMessage,
-      timestamp: timestamp || new Date(stats.mtimeMs).toISOString(),
-      mtimeMs: stats.mtimeMs,
-      hasConversation: hasUser && hasAssistant,
-      managedByWand: false,
-    };
-  } catch {
-    return null;
-  }
-}
-
-const WORKTREE_DIR_PATTERN = /--?\.?(?:wand-worktrees|claude-worktrees)-/;
-
-/** Scan all ~/.claude/projects/ directories for session JSONL files. */
-function listAllClaudeHistorySessions(): ClaudeHistorySession[] {
-  const projectsDir = path.join(os.homedir(), ".claude", "projects");
-  try {
-    const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .filter((entry) => !WORKTREE_DIR_PATTERN.test(entry.name));
-
-    const results: ClaudeHistorySession[] = [];
-    for (const dir of projectDirs) {
-      const dirPath = path.join(projectsDir, dir.name);
-      const cwd = invertNormalizedProjectDir(dir.name);
-      try {
-        const files = readdirSync(dirPath, { withFileTypes: true })
-          .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-          .map((entry) => entry.name.replace(/\.jsonl$/, ""))
-          .filter((name) => UUID_V4_PATTERN.test(name));
-
-        for (const sessionId of files) {
-          const filePath = path.join(dirPath, `${sessionId}.jsonl`);
-          const summary = readClaudeSessionSummary(filePath, sessionId, cwd);
-          if (summary) {
-            results.push(summary);
-          }
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    return results.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  } catch {
-    return [];
-  }
-}
-
-// ── Codex history (~/.codex/sessions/YYYY/MM/DD/rollout-*-<uuid>.jsonl) ──
-//
-// Codex 把每个会话写成 rollout JSONL，首行是 session_meta，payload.id 即 thread id
-// （UUID v7），payload.cwd 即工作目录。wand 用 SessionSnapshot.claudeSessionId 字段
-// 复用存 codex 的 thread id，因此这里的 CodexHistorySession 形状与 ClaudeHistorySession
-// 对齐，前端历史区组件可直接复用。
-
-/** A Codex session discovered by scanning ~/.codex/sessions/ rollout files. */
-export interface CodexHistorySession {
-  /** Codex thread id（存进 claudeSessionId 字段以复用前端/路由）。 */
-  claudeSessionId: string;
-  cwd: string;
-  firstUserMessage: string;
-  firstUserAt: string;
-  timestamp: string;
-  mtimeMs: number;
-  hasUser: boolean;
-  hasConversation: boolean;
-  managedByWand: boolean;
-  provider: "codex";
-}
-
-function getCodexSessionsDir(): string {
-  return path.join(os.homedir(), ".codex", "sessions");
-}
-
-/**
- * codex 的 user message 里混杂了系统注入（AGENTS.md 指令、<environment_context> 等
- * XML 包裹块），它们都以 "#" 或 "<" 开头。真正的用户输入是首条不以这两者开头的
- * input_text。
- */
-function isCodexSystemInjectedText(text: string): boolean {
-  const trimmed = text.trimStart();
-  return trimmed.startsWith("#") || trimmed.startsWith("<");
-}
-
-/**
- * Read the head of a rollout file to extract summary metadata. Codex prepends a
- * large session_meta (full base_instructions + AGENTS.md + <environment_context>)
- * before the first real user turn, so a small window misses it. 64KB covers the
- * first real user message in every observed session.
- */
-function readCodexSessionSummary(filePath: string): CodexHistorySession | null {
-  try {
-    const stats = statSync(filePath);
-    const fd = openSync(filePath, "r");
-    const buffer = Buffer.alloc(65536);
-    const bytesRead = readSync(fd, buffer, 0, 65536, 0);
-    closeSync(fd);
-    const chunk = buffer.toString("utf8", 0, bytesRead);
-    const lines = chunk.split("\n").filter((line) => line.trim().length > 0);
-
-    let id = "";
-    let cwd = "";
-    let timestamp = "";
-    let firstUserMessage = "";
-    let firstUserAt = "";
-    let hasUser = false;
-    let hasAssistant = false;
-
-    for (const line of lines) {
-      let parsed: {
-        type?: string;
-        timestamp?: string;
-        payload?: {
-          type?: string;
-          id?: string;
-          cwd?: string;
-          role?: string;
-          content?: Array<{ type?: string; text?: string }>;
-        };
-      };
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (!timestamp && parsed.timestamp) {
-        timestamp = parsed.timestamp;
-      }
-      const payload = parsed.payload;
-      if (!payload) continue;
-
-      if (parsed.type === "session_meta" || payload.type === "session_meta") {
-        if (!id && typeof payload.id === "string") id = payload.id;
-        if (!cwd && typeof payload.cwd === "string") cwd = payload.cwd;
-        continue;
-      }
-
-      if (payload.type === "message" && payload.role === "user") {
-        const text = Array.isArray(payload.content)
-          ? payload.content
-              .filter((b) => b?.type === "input_text" && typeof b.text === "string")
-              .map((b) => b.text as string)
-              .join("")
-          : "";
-        if (text.trim()) {
-          hasUser = true;
-          if (!firstUserAt && parsed.timestamp) {
-            firstUserAt = parsed.timestamp;
-          }
-          if (!firstUserMessage && !isCodexSystemInjectedText(text)) {
-            firstUserMessage = text.trim().slice(0, 120);
-          }
-        }
-      } else if (payload.type === "message" && payload.role === "assistant") {
-        hasAssistant = true;
-      }
-    }
-
-    if (!id) return null;
-
-    return {
-      claudeSessionId: id,
-      cwd,
-      firstUserMessage,
-      firstUserAt,
-      timestamp: timestamp || new Date(stats.mtimeMs).toISOString(),
-      mtimeMs: stats.mtimeMs,
-      hasUser,
-      hasConversation: hasUser && hasAssistant,
-      managedByWand: false,
-      provider: "codex",
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Recursively collect rollout-*.jsonl paths under ~/.codex/sessions/. */
-function listCodexRolloutFiles(): string[] {
-  const root = getCodexSessionsDir();
-  try {
-    return readdirSync(root, { recursive: true, withFileTypes: true })
-      .filter((entry) => entry.isFile()
-        && entry.name.startsWith("rollout-")
-        && entry.name.endsWith(".jsonl"))
-      .map((entry) => {
-        // Node ≥ 20 dirents from a recursive read carry parentPath/path.
-        const parent = (entry as { parentPath?: string; path?: string }).parentPath
-          ?? (entry as { path?: string }).path
-          ?? root;
-        return path.join(parent, entry.name);
-      });
-  } catch {
-    return [];
-  }
-}
-
-/** Scan ~/.codex/sessions/ and return one entry per thread id (newest rollout wins). */
-function listAllCodexHistorySessions(): CodexHistorySession[] {
-  const files = listCodexRolloutFiles();
-  // 同一 thread 同一天可能有多个 rollout 文件，按 thread id 去重保留 mtime 最新。
-  const byThread = new Map<string, CodexHistorySession>();
-  for (const filePath of files) {
-    const summary = readCodexSessionSummary(filePath);
-    if (!summary) continue;
-    const existing = byThread.get(summary.claudeSessionId);
-    if (!existing || summary.mtimeMs > existing.mtimeMs) {
-      byThread.set(summary.claudeSessionId, summary);
-    }
-  }
-  return Array.from(byThread.values()).sort((a, b) => b.mtimeMs - a.mtimeMs);
-}
-
-function listCodexSessionMtimes(): Map<string, number> {
-  return new Map(listAllCodexHistorySessions().map((session) => [session.claudeSessionId, session.mtimeMs]));
+function listCodexSessionMtimes(sessions: readonly CodexHistorySession[]): Map<string, number> {
+  return new Map(sessions.map((session) => [session.claudeSessionId, session.mtimeMs]));
 }
 
 function isSameResolvedPath(left: string | undefined, right: string | undefined): boolean {
@@ -625,9 +430,12 @@ function parseTimeMs(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function selectCodexSessionForRecord(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownCodexSessionMtimes">): CodexHistorySession | null {
+function selectCodexSessionForRecord(
+  record: Pick<SessionRecord, "cwd" | "startedAt" | "knownCodexSessionMtimes">,
+  sessions: readonly CodexHistorySession[],
+): CodexHistorySession | null {
   const knownMtimes = record.knownCodexSessionMtimes ?? new Map<string, number>();
-  const candidates = listAllCodexHistorySessions()
+  const candidates = sessions
     .filter(isUsableCodexHistorySession)
     .filter((session) => isSameResolvedPath(session.cwd, record.cwd))
     .filter((session) => {
@@ -652,18 +460,24 @@ function selectCodexSessionForRecord(record: Pick<SessionRecord, "cwd" | "starte
   return candidates.length === 1 ? candidates[0] : null;
 }
 
-function getLatestCodexSessionId(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownCodexSessionMtimes">): string | null {
-  return selectCodexSessionForRecord(record)?.claudeSessionId ?? null;
+function getLatestCodexSessionId(
+  record: Pick<SessionRecord, "cwd" | "startedAt" | "knownCodexSessionMtimes">,
+  sessions: readonly CodexHistorySession[],
+): string | null {
+  return selectCodexSessionForRecord(record, sessions)?.claudeSessionId ?? null;
 }
 
-function selectCodexSessionForTimeWindow(record: Pick<SessionRecord, "cwd" | "startedAt" | "endedAt">): CodexHistorySession | null {
+function selectCodexSessionForTimeWindow(
+  record: Pick<SessionRecord, "cwd" | "startedAt" | "endedAt">,
+  sessions: readonly CodexHistorySession[],
+): CodexHistorySession | null {
   const startedAtMs = parseTimeMs(record.startedAt);
   if (startedAtMs === null) return null;
 
   const endedAtMs = parseTimeMs(record.endedAt) ?? Date.now();
   const windowStart = startedAtMs - START_TIME_SKEW_MS;
   const windowEnd = endedAtMs + START_TIME_SKEW_MS;
-  const candidates = listAllCodexHistorySessions()
+  const candidates = sessions
     .filter(isUsableCodexHistorySession)
     .filter((session) => isSameResolvedPath(session.cwd, record.cwd))
     .filter((session) => {
@@ -682,11 +496,14 @@ function selectCodexSessionForTimeWindow(record: Pick<SessionRecord, "cwd" | "st
   return candidates.length === 1 ? candidates[0] : null;
 }
 
-function recoverCodexSessionIdFromHistory(snapshot: Pick<SessionSnapshot, "provider" | "command" | "cwd" | "startedAt" | "endedAt" | "claudeSessionId">): string | null {
+function recoverCodexSessionIdFromHistory(
+  snapshot: Pick<SessionSnapshot, "provider" | "command" | "cwd" | "startedAt" | "endedAt" | "claudeSessionId">,
+  sessions: readonly CodexHistorySession[],
+): string | null {
   if (snapshot.provider !== "codex" || snapshot.claudeSessionId) {
     return null;
   }
-  return getCodexResumeCommandSessionId(snapshot.command) ?? selectCodexSessionForTimeWindow(snapshot)?.claudeSessionId ?? null;
+  return getCodexResumeCommandSessionId(snapshot.command) ?? selectCodexSessionForTimeWindow(snapshot, sessions)?.claudeSessionId ?? null;
 }
 
 function recoverClaudeSessionIdFromHistory(snapshot: Pick<SessionSnapshot, "provider" | "command" | "cwd" | "startedAt" | "endedAt" | "claudeSessionId" | "messages">): string | null {
@@ -694,24 +511,6 @@ function recoverClaudeSessionIdFromHistory(snapshot: Pick<SessionSnapshot, "prov
     return null;
   }
   return getResumeCommandSessionId(snapshot.command) ?? selectClaudeProjectSessionForTimeWindow(snapshot)?.id ?? null;
-}
-
-/** Delete every rollout file belonging to the given codex thread ids. */
-function deleteCodexRolloutFiles(threadIds: Set<string>): number {
-  if (threadIds.size === 0) return 0;
-  let deleted = 0;
-  for (const filePath of listCodexRolloutFiles()) {
-    const summary = readCodexSessionSummary(filePath);
-    if (summary && threadIds.has(summary.claudeSessionId)) {
-      try {
-        unlinkSync(filePath);
-        deleted++;
-      } catch {
-        // Best-effort — file may already be gone
-      }
-    }
-  }
-  return deleted;
 }
 
 function snapshotMessages(record: Pick<SessionRecord, "ptyBridge" | "messages">): ConversationTurn[] {
@@ -785,15 +584,19 @@ function deriveSessionSummary(messages: ConversationTurn[]): string | undefined 
 export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly logger: SessionLogger;
+  private readonly providerHistory = new ProviderHistoryScanner();
   /** 24h archive scan timer */
   private archiveTimer: NodeJS.Timeout | null = null;
   /** Per-session debounce timers for throttled persist calls */
   private readonly persistDebounceTimers = new Map<string, NodeJS.Timeout>();
   /** Last persisted message state per session — used to skip redundant message writes */
   private readonly lastPersistedMessageState = new Map<string, PersistedMessageState>();
+  /** Columns that changed since the last per-session checkpoint. */
+  private readonly dirtySessions = new Map<string, SessionDirtyState>();
   /** 启动时被识别为孤儿 PTY 并标记为 exited 的旧会话数（旧服务器进程已死） */
   private orphanRecoveredCount = 0;
   private readonly topicRequests = new Set<string>();
+  private disposed = false;
 
   constructor(
     private readonly config: WandConfig,
@@ -802,11 +605,17 @@ export class ProcessManager extends EventEmitter {
   ) {
     super();
     this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"), config.shortcutLogMaxBytes);
+    let startupCodexHistory: CodexHistorySession[] | null = null;
+    const getStartupCodexHistory = (): CodexHistorySession[] => {
+      startupCodexHistory ??= this.providerHistory.listCodexHistorySessions();
+      return startupCodexHistory;
+    };
 
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "pty") {
         continue;
       }
+      this.lastPersistedMessageState.set(snapshot.id, getPersistedMessageState(snapshot.messages ?? []));
       const provider = snapshot.provider ?? resolveProviderFromCommand(snapshot.command);
       const isClaudeCmd = provider === "claude";
       const isCodexCmd = provider === "codex";
@@ -827,7 +636,7 @@ export class ProcessManager extends EventEmitter {
               ...snapshot,
               provider: "codex",
               endedAt: snapshot.endedAt ?? orphanEndedAt,
-            })
+            }, getStartupCodexHistory())
           : null;
       const restoredSessionId = resumeCommandSessionId ?? snapshot.claudeSessionId ?? sessionIdFromHistory;
       // Sessions restored from storage have ptyProcess: null — the old server's PTY
@@ -876,10 +685,10 @@ export class ProcessManager extends EventEmitter {
           knownClaudeTaskIds: undefined,
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
-          knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes() : undefined,
+          knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes(getStartupCodexHistory()) : undefined,
           codexSessionDiscoveryTimer: null,
           claudeSessionId: restoredSessionId ?? updated.claudeSessionId,
-          approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
+          approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
           ptyCols: snapshot.ptyCols ?? 120,
           ptyRows: snapshot.ptyRows ?? 36,
         });
@@ -918,10 +727,10 @@ export class ProcessManager extends EventEmitter {
           knownClaudeTaskIds: undefined,
           claudeTaskDiscoveryTimer: null,
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
-          knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes() : undefined,
+          knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes(getStartupCodexHistory()) : undefined,
           codexSessionDiscoveryTimer: null,
           claudeSessionId: restoredSessionId ?? updated.claudeSessionId,
-          approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
+          approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
           ptyCols: snapshot.ptyCols ?? 120,
           ptyRows: snapshot.ptyRows ?? 36,
         });
@@ -945,7 +754,45 @@ export class ProcessManager extends EventEmitter {
     return this.orphanRecoveredCount;
   }
 
+  /** Stop all live work and flush pending state before storage is closed. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    if (this.archiveTimer) {
+      clearInterval(this.archiveTimer);
+      this.archiveTimer = null;
+    }
+    const pendingPersistIds = new Set(this.persistDebounceTimers.keys());
+    for (const timer of this.persistDebounceTimers.values()) clearTimeout(timer);
+    this.persistDebounceTimers.clear();
+
+    for (const record of this.sessions.values()) {
+      const wasRunning = record.status === "running";
+      if (record.ptyBridge) {
+        record.messages = record.ptyBridge.getMessages();
+      }
+      this.cleanupRecord(record);
+      if (wasRunning) {
+        record.stopRequested = true;
+        record.status = "stopped";
+        record.exitCode = null;
+        record.endedAt = new Date().toISOString();
+        record.pendingEscalation = null;
+        record.ptyPermissionBlocked = false;
+      }
+      if (wasRunning || pendingPersistIds.has(record.id)) {
+        try { this.persist(record, { forceFullSave: wasRunning, metadataDirty: true }); } catch { /* best-effort shutdown flush */ }
+      }
+    }
+
+    this.topicRequests.clear();
+    this.removeAllListeners("process");
+    this.logger.dispose();
+  }
+
   private emitEvent(event: ProcessEvent): void {
+    if (this.disposed) return;
     this.emit("process", event);
   }
 
@@ -987,15 +834,16 @@ export class ProcessManager extends EventEmitter {
       }
       this.sessions.delete(id);
       this.lastPersistedMessageState.delete(id);
+      this.dirtySessions.delete(id);
       this.storage.deleteSession(id);
     }
     if (toRemove.length > 0) {
-      this.claudeHistoryCache = null;
-      this.codexHistoryCache = null;
+      this.providerHistory.invalidate();
     }
   }
 
   start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string }): SessionSnapshot {
+    if (this.disposed) throw new Error("ProcessManager has been disposed.");
     this.assertCommandAllowed(command);
 
     const baseCwd = resolveSessionCwd(cwd, this.config.defaultCwd);
@@ -1043,7 +891,9 @@ export class ProcessManager extends EventEmitter {
       : null;
     const knownClaudeTaskIds = isClaudeProvider ? new Set(listRecentClaudeProjectSessionIds(resolvedCwd, new Date().toISOString())) : null;
     const knownClaudeProjectMtimes = isClaudeProvider ? listClaudeProjectSessionMtimes(resolvedCwd) : null;
-    const knownCodexSessionMtimes = isCodexProvider && !codexResumeCommandSessionId ? listCodexSessionMtimes() : null;
+    const knownCodexSessionMtimes = isCodexProvider && !codexResumeCommandSessionId
+      ? listCodexSessionMtimes(this.providerHistory.listCodexHistorySessions())
+      : null;
     const initialClaudeSessionId = isClaudeProvider
       ? resumeCommandSessionId ?? null
       : codexResumeCommandSessionId ?? null;
@@ -1111,6 +961,7 @@ export class ProcessManager extends EventEmitter {
         initialMessages: priorMessages,
       });
       record.ptyBridge.on("event", (event: SessionEvent) => {
+        if (this.sessions.get(id) !== record) return;
         this.handleBridgeEvent(record, event);
       });
     }
@@ -1119,9 +970,9 @@ export class ProcessManager extends EventEmitter {
     this.persist(record, { forceFullSave: true });
     if (initialClaudeSessionId) {
       if (provider === "codex") {
-        this.codexHistoryCache = null;
+        this.providerHistory.invalidate("codex");
       } else {
-        this.claudeHistoryCache = null;
+        this.providerHistory.invalidate("claude");
       }
     }
     this.cleanupOldSessions();
@@ -1153,7 +1004,7 @@ export class ProcessManager extends EventEmitter {
       record.exitCode = -1;
       record.endedAt = new Date().toISOString();
       record.ptyProcess = null;
-      this.persist(record);
+      this.persist(record, { forceFullSave: true, metadataDirty: true });
       return this.snapshot(record);
     }
 
@@ -1163,7 +1014,10 @@ export class ProcessManager extends EventEmitter {
 
     child.onExit(({ exitCode }) => {
       const current = this.sessions.get(id);
-      if (!current) return;
+      // A stopped session can be resumed under the same public id before the
+      // old PTY has emitted its asynchronous exit event. Never let that stale
+      // callback finalize or clear the replacement run.
+      if (current !== record || current.ptyProcess !== child) return;
       if (current.claudeTaskDiscoveryTimer) {
         clearTimeout(current.claudeTaskDiscoveryTimer);
         current.claudeTaskDiscoveryTimer = null;
@@ -1188,16 +1042,14 @@ export class ProcessManager extends EventEmitter {
       current.exitCode = current.stopRequested ? null : exitCode;
       current.endedAt = new Date().toISOString();
       current.ptyProcess = null;
-      this.flushPersist(current);
-      this.storage.saveSession(this.snapshot(current));
+      this.flushPersist(current, true);
       this.emitEvent({ type: "ended", sessionId: id, data: this.snapshot(current) });
     });
 
     if (record.ptyBridge) {
       record.ptyBridge.setPtyWrite((input: string) => {
-        if (record.ptyProcess) {
-          record.ptyProcess.write(input);
-        }
+        if (this.sessions.get(id) !== record || record.ptyProcess !== child) return;
+        child.write(input);
       });
     }
 
@@ -1209,7 +1061,7 @@ export class ProcessManager extends EventEmitter {
       if (initialInputSent || !initialInput) return;
       initialInputSent = true;
       const current = this.sessions.get(id);
-      if (!current || !current.ptyProcess || current.status !== "running") {
+      if (current !== record || current.ptyProcess !== child || current.status !== "running") {
         process.stderr.write(`[wand] Cannot send initial input: session not ready\n`);
         return;
       }
@@ -1219,13 +1071,16 @@ export class ProcessManager extends EventEmitter {
         current.ptyBridge.onUserInput(initialInput);
       }
 
-      current.ptyProcess.write(initialInput);
-      current.ptyProcess.write("\r");
+      child.write(initialInput);
+      child.write("\r");
     };
 
     child.onData((chunk: string) => {
       const rec = this.sessions.get(id);
-      if (!rec) return;
+      // PTYs may still drain data after kill(). A replacement session can use
+      // the same id, so both record identity and the concrete PTY handle must
+      // match before accepting the chunk.
+      if (rec !== record || rec.ptyProcess !== child) return;
 
       if (rec.ptyBridge) {
         rec.ptyBridge.processChunk(chunk);
@@ -1251,7 +1106,8 @@ export class ProcessManager extends EventEmitter {
       const bridgeSessionId = rec.ptyBridge?.getClaudeSessionId();
       if (bridgeSessionId && bridgeSessionId !== rec.claudeSessionId) {
         rec.claudeSessionId = bridgeSessionId;
-        this.claudeHistoryCache = null;
+        this.markDirty(rec.id, { metadata: true });
+        this.providerHistory.invalidate("claude");
         process.stderr.write(`[wand] Captured Claude session ID: ${bridgeSessionId}\n`);
       }
 
@@ -1265,6 +1121,7 @@ export class ProcessManager extends EventEmitter {
         });
         if (discoveredTaskId) {
           rec.claudeSessionId = discoveredTaskId;
+          this.markDirty(rec.id, { metadata: true });
           rec.knownClaudeTaskIds.add(discoveredTaskId);
           process.stderr.write(`[wand] Captured Claude project session ID: ${discoveredTaskId}\n`);
         }
@@ -1290,8 +1147,9 @@ export class ProcessManager extends EventEmitter {
 
     if (record.knownClaudeTaskIds) {
       const tryDiscoverClaudeTaskId = () => {
+        if (this.disposed) return;
         const current = this.sessions.get(id);
-        if (!current || current.status !== "running" || current.claudeSessionId || !current.knownClaudeTaskIds) {
+        if (current !== record || current.ptyProcess !== child || current.status !== "running" || current.claudeSessionId || !current.knownClaudeTaskIds) {
           return;
         }
         if (getResumeCommandSessionId(current.command)) {
@@ -1320,8 +1178,9 @@ export class ProcessManager extends EventEmitter {
 
     if (record.knownCodexSessionMtimes) {
       const tryDiscoverCodexSessionId = () => {
+        if (this.disposed) return;
         const current = this.sessions.get(id);
-        if (!current || current.status !== "running" || current.claudeSessionId || !current.knownCodexSessionMtimes) {
+        if (current !== record || current.ptyProcess !== child || current.status !== "running" || current.claudeSessionId || !current.knownCodexSessionMtimes) {
           return;
         }
         if (getCodexResumeCommandSessionId(current.command)) {
@@ -1359,16 +1218,8 @@ export class ProcessManager extends EventEmitter {
     return isClaudeSessionFileAvailable(cwd, claudeSessionId);
   }
 
-  private claudeHistoryCache: { data: ClaudeHistorySession[]; expiresAt: number } | null = null;
-  private static readonly HISTORY_CACHE_TTL_MS = 30_000;
-
   listClaudeHistorySessions(): ClaudeHistorySession[] {
-    const now = Date.now();
-    if (this.claudeHistoryCache && now < this.claudeHistoryCache.expiresAt) {
-      return this.claudeHistoryCache.data;
-    }
-
-    const allSessions = listAllClaudeHistorySessions();
+    const allSessions = this.providerHistory.listClaudeHistorySessions();
 
     // Cross-reference with wand-managed sessions
     const managedClaudeIds = new Set<string>();
@@ -1384,50 +1235,15 @@ export class ProcessManager extends EventEmitter {
       }
     }
 
-    this.claudeHistoryCache = { data: allSessions, expiresAt: now + ProcessManager.HISTORY_CACHE_TTL_MS };
     return allSessions;
   }
 
   deleteClaudeHistoryFiles(sessions: { claudeSessionId: string; cwd: string }[]): number {
-    let deleted = 0;
-    const claudeHome = path.join(os.homedir(), ".claude");
-    for (const { claudeSessionId, cwd } of sessions) {
-      if (!UUID_V4_PATTERN.test(claudeSessionId)) continue;
-      const jsonlPath = path.join(
-        getClaudeProjectDir(cwd),
-        `${claudeSessionId}.jsonl`
-      );
-      try {
-        unlinkSync(jsonlPath);
-        deleted++;
-      } catch {
-        // Best-effort — file may already be gone
-      }
-      // Clean up related directories under ~/.claude/
-      for (const sub of ["session-env", "tasks", "todos"]) {
-        const dir = path.join(claudeHome, sub, claudeSessionId);
-        try {
-          if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-        } catch {
-          // Non-critical — best-effort
-        }
-      }
-    }
-    if (sessions.length > 0) {
-      this.claudeHistoryCache = null;
-    }
-    return deleted;
+    return this.providerHistory.deleteClaudeHistoryFiles(sessions);
   }
 
-  private codexHistoryCache: { data: CodexHistorySession[]; expiresAt: number } | null = null;
-
   listCodexHistorySessions(): CodexHistorySession[] {
-    const now = Date.now();
-    if (this.codexHistoryCache && now < this.codexHistoryCache.expiresAt) {
-      return this.codexHistoryCache.data;
-    }
-
-    const allSessions = listAllCodexHistorySessions();
+    const allSessions = this.providerHistory.listCodexHistorySessions();
 
     // Cross-reference with wand-managed sessions（codex 的 thread id 存在 claudeSessionId 字段）
     const managedIds = new Set<string>();
@@ -1442,22 +1258,15 @@ export class ProcessManager extends EventEmitter {
       }
     }
 
-    this.codexHistoryCache = { data: allSessions, expiresAt: now + ProcessManager.HISTORY_CACHE_TTL_MS };
     return allSessions;
   }
 
   hasCodexSessionFile(threadId: string): boolean {
-    if (!UUID_V4_PATTERN.test(threadId)) return false;
-    return listAllCodexHistorySessions().some((s) => s.claudeSessionId === threadId);
+    return this.providerHistory.hasCodexSessionFile(threadId);
   }
 
   deleteCodexHistoryFiles(threadIds: string[]): number {
-    const valid = new Set(threadIds.filter((id) => UUID_V4_PATTERN.test(id)));
-    const deleted = deleteCodexRolloutFiles(valid);
-    if (valid.size > 0) {
-      this.codexHistoryCache = null;
-    }
-    return deleted;
+    return this.providerHistory.deleteCodexHistoryFiles(threadIds);
   }
 
   private captureCodexSessionId(record: SessionRecord, options?: { allowTimeWindowFallback?: boolean }): boolean {
@@ -1469,12 +1278,12 @@ export class ProcessManager extends EventEmitter {
           cwd: record.cwd,
           startedAt: record.startedAt,
           knownCodexSessionMtimes: record.knownCodexSessionMtimes,
-        })
+        }, this.providerHistory.listCodexHistorySessions())
       : null;
     const fallbackThreadId = discoveredThreadId
       ? null
       : options?.allowTimeWindowFallback
-        ? selectCodexSessionForTimeWindow(record)?.claudeSessionId ?? null
+        ? selectCodexSessionForTimeWindow(record, this.providerHistory.listCodexHistorySessions())?.claudeSessionId ?? null
         : null;
     const threadId = discoveredThreadId ?? fallbackThreadId;
     if (!threadId) {
@@ -1482,7 +1291,7 @@ export class ProcessManager extends EventEmitter {
     }
     record.claudeSessionId = threadId;
     record.knownCodexSessionMtimes?.set(threadId, Date.now());
-    this.codexHistoryCache = null;
+    this.providerHistory.invalidate("codex");
     process.stderr.write(`[wand] Captured Codex thread ID: ${threadId}\n`);
     return true;
   }
@@ -1511,7 +1320,7 @@ export class ProcessManager extends EventEmitter {
     }
     record.claudeSessionId = sessionId;
     record.knownClaudeProjectMtimes?.set(sessionId, Date.now());
-    this.claudeHistoryCache = null;
+    this.providerHistory.invalidate("claude");
     process.stderr.write(`[wand] Captured Claude session ID: ${sessionId}\n`);
     return true;
   }
@@ -1525,6 +1334,15 @@ export class ProcessManager extends EventEmitter {
     if (!record.output && record.storedOutput) {
       result.output = record.storedOutput;
     }
+    return result;
+  }
+
+  /** Return only a session owned by this manager, without the SQLite fallback used by get(). */
+  getOwned(id: string): SessionSnapshot | null {
+    const record = this.sessions.get(id);
+    if (!record) return null;
+    const result = this.snapshot(record);
+    if (!record.output && record.storedOutput) result.output = record.storedOutput;
     return result;
   }
 
@@ -1594,6 +1412,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   sendInput(id: string, input: string, view?: "chat" | "terminal", shortcutKey?: string): SessionSnapshot {
+    if (this.disposed) throw new Error("ProcessManager has been disposed.");
     const record = this.mustGet(id);
 
     if (record.status !== "running") {
@@ -1689,7 +1508,8 @@ export class ProcessManager extends EventEmitter {
 
     // Immediately update status and clear PTY references so the session no longer
     // appears "running" and subsequent sendInput() calls are rejected cleanly.
-    // The async onExit handler will re-persist but will find stopRequested already true.
+    // Clearing the handle also makes a later onExit callback stale; stop() owns
+    // the terminal state transition and persistence from this point onward.
     record.status = "stopped";
     record.exitCode = null;
     record.endedAt = new Date().toISOString();
@@ -1699,11 +1519,12 @@ export class ProcessManager extends EventEmitter {
     this.captureClaudeSessionId(record, { allowTimeWindowFallback: true });
     this.captureCodexSessionId(record, { allowTimeWindowFallback: true });
     if (record.ptyBridge) {
+      record.messages = record.ptyBridge.getMessages();
       record.ptyBridge.removeAllListeners();
       record.ptyBridge = null;
     }
 
-    this.persist(record);
+    this.flushPersist(record, true);
     return this.snapshot(record);
   }
 
@@ -1728,12 +1549,14 @@ export class ProcessManager extends EventEmitter {
     if (record.status === "running") {
       record.stopRequested = true;
       if (record.childProcess) {
-        record.childProcess.kill();
+        const child = record.childProcess;
         record.childProcess = null;
+        child.kill();
       }
       if (record.ptyProcess) {
-        record.ptyProcess.kill();
+        const ptyProcess = record.ptyProcess;
         record.ptyProcess = null;
+        ptyProcess.kill();
       }
     }
     if (record.ptyBridge) {
@@ -1798,11 +1621,12 @@ export class ProcessManager extends EventEmitter {
     }
     this.sessions.delete(id);
     this.lastPersistedMessageState.delete(id);
+    this.dirtySessions.delete(id);
     if (record.claudeSessionId) {
       if (record.provider === "codex") {
-        this.codexHistoryCache = null;
+        this.providerHistory.invalidate("codex");
       } else {
-        this.claudeHistoryCache = null;
+        this.providerHistory.invalidate("claude");
       }
     }
   }
@@ -1852,6 +1676,8 @@ export class ProcessManager extends EventEmitter {
       mode: record.mode,
       worktreeEnabled: record.worktreeEnabled ?? false,
       worktree: record.worktree ?? null,
+      worktreeMergeStatus: record.worktreeMergeStatus,
+      worktreeMergeInfo: record.worktreeMergeInfo ?? null,
       autonomyPolicy: record.autonomyPolicy,
       approvalPolicy: record.approvalPolicy,
       allowedScopes: record.allowedScopes,
@@ -1869,9 +1695,12 @@ export class ProcessManager extends EventEmitter {
       messages: messages.length > 0 ? messages : undefined,
       resumedFromSessionId: record.resumedFromSessionId ?? undefined,
       autoRecovered: record.autoRecovered ?? false,
-      autoApprovePermissions: record.autoApprovePermissions || undefined,
+      // `false` is an intentional user setting and must survive metadata
+      // persistence/restarts; truthiness would silently drop it.
+      autoApprovePermissions: record.autoApprovePermissions,
       approvalStats: record.approvalStats.total > 0 ? record.approvalStats : undefined,
-      summary: record.description ?? deriveSessionSummary(messages),
+      currentTaskTitle: record.currentTaskTitle,
+      summary: record.description ?? record.summary ?? deriveSessionSummary(messages),
       title: record.title,
       description: record.description,
       selectedModel: record.selectedModel ?? null,
@@ -1900,19 +1729,47 @@ export class ProcessManager extends EventEmitter {
     record.title = title;
     record.description = description;
     const snapshot = this.snapshot(record);
-    this.storage.saveSessionMetadata(snapshot);
+    this.storage.updateSessionRuntimeMetadata(snapshot);
     this.emitEvent({ type: "output", sessionId: id, data: { title, description, summary: description } });
+    return snapshot;
+  }
+
+  /**
+   * Persist worktree merge progress through the manager that owns the live
+   * session record. Returning null lets callers fall back to another owner (or
+   * directly to storage for a row that is not currently loaded by a manager).
+   */
+  setWorktreeMergeState(
+    id: string,
+    status: SessionSnapshot["worktreeMergeStatus"],
+    info: SessionSnapshot["worktreeMergeInfo"],
+  ): SessionSnapshot | null {
+    const record = this.sessions.get(id);
+    if (!record) return null;
+    record.worktreeMergeStatus = status;
+    record.worktreeMergeInfo = info ?? null;
+    const snapshot = this.snapshot(record);
+    this.storage.updateSessionRuntimeMetadata(snapshot);
+    this.emitEvent({
+      type: "status",
+      sessionId: id,
+      data: {
+        sessionKind: "pty",
+        worktreeMergeStatus: status,
+        worktreeMergeInfo: snapshot.worktreeMergeInfo,
+      },
+    });
     return snapshot;
   }
 
   private maybeGenerateSessionTopic(id: string, input: string): void {
     const prompt = input.trim();
     const record = this.sessions.get(id);
-    if (!prompt || !record || record.title || this.topicRequests.has(id)) return;
+    if (this.disposed || !prompt || !record || record.title || this.topicRequests.has(id)) return;
     this.topicRequests.add(id);
     void generateSessionTopic(prompt, record.cwd, this.config.language)
       .then(({ title, description }) => {
-        if (this.sessions.has(id)) this.setSessionTopic(id, title, description);
+        if (!this.disposed && this.sessions.has(id)) this.setSessionTopic(id, title, description);
       })
       .catch((error) => console.error(`[ProcessManager] Failed to generate session topic ${id}:`, getErrorMessage(error)))
       .finally(() => this.topicRequests.delete(id));
@@ -1925,7 +1782,7 @@ export class ProcessManager extends EventEmitter {
     return "assist";
   }
 
-  resolveEscalation(id: string, requestId: string, resolution?: "approve_once" | "approve_turn" | "deny"): SessionSnapshot {
+  resolveEscalation(id: string, requestId: string, resolution?: PermissionResolution): SessionSnapshot {
     return this.resolvePermission(id, resolution ?? "approve_once", requestId);
   }
 
@@ -1953,30 +1810,36 @@ export class ProcessManager extends EventEmitter {
    * @param resolution - "approve_once", "approve_turn", or "deny"
    * @param requestId - Optional escalation request ID for validation
    */
-  resolvePermission(id: string, resolution: "approve_once" | "approve_turn" | "deny", requestId?: string): SessionSnapshot {
+  resolvePermission(id: string, resolution: PermissionResolution, requestId?: string): SessionSnapshot {
     const record = this.mustGet(id);
 
-    // Validate requestId if provided
-    if (requestId && record.pendingEscalation) {
-      if (record.pendingEscalation.requestId !== requestId) {
-        throw new Error("Escalation request not found.");
-      }
+    if (resolution !== "approve_once" && resolution !== "approve_turn" && resolution !== "deny") {
+      throw new Error("Invalid permission resolution.");
+    }
+
+    // A permission response is only meaningful for the currently pending
+    // prompt. In particular, never turn a stale/missing escalation request into
+    // an unconditional Enter key sent to the live provider process.
+    const pendingEscalation = record.pendingEscalation;
+    if (!pendingEscalation) {
+      throw new Error("Escalation request not found.");
+    }
+    if (requestId !== undefined && pendingEscalation.requestId !== requestId) {
+      throw new Error("Escalation request not found.");
     }
 
     // Record escalation result for audit trail
-    if (record.pendingEscalation) {
-      record.lastEscalationResult = {
-        requestId: record.pendingEscalation.requestId,
-        resolution,
-        reason: record.pendingEscalation.reason,
-      };
-    }
+    record.lastEscalationResult = {
+      requestId: pendingEscalation.requestId,
+      resolution,
+      reason: pendingEscalation.reason,
+    };
 
     // Handle "approve_turn" memory — only in ProcessManager for non-bridge sessions
-    if (resolution === "approve_turn" && record.pendingEscalation && !record.ptyBridge) {
-      record.rememberedEscalationScopes.add(record.pendingEscalation.scope);
-      if (record.pendingEscalation.target) {
-        record.rememberedEscalationTargets.add(record.pendingEscalation.target);
+    if (resolution === "approve_turn" && !record.ptyBridge) {
+      record.rememberedEscalationScopes.add(pendingEscalation.scope);
+      if (pendingEscalation.target) {
+        record.rememberedEscalationTargets.add(pendingEscalation.target);
       }
     }
 
@@ -1993,36 +1856,76 @@ export class ProcessManager extends EventEmitter {
     return this.snapshot(record);
   }
 
-  private persist(record: SessionRecord, options?: { forceFullSave?: boolean }): void {
+  private persist(
+    record: SessionRecord,
+    options: {
+      forceFullSave?: boolean;
+      metadataDirty?: boolean;
+      outputDirty?: boolean;
+      messagesDirty?: boolean;
+    } = {},
+  ): void {
+    this.markDirty(record.id, {
+      metadata: options.metadataDirty ?? true,
+      output: options.outputDirty,
+      messages: options.messagesDirty,
+    });
     // Update messages from bridge before persisting
     const messages = record.ptyBridge?.getMessages() ?? record.messages;
     if (messages !== record.messages) {
       record.messages = messages;
     }
     const snapshot = this.snapshot(record);
-    const shouldSaveMessages = options?.forceFullSave === true
-      || shouldPersistMessages(this.lastPersistedMessageState.get(record.id), messages);
-    // Persist full messages as soon as the structured conversation changes so
-    // service restarts cannot roll the session back to an older tail message.
-    if (shouldSaveMessages) {
-      this.storage.saveSession(snapshot);
-      this.lastPersistedMessageState.set(record.id, getPersistedMessageState(messages));
-    } else {
-      this.storage.saveSessionMetadata(snapshot);
+    const dirty = this.dirtySessions.get(record.id)!;
+    if (shouldPersistMessages(this.lastPersistedMessageState.get(record.id), messages)) {
+      dirty.messages = true;
     }
-    this.logger.saveMetadata(record.id, {
-      id: record.id,
-      command: record.command,
-      status: record.status,
-      startedAt: record.startedAt,
-      endedAt: record.endedAt,
-      claudeSessionId: record.claudeSessionId,
-      resumedFromSessionId: record.resumedFromSessionId ?? null,
-      autoRecovered: record.autoRecovered ?? false,
-    });
+    const shouldSaveMessages = options.forceFullSave === true || dirty.messages;
+    const shouldSaveMetadata = options.forceFullSave === true || dirty.metadata;
+
+    if (options.forceFullSave === true) {
+      this.storage.saveSession(snapshot);
+    } else {
+      if (dirty.metadata) this.storage.updateSessionRuntimeMetadata(snapshot);
+      if (dirty.messages) {
+        this.storage.checkpointSessionMessages(
+          record.id,
+          messages,
+          snapshot.structuredState,
+          dirty.output ? snapshot.output : undefined,
+        );
+        dirty.output = false;
+      } else if (dirty.output) {
+        this.storage.checkpointSessionOutput(record.id, snapshot.output);
+      }
+    }
+    if (shouldSaveMessages) this.lastPersistedMessageState.set(record.id, getPersistedMessageState(messages));
+    this.dirtySessions.delete(record.id);
+
+    if (shouldSaveMetadata) {
+      this.logger.saveMetadata(record.id, {
+        id: record.id,
+        command: record.command,
+        status: record.status,
+        startedAt: record.startedAt,
+        endedAt: record.endedAt,
+        claudeSessionId: record.claudeSessionId,
+        resumedFromSessionId: record.resumedFromSessionId ?? null,
+        autoRecovered: record.autoRecovered ?? false,
+      });
+    }
     if (shouldSaveMessages) {
       this.logger.saveMessages(record.id, messages);
     }
+  }
+
+  private markDirty(sessionId: string, next: Partial<SessionDirtyState>): SessionDirtyState {
+    const dirty = this.dirtySessions.get(sessionId) ?? { metadata: false, output: false, messages: false };
+    if (next.metadata) dirty.metadata = true;
+    if (next.output) dirty.output = true;
+    if (next.messages) dirty.messages = true;
+    this.dirtySessions.set(sessionId, dirty);
+    return dirty;
   }
 
   /**
@@ -2031,14 +1934,18 @@ export class ProcessManager extends EventEmitter {
    * Use this in hot paths (e.g. onData) to reduce I/O pressure.
    */
   private schedulePersist(record: SessionRecord): void {
+    if (this.disposed) return;
+    this.markDirty(record.id, { output: true });
     const existing = this.persistDebounceTimers.get(record.id);
-    if (existing) {
-      clearTimeout(existing);
-    }
+    // This is a throttle window, not a quiet-period debounce: continuous PTY
+    // output still reaches SQLite at least once per second.
+    if (existing) return;
     const timer = setTimeout(() => {
       this.persistDebounceTimers.delete(record.id);
-      this.persist(record);
+      if (this.disposed) return;
+      this.persist(record, { metadataDirty: false });
     }, 1000);
+    timer.unref?.();
     this.persistDebounceTimers.set(record.id, timer);
   }
 
@@ -2046,13 +1953,18 @@ export class ProcessManager extends EventEmitter {
    * Immediately persist any pending debounced write and clear the timer.
    * Use this at critical points (exit, stop, delete) to ensure no data loss.
    */
-  private flushPersist(record: SessionRecord): void {
+  private flushPersist(record: SessionRecord, forceFullSave = false): void {
     const existing = this.persistDebounceTimers.get(record.id);
     if (existing) {
       clearTimeout(existing);
       this.persistDebounceTimers.delete(record.id);
     }
-    this.persist(record);
+    this.persist(record, {
+      forceFullSave,
+      metadataDirty: true,
+      outputDirty: true,
+      messagesDirty: forceFullSave,
+    });
   }
 
   private archiveExpiredSessions(): void {
@@ -2072,12 +1984,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
   private assertCommandAllowed(command: string): void {
-    if (this.config.allowedCommandPrefixes.length === 0) {
-      return;
-    }
-
-    const isAllowed = this.config.allowedCommandPrefixes.some((prefix) => command.startsWith(prefix));
-    if (!isAllowed) {
+    if (!isCommandAllowedByPrefixes(command, this.config.allowedCommandPrefixes)) {
       throw new Error("Command is not allowed by current configuration.");
     }
   }
@@ -2189,6 +2096,7 @@ export class ProcessManager extends EventEmitter {
           reason: data.prompt,
         };
         record.ptyPermissionBlocked = true;
+        this.markDirty(record.id, { metadata: true });
         // Emit status event with full permission details for UI
         this.emitEvent({
           type: "status",
@@ -2220,6 +2128,7 @@ export class ProcessManager extends EventEmitter {
         }
         record.pendingEscalation = null;
         record.ptyPermissionBlocked = false;
+        this.markDirty(record.id, { metadata: true });
         this.emitEvent({
           type: "status",
           sessionId: event.sessionId,
@@ -2259,8 +2168,7 @@ export class ProcessManager extends EventEmitter {
         record.ptyBridge?.clearRememberedPermissions();
         record.rememberedEscalationScopes.clear();
         record.rememberedEscalationTargets.clear();
-        this.persist(record);
-        this.storage.saveSession(this.snapshot(record));
+        this.persist(record, { metadataDirty: true, outputDirty: true, messagesDirty: true });
         break;
 
       case "ended":

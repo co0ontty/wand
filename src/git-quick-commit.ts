@@ -3,8 +3,14 @@ import { spawn } from "node:child_process";
 
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
 import { buildChildEnv } from "./env-utils.js";
-import { runGit as runGitBase, runGitRaw as runGitRawBase, getGitErrorMessage } from "./git-utils.js";
-import { thinkingEffortToClaudeCliEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-session-manager.js";
+import {
+  runGit as runGitBase,
+  runGitAsync as runGitAsyncBase,
+  runGitRaw as runGitRawBase,
+  runGitRawAsync as runGitRawAsyncBase,
+  getGitErrorMessage,
+} from "./git-utils.js";
+import { thinkingEffortToClaudeCliEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-provider-common.js";
 import {
   GitStatusFileEntry,
   GitStatusResult,
@@ -32,6 +38,14 @@ function runGit(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS)
 
 function runGitAllowEmpty(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS): string {
   return runGitRawBase(args, cwd, { timeout: timeoutMs, maxBuffer: GIT_MAX_BUFFER });
+}
+
+function runGitAsync(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS): Promise<string> {
+  return runGitAsyncBase(args, cwd, { timeout: timeoutMs, maxBuffer: GIT_MAX_BUFFER });
+}
+
+function runGitAllowEmptyAsync(args: string[], cwd: string, timeoutMs: number = GIT_TIMEOUT_MS): Promise<string> {
+  return runGitRawAsyncBase(args, cwd, { timeout: timeoutMs, maxBuffer: GIT_MAX_BUFFER });
 }
 
 export type QuickCommitErrorCode =
@@ -71,6 +85,18 @@ function assertGitWorkTree(cwd: string): void {
   }
 }
 
+async function assertGitWorkTreeAsync(cwd: string): Promise<void> {
+  if (!cwd || !existsSync(cwd)) throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
+  try {
+    if (await runGitAsync(["rev-parse", "--is-inside-work-tree"], cwd) !== "true") {
+      throw new QuickCommitError("当前目录不在 git 仓库内。", "NOT_A_GIT_REPO");
+    }
+  } catch (error) {
+    if (error instanceof QuickCommitError) throw error;
+    throw new QuickCommitError(getGitErrorMessage(error), "NOT_A_GIT_REPO");
+  }
+}
+
 /**
  * Resolve the remote to push to. Prefers `branch.<name>.remote` config for the
  * current branch, falls back to `origin`. Never throws.
@@ -84,6 +110,14 @@ function resolvePushRemote(cwd: string): string {
   } catch {
     // ignore — fall through to default
   }
+  return "origin";
+}
+
+async function resolvePushRemoteAsync(cwd: string): Promise<string> {
+  try {
+    const branch = await runGitAsync(["branch", "--show-current"], cwd);
+    if (branch) return await runGitAsync(["config", "--get", `branch.${branch}.remote`], cwd) || "origin";
+  } catch { /* use origin */ }
   return "origin";
 }
 
@@ -279,6 +313,92 @@ export function getGitStatus(cwd: string): GitStatusResult {
     // 只能看到「有改动」的 submodule，clean submodule 不会出现在 status 里，所以再用
     // .gitmodules 声明兜底——只要仓库声明了 submodule 就提供该选项。
     hasSubmodule: allEntries.some((e) => e.isSubmodule) || repoDeclaresSubmodule(repoRoot),
+  };
+}
+
+async function repoDeclaresSubmoduleAsync(repoRoot: string | undefined): Promise<boolean> {
+  if (!repoRoot) return false;
+  const gitmodules = `${repoRoot}/.gitmodules`;
+  if (!existsSync(gitmodules)) return false;
+  try {
+    const out = (await runGitAllowEmptyAsync(["config", "-f", gitmodules, "--get-regexp", "\\.path$"], repoRoot)).trim();
+    return out.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Non-blocking status implementation used by HTTP routes. */
+export async function getGitStatusAsync(cwd: string): Promise<GitStatusResult> {
+  if (!cwd || !existsSync(cwd)) return { isGit: false, error: "工作目录不存在。" };
+  try {
+    if (await runGitAsync(["rev-parse", "--is-inside-work-tree"], cwd) !== "true") return { isGit: false };
+  } catch {
+    return { isGit: false };
+  }
+
+  let repoRoot: string | undefined;
+  try { repoRoot = await runGitAsync(["rev-parse", "--show-toplevel"], cwd); } catch { /* optional */ }
+
+  let branch: string;
+  try {
+    branch = await runGitAsync(["branch", "--show-current"], cwd);
+  } catch (error) {
+    return { isGit: true, repoRoot, error: getGitErrorMessage(error) };
+  }
+  if (!branch) {
+    try { branch = `HEAD (${await runGitAsync(["rev-parse", "--short", "HEAD"], cwd)})`; } catch { branch = "HEAD"; }
+  }
+
+  let head: string | undefined;
+  let initialCommit = false;
+  try { head = await runGitAsync(["rev-parse", "HEAD"], cwd); } catch { initialCommit = true; }
+
+  let porcelain: string;
+  try {
+    porcelain = await runGitAllowEmptyAsync(["status", "--porcelain=v2", "--untracked-files=all"], cwd);
+  } catch (error) {
+    return { isGit: true, branch, repoRoot, head, initialCommit, error: getGitErrorMessage(error) };
+  }
+  const allEntries = parsePorcelainV2(porcelain);
+
+  let upstream: string | undefined;
+  let ahead: number | undefined;
+  let behind: number | undefined;
+  let lastCommit: GitStatusResult["lastCommit"];
+  let latestTag: string | undefined;
+  if (!initialCommit) {
+    try { upstream = await runGitAsync(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd) || undefined; } catch { /* optional */ }
+    if (upstream) {
+      try {
+        const [behindRaw, aheadRaw] = (await runGitAsync(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], cwd)).split(/\s+/);
+        const parsedBehind = Number.parseInt(behindRaw, 10);
+        const parsedAhead = Number.parseInt(aheadRaw, 10);
+        if (!Number.isNaN(parsedBehind)) behind = parsedBehind;
+        if (!Number.isNaN(parsedAhead)) ahead = parsedAhead;
+      } catch { /* optional */ }
+    }
+    try {
+      const parts = (await runGitAsync(["log", "-1", "--pretty=format:%H%x09%h%x09%s"], cwd)).split("\t");
+      if (parts.length >= 3) lastCommit = { hash: parts[0], shortHash: parts[1], subject: parts.slice(2).join("\t") };
+    } catch { /* optional */ }
+    try { latestTag = await runGitAsync(["describe", "--tags", "--abbrev=0"], cwd) || undefined; } catch { /* optional */ }
+  }
+
+  return {
+    isGit: true,
+    branch,
+    modifiedCount: allEntries.length,
+    files: allEntries.slice(0, MAX_FILE_ENTRIES),
+    head,
+    repoRoot,
+    initialCommit,
+    upstream,
+    ahead,
+    behind,
+    lastCommit,
+    latestTag,
+    hasSubmodule: allEntries.some((entry) => entry.isSubmodule) || await repoDeclaresSubmoduleAsync(repoRoot),
   };
 }
 
@@ -479,16 +599,16 @@ async function callAiText(prompt: string, cwd: string, language: string, opts: Q
   return callClaudeText(prompt, cwd, language, opts.model);
 }
 
-function collectStagedDiff(cwd: string): string {
+async function collectStagedDiff(cwd: string): Promise<string> {
   let diff: string;
   try {
-    diff = runGit(["diff", "--cached", "--submodule=log"], cwd, 5000);
+    diff = await runGitAsync(["diff", "--cached", "--submodule=log"], cwd, 5000);
   } catch {
     diff = "";
   }
   if (!diff) {
     try {
-      diff = runGit(["diff", "--cached", "--name-only"], cwd, 3000);
+      diff = await runGitAsync(["diff", "--cached", "--name-only"], cwd, 3000);
     } catch {
       diff = "(no diff available)";
     }
@@ -500,7 +620,7 @@ function collectStagedDiff(cwd: string): string {
 }
 
 async function generateCommitMessage(cwd: string, language: string, ai: QuickCommitAiOptions = {}): Promise<string> {
-  const diff = collectStagedDiff(cwd);
+  const diff = await collectStagedDiff(cwd);
   const lang = language.trim() || "中文";
   const prompt = `阅读以下 git diff，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。\n\n${diff}`;
   const raw = await callAiText(prompt, cwd, language, ai);
@@ -546,10 +666,10 @@ async function generateCommitMessageWithTag(
   language: string,
   ai: QuickCommitAiOptions = {},
 ): Promise<GenerateCommitMessageResult> {
-  const diff = collectStagedDiff(cwd);
+  const diff = await collectStagedDiff(cwd);
   let latestTag: string | undefined;
   try {
-    latestTag = runGit(["describe", "--tags", "--abbrev=0"], cwd) || undefined;
+    latestTag = await runGitAsync(["describe", "--tags", "--abbrev=0"], cwd) || undefined;
   } catch {
     latestTag = undefined;
   }
@@ -595,7 +715,7 @@ export async function generateCommitMessageOnly(
     throw new QuickCommitError("工作目录不存在。", "CWD_MISSING");
   }
   try {
-    runGit(["add", "-A"], cwd, 5000);
+    await runGitAsync(["add", "-A"], cwd, 5000);
   } catch {
     // best-effort staging so the diff is complete
   }
@@ -614,13 +734,13 @@ async function generateTagAfterCommit(
 ): Promise<string> {
   let diff: string;
   try {
-    diff = runGit(["show", "HEAD", "--no-color", "--submodule=log"], cwd, 5000);
+    diff = await runGitAsync(["show", "HEAD", "--no-color", "--submodule=log"], cwd, 5000);
   } catch {
     diff = "";
   }
   if (!diff) {
     try {
-      diff = runGit(["show", "HEAD", "--name-only"], cwd, 3000);
+      diff = await runGitAsync(["show", "HEAD", "--name-only"], cwd, 3000);
     } catch {
       diff = "(no diff available)";
     }
@@ -632,7 +752,7 @@ async function generateTagAfterCommit(
   let latestTag: string | undefined;
   try {
     // We just made a commit, so look for the most recent tag reachable from HEAD~1.
-    latestTag = runGit(["describe", "--tags", "--abbrev=0", "HEAD~1"], cwd) || undefined;
+    latestTag = await runGitAsync(["describe", "--tags", "--abbrev=0", "HEAD~1"], cwd) || undefined;
   } catch {
     latestTag = undefined;
   }
@@ -695,36 +815,36 @@ interface DoPushOptions {
  * Push current branch (with upstream auto-setup) and/or tags.
  * Errors are returned via `error` so callers can present partial-success states.
  */
-function doPush(opts: DoPushOptions): PushOutcome {
+async function doPush(opts: DoPushOptions): Promise<PushOutcome> {
   const { cwd, pushCommits, pushTags } = opts;
   const recurseFlag = `--recurse-submodules=${opts.recurseSubmodules ?? "check"}`;
   let pushedCommits = false;
   let pushedTags = false;
   let hasUpstream = false;
   try {
-    runGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
+    await runGitAsync(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
     hasUpstream = true;
   } catch {
     hasUpstream = false;
   }
-  const pushRemote = resolvePushRemote(cwd);
+  const pushRemote = await resolvePushRemoteAsync(cwd);
 
   try {
     if (pushCommits) {
       if (hasUpstream) {
-        runGit(["push", recurseFlag], cwd, GIT_PUSH_TIMEOUT_MS);
+        await runGitAsync(["push", recurseFlag], cwd, GIT_PUSH_TIMEOUT_MS);
       } else {
-        runGit(["push", "-u", recurseFlag, pushRemote, "HEAD"], cwd, GIT_PUSH_TIMEOUT_MS);
+        await runGitAsync(["push", "-u", recurseFlag, pushRemote, "HEAD"], cwd, GIT_PUSH_TIMEOUT_MS);
       }
       pushedCommits = true;
     }
     if (pushTags) {
       if (Array.isArray(pushTags)) {
         for (const name of pushTags) {
-          runGit(["push", pushRemote, `refs/tags/${name}`], cwd, GIT_PUSH_TIMEOUT_MS);
+          await runGitAsync(["push", pushRemote, `refs/tags/${name}`], cwd, GIT_PUSH_TIMEOUT_MS);
         }
       } else {
-        runGit(["push", pushRemote, "--tags"], cwd, GIT_PUSH_TIMEOUT_MS);
+        await runGitAsync(["push", pushRemote, "--tags"], cwd, GIT_PUSH_TIMEOUT_MS);
       }
       pushedTags = true;
     }
@@ -751,11 +871,11 @@ interface TagHeadOptions {
 export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
   const { cwd, language, tag, autoTag, push } = opts;
 
-  assertGitWorkTree(cwd);
+  await assertGitWorkTreeAsync(cwd);
 
   let headHash: string;
   try {
-    headHash = runGit(["rev-parse", "HEAD"], cwd);
+    headHash = await runGitAsync(["rev-parse", "HEAD"], cwd);
   } catch {
     throw new QuickCommitError("仓库还没有任何 commit，无法打 tag。", "NO_COMMIT");
   }
@@ -764,7 +884,7 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
   if (!tagName && autoTag) {
     let headSubject = "";
     try {
-      headSubject = runGit(["log", "-1", "--pretty=format:%s"], cwd);
+      headSubject = await runGitAsync(["log", "-1", "--pretty=format:%s"], cwd);
     } catch {
       headSubject = "";
     }
@@ -781,7 +901,7 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
 
   // Refuse to overwrite an existing tag — surface a clear error code.
   try {
-    runGit(["rev-parse", "--verify", `refs/tags/${tagName}`], cwd);
+    await runGitAsync(["rev-parse", "--verify", `refs/tags/${tagName}`], cwd);
     throw new QuickCommitError(`tag \`${tagName}\` 已存在。`, "TAG_EXISTS");
   } catch (error) {
     if (error instanceof QuickCommitError) throw error;
@@ -789,7 +909,7 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
   }
 
   try {
-    runGit(["tag", tagName], cwd);
+    await runGitAsync(["tag", tagName], cwd);
   } catch (error) {
     throw new QuickCommitError(`git tag 失败：${getGitErrorMessage(error)}`, "GIT_TAG_FAILED");
   }
@@ -797,7 +917,7 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
   let pushed = false;
   let pushError: string | undefined;
   if (push) {
-    const outcome = doPush({ cwd, pushCommits: false, pushTags: [tagName] });
+    const outcome = await doPush({ cwd, pushCommits: false, pushTags: [tagName] });
     pushed = outcome.pushedTags;
     pushError = outcome.error;
   }
@@ -822,7 +942,7 @@ interface PushOptions {
 
 export async function runPush(opts: PushOptions): Promise<PushResult> {
   const { cwd, pushCommits = true, pushTags = false, submodule = false, tagName } = opts;
-  assertGitWorkTree(cwd);
+  await assertGitWorkTreeAsync(cwd);
   if (!pushCommits && !pushTags) {
     throw new QuickCommitError("没有要推送的内容。", "NOTHING_TO_PUSH");
   }
@@ -832,9 +952,9 @@ export async function runPush(opts: PushOptions): Promise<PushResult> {
   // status 看不到，但本地可能仍领先远端。父仓库随后用 recurse=no 推送。
   let subPushErrors: string[] = [];
   if (submodule) {
-    const { base, infos } = collectSubmodulesForPush(cwd);
+    const { base, infos } = await collectSubmodulesForPush(cwd);
     if (infos.length > 0) {
-      const subPush = pushSubmodules(base, infos, { pushTags: !!(pushTags && tagName), tagName });
+      const subPush = await pushSubmodules(base, infos, { pushTags: !!(pushTags && tagName), tagName });
       subPushErrors = subPush.errors;
     }
   }
@@ -851,7 +971,7 @@ export async function runPush(opts: PushOptions): Promise<PushResult> {
     };
   }
 
-  const outcome = doPush({ cwd, pushCommits, pushTags, recurseSubmodules: submodule ? "no" : "check" });
+  const outcome = await doPush({ cwd, pushCommits, pushTags, recurseSubmodules: submodule ? "no" : "check" });
   return {
     ok: !outcome.error && subPushErrors.length === 0,
     pushedCommits: outcome.pushedCommits,
@@ -877,23 +997,23 @@ interface SubmoduleCommitInfo {
  * `--recurse-submodules=on-demand` 会以「HEAD does not match the named branch」整体失败。
  * 优先取远端默认分支（`<remote>/HEAD` 指向）→ 当前命名分支 → 回退 main/master。
  */
-function resolveSubmodulePushBranch(subCwd: string, remote: string): string {
+async function resolveSubmodulePushBranch(subCwd: string, remote: string): Promise<string> {
   const prefix = `${remote}/`;
   try {
-    const ref = runGit(["symbolic-ref", "--short", `refs/remotes/${remote}/HEAD`], subCwd);
+    const ref = await runGitAsync(["symbolic-ref", "--short", `refs/remotes/${remote}/HEAD`], subCwd);
     const name = (ref.startsWith(prefix) ? ref.slice(prefix.length) : ref).trim();
     if (name) return name;
   } catch {
     // ignore — fall through
   }
   try {
-    const cur = runGit(["branch", "--show-current"], subCwd);
+    const cur = await runGitAsync(["branch", "--show-current"], subCwd);
     if (cur) return cur;
   } catch {
     // ignore
   }
   try {
-    runGit(["rev-parse", "--verify", `refs/remotes/${remote}/main`], subCwd);
+    await runGitAsync(["rev-parse", "--verify", `refs/remotes/${remote}/main`], subCwd);
     return "main";
   } catch {
     return "master";
@@ -909,13 +1029,13 @@ function resolveSubmodulePushBranch(subCwd: string, remote: string): string {
  * 任一 submodule 提交失败都会被收集为非致命错误，不阻塞父仓库继续 commit；
  * 调用方可以在结果里读到具体哪几个 submodule 失败。
  */
-function commitDirtySubmodules(parentCwd: string, message: string): { commits: SubmoduleCommitInfo[]; errors: string[] } {
+async function commitDirtySubmodules(parentCwd: string, message: string): Promise<{ commits: SubmoduleCommitInfo[]; errors: string[] }> {
   const commits: SubmoduleCommitInfo[] = [];
   const errors: string[] = [];
 
   let porcelain: string;
   try {
-    porcelain = runGitAllowEmpty(["status", "--porcelain=v2", "--untracked-files=all"], parentCwd);
+    porcelain = await runGitAllowEmptyAsync(["status", "--porcelain=v2", "--untracked-files=all"], parentCwd);
   } catch {
     return { commits, errors };
   }
@@ -933,7 +1053,7 @@ function commitDirtySubmodules(parentCwd: string, message: string): { commits: S
       continue;
     }
     try {
-      runGit(["add", "-A"], subCwd, 5000);
+      await runGitAsync(["add", "-A"], subCwd, 5000);
     } catch (error) {
       errors.push(`submodule ${entry.path} add 失败：${getGitErrorMessage(error)}`);
       continue;
@@ -942,41 +1062,41 @@ function commitDirtySubmodules(parentCwd: string, message: string): { commits: S
     // 文件都过滤掉了，会得到一个空 diff，此时跳过避免空 commit。
     let staged: string;
     try {
-      staged = runGitAllowEmpty(["diff", "--cached", "--name-only"], subCwd).trim();
+      staged = (await runGitAllowEmptyAsync(["diff", "--cached", "--name-only"], subCwd)).trim();
     } catch {
       staged = "";
     }
     if (!staged) continue;
     try {
-      runGit(["commit", "-m", message], subCwd, 10_000);
+      await runGitAsync(["commit", "-m", message], subCwd, 10_000);
     } catch (error) {
       errors.push(`submodule ${entry.path} commit 失败：${getGitErrorMessage(error)}`);
       continue;
     }
     let hash = "";
-    try { hash = runGit(["rev-parse", "--short", "HEAD"], subCwd); } catch { /* ignore */ }
-    const remote = resolvePushRemote(subCwd);
-    const branch = resolveSubmodulePushBranch(subCwd, remote);
+    try { hash = await runGitAsync(["rev-parse", "--short", "HEAD"], subCwd); } catch { /* ignore */ }
+    const remote = await resolvePushRemoteAsync(subCwd);
+    const branch = await resolveSubmodulePushBranch(subCwd, remote);
     commits.push({ path: entry.path, hash, remote, branch });
   }
   return { commits, errors };
 }
 
 /** 对刚提交的 submodule 打上与父仓库同名的 tag。已存在同名 tag 则记为非致命跳过。 */
-function tagSubmodules(parentCwd: string, subInfos: SubmoduleCommitInfo[], tagName: string): { tagged: string[]; errors: string[] } {
+async function tagSubmodules(parentCwd: string, subInfos: SubmoduleCommitInfo[], tagName: string): Promise<{ tagged: string[]; errors: string[] }> {
   const tagged: string[] = [];
   const errors: string[] = [];
   for (const info of subInfos) {
     const subCwd = `${parentCwd}/${info.path}`;
     try {
-      runGit(["rev-parse", "--verify", `refs/tags/${tagName}`], subCwd);
+      await runGitAsync(["rev-parse", "--verify", `refs/tags/${tagName}`], subCwd);
       errors.push(`submodule ${info.path} 已存在 tag ${tagName}，跳过`);
       continue;
     } catch {
       // 不存在 → 继续打 tag
     }
     try {
-      runGit(["tag", tagName], subCwd);
+      await runGitAsync(["tag", tagName], subCwd);
       tagged.push(info.path);
     } catch (error) {
       errors.push(`submodule ${info.path} 打 tag 失败：${getGitErrorMessage(error)}`);
@@ -990,11 +1110,11 @@ function tagSubmodules(parentCwd: string, subInfos: SubmoduleCommitInfo[], tagNa
  * 解决 detached HEAD 无法直接 push 的问题；`pushTags` 时连带把同名 tag 推上去。
  * 单个 submodule 失败收集为非致命错误。
  */
-function pushSubmodules(
+async function pushSubmodules(
   parentCwd: string,
   subInfos: SubmoduleCommitInfo[],
   opts: { pushTags?: boolean; tagName?: string },
-): { pushed: string[]; errors: string[] } {
+): Promise<{ pushed: string[]; errors: string[] }> {
   const pushed: string[] = [];
   const errors: string[] = [];
   for (const info of subInfos) {
@@ -1004,14 +1124,14 @@ function pushSubmodules(
       continue;
     }
     try {
-      runGit(["push", info.remote, `HEAD:refs/heads/${info.branch}`], subCwd, GIT_PUSH_TIMEOUT_MS);
+      await runGitAsync(["push", info.remote, `HEAD:refs/heads/${info.branch}`], subCwd, GIT_PUSH_TIMEOUT_MS);
     } catch (error) {
       errors.push(`submodule ${info.path} 推送失败：${getGitErrorMessage(error)}`);
       continue;
     }
     if (opts.pushTags && opts.tagName) {
       try {
-        runGit(["push", info.remote, `refs/tags/${opts.tagName}`], subCwd, GIT_PUSH_TIMEOUT_MS);
+        await runGitAsync(["push", info.remote, `refs/tags/${opts.tagName}`], subCwd, GIT_PUSH_TIMEOUT_MS);
       } catch (error) {
         errors.push(`submodule ${info.path} 推送 tag 失败：${getGitErrorMessage(error)}`);
       }
@@ -1026,16 +1146,16 @@ function pushSubmodules(
  * remote + 目标分支。用于结果面板的 Push & Close：此时 submodule 多已 clean，
  * status 里看不到，但本地 HEAD 可能仍领先远端，需要逐个尝试推送（up-to-date 则 no-op）。
  */
-function collectSubmodulesForPush(cwd: string): { base: string; infos: SubmoduleCommitInfo[] } {
+async function collectSubmodulesForPush(cwd: string): Promise<{ base: string; infos: SubmoduleCommitInfo[] }> {
   let base: string;
   try {
-    base = runGit(["rev-parse", "--show-toplevel"], cwd);
+    base = await runGitAsync(["rev-parse", "--show-toplevel"], cwd);
   } catch {
     base = cwd;
   }
   let raw: string;
   try {
-    raw = runGitAllowEmpty(["config", "-f", `${base}/.gitmodules`, "--get-regexp", "\\.path$"], base);
+    raw = await runGitAllowEmptyAsync(["config", "-f", `${base}/.gitmodules`, "--get-regexp", "\\.path$"], base);
   } catch {
     return { base, infos: [] };
   }
@@ -1048,8 +1168,8 @@ function collectSubmodulesForPush(cwd: string): { base: string; infos: Submodule
     if (!rel) continue;
     const subCwd = `${base}/${rel}`;
     if (!existsSync(subCwd)) continue;
-    const remote = resolvePushRemote(subCwd);
-    const branch = resolveSubmodulePushBranch(subCwd, remote);
+    const remote = await resolvePushRemoteAsync(subCwd);
+    const branch = await resolveSubmodulePushBranch(subCwd, remote);
     infos.push({ path: rel, hash: "", remote, branch });
   }
   return { base, infos };
@@ -1091,17 +1211,17 @@ function buildFallbackPrompt(opts: QuickCommitOptions, priorError: string): stri
   ].join("\n");
 }
 
-function getHead(cwd: string): string | null {
+async function getHead(cwd: string): Promise<string | null> {
   try {
-    return runGit(["rev-parse", "HEAD"], cwd);
+    return await runGitAsync(["rev-parse", "HEAD"], cwd);
   } catch {
     return null;
   }
 }
 
-function getHeadSummary(cwd: string): { hash: string; message: string } {
+async function getHeadSummary(cwd: string): Promise<{ hash: string; message: string }> {
   try {
-    const raw = runGit(["log", "-1", "--pretty=format:%h%x09%s"], cwd);
+    const raw = await runGitAsync(["log", "-1", "--pretty=format:%h%x09%s"], cwd);
     const parts = raw.split("\t");
     return { hash: parts[0] ?? "", message: parts.slice(1).join("\t") };
   } catch {
@@ -1109,17 +1229,17 @@ function getHeadSummary(cwd: string): { hash: string; message: string } {
   }
 }
 
-function getLatestTagAtHead(cwd: string): string | undefined {
+async function getLatestTagAtHead(cwd: string): Promise<string | undefined> {
   try {
-    return runGit(["describe", "--tags", "--exact-match", "HEAD"], cwd) || undefined;
+    return await runGitAsync(["describe", "--tags", "--exact-match", "HEAD"], cwd) || undefined;
   } catch {
     return undefined;
   }
 }
 
 async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: string): Promise<QuickCommitResult> {
-  assertGitWorkTree(opts.cwd);
-  const beforeHead = getHead(opts.cwd);
+  await assertGitWorkTreeAsync(opts.cwd);
+  const beforeHead = await getHead(opts.cwd);
   const prompt = buildFallbackPrompt(opts, priorError);
   const provider = normalizeProvider(opts.provider);
   if (provider === "codex") {
@@ -1159,12 +1279,12 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     });
   }
 
-  const afterHead = getHead(opts.cwd);
+  const afterHead = await getHead(opts.cwd);
   if (!afterHead || afterHead === beforeHead) {
     throw new QuickCommitError("CLI 兜底没有创建新的 commit。", "GIT_COMMIT_FAILED");
   }
-  const commit = getHeadSummary(opts.cwd);
-  const tag = getLatestTagAtHead(opts.cwd);
+  const commit = await getHeadSummary(opts.cwd);
+  const tag = await getLatestTagAtHead(opts.cwd);
   return {
     ok: true,
     commit,
@@ -1207,19 +1327,19 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     inheritEnv: opts.inheritEnv,
   };
 
-  assertGitWorkTree(cwd);
+  await assertGitWorkTreeAsync(cwd);
 
   // 先 add 一次让我们能在 collectStagedDiff 看到完整改动（包含 submodule 指针），
   // AI 生成 message 时也基于这个 staged diff。
   try {
-    runGit(["add", "-A"], cwd, 5000);
+    await runGitAsync(["add", "-A"], cwd, 5000);
   } catch (error) {
     throw new QuickCommitError(`git add 失败：${getGitErrorMessage(error)}`, "GIT_ADD_FAILED");
   }
 
   let stagedFiles: string;
   try {
-    stagedFiles = runGitAllowEmpty(["diff", "--cached", "--name-only"], cwd).trim();
+    stagedFiles = (await runGitAllowEmptyAsync(["diff", "--cached", "--name-only"], cwd)).trim();
   } catch (error) {
     throw new QuickCommitError(getGitErrorMessage(error), "GIT_DIFF_FAILED");
   }
@@ -1228,7 +1348,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   let parentHasStaged = stagedFiles.length > 0;
   let submoduleHasDirty = false;
   try {
-    const porcelain = runGitAllowEmpty(["status", "--porcelain=v2", "--untracked-files=all"], cwd);
+    const porcelain = await runGitAllowEmptyAsync(["status", "--porcelain=v2", "--untracked-files=all"], cwd);
     submoduleHasDirty = parsePorcelainV2(porcelain).some(
       (e) => e.isSubmodule && (e.submoduleState?.hasTrackedChanges || e.submoduleState?.hasUntracked),
     );
@@ -1258,16 +1378,16 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   // 父仓库随后再 add 一次，picks up 新的 submodule 指针。
   let submoduleOutcome: { commits: SubmoduleCommitInfo[]; errors: string[] } = { commits: [], errors: [] };
   if (submodule) {
-    submoduleOutcome = commitDirtySubmodules(cwd, message);
+    submoduleOutcome = await commitDirtySubmodules(cwd, message);
     if (submoduleOutcome.commits.length > 0) {
       try {
-        runGit(["add", "-A"], cwd, 5000);
+        await runGitAsync(["add", "-A"], cwd, 5000);
       } catch (error) {
         throw new QuickCommitError(`父仓库 add submodule 指针失败：${getGitErrorMessage(error)}`, "GIT_ADD_FAILED");
       }
       // 重新评估父仓库是否有 staged 内容：submodule 指针变了这里应为真。
       try {
-        stagedFiles = runGitAllowEmpty(["diff", "--cached", "--name-only"], cwd).trim();
+        stagedFiles = (await runGitAllowEmptyAsync(["diff", "--cached", "--name-only"], cwd)).trim();
         parentHasStaged = stagedFiles.length > 0;
       } catch { /* keep stale value */ }
     }
@@ -1287,14 +1407,14 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   }
 
   try {
-    runGit(["commit", "-m", message], cwd, 10_000);
+    await runGitAsync(["commit", "-m", message], cwd, 10_000);
   } catch (error) {
     throw new QuickCommitError(`git commit 失败：${getGitErrorMessage(error)}`, "GIT_COMMIT_FAILED");
   }
 
   let commitHash: string;
   try {
-    commitHash = runGit(["rev-parse", "--short", "HEAD"], cwd);
+    commitHash = await runGitAsync(["rev-parse", "--short", "HEAD"], cwd);
   } catch {
     commitHash = "";
   }
@@ -1306,13 +1426,13 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   }
   if (tagName) {
     try {
-      runGit(["tag", tagName], cwd);
+      await runGitAsync(["tag", tagName], cwd);
     } catch (error) {
       throw new QuickCommitError(`git tag 失败：${getGitErrorMessage(error)}`, "GIT_TAG_FAILED");
     }
     // 纳入 submodule 时给刚提交的 submodule 打同名 tag（非致命，失败不阻断父仓库流程）。
     if (submodule && submoduleOutcome.commits.length > 0) {
-      tagSubmodules(cwd, submoduleOutcome.commits, tagName);
+      await tagSubmodules(cwd, submoduleOutcome.commits, tagName);
     }
   }
 
@@ -1325,7 +1445,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     const includeSub = !!submodule && submoduleOutcome.commits.length > 0;
     let subPushErrors: string[] = [];
     if (includeSub) {
-      const subPush = pushSubmodules(cwd, submoduleOutcome.commits, { pushTags: !!tagName, tagName });
+      const subPush = await pushSubmodules(cwd, submoduleOutcome.commits, { pushTags: !!tagName, tagName });
       subPushErrors = subPush.errors;
     }
     if (subPushErrors.length > 0) {
@@ -1333,7 +1453,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
       // Submodule 意图，用户可直接用“Push & Close”补推。
       pushError = subPushErrors.join("；");
     } else {
-      const outcome = doPush({
+      const outcome = await doPush({
         cwd,
         pushCommits: true,
         // Push only the freshly-created tag — avoids surprising users by pushing stale local tags.

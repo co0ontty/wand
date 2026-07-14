@@ -4,13 +4,20 @@ import { ProcessManager, SessionInputError } from "./process-manager.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
 import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
-import { getDefaultModelForProvider, normalizeMode } from "./config.js";
+import { getDefaultModelForProvider, isExecutionMode } from "./config.js";
 import { blockWindowMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
-import { checkSessionWorktreeMergeability, cleanupSessionWorktree, getWorktreeMergeErrorCode, mergeSessionWorktree, WorktreeMergeError } from "./git-worktree.js";
+import { toSessionDetailDTO, toSessionListItemDTO } from "./session-transport.js";
+import {
+  checkSessionWorktreeMergeabilityAsync,
+  cleanupSessionWorktreeAsync,
+  getWorktreeMergeErrorCode,
+  mergeSessionWorktreeAsync,
+  WorktreeMergeError,
+} from "./git-worktree.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { resolveCommitAiContext } from "./session-ai-context.js";
 import {
-  getGitStatus,
+  getGitStatusAsync,
   QuickCommitError,
   runQuickCommitWithFallback,
   runTagHead,
@@ -19,6 +26,18 @@ import {
 } from "./git-quick-commit.js";
 
 import { getErrorMessage } from "./error-utils.js";
+import { isProviderSessionId } from "./resume-policy.js";
+import { parseBoundedInteger } from "./request-limits.js";
+import { asyncRoute } from "./express-async.js";
+import { SessionRegistry } from "./session-registry.js";
+
+export function parseExecutionMode(value: unknown, fallback: ExecutionMode): ExecutionMode {
+  if (value === undefined) return fallback;
+  if (!isExecutionMode(value)) {
+    throw new Error(`无效执行模式: ${String(value)}`);
+  }
+  return value;
+}
 
 export function parseSessionCreationOrigin(
   body: { sessionSource?: unknown; automationId?: unknown } | null | undefined,
@@ -137,10 +156,6 @@ function removeFromHiddenClaudeSessionIds(storage: WandStorage, ids: string[]): 
   }
 }
 
-function getSessionById(processes: ProcessManager, structured: StructuredSessionManager, id: string) {
-  return structured.get(id) ?? processes.get(id);
-}
-
 type SessionDeletionProcesses = Pick<
   ProcessManager,
   "get" | "delete" | "deleteClaudeHistoryFiles" | "deleteCodexHistoryFiles"
@@ -194,10 +209,38 @@ export function deleteSessionWithProviderHistory(
   addToHiddenClaudeSessionIds(storage, [providerSessionId]);
 }
 
-/** Lightweight session list — omits output and messages to reduce payload. */
-function listAllSessionsSlim(processes: ProcessManager, structured: StructuredSessionManager) {
-  return [...structured.listSlim(), ...processes.listSlim()]
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+type ProviderHistorySession = {
+  claudeSessionId: string;
+  managedByWand: boolean;
+};
+
+/**
+ * Provider history is scanned by ProcessManager, but structured sessions live
+ * in StructuredSessionManager. Annotate against the combined session list so a
+ * structured conversation is not also exposed as a recoverable native history
+ * entry. Return copies for matches because ProcessManager caches scan results.
+ */
+export function markManagedProviderHistory<T extends ProviderHistorySession>(
+  history: T[],
+  sessions: SessionSnapshot[],
+  provider: "claude" | "codex",
+): T[] {
+  const managedIds = new Set<string>();
+  for (const session of sessions) {
+    const sessionProvider = session.provider
+      ?? session.structuredState?.provider
+      ?? (/^codex\b/i.test(session.command.trim()) ? "codex" : "claude");
+    const providerSessionId = session.claudeSessionId?.trim();
+    if (sessionProvider === provider && providerSessionId) {
+      managedIds.add(providerSessionId);
+    }
+  }
+
+  return history.map((entry) => (
+    entry.managedByWand || !managedIds.has(entry.claudeSessionId)
+      ? entry
+      : { ...entry, managedByWand: true }
+  ));
 }
 
 function requireWorktreeSession(snapshot: SessionSnapshot | null): SessionSnapshot {
@@ -223,7 +266,7 @@ function buildWorktreeMergeInfo(
 }
 
 function saveWorktreeMergeState(
-  storage: WandStorage,
+  sessions: SessionRegistry,
   current: SessionSnapshot,
   status: SessionSnapshot["worktreeMergeStatus"],
   info: SessionSnapshot["worktreeMergeInfo"]
@@ -234,8 +277,8 @@ function saveWorktreeMergeState(
     worktreeMergeStatus: status,
     worktreeMergeInfo: mergedInfo,
   };
-  storage.saveSessionMetadata(updated);
-  return updated;
+
+  return sessions.updateWorktreeState(current.id, status, mergedInfo) ?? updated;
 }
 
 function getWorktreeMergeResponseStatus(error: unknown): number {
@@ -255,10 +298,6 @@ function getWorktreeMergePayload(error: unknown, fallback: string) {
     errorCode: getWorktreeMergeErrorCode(error) ?? null,
     result: null,
   };
-}
-
-function getLatestSessionSnapshot(processes: ProcessManager, structured: StructuredSessionManager, storage: WandStorage, id: string): SessionSnapshot | null {
-  return getSessionById(processes, structured, id) ?? storage.getSession(id);
 }
 
 function buildCodexResumeCommand(command: string, threadId: string): string {
@@ -308,7 +347,7 @@ function startResumedPtySession(
     }
   }
 
-  const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
+  const newMode = parseExecutionMode(body.mode, parseExecutionMode(existingSession.mode, defaultMode));
   const resumeCommand = provider === "codex"
     ? buildCodexResumeCommand(command, resumeSessionId)
     : `${command} --resume ${resumeSessionId}`;
@@ -367,14 +406,23 @@ export function registerSessionRoutes(
   storage: WandStorage,
   defaultMode: ExecutionMode,
   config: WandConfig,
+  sessions: SessionRegistry,
   onSessionCreated?: (cwd: string | undefined | null) => void
 ): void {
+  const sessionResponseDTO = (snapshot: SessionSnapshot) => {
+    const windowed = windowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {});
+    return toSessionDetailDTO(snapshot, {
+      messages: windowed.messages,
+      messageOffset: windowed.messageOffset,
+      messageTotal: windowed.messageTotal,
+    });
+  };
+
   app.get("/api/sessions", (_req, res) => {
-    const all = listAllSessionsSlim(processes, structured);
-    res.json(all);
+    res.json(sessions.listSlim().map(toSessionListItemDTO));
   });
 
-  app.post("/api/structured-sessions", async (req, res) => {
+  app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
     const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown };
     try {
       if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode") {
@@ -386,9 +434,11 @@ export function registerSessionRoutes(
       const origin = parseSessionCreationOrigin(body);
       const snapshot = structured.createSession({
         cwd: resolveSessionCwd(body.cwd, config.defaultCwd),
-        mode: normalizeMode(body.mode, defaultMode),
+        mode: parseExecutionMode(body.mode, defaultMode),
         provider,
-        runner: body.runner ?? (provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : "claude-cli-print"),
+        // Omit runner to let StructuredSessionManager apply the configured
+        // Claude default; explicit values are validated against the provider.
+        runner: body.runner,
         worktreeEnabled: body.worktreeEnabled === true,
         model: rawModel || getDefaultModelForProvider(config, provider) || undefined,
         thinkingEffort: typeof body.thinkingEffort === "string"
@@ -403,29 +453,22 @@ export function registerSessionRoutes(
         res.status(201).json(finished);
         return;
       }
-      res.status(201).json(snapshot);
+      res.status(201).json(sessionResponseDTO(snapshot));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法启动结构化会话。") });
     }
-  });
+  }));
 
   app.post("/api/sessions/:id/model", (req, res) => {
     const body = req.body as { model?: string | null };
     const rawModel = typeof body?.model === "string" ? body.model.trim() : null;
     const id = req.params.id;
     try {
-      const structuredSnapshot = structured.get(id);
-      if (structuredSnapshot) {
-        const updated = structured.setSessionModel(id, rawModel);
-        res.json(updated);
-        return;
-      }
-      const ptySnapshot = processes.get(id);
-      if (!ptySnapshot) {
+      const updated = sessions.setSessionModel(id, rawModel);
+      if (!updated) {
         res.status(404).json({ error: "未找到该会话。" });
         return;
       }
-      const updated = processes.setSessionModel(id, rawModel);
       res.json(updated);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "切换模型失败。") });
@@ -439,16 +482,11 @@ export function registerSessionRoutes(
     const raw = typeof body?.thinkingEffort === "string" ? body.thinkingEffort : null;
     const id = req.params.id;
     try {
-      if (structured.get(id)) {
-        const updated = structured.setSessionThinkingEffort(id, raw as SessionSnapshot["thinkingEffort"]);
-        res.json(updated);
-        return;
-      }
-      if (!processes.get(id)) {
+      const updated = sessions.setSessionThinkingEffort(id, raw as SessionSnapshot["thinkingEffort"]);
+      if (!updated) {
         res.status(404).json({ error: "未找到该会话。" });
         return;
       }
-      const updated = processes.setSessionThinkingEffort(id, raw as SessionSnapshot["thinkingEffort"]);
       res.json(updated);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "切换思考深度失败。") });
@@ -465,23 +503,20 @@ export function registerSessionRoutes(
       res.status(400).json({ error: "缺少 mode。" });
       return;
     }
-    const mode = normalizeMode(raw, "managed");
+    if (!isExecutionMode(raw)) {
+      res.status(400).json({ error: `无效执行模式: ${raw}` });
+      return;
+    }
+    const mode = raw;
     const id = req.params.id;
     try {
-      const structuredSnapshot = structured.get(id);
-      if (structuredSnapshot) {
-        const provider = structuredSnapshot.provider ?? "claude";
-        const effective = provider === "codex" ? "full-access" : mode;
-        res.json(structured.setSessionMode(id, effective));
-        return;
-      }
-      const ptySnapshot = processes.get(id);
-      if (!ptySnapshot) {
+      const snapshot = sessions.get(id);
+      if (!snapshot) {
         res.status(404).json({ error: "未找到该会话。" });
         return;
       }
-      const effective = (ptySnapshot.provider ?? "claude") === "codex" ? "full-access" : mode;
-      res.json(processes.setSessionMode(id, effective));
+      const effective = (snapshot.provider ?? "claude") === "codex" ? "full-access" : mode;
+      res.json(sessions.setSessionMode(id, effective));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "切换模式失败。") });
     }
@@ -496,7 +531,7 @@ export function registerSessionRoutes(
     res.json({ id: snapshot.id, messages: snapshot.messages ?? [] });
   });
 
-  app.post("/api/structured-sessions/:id/messages", async (req, res) => {
+  app.post("/api/structured-sessions/:id/messages", asyncRoute(async (req, res) => {
     const input = String(req.body?.input ?? "");
     const interrupt = !!req.body?.interrupt;
     // preserveQueue: 仅在 interrupt 路径有意义。排队条「立即」会带这个 flag，
@@ -505,7 +540,7 @@ export function registerSessionRoutes(
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
     try {
       const snapshot = await structured.sendMessage(req.params.id, input, { interrupt, preserveQueue, idempotencyKey });
-      res.json(snapshot);
+      res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;
       const status = errorCode === "duplicate_idempotency_key" || errorCode === "duplicate_queued_message" ? 409 : 400;
@@ -514,7 +549,7 @@ export function registerSessionRoutes(
         errorCode,
       });
     }
-  });
+  }));
 
   // ── Structured queued-messages management ──
   // 这些端点构成"排队消息条"的后端操作面：reorder、立即发送、单条删除、全部清空。
@@ -527,7 +562,7 @@ export function registerSessionRoutes(
     }
     try {
       const snapshot = structured.reorderQueuedMessages(req.params.id, rawOrder.map((v: unknown) => Number(v)));
-      res.json(snapshot);
+      res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法调整排队顺序。") });
     }
@@ -541,13 +576,13 @@ export function registerSessionRoutes(
     }
     try {
       const snapshot = structured.deleteQueuedMessage(req.params.id, index);
-      res.json(snapshot);
+      res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法删除排队消息。") });
     }
   });
 
-  app.post("/api/structured-sessions/:id/queued/:index/promote", async (req, res) => {
+  app.post("/api/structured-sessions/:id/queued/:index/promote", asyncRoute(async (req, res) => {
     const index = Number(req.params.index);
     if (!Number.isInteger(index)) {
       res.status(400).json({ error: "下标无效。" });
@@ -557,7 +592,7 @@ export function registerSessionRoutes(
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
     try {
       const snapshot = await structured.promoteQueuedMessage(req.params.id, index, expectedText, idempotencyKey);
-      res.json(snapshot);
+      res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;
       const status = errorCode === "duplicate_idempotency_key" ? 409 : 400;
@@ -566,12 +601,12 @@ export function registerSessionRoutes(
         errorCode,
       });
     }
-  });
+  }));
 
   app.delete("/api/structured-sessions/:id/queued", (req, res) => {
     try {
       const snapshot = structured.clearQueuedMessages(req.params.id);
-      res.json(snapshot);
+      res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法清空排队消息。") });
     }
@@ -580,7 +615,7 @@ export function registerSessionRoutes(
   // ── Tool content lazy-load endpoint ──
 
   app.get("/api/sessions/:id/tool-content/:toolUseId", (req, res) => {
-    const snapshot = getSessionById(processes, structured, req.params.id);
+    const snapshot = sessions.get(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
       return;
@@ -602,25 +637,25 @@ export function registerSessionRoutes(
     res.status(404).json({ error: "未找到该工具结果。" });
   });
 
-  app.post("/api/sessions/:id/worktree/merge/check", (req, res) => {
+  app.post("/api/sessions/:id/worktree/merge/check", asyncRoute(async (req, res) => {
     try {
-      const current = requireWorktreeSession(getLatestSessionSnapshot(processes, structured, storage, req.params.id));
+      const current = requireWorktreeSession(sessions.getLatest(req.params.id));
       if (!isMergeActionAllowed(current)) {
         res.status(409).json({ error: "会话仍在运行，请结束后再合并。", errorCode: "SESSION_STILL_RUNNING" });
         return;
       }
-      const checking = saveWorktreeMergeState(storage, current, "checking", {
+      const checking = saveWorktreeMergeState(sessions, current, "checking", {
         ...(current.worktreeMergeInfo ?? null),
         targetBranch: current.worktreeMergeInfo?.targetBranch,
         lastError: undefined,
         conflict: false,
       });
-      const result = checkSessionWorktreeMergeability({
+      const result = await checkSessionWorktreeMergeabilityAsync({
         worktree: checking.worktree as NonNullable<SessionSnapshot["worktree"]>,
         targetBranch: current.worktreeMergeInfo?.targetBranch,
       });
       const nextStatus: SessionSnapshot["worktreeMergeStatus"] = result.ok ? "ready" : "failed";
-      const updated = saveWorktreeMergeState(storage, checking, nextStatus, {
+      const updated = saveWorktreeMergeState(sessions, checking, nextStatus, {
         targetBranch: result.targetBranch,
         conflict: result.hasConflicts,
         lastError: result.ok ? undefined : result.reason,
@@ -629,25 +664,25 @@ export function registerSessionRoutes(
     } catch (error) {
       res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法检查 worktree 合并状态。"));
     }
-  });
+  }));
 
-  app.post("/api/sessions/:id/worktree/merge", (req, res) => {
+  app.post("/api/sessions/:id/worktree/merge", asyncRoute(async (req, res) => {
     try {
-      const current = requireWorktreeSession(getLatestSessionSnapshot(processes, structured, storage, req.params.id));
+      const current = requireWorktreeSession(sessions.getLatest(req.params.id));
       if (!isMergeActionAllowed(current)) {
         res.status(409).json({ error: "会话仍在运行，请结束后再合并。", errorCode: "SESSION_STILL_RUNNING" });
         return;
       }
-      const merging = saveWorktreeMergeState(storage, current, "merging", {
+      const merging = saveWorktreeMergeState(sessions, current, "merging", {
         ...(current.worktreeMergeInfo ?? null),
         lastError: undefined,
         conflict: false,
       });
-      const result = mergeSessionWorktree({
+      const result = await mergeSessionWorktreeAsync({
         worktree: merging.worktree as NonNullable<SessionSnapshot["worktree"]>,
         targetBranch: current.worktreeMergeInfo?.targetBranch,
       });
-      const updated = saveWorktreeMergeState(storage, merging, "merged", {
+      const updated = saveWorktreeMergeState(sessions, merging, "merged", {
         targetBranch: result.targetBranch,
         mergedAt: result.mergedAt,
         mergeCommit: result.mergeCommit,
@@ -657,10 +692,10 @@ export function registerSessionRoutes(
       });
       res.json({ session: updated, result });
     } catch (error) {
-      const current = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+      const current = sessions.getLatest(req.params.id);
       if (current && canMergeSession(current)) {
         const payload = getWorktreeMergePayload(error, "无法合并 worktree。") as { error: string; errorCode: string | null; result: Partial<import("./types.js").WorktreeMergeResult> | null };
-        saveWorktreeMergeState(storage, current, "failed", {
+        saveWorktreeMergeState(sessions, current, "failed", {
           ...(current.worktreeMergeInfo ?? null),
           targetBranch: payload.result?.targetBranch ?? current.worktreeMergeInfo?.targetBranch,
           mergedAt: payload.result?.mergedAt,
@@ -672,10 +707,10 @@ export function registerSessionRoutes(
       }
       res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法合并 worktree。"));
     }
-  });
+  }));
 
-  app.get("/api/sessions/:id/git-status", (req, res) => {
-    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+  app.get("/api/sessions/:id/git-status", asyncRoute(async (req, res) => {
+    const snapshot = sessions.getLatest(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
       return;
@@ -685,14 +720,14 @@ export function registerSessionRoutes(
       return;
     }
     try {
-      res.json(getGitStatus(snapshot.cwd));
+      res.json(await getGitStatusAsync(snapshot.cwd));
     } catch (error) {
       res.json({ isGit: false, error: getErrorMessage(error, "无法读取 git 状态。") });
     }
-  });
+  }));
 
-  app.post("/api/sessions/:id/quick-commit", async (req, res) => {
-    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+  app.post("/api/sessions/:id/quick-commit", asyncRoute(async (req, res) => {
+    const snapshot = sessions.getLatest(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
       return;
@@ -724,10 +759,10 @@ export function registerSessionRoutes(
       }
       res.status(400).json({ error: getErrorMessage(error, "快捷提交失败。") });
     }
-  });
+  }));
 
-  app.post("/api/sessions/:id/generate-commit-message", async (req, res) => {
-    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+  app.post("/api/sessions/:id/generate-commit-message", asyncRoute(async (req, res) => {
+    const snapshot = sessions.getLatest(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
       return;
@@ -749,10 +784,10 @@ export function registerSessionRoutes(
       }
       res.status(400).json({ error: getErrorMessage(error, "生成 commit message 失败。") });
     }
-  });
+  }));
 
-  app.post("/api/sessions/:id/git/tag-head", async (req, res) => {
-    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+  app.post("/api/sessions/:id/git/tag-head", asyncRoute(async (req, res) => {
+    const snapshot = sessions.getLatest(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
       return;
@@ -781,10 +816,10 @@ export function registerSessionRoutes(
       }
       res.status(400).json({ error: getErrorMessage(error, "打 tag 失败。") });
     }
-  });
+  }));
 
-  app.post("/api/sessions/:id/git/push", async (req, res) => {
-    const snapshot = getLatestSessionSnapshot(processes, structured, storage, req.params.id);
+  app.post("/api/sessions/:id/git/push", asyncRoute(async (req, res) => {
+    const snapshot = sessions.getLatest(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话。" });
       return;
@@ -810,17 +845,17 @@ export function registerSessionRoutes(
       }
       res.status(400).json({ error: getErrorMessage(error, "推送失败。") });
     }
-  });
+  }));
 
-  app.post("/api/sessions/:id/worktree/cleanup", (req, res) => {
+  app.post("/api/sessions/:id/worktree/cleanup", asyncRoute(async (req, res) => {
     try {
-      const current = requireWorktreeSession(getLatestSessionSnapshot(processes, structured, storage, req.params.id));
+      const current = requireWorktreeSession(sessions.getLatest(req.params.id));
       if (current.worktreeMergeStatus !== "merged" || current.worktreeMergeInfo?.cleanupDone !== false) {
         res.status(400).json({ error: "当前 worktree 无需补偿清理。", errorCode: "WORKTREE_CLEANUP_NOT_NEEDED" });
         return;
       }
-      cleanupSessionWorktree({ worktree: current.worktree as NonNullable<SessionSnapshot["worktree"]> });
-      const updated = saveWorktreeMergeState(storage, current, "merged", {
+      await cleanupSessionWorktreeAsync({ worktree: current.worktree as NonNullable<SessionSnapshot["worktree"]> });
+      const updated = saveWorktreeMergeState(sessions, current, "merged", {
         ...(current.worktreeMergeInfo ?? null),
         cleanupDone: true,
         lastError: undefined,
@@ -830,7 +865,7 @@ export function registerSessionRoutes(
     } catch (error) {
       res.status(getWorktreeMergeResponseStatus(error)).json(getWorktreeMergePayload(error, "无法清理 worktree。"));
     }
-  });
+  }));
 
   app.post("/api/sessions/batch-delete", (req, res) => {
     const sessionIds = Array.isArray(req.body?.sessionIds)
@@ -847,7 +882,7 @@ export function registerSessionRoutes(
 
     for (const sessionId of sessionIds) {
       try {
-        deleteSessionWithProviderHistory(processes, structured, storage, sessionId);
+        sessions.deleteWithProviderHistory(sessionId);
         deleted += 1;
       } catch {
         failed.push(sessionId);
@@ -863,7 +898,7 @@ export function registerSessionRoutes(
   });
 
   app.get("/api/sessions/:id", (req, res) => {
-    const snapshot = getSessionById(processes, structured, req.params.id);
+    const snapshot = sessions.get(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
@@ -874,38 +909,37 @@ export function registerSessionRoutes(
     if (req.query.format === "chat") {
       // 客户端带 blockBudget（iOS）走块级窗口：只回最近 N 个块（必要时切掉最旧 turn 的头部），
       // 根治「单条 turn 上百块/1MB」的长任务打开慢。Web/Android 不带该参数，走原 turn 级窗口。
-      const rawBudget = parseInt(String(req.query.blockBudget ?? ""), 10);
-      if (Number.isFinite(rawBudget) && rawBudget > 0) {
-        const windowed = blockWindowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {}, rawBudget);
-        res.json({
-          ...snapshot,
+      const rawBudget = req.query.blockBudget;
+      if (typeof rawBudget === "string" && /^\d+$/.test(rawBudget) && Number(rawBudget) > 0) {
+        const blockBudget = parseBoundedInteger(rawBudget, 1, 1, 2_000);
+        const windowed = blockWindowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {}, blockBudget);
+        res.json(toSessionDetailDTO(snapshot, {
           output: transcriptOutput,
           messages: windowed.messages,
           messageOffset: windowed.messageOffset,
           messageTotal: windowed.messageTotal,
           leadingBlockOffset: windowed.leadingBlockOffset,
           leadingBlockTotal: windowed.leadingBlockTotal,
-        });
+        }));
         return;
       }
       // 与 WS init 对齐：只回最近一窗 turn + offset/total，更早的走 /messages 翻页。
       const windowed = windowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {});
-      res.json({
-        ...snapshot,
+      res.json(toSessionDetailDTO(snapshot, {
         output: transcriptOutput,
         messages: windowed.messages,
         messageOffset: windowed.messageOffset,
         messageTotal: windowed.messageTotal,
-      });
+      }));
     } else {
-      res.json({ ...snapshot, output: transcriptOutput });
+      res.json(toSessionDetailDTO(snapshot, { output: transcriptOutput }));
     }
   });
 
   // 历史消息分页拉取：客户端滚动到顶时按绝对下标往前翻。
   // 返回 messages = 完整历史的 [offset, offset+limit)（已做 transport 截断）+ total。
   app.get("/api/sessions/:id/messages", (req, res) => {
-    const snapshot = getSessionById(processes, structured, req.params.id);
+    const snapshot = sessions.get(req.params.id);
     if (!snapshot) {
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
@@ -970,8 +1004,8 @@ export function registerSessionRoutes(
       const requestedOrigin = body.sessionSource !== undefined || body.automationId !== undefined
         ? parseSessionCreationOrigin(body)
         : null;
-      if (!claudeSessionId) {
-        res.status(400).json({ error: "Claude 会话 ID 不能为空。" });
+      if (!isProviderSessionId(claudeSessionId)) {
+        res.status(400).json({ error: "Claude 会话 ID 必须是有效的 UUID。" });
         return;
       }
       const existingSession = storage.getLatestSessionByClaudeSessionId(claudeSessionId);
@@ -993,8 +1027,10 @@ export function registerSessionRoutes(
           res.status(400).json({ error: "对应的 Claude 历史会话文件不存在，无法恢复。" });
           return;
         }
-        const newMode = body.mode ? normalizeMode(body.mode, defaultMode) : normalizeMode(existingSession.mode, defaultMode);
-        const resumeCommand = `${command} --resume ${claudeSessionId}`;
+        const newMode = parseExecutionMode(body.mode, parseExecutionMode(existingSession.mode, defaultMode));
+        // Do not reuse the persisted shell command here. It may contain flags or
+        // shell operators and must never become part of a resume command.
+        const resumeCommand = `claude --resume ${claudeSessionId}`;
         const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
         const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
         const newSnapshot = processes.start(resumeCommand, existingSession.cwd, newMode, undefined, {
@@ -1003,14 +1039,14 @@ export function registerSessionRoutes(
           rows: reqRows,
           ...(requestedOrigin ?? {}),
         });
-        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
+        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...sessionResponseDTO(newSnapshot) });
       } else {
         const cwd = body.cwd?.trim();
         if (!cwd) {
           res.status(400).json({ error: "未找到对应的会话记录，请提供工作目录 (cwd)。" });
           return;
         }
-        const newMode = normalizeMode(body.mode, defaultMode);
+        const newMode = parseExecutionMode(body.mode, defaultMode);
         const resumeCommand = `claude --resume ${claudeSessionId}`;
         const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
         const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
@@ -1019,14 +1055,14 @@ export function registerSessionRoutes(
           rows: reqRows,
           ...(requestedOrigin ?? {}),
         });
-        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...newSnapshot });
+        res.status(201).json({ resumedClaudeSessionId: claudeSessionId, ...sessionResponseDTO(newSnapshot) });
       }
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法按 Claude 会话 ID 恢复会话。") });
     }
   });
 
-  app.post("/api/sessions/:id/input", async (req, res) => {
+  app.post("/api/sessions/:id/input", asyncRoute(async (req, res) => {
     const body = req.body as InputRequest;
     const sessionId = req.params.id;
     const input = body.input ?? "";
@@ -1035,18 +1071,18 @@ export function registerSessionRoutes(
     try {
       if (structured.get(sessionId)) {
         const snapshot = await structured.sendMessage(sessionId, input);
-        res.json(snapshot);
+        res.json(sessionResponseDTO(snapshot));
         return;
       }
       const existingSession = processes.get(sessionId) || storage.getSession(sessionId);
       const autoResumeInput = getAutoResumeInitialInput(existingSession, input, view, shortcutKey);
       if (autoResumeInput !== null && canAutoResumePtyForInput(existingSession, autoResumeInput)) {
         const snapshot = startResumedPtySession(processes, existingSession, sessionId, defaultMode, {}, autoResumeInput);
-        res.json(snapshot);
+        res.json(sessionResponseDTO(snapshot));
         return;
       }
       const snapshot = processes.sendInput(sessionId, input, view, shortcutKey);
-      res.json(snapshot);
+      res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       const response = getInputErrorResponse(error, sessionId);
       console.error("[wand] Input request failed", {
@@ -1056,14 +1092,14 @@ export function registerSessionRoutes(
       });
       res.status(response.statusCode).json(response.payload);
     }
-  });
+  }));
 
-  app.post("/api/codex-sessions/:threadId/resume", async (req, res) => {
+  app.post("/api/codex-sessions/:threadId/resume", asyncRoute(async (req, res) => {
     const threadId = String(req.params.threadId || "").trim();
     const body = req.body as { mode?: ExecutionMode; cwd?: string; worktreeEnabled?: boolean; sessionSource?: unknown; automationId?: unknown };
     try {
-      if (!threadId) {
-        res.status(400).json({ error: "Codex 会话 ID 不能为空。" });
+      if (!isProviderSessionId(threadId)) {
+        res.status(400).json({ error: "Codex 会话 ID 必须是有效的 UUID。" });
         return;
       }
       const history = processes.listCodexHistorySessions().find((s) => s.claudeSessionId === threadId);
@@ -1076,7 +1112,7 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "无法确定工作目录 (cwd)，无法恢复。" });
         return;
       }
-      const newMode = normalizeMode(body.mode, defaultMode);
+      const newMode = parseExecutionMode(body.mode, defaultMode);
       const origin = parseSessionCreationOrigin(body);
       const snapshot = structured.createSession({
         cwd,
@@ -1088,20 +1124,20 @@ export function registerSessionRoutes(
         ...origin,
       });
       onSessionCreated?.(cwd);
-      res.status(201).json({ resumedClaudeSessionId: threadId, ...snapshot });
+      res.status(201).json({ resumedClaudeSessionId: threadId, ...sessionResponseDTO(snapshot) });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法按 Codex 会话 ID 恢复会话。") });
     }
-  });
+  }));
   app.post("/api/sessions/:id/resize", (req, res) => {
     const body = req.body as ResizeRequest;
     try {
-      if (structured.get(req.params.id)) {
+      if (sessions.ownerOf(req.params.id) === "structured") {
         res.status(400).json({ error: "结构化会话不支持调整终端大小。" });
         return;
       }
       const snapshot = processes.resize(req.params.id, body.cols ?? 0, body.rows ?? 0);
-      res.json(snapshot);
+      res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法调整终端大小。") });
     }
@@ -1109,11 +1145,11 @@ export function registerSessionRoutes(
 
   app.post("/api/sessions/:id/approve-permission", (req, res) => {
     try {
-      if (structured.get(req.params.id)) {
+      if (sessions.ownerOf(req.params.id) === "structured") {
         res.status(400).json({ error: "结构化会话不需要终端权限操作。" });
         return;
       }
-      const snapshot = processes.get(req.params.id);
+      const snapshot = sessions.get(req.params.id);
       if (snapshot?.provider === "codex") {
         res.status(400).json({ error: "Codex provider 不支持权限批准操作。" });
         return;
@@ -1126,11 +1162,11 @@ export function registerSessionRoutes(
 
   app.post("/api/sessions/:id/deny-permission", (req, res) => {
     try {
-      if (structured.get(req.params.id)) {
+      if (sessions.ownerOf(req.params.id) === "structured") {
         res.status(400).json({ error: "结构化会话不需要终端权限操作。" });
         return;
       }
-      const snapshot = processes.get(req.params.id);
+      const snapshot = sessions.get(req.params.id);
       if (snapshot?.provider === "codex") {
         res.status(400).json({ error: "Codex provider 不支持权限拒绝操作。" });
         return;
@@ -1143,11 +1179,11 @@ export function registerSessionRoutes(
 
   app.post("/api/sessions/:id/toggle-auto-approve", (req, res) => {
     try {
-      if (structured.get(req.params.id)) {
+      if (sessions.ownerOf(req.params.id) === "structured") {
         res.status(400).json({ error: "结构化会话不需要切换终端自动批准。" });
         return;
       }
-      const snapshot = processes.get(req.params.id);
+      const snapshot = sessions.get(req.params.id);
       if (snapshot?.provider === "codex") {
         res.status(400).json({ error: "Codex provider 不支持自动批准切换。" });
         return;
@@ -1161,12 +1197,17 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/escalations/:requestId/resolve", (req, res) => {
     try {
       const { requestId } = req.params;
-      const body = req.body as { resolution?: "approve_once" | "approve_turn" | "deny" };
-      if (structured.get(req.params.id)) {
-        res.json(structured.resolveEscalation(req.params.id, requestId, body.resolution));
+      const body = req.body as { resolution?: unknown };
+      const resolution = body?.resolution;
+      if (resolution !== "approve_once" && resolution !== "approve_turn" && resolution !== "deny") {
+        res.status(400).json({ error: "resolution 必须是 approve_once、approve_turn 或 deny。" });
         return;
       }
-      res.json(processes.resolveEscalation(req.params.id, requestId, body.resolution));
+      if (sessions.ownerOf(req.params.id) === "structured") {
+        res.json(structured.resolveEscalation(req.params.id, requestId, resolution));
+        return;
+      }
+      res.json(processes.resolveEscalation(req.params.id, requestId, resolution));
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法处理该授权请求。") });
     }
@@ -1174,7 +1215,7 @@ export function registerSessionRoutes(
 
   app.post("/api/sessions/:id/stop", (req, res) => {
     try {
-      if (structured.get(req.params.id)) {
+      if (sessions.ownerOf(req.params.id) === "structured") {
         res.json(structured.stop(req.params.id));
         return;
       }
@@ -1186,7 +1227,7 @@ export function registerSessionRoutes(
 
   app.delete("/api/sessions/:id", (req, res) => {
     try {
-      deleteSessionWithProviderHistory(processes, structured, storage, req.params.id);
+      sessions.deleteWithProviderHistory(req.params.id);
       res.json({ ok: true });
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "无法删除会话。") });
@@ -1194,14 +1235,24 @@ export function registerSessionRoutes(
   });
 }
 
-export function registerClaudeHistoryRoutes(app: Express, processes: ProcessManager, storage: WandStorage): void {
+export function registerClaudeHistoryRoutes(
+  app: Express,
+  processes: ProcessManager,
+  structured: StructuredSessionManager,
+  storage: WandStorage,
+  sessionRegistry: SessionRegistry,
+): void {
   app.get("/api/claude-history", (_req, res) => {
     try {
-      const sessions = processes.listClaudeHistorySessions();
+      const history = markManagedProviderHistory(
+        processes.listClaudeHistorySessions(),
+        sessionRegistry.listSlim(),
+        "claude",
+      );
       const hidden = getHiddenClaudeSessionIds(storage);
       const filtered = hidden.size > 0
-        ? sessions.filter((s: { claudeSessionId?: string }) => !s.claudeSessionId || !hidden.has(s.claudeSessionId))
-        : sessions;
+        ? history.filter((s: { claudeSessionId?: string }) => !s.claudeSessionId || !hidden.has(s.claudeSessionId))
+        : history;
       res.json(filtered);
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "无法扫描 Claude 历史会话。") });
@@ -1311,11 +1362,15 @@ export function registerClaudeHistoryRoutes(app: Express, processes: ProcessMana
 
   app.get("/api/codex-history", (_req, res) => {
     try {
-      const sessions = processes.listCodexHistorySessions();
+      const history = markManagedProviderHistory(
+        processes.listCodexHistorySessions(),
+        sessionRegistry.listSlim(),
+        "codex",
+      );
       const hidden = getHiddenClaudeSessionIds(storage);
       const filtered = hidden.size > 0
-        ? sessions.filter((s) => !hidden.has(s.claudeSessionId))
-        : sessions;
+        ? history.filter((s) => !hidden.has(s.claudeSessionId))
+        : history;
       res.json(filtered);
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "无法扫描 Codex 历史会话。") });

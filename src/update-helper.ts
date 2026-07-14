@@ -342,7 +342,11 @@ WAND_INSTALL_NODE
   else
     echo "[wand-update] starting updated standalone process"
     cd "$WORKING_DIRECTORY"
-    nohup "$NODE_BIN" "$GLOBAL_CLI" "$\{CLI_ARGS[@]}" >>"$LOG" 2>&1 </dev/null &
+    # The helper itself already runs in a detached session/process group.  BSD
+    # nohup can fail here with "can't detach from console" after the original
+    # parent exits, so launch the replacement directly inside that detached
+    # context and keep all stdio disconnected from the old service.
+    "$NODE_BIN" "$GLOBAL_CLI" "$\{CLI_ARGS[@]}" >>"$LOG" 2>&1 </dev/null &
     echo "[wand-update] standalone pid: $!"
   fi
   echo "[wand-update] completed at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"

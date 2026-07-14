@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash, createPrivateKey, randomUUID, X509Certificate } from "node:crypto";
+import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { createSecureContext } from "node:tls";
 
 interface CertificatePaths {
   keyPath: string;
@@ -42,6 +44,37 @@ function readPair(keyPath: string, certPath: string): { key: Buffer; cert: Buffe
   }
 }
 
+function validateCertificatePair(pair: { key: Buffer; cert: Buffer }): string | null {
+  try {
+    // createSecureContext performs OpenSSL's full PEM parsing and key/certificate
+    // consistency checks. checkPrivateKey keeps the mismatch failure explicit.
+    createSecureContext({ key: pair.key, cert: pair.cert });
+    const certificate = new X509Certificate(pair.cert);
+    const privateKey = createPrivateKey(pair.key);
+    if (!certificate.checkPrivateKey(privateKey)) return "证书与私钥不匹配";
+
+    const now = Date.now();
+    const validFrom = Date.parse(certificate.validFrom);
+    const validTo = Date.parse(certificate.validTo);
+    if (!Number.isFinite(validFrom) || !Number.isFinite(validTo)) return "证书有效期无法解析";
+    if (now < validFrom) return "证书尚未生效";
+    if (now >= validTo) return "证书已过期";
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+function ensurePrivateDirectory(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+}
+
+function hardenGeneratedPair(paths: CertificatePaths): void {
+  chmodSync(paths.keyPath, 0o600);
+  chmodSync(paths.certPath, 0o600);
+}
+
 /**
  * 收集本机所有可外部访问的 IPv4 地址 + hostname，作为自签证书的 SAN。
  * 之前 SAN 只有 `localhost,127.0.0.1`，从手机/局域网用 `https://192.168.x.x` 访问
@@ -50,7 +83,17 @@ function readPair(keyPath: string, certPath: string): { key: Buffer; cert: Buffe
 function collectSanEntries(): { dns: string[]; ip: string[] } {
   const dns = new Set<string>(["localhost"]);
   const ip = new Set<string>(["127.0.0.1", "::1"]);
-  const hostname = os.hostname();
+  const rawHostname = os.hostname().trim().toLowerCase().replace(/\.$/, "");
+  // Hostnames originate outside this process and become part of OpenSSL's
+  // extension grammar. Keep only RFC-style ASCII DNS labels.
+  const hostname = rawHostname.length <= 253
+    && rawHostname.split(".").every((label) => (
+      label.length >= 1
+      && label.length <= 63
+      && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)
+    ))
+    ? rawHostname
+    : "";
   if (hostname && hostname !== "localhost") {
     dns.add(hostname);
     // 部分 mDNS 环境下 hostname.local 也能解析
@@ -64,7 +107,8 @@ function collectSanEntries(): { dns: string[]; ip: string[] } {
       // Node 18+ entry.family 是 "IPv4" | "IPv6"，旧版本是 4 | 6
       const fam = entry.family as unknown;
       if (fam === "IPv4" || fam === 4 || fam === "IPv6" || fam === 6) {
-        ip.add(entry.address.split("%")[0]); // 去掉 zone-id
+        const address = entry.address.split("%")[0]; // 去掉 zone-id
+        if (isIP(address) !== 0) ip.add(address);
       }
     }
   }
@@ -92,70 +136,59 @@ function computeFingerprint(certPem: Buffer | string): string {
  * 生成 self-signed 证书（OpenSSL 路径）。SAN 覆盖本机 hostname / LAN IP，
  * 这样从手机/局域网设备访问 `https://<LAN IP>:port/` 时不会撞 SAN 不匹配。
  */
-function generateWithOpenSSL(paths: CertificatePaths): { key: Buffer; cert: Buffer } | null {
-  try {
-    execSync("openssl version", { stdio: "pipe" });
-
-    const dir = path.dirname(paths.keyPath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-
-    execSync(`openssl genrsa -out "${paths.keyPath}" 2048`, { stdio: "pipe" });
-
-    const san = buildSanArg();
-    execSync(
-      `openssl req -new -x509 -key "${paths.keyPath}" -out "${paths.certPath}" -days 825 ` +
-        `-subj "/CN=wand-local/O=Wand Local Development" ` +
-        `-addext "subjectAltName=${san}" ` +
-        `-addext "extendedKeyUsage=serverAuth" ` +
-        `-addext "basicConstraints=critical,CA:FALSE"`,
-      { stdio: "pipe" }
-    );
-
-    return {
-      key: readFileSync(paths.keyPath),
-      cert: readFileSync(paths.certPath),
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 没有 openssl 时的兜底：用 node 内置 crypto 生成 RSA 密钥，证书部分写一个
- * 明显的 placeholder PEM。这条路径产出的证书**无法被浏览器接受**，主要是为了
- * 不让 HTTPS 监听直接崩；启动日志会强烈建议用户装 openssl 或自备证书。
- */
-function generateWithoutOpenSSL(paths: CertificatePaths): { key: Buffer; cert: Buffer } {
+function generateWithOpenSSL(paths: CertificatePaths): { key: Buffer; cert: Buffer } {
   const dir = path.dirname(paths.keyPath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  ensurePrivateDirectory(dir);
 
-  const { generateKeyPairSync } = require("node:crypto") as typeof import("node:crypto");
-  const { privateKey } = generateKeyPairSync("rsa", {
-    modulusLength: 2048,
-    publicKeyEncoding: { type: "spki", format: "pem" },
-    privateKeyEncoding: { type: "pkcs8", format: "pem" },
-  });
+  const suffix = `${process.pid}-${randomUUID()}`;
+  const temporaryKeyPath = path.join(dir, `.server.key.${suffix}.tmp`);
+  const temporaryCertPath = path.join(dir, `.server.crt.${suffix}.tmp`);
+  const execOptions = {
+    stdio: "pipe" as const,
+    timeout: 15_000,
+    windowsHide: true,
+  };
 
-  const cert =
-    "-----BEGIN CERTIFICATE-----\n" +
-    "MIIBkTCB+wIJAKHBfPOPlvfoMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBnNh\n" +
-    "bmRib3gwHhcNMjQwMTAxMDAwMDAwWhcNMjUwMTAxMDAwMDAwWjARMQ8wDQYDVQQD\n" +
-    "DAZzYW5kYm94MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBALLgGbUPZxEvLPLXZQrz\n" +
-    "KxLhP5EoaUuB7V8FYA5JQZbRE6RkxEKkR8jFQHOcQYevGQYEbXvKZ0WxR2BqMJsC\n" +
-    "AwEAAaMgMB4wDQYJKoZIhvcNAQELBQADQQBpMq0NweMwF7fh0TiMwFCTzC/wK7fR\n" +
-    "e0WxR2BqMJsC\n" +
-    "-----END CERTIFICATE-----\n";
+  try {
+    // Pre-create with private modes. OpenSSL truncates existing output files and
+    // preserves their mode, so neither artifact is briefly world-readable.
+    writeFileSync(temporaryKeyPath, "", { flag: "wx", mode: 0o600 });
+    writeFileSync(temporaryCertPath, "", { flag: "wx", mode: 0o600 });
 
-  writeFileSync(paths.keyPath, privateKey, { mode: 0o600 });
-  writeFileSync(paths.certPath, cert, { mode: 0o644 });
+    execFileSync("openssl", ["version"], execOptions);
+    execFileSync("openssl", ["genrsa", "-out", temporaryKeyPath, "2048"], execOptions);
+    execFileSync("openssl", [
+      "req",
+      "-new",
+      "-x509",
+      "-key", temporaryKeyPath,
+      "-out", temporaryCertPath,
+      "-days", "825",
+      "-subj", "/CN=wand-local/O=Wand Local Development",
+      "-addext", `subjectAltName=${buildSanArg()}`,
+      "-addext", "extendedKeyUsage=serverAuth",
+      "-addext", "basicConstraints=critical,CA:FALSE",
+    ], execOptions);
 
-  process.stderr.write(
-    "\x1b[33m[wand] 警告：未检测到 openssl，写出的是无效占位证书。\n" +
-    "[wand] 请安装 openssl，或在 config.json 里配 tls.certPath / tls.keyPath\n" +
-    "[wand] 指向自备证书（推荐 mkcert：mkcert -install && mkcert localhost <hostname> <LAN-IP>）。\x1b[0m\n"
-  );
+    chmodSync(temporaryKeyPath, 0o600);
+    chmodSync(temporaryCertPath, 0o600);
+    const pair = {
+      key: readFileSync(temporaryKeyPath),
+      cert: readFileSync(temporaryCertPath),
+    };
+    const validationError = validateCertificatePair(pair);
+    if (validationError) {
+      throw new Error(`OpenSSL 生成了不可用的证书：${validationError}`);
+    }
 
-  return { key: Buffer.from(privateKey), cert: Buffer.from(cert) };
+    renameSync(temporaryKeyPath, paths.keyPath);
+    renameSync(temporaryCertPath, paths.certPath);
+    hardenGeneratedPair(paths);
+    return pair;
+  } finally {
+    rmSync(temporaryKeyPath, { force: true });
+    rmSync(temporaryCertPath, { force: true });
+  }
 }
 
 /**
@@ -163,7 +196,7 @@ function generateWithoutOpenSSL(paths: CertificatePaths): { key: Buffer; cert: B
  *   1. options.userCertPath / userKeyPath（config.tls）
  *   2. 配置目录下已存在的 server.crt + server.key
  *   3. 用 openssl 现场生成自签
- *   4. node crypto 兜底（产出非法证书，主要避免崩溃）
+ * 无法可靠生成时明确失败；绝不写入无效或与私钥不匹配的占位证书。
  */
 export function ensureCertificates(
   configDir: string,
@@ -173,16 +206,23 @@ export function ensureCertificates(
   if (options.userCertPath && options.userKeyPath) {
     const pair = readPair(options.userKeyPath, options.userCertPath);
     if (pair) {
-      const fingerprint = computeFingerprint(pair.cert);
-      process.stdout.write(
-        `[wand] 使用 config.tls 指定的证书：${options.userCertPath}\n` +
-          `[wand] SHA-256 指纹: ${fingerprint}\n`
+      const validationError = validateCertificatePair(pair);
+      if (!validationError) {
+        const fingerprint = computeFingerprint(pair.cert);
+        process.stdout.write(
+          `[wand] 使用 config.tls 指定的证书：${options.userCertPath}\n` +
+            `[wand] SHA-256 指纹: ${fingerprint}\n`
+        );
+        return { ...pair, certPath: options.userCertPath, fingerprint, userProvided: true };
+      }
+      process.stderr.write(
+        `\x1b[33m[wand] 警告：config.tls 指向的证书不可用（${validationError}），回退到默认自签流程。\x1b[0m\n`
       );
-      return { ...pair, certPath: options.userCertPath, fingerprint, userProvided: true };
+    } else {
+      process.stderr.write(
+        `\x1b[33m[wand] 警告：config.tls 指向的证书文件无法读取（cert=${options.userCertPath}, key=${options.userKeyPath}），回退到默认自签流程。\x1b[0m\n`
+      );
     }
-    process.stderr.write(
-      `\x1b[33m[wand] 警告：config.tls 指向的证书文件无法读取（cert=${options.userCertPath}, key=${options.userKeyPath}），回退到默认自签流程。\x1b[0m\n`
-    );
   }
 
   const paths = getCertificatePaths(configDir);
@@ -190,19 +230,27 @@ export function ensureCertificates(
   // 2. 已存在的自签
   const existing = readPair(paths.keyPath, paths.certPath);
   if (existing) {
-    return {
-      ...existing,
-      certPath: paths.certPath,
-      fingerprint: computeFingerprint(existing.cert),
-      userProvided: false,
-    };
+    const validationError = validateCertificatePair(existing);
+    if (!validationError) {
+      ensurePrivateDirectory(path.dirname(paths.keyPath));
+      hardenGeneratedPair(paths);
+      return {
+        ...existing,
+        certPath: paths.certPath,
+        fingerprint: computeFingerprint(existing.cert),
+        userProvided: false,
+      };
+    }
+    process.stderr.write(
+      `\x1b[33m[wand] 警告：已有自签证书不可用（${validationError}），正在重新生成。\x1b[0m\n`
+    );
   }
 
   process.stdout.write("[wand] 正在生成 self-signed HTTPS 证书…\n");
 
   // 3. OpenSSL
-  const ssl = generateWithOpenSSL(paths);
-  if (ssl) {
+  try {
+    const ssl = generateWithOpenSSL(paths);
     const fingerprint = computeFingerprint(ssl.cert);
     process.stdout.write(
       `[wand] 证书已写入 ${paths.certPath}\n` +
@@ -211,15 +259,12 @@ export function ensureCertificates(
         `[wand] HTTPS 启用后可通过 GET /cert/server.crt 在客户端下载安装。\n`
     );
     return { ...ssl, certPath: paths.certPath, fingerprint, userProvided: false };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      "无法生成 HTTPS 证书：需要可用的 OpenSSL，或在 config.tls 中配置有效且匹配的 certPath/keyPath。" +
+      ` OpenSSL 错误：${detail}`,
+      { cause: error },
+    );
   }
-
-  // 4. 兜底
-  process.stdout.write("[wand] 未检测到 openssl，使用 node crypto 兜底（产出占位证书，仅防崩）。\n");
-  const fallback = generateWithoutOpenSSL(paths);
-  return {
-    ...fallback,
-    certPath: paths.certPath,
-    fingerprint: computeFingerprint(fallback.cert),
-    userProvided: false,
-  };
 }

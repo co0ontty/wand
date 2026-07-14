@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
@@ -139,9 +139,12 @@ async function atomicWriteFile(filePath: string, content: string): Promise<void>
   const dir = path.dirname(filePath);
   const base = path.basename(filePath);
   const tmpPath = path.join(dir, `.${base}.tmp-${crypto.randomBytes(6).toString("hex")}`);
-  await writeFile(tmpPath, content, "utf8");
+  await writeFile(tmpPath, content, { encoding: "utf8", mode: 0o600 });
   try {
     await rename(tmpPath, filePath);
+    // rename preserves the temporary file mode, but chmod also repairs an
+    // existing config created by older versions or a permissive umask.
+    await chmod(filePath, 0o600);
   } catch (err) {
     try { await unlink(tmpPath); } catch { /* noop */ }
     throw err;
@@ -150,7 +153,9 @@ async function atomicWriteFile(filePath: string, content: string): Promise<void>
 
 /** saveConfig 写出时去掉偏好字段——这些已经移到 SQLite。 */
 export async function saveConfig(configPath: string, config: WandConfig): Promise<void> {
-  await mkdir(path.dirname(configPath), { recursive: true });
+  const dir = path.dirname(configPath);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await chmod(dir, 0o700);
   await atomicWriteFile(configPath, `${JSON.stringify(stripPreferenceFields(config), null, 2)}\n`);
 }
 
@@ -164,7 +169,8 @@ export async function saveConfig(configPath: string, config: WandConfig): Promis
  */
 export async function loadConfigWithStorage(configPath: string, storage: WandStorage): Promise<WandConfig> {
   const dir = path.dirname(configPath);
-  await mkdir(dir, { recursive: true });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await chmod(dir, 0o700);
 
   let rawInput: Partial<WandConfig> = {};
   let hadFile = false;
@@ -195,7 +201,8 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
 
   // 如果 JSON 里有偏好字段（说明是老版本配置或刚迁移），重写一次干净版本
   const hasLegacyPrefs = PREFERENCE_KEYS.some((key) => key in rawInput);
-  if (!hadFile || hasLegacyPrefs) {
+  const hasLegacySecrets = "password" in rawInput || "appSecret" in rawInput;
+  if (!hadFile || hasLegacyPrefs || hasLegacySecrets) {
     await saveConfig(configPath, config);
   }
   return config;
@@ -249,6 +256,10 @@ function stripPreferenceFields(config: WandConfig): Partial<WandConfig> {
   for (const key of PREFERENCE_KEYS) {
     delete (out as Record<string, unknown>)[key];
   }
+  // These values are DB-owned runtime secrets. They must never be copied back
+  // into config.json when a deployment setting is updated.
+  delete out.password;
+  delete out.appSecret;
   return out;
 }
 
@@ -399,13 +410,15 @@ export function writePreferenceToStorage(
       break;
     }
     case "defaultThinkingEffort": {
-      const v = isThinkingEffort(value) ? value : "off";
+      if (!isThinkingEffort(value)) throw new Error(`无效思考深度: ${String(value)}`);
+      const v = value;
       storage.setPreference(dbKey, v);
       config.defaultThinkingEffort = v;
       break;
     }
     case "structuredRunner": {
-      const v: StructuredRunnerOption = value === "cli" ? "cli" : "sdk";
+      if (value !== "cli" && value !== "sdk") throw new Error(`无效 structured runner: ${String(value)}`);
+      const v: StructuredRunnerOption = value;
       storage.setPreference(dbKey, v);
       config.structuredRunner = v;
       break;
@@ -423,7 +436,8 @@ export function writePreferenceToStorage(
       break;
     }
     case "inheritEnv": {
-      const v = value === false ? false : true;
+      if (typeof value !== "boolean") throw new Error(`inheritEnv 必须是布尔值: ${String(value)}`);
+      const v = value;
       storage.setPreference(dbKey, v);
       config.inheritEnv = v;
       break;

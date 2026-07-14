@@ -1458,48 +1458,6 @@ import { getSessionStatusLabel } from "./session-ui";
         });
       }
 
-      // 计算一条 ConversationTurn 里所有 content block 的"信息体积"——文字 / 思考 /
-      // tool_result 内容长度之和。用于在 lastMessage 增量更新里判断 incoming 是否
-      // 至少和 localLast 一样完整，防止服务端偶发吐出更短的同 message.id 导致
-      // 已显示的文字段被回退覆盖（"显示了又消失"的根因之一）。
-      export function turnContentVolume(turn) {
-        if (!turn || !Array.isArray(turn.content)) return 0;
-        var total = 0;
-        for (var i = 0; i < turn.content.length; i++) {
-          var b = turn.content[i];
-          if (!b) continue;
-          if (typeof b.text === "string") total += b.text.length;
-          if (typeof b.thinking === "string") total += b.thinking.length;
-          if (typeof b.content === "string") total += b.content.length;
-          else if (Array.isArray(b.content)) {
-            for (var k = 0; k < b.content.length; k++) {
-              var sub = b.content[k];
-              if (sub && typeof sub.text === "string") total += sub.text.length;
-            }
-          }
-          if (b.input) {
-            try { total += JSON.stringify(b.input).length; } catch (_e) {}
-          }
-        }
-        return total;
-      }
-
-      // 合并同 role 的 last assistant turn：incoming 通常是权威更新（包含完整 usage、
-      // 完整 block 序列），但偶发的服务端回退会让 incoming 比 local 更短。此时
-      // 保留本地内容——下一次正常 emit 会校正。usage 字段以 incoming 优先（因为
-      // 那是 result event 给的最终值）。
-      export function mergeAssistantTurn(localLast, incoming) {
-        if (!localLast) return incoming;
-        if (!incoming) return localLast;
-        var localVol = turnContentVolume(localLast);
-        var incVol = turnContentVolume(incoming);
-        if (incVol >= localVol) return incoming;
-        // incoming 更短：保留 local 的 content，但允许 incoming 更新 usage / 元字段。
-        return Object.assign({}, localLast, {
-          usage: incoming.usage || localLast.usage,
-        });
-      }
-
       // 结构化会话的"对话视图"现在只渲染真实的 user/assistant turn。排队消息（还没
       // flush 出去那批）由 .queue-bar 在对话区右下角统一展示，不再在 chat 流里贴一份
       // 半透明 "排队中" 用户气泡——避免同一条消息在 UI 上出现两次。

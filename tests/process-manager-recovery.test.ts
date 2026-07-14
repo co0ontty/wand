@@ -31,7 +31,26 @@ class FakeStorage {
   }
 
   saveSessionMetadata(snapshot: SessionSnapshot): void {
-    this.sessions.set(snapshot.id, snapshot);
+    this.updateSessionRuntimeMetadata(snapshot);
+  }
+
+  updateSessionRuntimeMetadata(snapshot: SessionSnapshot): void {
+    const current = this.sessions.get(snapshot.id);
+    this.sessions.set(snapshot.id, {
+      ...snapshot,
+      output: current?.output ?? snapshot.output,
+      messages: current?.messages,
+    });
+  }
+
+  checkpointSessionOutput(id: string, output: string): void {
+    const current = this.sessions.get(id);
+    if (current) this.sessions.set(id, { ...current, output });
+  }
+
+  checkpointSessionMessages(id: string, messages: NonNullable<SessionSnapshot["messages"]>): void {
+    const current = this.sessions.get(id);
+    if (current) this.sessions.set(id, { ...current, messages });
   }
 
   deleteSession(id: string): void {

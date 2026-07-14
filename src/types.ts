@@ -140,6 +140,9 @@ export interface WandConfig {
   inheritEnv?: boolean;
 }
 
+export type ClaudeModelSource = "builtin" | "configured" | "verified-cache" | "models-api";
+export type ClaudeModelAvailability = "default" | "candidate" | "verified" | "stale";
+
 export interface ClaudeModelInfo {
   /** 传给 --model 的值（别名或完整模型 ID） */
   id: string;
@@ -149,6 +152,14 @@ export interface ClaudeModelInfo {
   note?: string;
   /** 是否为别名（opus/sonnet 等）；完整 ID 为 false */
   alias?: boolean;
+  /** Claude 候选的来源；Codex / OpenCode 动态结果通常不提供。 */
+  source?: ClaudeModelSource;
+  /** Claude Code 默认、候选、已验证或版本/时限过期的验证记录。 */
+  availability?: ClaudeModelAvailability;
+  /** 最近一次由 Claude Code CLI 成功验证的时间。 */
+  lastVerifiedAt?: string;
+  /** 完成最近一次验证时的 Claude Code CLI 版本。 */
+  verifiedWithClaudeVersion?: string;
   /** Codex 模型声明的可用推理档位；Claude 模型通常不提供。 */
   reasoningEfforts?: ReasoningEffortInfo[];
   /** Codex 模型的默认推理档位。 */

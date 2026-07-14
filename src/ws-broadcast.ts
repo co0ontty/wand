@@ -4,15 +4,19 @@
  */
 
 import { WebSocketServer, WebSocket } from "ws";
-import type { CardExpandDefaults, SessionSnapshot, ProcessEvent } from "./types.js";
-import { readSessionCookie, validateSession } from "./auth.js";
+import type { CardExpandDefaults, ConversationTurn, SessionSnapshot, ProcessEvent } from "./types.js";
+import { readSessionCookie, type AuthService } from "./auth.js";
 import { blockWindowMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
+import { boundSessionEventData, toSessionDetailDTO } from "./session-transport.js";
 
 export type { ProcessEvent } from "./types.js";
 
 // ── Constants ──
 
 const MAX_QUEUE_SIZE = 500;
+const QUEUE_RESUME_SIZE = Math.floor(MAX_QUEUE_SIZE * 0.8);
+const SEND_BATCH_SIZE = 8;
+const MAX_BLOCK_BUDGET = 2_000;
 const OUTPUT_DEBOUNCE_MS = 16;
 /**
  * 服务端心跳节奏。20s 一次，比常见 NAT/代理空闲超时（30~60s）更短，可以保活；
@@ -51,6 +55,14 @@ interface WsClient {
   lastSeenAt: number;
 }
 
+interface ClientMessageWindow {
+  messages: ConversationTurn[] | undefined;
+  messageOffset: number;
+  messageTotal: number;
+  leadingBlockOffset?: number;
+  leadingBlockTotal?: number;
+}
+
 // ── Manager ──
 
 export class WsBroadcastManager {
@@ -58,26 +70,57 @@ export class WsBroadcastManager {
   private clients = new Set<WsClient>();
   private outputDebounceCache = new Map<string, { event: ProcessEvent; timer: NodeJS.Timeout }>();
   private heartbeatTimer?: NodeJS.Timeout;
+  private disposed = false;
 
   private getCardDefaults: () => CardExpandDefaults;
   private useHttps: boolean;
+  private authService?: Pick<AuthService, "validateSession">;
 
   constructor(
     wss: WebSocketServer,
     getCardDefaults?: () => CardExpandDefaults,
     useHttps = false,
+    authService?: Pick<AuthService, "validateSession">,
   ) {
     this.wss = wss;
     this.getCardDefaults = getCardDefaults ?? (() => ({}));
     this.useHttps = useHttps;
+    this.authService = authService;
+  }
+
+  /** Immediately disconnect all authenticated clients after global revocation. */
+  disconnectAll(): void {
+    for (const client of Array.from(this.clients)) {
+      this.discardClient(client, true);
+    }
+  }
+
+  /** Stop timers, discard deferred output, and terminate every client. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+    for (const { timer } of this.outputDebounceCache.values()) {
+      clearTimeout(timer);
+    }
+    this.outputDebounceCache.clear();
+    this.disconnectAll();
   }
 
   /** Set up connection handling. Should be called once during server startup. */
   setup(getSession: (id: string) => SessionSnapshot | null): void {
+    if (this.disposed) return;
     this.wss.on("connection", (ws, req) => {
+      if (this.disposed) {
+        ws.close(1012, "Server shutting down");
+        return;
+      }
       const sessionToken = readSessionCookie(req, this.useHttps);
 
-      if (!sessionToken || !validateSession(sessionToken)) {
+      if (!sessionToken || !this.authService?.validateSession(sessionToken)) {
         ws.close(1008, "Unauthorized");
         return;
       }
@@ -116,8 +159,8 @@ export class WsBroadcastManager {
           if (msg.type === "subscribe" && msg.sessionId) {
             // 客户端可在 subscribe 时声明块级窗口预算（iOS）；后续 init/resync/广播
             // 全量快照都按它块级窗口化。不带则保持 turn 级（Web/Android）。
-            if (typeof msg.blockBudget === "number" && msg.blockBudget > 0) {
-              client.blockBudget = msg.blockBudget;
+            if (Number.isSafeInteger(msg.blockBudget) && msg.blockBudget > 0) {
+              client.blockBudget = Math.min(msg.blockBudget, MAX_BLOCK_BUDGET);
             }
             const snapshot = getSession(msg.sessionId);
             if (snapshot) {
@@ -153,12 +196,7 @@ export class WsBroadcastManager {
 
     // 在 wss 关闭时停心跳。restart 路由会先 close 所有 client、再 server.close()，
     // wss 会跟着关，这里清掉 interval 防止泄漏。
-    this.wss.on("close", () => {
-      if (this.heartbeatTimer) {
-        clearInterval(this.heartbeatTimer);
-        this.heartbeatTimer = undefined;
-      }
-    });
+    this.wss.on("close", () => this.dispose());
   }
 
   /**
@@ -194,6 +232,7 @@ export class WsBroadcastManager {
 
   /** Emit a process event to all subscribed WebSocket clients. */
   emitEvent(event: ProcessEvent): void {
+    if (this.disposed) return;
     // Debounce output events to reduce flicker during rapid streaming
     if (event.type === "output") {
       const existing = this.outputDebounceCache.get(event.sessionId);
@@ -281,11 +320,7 @@ export class WsBroadcastManager {
       sessionId,
       seq,
       ...(resync ? { resync: true } : {}),
-      data: {
-        ...snapshot,
-        ...windowed,
-        output: snapshot.output,
-      },
+      data: toSessionDetailDTO(snapshot, { output: snapshot.output, ...windowed }),
     }));
   }
 
@@ -296,7 +331,7 @@ export class WsBroadcastManager {
   private windowForClient(
     client: WsClient,
     messages: SessionSnapshot["messages"],
-  ): Record<string, unknown> {
+  ): ClientMessageWindow {
     if (!messages) {
       return { messages: undefined, messageOffset: 0, messageTotal: 0 };
     }
@@ -315,29 +350,32 @@ export class WsBroadcastManager {
   }
 
   private broadcast(event: ProcessEvent): void {
+    if (this.disposed) return;
     // 非增量事件若带完整 messages（结构化 output/ended 快照、PTY 非流式 chat 快照），
     // 在这个统一出口窗口化——避免逐个 emit 点各自处理、也防止超大帧撑爆移动端 WS。
     // 增量事件只带 lastMessage，不含 messages 数组，不受影响。
     // 块级窗口客户端（iOS）需按各自预算切，所以这里改为「按客户端」窗口化；
     // turn 级（Web/Android）的结果跨客户端一致，缓存一次复用，避免重复计算。
-    const data = event.data as Record<string, unknown> | undefined;
+    const boundedData = boundSessionEventData(event.data);
+    const boundedEvent = boundedData === event.data ? event : { ...event, data: boundedData };
+    const data = boundedData as Record<string, unknown> | undefined;
     const hasFullMessages = !!(data && !data.incremental && Array.isArray(data.messages));
     const rawMessages = hasFullMessages
       ? (data!.messages as SessionSnapshot["messages"])
       : undefined;
     let turnWindowedEvent: ProcessEvent | undefined;
     const eventForClient = (client: WsClient): ProcessEvent => {
-      if (!hasFullMessages) return event;
+      if (!hasFullMessages) return boundedEvent;
       if (client.blockBudget && client.blockBudget > 0) {
         return {
-          ...event,
+          ...boundedEvent,
           data: { ...data, ...this.windowForClient(client, rawMessages) },
         } as ProcessEvent;
       }
       if (!turnWindowedEvent) {
         const w = windowMessagesForTransport(rawMessages, this.getCardDefaults());
         turnWindowedEvent = {
-          ...event,
+          ...boundedEvent,
           data: {
             ...data,
             messages: w.messages,
@@ -361,66 +399,101 @@ export class WsBroadcastManager {
         outgoing = { ...clientEvent, seq } as ProcessEvent;
       }
 
-      // Apply backpressure if queue is too large. We mark the session as
-      // needing a resync rather than silently discarding — the client will
-      // request a fresh snapshot once it sees the resync hint.
-      if (client.sendQueue.length >= MAX_QUEUE_SIZE) {
+      // Backpressure only gates new business messages. The send pump must
+      // keep draining messages that were already accepted; otherwise a queue
+      // at the high-water mark can never reach the low-water mark again.
+      if (client.backpressurePaused || client.sendQueue.length >= MAX_QUEUE_SIZE) {
         client.backpressurePaused = true;
         if (event.type === "output") client.pendingResyncSessions.add(event.sessionId);
+        this.processWsQueue(client);
         continue;
-      }
-      if (client.backpressurePaused) {
-        if (event.type === "output") client.pendingResyncSessions.add(event.sessionId);
-        continue;
-      }
-
-      // If we owed this session a resync notice, prepend it now that the
-      // queue has drained enough to actually deliver something.
-      if (client.pendingResyncSessions.has(event.sessionId)) {
-        client.pendingResyncSessions.delete(event.sessionId);
-        const notice = JSON.stringify({
-          type: "resync_required",
-          sessionId: event.sessionId,
-          reason: "backpressure_drop",
-        });
-        client.sendQueue.push(notice);
       }
 
       client.sendQueue.push(JSON.stringify(outgoing));
+      if (client.sendQueue.length >= MAX_QUEUE_SIZE) {
+        client.backpressurePaused = true;
+      }
       this.processWsQueue(client);
     }
   }
 
-  private processWsQueue(client: WsClient): void {
-    if (client.sendInProgress || client.sendQueue.length === 0) {
+  /**
+   * Resume accepting business messages after the queue crosses the low-water
+   * mark, then enqueue the resync notices owed for output dropped while
+   * paused. Notices are themselves bounded by the same queue capacity; any
+   * remainder stays in the set and is appended by a later drain cycle.
+   */
+  private resumeAndQueueResyncNotices(client: WsClient): void {
+    if (client.backpressurePaused && client.sendQueue.length >= QUEUE_RESUME_SIZE) {
       return;
     }
-    if (client.backpressurePaused) {
-      if (client.sendQueue.length < MAX_QUEUE_SIZE * 0.8) {
-        client.backpressurePaused = false;
-      } else {
-        return;
+
+    client.backpressurePaused = false;
+    for (const sessionId of client.pendingResyncSessions) {
+      if (client.sendQueue.length >= MAX_QUEUE_SIZE) {
+        client.backpressurePaused = true;
+        break;
       }
+      client.pendingResyncSessions.delete(sessionId);
+      client.sendQueue.push(JSON.stringify({
+        type: "resync_required",
+        sessionId,
+        reason: "backpressure_drop",
+      }));
+    }
+  }
+
+  private discardClient(client: WsClient, terminate: boolean): void {
+    client.sendQueue.length = 0;
+    client.pendingResyncSessions.clear();
+    client.sendInProgress = false;
+    client.backpressurePaused = false;
+    this.clients.delete(client);
+    if (terminate) {
+      try { client.ws.terminate(); } catch { /* ignore */ }
+    }
+  }
+
+  private processWsQueue(client: WsClient): void {
+    if (this.disposed) return;
+    if (client.sendInProgress || client.sendQueue.length === 0) {
+      return;
     }
     // Check socket state before dequeuing to avoid dropping messages
     if (client.ws.readyState !== WebSocket.OPEN) {
       // Socket closed — discard remaining queue and remove client
-      client.sendQueue.length = 0;
-      this.clients.delete(client);
+      this.discardClient(client, false);
       return;
     }
     client.sendInProgress = true;
-    const batch = client.sendQueue.splice(0, Math.min(8, client.sendQueue.length));
+    const batch = client.sendQueue.splice(0, Math.min(SEND_BATCH_SIZE, client.sendQueue.length));
     let pending = batch.length;
+    let sendError: Error | undefined;
+    const settleSend = (err?: Error): void => {
+      if (err && !sendError) sendError = err;
+      pending -= 1;
+      if (pending > 0) return;
+
+      client.sendInProgress = false;
+      if (sendError) {
+        // A callback error means the socket can no longer be trusted. Drop
+        // the bounded application queue and force a reconnect/resubscribe.
+        this.discardClient(client, true);
+        return;
+      }
+
+      this.resumeAndQueueResyncNotices(client);
+      if (client.sendQueue.length > 0) {
+        setImmediate(() => this.processWsQueue(client));
+      }
+    };
+
     for (const msg of batch) {
-      client.ws.send(msg, (err) => {
-        if (--pending === 0) {
-          client.sendInProgress = false;
-          if (!err && client.sendQueue.length > 0) {
-            setImmediate(() => this.processWsQueue(client));
-          }
-        }
-      });
+      try {
+        client.ws.send(msg, settleSend);
+      } catch (error) {
+        settleSend(error instanceof Error ? error : new Error(String(error)));
+      }
     }
   }
 

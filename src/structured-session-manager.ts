@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn, ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { query as sdkQuery, type Options as SdkOptions, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
@@ -15,12 +14,36 @@ import {
   SubagentMeta, ToolUseBlock, WandConfig,
 } from "./types.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
-import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
+import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
-import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { generateSessionTopic } from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import { buildCodexArgs } from "./structured-codex-adapter.js";
+import {
+  buildAppendSystemPromptParts,
+  buildClaudeCliArgs,
+  buildClaudeSdkThinking,
+  derivePermissionPolicy,
+} from "./structured-claude-adapter.js";
+import { applyOpenCodeEvent, buildOpenCodeArgs } from "./structured-opencode-adapter.js";
+import {
+  defaultStructuredRunner,
+  defaultStructuredState,
+  isStructuredRunnerForProvider,
+  normalizeThinkingEffort,
+  resolveStructuredRunner,
+} from "./structured-provider-common.js";
+
+export {
+  isStructuredRunnerForProvider,
+  normalizeThinkingEffort,
+  resolveStructuredRunner,
+  thinkingEffortToClaudeCliEffort,
+  thinkingEffortToCodexReasoningEffort,
+  thinkingEffortToOpenCodeVariant,
+  thinkingEffortToSdkBudget,
+} from "./structured-provider-common.js";
 
 interface CreateStructuredSessionOptions {
   cwd: string;
@@ -43,82 +66,12 @@ interface CreateStructuredSessionOptions {
   claudeSessionId?: string;
 }
 
-function defaultStructuredRunner(provider: SessionProvider): SessionRunner {
-  return provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : "claude-cli-print";
-}
-
-function defaultStructuredState(provider: SessionProvider, runner = defaultStructuredRunner(provider)): StructuredSessionState {
-  return {
-    provider,
-    runner,
-    lastError: null,
-    inFlight: false,
-    activeRequestId: null,
-  };
-}
-
-/**
- * 把任意外部输入收敛到合法的 thinkingEffort 枚举值。`null` / 非法值都视为
- * "未设置"——上层调用方再根据 provider 决定是否填默认值。
- */
-export function normalizeThinkingEffort(
-  value: unknown,
-): SessionSnapshot["thinkingEffort"] {
-  if (typeof value !== "string") return null;
-  const v = value.trim().toLowerCase();
-  if (v === "off" || v === "standard" || v === "deep" || v === "max") return v;
-  if (/^codex:[a-z0-9][a-z0-9_-]{0,31}$/.test(v)) return v as SessionSnapshot["thinkingEffort"];
-  return null;
-}
-
-/** Claude SDK 用：把 thinkingEffort 映射成 `thinking.budget_tokens`。off / 空 → 0（不启用）。 */
-export function thinkingEffortToSdkBudget(effort: SessionSnapshot["thinkingEffort"]): number {
-  switch (effort) {
-    case "standard": return 4096;
-    case "deep": return 16000;
-    case "max": return 31999;
-    case "off":
-    default: return 0;
+/** The runner already persisted/emitted its detailed terminal snapshot. */
+class PersistedStructuredRunnerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PersistedStructuredRunnerError";
   }
-}
-
-/** Claude CLI 用：把 thinkingEffort 映射到 `--effort` / `/effort` 支持的等级。off → 不覆盖默认值。 */
-export function thinkingEffortToClaudeCliEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  switch (effort) {
-    case "standard": return "low";
-    case "deep": return "medium";
-    case "max": return "max";
-    case "off":
-    default: return null;
-  }
-}
-
-/** Claude PTY slash-command 用：off 表示恢复模型默认 effort。 */
-export function thinkingEffortToClaudeSlashEffort(effort: SessionSnapshot["thinkingEffort"]): string {
-  return thinkingEffortToClaudeCliEffort(effort) ?? "auto";
-}
-
-/** Codex CLI 用：把 thinkingEffort 映射到 model_reasoning_effort 配置。off → 不覆盖 Codex 默认。 */
-export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  if (typeof effort === "string" && effort.startsWith("codex:")) {
-    return effort.slice("codex:".length) || null;
-  }
-  switch (effort) {
-    case "standard": return "low";
-    case "deep": return "medium";
-    case "max": return "xhigh";
-    case "off": return null;
-    default: return null;
-  }
-}
-
-/** OpenCode exposes provider-specific reasoning presets through `--variant`. */
-export function thinkingEffortToOpenCodeVariant(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  if (!effort || effort === "off") return null;
-  if (effort === "standard") return "low";
-  if (effort === "deep") return "high";
-  if (effort === "max") return "max";
-  return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -594,8 +547,18 @@ const STREAM_EMIT_DEBOUNCE_MS = 16;
  *  saveSession serializes the entire messages array, so doing it on every NDJSON
  *  event is N². close-path always calls saveSession unconditionally to take the
  *  authoritative final snapshot. */
-const STREAM_SAVE_THROTTLE_MS = 200;
+// Full message snapshots become increasingly expensive during long turns.
+// Terminal paths always force an authoritative save, so a one-second crash
+// checkpoint keeps recovery useful without rewriting megabytes five times a
+// second on the event loop.
+const STREAM_SAVE_THROTTLE_MS = 1_000;
 const ARCHIVE_AFTER_MS = 1000 * 60 * 60 * 24;
+
+interface StreamingCheckpointDirty {
+  metadata: boolean;
+  output: boolean;
+  messages: boolean;
+}
 
 /**
  * 找出最后一条 assistant turn 中尚未配对 tool_result 的 AskUserQuestion tool_use。
@@ -650,144 +613,6 @@ function withSummary(snapshot: SessionSnapshot): SessionSnapshot {
 /** Should we auto-approve permissions for this mode? */
 function shouldAutoApproveForMode(mode: ExecutionMode): boolean {
   return mode === "full-access" || mode === "managed" || mode === "auto-edit";
-}
-
-/**
- * Root 模式下绕过权限的工具白名单。Claude CLI 拒绝以 root 身份用 bypassPermissions，
- * 退而求其次用 acceptEdits + 显式 allowedTools 覆盖 CWD 之外的路径。
- */
-const ROOT_FALLBACK_ALLOWED_TOOLS = [
-  "Bash", "Edit", "Write", "Read", "Glob", "Grep", "NotebookEdit", "WebFetch", "WebSearch",
-];
-
-/** 我们实际用到的权限子集——SDK PermissionMode 还包括 plan/dontAsk/auto 等，wand 用不上。 */
-type WandPermissionMode = "default" | "acceptEdits" | "bypassPermissions";
-
-interface PermissionPolicy {
-  permissionMode: WandPermissionMode;
-  /** Root + (bypass|accept)、或非 bypass 模式下需要放行 MCP 工具时才有值。 */
-  allowedTools: string[] | undefined;
-}
-
-/**
- * 收集当前会话可见的 MCP server 名字。
- * claude -p / SDK runner 没有交互式权限弹窗，碰到 mcp__* 工具会直接 fail with
- * "haven't granted"。用户已经在 claude 这边配过的 MCP server 视为可信，
- * 在 --allowedTools 里加 `mcp__<server>` 放行整台 server 的所有工具。
- *
- * 来源（取并集）：
- *   - ~/.claude.json 顶层 mcpServers
- *   - ~/.claude.json projects[<cwd>].mcpServers（仅当前 cwd 精确匹配）
- *   - <cwd>/.mcp.json mcpServers
- *
- * 结果按 (cwd, 各文件 mtime) 缓存，避免每次 spawn 都重读。
- */
-const mcpServerCache = new Map<string, { mtimeFingerprint: string; names: string[] }>();
-
-function readJsonSafe(filePath: string): Record<string, unknown> | null {
-  try {
-    const raw = readFileSync(filePath, "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
-  } catch { /* missing/invalid — return null */ }
-  return null;
-}
-
-function mtimeOf(filePath: string): number {
-  try { return statSync(filePath).mtimeMs; } catch { return 0; }
-}
-
-function extractMcpServerKeys(node: unknown): string[] {
-  if (!node || typeof node !== "object") return [];
-  const mcpServers = (node as Record<string, unknown>).mcpServers;
-  if (!mcpServers || typeof mcpServers !== "object") return [];
-  return Object.keys(mcpServers as Record<string, unknown>);
-}
-
-function collectMcpServerNames(cwd: string): string[] {
-  const userConfigPath = path.join(homedir(), ".claude.json");
-  const projectMcpPath = path.join(cwd, ".mcp.json");
-  const fingerprint = `${mtimeOf(userConfigPath)}:${mtimeOf(projectMcpPath)}`;
-  const cached = mcpServerCache.get(cwd);
-  if (cached && cached.mtimeFingerprint === fingerprint) return cached.names;
-
-  const names = new Set<string>();
-  const userConfig = readJsonSafe(userConfigPath);
-  if (userConfig) {
-    for (const k of extractMcpServerKeys(userConfig)) names.add(k);
-    const projects = userConfig.projects;
-    if (projects && typeof projects === "object") {
-      const entry = (projects as Record<string, unknown>)[cwd];
-      for (const k of extractMcpServerKeys(entry)) names.add(k);
-    }
-  }
-  const projectMcp = readJsonSafe(projectMcpPath);
-  for (const k of extractMcpServerKeys(projectMcp)) names.add(k);
-
-  const result = Array.from(names);
-  mcpServerCache.set(cwd, { mtimeFingerprint: fingerprint, names: result });
-  return result;
-}
-
-function mcpAllowEntries(cwd: string): string[] {
-  // `mcp__<server>` 形式放行该 server 的所有工具，等价于 `mcp__<server>__*`。
-  return collectMcpServerNames(cwd).map((name) => `mcp__${name}`);
-}
-
-/**
- * 把 (执行模式, 自动批准开关) 映射成 Claude CLI / SDK 的权限决策。
- * CLI runner 把它转成 --permission-mode / --allowedTools flag，
- * SDK runner 直接塞进 Options。两边的决策规则保持一字不差。
- *
- * cwd 用来枚举该会话能看到的 MCP server，把 `mcp__<server>` 加进 allowedTools；
- * bypassPermissions 模式下整个白名单都没意义，不附加。
- */
-function derivePermissionPolicy(
-  mode: ExecutionMode,
-  autoApprove: boolean,
-  cwd: string,
-): PermissionPolicy {
-  const shouldBypass = autoApprove || mode === "full-access" || mode === "managed";
-  const shouldAcceptEdits = mode === "auto-edit";
-  const mcpAllow = shouldBypass ? [] : mcpAllowEntries(cwd);
-  const withMcp = (base: string[] | undefined): string[] | undefined => {
-    if (!mcpAllow.length) return base;
-    return base ? [...base, ...mcpAllow] : [...mcpAllow];
-  };
-
-  if (!isRunningAsRoot()) {
-    if (shouldBypass) return { permissionMode: "bypassPermissions", allowedTools: undefined };
-    if (shouldAcceptEdits) return { permissionMode: "acceptEdits", allowedTools: withMcp(undefined) };
-    return { permissionMode: "default", allowedTools: withMcp(undefined) };
-  }
-
-  if (shouldBypass || shouldAcceptEdits) {
-    return { permissionMode: "acceptEdits", allowedTools: withMcp(ROOT_FALLBACK_ALLOWED_TOOLS) };
-  }
-  return { permissionMode: "default", allowedTools: withMcp(undefined) };
-}
-
-/**
- * 拼装要追加到系统提示词里的片段：托管模式的自主决策提示 + 用户配置的语言偏好。
- * CLI runner 每段单独 push 一对 `--append-system-prompt <part>` flag，
- * SDK runner 用 "\n\n" 串成一个 appendSystemPrompt 字符串塞 Options。
- * 文本统一到这里维护，避免两个 runner 各抄一份导致漂移。
- */
-function buildAppendSystemPromptParts(language: string | undefined, mode: ExecutionMode): string[] {
-  const trimmedLanguage = language?.trim();
-  const isChinese = trimmedLanguage === "中文";
-  const parts: string[] = [];
-
-  if (mode === "managed") {
-    parts.push(buildManagedAutonomyDirective(isChinese));
-  }
-
-  if (trimmedLanguage) {
-    const directive = buildLanguageDirective(trimmedLanguage);
-    if (directive) parts.push(directive);
-  }
-
-  return parts;
 }
 
 function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["data"] {
@@ -880,12 +705,6 @@ export class StructuredSessionManager {
   private readonly pendingSdkQueries = new Map<string, { interrupt(): Promise<void> }>();
   private readonly interruptedWith = new Map<string, string>();
   /**
-   * 用户主动点了「停止」的会话。异步收尾（claude -p / codex 的 close、SDK 的 abort）
-   * 据此跳过"结构化会话执行失败"路径——主动停止不是失败，按正常 idle 收尾、保留历史内容。
-   * 用 Set.delete 消费：读取的同时清除，下一轮真失败不会被旧标记误抑制。
-   */
-  private readonly userStopped = new Set<string>();
-  /**
    * Sessions where the current interrupt is a "queue promote" (用户从排队条点了「立即」
    * 把队首插队到 now)。退出处理三个分支默认会把 queuedMessages 清空——因为常规的
    * interrupt 语义是"算了，做这个"，把队列也作废。但 queue-promote 的语义是
@@ -893,8 +712,10 @@ export class StructuredSessionManager {
    * 收到后必须 delete 掉，避免下一次普通 interrupt 误带 flag。
    */
   private readonly preserveQueueOnInterrupt = new Set<string>();
-  /** Last wall-clock time (ms) we did a full saveSession for a streaming session. */
+  /** Last wall-clock time (ms) a streaming checkpoint reached SQLite. */
   private readonly lastStreamSaveAt = new Map<string, number>();
+  private readonly streamCheckpointTimers = new Map<string, NodeJS.Timeout>();
+  private readonly streamCheckpointDirty = new Map<string, StreamingCheckpointDirty>();
   /**
    * Idempotency keys we've already accepted, mapped to their wall-clock timestamp.
    * Android WebView 在进程恢复时偶尔会重发上一个未收到响应的 POST（HTTP/2 stream
@@ -906,22 +727,35 @@ export class StructuredSessionManager {
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   private archiveTimer: NodeJS.Timeout | null = null;
   private readonly topicRequests = new Set<string>();
+  private readonly streamEmitTimers = new Set<NodeJS.Timeout>();
+  private disposed = false;
 
   constructor(
     private readonly storage: WandStorage,
     private readonly config: WandConfig,
     private readonly logger: SessionLogger | null = null,
+    private readonly sdkQueryFactory: typeof sdkQuery = sdkQuery,
   ) {
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
+      const storedProvider = snapshot.provider ?? snapshot.structuredState?.provider;
+      const provider: SessionProvider = storedProvider === "codex" || storedProvider === "opencode"
+        ? storedProvider
+        : "claude";
+      const storedRunner = snapshot.runner ?? snapshot.structuredState?.runner;
+      // Legacy/corrupt snapshots are normalized on restore so send dispatch can
+      // rely on the provider/runner invariant without making startup fail.
+      const runner = isStructuredRunnerForProvider(provider, storedRunner)
+        ? storedRunner
+        : defaultStructuredRunner(provider, this.config.structuredRunner);
       const restored: SessionSnapshot = {
         ...snapshot,
         sessionKind: "structured",
         sessionSource: snapshot.sessionSource ?? "interactive",
         automationId: snapshot.automationId,
-        provider: snapshot.provider ?? snapshot.structuredState?.provider ?? "claude",
-        runner: snapshot.runner ?? snapshot.structuredState?.runner ?? defaultStructuredRunner(snapshot.provider ?? snapshot.structuredState?.provider ?? "claude"),
+        provider,
+        runner,
         status: restoredStatus,
         autoApprovePermissions: snapshot.autoApprovePermissions ?? shouldAutoApproveForMode(snapshot.mode),
         approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
@@ -929,8 +763,8 @@ export class StructuredSessionManager {
         pendingEscalation: null,
         permissionBlocked: false,
         structuredState: {
-          provider: snapshot.structuredState?.provider ?? snapshot.provider ?? "claude",
-          runner: snapshot.runner ?? snapshot.structuredState?.runner ?? defaultStructuredRunner(snapshot.structuredState?.provider ?? snapshot.provider ?? "claude"),
+          provider,
+          runner,
           model: snapshot.structuredState?.model ?? snapshot.selectedModel ?? undefined,
           lastError: snapshot.structuredState?.lastError ?? null,
           inFlight: false,
@@ -959,26 +793,166 @@ export class StructuredSessionManager {
       if (!Number.isFinite(endedAtMs) || now - endedAtMs < ARCHIVE_AFTER_MS) continue;
       session.archived = true;
       session.archivedAt = new Date(now).toISOString();
-      this.storage.saveSession(session);
+      this.storage.updateSessionRuntimeMetadata(session);
     }
   }
 
   setEventEmitter(emitEvent: (event: ProcessEvent) => void): void {
+    if (this.disposed) return;
     this.emitEvent = emitEvent;
   }
 
-  /**
-   * In-memory snapshot is updated unconditionally; the SQLite write is rate-
-   * limited to once per STREAM_SAVE_THROTTLE_MS. Caller must still invoke
-   * `storage.saveSession` directly at terminal events (close / failure) so the
-   * final state is durable.
-   */
-  private saveStreamingSnapshot(snapshot: SessionSnapshot): void {
+  /** Stop every runner and flush terminal state before storage is closed. */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    if (this.archiveTimer) {
+      clearInterval(this.archiveTimer);
+      this.archiveTimer = null;
+    }
+    for (const timer of this.streamEmitTimers) clearTimeout(timer);
+    this.streamEmitTimers.clear();
+
+    const activeSessionIds = new Set<string>([
+      ...this.pendingChildren.keys(),
+      ...this.pendingSdkQueries.keys(),
+      ...this.pendingSdkAbort.keys(),
+      ...Array.from(this.sessions.values())
+        .filter((session) => session.structuredState?.inFlight)
+        .map((session) => session.id),
+    ]);
+    for (const id of activeSessionIds) {
+      const session = this.sessions.get(id);
+      if (!session) continue;
+      const cancelled: SessionSnapshot = {
+        ...session,
+        status: "idle",
+        exitCode: null,
+        endedAt: null,
+        pendingEscalation: null,
+        permissionBlocked: false,
+        structuredState: {
+          ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
+          inFlight: false,
+          activeRequestId: null,
+          lastError: null,
+        },
+      };
+      this.sessions.set(id, cancelled);
+      try { this.saveAuthoritativeSession(cancelled); } catch { /* best-effort shutdown flush */ }
+    }
+
+    for (const child of this.pendingChildren.values()) {
+      try { child.kill(); } catch { /* ignore */ }
+    }
+    for (const query of this.pendingSdkQueries.values()) {
+      void query.interrupt().catch(() => { /* ignore */ });
+    }
+    for (const controller of this.pendingSdkAbort.values()) controller.abort();
+    this.pendingChildren.clear();
+    this.pendingSdkQueries.clear();
+    this.pendingSdkAbort.clear();
+    this.interruptedWith.clear();
+    this.preserveQueueOnInterrupt.clear();
+    for (const timer of this.streamCheckpointTimers.values()) clearTimeout(timer);
+    this.streamCheckpointTimers.clear();
+    this.streamCheckpointDirty.clear();
+    this.lastStreamSaveAt.clear();
+    this.topicRequests.clear();
+    this.emitEvent = null;
+  }
+
+  private trackStreamEmitTimer(timer: NodeJS.Timeout): NodeJS.Timeout {
+    this.streamEmitTimers.add(timer);
+    return timer;
+  }
+
+  private clearStreamEmitTimer(timer: NodeJS.Timeout): void {
+    clearTimeout(timer);
+    this.streamEmitTimers.delete(timer);
+  }
+
+  /** Mark streaming payload dirty and enforce both leading and trailing checkpoints. */
+  private saveStreamingSnapshot(
+    snapshot: SessionSnapshot,
+    changed: Partial<StreamingCheckpointDirty> = { messages: true, output: true },
+  ): void {
+    if (this.disposed) return;
+    const dirty = this.streamCheckpointDirty.get(snapshot.id) ?? { metadata: false, output: false, messages: false };
+    if (changed.metadata) dirty.metadata = true;
+    if (changed.output) dirty.output = true;
+    if (changed.messages) dirty.messages = true;
+    this.streamCheckpointDirty.set(snapshot.id, dirty);
+
     const now = Date.now();
     const last = this.lastStreamSaveAt.get(snapshot.id) ?? 0;
-    if (now - last < STREAM_SAVE_THROTTLE_MS) return;
-    this.lastStreamSaveAt.set(snapshot.id, now);
+    const remaining = STREAM_SAVE_THROTTLE_MS - (now - last);
+    if (remaining <= 0) {
+      this.flushStreamingCheckpoint(snapshot.id);
+      return;
+    }
+    if (this.streamCheckpointTimers.has(snapshot.id)) return;
+    const timer = setTimeout(() => {
+      this.streamCheckpointTimers.delete(snapshot.id);
+      if (!this.disposed) this.flushStreamingCheckpoint(snapshot.id);
+    }, remaining);
+    timer.unref?.();
+    this.streamCheckpointTimers.set(snapshot.id, timer);
+  }
+
+  private flushStreamingCheckpoint(sessionId: string): void {
+    const timer = this.streamCheckpointTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this.streamCheckpointTimers.delete(sessionId);
+    }
+    const dirty = this.streamCheckpointDirty.get(sessionId);
+    const snapshot = this.sessions.get(sessionId);
+    if (!dirty || !snapshot) {
+      this.streamCheckpointDirty.delete(sessionId);
+      return;
+    }
+    if (dirty.metadata) this.storage.updateSessionRuntimeMetadata(snapshot);
+    if (dirty.messages) {
+      this.storage.checkpointSessionMessages(
+        sessionId,
+        snapshot.messages ?? [],
+        snapshot.structuredState,
+        dirty.output ? snapshot.output : undefined,
+      );
+    } else if (dirty.output) {
+      this.storage.checkpointSessionOutput(sessionId, snapshot.output);
+    }
+    this.streamCheckpointDirty.delete(sessionId);
+    this.lastStreamSaveAt.set(sessionId, Date.now());
+  }
+
+  private clearStreamingCheckpoint(sessionId: string): void {
+    this.cancelStreamingCheckpointTimer(sessionId);
+    this.streamCheckpointDirty.delete(sessionId);
+    this.lastStreamSaveAt.delete(sessionId);
+  }
+
+  private cancelStreamingCheckpointTimer(sessionId: string): void {
+    const timer = this.streamCheckpointTimers.get(sessionId);
+    if (timer) clearTimeout(timer);
+    this.streamCheckpointTimers.delete(sessionId);
+  }
+
+  private saveAuthoritativeSession(snapshot: SessionSnapshot): void {
     this.storage.saveSession(snapshot);
+    this.clearStreamingCheckpoint(snapshot.id);
+  }
+
+  private checkpointSessionMessages(snapshot: SessionSnapshot, includeOutput = false): void {
+    this.storage.updateSessionRuntimeMetadata(snapshot);
+    this.storage.checkpointSessionMessages(
+      snapshot.id,
+      snapshot.messages ?? [],
+      snapshot.structuredState,
+      includeOutput ? snapshot.output : undefined,
+    );
   }
 
   list(): SessionSnapshot[] {
@@ -1007,28 +981,63 @@ export class StructuredSessionManager {
     const current = this.requireSession(id);
     const updated: SessionSnapshot = { ...current, title, description, summary: description };
     this.sessions.set(id, updated);
-    this.storage.saveSessionMetadata(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
+    return updated;
+  }
+
+  /**
+   * Update worktree merge progress on the canonical in-memory snapshot before
+   * persisting it. A null result means this manager does not own the session.
+   */
+  setWorktreeMergeState(
+    id: string,
+    status: SessionSnapshot["worktreeMergeStatus"],
+    info: SessionSnapshot["worktreeMergeInfo"],
+  ): SessionSnapshot | null {
+    const current = this.sessions.get(id);
+    if (!current) return null;
+    const updated: SessionSnapshot = {
+      ...current,
+      worktreeMergeStatus: status,
+      worktreeMergeInfo: info ?? null,
+    };
+    this.sessions.set(id, updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
+    this.emit({
+      type: "status",
+      sessionId: id,
+      data: {
+        sessionKind: "structured",
+        worktreeMergeStatus: status,
+        worktreeMergeInfo: updated.worktreeMergeInfo,
+      },
+    });
     return updated;
   }
 
   private maybeGenerateSessionTopic(id: string, input: string): void {
     const session = this.sessions.get(id);
-    if (!session || session.title || this.topicRequests.has(id)) return;
+    if (this.disposed || !session || session.title || this.topicRequests.has(id)) return;
     this.topicRequests.add(id);
     void generateSessionTopic(input, session.cwd, this.config.language)
       .then(({ title, description }) => {
-        if (this.sessions.has(id)) this.setSessionTopic(id, title, description);
+        if (!this.disposed && this.sessions.has(id)) this.setSessionTopic(id, title, description);
       })
       .catch((error) => console.error(`[StructuredSessionManager] Failed to generate session topic ${id}:`, getErrorMessage(error)))
       .finally(() => this.topicRequests.delete(id));
   }
 
   createSession(options: CreateStructuredSessionOptions): SessionSnapshot {
+    if (this.disposed) throw new Error("StructuredSessionManager has been disposed.");
     const id = randomUUID();
     const startedAt = new Date().toISOString();
-    const provider: SessionProvider = options.provider === "codex" || options.provider === "opencode" ? options.provider : "claude";
-    const runner = options.runner ?? defaultStructuredRunner(provider);
+    const requestedProvider: unknown = options.provider ?? "claude";
+    if (requestedProvider !== "claude" && requestedProvider !== "codex" && requestedProvider !== "opencode") {
+      throw new Error(`不支持的结构化 provider: ${String(requestedProvider)}`);
+    }
+    const provider: SessionProvider = requestedProvider;
+    const runner = resolveStructuredRunner(provider, options.runner, this.config.structuredRunner);
     const baseCwd = resolveSessionCwd(options.cwd, this.config.defaultCwd);
     const worktreeSetup = options.worktreeEnabled
       ? prepareSessionWorktree({ cwd: baseCwd, sessionId: id })
@@ -1091,6 +1100,7 @@ export class StructuredSessionManager {
     input: string,
     opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean; queueAlreadyRemoved?: boolean },
   ): Promise<SessionSnapshot> {
+    if (this.disposed) throw new Error("StructuredSessionManager has been disposed.");
     let session = this.requireSession(id);
     const prompt = input.trim();
     if (!prompt) return session;
@@ -1113,9 +1123,16 @@ export class StructuredSessionManager {
     }
     if (session.structuredState?.inFlight) {
       const child = this.pendingChildren.get(id);
-      const childAlive = child && !child.killed && child.exitCode === null;
-      if (!childAlive) {
-        if (child) this.pendingChildren.delete(id);
+      const sdkAbort = this.pendingSdkAbort.get(id);
+      const sdkQueryHandle = this.pendingSdkQueries.get(id);
+      // ChildProcess.killed only means kill() successfully sent a signal; the
+      // process can keep running until its close/error callback releases this
+      // exact handle. Treat map ownership as the authoritative in-flight state.
+      const childActive = Boolean(child);
+      const sdkAlive = Boolean(sdkQueryHandle || (sdkAbort && !sdkAbort.signal.aborted));
+      if (!childActive && !sdkAlive) {
+        if (child) this.releasePendingChild(id, child);
+        if (sdkAbort) this.releasePendingSdkAbort(id, sdkAbort);
         const recovered: SessionSnapshot = {
           ...session,
           status: "idle",
@@ -1127,7 +1144,7 @@ export class StructuredSessionManager {
           },
         };
         this.sessions.set(id, recovered);
-        this.storage.saveSession(recovered);
+        this.storage.updateSessionRuntimeMetadata(recovered);
         session = recovered;
       } else if (opts?.interrupt) {
         this.interruptedWith.set(id, prompt);
@@ -1145,19 +1162,19 @@ export class StructuredSessionManager {
               const trimmedQueue = queue.slice(0, removeAt).concat(queue.slice(removeAt + 1));
               session = { ...session, queuedMessages: trimmedQueue };
               this.sessions.set(id, session);
-              this.storage.saveSession(session);
+              this.storage.updateSessionRuntimeMetadata(session);
               this.emitStructuredSnapshot(session);
             }
           }
         } else {
           this.preserveQueueOnInterrupt.delete(id);
         }
-        try { child.kill("SIGTERM"); } catch (_err) { /* ignore */ }
-        const sdkQueryHandle = this.pendingSdkQueries.get(id);
+        if (childActive && child) {
+          try { child.kill("SIGTERM"); } catch (_err) { /* ignore */ }
+        }
         if (sdkQueryHandle) {
           void sdkQueryHandle.interrupt().catch(() => { /* ignore */ });
         }
-        const sdkAbort = this.pendingSdkAbort.get(id);
         if (sdkAbort) sdkAbort.abort();
         return session;
       } else {
@@ -1175,7 +1192,7 @@ export class StructuredSessionManager {
           queuedMessages: [...queue, prompt],
         };
         this.sessions.set(id, queued);
-        this.storage.saveSession(queued);
+        this.storage.updateSessionRuntimeMetadata(queued);
         this.emitStructuredSnapshot(queued);
         return queued;
       }
@@ -1216,7 +1233,7 @@ export class StructuredSessionManager {
       },
     };
     this.sessions.set(id, updated);
-    this.storage.saveSession(updated);
+    this.checkpointSessionMessages(updated);
     this.emitStructuredSnapshot(updated);
     this.emit({
       type: "status",
@@ -1236,21 +1253,35 @@ export class StructuredSessionManager {
       : prompt;
 
     try {
-      if ((updated.provider ?? "claude") === "codex") {
-        await this.runCodexStreaming(id, updated, prompt);
-      } else if ((updated.provider ?? "claude") === "opencode") {
-        await this.runOpenCodeStreaming(id, updated, prompt);
-      } else if (this.config.structuredRunner === "sdk") {
-        await this.runClaudeSdkStreaming(id, updated, prompt);
+      const provider = updated.provider ?? updated.structuredState?.provider ?? "claude";
+      const runner = updated.runner ?? updated.structuredState?.runner;
+      if (!isStructuredRunnerForProvider(provider, runner)) {
+        throw new Error(`会话 runner ${String(runner)} 与 provider ${provider} 不匹配。`);
+      }
+      if (provider === "codex") {
+        await this.runCodexStreaming(id, updated, prompt, requestId);
+      } else if (provider === "opencode") {
+        await this.runOpenCodeStreaming(id, updated, prompt, requestId);
+      } else if (runner === "claude-sdk") {
+        await this.runClaudeSdkStreaming(id, updated, prompt, requestId);
       } else {
-        await this.runClaudeStreaming(id, updated, cliClaudePrompt);
+        await this.runClaudeStreaming(id, updated, cliClaudePrompt, requestId);
       }
       const finished = this.requireSession(id);
       return finished;
     } catch (error) {
       const message = getErrorMessage(error);
+      // Close handlers use this tagged error after they have already persisted
+      // the detailed failure. Re-throw even if an ended-event listener removed
+      // the session synchronously; there is no request-id marker to leak.
+      if (error instanceof PersistedStructuredRunnerError) throw error;
       const current = this.sessions.get(id);
       if (!current) throw error;
+      // stop() or a newer turn may have invalidated this execution while its
+      // runner was unwinding. A stale rejection must never fail the new turn.
+      if (!this.isCurrentRequest(id, requestId)) {
+        return current;
+      }
       const failed: SessionSnapshot = {
         ...current,
         status: "failed",
@@ -1264,7 +1295,7 @@ export class StructuredSessionManager {
         },
       };
       this.sessions.set(id, failed);
-      this.storage.saveSession(failed);
+      this.saveAuthoritativeSession(failed);
       this.emit({
         type: "status",
         sessionId: id,
@@ -1299,7 +1330,7 @@ export class StructuredSessionManager {
     const reordered = order.map((idx) => queue[idx]);
     const updated: SessionSnapshot = { ...session, queuedMessages: reordered };
     this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
     return updated;
   }
@@ -1314,7 +1345,7 @@ export class StructuredSessionManager {
     const next = queue.slice(0, index).concat(queue.slice(index + 1));
     const updated: SessionSnapshot = { ...session, queuedMessages: next };
     this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
     return updated;
   }
@@ -1347,7 +1378,7 @@ export class StructuredSessionManager {
     const inFlight = session.status === "running" && session.structuredState?.inFlight === true;
     const updated: SessionSnapshot = { ...session, queuedMessages: remaining };
     this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
 
     try {
@@ -1372,7 +1403,7 @@ export class StructuredSessionManager {
     }
     const updated: SessionSnapshot = { ...session, queuedMessages: [] };
     this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
     return updated;
   }
@@ -1390,7 +1421,7 @@ export class StructuredSessionManager {
       },
     };
     this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     this.emit({
       type: "status",
       sessionId,
@@ -1415,7 +1446,7 @@ export class StructuredSessionManager {
       thinkingEffort: normalized,
     };
     this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     this.emit({
       type: "status",
       sessionId,
@@ -1439,7 +1470,7 @@ export class StructuredSessionManager {
       autoApprovePermissions: autoApprove,
     };
     this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     this.emit({
       type: "status",
       sessionId,
@@ -1454,15 +1485,25 @@ export class StructuredSessionManager {
     const newVal = !session.autoApprovePermissions;
     const updated: SessionSnapshot = { ...session, autoApprovePermissions: newVal };
     this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     return updated;
   }
 
   /** Resolve a specific escalation by requestId. */
-  resolveEscalation(sessionId: string, requestId: string, resolution?: "approve_once" | "approve_turn" | "deny"): SessionSnapshot {
-    const approved = resolution !== "deny";
+  resolveEscalation(sessionId: string, requestId: string, resolution: unknown): SessionSnapshot {
     const session = this.requireSession(sessionId);
-    const scope = session.pendingEscalation?.scope;
+    const pending = session.pendingEscalation;
+    if (!pending) {
+      throw new Error("当前会话没有待处理的授权请求。");
+    }
+    if (pending.requestId !== requestId) {
+      throw new Error("授权请求已失效，请刷新后重试。");
+    }
+    if (resolution !== "approve_once" && resolution !== "approve_turn" && resolution !== "deny") {
+      throw new Error("resolution 必须是 approve_once、approve_turn 或 deny。");
+    }
+    const approved = resolution !== "deny";
+    const scope = pending.scope;
     if (approved && scope) {
       this.incrementApprovalStats(session, scope);
     }
@@ -1470,14 +1511,14 @@ export class StructuredSessionManager {
       ...session,
       pendingEscalation: null,
       permissionBlocked: false,
-      lastEscalationResult: session.pendingEscalation ? {
-        requestId: session.pendingEscalation.requestId,
-        resolution: approved ? "approve_once" : "deny",
+      lastEscalationResult: {
+        requestId: pending.requestId,
+        resolution,
         reason: approved ? "user_approved" : "user_denied",
-      } : session.lastEscalationResult ?? null,
+      },
     };
     this.sessions.set(sessionId, updated);
-    this.storage.saveSession(updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
     this.emit({
       type: "status",
       sessionId,
@@ -1490,26 +1531,8 @@ export class StructuredSessionManager {
     const session = this.requireSession(id);
     this.interruptedWith.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
-    // 标记本会话为「用户主动停止」，让被 kill 的子进程 close / SDK abort 收尾时
-    // 走正常 idle 收尾而不是失败路径。
-    this.userStopped.add(id);
-    const child = this.pendingChildren.get(id);
-    if (child) {
-      child.kill();
-      this.pendingChildren.delete(id);
-    }
-    // SDK runner：先尝试 query.interrupt() 优雅停止，失败再走 abort。
-    // 两个都清掉避免后续重复操作。
-    const sdkQuery = this.pendingSdkQueries.get(id);
-    if (sdkQuery) {
-      void sdkQuery.interrupt().catch(() => { /* ignore */ });
-      this.pendingSdkQueries.delete(id);
-    }
-    const sdkAbort = this.pendingSdkAbort.get(id);
-    if (sdkAbort) {
-      sdkAbort.abort();
-      this.pendingSdkAbort.delete(id);
-    }
+    // Clearing activeRequestId is the generation barrier: late data/close callbacks
+    // from the cancelled runner can no longer mutate this session or a replacement turn.
     // 主动停止只是取消「当前回合」，结构化会话本身并没有结束——置为 idle 而非 stopped。
     // 这样前端不会进入"会话已结束/恢复会话"终止态，输入框保持可用，直接展示历史内容。
     const cancelled: SessionSnapshot = {
@@ -1527,7 +1550,25 @@ export class StructuredSessionManager {
       },
     };
     this.sessions.set(id, cancelled);
-    this.storage.saveSession(cancelled);
+
+    const child = this.pendingChildren.get(id);
+    if (child) {
+      child.kill();
+      this.releasePendingChild(id, child);
+    }
+    // SDK runner：先尝试 query.interrupt() 优雅停止，失败再走 abort。
+    // 两个都清掉避免后续重复操作。
+    const sdkQuery = this.pendingSdkQueries.get(id);
+    if (sdkQuery) {
+      void sdkQuery.interrupt().catch(() => { /* ignore */ });
+      this.releasePendingSdkQuery(id, sdkQuery);
+    }
+    const sdkAbort = this.pendingSdkAbort.get(id);
+    if (sdkAbort) {
+      sdkAbort.abort();
+      this.releasePendingSdkAbort(id, sdkAbort);
+    }
+    this.saveAuthoritativeSession(cancelled);
     // 仍发 "ended" 事件让各端停掉"回复中"指示 / 灵动岛，但携带的 status 是 idle。
     this.emitStructuredSnapshot(cancelled, "ended");
     return cancelled;
@@ -1535,22 +1576,24 @@ export class StructuredSessionManager {
 
   delete(id: string): void {
     const child = this.pendingChildren.get(id);
+    const sdkQuery = this.pendingSdkQueries.get(id);
+    const sdkAbort = this.pendingSdkAbort.get(id);
+    // Invalidate callback ownership before signalling the runner. Abort/kill can
+    // synchronously wake listeners in some SDK/ChildProcess implementations.
+    this.sessions.delete(id);
     if (child) {
       child.kill();
-      this.pendingChildren.delete(id);
+      this.releasePendingChild(id, child);
     }
-    const sdkQuery = this.pendingSdkQueries.get(id);
     if (sdkQuery) {
       void sdkQuery.interrupt().catch(() => { /* ignore */ });
-      this.pendingSdkQueries.delete(id);
+      this.releasePendingSdkQuery(id, sdkQuery);
     }
-    const sdkAbort = this.pendingSdkAbort.get(id);
     if (sdkAbort) {
       sdkAbort.abort();
-      this.pendingSdkAbort.delete(id);
+      this.releasePendingSdkAbort(id, sdkAbort);
     }
-    this.sessions.delete(id);
-    this.lastStreamSaveAt.delete(id);
+    this.clearStreamingCheckpoint(id);
     this.interruptedWith.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
     this.storage.deleteSession(id);
@@ -1567,6 +1610,35 @@ export class StructuredSessionManager {
       throw new Error("未找到该结构化会话。");
     }
     return session;
+  }
+
+  /** True only while this exact turn still owns the session's mutable state. */
+  private isCurrentRequest(sessionId: string, requestId: string): boolean {
+    return this.sessions.get(sessionId)?.structuredState?.activeRequestId === requestId;
+  }
+
+  private currentSessionForRequest(sessionId: string, requestId: string): SessionSnapshot | null {
+    if (!this.isCurrentRequest(sessionId, requestId)) return null;
+    return this.sessions.get(sessionId) ?? null;
+  }
+
+  /** Delete a handle only if it still belongs to the execution doing cleanup. */
+  private releasePendingChild(sessionId: string, child: ChildProcess): boolean {
+    if (this.pendingChildren.get(sessionId) !== child) return false;
+    this.pendingChildren.delete(sessionId);
+    return true;
+  }
+
+  private releasePendingSdkAbort(sessionId: string, controller: AbortController): boolean {
+    if (this.pendingSdkAbort.get(sessionId) !== controller) return false;
+    this.pendingSdkAbort.delete(sessionId);
+    return true;
+  }
+
+  private releasePendingSdkQuery(sessionId: string, query: { interrupt(): Promise<void> }): boolean {
+    if (this.pendingSdkQueries.get(sessionId) !== query) return false;
+    this.pendingSdkQueries.delete(sessionId);
+    return true;
   }
 
   private emitStructuredSnapshot(session: SessionSnapshot, eventType: "output" | "ended" = "output"): void {
@@ -1587,6 +1659,7 @@ export class StructuredSessionManager {
   }
 
   private async flushNextQueuedMessage(sessionId: string): Promise<void> {
+    if (this.disposed) return;
     const current = this.sessions.get(sessionId);
     if (!current || (current.queuedMessages?.length ?? 0) === 0) {
       return;
@@ -1603,7 +1676,7 @@ export class StructuredSessionManager {
       queuedMessages: restQueue,
     };
     this.sessions.set(sessionId, nextSession);
-    this.storage.saveSession(nextSession);
+    this.storage.updateSessionRuntimeMetadata(nextSession);
     this.emitStructuredSnapshot(nextSession);
     try {
       await this.sendMessage(sessionId, nextInput);
@@ -1617,14 +1690,14 @@ export class StructuredSessionManager {
           queuedMessages: [nextInput, ...(afterFail.queuedMessages ?? [])],
         };
         this.sessions.set(sessionId, rescued);
-        this.storage.saveSession(rescued);
+        this.storage.updateSessionRuntimeMetadata(rescued);
         this.emitStructuredSnapshot(rescued);
       }
     }
   }
 
   private emit(event: ProcessEvent): void {
-    if (this.emitEvent) {
+    if (!this.disposed && this.emitEvent) {
       this.emitEvent(event);
     }
   }
@@ -1644,49 +1717,12 @@ export class StructuredSessionManager {
   }
 
   // ---------------------------------------------------------------------------
-  // CLI argument construction
-  // ---------------------------------------------------------------------------
-  // claude CLI 的权限/系统提示 flag 由模块级 derivePermissionPolicy() +
-  // buildAppendSystemPromptParts() 派生，定义在文件顶部，与 SDK runner 共用。
-
-  private buildCodexArgs(session: SessionSnapshot): string[] {
-    const args = ["exec", "--json", "--color", "never"];
-    const shouldBypass = session.autoApprovePermissions === true || session.mode === "full-access" || session.mode === "managed";
-    if (shouldBypass) {
-      args.push("--dangerously-bypass-approvals-and-sandbox");
-    } else if (session.mode === "auto-edit" || session.mode === "agent" || session.mode === "agent-max") {
-      args.push("--sandbox", "workspace-write");
-    } else {
-      args.push("--sandbox", "read-only");
-    }
-    args.push("--skip-git-repo-check");
-    const modelChoice = session.selectedModel?.trim();
-    if (modelChoice && modelChoice !== "default") {
-      args.push("--model", modelChoice);
-    }
-    // 思考深度 → model_reasoning_effort（off → 不覆盖，standard → low，deep → medium，max → xhigh）
-    // Newer Codex CLI versions removed the old dedicated exec flag, but still
-    // accept config overrides through `-c`.
-    const reasoningEffort = thinkingEffortToCodexReasoningEffort(session.thinkingEffort);
-    if (reasoningEffort) {
-      args.push("-c", `model_reasoning_effort=${reasoningEffort}`);
-    }
-    if (session.claudeSessionId) {
-      args.push("resume", session.claudeSessionId, "-");
-    } else {
-      args.push("-");
-    }
-    return args;
-  }
-
-  // ---------------------------------------------------------------------------
   // Streaming codex exec --json execution
   // ---------------------------------------------------------------------------
 
-  private runCodexStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
-    this.userStopped.delete(sessionId);
+  private runCodexStreaming(sessionId: string, session: SessionSnapshot, prompt: string, requestId: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const args = this.buildCodexArgs(session);
+      const args = buildCodexArgs(session);
       const spawnedAt = new Date().toISOString();
       const child = spawn("codex", args, {
         cwd: session.cwd,
@@ -1720,6 +1756,7 @@ export class StructuredSessionManager {
       let lineBuf = "";
       let stderr = "";
       let emitTimer: ReturnType<typeof setTimeout> | null = null;
+      let settled = false;
       // codex 把所有错误（包括重试日志和最终失败原因）都通过 stdout 的 NDJSON 事件
       // 输出，stderr 通常是空的。我们在 processLine 里收集这些，然后在 close 中
       // 决定真正的报错文本。
@@ -1728,20 +1765,20 @@ export class StructuredSessionManager {
 
       const flushEmit = (): void => {
         if (emitTimer) {
-          clearTimeout(emitTimer);
+          this.clearStreamEmitTimer(emitTimer);
           emitTimer = null;
         }
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (!current) return;
         this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}) });
       };
 
       const scheduleEmit = (): void => {
-        if (!emitTimer) emitTimer = setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS);
+        if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
       };
 
       const syncSnapshot = (): void => {
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (!current) return;
         refreshEstimatedCodexUsage(turnState);
         const inProgressTurn: ConversationTurn = {
@@ -1771,6 +1808,7 @@ export class StructuredSessionManager {
       };
 
       const processLine = (line: string): void => {
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         const trimmed = line.trim();
         if (!trimmed) return;
         let parsed: any;
@@ -1838,6 +1876,7 @@ export class StructuredSessionManager {
       };
 
       child.stdout?.on("data", (chunk: Buffer) => {
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         const text = chunk.toString();
         this.logger?.appendStructuredStdout(sessionId, text);
         lineBuf += text;
@@ -1847,15 +1886,23 @@ export class StructuredSessionManager {
       });
 
       child.stderr?.on("data", (chunk: Buffer) => {
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         const text = chunk.toString();
         this.logger?.appendStructuredStderr(sessionId, text);
         stderr += text;
       });
 
       child.on("error", (error) => {
-        this.pendingChildren.delete(sessionId);
-        this.lastStreamSaveAt.delete(sessionId);
-        if (emitTimer) clearTimeout(emitTimer);
+        const released = this.releasePendingChild(sessionId, child);
+        if (released) this.cancelStreamingCheckpointTimer(sessionId);
+        if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+        if (settled) return;
+        if (!this.isCurrentRequest(sessionId, requestId)) {
+          settled = true;
+          resolve();
+          return;
+        }
+        settled = true;
         this.logger?.appendStructuredSpawn(sessionId, {
           kind: "codex-exec-error",
           pid: child.pid ?? null,
@@ -1875,8 +1922,15 @@ export class StructuredSessionManager {
       });
 
       child.on("close", (code, signal) => {
-        this.pendingChildren.delete(sessionId);
-        this.lastStreamSaveAt.delete(sessionId);
+        const released = this.releasePendingChild(sessionId, child);
+        if (released) this.cancelStreamingCheckpointTimer(sessionId);
+        if (settled) return;
+        if (!this.isCurrentRequest(sessionId, requestId)) {
+          if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+          settled = true;
+          resolve();
+          return;
+        }
         if (lineBuf.trim()) {
           processLine(lineBuf);
           lineBuf = "";
@@ -1893,20 +1947,19 @@ export class StructuredSessionManager {
           codexErrors,
           codexTurnFailed,
         });
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (!current) {
-          reject(new Error("Session removed during execution."));
+          settled = true;
+          resolve();
           return;
         }
         // 主动中断时（interruptedWith 里有新消息），不走失败路径
         const interruptedByUser = this.interruptedWith.has(sessionId);
         const interruptPrompt = this.interruptedWith.get(sessionId);
-        // 用户点「停止」kill 掉 codex 后会非零退出，但这不是失败——按正常 idle 收尾。
-        const userStopped = this.userStopped.delete(sessionId);
         // codex 把模型/网络/沙箱等错误写到 stdout 的 NDJSON 流（type: error / turn.failed），
         // 而不是 stderr。我们以 turn.failed 的 message 为准，其次是最后一个 error 事件。
         const codexFailed = codexTurnFailed !== null;
-        if ((codexFailed || (code !== 0 && code !== null) || signal) && !interruptedByUser && !userStopped) {
+        if ((codexFailed || (code !== 0 && code !== null) || signal) && !interruptedByUser) {
           const errorText = this.formatStructuredExitError("codex exec", code, signal, {
             stderr,
             primary: codexTurnFailed,
@@ -1915,10 +1968,11 @@ export class StructuredSessionManager {
           const exitForSnapshot = typeof code === "number" ? code : 1;
           const failed = this.finishStructuredFailure(current, exitForSnapshot, errorText, turnState);
           this.sessions.set(sessionId, failed);
-          this.storage.saveSession(failed);
+          this.saveAuthoritativeSession(failed);
           this.emitStructuredSnapshot(failed);
           this.emitStructuredSnapshot(failed, "ended");
-          reject(new Error(errorText));
+          settled = true;
+          reject(new PersistedStructuredRunnerError(errorText));
           return;
         }
         const msgs = this.buildCompletedAssistantMessages(current, turnState);
@@ -1943,7 +1997,7 @@ export class StructuredSessionManager {
           },
         };
         this.sessions.set(sessionId, finished);
-        this.storage.saveSession(finished);
+        this.saveAuthoritativeSession(finished);
         this.emitStructuredSnapshot(finished);
         if (!keepRunning) {
           this.emitStructuredSnapshot(finished, "ended");
@@ -1955,133 +2009,25 @@ export class StructuredSessionManager {
           // 注意：被保留的 queuedMessages 不需要在这里主动 flush，重发的
           // interruptPrompt 跑完会自然触发 flushNextQueuedMessage。
           this.preserveQueueOnInterrupt.delete(sessionId);
+          settled = true;
           resolve();
           setImmediate(() => {
             this.sendMessage(sessionId, interruptPrompt).catch((err) => {
               console.error("[WAND] codex interrupt-and-send failed:", err);
-              const afterFail = this.sessions.get(sessionId);
-              if (afterFail) {
-                const recovered: SessionSnapshot = {
-                  ...afterFail,
-                  status: "idle",
-                  exitCode: 0,
-                  endedAt: new Date().toISOString(),
-                  structuredState: {
-                    ...(afterFail.structuredState as StructuredSessionState),
-                    inFlight: false,
-                    activeRequestId: null,
-                  },
-                };
-                this.sessions.set(sessionId, recovered);
-                this.storage.saveSession(recovered);
-                this.emitStructuredSnapshot(recovered);
-              }
             });
           });
           return;
         }
+        settled = true;
         resolve();
         setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
       });
     });
   }
 
-  private buildOpenCodeArgs(session: SessionSnapshot): string[] {
-    const args = ["run", "--format", "json", "--thinking"];
-    const modelChoice = session.selectedModel?.trim();
-    if (modelChoice && modelChoice !== "default") {
-      args.push("--model", modelChoice);
-    }
-    const variant = thinkingEffortToOpenCodeVariant(session.thinkingEffort);
-    if (variant) args.push("--variant", variant);
-    if (session.autoApprovePermissions === true || session.mode === "full-access" || session.mode === "managed" || session.mode === "auto-edit") {
-      args.push("--dangerously-skip-permissions");
-    }
-    if (session.claudeSessionId) {
-      args.push("--session", session.claudeSessionId);
-    }
-    return args;
-  }
-
-  private openCodeToolName(name: string): string {
-    const mapped: Record<string, string> = {
-      bash: "Bash",
-      shell: "Bash",
-      read: "Read",
-      edit: "Edit",
-      write: "Write",
-      glob: "Glob",
-      grep: "Grep",
-      webfetch: "WebFetch",
-      websearch: "WebSearch",
-      todowrite: "TodoWrite",
-      task: "Task",
-      skill: "Skill",
-    };
-    return mapped[name.toLowerCase()] ?? `OpenCode/${name}`;
-  }
-
-  private applyOpenCodeEvent(turnState: StreamingTurnState, event: Record<string, unknown>): string | null {
-    if (typeof event.sessionID === "string" && event.sessionID) turnState.sessionId = event.sessionID;
-    const type = typeof event.type === "string" ? event.type : "";
-    const part = asRecord(event.part);
-    if (!part) {
-      if (type === "error") return this.extractCodexText(event.error) || "OpenCode run failed";
-      return null;
-    }
-
-    if (type === "text" && typeof part.text === "string" && part.text.trim()) {
-      turnState.blocks.push({ type: "text", text: part.text });
-      turnState.result += (turnState.result ? "\n" : "") + part.text;
-      return null;
-    }
-    if (type === "reasoning" && typeof part.text === "string" && part.text.trim()) {
-      turnState.blocks.push({ type: "thinking", thinking: part.text });
-      return null;
-    }
-    if (type === "tool_use") {
-      const state = asRecord(part.state) ?? {};
-      const tool = typeof part.tool === "string" && part.tool ? part.tool : "tool";
-      const toolId = typeof part.callID === "string" && part.callID
-        ? part.callID
-        : typeof part.id === "string" && part.id
-          ? part.id
-          : randomUUID();
-      const input = asRecord(state.input) ?? {};
-      turnState.blocks.push({
-        type: "tool_use",
-        id: toolId,
-        name: this.openCodeToolName(tool),
-        description: typeof state.title === "string" ? state.title : undefined,
-        input,
-      });
-      const failed = state.status === "error";
-      const content = failed
-        ? (typeof state.error === "string" ? state.error : "OpenCode tool failed")
-        : (typeof state.output === "string" ? state.output : "");
-      turnState.blocks.push({ type: "tool_result", tool_use_id: toolId, content, is_error: failed });
-      return null;
-    }
-    if (type === "step_finish") {
-      const tokens = asRecord(part.tokens);
-      const cache = asRecord(tokens?.cache);
-      const previous = turnState.usage ?? {};
-      turnState.usage = {
-        inputTokens: (previous.inputTokens ?? 0) + (typeof tokens?.input === "number" ? tokens.input : 0),
-        outputTokens: (previous.outputTokens ?? 0) + (typeof tokens?.output === "number" ? tokens.output : 0),
-        reasoningOutputTokens: (previous.reasoningOutputTokens ?? 0) + (typeof tokens?.reasoning === "number" ? tokens.reasoning : 0),
-        cacheReadInputTokens: (previous.cacheReadInputTokens ?? 0) + (typeof cache?.read === "number" ? cache.read : 0),
-        cacheCreationInputTokens: (previous.cacheCreationInputTokens ?? 0) + (typeof cache?.write === "number" ? cache.write : 0),
-        totalCostUsd: (previous.totalCostUsd ?? 0) + (typeof part.cost === "number" ? part.cost : 0),
-      };
-    }
-    return null;
-  }
-
-  private runOpenCodeStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
-    this.userStopped.delete(sessionId);
+  private runOpenCodeStreaming(sessionId: string, session: SessionSnapshot, prompt: string, requestId: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const args = this.buildOpenCodeArgs(session);
+      const args = buildOpenCodeArgs(session);
       const spawnedAt = new Date().toISOString();
       const child = spawn("opencode", args, {
         cwd: session.cwd,
@@ -2115,9 +2061,10 @@ export class StructuredSessionManager {
       let stderr = "";
       let primaryError: string | null = null;
       let emitTimer: ReturnType<typeof setTimeout> | null = null;
+      let settled = false;
 
       const syncSnapshot = (): void => {
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (!current) return;
         const turn: ConversationTurn = {
           role: "assistant",
@@ -2137,27 +2084,29 @@ export class StructuredSessionManager {
         this.saveStreamingSnapshot(patched);
       };
       const flushEmit = (): void => {
-        if (emitTimer) clearTimeout(emitTimer);
+        if (emitTimer) this.clearStreamEmitTimer(emitTimer);
         emitTimer = null;
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (current) this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}) });
       };
       const scheduleEmit = (): void => {
-        if (!emitTimer) emitTimer = setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS);
+        if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
       };
       const processLine = (line: string): void => {
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         const trimmed = line.trim();
         if (!trimmed) return;
         let event: Record<string, unknown>;
         try { event = JSON.parse(trimmed) as Record<string, unknown>; } catch { return; }
         this.logger?.appendStreamEvent(sessionId, event);
-        const error = this.applyOpenCodeEvent(turnState, event);
+        const error = applyOpenCodeEvent(turnState, event);
         if (error) primaryError = error;
         syncSnapshot();
         scheduleEmit();
       };
 
       child.stdout?.on("data", (chunk: Buffer) => {
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         const text = chunk.toString();
         this.logger?.appendStructuredStdout(sessionId, text);
         lineBuf += text;
@@ -2166,14 +2115,22 @@ export class StructuredSessionManager {
         for (const line of lines) processLine(line);
       });
       child.stderr?.on("data", (chunk: Buffer) => {
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         const text = chunk.toString();
         this.logger?.appendStructuredStderr(sessionId, text);
         stderr += text;
       });
       child.on("error", (error) => {
-        this.pendingChildren.delete(sessionId);
-        this.lastStreamSaveAt.delete(sessionId);
-        if (emitTimer) clearTimeout(emitTimer);
+        const released = this.releasePendingChild(sessionId, child);
+        if (released) this.cancelStreamingCheckpointTimer(sessionId);
+        if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+        if (settled) return;
+        if (!this.isCurrentRequest(sessionId, requestId)) {
+          settled = true;
+          resolve();
+          return;
+        }
+        settled = true;
         const nodeError = error as NodeJS.ErrnoException;
         const hint = nodeError.code === "ENOENT"
           ? "（PATH 中找不到 opencode；请安装 opencode-ai，或重跑 `wand service:install` 刷新服务 PATH）"
@@ -2181,29 +2138,37 @@ export class StructuredSessionManager {
         reject(new Error(`opencode run 启动失败：${error.message}${hint}`));
       });
       child.on("close", (code, signal) => {
-        this.pendingChildren.delete(sessionId);
-        this.lastStreamSaveAt.delete(sessionId);
+        const released = this.releasePendingChild(sessionId, child);
+        if (released) this.cancelStreamingCheckpointTimer(sessionId);
+        if (settled) return;
+        if (!this.isCurrentRequest(sessionId, requestId)) {
+          if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+          settled = true;
+          resolve();
+          return;
+        }
         if (lineBuf.trim()) processLine(lineBuf);
         flushEmit();
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (!current) {
-          reject(new Error("Session removed during execution."));
+          settled = true;
+          resolve();
           return;
         }
         const interruptedByUser = this.interruptedWith.has(sessionId);
         const interruptPrompt = this.interruptedWith.get(sessionId);
-        const userStopped = this.userStopped.delete(sessionId);
-        if ((primaryError || (code !== 0 && code !== null) || signal) && !interruptedByUser && !userStopped) {
+        if ((primaryError || (code !== 0 && code !== null) || signal) && !interruptedByUser) {
           const legacyHint = /unknown command|unknown flag|No help topic for 'run'/i.test(stderr)
             ? "\n检测到旧版 OpenCode CLI；请卸载 0.0.x 旧包并安装 `opencode-ai@latest`。"
             : "";
           const errorText = this.formatStructuredExitError("opencode run", code, signal, { stderr, primary: primaryError }) + legacyHint;
           const failed = this.finishStructuredFailure(current, typeof code === "number" ? code : 1, errorText, turnState);
           this.sessions.set(sessionId, failed);
-          this.storage.saveSession(failed);
+          this.saveAuthoritativeSession(failed);
           this.emitStructuredSnapshot(failed);
           this.emitStructuredSnapshot(failed, "ended");
-          reject(new Error(errorText));
+          settled = true;
+          reject(new PersistedStructuredRunnerError(errorText));
           return;
         }
         const messages = this.buildCompletedAssistantMessages(current, turnState);
@@ -2228,12 +2193,13 @@ export class StructuredSessionManager {
           },
         };
         this.sessions.set(sessionId, finished);
-        this.storage.saveSession(finished);
+        this.saveAuthoritativeSession(finished);
         this.emitStructuredSnapshot(finished);
         if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
         if (interruptPrompt) {
           this.interruptedWith.delete(sessionId);
           this.preserveQueueOnInterrupt.delete(sessionId);
+          settled = true;
           resolve();
           setImmediate(() => {
             this.sendMessage(sessionId, interruptPrompt).catch((error) => {
@@ -2242,6 +2208,7 @@ export class StructuredSessionManager {
           });
           return;
         }
+        settled = true;
         resolve();
         setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
       });
@@ -2263,48 +2230,14 @@ export class StructuredSessionManager {
    * - Root: --permission-mode acceptEdits + --allowedTools (extends approval
    *   outside CWD). stdin is always "ignore" — no ACP bidirectional control.
    */
-  private runClaudeStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
-    this.userStopped.delete(sessionId);
+  private runClaudeStreaming(sessionId: string, session: SessionSnapshot, prompt: string, requestId: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const args = ["-p", "--verbose", "--output-format", "stream-json"];
-
-      // 权限策略：决策规则与 SDK runner 共享 derivePermissionPolicy()，CLI 这边把
-      // 结果转成对应的 flag。--allowedTools 是 commander 的 variadic（<tools...>），
-      // 紧跟其后的所有非 flag 形 token 都会被吞进工具列表，因此后面任何位置参数
-      // 都得是 -- 开头的 flag——下面追加 --append-system-prompt / --model / --resume
-      // 都满足这个条件。
       const permPolicy = derivePermissionPolicy(session.mode, session.autoApprovePermissions ?? false, session.cwd);
-      if (permPolicy.permissionMode !== "default") {
-        args.push("--permission-mode", permPolicy.permissionMode);
-      }
-      if (permPolicy.allowedTools) {
-        args.push("--allowedTools", ...permPolicy.allowedTools);
-      }
-
-      // 追加系统提示词（托管模式自主决策 + 语言偏好），文本与 SDK runner 共享。
-      for (const part of buildAppendSystemPromptParts(this.config.language, session.mode)) {
-        args.push("--append-system-prompt", part);
-      }
-
-      const modelChoice = session.selectedModel?.trim();
-      if (modelChoice && modelChoice !== "default") {
-        args.push("--model", modelChoice);
-      }
-      const claudeEffort = thinkingEffortToClaudeCliEffort(session.thinkingEffort);
-      if (claudeEffort) {
-        args.push("--effort", claudeEffort);
-      }
-
-      // 托管模式：禁用 AskUserQuestion，让 agent 自己拍板，不要等用户决策。
-      // 非托管模式：保留工具，靠 processLine 检测后主动 kill child 触发"中断+续接"流程。
       const isManaged = session.mode === "managed";
-      if (isManaged) {
-        args.push("--disallowedTools", "AskUserQuestion");
-      }
-
-      if (session.claudeSessionId) {
-        args.push("--resume", session.claudeSessionId);
-      }
+      const args = buildClaudeCliArgs(session, {
+        permissionPolicy: permPolicy,
+        systemPromptParts: buildAppendSystemPromptParts(this.config.language, session.mode),
+      });
 
       // 通过 stdin 传 prompt，避免被 --allowedTools / --disallowedTools 这类
       // variadic 参数贪婪吞掉（commander 的 <tools...> 会一直吃 positional 直到
@@ -2470,6 +2403,7 @@ export class StructuredSessionManager {
 
       // Debounce output events to avoid flooding the WebSocket.
       let emitTimer: ReturnType<typeof setTimeout> | null = null;
+      let settled = false;
 
       // 当 Claude 在非托管模式调用 AskUserQuestion 时，stdin 关闭导致它会 hang 等
       // tool_result。我们检测到后主动 kill child，让它顺利退出，UI 把 tool_use 卡片
@@ -2478,10 +2412,10 @@ export class StructuredSessionManager {
 
       const flushEmit = (): void => {
         if (emitTimer) {
-          clearTimeout(emitTimer);
+          this.clearStreamEmitTimer(emitTimer);
           emitTimer = null;
         }
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (!current) return;
         this.emit({
           type: "output",
@@ -2492,13 +2426,13 @@ export class StructuredSessionManager {
 
       const scheduleEmit = (): void => {
         if (!emitTimer) {
-          emitTimer = setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS);
+          emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
         }
       };
 
       /** Update the session snapshot with the current in-progress assistant turn. */
       const syncSnapshot = (): void => {
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (!current) return;
         const inProgressTurn: ConversationTurn = {
           role: "assistant",
@@ -2540,15 +2474,16 @@ export class StructuredSessionManager {
         if (typeof sid !== "string" || !sid) return;
         if (turnState.sessionId === sid) return;
         turnState.sessionId = sid;
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (current && current.claudeSessionId !== sid) {
           const patched: SessionSnapshot = { ...current, claudeSessionId: sid };
           this.sessions.set(sessionId, patched);
-          this.saveStreamingSnapshot(patched);
+          this.saveStreamingSnapshot(patched, { metadata: true });
         }
       };
 
       const processLine = (line: string): void => {
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         const trimmed = line.trim();
         if (!trimmed) return;
 
@@ -2655,6 +2590,7 @@ export class StructuredSessionManager {
       let lastRawStdoutChunk = "";
 
       child.stdout?.on("data", (chunk: Buffer) => {
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         const text = chunk.toString();
         this.logger?.appendStructuredStdout(sessionId, text);
         const trimmed = text.trim();
@@ -2669,15 +2605,23 @@ export class StructuredSessionManager {
       });
 
       child.stderr?.on("data", (chunk: Buffer) => {
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         const text = chunk.toString();
         this.logger?.appendStructuredStderr(sessionId, text);
         stderr += text;
       });
 
       child.on("error", (error) => {
-        this.pendingChildren.delete(sessionId);
-        this.lastStreamSaveAt.delete(sessionId);
-        if (emitTimer) clearTimeout(emitTimer);
+        const released = this.releasePendingChild(sessionId, child);
+        if (released) this.cancelStreamingCheckpointTimer(sessionId);
+        if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+        if (settled) return;
+        if (!this.isCurrentRequest(sessionId, requestId)) {
+          settled = true;
+          resolve();
+          return;
+        }
+        settled = true;
         this.logger?.appendStructuredSpawn(sessionId, {
           kind: "claude-print-error",
           pid: child.pid ?? null,
@@ -2694,8 +2638,15 @@ export class StructuredSessionManager {
       });
 
       child.on("close", (code, signal) => {
-        this.pendingChildren.delete(sessionId);
-        this.lastStreamSaveAt.delete(sessionId);
+        const released = this.releasePendingChild(sessionId, child);
+        if (released) this.cancelStreamingCheckpointTimer(sessionId);
+        if (settled) return;
+        if (!this.isCurrentRequest(sessionId, requestId)) {
+          if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+          settled = true;
+          resolve();
+          return;
+        }
         this.logger?.appendStructuredSpawn(sessionId, {
           kind: "claude-print-close",
           pid: child.pid ?? null,
@@ -2715,9 +2666,10 @@ export class StructuredSessionManager {
         flushEmit();
 
         // Finalize the session snapshot.
-        const current = this.sessions.get(sessionId);
+        const current = this.currentSessionForRequest(sessionId, requestId);
         if (!current) {
-          reject(new Error("Session removed during execution."));
+          settled = true;
+          resolve();
           return;
         }
 
@@ -2725,10 +2677,8 @@ export class StructuredSessionManager {
         // 可能以非零 exit code 退出（内部 handler 调了 exit(1)）。这种情况属于正常
         // 中断流程，不应走失败路径——后续 interruptedWith 逻辑会发送新消息。
         const interruptedByUser = this.interruptedWith.has(sessionId);
-        // 用户点「停止」kill 掉 claude -p 后会非零退出，但这不是失败——按正常 idle 收尾。
-        const userStopped = this.userStopped.delete(sessionId);
         const failedExit = (code !== null && code !== 0) || signal !== null;
-        if (failedExit && !interruptedByUser && !userStopped) {
+        if (failedExit && !interruptedByUser && !killedForAskUserQuestion) {
           const errorText = this.formatStructuredExitError("claude -p", code, signal, {
             stderr,
             // claude -p 没有 codex 那种独立的 turn.failed 事件，所以 primary 留空；
@@ -2767,10 +2717,11 @@ export class StructuredSessionManager {
             },
           };
           this.sessions.set(sessionId, failed);
-          this.storage.saveSession(failed);
+          this.saveAuthoritativeSession(failed);
           this.emitStructuredSnapshot(failed);
           this.emitStructuredSnapshot(failed, "ended");
-          reject(new Error(errorText));
+          settled = true;
+          reject(new PersistedStructuredRunnerError(errorText));
           return;
         }
 
@@ -2800,17 +2751,11 @@ export class StructuredSessionManager {
           },
         };
         this.sessions.set(sessionId, finished);
-        this.storage.saveSession(finished);
+        this.saveAuthoritativeSession(finished);
 
         this.emitStructuredSnapshot(finished);
         if (!keepRunning) {
           this.emitStructuredSnapshot(finished, "ended");
-        }
-
-        // 等待用户回答 AskUserQuestion 时，跳过后续自续接和队列推进。
-        if (killedForAskUserQuestion) {
-          resolve();
-          return;
         }
 
         // 用户中断当前回复：保存部分回复后立即发送新消息。
@@ -2821,30 +2766,25 @@ export class StructuredSessionManager {
           // 注意：被保留的 queuedMessages 不需要在这里主动 flush，重发的
           // interruptPrompt 跑完会自然触发 flushNextQueuedMessage。
           this.preserveQueueOnInterrupt.delete(sessionId);
+          settled = true;
           resolve();
           setImmediate(() => {
             this.sendMessage(sessionId, interruptPrompt).catch((err) => {
               console.error("[WAND] interrupt-and-send failed:", err);
-              // 续接失败：把状态回滚到 idle，让用户可以重新输入而不是卡在 running 状态
-              const afterFail = this.sessions.get(sessionId);
-              if (afterFail) {
-                const recovered: SessionSnapshot = {
-                  ...afterFail,
-                  status: "idle",
-                  exitCode: 0,
-                  endedAt: new Date().toISOString(),
-                  structuredState: {
-                    ...(afterFail.structuredState as StructuredSessionState),
-                    inFlight: false,
-                    activeRequestId: null,
-                  },
-                };
-                this.sessions.set(sessionId, recovered);
-                this.storage.saveSession(recovered);
-                this.emitStructuredSnapshot(recovered);
-              }
             });
           });
+          return;
+        }
+
+        if (killedForAskUserQuestion) {
+          settled = true;
+          resolve();
+          // An answer can arrive after AskUserQuestion triggered SIGTERM but
+          // before close finalized the turn. It was queued while inFlight; now
+          // advance it normally so it becomes the matching tool_result.
+          if ((finished.queuedMessages?.length ?? 0) > 0) {
+            setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
+          }
           return;
         }
 
@@ -2856,6 +2796,7 @@ export class StructuredSessionManager {
           (b): b is ContentBlock & { type: "tool_use" } => b.type === "tool_use",
         );
         if (lastToolUse && lastToolUse.name === "ExitPlanMode" && turnState.sessionId) {
+          settled = true;
           resolve();
           setImmediate(() => {
             this.sendMessage(sessionId, "Plan approved. Proceed with the implementation.").catch((err) => {
@@ -2865,6 +2806,7 @@ export class StructuredSessionManager {
           return;
         }
 
+        settled = true;
         resolve();
         setImmediate(() => {
           void this.flushNextQueuedMessage(sessionId);
@@ -2886,8 +2828,7 @@ export class StructuredSessionManager {
    * payloads for incremental text/thinking/tool_use updates, followed by a final
    * SDKAssistantMessage with the authoritative complete content.
    */
-  private async runClaudeSdkStreaming(sessionId: string, session: SessionSnapshot, prompt: string): Promise<void> {
-    this.userStopped.delete(sessionId);
+  private async runClaudeSdkStreaming(sessionId: string, session: SessionSnapshot, prompt: string, requestId: string): Promise<void> {
     const abortController = new AbortController();
     this.pendingSdkAbort.set(sessionId, abortController);
 
@@ -2902,13 +2843,7 @@ export class StructuredSessionManager {
     // SDK 默认会把整个 process.env 透传给 claude 子进程；这里显式按 inheritEnv 配置组装，
     // 否则关闭"继承环境变量"开关时 SDK 路径会被静默忽略。
     const sdkEnv = buildChildEnv(this.config.inheritEnv !== false);
-    // 思考深度：off → 显式禁用 thinking，其他 → 给一个固定 budget。
-    // SDK 类型用驼峰 budgetTokens（API 层是 budget_tokens，SDK 内部已做转换）。
-    const sdkThinkingBudget = thinkingEffortToSdkBudget(session.thinkingEffort);
-    const sdkThinking: { type: "enabled"; budgetTokens: number } | { type: "disabled" } =
-      sdkThinkingBudget > 0
-        ? { type: "enabled", budgetTokens: sdkThinkingBudget }
-        : { type: "disabled" };
+    const sdkThinking = buildClaudeSdkThinking(session.thinkingEffort);
 
     const sdkOptions: SdkOptions = {
       cwd: session.cwd,
@@ -3019,14 +2954,14 @@ export class StructuredSessionManager {
     let emitTimer: ReturnType<typeof setTimeout> | null = null;
 
     const flushEmit = (): void => {
-      if (emitTimer) { clearTimeout(emitTimer); emitTimer = null; }
-      const current = this.sessions.get(sessionId);
+      if (emitTimer) { this.clearStreamEmitTimer(emitTimer); emitTimer = null; }
+      const current = this.currentSessionForRequest(sessionId, requestId);
       if (!current) return;
       this.emit({ type: "output", sessionId, data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}) });
     };
 
     const scheduleEmit = (): void => {
-      if (!emitTimer) emitTimer = setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS);
+      if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
     };
 
     // Rebuild ContentBlock[] from finalized history + the in-progress streaming map.
@@ -3066,7 +3001,7 @@ export class StructuredSessionManager {
     };
 
     const syncSnapshot = (): void => {
-      const current = this.sessions.get(sessionId);
+      const current = this.currentSessionForRequest(sessionId, requestId);
       if (!current) return;
       const inProgressTurn: ConversationTurn = {
         role: "assistant",
@@ -3103,12 +3038,18 @@ export class StructuredSessionManager {
       spawnedAt,
     });
 
-    const queryHandle = sdkQuery({ prompt: singleShotPrompt(), options: sdkOptions });
+    let queryHandle: ReturnType<typeof sdkQuery>;
+    try {
+      queryHandle = this.sdkQueryFactory({ prompt: singleShotPrompt(), options: sdkOptions });
+    } catch (error) {
+      this.releasePendingSdkAbort(sessionId, abortController);
+      throw error;
+    }
     this.pendingSdkQueries.set(sessionId, queryHandle);
 
     try {
       for await (const msg of queryHandle as AsyncIterable<SDKMessage>) {
-        if (abortController.signal.aborted) break;
+        if (abortController.signal.aborted || !this.isCurrentRequest(sessionId, requestId)) break;
 
         // 同 CLI runner 的关键修复：从任何带 session_id 的 SDK 消息（system / assistant /
         // user / result）即时捕获并落库。AskUserQuestion 的 interrupt 发生在 assistant
@@ -3117,11 +3058,11 @@ export class StructuredSessionManager {
         const msgSessionId = (msg as { session_id?: unknown }).session_id;
         if (typeof msgSessionId === "string" && msgSessionId && turnState.sessionId !== msgSessionId) {
           turnState.sessionId = msgSessionId;
-          const cur = this.sessions.get(sessionId);
+          const cur = this.currentSessionForRequest(sessionId, requestId);
           if (cur && cur.claudeSessionId !== msgSessionId) {
             const patched: SessionSnapshot = { ...cur, claudeSessionId: msgSessionId };
             this.sessions.set(sessionId, patched);
-            this.saveStreamingSnapshot(patched);
+            this.saveStreamingSnapshot(patched, { metadata: true });
           }
         }
 
@@ -3282,10 +3223,11 @@ export class StructuredSessionManager {
       // AbortError from abortController.abort() is intentional — fall through to finish logic
       const isAbort = abortController.signal.aborted || (err instanceof Error && err.name === "AbortError");
       if (!isAbort) {
-        this.pendingSdkAbort.delete(sessionId);
-        this.pendingSdkQueries.delete(sessionId);
-        this.lastStreamSaveAt.delete(sessionId);
-        if (emitTimer) clearTimeout(emitTimer);
+        const releasedAbort = this.releasePendingSdkAbort(sessionId, abortController);
+        const releasedQuery = this.releasePendingSdkQuery(sessionId, queryHandle);
+        if (releasedAbort || releasedQuery) this.cancelStreamingCheckpointTimer(sessionId);
+        if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+        if (!this.isCurrentRequest(sessionId, requestId)) return;
         this.logger?.appendStructuredSpawn(sessionId, {
           kind: "claude-sdk-error",
           spawnedAt,
@@ -3297,16 +3239,15 @@ export class StructuredSessionManager {
     }
 
     // Cleanup
-    this.pendingSdkAbort.delete(sessionId);
-    this.pendingSdkQueries.delete(sessionId);
-    this.lastStreamSaveAt.delete(sessionId);
-    // SDK abort 收尾本就走 idle（不产生失败串），这里只是顺手清掉用户停止标记避免泄漏。
-    this.userStopped.delete(sessionId);
-    if (emitTimer) clearTimeout(emitTimer);
+    const releasedAbort = this.releasePendingSdkAbort(sessionId, abortController);
+    const releasedQuery = this.releasePendingSdkQuery(sessionId, queryHandle);
+    if (releasedAbort || releasedQuery) this.cancelStreamingCheckpointTimer(sessionId);
+    if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+    if (!this.isCurrentRequest(sessionId, requestId)) return;
     flushEmit();
 
-    const current = this.sessions.get(sessionId);
-    if (!current) throw new Error("Session removed during execution.");
+    const current = this.currentSessionForRequest(sessionId, requestId);
+    if (!current) return;
 
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: "claude-sdk-close",
@@ -3340,11 +3281,9 @@ export class StructuredSessionManager {
       },
     };
     this.sessions.set(sessionId, finished);
-    this.storage.saveSession(finished);
+    this.saveAuthoritativeSession(finished);
     this.emitStructuredSnapshot(finished);
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
-
-    if (killedForAskUserQuestion) return;
 
     if (interruptPrompt) {
       this.interruptedWith.delete(sessionId);
@@ -3353,25 +3292,15 @@ export class StructuredSessionManager {
       setImmediate(() => {
         this.sendMessage(sessionId, interruptPrompt).catch((err) => {
           console.error("[WAND] sdk interrupt-and-send failed:", err);
-          const afterFail = this.sessions.get(sessionId);
-          if (afterFail) {
-            const recovered: SessionSnapshot = {
-              ...afterFail,
-              status: "idle",
-              exitCode: 0,
-              endedAt: new Date().toISOString(),
-              structuredState: {
-                ...(afterFail.structuredState as StructuredSessionState),
-                inFlight: false,
-                activeRequestId: null,
-              },
-            };
-            this.sessions.set(sessionId, recovered);
-            this.storage.saveSession(recovered);
-            this.emitStructuredSnapshot(recovered);
-          }
         });
       });
+      return;
+    }
+
+    if (killedForAskUserQuestion) {
+      if ((finished.queuedMessages?.length ?? 0) > 0) {
+        setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
+      }
       return;
     }
 

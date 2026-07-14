@@ -1,4 +1,5 @@
 import { state, readStoredBoolean, writeStoredBoolean, configPath } from "./state";
+import { mergeWindowedMessages } from "./message-reconciliation";
 import { t, iconSvg } from "./i18n";
 import { escapeHtml, formatElapsedShort, refreshTailMarqueePaths, renderTailMarqueePath, setTailMarqueePathText } from "./utils";
 import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender, shortCommand } from "./chat-render";
@@ -639,7 +640,16 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           var m = models[i];
           if (m.id === "default") continue;
           var label = m.label || m.id;
-          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === normalized ? " selected" : "") + '>' + escapeHtml(label) + '</option>';
+          var suffix = getProviderForSession(session) === "claude"
+            ? m.availability === "verified"
+              ? " · 已验证"
+              : m.availability === "stale"
+                ? " · 待刷新"
+                : m.source === "models-api"
+                  ? " · API 候选"
+                  : " · 候选"
+            : "";
+          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === normalized ? " selected" : "") + '>' + escapeHtml(label + suffix) + '</option>';
         }
         if (normalized && !models.some(function(m) { return m.id === normalized; })) {
           html += '<option value="' + escapeHtml(normalized) + '" selected>' + escapeHtml(normalized) + '（自定义）</option>';
@@ -647,7 +657,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         return html;
       }
 
-      // model 选项 raw 版：空值显示 "default"，其它直接用 raw id（不带"（自定义）"等后缀）。
+      // Raw 选项优先显示模型 ID，并以简短状态标识候选的验证状态。
       export function renderChatModelOptionsRaw(selected, session) {
         var models = getModelsForCurrentProvider(session);
         var normalized = selected === "default" ? "" : (selected || "");
@@ -655,7 +665,16 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         for (var i = 0; i < models.length; i++) {
           var m = models[i];
           if (m.id === "default") continue;
-          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === normalized ? " selected" : "") + '>' + escapeHtml(m.id) + '</option>';
+          var rawSuffix = getProviderForSession(session) === "claude"
+            ? m.availability === "verified"
+              ? " · verified"
+              : m.availability === "stale"
+                ? " · stale"
+                : m.source === "models-api"
+                  ? " · API candidate"
+                  : " · candidate"
+            : "";
+          html += '<option value="' + escapeHtml(m.id) + '"' + (m.id === normalized ? " selected" : "") + '>' + escapeHtml(m.id + rawSuffix) + '</option>';
         }
         if (normalized && !models.some(function(m) { return m.id === normalized; })) {
           html += '<option value="' + escapeHtml(normalized) + '" selected>' + escapeHtml(normalized) + '</option>';
@@ -834,7 +853,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               updateSettingsDefaultModelSelect(data);
               syncCommitModelProvider(false);
               if (typeof showToast === "function") {
-                showToast("模型列表已刷新" + (data.claudeVersion ? "（claude " + data.claudeVersion + "）" : ""), "success");
+                var verifiedCount = data.models.filter(function(model) { return model.availability === "verified"; }).length;
+                var message = "模型列表已刷新" + (data.claudeVersion ? "（claude " + data.claudeVersion + "）" : "");
+                if (verifiedCount) message += "；已验证 " + verifiedCount + " 个";
+                showToast(message, "success");
               }
             }
             return data;
@@ -1021,7 +1043,15 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           return;
         }
         if (known) {
-          status.textContent = "已检测到";
+          if (known.availability === "verified") {
+            status.textContent = "已由 Claude Code 验证";
+          } else if (known.availability === "stale") {
+            status.textContent = "验证记录待刷新";
+          } else if (known.source === "models-api") {
+            status.textContent = "API 候选，尚未验证";
+          } else {
+            status.textContent = "已检测到，尚未验证";
+          }
           status.classList.add("is-known");
           return;
         }
@@ -1054,7 +1084,16 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           if (model.id === value) exactMatch = true;
           var label = model.label || model.id;
           if (query && model.id.toLowerCase().indexOf(query) === -1 && label.toLowerCase().indexOf(query) === -1) continue;
-          rows.push({ value: model.id, label: label, meta: label === model.id ? "已检测模型" : model.id, custom: false });
+          var meta = provider !== "claude"
+            ? (label === model.id ? "已检测模型" : model.id)
+            : model.availability === "verified"
+              ? "已由 Claude Code 验证"
+              : model.availability === "stale"
+                ? "验证记录待刷新"
+                : model.source === "models-api"
+                  ? "API 候选，尚未验证"
+                  : model.note || "尚未验证";
+          rows.push({ value: model.id, label: label, meta: meta, custom: false });
         }
 
         var defaultLabel = provider === "codex" ? "跟随 Codex 默认" : provider === "opencode" ? "跟随 OpenCode 默认" : "跟随 Claude Code 默认";
@@ -1491,27 +1530,6 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
         if (kindHint) kindHint.textContent = getSessionKindHint(sessionKind);
         if (modeHint) modeHint.textContent = getToolModeHint(tool, state.modeValue);
-      }
-
-      // 窗口化合并：incoming.messages 是完整历史的「最近一窗」（带 offset/total）。
-      // 约束同 iOS：空不覆盖非空；保留本地已翻页加载的、比该窗口更早的前缀。
-      export function mergeWindowedMessages(prev, incoming, offset, total) {
-        var snapOffset = offset || 0;
-        var snapTotal = (typeof total === "number") ? total : Math.max(snapOffset + incoming.length, incoming.length);
-        var prevMsgs = (prev && Array.isArray(prev.messages)) ? prev.messages : [];
-        var prevOffset = (prev && typeof prev.messageOffset === "number") ? prev.messageOffset : 0;
-        if (incoming.length === 0 && prevMsgs.length > 0 && snapTotal === 0) {
-          return { messages: prevMsgs, messageOffset: prevOffset, messageTotal: (prev && prev.messageTotal) || prevMsgs.length };
-        }
-        if (prevMsgs.length === 0) {
-          return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
-        }
-        if (prevOffset <= snapOffset) {
-          var keep = Math.min(Math.max(snapOffset - prevOffset, 0), prevMsgs.length);
-          var merged = prevMsgs.slice(0, keep).concat(incoming);
-          return { messages: merged, messageOffset: prevOffset, messageTotal: Math.max(snapTotal, prevOffset + merged.length) };
-        }
-        return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
       }
 
       export function updateSessionSnapshot(snapshot) {

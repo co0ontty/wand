@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { runPush, runQuickCommit } from "../src/git-quick-commit.js";
+import { getGitStatusAsync, runPush, runQuickCommit } from "../src/git-quick-commit.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -135,6 +135,30 @@ test("runPush publishes the parent after the submodule is available remotely", a
     assert.equal(remoteHasRef(subRemote, "refs/tags/v1.0.0"), true);
     assert.equal(remoteHasRef(parentRemote, "refs/heads/master"), true);
     assert.equal(remoteHasRef(parentRemote, "refs/tags/v1.0.0"), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("getGitStatusAsync returns repository state without blocking timers", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wand-git-status-async-"));
+  try {
+    initRepo(root);
+    writeFileSync(join(root, "tracked.txt"), "initial\n");
+    git(root, "add", "tracked.txt");
+    git(root, "commit", "-m", "initial");
+    writeFileSync(join(root, "tracked.txt"), "changed\n");
+
+    let timerObserved = false;
+    const timer = setTimeout(() => { timerObserved = true; }, 0);
+    const status = await getGitStatusAsync(root);
+    clearTimeout(timer);
+
+    assert.equal(timerObserved, true);
+    assert.equal(status.isGit, true);
+    assert.equal(status.branch, "master");
+    assert.equal(status.modifiedCount, 1);
+    assert.equal(status.files?.[0]?.path, "tracked.txt");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

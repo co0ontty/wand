@@ -1,19 +1,30 @@
-import { exec } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { ClaudeModelInfo } from "./types.js";
+import Anthropic from "@anthropic-ai/sdk";
+import { buildChildEnv } from "./env-utils.js";
+import { ClaudeModelAvailability, ClaudeModelInfo, ClaudeModelSource } from "./types.js";
 import { extractSemver } from "./version-utils.js";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+const CLAUDE_VERIFICATION_CACHE_KEY = "claude-model-verifications-v1";
+const CLAUDE_VERIFICATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CLAUDE_PROBE_TIMEOUT_MS = 15_000;
+const MAX_CLAUDE_MODEL_PROBES = 12;
+const CLAUDE_PROBE_CONCURRENCY = 3;
+const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-const CLAUDE_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "Sonnet 4.6 · claude-sonnet-4-6（Claude Code 默认）", alias: true },
-  { id: "opus", label: "opus（最新 Opus）", alias: true },
-  { id: "sonnet", label: "sonnet（最新 Sonnet）", alias: true },
-  { id: "haiku", label: "haiku（最新 Haiku）", alias: true },
-  { id: "claude-opus-4-7", label: "Opus 4.7 · claude-opus-4-7" },
-  { id: "claude-opus-4-6", label: "Opus 4.6 · claude-opus-4-6" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6 · claude-sonnet-4-6" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5 · claude-haiku-4-5-20251001" },
+const CLAUDE_BUILTIN_MODELS: ClaudeModelInfo[] = [
+  {
+    id: "default",
+    label: "跟随 Claude Code 默认",
+    alias: true,
+    source: "builtin",
+    availability: "default",
+    note: "不传 --model 参数",
+  },
+  { id: "opus", label: "opus（最新 Opus）", alias: true, source: "builtin", availability: "candidate" },
+  { id: "sonnet", label: "sonnet（最新 Sonnet）", alias: true, source: "builtin", availability: "candidate" },
+  { id: "haiku", label: "haiku（最新 Haiku）", alias: true, source: "builtin", availability: "candidate" },
 ];
 
 const CODEX_FALLBACK_MODELS: ClaudeModelInfo[] = [
@@ -24,28 +35,55 @@ const OPENCODE_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "default", label: "跟随 OpenCode 默认", alias: true },
 ];
 
-interface ModelCache {
+export interface ModelCacheStorage {
+  getConfigValue(key: string): string | null;
+  setConfigValue(key: string, value: string): void;
+}
+
+export interface ModelCommandOptions {
+  env: NodeJS.ProcessEnv;
+  timeout: number;
+}
+
+export interface ModelCommandResult {
+  stdout: string;
+  stderr: string;
+}
+
+export type ModelCommandRunner = (
+  file: string,
+  args: string[],
+  options: ModelCommandOptions,
+) => Promise<ModelCommandResult>;
+
+export interface ClaudeModelsApiEntry {
+  id: string;
+  display_name?: string;
+}
+
+export interface ClaudeModelsApi {
+  list(): AsyncIterable<ClaudeModelsApiEntry>;
+}
+
+export interface ModelRefreshOptions {
+  storage?: ModelCacheStorage;
+  configuredClaudeModels?: readonly (string | null | undefined)[];
+  inheritEnv?: boolean;
+  env?: NodeJS.ProcessEnv;
+  apiKey?: string;
+  commandRunner?: ModelCommandRunner;
+  modelsApi?: ClaudeModelsApi;
+  verifyClaudeCandidates?: boolean;
+  now?: () => Date;
+}
+
+export interface ModelCache {
   models: ClaudeModelInfo[];
   codexModels: ClaudeModelInfo[];
   opencodeModels: ClaudeModelInfo[];
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string;
-}
-
-let cache: ModelCache | null = null;
-
-function cloneClaudeModels(): ClaudeModelInfo[] {
-  return CLAUDE_MODELS.map((m) => ({ ...m }));
-}
-
-async function probeClaudeVersion(): Promise<string | null> {
-  try {
-    const { stdout } = await execAsync("claude --version", { timeout: 5000 });
-    return extractSemver(stdout) ?? (stdout.trim().slice(0, 64) || null);
-  } catch {
-    return null;
-  }
 }
 
 interface CodexModelEntry {
@@ -60,27 +98,347 @@ interface CodexModelEntry {
   }>;
 }
 
-async function probeCodexModels(): Promise<ClaudeModelInfo[]> {
-  try {
-    const { stdout } = await execAsync("codex debug models", { timeout: 8000 });
-    return parseCodexModels(stdout);
-  } catch {
-    return CODEX_FALLBACK_MODELS.map((m) => ({ ...m }));
+interface PersistedClaudeVerification {
+  id: string;
+  label?: string;
+  verifiedAt: string;
+  claudeVersion: string | null;
+}
+
+interface PersistedClaudeVerificationCache {
+  version: 1;
+  models: PersistedClaudeVerification[];
+}
+
+interface ClaudeCandidate {
+  id: string;
+  label: string;
+  alias?: boolean;
+  source: ClaudeModelSource;
+}
+
+let cache: ModelCache | null = null;
+
+function cloneModels(models: readonly ClaudeModelInfo[]): ClaudeModelInfo[] {
+  return models.map((model) => ({ ...model }));
+}
+
+function defaultCommandRunner(
+  file: string,
+  args: string[],
+  options: ModelCommandOptions,
+): Promise<ModelCommandResult> {
+  return execFileAsync(file, args, {
+    env: options.env,
+    timeout: options.timeout,
+    maxBuffer: 1024 * 1024,
+  }).then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }));
+}
+
+function resolveProbeEnv(options: ModelRefreshOptions): NodeJS.ProcessEnv {
+  return options.env ?? buildChildEnv(options.inheritEnv !== false);
+}
+
+function normalizeClaudeModelId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const id = value.trim();
+  return MODEL_ID_PATTERN.test(id) ? id : null;
+}
+
+function formatClaudeModelLabel(id: string, displayName?: string): string {
+  const name = displayName?.trim();
+  return name && name !== id ? `${name} · ${id}` : id;
+}
+
+function sourcePriority(source: ClaudeModelSource): number {
+  switch (source) {
+    case "configured": return 4;
+    case "verified-cache": return 3;
+    case "models-api": return 2;
+    case "builtin": return 1;
   }
 }
 
-async function probeOpenCode(): Promise<{ models: ClaudeModelInfo[]; version: string | null }> {
+function loadClaudeVerifications(storage?: ModelCacheStorage): PersistedClaudeVerification[] {
+  if (!storage) return [];
+  const raw = storage.getConfigValue(CLAUDE_VERIFICATION_CACHE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as Partial<PersistedClaudeVerificationCache>;
+    if (parsed.version !== 1 || !Array.isArray(parsed.models)) return [];
+    const seen = new Set<string>();
+    const models: PersistedClaudeVerification[] = [];
+    for (const entry of parsed.models) {
+      const id = normalizeClaudeModelId(entry?.id);
+      if (!id || seen.has(id) || typeof entry?.verifiedAt !== "string" || Number.isNaN(Date.parse(entry.verifiedAt))) {
+        continue;
+      }
+      seen.add(id);
+      models.push({
+        id,
+        ...(typeof entry.label === "string" && entry.label.trim() ? { label: entry.label.trim() } : {}),
+        verifiedAt: entry.verifiedAt,
+        claudeVersion: typeof entry.claudeVersion === "string" && entry.claudeVersion.trim()
+          ? entry.claudeVersion.trim()
+          : null,
+      });
+    }
+    return models;
+  } catch {
+    return [];
+  }
+}
+
+function saveClaudeVerifications(storage: ModelCacheStorage | undefined, models: PersistedClaudeVerification[]): void {
+  if (!storage) return;
+  const sorted = [...models].sort((a, b) => a.id.localeCompare(b.id));
+  storage.setConfigValue(CLAUDE_VERIFICATION_CACHE_KEY, JSON.stringify({ version: 1, models: sorted }));
+}
+
+function verificationAvailability(
+  verification: PersistedClaudeVerification | undefined,
+  claudeVersion: string | null,
+  now: Date,
+): ClaudeModelAvailability {
+  if (!verification) return "candidate";
+  const isFresh = now.getTime() - Date.parse(verification.verifiedAt) <= CLAUDE_VERIFICATION_TTL_MS;
+  const versionMatches = !claudeVersion || !verification.claudeVersion || claudeVersion === verification.claudeVersion;
+  return isFresh && versionMatches ? "verified" : "stale";
+}
+
+function candidateNote(
+  candidate: ClaudeCandidate,
+  availability: ClaudeModelAvailability,
+  verification: PersistedClaudeVerification | undefined,
+): string | undefined {
+  if (availability === "verified") return "已由 Claude Code 验证";
+  if (availability === "stale" && verification) return `上次由 Claude Code 验证：${verification.verifiedAt}`;
+  if (candidate.source === "models-api") return "API 目录候选，尚未验证 Claude Code 可用性";
+  if (candidate.source === "configured") return "已配置，尚未验证 Claude Code 可用性";
+  return "尚未验证 Claude Code 可用性";
+}
+
+function candidateFromModel(model: ClaudeModelInfo): ClaudeCandidate | null {
+  const id = normalizeClaudeModelId(model.id);
+  if (!id || id === "default") return null;
+  const source = model.source === "configured" || model.source === "verified-cache" || model.source === "models-api"
+    ? model.source
+    : "builtin";
+  return { id, label: model.label || id, alias: model.alias, source };
+}
+
+function buildClaudeModels(options: {
+  configuredClaudeModels?: readonly (string | null | undefined)[];
+  existingModels?: readonly ClaudeModelInfo[];
+  apiModels?: readonly ClaudeModelsApiEntry[];
+  verifications: readonly PersistedClaudeVerification[];
+  claudeVersion: string | null;
+  now: Date;
+}): ClaudeModelInfo[] {
+  const candidates = new Map<string, ClaudeCandidate>();
+  const add = (candidate: ClaudeCandidate): void => {
+    const id = normalizeClaudeModelId(candidate.id);
+    if (!id || id === "default") return;
+    const normalized = { ...candidate, id, label: candidate.label || id };
+    const existing = candidates.get(id);
+    if (!existing || sourcePriority(normalized.source) >= sourcePriority(existing.source)) {
+      candidates.set(id, normalized);
+    }
+  };
+
+  for (const model of CLAUDE_BUILTIN_MODELS) {
+    const candidate = candidateFromModel(model);
+    if (candidate) add(candidate);
+  }
+  for (const model of options.existingModels ?? []) {
+    const candidate = candidateFromModel(model);
+    if (candidate) add(candidate);
+  }
+  for (const model of options.apiModels ?? []) {
+    const id = normalizeClaudeModelId(model.id);
+    if (id) add({ id, label: formatClaudeModelLabel(id, model.display_name), source: "models-api" });
+  }
+  for (const verification of options.verifications) {
+    add({ id: verification.id, label: verification.label || verification.id, source: "verified-cache" });
+  }
+  for (const value of options.configuredClaudeModels ?? []) {
+    const id = normalizeClaudeModelId(value);
+    if (id && id !== "default") add({ id, label: id, source: "configured" });
+  }
+
+  const verificationById = new Map(options.verifications.map((entry) => [entry.id, entry]));
+  const models: ClaudeModelInfo[] = [cloneModels(CLAUDE_BUILTIN_MODELS)[0]!];
+  for (const candidate of candidates.values()) {
+    const verification = verificationById.get(candidate.id);
+    const availability = verificationAvailability(verification, options.claudeVersion, options.now);
+    models.push({
+      id: candidate.id,
+      label: candidate.label,
+      ...(candidate.alias ? { alias: true } : {}),
+      source: candidate.source,
+      availability,
+      ...(verification ? {
+        lastVerifiedAt: verification.verifiedAt,
+        ...(verification.claudeVersion ? { verifiedWithClaudeVersion: verification.claudeVersion } : {}),
+      } : {}),
+      ...(candidateNote(candidate, availability, verification) ? { note: candidateNote(candidate, availability, verification) } : {}),
+    });
+  }
+  return models;
+}
+
+function createInitialCache(options: ModelRefreshOptions): ModelCache {
+  const now = options.now?.() ?? new Date();
+  return {
+    models: buildClaudeModels({
+      configuredClaudeModels: options.configuredClaudeModels,
+      verifications: loadClaudeVerifications(options.storage),
+      claudeVersion: null,
+      now,
+    }),
+    codexModels: cloneModels(CODEX_FALLBACK_MODELS),
+    opencodeModels: cloneModels(OPENCODE_FALLBACK_MODELS),
+    claudeVersion: null,
+    opencodeVersion: null,
+    refreshedAt: now.toISOString(),
+  };
+}
+
+function refreshCachedClaudeModels(options: ModelRefreshOptions): void {
+  if (!cache) return;
+  const now = options.now?.() ?? new Date();
+  cache.models = buildClaudeModels({
+    configuredClaudeModels: options.configuredClaudeModels,
+    existingModels: cache.models,
+    verifications: loadClaudeVerifications(options.storage),
+    claudeVersion: cache.claudeVersion,
+    now,
+  });
+}
+
+async function probeClaudeVersion(runner: ModelCommandRunner, env: NodeJS.ProcessEnv): Promise<string | null> {
+  try {
+    const { stdout } = await runner("claude", ["--version"], { env, timeout: 5000 });
+    return extractSemver(stdout) ?? (stdout.trim().slice(0, 64) || null);
+  } catch {
+    return null;
+  }
+}
+
+async function probeClaudeModel(
+  id: string,
+  runner: ModelCommandRunner,
+  env: NodeJS.ProcessEnv,
+): Promise<boolean> {
+  try {
+    await runner("claude", ["--model", id, "-p", "Reply with exactly: ok"], {
+      env,
+      timeout: CLAUDE_PROBE_TIMEOUT_MS,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function probeCodexModels(runner: ModelCommandRunner, env: NodeJS.ProcessEnv): Promise<ClaudeModelInfo[]> {
+  try {
+    const { stdout } = await runner("codex", ["debug", "models"], { env, timeout: 8000 });
+    return parseCodexModels(stdout);
+  } catch {
+    return cloneModels(CODEX_FALLBACK_MODELS);
+  }
+}
+
+async function probeOpenCode(
+  runner: ModelCommandRunner,
+  env: NodeJS.ProcessEnv,
+): Promise<{ models: ClaudeModelInfo[]; version: string | null }> {
   const [modelsResult, versionResult] = await Promise.allSettled([
-    execAsync("opencode models", { timeout: 8000 }),
-    execAsync("opencode --version", { timeout: 5000 }),
+    runner("opencode", ["models"], { env, timeout: 8000 }),
+    runner("opencode", ["--version"], { env, timeout: 5000 }),
   ]);
   const models = modelsResult.status === "fulfilled"
     ? parseOpenCodeModels(modelsResult.value.stdout)
-    : OPENCODE_FALLBACK_MODELS.map((m) => ({ ...m }));
+    : cloneModels(OPENCODE_FALLBACK_MODELS);
   const version = versionResult.status === "fulfilled"
     ? extractSemver(versionResult.value.stdout) ?? (versionResult.value.stdout.trim().slice(0, 64) || null)
     : null;
   return { models, version };
+}
+
+function createOfficialModelsApi(apiKey: string): ClaudeModelsApi {
+  const client = new Anthropic({ apiKey });
+  return {
+    list: () => client.models.list({ limit: 100 }) as AsyncIterable<ClaudeModelsApiEntry>,
+  };
+}
+
+async function listClaudeModelsFromApi(options: ModelRefreshOptions, env: NodeJS.ProcessEnv): Promise<ClaudeModelsApiEntry[]> {
+  const apiKey = options.apiKey?.trim() || env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) return [];
+  try {
+    const api = options.modelsApi ?? createOfficialModelsApi(apiKey);
+    const models: ClaudeModelsApiEntry[] = [];
+    for await (const model of api.list()) {
+      const id = normalizeClaudeModelId(model?.id);
+      if (id) models.push({ id, ...(typeof model.display_name === "string" ? { display_name: model.display_name } : {}) });
+    }
+    return models;
+  } catch {
+    return [];
+  }
+}
+
+function probePriority(model: ClaudeModelInfo): number {
+  if (model.source === "configured") return 0;
+  if (model.availability === "stale") return 1;
+  if (model.source === "verified-cache") return 2;
+  if (model.source === "builtin") return 3;
+  return 4;
+}
+
+async function verifyClaudeCandidates(
+  models: readonly ClaudeModelInfo[],
+  runner: ModelCommandRunner,
+  env: NodeJS.ProcessEnv,
+): Promise<Set<string>> {
+  const candidates = models
+    .filter((model) => model.id !== "default" && model.availability !== "verified")
+    .sort((a, b) => probePriority(a) - probePriority(b) || a.id.localeCompare(b.id))
+    .slice(0, MAX_CLAUDE_MODEL_PROBES);
+  const verified = new Set<string>();
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < candidates.length) {
+      const candidate = candidates[nextIndex++];
+      if (candidate && await probeClaudeModel(candidate.id, runner, env)) {
+        verified.add(candidate.id);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CLAUDE_PROBE_CONCURRENCY, candidates.length) }, worker));
+  return verified;
+}
+
+function mergeVerifications(
+  previous: readonly PersistedClaudeVerification[],
+  models: readonly ClaudeModelInfo[],
+  verifiedIds: ReadonlySet<string>,
+  claudeVersion: string | null,
+  now: Date,
+): PersistedClaudeVerification[] {
+  const byId = new Map(previous.map((entry) => [entry.id, entry]));
+  for (const id of verifiedIds) {
+    const model = models.find((entry) => entry.id === id);
+    byId.set(id, {
+      id,
+      ...(model?.label ? { label: model.label } : {}),
+      verifiedAt: now.toISOString(),
+      claudeVersion,
+    });
+  }
+  return [...byId.values()];
 }
 
 /** Parse `opencode models`, whose stable machine-friendly output is one provider/model id per line. */
@@ -91,7 +449,7 @@ export function parseOpenCodeModels(stdout: string): ClaudeModelInfo[] {
       .map((line) => line.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "").trim())
       .filter((line) => /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i.test(line)),
   ));
-  if (!ids.length) return OPENCODE_FALLBACK_MODELS.map((m) => ({ ...m }));
+  if (!ids.length) return cloneModels(OPENCODE_FALLBACK_MODELS);
   return [
     { id: "default", label: "跟随 OpenCode 默认", alias: true },
     ...ids.map((id) => ({ id, label: id })),
@@ -103,10 +461,10 @@ export function parseCodexModels(stdout: string): ClaudeModelInfo[] {
   try {
     const data = JSON.parse(stdout) as { models?: CodexModelEntry[] };
     const visible = (Array.isArray(data.models) ? data.models : [])
-      .filter((m) => typeof m.slug === "string" && m.slug.length > 0)
-      .filter((m) => m.visibility === "list")
+      .filter((model) => typeof model.slug === "string" && model.slug.length > 0)
+      .filter((model) => model.visibility === "list")
       .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
-    if (!visible.length) return CODEX_FALLBACK_MODELS.map((m) => ({ ...m }));
+    if (!visible.length) return cloneModels(CODEX_FALLBACK_MODELS);
     const defaultModel = visible[0];
     const defaultLabel = formatCodexModelLabel(defaultModel);
     const result: ClaudeModelInfo[] = [
@@ -117,16 +475,16 @@ export function parseCodexModels(stdout: string): ClaudeModelInfo[] {
         ...codexReasoningMetadata(defaultModel),
       },
     ];
-    for (const m of visible) {
+    for (const model of visible) {
       result.push({
-        id: m.slug,
-        label: formatCodexModelLabel(m),
-        ...codexReasoningMetadata(m),
+        id: model.slug,
+        label: formatCodexModelLabel(model),
+        ...codexReasoningMetadata(model),
       });
     }
     return result;
   } catch {
-    return CODEX_FALLBACK_MODELS.map((m) => ({ ...m }));
+    return cloneModels(CODEX_FALLBACK_MODELS);
   }
 }
 
@@ -151,33 +509,51 @@ function formatCodexModelLabel(model: CodexModelEntry): string {
     : model.slug;
 }
 
-export function getCachedModels(): ModelCache {
+export function getCachedModels(options: ModelRefreshOptions = {}): ModelCache {
   if (!cache) {
-    cache = {
-      models: cloneClaudeModels(),
-      codexModels: CODEX_FALLBACK_MODELS.map((m) => ({ ...m })),
-      opencodeModels: OPENCODE_FALLBACK_MODELS.map((m) => ({ ...m })),
-      claudeVersion: null,
-      opencodeVersion: null,
-      refreshedAt: new Date().toISOString(),
-    };
+    cache = createInitialCache(options);
+  } else if (options.storage || options.configuredClaudeModels) {
+    refreshCachedClaudeModels(options);
   }
   return cache;
 }
 
-export async function refreshModels(): Promise<ModelCache> {
-  const [version, codexModels, opencode] = await Promise.all([
-    probeClaudeVersion(),
-    probeCodexModels(),
-    probeOpenCode(),
+export async function refreshModels(options: ModelRefreshOptions = {}): Promise<ModelCache> {
+  const now = options.now?.() ?? new Date();
+  const env = resolveProbeEnv(options);
+  const runner = options.commandRunner ?? defaultCommandRunner;
+  const [claudeVersion, codexModels, opencode, apiModels] = await Promise.all([
+    probeClaudeVersion(runner, env),
+    probeCodexModels(runner, env),
+    probeOpenCode(runner, env),
+    listClaudeModelsFromApi(options, env),
   ]);
+  const priorVerifications = loadClaudeVerifications(options.storage);
+  const initialModels = buildClaudeModels({
+    configuredClaudeModels: options.configuredClaudeModels,
+    apiModels,
+    verifications: priorVerifications,
+    claudeVersion,
+    now,
+  });
+  const verifiedIds = options.verifyClaudeCandidates
+    ? await verifyClaudeCandidates(initialModels, runner, env)
+    : new Set<string>();
+  const verifications = mergeVerifications(priorVerifications, initialModels, verifiedIds, claudeVersion, now);
+  if (verifiedIds.size > 0) saveClaudeVerifications(options.storage, verifications);
   cache = {
-    models: cloneClaudeModels(),
+    models: buildClaudeModels({
+      configuredClaudeModels: options.configuredClaudeModels,
+      apiModels,
+      verifications,
+      claudeVersion,
+      now,
+    }),
     codexModels,
     opencodeModels: opencode.models,
-    claudeVersion: version,
+    claudeVersion,
     opencodeVersion: opencode.version,
-    refreshedAt: new Date().toISOString(),
+    refreshedAt: now.toISOString(),
   };
   return cache;
 }

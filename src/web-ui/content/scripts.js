@@ -572,6 +572,80 @@
     return "<svg" + cls + ' width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="' + fill + '" stroke="currentColor" stroke-width="' + stroke + '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + "</svg>";
   }
 
+  // src/web-ui/browser/message-reconciliation.ts
+  function turnContentVolume(turn) {
+    if (!turn || !Array.isArray(turn.content)) return 0;
+    var total = 0;
+    for (var i = 0; i < turn.content.length; i++) {
+      var block = turn.content[i];
+      if (!block) continue;
+      if (typeof block.text === "string") total += block.text.length;
+      if (typeof block.thinking === "string") total += block.thinking.length;
+      if (typeof block.content === "string") total += block.content.length;
+      else if (Array.isArray(block.content)) {
+        for (var k = 0; k < block.content.length; k++) {
+          var nestedBlock = block.content[k];
+          if (nestedBlock && typeof nestedBlock.text === "string") total += nestedBlock.text.length;
+        }
+      }
+      if (block.input) {
+        try {
+          total += JSON.stringify(block.input).length;
+        } catch (_error) {
+        }
+      }
+    }
+    return total;
+  }
+  function mergeAssistantTurn(localTurn, incomingTurn) {
+    if (!localTurn) return incomingTurn;
+    if (!incomingTurn) return localTurn;
+    if (turnContentVolume(incomingTurn) >= turnContentVolume(localTurn)) return incomingTurn;
+    return Object.assign({}, localTurn, {
+      usage: incomingTurn.usage || localTurn.usage
+    });
+  }
+  function mergeOverlappingTurns(localTurn, incomingTurn) {
+    if (localTurn?.role === "assistant" && incomingTurn?.role === "assistant") {
+      return mergeAssistantTurn(localTurn, incomingTurn);
+    }
+    return incomingTurn || localTurn;
+  }
+  function mergeWindowedMessages(prev, incoming, offset, total) {
+    var snapOffset = offset || 0;
+    var snapTotal = typeof total === "number" ? total : Math.max(snapOffset + incoming.length, incoming.length);
+    var prevMsgs = prev && Array.isArray(prev.messages) ? prev.messages : [];
+    var prevOffset = prev && typeof prev.messageOffset === "number" ? prev.messageOffset : 0;
+    var prevTotal = prev && typeof prev.messageTotal === "number" ? prev.messageTotal : prevOffset + prevMsgs.length;
+    if (incoming.length === 0 && prevMsgs.length > 0 && snapTotal === 0) {
+      return { messages: prevMsgs, messageOffset: prevOffset, messageTotal: prevTotal };
+    }
+    if (prevMsgs.length > 0 && snapTotal < prevTotal) {
+      return { messages: prevMsgs, messageOffset: prevOffset, messageTotal: prevTotal };
+    }
+    if (prevMsgs.length === 0) {
+      return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
+    }
+    var prevEnd = prevOffset + prevMsgs.length;
+    var snapEnd = snapOffset + incoming.length;
+    if (snapOffset > prevEnd || prevOffset > snapEnd) {
+      return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
+    }
+    var mergedOffset = Math.min(prevOffset, snapOffset);
+    var mergedEnd = Math.max(prevEnd, snapEnd);
+    var merged = [];
+    for (var absoluteIndex = mergedOffset; absoluteIndex < mergedEnd; absoluteIndex++) {
+      var localTurn = absoluteIndex >= prevOffset && absoluteIndex < prevEnd ? prevMsgs[absoluteIndex - prevOffset] : void 0;
+      var incomingTurn = absoluteIndex >= snapOffset && absoluteIndex < snapEnd ? incoming[absoluteIndex - snapOffset] : void 0;
+      merged.push(mergeOverlappingTurns(localTurn, incomingTurn));
+    }
+    return {
+      messages: merged,
+      messageOffset: mergedOffset,
+      messageTotal: Math.max(prevTotal, snapTotal, mergedOffset + merged.length)
+    };
+  }
+
   // src/web-ui/browser/chat-scroll.ts
   function getChatScrollElement() {
     var chatOutput = document.getElementById("chat-output");
@@ -10335,40 +10409,6 @@
       }
     });
   }
-  function turnContentVolume(turn) {
-    if (!turn || !Array.isArray(turn.content)) return 0;
-    var total = 0;
-    for (var i = 0; i < turn.content.length; i++) {
-      var b = turn.content[i];
-      if (!b) continue;
-      if (typeof b.text === "string") total += b.text.length;
-      if (typeof b.thinking === "string") total += b.thinking.length;
-      if (typeof b.content === "string") total += b.content.length;
-      else if (Array.isArray(b.content)) {
-        for (var k = 0; k < b.content.length; k++) {
-          var sub = b.content[k];
-          if (sub && typeof sub.text === "string") total += sub.text.length;
-        }
-      }
-      if (b.input) {
-        try {
-          total += JSON.stringify(b.input).length;
-        } catch (_e) {
-        }
-      }
-    }
-    return total;
-  }
-  function mergeAssistantTurn(localLast, incoming) {
-    if (!localLast) return incoming;
-    if (!incoming) return localLast;
-    var localVol = turnContentVolume(localLast);
-    var incVol = turnContentVolume(incoming);
-    if (incVol >= localVol) return incoming;
-    return Object.assign({}, localLast, {
-      usage: incoming.usage || localLast.usage
-    });
-  }
   function buildMessagesForRender(session, messages) {
     var sanitized = Array.isArray(messages) ? stripRenderOnlyStructuredMessages(messages) : [];
     var base = Array.isArray(sanitized) ? sanitized.slice() : [];
@@ -15007,7 +15047,8 @@
       var m = models[i];
       if (m.id === "default") continue;
       var label = m.label || m.id;
-      html += '<option value="' + escapeHtml2(m.id) + '"' + (m.id === normalized ? " selected" : "") + ">" + escapeHtml2(label) + "</option>";
+      var suffix = getProviderForSession(session) === "claude" ? m.availability === "verified" ? " \xB7 \u5DF2\u9A8C\u8BC1" : m.availability === "stale" ? " \xB7 \u5F85\u5237\u65B0" : m.source === "models-api" ? " \xB7 API \u5019\u9009" : " \xB7 \u5019\u9009" : "";
+      html += '<option value="' + escapeHtml2(m.id) + '"' + (m.id === normalized ? " selected" : "") + ">" + escapeHtml2(label + suffix) + "</option>";
     }
     if (normalized && !models.some(function(m2) {
       return m2.id === normalized;
@@ -15023,7 +15064,8 @@
     for (var i = 0; i < models.length; i++) {
       var m = models[i];
       if (m.id === "default") continue;
-      html += '<option value="' + escapeHtml2(m.id) + '"' + (m.id === normalized ? " selected" : "") + ">" + escapeHtml2(m.id) + "</option>";
+      var rawSuffix = getProviderForSession(session) === "claude" ? m.availability === "verified" ? " \xB7 verified" : m.availability === "stale" ? " \xB7 stale" : m.source === "models-api" ? " \xB7 API candidate" : " \xB7 candidate" : "";
+      html += '<option value="' + escapeHtml2(m.id) + '"' + (m.id === normalized ? " selected" : "") + ">" + escapeHtml2(m.id + rawSuffix) + "</option>";
     }
     if (normalized && !models.some(function(m2) {
       return m2.id === normalized;
@@ -15189,7 +15231,12 @@
         updateSettingsDefaultModelSelect(data);
         syncCommitModelProvider(false);
         if (typeof showToast2 === "function") {
-          showToast2("\u6A21\u578B\u5217\u8868\u5DF2\u5237\u65B0" + (data.claudeVersion ? "\uFF08claude " + data.claudeVersion + "\uFF09" : ""), "success");
+          var verifiedCount = data.models.filter(function(model) {
+            return model.availability === "verified";
+          }).length;
+          var message = "\u6A21\u578B\u5217\u8868\u5DF2\u5237\u65B0" + (data.claudeVersion ? "\uFF08claude " + data.claudeVersion + "\uFF09" : "");
+          if (verifiedCount) message += "\uFF1B\u5DF2\u9A8C\u8BC1 " + verifiedCount + " \u4E2A";
+          showToast2(message, "success");
         }
       }
       return data;
@@ -15319,7 +15366,15 @@
       return;
     }
     if (known) {
-      status.textContent = "\u5DF2\u68C0\u6D4B\u5230";
+      if (known.availability === "verified") {
+        status.textContent = "\u5DF2\u7531 Claude Code \u9A8C\u8BC1";
+      } else if (known.availability === "stale") {
+        status.textContent = "\u9A8C\u8BC1\u8BB0\u5F55\u5F85\u5237\u65B0";
+      } else if (known.source === "models-api") {
+        status.textContent = "API \u5019\u9009\uFF0C\u5C1A\u672A\u9A8C\u8BC1";
+      } else {
+        status.textContent = "\u5DF2\u68C0\u6D4B\u5230\uFF0C\u5C1A\u672A\u9A8C\u8BC1";
+      }
       status.classList.add("is-known");
       return;
     }
@@ -15348,7 +15403,8 @@
       if (model.id === value) exactMatch = true;
       var label = model.label || model.id;
       if (query && model.id.toLowerCase().indexOf(query) === -1 && label.toLowerCase().indexOf(query) === -1) continue;
-      rows.push({ value: model.id, label, meta: label === model.id ? "\u5DF2\u68C0\u6D4B\u6A21\u578B" : model.id, custom: false });
+      var meta = provider !== "claude" ? label === model.id ? "\u5DF2\u68C0\u6D4B\u6A21\u578B" : model.id : model.availability === "verified" ? "\u5DF2\u7531 Claude Code \u9A8C\u8BC1" : model.availability === "stale" ? "\u9A8C\u8BC1\u8BB0\u5F55\u5F85\u5237\u65B0" : model.source === "models-api" ? "API \u5019\u9009\uFF0C\u5C1A\u672A\u9A8C\u8BC1" : model.note || "\u5C1A\u672A\u9A8C\u8BC1";
+      rows.push({ value: model.id, label, meta, custom: false });
     }
     var defaultLabel = provider === "codex" ? "\u8DDF\u968F Codex \u9ED8\u8BA4" : provider === "opencode" ? "\u8DDF\u968F OpenCode \u9ED8\u8BA4" : "\u8DDF\u968F Claude Code \u9ED8\u8BA4";
     var defaultMeta = defaultModel && defaultModel.label ? defaultModel.label : "\u4E0D\u4F20 --model \u53C2\u6570";
@@ -15758,24 +15814,6 @@
     }
     if (kindHint) kindHint.textContent = getSessionKindHint(sessionKind);
     if (modeHint) modeHint.textContent = getToolModeHint2(tool, state.modeValue);
-  }
-  function mergeWindowedMessages(prev, incoming, offset, total) {
-    var snapOffset = offset || 0;
-    var snapTotal = typeof total === "number" ? total : Math.max(snapOffset + incoming.length, incoming.length);
-    var prevMsgs = prev && Array.isArray(prev.messages) ? prev.messages : [];
-    var prevOffset = prev && typeof prev.messageOffset === "number" ? prev.messageOffset : 0;
-    if (incoming.length === 0 && prevMsgs.length > 0 && snapTotal === 0) {
-      return { messages: prevMsgs, messageOffset: prevOffset, messageTotal: prev && prev.messageTotal || prevMsgs.length };
-    }
-    if (prevMsgs.length === 0) {
-      return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
-    }
-    if (prevOffset <= snapOffset) {
-      var keep = Math.min(Math.max(snapOffset - prevOffset, 0), prevMsgs.length);
-      var merged = prevMsgs.slice(0, keep).concat(incoming);
-      return { messages: merged, messageOffset: prevOffset, messageTotal: Math.max(snapTotal, prevOffset + merged.length) };
-    }
-    return { messages: incoming, messageOffset: snapOffset, messageTotal: snapTotal };
   }
   function updateSessionSnapshot(snapshot) {
     if (!snapshot || !snapshot.id) return;
