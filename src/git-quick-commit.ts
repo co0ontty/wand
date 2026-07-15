@@ -556,7 +556,10 @@ function runCliText(
 }
 
 async function callCodexText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
-  const args = ["exec", "--json", "--color", "never", "--skip-git-repo-check", "--sandbox", "read-only"];
+  // Quick commit is an internal one-shot request, not a user conversation. Keep
+  // Codex from persisting it into ~/.codex/sessions, where Wand would otherwise
+  // surface the generated prompt as a recoverable session.
+  const args = ["exec", "--ephemeral", "--json", "--color", "never", "--skip-git-repo-check", "--sandbox", "read-only"];
   const model = opts.model?.trim();
   if (model && model !== "default") args.push("--model", model);
   const reasoningEffort = thinkingEffortToCodexReasoningEffort(opts.thinkingEffort ?? "off");
@@ -1243,7 +1246,7 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
   const prompt = buildFallbackPrompt(opts, priorError);
   const provider = normalizeProvider(opts.provider);
   if (provider === "codex") {
-    const args = ["exec", "--json", "--color", "never", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
+    const args = ["exec", "--ephemeral", "--json", "--color", "never", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
     const model = opts.model?.trim();
     if (model && model !== "default") args.push("--model", model);
     const reasoningEffort = thinkingEffortToCodexReasoningEffort(opts.thinkingEffort ?? "off");

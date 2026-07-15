@@ -145,6 +145,23 @@ function isCodexSystemInjectedText(text: string): boolean {
   return trimmed.startsWith("#") || trimmed.startsWith("<");
 }
 
+/**
+ * Codex versions used before quick commit enabled `--ephemeral` persisted these
+ * internal one-shot prompts as ordinary sessions. Hide those legacy artifacts
+ * without deleting their files; newly generated quick-commit calls never land
+ * in the history directory in the first place.
+ */
+function isWandQuickCommitPrompt(text: string): boolean {
+  const trimmed = text.trimStart();
+  return (trimmed.startsWith("阅读以下 git diff，用")
+      && trimmed.includes("写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身"))
+    || (trimmed.startsWith("阅读以下 git diff，完成两件事：")
+      && trimmed.includes("请严格输出**单行 JSON 对象**"))
+    || (trimmed.startsWith("根据以下 commit message 和 git diff 推荐一个语义化版本 tag")
+      && trimmed.includes("严格输出**单行 JSON 对象**"))
+    || trimmed.startsWith("你正在作为 Wand 的快捷提交兜底执行器运行。");
+}
+
 function parseCodexSummary(head: { text: string; mtimeMs: number }): CodexHistorySession | null {
   let id = "";
   let cwd = "";
@@ -193,6 +210,7 @@ function parseCodexSummary(head: { text: string; mtimeMs: number }): CodexHistor
     }
   }
   if (!id) return null;
+  if (isWandQuickCommitPrompt(firstUserMessage)) return null;
   return {
     claudeSessionId: id,
     cwd,
