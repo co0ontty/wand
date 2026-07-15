@@ -1070,7 +1070,27 @@ export function registerSessionRoutes(
     const shortcutKey = body.shortcutKey;
     try {
       if (structured.get(sessionId)) {
-        const snapshot = await structured.sendMessage(sessionId, input);
+        const completion = structured.sendMessage(sessionId, input);
+        if (body.respondImmediately === true) {
+          // sendMessage updates the canonical snapshot synchronously before it
+          // starts awaiting the runner. Native clients should not hold this
+          // request open for an entire model turn (which can exceed their HTTP
+          // timeout, especially while the first-turn title job is also active).
+          // The normal structured events continue to carry progress/failure.
+          completion.catch((error) => {
+            console.error("[wand] Accepted structured input later failed", {
+              sessionId,
+              error: getInputDebugMeta(error),
+            });
+          });
+          const accepted = structured.get(sessionId);
+          if (!accepted) {
+            throw new Error("未找到该结构化会话。");
+          }
+          res.status(202).json(sessionResponseDTO(accepted));
+          return;
+        }
+        const snapshot = await completion;
         res.json(sessionResponseDTO(snapshot));
         return;
       }

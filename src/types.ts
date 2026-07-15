@@ -304,6 +304,12 @@ export interface CommandRequest {
 
 export interface InputRequest {
   input?: string;
+  /**
+   * Structured sessions normally keep the HTTP request open until the whole
+   * turn finishes. Native clients can opt into an accepted snapshot instead
+   * and continue receiving progress through the existing event stream.
+   */
+  respondImmediately?: boolean;
   /** Current UI view: "chat" or "terminal". Chat view uses PTY-derived structured messages. */
   view?: "chat" | "terminal";
   autonomyPolicy?: AutonomyPolicy;
