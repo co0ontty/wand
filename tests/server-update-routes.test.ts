@@ -19,7 +19,7 @@ test("extracted public update routes preserve metadata, channel, range, and miss
   registerPublicUpdateRoutes(app, {
     async resolveLatestApk(channel) {
       return {
-        version: channel === "beta" ? "3.0.0-beta.1" : "2.0.0",
+        version: channel === "beta" ? "2.0.0-debug.07150800" : "2.0.0",
         downloadUrl: `/android/download?channel=${channel}`,
         fileName: "wand.apk",
         size: 11,
@@ -60,6 +60,22 @@ test("extracted public update routes preserve metadata, channel, range, and miss
       size: 11,
       source: "local",
       channel: "stable",
+      releaseNotes: "notes",
+    });
+
+    const betaAfterRelease = await fetch(
+      `${baseUrl}/api/android-apk-update?currentVersion=2.0.0&channel=beta`,
+    );
+    assert.equal(betaAfterRelease.status, 200);
+    assert.deepEqual(await betaAfterRelease.json(), {
+      updateAvailable: true,
+      currentVersion: "2.0.0",
+      latestVersion: "2.0.0-debug.07150800",
+      downloadUrl: "/android/download?channel=beta",
+      fileName: "wand.apk",
+      size: 11,
+      source: "local",
+      channel: "beta",
       releaseNotes: "notes",
     });
 

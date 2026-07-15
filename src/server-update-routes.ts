@@ -14,7 +14,7 @@ import {
 import { streamFileWithRange } from "./server-file-routes.js";
 import type { WandStorage } from "./storage.js";
 import type { WandConfig } from "./types.js";
-import { compareSemver } from "./version-utils.js";
+import { compareApkInstallOrder, compareSemver } from "./version-utils.js";
 import { canUseDetachedUpdateHelper, startDetachedUpdateHelper } from "./update-helper.js";
 
 interface DownloadAsset {
@@ -52,7 +52,10 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
       res.json({ updateAvailable: false, currentVersion, latestVersion: null, downloadUrl: null, source: null, channel });
       return;
     }
-    const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
+    // APK 的 versionCode 约定是：X.Y.Z < X.Y.Z-debug.* < X.Y.(Z+1)。
+    // 不能使用标准 SemVer（它会把 prerelease 判为低于同号正式版），否则刚从
+    // tag 构建的 Beta 包对已安装 X.Y.Z 的设备永远不可见。
+    const updateAvailable = compareApkInstallOrder(latest.version, currentVersion) > 0;
     res.json({
       updateAvailable,
       currentVersion,
