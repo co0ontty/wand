@@ -14374,9 +14374,115 @@
   }
   function renderMarkdown(text) {
     if (!text) return "";
-    var result = escapeHtml2(text);
+    var markdownLinks = [];
+    var result = escapeHtml2(stashMarkdownLinks(String(text)));
     var bt = String.fromCharCode(96);
     var newline = String.fromCharCode(10);
+    function serverFilePathFromLink(target) {
+      var value = String(target || "").trim();
+      if (!value) return null;
+      if (value.charAt(0) === "<" && value.charAt(value.length - 1) === ">") {
+        value = value.slice(1, -1).trim();
+      }
+      if (/^file:\/\//i.test(value)) {
+        try {
+          var fileUrl = new URL(value);
+          if (fileUrl.protocol !== "file:") return null;
+          value = decodeURIComponent(fileUrl.pathname || "");
+        } catch (_) {
+          value = value.replace(/^file:\/\/(?:localhost)?/i, "");
+          try {
+            value = decodeURIComponent(value);
+          } catch (_2) {
+          }
+        }
+      } else if (value.charAt(0) !== "/" || value.indexOf("//") === 0) {
+        return null;
+      }
+      if (/^\/(?:api|android|macos)(?:\/|$)/.test(value)) return null;
+      value = value.replace(/#L\d+(?:C\d+)?$/i, "");
+      value = value.replace(/:\d+(?::\d+)?$/, "");
+      return value.charAt(0) === "/" ? value : null;
+    }
+    function safeExternalLink(target, label) {
+      var value = String(target || "").trim();
+      if (value.charAt(0) === "<" && value.charAt(value.length - 1) === ">") {
+        value = value.slice(1, -1).trim();
+      }
+      if (!/^(?:https?:\/\/|mailto:|#)/i.test(value)) return label;
+      var escapedTarget = escapeHtml2(value);
+      var opensNewWindow = /^https?:\/\//i.test(value);
+      return '<a href="' + escapedTarget + '"' + (opensNewWindow ? ' target="_blank"' : "") + ' rel="noopener">' + label + "</a>";
+    }
+    function stashMarkdownLinks(source) {
+      function findTargetEnd(start2) {
+        if (source.charAt(start2) === "<") {
+          var closeAngle = source.indexOf(">", start2 + 1);
+          return closeAngle >= 0 && source.charAt(closeAngle + 1) === ")" ? closeAngle + 1 : -1;
+        }
+        var depth = 0;
+        for (var i = start2; i < source.length; i += 1) {
+          if (source.charAt(i) === "\\") {
+            i += 1;
+            continue;
+          }
+          if (source.charAt(i) === "(") depth += 1;
+          else if (source.charAt(i) === ")") {
+            if (depth === 0) return i;
+            depth -= 1;
+          }
+        }
+        return -1;
+      }
+      var output = "";
+      var cursor = 0;
+      var inFence = false;
+      var inInlineCode = false;
+      while (cursor < source.length) {
+        if (source.slice(cursor, cursor + 3) === "```") {
+          inFence = !inFence;
+          output += "```";
+          cursor += 3;
+          continue;
+        }
+        if (!inFence && source.charAt(cursor) === "`") {
+          inInlineCode = !inInlineCode;
+          output += "`";
+          cursor += 1;
+          continue;
+        }
+        if (!inFence && !inInlineCode && source.charAt(cursor) === "[" && source.charAt(cursor - 1) !== "!") {
+          var closeText = source.indexOf("](", cursor + 1);
+          var closeTarget = closeText >= 0 ? findTargetEnd(closeText + 2) : -1;
+          if (closeText > cursor + 1 && closeTarget > closeText + 2) {
+            var label = escapeHtml2(source.slice(cursor + 1, closeText));
+            var target = source.slice(closeText + 2, closeTarget).trim();
+            var serverPath = serverFilePathFromLink(target);
+            var linkHtml;
+            if (serverPath) {
+              var rawUrl = "/api/file-raw?download=1&amp;path=" + encodeURIComponent(serverPath);
+              linkHtml = '<a class="server-file-link" href="' + rawUrl + '" data-server-file-path="' + escapeHtml2(serverPath) + `" title="\u6253\u5F00\u6216\u4E0B\u8F7D\u670D\u52A1\u7AEF\u6587\u4EF6" onclick="if(window.__openFilePreview){event.preventDefault();window.__openFilePreview(this.getAttribute('data-server-file-path'));}">` + label + "</a>";
+            } else {
+              linkHtml = safeExternalLink(target, label);
+            }
+            var token = "WANDMARKDOWNLINKTOKEN" + markdownLinks.length + "END";
+            markdownLinks.push(linkHtml);
+            output += token;
+            cursor = closeTarget + 1;
+            continue;
+          }
+        }
+        output += source.charAt(cursor);
+        cursor += 1;
+      }
+      return output;
+    }
+    function restoreMarkdownLinks(source) {
+      for (var i = 0; i < markdownLinks.length; i += 1) {
+        source = source.split("WANDMARKDOWNLINKTOKEN" + i + "END").join(markdownLinks[i]);
+      }
+      return source;
+    }
     function replacePair(source, marker, openTag, closeTag) {
       var cursor = 0;
       while (true) {
@@ -14539,6 +14645,7 @@
     });
     flushListBuffer();
     result = wrapParagraphs(grouped.join(newline));
+    result = restoreMarkdownLinks(result);
     return '<div class="markdown-content">' + result + "</div>";
   }
   function highlightCode(code, lang) {

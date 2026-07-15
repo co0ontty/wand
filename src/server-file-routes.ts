@@ -259,7 +259,11 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       const baseName = path.basename(filePath);
       const kind = classifyFile(ext, baseName);
       const cap = RAW_MAX_BYTES_BY_KIND[kind] ?? RAW_MAX_BYTES_BY_KIND.binary;
-      if (fileStat.size > cap) {
+      // Inline responses are previews and stay size-bounded. Explicit downloads are
+      // streamed with range support, so keeping the preview cap here would make the
+      // file browser's "下载" action fail for the very files that are too large to
+      // preview.
+      if (!asDownload && fileStat.size > cap) {
         res.status(413).json({
           error: `文件超出可在线预览的上限（${Math.round(cap / 1024 / 1024)} MB）。`,
           size: fileStat.size,

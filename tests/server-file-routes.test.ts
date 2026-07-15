@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -65,6 +65,19 @@ test("extracted file routes preserve directory, preview, write, range, recent, a
     });
     assert.equal(invalidRange.status, 416);
     assert.equal(invalidRange.headers.get("content-range"), "bytes */11");
+
+    const largeTextPath = path.join(root, "large.txt");
+    writeFileSync(largeTextPath, "");
+    truncateSync(largeTextPath, 5 * 1024 * 1024 + 1);
+    const oversizedPreview = await fetch(`${baseUrl}/api/file-raw?path=${encodeURIComponent(largeTextPath)}`);
+    assert.equal(oversizedPreview.status, 413);
+    const oversizedDownload = await fetch(
+      `${baseUrl}/api/file-raw?download=1&path=${encodeURIComponent(largeTextPath)}`,
+      { headers: { Range: "bytes=0-0" } },
+    );
+    assert.equal(oversizedDownload.status, 206);
+    assert.match(oversizedDownload.headers.get("content-disposition") ?? "", /^attachment;/);
+    assert.equal((await oversizedDownload.arrayBuffer()).byteLength, 1);
 
     const write = await fetch(`${baseUrl}/api/file-write`, {
       method: "POST",
