@@ -3013,9 +3013,39 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function loadSettingsData() {
-        fetch("/api/settings", { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
+        var canManageSettings = !state.config || state.config.canManageSettings !== false;
+        var settingsUrl = canManageSettings ? "/api/settings" : "/api/settings/about";
+        fetch(settingsUrl, { credentials: "same-origin" })
+          .then(function(res) {
+            if (res.ok) return res.json();
+            // Older servers do not expose canManageSettings in /api/config, so
+            // retain a 403 fallback for connected-app sessions during upgrades.
+            if (res.status === 403 && settingsUrl === "/api/settings") {
+              return fetch("/api/settings/about", { credentials: "same-origin" }).then(function(aboutRes) {
+                if (!aboutRes.ok) throw new Error("无法加载关于信息 (HTTP " + aboutRes.status + ")");
+                return aboutRes.json();
+              });
+            }
+            throw new Error("无法加载设置 (HTTP " + res.status + ")");
+          })
           .then(function(data) {
+            var hasAdminSettings = data.settingsAccess !== "read-only";
+            var accessNote = document.getElementById("settings-about-access-note");
+            if (accessNote) accessNote.classList.toggle("hidden", hasAdminSettings);
+            var providerCliSection = document.getElementById("provider-cli-update-section");
+            if (providerCliSection) providerCliSection.classList.toggle("hidden", !hasAdminSettings);
+            var connectSection = document.getElementById("android-connect-section");
+            if (connectSection) connectSection.classList.toggle("hidden", !hasAdminSettings);
+            ["check-update-button", "do-update-button", "do-restart-button"].forEach(function(id) {
+              var control = document.getElementById(id);
+              var actions = control && control.closest(".settings-update-actions");
+              if (actions) actions.classList.toggle("hidden", !hasAdminSettings);
+            });
+            ["beta-channel-toggle", "auto-update-web-toggle"].forEach(function(id) {
+              var control = document.getElementById(id);
+              var row = control && control.closest(".settings-toggle-row");
+              if (row) row.classList.toggle("hidden", !hasAdminSettings);
+            });
             updateSettingsSidebarStatus(data);
             // About
             var nameEl = document.getElementById("settings-pkg-name");
@@ -3054,7 +3084,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (autoUpdateDmgToggle) autoUpdateDmgToggle.checked = !!_macAppVersion && !!autoUpdate.dmg;
             var autoUpdateCliToggle = document.getElementById("auto-update-cli-toggle") as HTMLInputElement | null;
             if (autoUpdateCliToggle) autoUpdateCliToggle.checked = !!autoUpdate.cli;
-            loadProviderCliUpdates(false);
+            if (hasAdminSettings) loadProviderCliUpdates(false);
 
             // ── 原生包下载 helper（APK / DMG 共用）──
             function safeNotify(msg, type) {
@@ -3210,8 +3240,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               // Show APK auto-update toggle in APK mode
               var apkAutoRow = document.getElementById("android-auto-update-row");
               var apkAutoHint = document.getElementById("android-auto-update-hint");
-              if (apkAutoRow) apkAutoRow.classList.remove("hidden");
-              if (apkAutoHint) apkAutoHint.classList.remove("hidden");
+              if (apkAutoRow) apkAutoRow.classList.toggle("hidden", !hasAdminSettings);
+              if (apkAutoHint) apkAutoHint.classList.toggle("hidden", !hasAdminSettings);
             } else {
               // ── 浏览器模式：显示线上版本 + 本地版本 + 下载按钮 ──
               if (androidApk.github && apkGithubRow && apkGithubEl) {
@@ -3300,8 +3330,8 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               }
               var dmgAutoRow = document.getElementById("macos-auto-update-row");
               var dmgAutoHint = document.getElementById("macos-auto-update-hint");
-              if (dmgAutoRow) dmgAutoRow.classList.remove("hidden");
-              if (dmgAutoHint) dmgAutoHint.classList.remove("hidden");
+              if (dmgAutoRow) dmgAutoRow.classList.toggle("hidden", !hasAdminSettings);
+              if (dmgAutoHint) dmgAutoHint.classList.toggle("hidden", !hasAdminSettings);
             } else {
               // ── 浏览器模式：仅展示下载入口 ──
               if (macosDmg.github && dmgGithubRow && dmgGithubEl) {
@@ -3342,7 +3372,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             var connectQrCanvas = document.getElementById("android-connect-qr");
             var connectQrEmpty = document.getElementById("android-connect-qr-empty");
             var connectQrWrap = document.getElementById("android-connect-qr-wrap");
-            if (connectCodeEl) {
+            if (connectCodeEl && hasAdminSettings) {
               connectCodeEl.textContent = "加载中...";
               if (connectQrEmpty) connectQrEmpty.textContent = "生成中…";
               if (connectQrCanvas) connectQrCanvas.style.visibility = "hidden";
@@ -3460,7 +3490,14 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (cdThinkingEl) cdThinkingEl.checked = cd.thinking === true;
             if (cdToolgroupEl) cdToolgroupEl.checked = cd.toolGroup === true;
           })
-          .catch(function() {});
+          .catch(function(error) {
+            var accessNote = document.getElementById("settings-about-access-note");
+            if (accessNote) {
+              accessNote.textContent = (error && error.message) || "关于信息加载失败，请稍后重试。";
+              accessNote.style.color = "var(--error)";
+              accessNote.classList.remove("hidden");
+            }
+          });
       }
 
       export function saveConfigSettings() {

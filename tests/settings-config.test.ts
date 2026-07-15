@@ -48,9 +48,25 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal(connectedLoginBody.principal?.kind, "connected-app");
     const connectedCookie = connectedLogin.headers.getSetCookie().map((value) => value.split(";", 1)[0]).join("; ");
     const connectedCookieHeaders = { Cookie: connectedCookie };
+    const connectedConfigResponse = await fetch(`${baseUrl}/api/config`, { headers: connectedCookieHeaders });
+    assert.equal(connectedConfigResponse.status, 200);
+    const connectedConfig = await connectedConfigResponse.json() as { canManageSettings?: boolean };
+    assert.equal(connectedConfig.canManageSettings, false);
     assert.equal((await fetch(`${baseUrl}/api/models`, { headers: connectedCookieHeaders })).status, 200);
     assert.equal((await fetch(`${baseUrl}/api/models`, { headers: { Authorization: "Bearer not-a-token" } })).status, 401);
     assert.equal((await fetch(`${baseUrl}/api/settings`, { headers: connectedCookieHeaders })).status, 403);
+    const connectedAboutResponse = await fetch(`${baseUrl}/api/settings/about`, { headers: connectedCookieHeaders });
+    assert.equal(connectedAboutResponse.status, 200);
+    const connectedAbout = await connectedAboutResponse.json() as Record<string, unknown> & {
+      androidApk?: Record<string, unknown>;
+      macosDmg?: Record<string, unknown>;
+    };
+    assert.equal(connectedAbout.settingsAccess, "read-only");
+    assert.equal(typeof connectedAbout.version, "string");
+    assert.equal("config" in connectedAbout, false);
+    assert.equal("autoUpdate" in connectedAbout, false);
+    assert.equal("apkDir" in (connectedAbout.androidApk ?? {}), false);
+    assert.equal("dmgDir" in (connectedAbout.macosDmg ?? {}), false);
     assert.equal((await fetch(`${baseUrl}/api/app-connect-code`, { headers: connectedHeaders })).status, 403);
     assert.equal((await fetch(`${baseUrl}/api/settings/env-preview`, { headers: connectedHeaders })).status, 200);
     assert.equal((await fetch(`${baseUrl}/api/settings/env-preview?reveal=1`, { headers: connectedHeaders })).status, 403);
@@ -110,6 +126,9 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal(settingsBody.desiredConfig.host, "0.0.0.0");
     assert.equal(settingsBody.activeConfig.host, "127.0.0.1");
     assert.equal(settingsBody.restartRequired, true);
+    const adminConfig = await fetch(`${baseUrl}/api/config`, { headers });
+    assert.equal(adminConfig.status, 200);
+    assert.equal(((await adminConfig.json()) as { canManageSettings?: boolean }).canManageSettings, true);
 
     const persisted = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
     assert.equal(persisted.host, "0.0.0.0");

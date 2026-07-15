@@ -1045,6 +1045,7 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                   '<h3 class="settings-panel-title">关于 Wand</h3>' +
                   '<p class="settings-panel-desc">查看版本信息、更新状态和 Android App 连接方式。</p>' +
                 '</div>' +
+                '<p id="settings-about-access-note" class="hint hidden">当前是 App 连接会话，仅展示版本与客户端下载信息。更新管理和连接码仅对管理员开放。</p>' +
                 '<div class="settings-about-info">' +
                   '<div class="settings-about-row"><span class="settings-label">包名</span><span class="settings-value" id="settings-pkg-name">-</span></div>' +
                   '<div class="settings-about-row"><span class="settings-label">当前版本</span><span class="settings-value" id="settings-version">-</span></div>' +

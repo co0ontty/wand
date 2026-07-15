@@ -1317,9 +1317,10 @@ export async function startServer(
 
   // ── Config & Session info ──
 
-  app.get("/api/config", asyncRoute(async (_req, res) => {
+  app.get("/api/config", asyncRoute(async (req, res) => {
     const structuredChatPersona = await buildStructuredChatPersonaPayload(configPath, config);
     const defaultModels = getProviderDefaultModels(config);
+    const principal = requestPrincipals.get(req);
     res.json({
       host: config.host,
       port: config.port,
@@ -1349,6 +1350,7 @@ export async function startServer(
       updateChannel: getUpdateChannel(),
       currentVersion: DISPLAY_VERSION,
       packageVersion: PKG_VERSION,
+      canManageSettings: !!principal && principalHasScope(principal, "admin"),
       serverInstanceId: SERVER_INSTANCE_ID,
     });
   }));

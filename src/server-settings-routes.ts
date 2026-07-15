@@ -56,6 +56,16 @@ function publicConfig(config: WandConfig): Record<string, unknown> {
   };
 }
 
+function publicDistributionInfo(distribution: SettingsDistributionPayload): SettingsDistributionPayload {
+  const androidApk = { ...distribution.androidApk };
+  const macosDmg = { ...distribution.macosDmg };
+  // These server filesystem paths are useful to administrators, but the About
+  // panel only needs versions, sizes, and download URLs.
+  delete androidApk.apkDir;
+  delete macosDmg.dmgDir;
+  return { androidApk, macosDmg };
+}
+
 export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesDependencies): void {
   const {
     storage,
@@ -67,11 +77,32 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     requireAdminOrSessionPreferences,
   } = deps;
 
+  app.get("/api/settings/about", asyncRoute(async (_req, res) => {
+    const distribution = publicDistributionInfo(await deps.getDistributionSettings());
+    const cachedUpdate = deps.getCachedUpdateInfo();
+    res.json({
+      settingsAccess: "read-only",
+      version: deps.packageInfo.version,
+      packageName: deps.packageInfo.name,
+      nodeVersion: deps.packageInfo.nodeVersion,
+      repoUrl: deps.packageInfo.repoUrl,
+      updateAvailable: cachedUpdate?.updateAvailable ?? false,
+      latestVersion: cachedUpdate?.latest ?? null,
+      updateChannel: deps.getUpdateChannel(),
+      build: {
+        ...deps.buildInfo,
+        shortCommit: deps.buildInfo.commit ? deps.buildInfo.commit.slice(0, 7) : null,
+      },
+      ...distribution,
+    });
+  }));
+
   app.get("/api/settings", requireAdmin, asyncRoute(async (_req, res) => {
     const desiredConfig = runtimeConfig.desiredSnapshot();
     const distribution = await deps.getDistributionSettings();
     const cachedUpdate = deps.getCachedUpdateInfo();
     res.json({
+      settingsAccess: "admin",
       version: deps.packageInfo.version,
       packageName: deps.packageInfo.name,
       nodeVersion: deps.packageInfo.nodeVersion,
