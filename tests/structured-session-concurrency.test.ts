@@ -162,20 +162,17 @@ test("session creation validates provider-runner combinations and applies defaul
   }
 });
 
-test("a signalled child stays in-flight until its owning close callback releases it", async (t) => {
+test("an interrupted runner stays in-flight until its owning completion releases it", async (t) => {
   const { manager, queries, session } = createSdkHarness(t);
   let killCalls = 0;
-  const fakeChild = {
-    killed: true,
-    exitCode: null,
-    kill: () => {
+  const fakeExecution = {
+    interrupt: () => {
       killCalls++;
-      return true;
     },
   };
   const internal = manager as unknown as {
     sessions: Map<string, SessionSnapshot>;
-    pendingChildren: Map<string, unknown>;
+    pendingRunnerExecutions: Map<string, unknown>;
   };
   internal.sessions.set(session.id, {
     ...session,
@@ -186,7 +183,7 @@ test("a signalled child stays in-flight until its owning close callback releases
       activeRequestId: "request-before-close",
     },
   });
-  internal.pendingChildren.set(session.id, fakeChild);
+  internal.pendingRunnerExecutions.set(session.id, fakeExecution);
 
   const queued = await manager.sendMessage(session.id, "wait for close");
   assert.deepEqual(queued.queuedMessages, ["wait for close"]);

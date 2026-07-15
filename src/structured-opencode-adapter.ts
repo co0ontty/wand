@@ -1,14 +1,18 @@
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 
-import type { ContentBlock, ConversationTurn, SessionSnapshot } from "./types.js";
 import { thinkingEffortToOpenCodeVariant } from "./structured-provider-common.js";
+import type {
+  StructuredRunnerAdapter,
+  StructuredRunnerContext,
+  StructuredRunnerExecution,
+  StructuredRunnerObserver,
+  StructuredRunnerResult,
+  StructuredRunnerTurnState,
+} from "./structured-runner.js";
+import type { SessionSnapshot } from "./types.js";
 
-export interface OpenCodeTurnState {
-  blocks: ContentBlock[];
-  result: string;
-  sessionId: string | null;
-  usage?: ConversationTurn["usage"];
-}
+export type OpenCodeTurnState = StructuredRunnerTurnState;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -125,4 +129,100 @@ export function applyOpenCodeEvent(
     };
   }
   return null;
+}
+
+/** Production adapter for the external `opencode run --format json` process. */
+export class OpenCodeRunner implements StructuredRunnerAdapter {
+  constructor(private readonly spawnProcess: typeof spawn = spawn) {}
+
+  start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
+    const args = buildOpenCodeArgs(context.session);
+    const spawnedAt = new Date().toISOString();
+    const child = this.spawnProcess("opencode", args, {
+      cwd: context.session.cwd,
+      env: context.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    child.stdin?.end(context.prompt);
+
+    const state: OpenCodeTurnState = {
+      blocks: [],
+      result: "",
+      sessionId: context.session.claudeSessionId,
+      model: context.session.selectedModel ?? context.session.structuredState?.model,
+      usage: undefined,
+    };
+    let lineBuffer = "";
+    let stderr = "";
+    let primaryError: string | null = null;
+    let settled = false;
+
+    const result = (
+      exitCode: number | null,
+      signal: NodeJS.Signals | null,
+      spawnError?: NodeJS.ErrnoException,
+    ): StructuredRunnerResult => ({
+      state,
+      exitCode,
+      signal,
+      stderr,
+      primaryError,
+      ...(spawnError ? { spawnError } : {}),
+    });
+    const processLine = (line: string): void => {
+      if (!observer.isActive()) return;
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(trimmed) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      observer.onEvent?.(event);
+      const error = applyOpenCodeEvent(state, event);
+      if (error) primaryError = error;
+      observer.onUpdate(state);
+    };
+
+    const completion = new Promise<StructuredRunnerResult>((resolve) => {
+      child.stdout?.on("data", (chunk: Buffer) => {
+        if (!observer.isActive()) return;
+        const text = chunk.toString();
+        observer.onStdout?.(text);
+        lineBuffer += text;
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() ?? "";
+        for (const line of lines) processLine(line);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        if (!observer.isActive()) return;
+        const text = chunk.toString();
+        observer.onStderr?.(text);
+        stderr += text;
+      });
+      child.on("error", (error) => {
+        if (settled) return;
+        settled = true;
+        resolve(result(null, null, error as NodeJS.ErrnoException));
+      });
+      child.on("close", (exitCode, signal) => {
+        if (settled) return;
+        settled = true;
+        if (lineBuffer.trim()) processLine(lineBuffer);
+        lineBuffer = "";
+        resolve(result(exitCode, signal));
+      });
+    });
+
+    return {
+      args,
+      spawnedAt,
+      pid: child.pid ?? null,
+      completion,
+      interrupt: () => {
+        try { child.kill("SIGTERM"); } catch { /* best-effort external interruption */ }
+      },
+    };
+  }
 }

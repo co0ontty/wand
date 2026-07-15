@@ -1,9 +1,8 @@
 import crypto from "node:crypto";
-import { compareApkInstallOrder, compareSemver, extractSemver } from "./version-utils.js";
 import compression from "compression";
 import express, { NextFunction, Request, Response } from "express";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { spawn } from "node:child_process";
@@ -78,6 +77,7 @@ import {
   type PasswordVaultItemInput,
 } from "./password-manager.js";
 import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, type PathRepairResult } from "./path-repair.js";
+import { DistributionManager } from "./distribution-manager.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
@@ -172,262 +172,6 @@ function readBuildInfo(): WandBuildInfo {
 const BUILD_INFO = readBuildInfo();
 const DISPLAY_VERSION = BUILD_INFO.version || PKG_VERSION;
 const SERVER_INSTANCE_ID = crypto.randomUUID();
-
-// ── Android APK update check cache ──
-
-interface GitHubApkInfo {
-  version: string;
-  downloadUrl: string;
-  fileName: string;
-  size: number;
-  releaseNotes?: string;
-}
-
-let cachedGitHubApk: GitHubApkInfo | null = null;
-let gitHubApkCacheTs = 0;
-const GITHUB_APK_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
-
-interface GitHubReleaseAssetHit {
-  tagName: string;
-  body?: string;
-  asset: { name: string; browser_download_url: string; size: number };
-}
-
-// 按时间倒序遍历最近的 releases，取第一个带对应产物的。正常 tag release
-// 会为每个平台出包；这里保留回退以兼容旧 release 或某次平台构建失败。
-async function fetchGitHubReleaseAssetByExt(ext: string): Promise<GitHubReleaseAssetHit | null> {
-  const apiUrl = PKG_REPO_URL.replace("github.com", "api.github.com/repos") + "/releases?per_page=30";
-  const resp = await fetch(apiUrl, {
-    headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "wand-server" },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!resp.ok) return null;
-  const releases = await resp.json() as Array<{
-    tag_name: string;
-    body?: string;
-    draft?: boolean;
-    prerelease?: boolean;
-    assets: Array<{ name: string; browser_download_url: string; size: number }>;
-  }>;
-  for (const release of releases) {
-    if (release.draft || release.prerelease) continue;
-    const asset = release.assets.find(a => a.name.toLowerCase().endsWith(ext));
-    if (asset) return { tagName: release.tag_name, body: release.body, asset };
-  }
-  return null;
-}
-
-async function fetchGitHubLatestApk(forceRefresh = false): Promise<GitHubApkInfo | null> {
-  const now = Date.now();
-  if (!forceRefresh && cachedGitHubApk && (now - gitHubApkCacheTs < GITHUB_APK_CACHE_TTL)) {
-    return cachedGitHubApk;
-  }
-  try {
-    const hit = await fetchGitHubReleaseAssetByExt(".apk");
-    if (!hit) return cachedGitHubApk ?? null;
-    // 版本号优先从文件名提取；回退到旧 release asset 时不能把当前 release tag
-    // 误当成产物版本。
-    const version = extractAndroidApkVersion(hit.asset.name)
-      ?? extractAndroidApkVersion(hit.tagName)
-      ?? hit.tagName.replace(/^v/, "");
-    cachedGitHubApk = {
-      version,
-      downloadUrl: hit.asset.browser_download_url,
-      fileName: hit.asset.name,
-      size: hit.asset.size,
-      releaseNotes: hit.body ? hit.body.trim().slice(0, 500) : undefined,
-    };
-    gitHubApkCacheTs = now;
-    return cachedGitHubApk;
-  } catch {
-    return cachedGitHubApk ?? null;
-  }
-}
-
-interface ResolvedApkVersion {
-  version: string;
-  downloadUrl: string;
-  fileName: string;
-  size: number;
-  source: "local" | "github";
-  releaseNotes?: string;
-}
-
-/**
- * APK 更新通道：stable 只看正式版（无 prerelease 后缀），beta 额外包含
- * `-debug.MMDDHHMM` 这类 tag 后 master 构建。镜像 server 自身的 stable/beta 通道语义。
- */
-type ApkUpdateChannel = "stable" | "beta";
-
-function parseApkChannel(value: unknown): ApkUpdateChannel {
-  return value === "beta" ? "beta" : "stable";
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? value as Record<string, unknown> : null;
-}
-
-async function refreshDistributionConfig(configPath: string, config: WandConfig): Promise<void> {
-  let raw: Record<string, unknown>;
-  try {
-    raw = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
-  } catch {
-    return;
-  }
-
-  const android = asRecord(raw.android);
-  if (android) {
-    config.android = { ...(config.android ?? {}) };
-    if (typeof android.enabled === "boolean") config.android.enabled = android.enabled;
-    if (Object.prototype.hasOwnProperty.call(android, "apkDir")) {
-      config.android.apkDir = typeof android.apkDir === "string" && android.apkDir.trim()
-        ? android.apkDir.trim()
-        : "android";
-    }
-    if (Object.prototype.hasOwnProperty.call(android, "currentApkFile")) {
-      config.android.currentApkFile = typeof android.currentApkFile === "string"
-        ? android.currentApkFile.trim()
-        : "";
-    }
-  }
-
-  const macos = asRecord(raw.macos);
-  if (macos) {
-    config.macos = { ...(config.macos ?? {}) };
-    if (typeof macos.enabled === "boolean") config.macos.enabled = macos.enabled;
-    if (Object.prototype.hasOwnProperty.call(macos, "dmgDir")) {
-      config.macos.dmgDir = typeof macos.dmgDir === "string" && macos.dmgDir.trim()
-        ? macos.dmgDir.trim()
-        : "macos";
-    }
-    if (Object.prototype.hasOwnProperty.call(macos, "currentDmgFile")) {
-      config.macos.currentDmgFile = typeof macos.currentDmgFile === "string"
-        ? macos.currentDmgFile.trim()
-        : "";
-    }
-  }
-}
-
-/** 版本号带 prerelease 后缀（如 -debug.06121811）即视为 beta 构建。 */
-function isPrereleaseApkVersion(version: string | null): boolean {
-  return !!version && version.includes("-");
-}
-
-async function resolveLatestApkVersion(
-  configDir: string,
-  config: WandConfig,
-  channel: ApkUpdateChannel,
-  configPath?: string
-): Promise<ResolvedApkVersion | null> {
-  // local 与 github 两个来源都看，按安装序取真正更新的那个（持平偏向 local：同源下载更快）。
-  // 旧逻辑是「local 存在就一票否决」——本地目录留着旧包时，会把线上新版压住不提示。
-  const localApk = await resolveAndroidApkAsset(configDir, config, channel, configPath);
-  const local: ResolvedApkVersion | null = localApk && localApk.version
-    ? {
-      version: localApk.version,
-      // 下载链接始终带通道参数，保证「提示的版本」和「下载到的文件」出自同一套过滤：
-      // 裸 /android/download（网页下载页、二维码落地页）默认 beta = 目录里真正最新的包。
-      downloadUrl: `${localApk.downloadUrl}?channel=${channel}`,
-      fileName: localApk.fileName,
-      size: localApk.size,
-      source: "local",
-    }
-    : null;
-  let github: ResolvedApkVersion | null = null;
-  try {
-    const ghApk = await fetchGitHubLatestApk();
-    if (ghApk) {
-      github = {
-        version: ghApk.version,
-        downloadUrl: ghApk.downloadUrl,
-        fileName: ghApk.fileName,
-        size: ghApk.size,
-        source: "github",
-        releaseNotes: ghApk.releaseNotes,
-      };
-    }
-  } catch {
-    // GitHub 不可达时静默回退 local
-  }
-  if (local && github) {
-    return compareApkInstallOrder(github.version, local.version) > 0 ? github : local;
-  }
-  return local ?? github;
-}
-
-// ── macOS DMG update check cache ──
-
-interface GitHubDmgInfo {
-  version: string;
-  downloadUrl: string;
-  fileName: string;
-  size: number;
-}
-
-let cachedGitHubDmg: GitHubDmgInfo | null = null;
-let gitHubDmgCacheTs = 0;
-const GITHUB_DMG_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
-
-async function fetchGitHubLatestDmg(forceRefresh = false): Promise<GitHubDmgInfo | null> {
-  const now = Date.now();
-  if (!forceRefresh && cachedGitHubDmg && (now - gitHubDmgCacheTs < GITHUB_DMG_CACHE_TTL)) {
-    return cachedGitHubDmg;
-  }
-  try {
-    const hit = await fetchGitHubReleaseAssetByExt(".dmg");
-    if (!hit) return cachedGitHubDmg ?? null;
-    // 同 APK：版本号优先从文件名提取，避免回退到旧 asset 时把 release tag 当成新版本。
-    const version = extractMacosDmgVersion(hit.asset.name)
-      ?? extractMacosDmgVersion(hit.tagName)
-      ?? hit.tagName.replace(/^v/, "");
-    cachedGitHubDmg = {
-      version,
-      downloadUrl: hit.asset.browser_download_url,
-      fileName: hit.asset.name,
-      size: hit.asset.size,
-    };
-    gitHubDmgCacheTs = now;
-    return cachedGitHubDmg;
-  } catch {
-    return cachedGitHubDmg ?? null;
-  }
-}
-
-interface ResolvedDmgVersion {
-  version: string;
-  downloadUrl: string;
-  fileName: string;
-  size: number;
-  source: "local" | "github";
-}
-
-async function resolveLatestDmgVersion(
-  configDir: string,
-  config: WandConfig,
-  configPath?: string,
-): Promise<ResolvedDmgVersion | null> {
-  const localDmg = await resolveMacosDmgAsset(configDir, config, configPath);
-  if (localDmg && localDmg.version) {
-    return {
-      version: localDmg.version,
-      downloadUrl: localDmg.downloadUrl,
-      fileName: localDmg.fileName,
-      size: localDmg.size,
-      source: "local",
-    };
-  }
-  const ghDmg = await fetchGitHubLatestDmg();
-  if (ghDmg) {
-    return {
-      version: ghDmg.version,
-      downloadUrl: ghDmg.downloadUrl,
-      fileName: ghDmg.fileName,
-      size: ghDmg.size,
-      source: "github",
-    };
-  }
-  return null;
-}
 
 function isExternalAvatarSource(value: string): boolean {
   return /^(https?:|data:)/i.test(value);
@@ -753,204 +497,6 @@ function resolveAppConnectOrigin(origin: string, config: WandConfig): string {
   }
 }
 
-interface AndroidApkAsset {
-  fileName: string;
-  filePath: string;
-  size: number;
-  updatedAt: string;
-  version: string | null;
-  downloadUrl: string;
-  source: "local";
-}
-
-interface MacosDmgAsset {
-  fileName: string;
-  filePath: string;
-  size: number;
-  updatedAt: string;
-  version: string | null;
-  downloadUrl: string;
-  source: "local";
-}
-
-/** Match a semver-looking token in a file name (with optional pre-release / build metadata). */
-function resolveAndroidApkDir(configDir: string, config: WandConfig): string {
-  const configuredDir = config.android?.apkDir?.trim();
-  if (!configuredDir) {
-    return path.join(configDir, "android");
-  }
-  return path.isAbsolute(configuredDir) ? configuredDir : path.resolve(configDir, configuredDir);
-}
-
-function extractAndroidApkVersion(fileName: string): string | null {
-  return extractSemver(fileName.replace(/\.apk$/i, ""));
-}
-
-async function resolveAndroidApkAsset(
-  configDir: string,
-  config: WandConfig,
-  channel: ApkUpdateChannel = "beta",
-  configPath?: string,
-): Promise<AndroidApkAsset | null> {
-  if (configPath) await refreshDistributionConfig(configPath, config);
-  if (config.android?.enabled !== true) return null;
-  const apkDir = resolveAndroidApkDir(configDir, config);
-  await mkdir(apkDir, { recursive: true });
-
-  const configuredFile = config.android?.currentApkFile?.trim();
-  // Beta is the local development channel: every check should pick the newest
-  // APK in apkDir, so dropping a new debug build into the directory is enough.
-  // currentApkFile remains a stable/manual pin and backward-compatible fallback.
-  if (configuredFile && channel !== "beta") {
-    const filePath = path.join(apkDir, path.basename(configuredFile));
-    try {
-      const fileStat = await stat(filePath);
-      if (!fileStat.isFile()) return null;
-      const fileName = path.basename(filePath);
-      const version = extractAndroidApkVersion(fileName);
-      if (channel === "stable" && isPrereleaseApkVersion(version)) return null;
-      return {
-        fileName,
-        filePath,
-        size: fileStat.size,
-        updatedAt: fileStat.mtime.toISOString(),
-        version,
-        downloadUrl: "/android/download",
-        source: "local",
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  const entries = await readdir(apkDir, { withFileTypes: true });
-  const apkFiles = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".apk"));
-  if (apkFiles.length === 0) return null;
-
-  const allCandidates = await Promise.all(apkFiles.map(async (entry) => {
-    const filePath = path.join(apkDir, entry.name);
-    const fileStat = await stat(filePath);
-    return {
-      entry,
-      filePath,
-      fileStat,
-    };
-  }));
-  // 通道过滤：stable 只看正式版文件（无 prerelease 后缀的版本号），beta 全量。
-  // 无版本号的文件两个通道都保留（排序时本来就垫底，仅在只有它时兜底可下载）。
-  const candidates = channel === "beta"
-    ? allCandidates
-    : allCandidates.filter((c) => !isPrereleaseApkVersion(extractAndroidApkVersion(c.entry.name)));
-  if (candidates.length === 0) return null;
-  // 按版本号选"最新", 而非修改时间 —— cp/rsync/解压/checkout 都可能让低版本号文件的
-  // mtime 更新, 用 mtime 会把旧版本号当成 latest 上报。版本相同或都无版本号时退回 mtime。
-  // 注意用安装序比较（同三段时 debug > release，镜像 versionCode），不是标准 semver：
-  // wand-v1.55.0.apk 与 wand-v1.55.0-debug.x.apk 并存时，debug 才是装得上的更新包。
-  candidates.sort((a, b) => {
-    const va = extractAndroidApkVersion(a.entry.name);
-    const vb = extractAndroidApkVersion(b.entry.name);
-    if (va && vb) {
-      const cmp = compareApkInstallOrder(vb, va);
-      if (cmp !== 0) return cmp;
-    } else if (va && !vb) {
-      return -1;
-    } else if (!va && vb) {
-      return 1;
-    }
-    return b.fileStat.mtimeMs - a.fileStat.mtimeMs;
-  });
-  const selected = candidates[0];
-  return {
-    fileName: selected.entry.name,
-    filePath: selected.filePath,
-    size: selected.fileStat.size,
-    updatedAt: selected.fileStat.mtime.toISOString(),
-    version: extractAndroidApkVersion(selected.entry.name),
-    downloadUrl: "/android/download",
-    source: "local",
-  };
-}
-
-function resolveMacosDmgDir(configDir: string, config: WandConfig): string {
-  const configuredDir = config.macos?.dmgDir?.trim();
-  if (!configuredDir) {
-    return path.join(configDir, "macos");
-  }
-  return path.isAbsolute(configuredDir) ? configuredDir : path.resolve(configDir, configuredDir);
-}
-
-function extractMacosDmgVersion(fileName: string): string | null {
-  return extractSemver(fileName.replace(/\.dmg$/i, ""));
-}
-
-async function resolveMacosDmgAsset(
-  configDir: string,
-  config: WandConfig,
-  configPath?: string,
-): Promise<MacosDmgAsset | null> {
-  if (configPath) await refreshDistributionConfig(configPath, config);
-  if (config.macos?.enabled !== true) return null;
-  const dmgDir = resolveMacosDmgDir(configDir, config);
-  await mkdir(dmgDir, { recursive: true });
-
-  const configuredFile = config.macos?.currentDmgFile?.trim();
-  if (configuredFile) {
-    const filePath = path.join(dmgDir, path.basename(configuredFile));
-    try {
-      const fileStat = await stat(filePath);
-      if (!fileStat.isFile()) return null;
-      return {
-        fileName: path.basename(filePath),
-        filePath,
-        size: fileStat.size,
-        updatedAt: fileStat.mtime.toISOString(),
-        version: extractMacosDmgVersion(path.basename(filePath)),
-        downloadUrl: "/macos/download",
-        source: "local",
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  const entries = await readdir(dmgDir, { withFileTypes: true });
-  const dmgFiles = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".dmg"));
-  if (dmgFiles.length === 0) return null;
-
-  const candidates = await Promise.all(dmgFiles.map(async (entry) => {
-    const filePath = path.join(dmgDir, entry.name);
-    const fileStat = await stat(filePath);
-    return {
-      entry,
-      filePath,
-      fileStat,
-    };
-  }));
-  candidates.sort((a, b) => {
-    const va = extractMacosDmgVersion(a.entry.name);
-    const vb = extractMacosDmgVersion(b.entry.name);
-    if (va && vb) {
-      const cmp = compareSemver(vb, va);
-      if (cmp !== 0) return cmp;
-    } else if (va && !vb) {
-      return -1;
-    } else if (!va && vb) {
-      return 1;
-    }
-    return b.fileStat.mtimeMs - a.fileStat.mtimeMs;
-  });
-  const selected = candidates[0];
-  return {
-    fileName: selected.entry.name,
-    filePath: selected.filePath,
-    size: selected.fileStat.size,
-    updatedAt: selected.fileStat.mtime.toISOString(),
-    version: extractMacosDmgVersion(selected.entry.name),
-    downloadUrl: "/macos/download",
-    source: "local",
-  };
-}
-
 // ── Startup error handling ──
 
 process.on("uncaughtException", (err) => {
@@ -1076,6 +622,12 @@ export async function startServer(
     };
   };
   const configDir = resolveConfigDir(configPath);
+  const distributionManager = new DistributionManager({
+    configDir,
+    configPath,
+    config,
+    repositoryUrl: PKG_REPO_URL,
+  });
   const processes = new ProcessManager(config, storage, configDir);
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   const structuredSessions = new StructuredSessionManager(storage, config, structuredLogger);
@@ -1276,12 +828,7 @@ export async function startServer(
 
   // ── Android APK update & download (no auth required) ──
 
-  registerPublicUpdateRoutes(app, {
-    resolveLatestApk: (channel) => resolveLatestApkVersion(configDir, config, channel, configPath),
-    resolveAndroidDownload: (channel) => resolveAndroidApkAsset(configDir, config, channel, configPath),
-    resolveLatestDmg: () => resolveLatestDmgVersion(configDir, config, configPath),
-    resolveMacosDownload: () => resolveMacosDmgAsset(configDir, config, configPath),
-  });
+  registerPublicUpdateRoutes(app, distributionManager);
 
   // Public probe so the unauthenticated browser does not log a 401 on /api/config
   app.get("/api/session-check", (req, res) => {
@@ -1479,52 +1026,7 @@ export async function startServer(
 
   // ── Settings endpoints ──
 
-  const getDistributionSettings = async () => {
-    const localApk = await resolveAndroidApkAsset(configDir, config, "beta", configPath);
-    const ghApk = await fetchGitHubLatestApk();
-    const apkDir = resolveAndroidApkDir(configDir, config);
-    const resolvedApk = localApk
-      ? { hasApk: true, fileName: localApk.fileName, version: localApk.version, size: localApk.size, updatedAt: localApk.updatedAt, downloadUrl: localApk.downloadUrl, source: "local" as const }
-      : ghApk
-        ? { hasApk: true, fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, updatedAt: null, downloadUrl: ghApk.downloadUrl, source: "github" as const }
-        : null;
-    const localDmg = await resolveMacosDmgAsset(configDir, config, configPath);
-    const ghDmg = await fetchGitHubLatestDmg();
-    const dmgDir = resolveMacosDmgDir(configDir, config);
-    const resolvedDmg = localDmg
-      ? { hasDmg: true, fileName: localDmg.fileName, version: localDmg.version, size: localDmg.size, updatedAt: localDmg.updatedAt, downloadUrl: localDmg.downloadUrl, source: "local" as const }
-      : ghDmg
-        ? { hasDmg: true, fileName: ghDmg.fileName, version: ghDmg.version, size: ghDmg.size, updatedAt: null, downloadUrl: ghDmg.downloadUrl, source: "github" as const }
-        : null;
-    return {
-      androidApk: {
-        enabled: config.android?.enabled === true,
-        apkDir,
-        hasApk: resolvedApk?.hasApk ?? false,
-        fileName: resolvedApk?.fileName ?? null,
-        version: resolvedApk?.version ?? null,
-        size: resolvedApk?.size ?? null,
-        updatedAt: resolvedApk?.updatedAt ?? null,
-        downloadUrl: resolvedApk?.downloadUrl ?? null,
-        source: resolvedApk?.source ?? null,
-        local: localApk ? { fileName: localApk.fileName, version: localApk.version, size: localApk.size, updatedAt: localApk.updatedAt, downloadUrl: localApk.downloadUrl } : null,
-        github: ghApk ? { fileName: ghApk.fileName, version: ghApk.version, size: ghApk.size, downloadUrl: ghApk.downloadUrl } : null,
-      },
-      macosDmg: {
-        enabled: config.macos?.enabled === true,
-        dmgDir,
-        hasDmg: resolvedDmg?.hasDmg ?? false,
-        fileName: resolvedDmg?.fileName ?? null,
-        version: resolvedDmg?.version ?? null,
-        size: resolvedDmg?.size ?? null,
-        updatedAt: resolvedDmg?.updatedAt ?? null,
-        downloadUrl: resolvedDmg?.downloadUrl ?? null,
-        source: resolvedDmg?.source ?? null,
-        local: localDmg ? { fileName: localDmg.fileName, version: localDmg.version, size: localDmg.size, updatedAt: localDmg.updatedAt, downloadUrl: localDmg.downloadUrl } : null,
-        github: ghDmg ? { fileName: ghDmg.fileName, version: ghDmg.version, size: ghDmg.size, downloadUrl: ghDmg.downloadUrl } : null,
-      },
-    };
-  };
+  const getDistributionSettings = () => distributionManager.getSettings();
 
   registerSettingsRoutes(app, {
     storage,

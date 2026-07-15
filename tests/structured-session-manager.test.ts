@@ -4,12 +4,16 @@ import {
   buildCodexFileChangeBlocks,
   buildCodexPatchApplyBlocks,
   estimateCodexOutputTokens,
-  getLastSubmittedStructuredInput,
-  isDuplicateStructuredQueueInput,
+} from "../src/structured-codex-protocol.js";
+import { normalizeStructuredToolResultContent } from "../src/structured-content.js";
+import {
   normalizeThinkingEffort,
-  normalizeStructuredToolResultContent,
   thinkingEffortToCodexReasoningEffort,
   thinkingEffortToOpenCodeVariant,
+} from "../src/structured-provider-common.js";
+import {
+  getLastSubmittedStructuredInput,
+  isDuplicateStructuredQueueInput,
 } from "../src/structured-session-manager.js";
 
 test("structured queue rejects a replay of the active or last queued input", () => {
