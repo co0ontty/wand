@@ -17015,7 +17015,11 @@
     for (var key in metaMap) {
       if (!Object.prototype.hasOwnProperty.call(metaMap, key)) continue;
       var tab = document.querySelector('.settings-tab[data-tab="' + key + '"] .settings-tab-meta');
-      if (tab) tab.textContent = metaMap[key] || "";
+      if (tab) {
+        var metaText = metaMap[key] || "";
+        tab.textContent = metaText;
+        tab.setAttribute("title", metaText);
+      }
     }
   }
   function renderConnectQrCode(code) {
