@@ -1767,7 +1767,7 @@ export class ProcessManager extends EventEmitter {
     const record = this.sessions.get(id);
     if (this.disposed || !prompt || !record || record.title || this.topicRequests.has(id)) return;
     this.topicRequests.add(id);
-    void generateSessionTopic(prompt, record.cwd, this.config.language)
+    void generateSessionTopic(prompt, record.cwd, this.config.language, this.config.systemAi)
       .then(({ title, description }) => {
         if (!this.disposed && this.sessions.has(id)) this.setSessionTopic(id, title, description);
       })

@@ -127,18 +127,11 @@ async function checkLatestPackageVersion(channel: UpdateChannel, forceRefresh = 
   const now = Date.now();
   const cached = packageUpdateCache.get(channel);
   if (!forceRefresh && cached && now - cached.timestamp < CACHE_TTL_MS) {
-    return applyLocalBuildUpdateOverride(cached.info);
+    return cached.info;
   }
   const info = await checkPackageUpdateAsync(PKG_VERSION, channel);
   if (info.latest) {
     packageUpdateCache.set(channel, { info, timestamp: now });
-  }
-  return applyLocalBuildUpdateOverride(info);
-}
-
-function applyLocalBuildUpdateOverride(info: PackageUpdateInfo): PackageUpdateInfo {
-  if (info.channel === "stable" && BUILD_INFO.channel === "beta" && info.latest) {
-    return { ...info, updateAvailable: true };
   }
   return info;
 }
@@ -1095,7 +1088,7 @@ export async function startServer(
       if (snap?.cwd) cwd = snap.cwd;
     }
     try {
-      const optimized = await optimizePrompt(text, config.language ?? "", cwd);
+      const optimized = await optimizePrompt(text, config.language ?? "", cwd, config.systemAi);
       res.json({ optimized });
     } catch (error) {
       if (error instanceof PromptOptimizeError) {

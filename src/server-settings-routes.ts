@@ -9,12 +9,14 @@ import {
   getProviderDefaultModels,
   PREFERENCE_KEYS,
   saveConfig,
+  validateCommitAiConfig,
   writePreferenceToStorage,
 } from "./config.js";
 import { getCachedModels, refreshModels, type ModelRefreshOptions } from "./models.js";
 import { DEPLOYMENT_CONFIG_KEYS, type RuntimeConfigState } from "./runtime-config.js";
 import type { WandStorage } from "./storage.js";
 import type { WandConfig } from "./types.js";
+import { discoverCliSystemAiConfig, normalizeSystemAiConfig } from "./system-ai.js";
 
 interface SettingsDistributionPayload {
   androidApk: Record<string, unknown>;
@@ -49,6 +51,11 @@ function publicConfig(config: WandConfig): Record<string, unknown> {
   const defaultModels = getProviderDefaultModels(config);
   return {
     ...safe,
+    systemAi: safe.systemAi ? {
+      ...safe.systemAi,
+      apiKey: "",
+      hasApiKey: Boolean(safe.systemAi.apiKey),
+    } : undefined,
     defaultModel: defaultModels.claude,
     defaultCodexModel: defaultModels.codex,
     defaultOpenCodeModel: defaultModels.opencode,
@@ -155,12 +162,31 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     res.json({ inheritEnv, total: entries.length, reveal, entries });
   });
 
+  app.post("/api/settings/system-ai/import", requireAdmin, (req, res) => {
+    const body = (req.body ?? {}) as { source?: unknown };
+    const source = body.source === "codex" || body.source === "opencode" || body.source === "claude"
+      ? body.source
+      : config.commitCli;
+    const imported = discoverCliSystemAiConfig(source);
+    if (!imported) {
+      res.status(404).json({ error: "没有在已配置的 CLI 文件中找到可直连的 API 地址、密钥和模型。" });
+      return;
+    }
+    const candidate = runtimeConfig.createCandidate();
+    writePreferenceToStorage(candidate, storage, "systemAi", {
+      ...imported,
+      enabled: candidate.systemAi?.enabled === true,
+    });
+    runtimeConfig.commit(candidate, new Set(["systemAi"]));
+    res.json({ ok: true, systemAi: (publicConfig(candidate).systemAi) });
+  });
+
   app.get("/api/app-connect-code", requireAdmin, (req, res) => {
     res.json(deps.resolveAppConnectCode(req));
   });
 
   app.post("/api/settings/config", requireAdminOrSessionPreferences, asyncRoute(async (req, res) => {
-    const body = req.body as Partial<WandConfig> & { defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown } };
+    const body = req.body as Partial<WandConfig> & { defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown }; systemAi?: Record<string, unknown> };
     const previousDesiredConfig = runtimeConfig.desiredSnapshot();
     const candidateConfig = runtimeConfig.createCandidate();
     const stagedPreferences: Array<{ key: string; value: unknown }> = [];
@@ -169,7 +195,9 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       setPreference(key: string, value: unknown): void { stagedPreferences.push({ key, value }); },
     } as unknown as WandStorage;
     const stagePreference = (field: (typeof PREFERENCE_KEYS)[number], value: unknown): void => {
-      writePreferenceToStorage(candidateConfig, stagingStorage, field, value);
+      writePreferenceToStorage(candidateConfig, stagingStorage, field, value, {
+        deferCommitAiValidation: true,
+      });
       stagedPreferenceFields.add(field);
     };
     let touchedDeployField = false;
@@ -200,11 +228,23 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         if (Object.hasOwn(body.defaultModels, "codex")) stagePreference("defaultCodexModel", body.defaultModels.codex);
         if (Object.hasOwn(body.defaultModels, "opencode")) stagePreference("defaultOpenCodeModel", body.defaultModels.opencode);
       }
+      if (body.systemAi !== undefined) {
+        if (!body.systemAi || typeof body.systemAi !== "object" || Array.isArray(body.systemAi)) {
+          throw new Error("systemAi 必须是对象。");
+        }
+        const previous = candidateConfig.systemAi;
+        const apiKey = typeof body.systemAi.apiKey === "string" && body.systemAi.apiKey.trim()
+          ? body.systemAi.apiKey.trim()
+          : previous?.apiKey ?? "";
+        stagePreference("systemAi", normalizeSystemAiConfig({ ...previous, ...body.systemAi, apiKey }, previous));
+      }
       for (const field of PREFERENCE_KEYS) {
+        if (field === "systemAi") continue;
         const value = (body as Record<string, unknown>)[field];
         if (!(field in body) || value === undefined) continue;
         stagePreference(field, value);
       }
+      validateCommitAiConfig(candidateConfig);
     } catch (error) {
       res.status(400).json({ error: getErrorMessage(error, "配置校验失败。") });
       return;

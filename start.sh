@@ -464,22 +464,29 @@ esac
 
 PACKAGE_VERSION="$("$NODE_BIN" -e 'process.stdout.write(require("./package.json").version)' 2>/dev/null)"
 # 兼容曾经使用的 -dev.YYYYMMDDHHMM，以及现在与 Android 对齐的
-# -debug.tMMDDHHMM（npm semver 不允许纯数字段带前导零）；脚本退出时始终恢复
-# 纯正式版本，避免把临时版本留在工作区。
-RESTORE_VERSION="${PACKAGE_VERSION%%-dev.*}"
-RESTORE_VERSION="${RESTORE_VERSION%%-debug.*}"
+# -debug.tMMDDHHMM（npm semver 不允许纯数字段带前导零）。package.json 与
+# package-lock.json 先同步到最新 tag；只有打包产物保留临时 debug 后缀。
+FALLBACK_VERSION="${PACKAGE_VERSION%%-dev.*}"
+FALLBACK_VERSION="${FALLBACK_VERSION%%-debug.*}"
 BASE_VERSION="$(latest_tag_version)"
-[[ -n "$BASE_VERSION" ]] || BASE_VERSION="$RESTORE_VERSION"
+[[ -n "$BASE_VERSION" ]] || BASE_VERSION="$FALLBACK_VERSION"
+RESTORE_VERSION="$BASE_VERSION"
 DEV_VERSION="${BASE_VERSION}-debug.t$(date +%m%d%H%M)"
 PACK_DIR=""
 
 restore_version() {
-  "$NPM_BIN" version "$RESTORE_VERSION" --no-git-tag-version --allow-same-version >/dev/null 2>&1 || true
+  "$NPM_BIN" version "$RESTORE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null 2>&1 || true
   [[ -n "$PACK_DIR" && -d "$PACK_DIR" ]] && rm -rf "$PACK_DIR"
   return 0
 }
 trap restore_version EXIT
 trap 'echo; warn "已中断。service 可能仍在跑旧版本。"; exit 130' INT
+
+if [[ "$PACKAGE_VERSION" != "$BASE_VERSION" ]]; then
+  msg "先同步 package.json/package-lock.json: $PACKAGE_VERSION -> $BASE_VERSION (latest tag)"
+  "$NPM_BIN" version "$BASE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null
+  ok "仓库包版本已同步到 $BASE_VERSION"
+fi
 
 if [[ "$DO_BUILD" == "1" ]]; then
   if [[ -e "$REPO_ROOT/dist" && ! -w "$REPO_ROOT/dist" ]]; then
@@ -487,8 +494,8 @@ if [[ "$DO_BUILD" == "1" ]]; then
     warn "dist/ 当前不可写，先归还给当前用户"
     sudo chown -R "$(id -u):$(id -g)" "$REPO_ROOT/dist"
   fi
-  msg "版本号: package $RESTORE_VERSION, latest tag $BASE_VERSION -> $DEV_VERSION"
-  "$NPM_BIN" version "$DEV_VERSION" --no-git-tag-version --allow-same-version >/dev/null 2>&1
+  msg "版本号: package $PACKAGE_VERSION, latest tag $BASE_VERSION -> $DEV_VERSION"
+  "$NPM_BIN" version "$DEV_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null 2>&1
   msg "WAND_BUILD_CHANNEL=beta npm run build"
   WAND_BUILD_CHANNEL=beta "$NPM_BIN" run build
   ok "build 完成 ($DEV_VERSION)"
@@ -509,7 +516,11 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   msg "npm pack -> install -g --prefix $WAND_PREFIX"
   repair_global_package_permissions
   cleanup_npm_package_temps
-  PACK_FILE="$("$NPM_BIN" pack --pack-destination "$PACK_DIR" | tail -1)"
+  # dist was built explicitly above with the local debug version. Do not run
+  # publish lifecycle hooks here: prepublishOnly rewrites package.json back to
+  # the latest stable tag and silently turns this local package into a stable
+  # build before installation.
+  PACK_FILE="$("$NPM_BIN" pack --ignore-scripts --pack-destination "$PACK_DIR" | tail -1)"
   [[ -n "$PACK_FILE" && -f "$PACK_DIR/$PACK_FILE" ]] || die "npm pack 未产出 tarball"
   "$NPM_BIN" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund
   ok "本地 npm 包已安装到 $WAND_PREFIX"

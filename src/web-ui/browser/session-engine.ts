@@ -1283,6 +1283,120 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         renderSettingsModelCombobox(root);
       }
 
+      export function syncCommitSourceUI() {
+        var apiRadio = document.getElementById("cfg-commit-source-api") as HTMLInputElement | null;
+        var cliRadio = document.getElementById("cfg-commit-source-cli") as HTMLInputElement | null;
+        var apiPanel = document.getElementById("cfg-commit-api-panel") as HTMLElement | null;
+        var cliPanel = document.getElementById("cfg-commit-cli-panel") as HTMLElement | null;
+        var refresh = document.getElementById("cfg-commit-model-refresh") as HTMLElement | null;
+        var apiOption = document.getElementById("cfg-commit-source-api-option");
+        var cliOption = document.getElementById("cfg-commit-source-cli-option");
+        var apiSelected = apiRadio?.checked === true;
+
+        if (cliRadio && !apiRadio?.checked) cliRadio.checked = true;
+        if (apiPanel) apiPanel.hidden = !apiSelected;
+        if (cliPanel) cliPanel.hidden = apiSelected;
+        if (refresh) refresh.hidden = apiSelected;
+        if (apiOption) apiOption.classList.toggle("is-selected", apiSelected);
+        if (cliOption) cliOption.classList.toggle("is-selected", !apiSelected);
+
+        var status = document.getElementById("cfg-commit-api-status");
+        if (!status) return;
+        var baseUrl = ((document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null)?.value || "").trim();
+        var model = ((document.getElementById("cfg-system-ai-model") as HTMLInputElement | null)?.value || "").trim();
+        var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
+        var hasKey = Boolean((key?.value || "").trim() || key?.dataset.hasApiKey === "true");
+        var validUrl = false;
+        var host = "";
+        try {
+          var parsedUrl = baseUrl ? new URL(baseUrl) : null;
+          validUrl = parsedUrl?.protocol === "http:" || parsedUrl?.protocol === "https:";
+          host = parsedUrl?.host || "";
+        } catch (_error) {}
+        var ready = Boolean(validUrl && model && hasKey);
+        status.dataset.tone = ready ? "ready" : "warning";
+        status.textContent = ready
+          ? "已就绪：" + model + (host ? " · " + host : "")
+          : baseUrl && !validUrl
+            ? "尚未就绪：API 地址必须是有效的 http(s) URL。"
+            : "尚未就绪：请先填写 API 地址、API Key 和模型。";
+      }
+
+      export function organizeSettingsAiPanel() {
+        var target = document.getElementById("settings-ai-model-sections");
+        if (!target) return;
+        ["settings-model-card-title", "settings-system-ai-card-title", "settings-commit-model-card-title"].forEach(function(titleId) {
+          var title = document.getElementById(titleId);
+          var section = title && title.closest ? title.closest(".settings-model-card") : null;
+          if (section && section.parentElement !== target) target.appendChild(section);
+        });
+      }
+
+      function getActiveConfigMessage() {
+        return (document.querySelector(".settings-panel.active .settings-status-message") as HTMLElement | null)
+          || document.getElementById("config-message");
+      }
+
+      var configSavePending = false;
+
+      function fillSystemAiSettings(systemAi) {
+        systemAi = systemAi || {};
+        var enabled = document.getElementById("cfg-system-ai-enabled") as HTMLInputElement | null;
+        var protocol = document.getElementById("cfg-system-ai-protocol") as HTMLSelectElement | null;
+        var authHeader = document.getElementById("cfg-system-ai-auth-header") as HTMLSelectElement | null;
+        var baseUrl = document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null;
+        var model = document.getElementById("cfg-system-ai-model") as HTMLInputElement | null;
+        var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
+        var status = document.getElementById("cfg-system-ai-status");
+        if (enabled) enabled.checked = systemAi.enabled === true;
+        if (protocol) protocol.value = systemAi.protocol === "anthropic" ? "anthropic" : "openai";
+        if (authHeader) authHeader.value = systemAi.authHeader === "x-api-key" ? "x-api-key" : "bearer";
+        if (baseUrl) baseUrl.value = systemAi.baseUrl || "";
+        if (model) model.value = systemAi.model || "";
+        if (key) {
+          key.value = "";
+          key.placeholder = systemAi.hasApiKey ? "已保存；留空则保持不变" : "输入 API Key";
+          key.dataset.hasApiKey = systemAi.hasApiKey ? "true" : "false";
+          key.dataset.source = systemAi.source || "custom";
+        }
+        if (status) status.textContent = systemAi.source && systemAi.source !== "custom"
+          ? "已从 " + (systemAi.source === "claude" ? "Claude Code" : systemAi.source === "codex" ? "Codex" : "OpenCode") + " 导入。"
+          : "控制提示词优化和会话标题；Commit 来源在下方单独选择。";
+        syncCommitSourceUI();
+      }
+
+      export function importSystemAiConfig() {
+        var button = document.getElementById("cfg-system-ai-import") as HTMLButtonElement | null;
+        var message = getActiveConfigMessage();
+        var buttonLabel = button?.innerHTML || "";
+        if (button) {
+          button.disabled = true;
+          button.setAttribute("aria-busy", "true");
+          button.textContent = "导入中…";
+        }
+        fetch("/api/settings/system-ai/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ source: (document.getElementById("cfg-commit-cli") as HTMLSelectElement | null)?.value || "claude" })
+        }).then(function(res) { return res.json().then(function(data) { if (!res.ok) throw new Error(data.error || "导入失败"); return data; }); })
+          .then(function(data) {
+            fillSystemAiSettings(data.systemAi || {});
+            if (state.config) state.config.systemAi = data.systemAi;
+            if (message) { message.textContent = "API 配置已从 CLI 导入并保存；系统 AI 开关和 Commit 来源保持不变。"; message.style.color = "var(--success)"; message.classList.remove("hidden"); }
+          })
+          .catch(function(error) {
+            if (message) { message.textContent = error.message || "导入失败。"; message.style.color = "var(--error)"; message.classList.remove("hidden"); }
+          })
+          .finally(function() {
+            if (button) {
+              button.disabled = false;
+              button.removeAttribute("aria-busy");
+              button.innerHTML = buttonLabel;
+            }
+          });
+      }
+
       export function updateSettingsDefaultModelSelect(data?) {
         var defaults = getConfigDefaultModels();
         var claudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
@@ -2882,9 +2996,13 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       export function updateSettingsSidebarStatus(data) {
         if (!data) return;
         var cfg = data.config || {};
+        var commitSourceLabel = cfg.commitAiSource === "api"
+          ? "Commit · 直连 API"
+          : "Commit · " + (cfg.commitCli === "codex" ? "Codex" : cfg.commitCli === "opencode" ? "OpenCode" : "Claude");
         var metaMap = {
           about: data.version ? ("当前 v" + data.version) : "版本与更新信息",
           general: [cfg.defaultMode || "default", cfg.language || "自动语言"].filter(Boolean).join(" · "),
+          ai: commitSourceLabel,
           notifications: state.notifSound ? ("提示音 " + state.notifVolume + "%") : "提示音已关闭",
           security: data.hasCert ? "已安装 SSL 证书" : "密码与证书管理",
           presets: cfg.commandPresets && cfg.commandPresets.length ? (cfg.commandPresets.length + " 条预设") : "暂无预设",
@@ -3428,15 +3546,22 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             var inheritEnvEl = document.getElementById("cfg-inherit-env") as HTMLInputElement | null;
             if (inheritEnvEl) inheritEnvEl.checked = cfg.inheritEnv !== false;
 
+            fillSystemAiSettings(cfg.systemAi);
+
             var commitCliEl = document.getElementById("cfg-commit-cli") as HTMLSelectElement | null;
             var commitModelEl = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
+            var commitSourceApiEl = document.getElementById("cfg-commit-source-api") as HTMLInputElement | null;
+            var commitSourceCliEl = document.getElementById("cfg-commit-source-cli") as HTMLInputElement | null;
             if (commitCliEl) commitCliEl.value = getProviderKey(cfg.commitCli);
+            if (commitSourceApiEl) commitSourceApiEl.checked = cfg.commitAiSource === "api";
+            if (commitSourceCliEl) commitSourceCliEl.checked = cfg.commitAiSource !== "api";
             if (commitModelEl) {
               commitModelEl.value = cfg.commitModel || "";
               commitModelEl.dataset.modelInitialized = "true";
               commitModelEl.dataset.modelDirty = "false";
             }
             syncCommitModelProvider(false);
+            syncCommitSourceUI();
 
             // Default model
             var defaultModels = cfg.defaultModels && typeof cfg.defaultModels === "object"
@@ -3505,22 +3630,60 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function saveConfigSettings() {
-        var msgEl = document.getElementById("config-message");
+        if (configSavePending) return;
+        var savingAi = document.getElementById("settings-tab-ai")?.classList.contains("active") === true;
+        var msgEl = getActiveConfigMessage();
         if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
 
         var defaultModelValue = ((document.getElementById("cfg-default-model") as HTMLInputElement | null || {} as any).value || "").trim();
         var defaultCodexModelValue = ((document.getElementById("cfg-default-codex-model") as HTMLInputElement | null || {} as any).value || "").trim();
         var defaultOpenCodeModelValue = ((document.getElementById("cfg-default-opencode-model") as HTMLInputElement | null || {} as any).value || "").trim();
         var commitModelValue = ((document.getElementById("cfg-commit-model") as HTMLInputElement | null || {} as any).value || "").trim();
+        var systemAiKey = ((document.getElementById("cfg-system-ai-key") as HTMLInputElement | null || {} as any).value || "").trim();
+        var systemAiKeyEl = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
+        var commitAiSource = (document.getElementById("cfg-commit-source-api") as HTMLInputElement | null)?.checked === true ? "api" : "cli";
+        var systemAiEnabled = (document.getElementById("cfg-system-ai-enabled") as HTMLInputElement | null)?.checked === true;
+        var systemAiBaseUrlEl = document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null;
+        var systemAiModelEl = document.getElementById("cfg-system-ai-model") as HTMLInputElement | null;
+        [systemAiBaseUrlEl, systemAiModelEl, systemAiKeyEl].forEach(function(field) {
+          if (field) field.removeAttribute("aria-invalid");
+        });
+        if (savingAi && (commitAiSource === "api" || systemAiEnabled)) {
+          var missingField = !systemAiBaseUrlEl?.value.trim()
+            ? systemAiBaseUrlEl
+            : !systemAiModelEl?.value.trim()
+              ? systemAiModelEl
+              : !(systemAiKey || systemAiKeyEl?.dataset.hasApiKey === "true")
+                ? systemAiKeyEl
+                : null;
+          if (missingField) {
+            missingField.setAttribute("aria-invalid", "true");
+            missingField.focus();
+            if (msgEl) {
+              msgEl.textContent = "API 配置尚未完整，请填写 API 地址、API Key 和模型。";
+              msgEl.style.color = "var(--error)";
+              msgEl.classList.remove("hidden");
+            }
+            syncCommitSourceUI();
+            return;
+          }
+          try {
+            var parsedSystemAiUrl = new URL(systemAiBaseUrlEl?.value.trim() || "");
+            if (parsedSystemAiUrl.protocol !== "http:" && parsedSystemAiUrl.protocol !== "https:") throw new Error("invalid protocol");
+          } catch (_error) {
+            systemAiBaseUrlEl?.setAttribute("aria-invalid", "true");
+            systemAiBaseUrlEl?.focus();
+            if (msgEl) {
+              msgEl.textContent = "API 地址必须是有效的 http(s) URL。";
+              msgEl.style.color = "var(--error)";
+              msgEl.classList.remove("hidden");
+            }
+            syncCommitSourceUI();
+            return;
+          }
+        }
 
-        var body = {
-          host: (document.getElementById("cfg-host") as HTMLInputElement | null || {} as any).value,
-          port: Number((document.getElementById("cfg-port") as HTMLInputElement | null || {} as any).value),
-          https: (document.getElementById("cfg-https") as HTMLInputElement | null || {} as any).checked,
-          defaultMode: (document.getElementById("cfg-mode") as HTMLSelectElement | null || {} as any).value,
-          defaultCwd: (document.getElementById("cfg-cwd") as HTMLInputElement | null || {} as any).value,
-          shell: (document.getElementById("cfg-shell") as HTMLInputElement | null || {} as any).value,
-          language: (document.getElementById("cfg-language") as HTMLSelectElement | null || {} as any).value || "",
+        var body: any = savingAi ? {
           defaultModel: defaultModelValue,
           defaultCodexModel: defaultCodexModelValue,
           defaultOpenCodeModel: defaultOpenCodeModelValue,
@@ -3531,14 +3694,40 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           },
           commitCli: getProviderKey((document.getElementById("cfg-commit-cli") as HTMLSelectElement | null || {} as any).value),
           commitModel: commitModelValue,
+          commitAiSource: commitAiSource,
+          systemAi: {
+            enabled: systemAiEnabled,
+            protocol: (document.getElementById("cfg-system-ai-protocol") as HTMLSelectElement | null || {} as any).value || "openai",
+            baseUrl: ((document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null || {} as any).value || "").trim(),
+            apiKey: systemAiKey,
+            model: ((document.getElementById("cfg-system-ai-model") as HTMLInputElement | null || {} as any).value || "").trim(),
+            authHeader: (document.getElementById("cfg-system-ai-auth-header") as HTMLSelectElement | null)?.value === "x-api-key" ? "x-api-key" : "bearer",
+            source: systemAiKeyEl?.dataset.source || "custom"
+          }
+        } : {
+          host: (document.getElementById("cfg-host") as HTMLInputElement | null || {} as any).value,
+          port: Number((document.getElementById("cfg-port") as HTMLInputElement | null || {} as any).value),
+          https: (document.getElementById("cfg-https") as HTMLInputElement | null || {} as any).checked,
+          defaultMode: (document.getElementById("cfg-mode") as HTMLSelectElement | null || {} as any).value,
+          defaultCwd: (document.getElementById("cfg-cwd") as HTMLInputElement | null || {} as any).value,
+          shell: (document.getElementById("cfg-shell") as HTMLInputElement | null || {} as any).value,
+          language: (document.getElementById("cfg-language") as HTMLSelectElement | null || {} as any).value || "",
           structuredRunner: (document.getElementById("cfg-structured-runner") as HTMLSelectElement | null || {} as any).value || "cli",
-          inheritEnv: (document.getElementById("cfg-inherit-env") as HTMLInputElement | null || {} as any).checked !== false,
+          inheritEnv: (document.getElementById("cfg-inherit-env") as HTMLInputElement | null || {} as any).checked !== false
         };
 
         var previousDefaults = getConfigDefaultModels();
         var nextDefaultModel = body.defaultModel || "";
         var nextDefaultCodexModel = body.defaultCodexModel || "";
         var nextDefaultOpenCodeModel = body.defaultOpenCodeModel || "";
+        var saveButtons = document.querySelectorAll("#save-config-button, #save-ai-config-button");
+        configSavePending = true;
+        for (var saveIndex = 0; saveIndex < saveButtons.length; saveIndex++) {
+          var pendingButton = saveButtons[saveIndex] as HTMLButtonElement;
+          pendingButton.dataset.saveLabel = pendingButton.textContent || "保存配置";
+          pendingButton.disabled = true;
+          if (pendingButton.closest(".settings-panel.active")) pendingButton.textContent = "保存中…";
+        }
 
         fetch("/api/settings/config", {
           method: "POST",
@@ -3561,14 +3750,13 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             msgEl.classList.remove("hidden");
           }
           if (!data || !data.error) {
-            if (state.config) {
-              state.config.defaultModel = nextDefaultModel;
-              state.config.defaultCodexModel = nextDefaultCodexModel;
-              state.config.defaultOpenCodeModel = nextDefaultOpenCodeModel;
-              state.config.defaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel, opencode: nextDefaultOpenCodeModel };
-              state.config.commitCli = body.commitCli;
-              state.config.commitModel = body.commitModel;
-            }
+            var returnedConfig = data.config || {};
+            if (state.config) Object.assign(state.config, returnedConfig);
+            if (!savingAi) return;
+            nextDefaultModel = returnedConfig.defaultModel || nextDefaultModel;
+            nextDefaultCodexModel = returnedConfig.defaultCodexModel || nextDefaultCodexModel;
+            nextDefaultOpenCodeModel = returnedConfig.defaultOpenCodeModel || nextDefaultOpenCodeModel;
+            fillSystemAiSettings(returnedConfig.systemAi || { ...body.systemAi, apiKey: "", hasApiKey: Boolean(systemAiKey || state.config?.systemAi?.hasApiKey) });
             state.configDefaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel, opencode: nextDefaultOpenCodeModel };
             state.configDefaultModel = nextDefaultModel;
             var savedClaudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
@@ -3591,6 +3779,14 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             if (nextDefaultModel !== previousDefaults.claude || nextDefaultCodexModel !== previousDefaults.codex || nextDefaultOpenCodeModel !== previousDefaults.opencode) {
               syncComposerModelSelect(getSelectedSession());
             }
+            var aiTabMeta = document.querySelector('.settings-tab[data-tab="ai"] .settings-tab-meta');
+            if (aiTabMeta) {
+              var savedSource = returnedConfig.commitAiSource || body.commitAiSource;
+              var savedCli = returnedConfig.commitCli || body.commitCli;
+              aiTabMeta.textContent = savedSource === "api"
+                ? "Commit · 直连 API"
+                : "Commit · " + (savedCli === "codex" ? "Codex" : savedCli === "opencode" ? "OpenCode" : "Claude");
+            }
           }
         })
         .catch(function() {
@@ -3598,6 +3794,15 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             msgEl.textContent = "保存失败。";
             msgEl.style.color = "var(--error)";
             msgEl.classList.remove("hidden");
+          }
+        })
+        .finally(function() {
+          configSavePending = false;
+          for (var saveIndex = 0; saveIndex < saveButtons.length; saveIndex++) {
+            var pendingButton = saveButtons[saveIndex] as HTMLButtonElement;
+            pendingButton.disabled = false;
+            pendingButton.textContent = pendingButton.dataset.saveLabel || "保存配置";
+            delete pendingButton.dataset.saveLabel;
           }
         });
       }

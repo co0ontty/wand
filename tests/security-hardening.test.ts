@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
@@ -42,6 +45,71 @@ test("config persistence excludes runtime secrets and uses private permissions",
   assert.equal("appSecret" in persisted, false);
   assert.equal(statSync(dir).mode & 0o777, 0o700);
   assert.equal(statSync(configPath).mode & 0o777, 0o600);
+});
+
+test("config:show redacts every runtime secret", (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-config-show-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const configPath = path.join(dir, "config.json");
+  const password = "config-show-password";
+  const appSecret = "c".repeat(64);
+  const apiKey = "config-show-api-key";
+  writeFileSync(configPath, JSON.stringify({ host: "127.0.0.1" }));
+
+  const storage = new WandStorage(path.join(dir, "wand.db"));
+  storage.setPassword(password);
+  storage.setAppSecret(appSecret);
+  storage.setPreference("pref:systemAi", {
+    enabled: false,
+    protocol: "openai",
+    baseUrl: "https://api.example.test/v1",
+    apiKey,
+    model: "test-model",
+  });
+  storage.close();
+
+  const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+  const output = execFileSync(process.execPath, [
+    "--import", "tsx", cliPath, "config:show", "-c", configPath,
+  ], { encoding: "utf8", cwd: path.dirname(cliPath) });
+  const displayed = JSON.parse(output) as {
+    password?: string;
+    appSecret?: string;
+    systemAi?: { apiKey?: string };
+  };
+
+  assert.equal(displayed.password, "<set>");
+  assert.equal(displayed.appSecret, "<set>");
+  assert.equal(displayed.systemAi?.apiKey, "<set>");
+  assert.equal(output.includes(password), false);
+  assert.equal(output.includes(appSecret), false);
+  assert.equal(output.includes(apiKey), false);
+});
+
+test("config loading never copies provider CLI credentials", async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-no-credential-import-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const home = path.join(dir, "home");
+  mkdirSync(path.join(home, ".claude"), { recursive: true });
+  writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({
+    env: {
+      ANTHROPIC_BASE_URL: "https://proxy.example.test",
+      ANTHROPIC_AUTH_TOKEN: "must-not-be-copied",
+    },
+    model: "test-model",
+  }));
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  const storage = new WandStorage(path.join(dir, "wand.db"));
+  try {
+    const config = await loadConfigWithStorage(path.join(dir, "config.json"), storage);
+    assert.equal(config.systemAi?.apiKey, "");
+    assert.equal(storage.hasPreference("pref:systemAi"), false);
+  } finally {
+    storage.close();
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
 });
 
 test("SQLite storage repairs database permissions", (t) => {

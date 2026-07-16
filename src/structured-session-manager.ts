@@ -574,7 +574,7 @@ export class StructuredSessionManager {
     const session = this.sessions.get(id);
     if (this.disposed || !session || session.title || this.topicRequests.has(id)) return;
     this.topicRequests.add(id);
-    void generateSessionTopic(input, session.cwd, this.config.language)
+    void generateSessionTopic(input, session.cwd, this.config.language, this.config.systemAi)
       .then(({ title, description }) => {
         if (!this.disposed && this.sessions.has(id)) this.setSessionTopic(id, title, description);
       })

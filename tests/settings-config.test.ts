@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -37,6 +37,40 @@ test("settings validate atomically, persist without secrets, and password rotati
     const adminCookie = login.headers.getSetCookie().map((value) => value.split(";", 1)[0]).join("; ");
     const headers = { Cookie: adminCookie, "Content-Type": "application/json" };
     const connectedHeaders = { Authorization: `Bearer ${appToken}`, "Content-Type": "application/json" };
+
+    const importHome = path.join(dir, "import-home");
+    mkdirSync(path.join(importHome, ".claude"), { recursive: true });
+    writeFileSync(path.join(importHome, ".claude", "settings.json"), JSON.stringify({
+      env: {
+        ANTHROPIC_BASE_URL: "https://proxy.example.test",
+        ANTHROPIC_AUTH_TOKEN: "imported-system-ai-secret",
+      },
+      model: "imported-model",
+    }));
+    const previousHome = process.env.HOME;
+    process.env.HOME = importHome;
+    let importedResponse: Response | undefined;
+    try {
+      importedResponse = await fetch(`${baseUrl}/api/settings/system-ai/import`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ source: "claude" }),
+      });
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+    }
+    assert.ok(importedResponse);
+    assert.equal(importedResponse.status, 200);
+    const importedBody = await importedResponse.json() as {
+      systemAi?: { enabled?: boolean; apiKey?: string; hasApiKey?: boolean };
+    };
+    assert.equal(importedBody.systemAi?.enabled, false);
+    assert.equal(importedBody.systemAi?.apiKey, "");
+    assert.equal(importedBody.systemAi?.hasApiKey, true);
+    assert.equal(config.systemAi?.enabled, false);
+    assert.equal(config.systemAi?.apiKey, "imported-system-ai-secret");
+    assert.equal(config.commitAiSource, "cli");
 
     const connectedLogin = await fetch(`${baseUrl}/api/login`, {
       method: "POST",
@@ -95,10 +129,42 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal(config.defaultProvider, "claude");
     assert.equal(existsSync(configPath), false);
 
+    const invalidSystemAi = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ commitAiSource: "api", systemAi: "invalid" }),
+    });
+    assert.equal(invalidSystemAi.status, 400);
+    assert.match((await invalidSystemAi.json() as { error: string }).error, /systemAi 必须是对象/);
+
+    const incompleteDirectApi = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        commitAiSource: "api",
+        systemAi: { enabled: false, baseUrl: "", apiKey: "", model: "" },
+      }),
+    });
+    assert.equal(incompleteDirectApi.status, 400);
+    assert.match((await incompleteDirectApi.json() as { error: string }).error, /必须先填写 API 地址、API Key 和模型/);
+    assert.equal(config.commitAiSource, "cli");
+
     const valid = await fetch(`${baseUrl}/api/settings/config`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ host: "0.0.0.0", defaultProvider: "codex", structuredRunner: "sdk" }),
+      body: JSON.stringify({
+        host: "0.0.0.0",
+        defaultProvider: "codex",
+        structuredRunner: "sdk",
+        commitAiSource: "api",
+        systemAi: {
+          enabled: true,
+          protocol: "openai",
+          baseUrl: "https://llm.example.test",
+          apiKey: "system-ai-secret",
+          model: "custom-model",
+        },
+      }),
     });
     assert.equal(valid.status, 200);
     const validBody = await valid.json() as {
@@ -110,11 +176,15 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal(validBody.restartRequired, true);
     assert.equal("password" in validBody.config, false);
     assert.equal("appSecret" in validBody.config, false);
+    assert.equal((validBody.config.systemAi as { apiKey?: string; hasApiKey?: boolean }).apiKey, "");
+    assert.equal((validBody.config.systemAi as { apiKey?: string; hasApiKey?: boolean }).hasApiKey, true);
     assert.equal(validBody.desiredConfig.host, "0.0.0.0");
     assert.equal(validBody.activeConfig.host, "127.0.0.1");
     assert.equal(config.host, "127.0.0.1");
     assert.equal(config.defaultProvider, "codex");
     assert.equal(config.structuredRunner, "sdk");
+    assert.equal(config.commitAiSource, "api");
+    assert.equal(config.systemAi?.apiKey, "system-ai-secret");
 
     const settingsAfterUpdate = await fetch(`${baseUrl}/api/settings`, { headers });
     assert.equal(settingsAfterUpdate.status, 200);
@@ -134,6 +204,7 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal(persisted.host, "0.0.0.0");
     assert.equal("password" in persisted, false);
     assert.equal("appSecret" in persisted, false);
+    assert.equal("systemAi" in persisted, false);
 
     const oversizedPrompt = await fetch(`${baseUrl}/api/optimize-prompt`, {
       method: "POST",

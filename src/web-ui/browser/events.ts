@@ -8,7 +8,7 @@ import { attachQuickCommitModalListeners, closeQuickCommitModal, loadGitStatus, 
 import { attachQueueBarDelegates, beginComposerVoiceHold, bindInputTouchScroll, cancelComposerVoiceHold, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, endComposerVoiceHold, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleComposerVoiceMove, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, stopSession, toggleTerminalInteractive, updateQueueBar, welcomeInputSend } from "./input";
 import { _doPlaySound, _hasNativeBridge, _vibrate, hideError, showError, showToast, wandAlert, wandConfirm } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
-import { _updateAppIconSelection, addPendingAttachment, backToNativeApp, bindSettingsModelComboboxes, checkForUpdate, closePlusPopover, closeSessionModal, closeSessionsDrawer, closeSettingsModal, closeWorktreeMergeModal, confirmWorktreeMerge, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, hidePathSuggestions, initBlankChatCwd, isStructuredSession, loadProviderCliUpdates, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openEnvPreviewModal, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, performProviderCliUpdates, performSettingsRestart, performUpdate, persistNewSessionDefaults, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, resetNotificationPermission, retryWorktreeCleanup, runCommand, saveConfigSettings, saveDisplaySettings, savePassword, schedulePathSuggestions, scheduleTestNotification, selectSession, setDraftValue, setUpdateChannel, switchServer, switchSettingsTab, syncCommitModelProvider, syncComposerHasText, syncSessionModalUI, testNotification, toggleAutoUpdate, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin, updateNotificationStatus, uploadCertificates } from "./session-engine";
+import { _updateAppIconSelection, addPendingAttachment, backToNativeApp, bindSettingsModelComboboxes, checkForUpdate, closePlusPopover, closeSessionModal, closeSessionsDrawer, closeSettingsModal, closeWorktreeMergeModal, confirmWorktreeMerge, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, hidePathSuggestions, importSystemAiConfig, initBlankChatCwd, isStructuredSession, loadProviderCliUpdates, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openEnvPreviewModal, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, organizeSettingsAiPanel, performProviderCliUpdates, performSettingsRestart, performUpdate, persistNewSessionDefaults, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, resetNotificationPermission, retryWorktreeCleanup, runCommand, saveConfigSettings, saveDisplaySettings, savePassword, schedulePathSuggestions, scheduleTestNotification, selectSession, setDraftValue, setUpdateChannel, switchServer, switchSettingsTab, syncCommitModelProvider, syncCommitSourceUI, syncComposerHasText, syncSessionModalUI, testNotification, toggleAutoUpdate, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin, updateNotificationStatus, uploadCertificates } from "./session-engine";
 import { batchDeleteSelected, clearSelections, confirmDelete, renderSessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { activateSessionItem, addRecentPath, copySelectedSessionField, fetchRecentPaths, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, saveWorkingDir, softResyncTerminal } from "./terminal";
 import { ensureTerminalFit, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
@@ -621,6 +621,9 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         }
         var saveConfigBtn = document.getElementById("save-config-button");
         if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
+        var saveAiConfigBtn = document.getElementById("save-ai-config-button");
+        if (saveAiConfigBtn) saveAiConfigBtn.addEventListener("click", saveConfigSettings);
+        organizeSettingsAiPanel();
         bindSettingsModelComboboxes();
         var defaultModelRefreshBtn = document.getElementById("cfg-default-model-refresh");
         if (defaultModelRefreshBtn) defaultModelRefreshBtn.addEventListener("click", refreshAvailableModels);
@@ -628,6 +631,44 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         if (commitModelRefreshBtn) commitModelRefreshBtn.addEventListener("click", refreshAvailableModels);
         var commitCliSelect = document.getElementById("cfg-commit-cli");
         if (commitCliSelect) commitCliSelect.addEventListener("change", function() { syncCommitModelProvider(true); });
+        var commitSourceInputs = document.querySelectorAll('input[name="commit-ai-source"]');
+        for (var csi = 0; csi < commitSourceInputs.length; csi++) {
+          commitSourceInputs[csi].addEventListener("change", syncCommitSourceUI);
+        }
+        ["cfg-system-ai-base-url", "cfg-system-ai-model", "cfg-system-ai-key"].forEach(function(id) {
+          var field = document.getElementById(id);
+          if (field) field.addEventListener("input", function(e) {
+            (e.currentTarget as HTMLElement | null)?.removeAttribute("aria-invalid");
+            var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
+            if (key) key.dataset.source = "custom";
+            syncCommitSourceUI();
+          });
+        });
+        var systemAiProtocol = document.getElementById("cfg-system-ai-protocol");
+        if (systemAiProtocol) systemAiProtocol.addEventListener("change", function() {
+          var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
+          var authHeader = document.getElementById("cfg-system-ai-auth-header") as HTMLSelectElement | null;
+          if (authHeader) authHeader.value = (systemAiProtocol as HTMLSelectElement).value === "anthropic" ? "x-api-key" : "bearer";
+          if (key) key.dataset.source = "custom";
+          syncCommitSourceUI();
+        });
+        var systemAiAuthHeader = document.getElementById("cfg-system-ai-auth-header");
+        if (systemAiAuthHeader) systemAiAuthHeader.addEventListener("change", function() {
+          var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
+          if (key) key.dataset.source = "custom";
+        });
+        var systemAiEnabled = document.getElementById("cfg-system-ai-enabled");
+        if (systemAiEnabled) systemAiEnabled.addEventListener("change", syncCommitSourceUI);
+        var commitApiConfigure = document.getElementById("cfg-commit-api-configure");
+        if (commitApiConfigure) commitApiConfigure.addEventListener("click", function() {
+          var field = document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null;
+          if (!field) return;
+          var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          field.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+          field.focus({ preventScroll: true });
+        });
+        var systemAiImportBtn = document.getElementById("cfg-system-ai-import");
+        if (systemAiImportBtn) systemAiImportBtn.addEventListener("click", importSystemAiConfig);
         var viewEnvBtn = document.getElementById("cfg-view-env-btn");
         if (viewEnvBtn) viewEnvBtn.addEventListener("click", openEnvPreviewModal);
         var saveDisplayBtn = document.getElementById("save-display-button");

@@ -1017,7 +1017,11 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                     '</button>' +
                     '<button class="settings-tab" data-tab="general" role="tab" aria-selected="false" aria-controls="settings-tab-general">' +
                       '<span class="settings-tab-main">基本配置</span>' +
-                      '<span class="settings-tab-meta">模型、模式与运行环境</span>' +
+                      '<span class="settings-tab-meta">连接、模式与运行环境</span>' +
+                    '</button>' +
+                    '<button class="settings-tab" data-tab="ai" role="tab" aria-selected="false" aria-controls="settings-tab-ai">' +
+                      '<span class="settings-tab-main">AI 与模型</span>' +
+                      '<span class="settings-tab-meta">默认模型、系统 API 与 Commit</span>' +
                     '</button>' +
                     '<button class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="settings-tab-notifications">' +
                       '<span class="settings-tab-main">通知</span>' +
@@ -1305,7 +1309,7 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
               '<div class="settings-panel" id="settings-tab-general" role="tabpanel">' +
                 '<div class="settings-panel-header">' +
                   '<h3 class="settings-panel-title">基本配置</h3>' +
-                  '<p class="settings-panel-desc">配置服务连接、默认模型、执行方式和工作目录。</p>' +
+                  '<p class="settings-panel-desc">配置服务连接、执行方式和工作目录。</p>' +
                 '</div>' +
                 '<div class="field-row">' +
                   '<div class="field">' +
@@ -1453,13 +1457,40 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                   '</div>' +
                   '<p class="field-hint settings-model-version" id="cfg-default-model-version">模型名称仅在新建会话时作为默认值；运行中的结构化会话仍可单独切换。</p>' +
                 '</section>' +
+                '<section class="settings-model-card" aria-labelledby="settings-system-ai-card-title">' +
+                  '<div class="settings-model-card-header">' +
+                    '<div class="settings-model-card-heading">' +
+                      '<span class="settings-model-card-icon" aria-hidden="true">' + iconSvg("cpu", { size: 18, strokeWidth: 1.8 }) + '</span>' +
+                      '<div>' +
+                        '<h4 class="settings-model-card-title" id="settings-system-ai-card-title">系统 AI API</h4>' +
+                        '<p class="settings-model-card-desc">直连自定义模型，用于快捷提交、提示词优化和会话标题。</p>' +
+                      '</div>' +
+                    '</div>' +
+                    '<button type="button" id="cfg-system-ai-import" class="btn btn-secondary btn-sm settings-model-refresh" title="从 CLI 复制并保存 API 配置，不改变启用状态和 Commit 来源">' +
+                      '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>' +
+                      '<span>从 CLI 导入</span>' +
+                    '</button>' +
+                  '</div>' +
+                  '<div class="settings-toggle-row">' +
+                    '<div class="settings-toggle-text"><label class="settings-toggle-title" for="cfg-system-ai-enabled">用于系统 AI 功能</label><span class="settings-toggle-desc" id="cfg-system-ai-status">控制提示词优化和会话标题；Commit 来源在下方单独选择。</span></div>' +
+                    '<label class="settings-switch"><input id="cfg-system-ai-enabled" type="checkbox" class="switch-toggle" /><span class="switch-slider"></span></label>' +
+                  '</div>' +
+                  '<div class="settings-model-grid">' +
+                    '<div class="field settings-model-field"><label class="field-label" for="cfg-system-ai-protocol">接口格式</label><select id="cfg-system-ai-protocol" class="field-input"><option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic-compatible</option></select></div>' +
+                    '<div class="field settings-model-field"><label class="field-label" for="cfg-system-ai-auth-header">认证方式</label><select id="cfg-system-ai-auth-header" class="field-input"><option value="bearer">Bearer Token</option><option value="x-api-key">x-api-key</option></select></div>' +
+                    '<div class="field settings-model-field"><label class="field-label" for="cfg-system-ai-model">模型</label><input id="cfg-system-ai-model" class="field-input" type="text" autocomplete="off" placeholder="例如 gpt-5.5 / glm-5.2" aria-describedby="ai-config-message" /></div>' +
+                    '<div class="field settings-model-field"><label class="field-label" for="cfg-system-ai-base-url">API 地址</label><input id="cfg-system-ai-base-url" class="field-input" type="url" autocomplete="off" placeholder="https://api.example.com" aria-describedby="ai-config-message" /></div>' +
+                    '<div class="field settings-model-field"><label class="field-label" for="cfg-system-ai-key">API Key</label><input id="cfg-system-ai-key" class="field-input" type="password" autocomplete="new-password" placeholder="留空则保留已保存的密钥" aria-describedby="ai-config-message" /></div>' +
+                  '</div>' +
+                  '<p class="field-hint">API Key 仅保存在服务端 SQLite 中，设置接口不会回传明文。</p>' +
+                '</section>' +
                 '<section class="settings-model-card" aria-labelledby="settings-commit-model-card-title">' +
                   '<div class="settings-model-card-header">' +
                     '<div class="settings-model-card-heading">' +
                       '<span class="settings-model-card-icon" aria-hidden="true">' + iconSvg("edit", { size: 18, strokeWidth: 1.8 }) + '</span>' +
                       '<div>' +
                         '<h4 class="settings-model-card-title" id="settings-commit-model-card-title">Commit 生成</h4>' +
-                        '<p class="settings-model-card-desc">指定快捷提交生成 message 与 tag 时使用的 CLI 和模型。</p>' +
+                        '<p class="settings-model-card-desc">明确选择快捷提交生成 message 与 tag 时使用的 AI 来源。</p>' +
                       '</div>' +
                     '</div>' +
                     '<button type="button" id="cfg-commit-model-refresh" class="btn btn-secondary btn-sm settings-model-refresh" title="重新检测所选 CLI 的模型">' +
@@ -1467,7 +1498,24 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                       '<span>刷新列表</span>' +
                     '</button>' +
                   '</div>' +
-                  '<div class="settings-model-grid">' +
+                  '<fieldset class="settings-source-picker">' +
+                    '<legend class="field-label">生成方式</legend>' +
+                    '<div class="settings-source-options">' +
+                      '<label class="settings-source-option" id="cfg-commit-source-cli-option" for="cfg-commit-source-cli">' +
+                        '<input id="cfg-commit-source-cli" name="commit-ai-source" type="radio" value="cli" checked />' +
+                        '<span class="settings-source-option-copy"><strong>CLI</strong><span>使用本机 Claude、Codex 或 OpenCode</span></span>' +
+                      '</label>' +
+                      '<label class="settings-source-option" id="cfg-commit-source-api-option" for="cfg-commit-source-api">' +
+                        '<input id="cfg-commit-source-api" name="commit-ai-source" type="radio" value="api" />' +
+                        '<span class="settings-source-option-copy"><strong>直连 API</strong><span>使用上方保存的 API 与模型</span></span>' +
+                      '</label>' +
+                    '</div>' +
+                  '</fieldset>' +
+                  '<div id="cfg-commit-api-panel" class="settings-source-panel" hidden>' +
+                    '<div id="cfg-commit-api-status" class="settings-connection-status" role="status" aria-live="polite">检查 API 配置中…</div>' +
+                    '<button type="button" id="cfg-commit-api-configure" class="btn btn-secondary btn-sm">配置直连 API</button>' +
+                  '</div>' +
+                  '<div id="cfg-commit-cli-panel" class="settings-model-grid">' +
                     '<div class="field settings-model-field">' +
                       '<div class="settings-model-label-row">' +
                         '<label class="field-label" for="cfg-commit-cli">CLI</label>' +
@@ -1540,7 +1588,21 @@ import { closeSessionModal, closeSettingsModal, closeWorktreeMergeModal, getTool
                 '<div class="settings-actions settings-actions-sticky">' +
                   '<button id="save-config-button" class="btn btn-primary btn-block">保存配置</button>' +
                 '</div>' +
-                '<p id="config-message" class="hint hidden settings-status-message"></p>' +
+                '<p id="config-message" class="hint hidden settings-status-message" role="alert"></p>' +
+              '</div>' +
+
+              // AI and models tab. Model cards are moved here once the modal is
+              // mounted, preserving their existing field IDs and event wiring.
+              '<div class="settings-panel" id="settings-tab-ai" role="tabpanel">' +
+                '<div class="settings-panel-header">' +
+                  '<h3 class="settings-panel-title">AI 与模型</h3>' +
+                  '<p class="settings-panel-desc">集中管理会话默认模型、Wand 系统服务 API，以及快捷提交使用的模型。</p>' +
+                '</div>' +
+                '<div id="settings-ai-model-sections"></div>' +
+                '<div class="settings-actions settings-actions-sticky">' +
+                  '<button id="save-ai-config-button" class="btn btn-primary btn-block">保存 AI 与模型配置</button>' +
+                '</div>' +
+                '<p id="ai-config-message" class="hint hidden settings-status-message" role="alert"></p>' +
               '</div>' +
 
               // Security tab

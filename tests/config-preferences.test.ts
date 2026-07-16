@@ -26,13 +26,23 @@ test("commit CLI and model preferences update live config and restore from stora
 
   writePreferenceToStorage(config, storage, "commitCli", "codex");
   writePreferenceToStorage(config, storage, "commitModel", "  gpt-5.4-mini  ");
+  writePreferenceToStorage(config, storage, "systemAi", {
+    enabled: false,
+    protocol: "openai",
+    baseUrl: "https://api.example.test/v1",
+    apiKey: "direct-secret",
+    model: "direct-model",
+  });
+  writePreferenceToStorage(config, storage, "commitAiSource", "api");
 
   assert.equal(config.commitCli, "codex");
   assert.equal(config.commitModel, "gpt-5.4-mini");
+  assert.equal(config.commitAiSource, "api");
 
   const restored = applyStoragePreferences(defaultConfig(), storage);
   assert.equal(restored.commitCli, "codex");
   assert.equal(restored.commitModel, "gpt-5.4-mini");
+  assert.equal(restored.commitAiSource, "api");
 });
 
 test("commit CLI preference rejects unsupported commands", () => {
@@ -40,6 +50,24 @@ test("commit CLI preference rejects unsupported commands", () => {
   assert.throws(
     () => writePreferenceToStorage(defaultConfig(), storage, "commitCli", "cursor"),
     /无效 commit CLI/,
+  );
+  assert.throws(
+    () => writePreferenceToStorage(defaultConfig(), storage, "commitAiSource", "automatic"),
+    /无效 commit AI 来源/,
+  );
+});
+
+test("commit direct API preferences reject incomplete and non-object profiles", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+
+  assert.throws(
+    () => writePreferenceToStorage(config, storage, "commitAiSource", "api"),
+    /必须先填写 API 地址、API Key 和模型/,
+  );
+  assert.throws(
+    () => writePreferenceToStorage(config, storage, "systemAi", "not-an-object"),
+    /systemAi 必须是对象/,
   );
 });
 

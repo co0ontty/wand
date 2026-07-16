@@ -23,14 +23,16 @@ import {
 
 const MIB = 1024 * 1024;
 
-test("npm dist-tags remain authoritative for every local version state", () => {
+test("npm updates move forward without downgrading local or debug builds", () => {
   assert.equal(buildPackageUpdateInfo("2.0.0", "stable", "3.0.0").updateAvailable, true);
-  assert.equal(buildPackageUpdateInfo("4.0.0", "stable", "3.0.0").updateAvailable, true);
+  assert.equal(buildPackageUpdateInfo("4.0.0", "stable", "3.0.0").updateAvailable, false);
   assert.equal(buildPackageUpdateInfo("3.0.0-local.1", "stable", "3.0.0").updateAvailable, true);
+  assert.equal(buildPackageUpdateInfo("3.0.0-debug.t07161744", "stable", "3.0.0").updateAvailable, false);
+  assert.equal(buildPackageUpdateInfo("3.0.0-debug.t07161743", "beta", "3.0.0-debug.t07161744").updateAvailable, true);
   assert.equal(buildPackageUpdateInfo("dev", "stable", "3.0.0").updateAvailable, true);
   assert.equal(buildPackageUpdateInfo("v3.0.0", "stable", "3.0.0").updateAvailable, false);
 
-  assert.equal(buildPackageUpdateInfo("4.0.0-beta.local", "beta", "3.0.0-beta.remote").updateAvailable, true);
+  assert.equal(buildPackageUpdateInfo("4.0.0-beta.local", "beta", "3.0.0-beta.remote").updateAvailable, false);
   assert.equal(buildPackageUpdateInfo("3.0.0-beta.remote", "beta", "3.0.0-beta.remote").updateAvailable, false);
 });
 

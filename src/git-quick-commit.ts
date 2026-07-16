@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
+import { callSystemAiText } from "./system-ai.js";
 import { buildChildEnv } from "./env-utils.js";
 import {
   runGit as runGitBase,
@@ -465,6 +466,7 @@ interface QuickCommitOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
+  systemAi?: import("./types.js").SystemAiConfig;
   autoMessage: boolean;
   customMessage?: string;
   tag?: string;
@@ -483,6 +485,7 @@ interface QuickCommitAiOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
+  systemAi?: import("./types.js").SystemAiConfig;
 }
 
 export class QuickCommitError extends Error {
@@ -650,6 +653,7 @@ async function callOpenCodeText(prompt: string, cwd: string, opts: QuickCommitAi
 }
 
 async function callAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
+  if (opts.systemAi?.enabled) return callSystemAiText(prompt, opts.systemAi);
   const provider = normalizeProvider(opts.provider);
   if (provider === "codex") {
     return callCodexText(prompt, cwd, opts);
@@ -1352,7 +1356,10 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
   };
 }
 
-function shouldFallbackToCli(error: QuickCommitError): boolean {
+function shouldFallbackToCli(error: QuickCommitError, opts: QuickCommitOptions): boolean {
+  // An explicit direct-API selection is a hard boundary: never execute a local
+  // provider CLI (especially the permission-bypassing fallback) behind it.
+  if (opts.systemAi?.enabled) return false;
   return ![
     "CWD_MISSING",
     "NO_CWD",
@@ -1370,7 +1377,7 @@ export async function runQuickCommitWithFallback(opts: QuickCommitOptions): Prom
   try {
     return await runQuickCommit(opts);
   } catch (error) {
-    if (error instanceof QuickCommitError && shouldFallbackToCli(error)) {
+    if (error instanceof QuickCommitError && shouldFallbackToCli(error, opts)) {
       return runQuickCommitFallbackCli(opts, error.message);
     }
     throw error;
@@ -1384,6 +1391,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     model: opts.model,
     thinkingEffort: opts.thinkingEffort,
     inheritEnv: opts.inheritEnv,
+    systemAi: opts.systemAi,
   };
 
   await assertGitWorkTreeAsync(cwd);

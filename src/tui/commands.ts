@@ -10,7 +10,6 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSyn
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
 
 import {
   checkPackageUpdateSync,
@@ -71,18 +70,6 @@ export function restartSelf(): CommandResult {
 
 // ─── 检查 / 安装更新 ────────────────────────────────────────────────────
 
-const TUI_MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-
-function readLocalBuildChannel(): string | null {
-  try {
-    const raw = readFileSync(path.resolve(TUI_MODULE_DIR, "..", "build-info.json"), "utf8");
-    const parsed = JSON.parse(raw) as { channel?: unknown };
-    return typeof parsed.channel === "string" ? parsed.channel : null;
-  } catch {
-    return null;
-  }
-}
-
 export interface UpdateInfo {
   channel: UpdateChannel;
   current: string;
@@ -105,14 +92,11 @@ export function readUpdateChannel(configPath: string): UpdateChannel {
 /** 通过 npm dist-tag 拿到当前通道最新版本号。失败返回 latest=null。 */
 export function checkUpdate(currentVersion: string, channel: UpdateChannel = "stable"): UpdateInfo {
   const info = checkPackageUpdateSync(currentVersion, channel);
-  const updateAvailable =
-    info.updateAvailable ||
-    (channel === "stable" && !!info.latest && readLocalBuildChannel() === "beta");
   return {
     channel: info.channel,
     current: info.current,
     latest: info.latest,
-    hasUpdate: updateAvailable,
+    hasUpdate: info.updateAvailable,
     installSpec: info.installSpec,
   };
 }

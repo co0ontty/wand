@@ -1,5 +1,6 @@
 export type SessionKind = "pty" | "structured";
 export type SessionProvider = "claude" | "codex" | "opencode";
+export type CommitAiSource = "cli" | "api";
 export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "pty";
 export type SessionSource = "interactive" | "automation" | "startup";
 
@@ -128,6 +129,10 @@ export interface WandConfig {
   commitCli?: SessionProvider;
   /** 快捷提交专用模型。留空则跟随所选 CLI 的默认模型。 */
   commitModel?: string;
+  /** 快捷提交生成 commit message / tag 时使用 CLI 或直连 API。 */
+  commitAiSource?: CommitAiSource;
+  /** Wand 自身轻量 AI 功能与 Commit 直连模式复用的 API 配置。 */
+  systemAi?: SystemAiConfig;
   /** 新建会话时默认使用的思考深度。 */
   defaultThinkingEffort?: ThinkingEffort;
   /** 结构化会话使用的 runner: "cli"（默认，spawn claude -p）或 "sdk"（@anthropic-ai/claude-agent-sdk）。 */
@@ -138,6 +143,20 @@ export interface WandConfig {
    * 用于隔离敏感凭据或避免 API key 泄漏到子命令。
    */
   inheritEnv?: boolean;
+}
+
+export type SystemAiProtocol = "openai" | "anthropic";
+export type SystemAiAuthHeader = "bearer" | "x-api-key";
+
+export interface SystemAiConfig {
+  enabled: boolean;
+  protocol: SystemAiProtocol;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  authHeader?: SystemAiAuthHeader;
+  /** 自动导入时记录来源，仅用于设置页说明。 */
+  source?: "claude" | "codex" | "opencode" | "custom";
 }
 
 export type ClaudeModelSource = "builtin" | "configured" | "verified-cache" | "models-api";

@@ -1,4 +1,6 @@
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
+import { callSystemAiText } from "./system-ai.js";
+import type { SystemAiConfig } from "./types.js";
 
 const CLAUDE_TIMEOUT_MS = 60_000;
 const MAX_INPUT_LENGTH = 8000;
@@ -43,7 +45,7 @@ function buildOptimizePrompt(userInput: string, language: string): string {
   ].join("\n");
 }
 
-export async function optimizePrompt(rawText: string, language: string, cwd?: string): Promise<string> {
+export async function optimizePrompt(rawText: string, language: string, cwd?: string, systemAi?: SystemAiConfig): Promise<string> {
   const text = (rawText || "").trim();
   if (!text) {
     throw new PromptOptimizeError("请先输入要优化的内容。", "EMPTY_INPUT");
@@ -55,7 +57,7 @@ export async function optimizePrompt(rawText: string, language: string, cwd?: st
     );
   }
   const prompt = buildOptimizePrompt(text, language);
-  const raw = await callClaudeText(prompt, cwd, language);
+  const raw = systemAi?.enabled ? await callSystemAiText(prompt, systemAi) : await callClaudeText(prompt, cwd, language);
   const cleaned = raw
     .replace(/^```[a-zA-Z]*\n?/, "")
     .replace(/\n?```$/, "")

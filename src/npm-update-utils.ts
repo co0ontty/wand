@@ -37,6 +37,7 @@ import process from "node:process";
 import { promisify } from "node:util";
 import { whichSync } from "./path-repair.js";
 import { getErrorMessage } from "./error-utils.js";
+import { compareWandInstallOrder, extractSemver } from "./version-utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -92,10 +93,12 @@ function computeUpdateAvailable(currentVersion: string, latestVersion: string | 
     ? getStableTagVersion(latestVersion)
     : cleanVersion(latestVersion);
 
-  // npm's selected dist-tag is authoritative. Manual/local builds can have a
-  // numerically higher, lower, invalid, or suffixed version; any mismatch must
-  // still allow switching to the exact package selected by @latest or @beta.
-  return current !== target;
+  // Invalid/manual labels cannot be ordered safely, so offer the selected
+  // dist-tag. Valid versions only update forward. In particular, Wand's local
+  // X.Y.Z-debug.* build represents code after X.Y.Z and must not be replaced
+  // by the same stable release as an apparent "upgrade".
+  if (!extractSemver(current) || !extractSemver(target)) return current !== target;
+  return compareWandInstallOrder(target, current) > 0;
 }
 
 export function buildPackageUpdateInfo(

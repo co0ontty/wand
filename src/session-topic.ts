@@ -1,4 +1,6 @@
 import { runClaudePrint } from "./claude-sdk-runner.js";
+import { callSystemAiText } from "./system-ai.js";
+import type { SystemAiConfig } from "./types.js";
 
 const TOPIC_TIMEOUT_MS = 45_000;
 const MAX_PROMPT_LENGTH = 12_000;
@@ -30,6 +32,7 @@ export async function generateSessionTopic(
   userMessage: string,
   cwd?: string,
   language?: string,
+  systemAi?: SystemAiConfig,
 ): Promise<SessionTopic> {
   const input = userMessage.trim().slice(0, MAX_PROMPT_LENGTH);
   const outputLanguage = language?.trim() || "与用户消息相同的语言";
@@ -43,7 +46,9 @@ export async function generateSessionTopic(
     "用户消息：",
     input,
   ].join("\n");
-  const raw = await runClaudePrint(prompt, { cwd, timeoutMs: TOPIC_TIMEOUT_MS, language });
+  const raw = systemAi?.enabled
+    ? await callSystemAiText(prompt, systemAi, TOPIC_TIMEOUT_MS)
+    : await runClaudePrint(prompt, { cwd, timeoutMs: TOPIC_TIMEOUT_MS, language });
   const topic = parseTopic(raw);
   if (!topic) throw new Error("模型返回的会话主题格式无效。");
   return topic;

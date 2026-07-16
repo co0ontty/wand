@@ -6,6 +6,7 @@ import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
+import { normalizeSystemAiConfig } from "./system-ai.js";
 type StructuredRunnerOption = WandConfig["structuredRunner"];
 
 function isThinkingEffort(value: unknown): value is ThinkingEffort {
@@ -36,6 +37,8 @@ export const PREFERENCE_KEYS = [
   "defaultOpenCodeModel",
   "commitCli",
   "commitModel",
+  "commitAiSource",
+  "systemAi",
   "defaultThinkingEffort",
   "structuredRunner",
   "language",
@@ -82,6 +85,16 @@ export const defaultConfig = (): WandConfig => ({
   defaultOpenCodeModel: "",
   commitCli: "claude",
   commitModel: "",
+  commitAiSource: "cli",
+  systemAi: {
+    enabled: false,
+    protocol: "openai",
+    baseUrl: "",
+    apiKey: "",
+    model: "",
+    authHeader: "bearer",
+    source: "custom",
+  },
   defaultThinkingEffort: "off",
   structuredRunner: "cli" as StructuredRunnerOption,
   inheritEnv: true,
@@ -323,6 +336,14 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("commitModel"), defaults.commitModel ?? "");
     if (typeof v === "string") config.commitModel = v.trim();
   }
+  if (storage.hasPreference(preferenceStorageKey("commitAiSource"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("commitAiSource"), defaults.commitAiSource ?? "cli");
+    if (v === "cli" || v === "api") config.commitAiSource = v;
+  }
+  if (storage.hasPreference(preferenceStorageKey("systemAi"))) {
+    const v = storage.getPreference<unknown>(preferenceStorageKey("systemAi"), defaults.systemAi);
+    config.systemAi = normalizeSystemAiConfig(v, defaults.systemAi);
+  }
   if (storage.hasPreference(preferenceStorageKey("defaultThinkingEffort"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultThinkingEffort"), defaults.defaultThinkingEffort ?? "off");
     if (isThinkingEffort(v)) config.defaultThinkingEffort = v;
@@ -343,6 +364,7 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<unknown>(preferenceStorageKey("inheritEnv"), defaults.inheritEnv ?? true);
     config.inheritEnv = v === false ? false : true;
   }
+  validateCommitAiConfig(config);
   return config;
 }
 
@@ -351,7 +373,8 @@ export function writePreferenceToStorage(
   config: WandConfig,
   storage: WandStorage,
   key: PreferenceKey,
-  value: unknown
+  value: unknown,
+  options: { deferCommitAiValidation?: boolean } = {},
 ): void {
   const dbKey = preferenceStorageKey(key);
   switch (key) {
@@ -409,6 +432,30 @@ export function writePreferenceToStorage(
       config.commitModel = v;
       break;
     }
+    case "commitAiSource": {
+      if (value !== "cli" && value !== "api") throw new Error(`无效 commit AI 来源: ${String(value)}`);
+      if (!options.deferCommitAiValidation) {
+        validateCommitAiConfig({ ...config, commitAiSource: value });
+      }
+      storage.setPreference(dbKey, value);
+      config.commitAiSource = value;
+      break;
+    }
+    case "systemAi": {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("systemAi 必须是对象。");
+      }
+      const normalized = normalizeSystemAiConfig(value, config.systemAi ?? defaultConfig().systemAi);
+      if (normalized.enabled && (!normalized.baseUrl || !normalized.apiKey || !normalized.model)) {
+        throw new Error("启用系统 AI API 时，地址、API Key 和模型不能为空。");
+      }
+      if (!options.deferCommitAiValidation) {
+        validateCommitAiConfig({ ...config, systemAi: normalized });
+      }
+      storage.setPreference(dbKey, normalized);
+      config.systemAi = normalized;
+      break;
+    }
     case "defaultThinkingEffort": {
       if (!isThinkingEffort(value)) throw new Error(`无效思考深度: ${String(value)}`);
       const v = value;
@@ -442,6 +489,17 @@ export function writePreferenceToStorage(
       config.inheritEnv = v;
       break;
     }
+  }
+}
+
+/** Validate the cross-field contract for Commit's direct-API source. */
+export function validateCommitAiConfig(
+  config: Pick<WandConfig, "commitAiSource" | "systemAi">,
+): void {
+  if (config.commitAiSource !== "api") return;
+  const directApi = config.systemAi;
+  if (!directApi?.baseUrl || !directApi.apiKey || !directApi.model) {
+    throw new Error("选择直连 API 生成 Commit 时，必须先填写 API 地址、API Key 和模型。");
   }
 }
 
@@ -594,6 +652,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     defaultOpenCodeModel: typeof input.defaultOpenCodeModel === "string" ? input.defaultOpenCodeModel.trim() : defaults.defaultOpenCodeModel,
     commitCli: input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
+    commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
     defaultThinkingEffort: isThinkingEffort(input.defaultThinkingEffort) ? input.defaultThinkingEffort : "off",
     structuredRunner: (input.structuredRunner === "sdk" || input.structuredRunner === "cli") ? input.structuredRunner : defaults.structuredRunner,
     inheritEnv: typeof input.inheritEnv === "boolean" ? input.inheritEnv : (defaults.inheritEnv ?? true),

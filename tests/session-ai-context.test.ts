@@ -120,3 +120,43 @@ test("resolveCommitAiContext leaves model unset when commit model follows the CL
   assert.equal(context.provider, "claude");
   assert.equal(context.model, undefined);
 });
+
+test("resolveCommitAiContext keeps CLI selected when a direct API profile is enabled", () => {
+  const context = resolveCommitAiContext(session({ provider: "claude" }), {
+    ...config,
+    commitAiSource: "cli",
+    systemAi: {
+      enabled: true,
+      protocol: "anthropic",
+      baseUrl: "https://api.example.test",
+      apiKey: "secret",
+      model: "model-a",
+    },
+  });
+
+  assert.equal(context.systemAi, undefined);
+});
+
+test("resolveCommitAiContext uses the direct API selected for commits", () => {
+  const context = resolveCommitAiContext(session({ provider: "claude" }), {
+    ...config,
+    commitAiSource: "api",
+    systemAi: {
+      enabled: false,
+      protocol: "anthropic",
+      baseUrl: "https://api.example.test",
+      apiKey: "secret",
+      model: "model-a",
+      authHeader: "x-api-key",
+    },
+  });
+
+  assert.deepEqual(context.systemAi, {
+    enabled: true,
+    protocol: "anthropic",
+    baseUrl: "https://api.example.test",
+    apiKey: "secret",
+    model: "model-a",
+    authHeader: "x-api-key",
+  });
+});

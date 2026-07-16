@@ -1,11 +1,12 @@
 import { getDefaultModelForProvider } from "./config.js";
-import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
+import type { SessionProvider, SessionSnapshot, SystemAiConfig, WandConfig } from "./types.js";
 
 export interface SessionAiContext {
   provider: SessionProvider;
   model?: string;
   thinkingEffort: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
+  systemAi?: SystemAiConfig;
 }
 
 /**
@@ -73,12 +74,22 @@ export function resolveCommitAiContext(
     | "inheritEnv"
     | "commitCli"
     | "commitModel"
+    | "commitAiSource"
+    | "systemAi"
   >,
 ): SessionAiContext {
   const sessionContext = resolveSessionAiContext(snapshot, config);
+  const directApi = config.systemAi ?? {
+    enabled: true,
+    protocol: "openai" as const,
+    baseUrl: "",
+    apiKey: "",
+    model: "",
+  };
   return {
     ...sessionContext,
     provider: config.commitCli === "codex" || config.commitCli === "opencode" ? config.commitCli : "claude",
     model: normalizeModel(config.commitModel),
+    ...(config.commitAiSource === "api" ? { systemAi: { ...directApi, enabled: true } } : {}),
   };
 }

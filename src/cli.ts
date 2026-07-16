@@ -113,18 +113,21 @@ async function main(): Promise<void> {
       break;
     }
     case "config:show": {
-      // 展示合并后的视图（JSON 部署字段 + DB 偏好字段）。password 脱敏：
-      // 显示是否已自定义（"<set>" / "change-me"），避免误把真密码截图分享出去；
-      // 想看真值就直接读 DB（sqlite3 wand.db "SELECT * FROM app_config WHERE key='password'"）。
+      // 展示合并后的视图（JSON 部署字段 + DB 偏好字段），但绝不打印运行时密钥。
       const { ensureDatabaseFile, resolveDatabasePath, WandStorage } = await import("./storage.js");
       const dbPath = resolveDatabasePath(configPath);
       ensureDatabaseFile(dbPath);
       const storage = new WandStorage(dbPath);
       try {
         const config = await loadConfigWithStorage(configPath, storage);
-        const display: WandConfig = {
+        const display: Record<string, unknown> = {
           ...config,
           password: config.password === "change-me" ? "change-me" : "<set>",
+          appSecret: config.appSecret ? "<set>" : "",
+          systemAi: config.systemAi ? {
+            ...config.systemAi,
+            apiKey: config.systemAi.apiKey ? "<set>" : "",
+          } : undefined,
         };
         process.stdout.write(`${JSON.stringify(display, null, 2)}\n`);
       } finally {

@@ -81,6 +81,19 @@ export function compareApkInstallOrder(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * Wand Web 包的更新顺序。普通版本继续遵守 semver；但同一 X.Y.Z 下的
+ * `-debug.*` 是该 tag 之后的本地源码构建，产品语义上比同号 release 新。
+ */
+export function compareWandInstallOrder(a: string, b: string): number {
+  const pa = parseSemverLike(a);
+  const pb = parseSemverLike(b);
+  const mainOrder = compareMainParts(pa.mainParts, pb.mainParts);
+  if (mainOrder !== 0) return mainOrder;
+  if (pa.isDebug !== pb.isDebug) return pa.isDebug ? 1 : -1;
+  return compareSemver(a, b);
+}
+
 function compareMainParts(a: number[], b: number[]): number {
   for (let i = 0; i < 3; i++) {
     const diff = (a[i] || 0) - (b[i] || 0);
