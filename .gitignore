@@ -20,3 +20,10 @@ avatar-seed.txt
 # 是构建产物而非源码，不入库（避免 2MB base64 逐版本提交撑大 .git 仓库）。
 src/web-ui/embedded-assets.ts
 .claude/worktrees/
+
+# IDE / 工具本地状态，不该入库
+.qoder/
+.zcode/
+
+# 本地 debug APK 分发目录（APK 走 ~/.wand/android/ 或 GitHub Release，不进 git）
+beta/
