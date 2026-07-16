@@ -121,6 +121,62 @@ async function resolvePushRemoteAsync(cwd: string): Promise<string> {
   return "origin";
 }
 
+function githubSshPushUrl(remoteUrl: string): string | undefined {
+  try {
+    const parsed = new URL(remoteUrl);
+    if (parsed.protocol !== "https:" || parsed.hostname.toLowerCase() !== "github.com") return undefined;
+    const path = decodeURIComponent(parsed.pathname).replace(/^\/+|\/+$/g, "");
+    const parts = path.split("/");
+    if (parts.length !== 2 || parts.some((part) => !part)) return undefined;
+    return `git@github.com:${parts[0]}/${parts[1]}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function isHttpsCredentialError(error: unknown): boolean {
+  return /could not read (?:User|Pass)name|authentication failed|terminal prompts disabled|credential[^\n]*(?:failed|missing)|http basic: access denied/i
+    .test(getGitErrorMessage(error));
+}
+
+async function resolveRemotePushUrl(cwd: string, remote: string): Promise<string> {
+  try {
+    return await runGitAsync(["remote", "get-url", "--push", remote], cwd);
+  } catch {
+    return remote;
+  }
+}
+
+/**
+ * Push explicit refs through one transport seam. A Wand service deliberately disables interactive
+ * credential prompts, so a GitHub HTTPS remote that has no non-interactive credential would
+ * otherwise fail even when the same machine is already configured for GitHub SSH.
+ */
+async function pushRemoteRefs(
+  cwd: string,
+  remote: string,
+  options: string[] = [],
+  refs: string[] = [],
+): Promise<void> {
+  try {
+    await runGitAsync(["push", ...options, remote, ...refs], cwd, GIT_PUSH_TIMEOUT_MS);
+    return;
+  } catch (error) {
+    if (!isHttpsCredentialError(error)) throw error;
+    const configuredUrl = await resolveRemotePushUrl(cwd, remote);
+    const sshUrl = githubSshPushUrl(configuredUrl);
+    if (!sshUrl) throw error;
+    try {
+      await runGitAsync(["push", ...options, sshUrl, ...refs], cwd, GIT_PUSH_TIMEOUT_MS);
+    } catch (sshError) {
+      throw new Error(
+        `${getGitErrorMessage(error)}\nGitHub SSH 回退也失败：${getGitErrorMessage(sshError)}`,
+        { cause: sshError },
+      );
+    }
+  }
+}
+
 function unquotePath(raw: string): string {
   if (raw.startsWith("\"") && raw.endsWith("\"")) {
     return raw.slice(1, -1).replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
@@ -835,19 +891,19 @@ async function doPush(opts: DoPushOptions): Promise<PushOutcome> {
   try {
     if (pushCommits) {
       if (hasUpstream) {
-        await runGitAsync(["push", recurseFlag], cwd, GIT_PUSH_TIMEOUT_MS);
+        await pushRemoteRefs(cwd, pushRemote, [recurseFlag]);
       } else {
-        await runGitAsync(["push", "-u", recurseFlag, pushRemote, "HEAD"], cwd, GIT_PUSH_TIMEOUT_MS);
+        await pushRemoteRefs(cwd, pushRemote, ["-u", recurseFlag], ["HEAD"]);
       }
       pushedCommits = true;
     }
     if (pushTags) {
       if (Array.isArray(pushTags)) {
         for (const name of pushTags) {
-          await runGitAsync(["push", pushRemote, `refs/tags/${name}`], cwd, GIT_PUSH_TIMEOUT_MS);
+          await pushRemoteRefs(cwd, pushRemote, [], [`refs/tags/${name}`]);
         }
       } else {
-        await runGitAsync(["push", pushRemote, "--tags"], cwd, GIT_PUSH_TIMEOUT_MS);
+        await pushRemoteRefs(cwd, pushRemote, ["--tags"]);
       }
       pushedTags = true;
     }
@@ -1127,14 +1183,14 @@ async function pushSubmodules(
       continue;
     }
     try {
-      await runGitAsync(["push", info.remote, `HEAD:refs/heads/${info.branch}`], subCwd, GIT_PUSH_TIMEOUT_MS);
+      await pushRemoteRefs(subCwd, info.remote, [], [`HEAD:refs/heads/${info.branch}`]);
     } catch (error) {
       errors.push(`submodule ${info.path} 推送失败：${getGitErrorMessage(error)}`);
       continue;
     }
     if (opts.pushTags && opts.tagName) {
       try {
-        await runGitAsync(["push", info.remote, `refs/tags/${opts.tagName}`], subCwd, GIT_PUSH_TIMEOUT_MS);
+        await pushRemoteRefs(subCwd, info.remote, [], [`refs/tags/${opts.tagName}`]);
       } catch (error) {
         errors.push(`submodule ${info.path} 推送 tag 失败：${getGitErrorMessage(error)}`);
       }
@@ -1427,15 +1483,24 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
   if (!tagName && autoTag) {
     tagName = await generateTagAfterCommit(cwd, language, message, ai);
   }
+  let submodulePushInfos = submoduleOutcome.commits;
+  if (submodule) {
+    // The selected scope is the declared submodule set, not merely the submodules dirtied by this
+    // request. A clean submodule can still have an unpushed HEAD or a pre-existing pointer change.
+    const collected = await collectSubmodulesForPush(cwd);
+    submodulePushInfos = collected.infos;
+  }
+
   if (tagName) {
     try {
       await runGitAsync(["tag", tagName], cwd);
     } catch (error) {
       throw new QuickCommitError(`git tag 失败：${getGitErrorMessage(error)}`, "GIT_TAG_FAILED");
     }
-    // 纳入 submodule 时给刚提交的 submodule 打同名 tag（非致命，失败不阻断父仓库流程）。
-    if (submodule && submoduleOutcome.commits.length > 0) {
-      await tagSubmodules(cwd, submoduleOutcome.commits, tagName);
+    // 纳入 submodule 时给全部声明的 submodule 当前 HEAD 打同名 tag。这样纯指针变化或
+    // 已提前提交但尚未推送的 submodule 也不会漏掉发布 tag。
+    if (submodule && submodulePushInfos.length > 0) {
+      await tagSubmodules(cwd, submodulePushInfos, tagName);
     }
   }
 
@@ -1445,10 +1510,10 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     // 纳入 submodule：先把各 submodule 的 HEAD（+ 同名 tag）分别推到各自远端分支，
     // 解决 detached HEAD 无法被父仓库 on-demand 递归推送的问题；父仓库随后用
     // recurse=no 单独推（submodule 已就绪）。否则父仓库用 recurse=check 做安全校验。
-    const includeSub = !!submodule && submoduleOutcome.commits.length > 0;
+    const includeSub = !!submodule && submodulePushInfos.length > 0;
     let subPushErrors: string[] = [];
     if (includeSub) {
-      const subPush = await pushSubmodules(cwd, submoduleOutcome.commits, { pushTags: !!tagName, tagName });
+      const subPush = await pushSubmodules(cwd, submodulePushInfos, { pushTags: !!tagName, tagName });
       subPushErrors = subPush.errors;
     }
     if (subPushErrors.length > 0) {

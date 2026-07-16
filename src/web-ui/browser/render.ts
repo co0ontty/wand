@@ -728,7 +728,7 @@ export function renderAppShell() {
         '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
           '<div class="composer-top-row">' +
             '<div id="todo-progress" class="todo-progress hidden">' +
-              '<div class="todo-progress-header" id="todo-progress-toggle">' +
+              '<button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="展开待办列表">' +
                 '<div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div>' +
                 '<div class="todo-progress-left">' +
                   '<span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0">' +
@@ -739,13 +739,12 @@ export function renderAppShell() {
                   '</span>' +
                   '<span class="todo-progress-counter" id="todo-progress-counter"></span>' +
                 '</div>' +
-                // 右侧任务描述：与展开箭头并排，flex: 1 让它把剩余宽度占满
-                // （进度填充在底层按 --progress 比例从左覆盖，不会与文字冲突）。
+                // 当前任务描述占满中间剩余空间，过长时单行截断；细进度轨道独立贴底。
                 '<div class="todo-progress-task-wrap">' +
                   '<span class="todo-progress-task" id="todo-progress-task"></span>' +
                 '</div>' +
-                '<svg class="todo-progress-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>' +
-              '</div>' +
+                iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) +
+              '</button>' +
             '</div>' +
             '<div class="todo-progress-body hidden" id="todo-progress-body">' +
               '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +

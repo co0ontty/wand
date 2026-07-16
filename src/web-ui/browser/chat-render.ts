@@ -630,6 +630,8 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         e.preventDefault();
         e.stopPropagation();
         todoExpanded = !todoExpanded;
+        toggle.setAttribute("aria-expanded", todoExpanded ? "true" : "false");
+        toggle.setAttribute("aria-label", todoExpanded ? "收起待办列表" : "展开待办列表");
         var prog = document.getElementById("todo-progress");
         var body = document.getElementById("todo-progress-body");
         if (prog && body) {
@@ -842,7 +844,7 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         // 旧方案用 completed+1 试图表达"正在干第 N 个"，但列表只有 completed 个
         // 勾，造成计数器和列表不匹配（如计数器 3/4、列表只 2 个 ✓）。
         var counter = document.getElementById("todo-progress-counter");
-        if (counter) counter.textContent = completed + "/" + todos.length;
+        if (counter) counter.textContent = completed + " / " + todos.length;
 
         // 右侧任务描述：优先取首个 in_progress 的 activeForm / content，
         // 没有任何进行中项时（首条 TodoWrite 还没来、模型漏发 activeForm），

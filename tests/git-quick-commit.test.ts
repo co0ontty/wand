@@ -140,6 +140,34 @@ test("runPush publishes the parent after the submodule is available remotely", a
   }
 });
 
+test("runQuickCommit pushes a clean but unpublished declared submodule", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wand-quick-commit-clean-submodule-"));
+  try {
+    const subRemote = join(root, "client.git");
+    mkdirSync(subRemote, { recursive: true });
+    git(root, "init", "--bare", subRemote);
+    const { parent, parentRemote } = setupParentWithSubmodule(root, subRemote);
+    writeFileSync(join(parent, "parent.txt"), "parent update\n");
+
+    const result = await runQuickCommit({
+      cwd: parent,
+      language: "中文",
+      autoMessage: false,
+      customMessage: "update parent",
+      push: true,
+      submodule: true,
+    });
+
+    assert.equal(result.pushed, true);
+    assert.equal(result.pushError, undefined);
+    assert.equal(result.submoduleCommits, undefined);
+    assert.equal(remoteHasRef(subRemote, "refs/heads/master"), true);
+    assert.equal(remoteHasRef(parentRemote, "refs/heads/master"), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("getGitStatusAsync returns repository state without blocking timers", async () => {
   const root = mkdtempSync(join(tmpdir(), "wand-git-status-async-"));
   try {

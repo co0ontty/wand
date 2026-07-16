@@ -6856,21 +6856,47 @@
       position: relative;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 4px 8px;
+      width: 100%;
+      min-height: 36px;
+      padding: 0 10px;
       cursor: pointer;
       user-select: none;
-      gap: 8px;
-      border-radius: 10px;
-      transition: background var(--transition-fast);
+      gap: 10px;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      appearance: none;
+      background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+      border: 1px solid var(--border-subtle);
+      border-radius: 11px;
+      box-shadow: var(--shadow-xs), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+      overflow: hidden;
+      transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
     }
     .todo-progress-header:hover {
-      background: rgba(197, 101, 61, 0.08);
+      background: color-mix(in srgb, var(--bg-elevated) 88%, var(--accent-muted));
+      border-color: color-mix(in srgb, var(--border-default) 65%, var(--accent));
+    }
+    .todo-progress-header:focus-visible {
+      outline: none;
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px var(--accent-muted), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    }
+    .todo-progress-header::after {
+      content: "";
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: 3px;
+      height: 2px;
+      border-radius: var(--radius-full);
+      background: var(--border-subtle);
+      pointer-events: none;
     }
     .todo-progress-left {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 7px;
       min-width: 0;
       flex-shrink: 0;
       position: relative;
@@ -6902,101 +6928,48 @@
       stroke-dashoffset: calc(97.39 * (1 - var(--progress, 0)));
       transition: stroke-dashoffset 0.35s ease;
     }
-    /* A short orbiting arc communicates that the current step is still active.
-       The determinate ring underneath stays fixed, so completion remains readable. */
-    .todo-progress-ring::after {
-      content: "";
-      position: absolute;
-      inset: -1px;
-      border-radius: 50%;
-      border: 1.5px solid transparent;
-      border-top-color: var(--accent);
-      border-right-color: rgba(var(--accent-rgb, 197, 101, 61), 0.35);
-      animation: todoProgressSpin 0.9s linear infinite;
-      pointer-events: none;
-    }
-    @keyframes todoProgressSpin {
-      to { transform: rotate(360deg); }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      html:not(.is-wand-app) .todo-progress-ring::after {
-        animation: none;
-        transform: rotate(45deg);
-      }
-    }
     .todo-progress-counter {
-      font-size: 0.75rem;
-      font-weight: 600;
+      min-width: 31px;
+      font-size: 0.6875rem;
+      font-weight: 650;
       color: var(--text-primary);
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
+      letter-spacing: 0.01em;
     }
-    /* Horizontal progress fill: the whole header bar fills from left to right
-       as --progress grows. The active step text sits on the right (handled by
-       .todo-progress-task-wrap with justify-content: flex-end), so the fill
-       overlays the LEFT portion of the wrap — the text gets a soft white
-       backdrop (see :has rule below) to stay readable when overlapping. */
+    /* A quiet two-pixel track keeps progress legible without tinting the whole row. */
     .todo-progress-fill {
       position: absolute;
-      top: 0;
-      left: 0;
-      bottom: 0;
-      width: calc(var(--progress, 0) * 100%);
-      background: linear-gradient(
-        to right,
-        rgba(197, 101, 61, 0.28) 0%,
-        rgba(197, 101, 61, 0.10) 100%
-      );
-      border-radius: 10px 0 0 10px;
-      transition: width 0.35s ease;
+      left: 10px;
+      bottom: 3px;
+      width: calc((100% - 20px) * var(--progress, 0));
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent-active), var(--accent-hover));
+      border-radius: var(--radius-full);
+      transition: width 0.3s ease-out;
       pointer-events: none;
-      z-index: 0;
-    }
-    /* Leading-edge marker at the right end of the fill, makes the progress
-       boundary easy to read at a glance. */
-    .todo-progress-fill::after {
-      content: "";
-      position: absolute;
-      top: 4px;
-      bottom: 4px;
-      right: -1px;
-      width: 2px;
-      background: rgba(197, 101, 61, 0.6);
-      border-radius: 1px;
+      z-index: 2;
     }
     .todo-progress-task-wrap {
       flex: 1;
       min-width: 0;
       display: flex;
       align-items: center;
-      justify-content: flex-end; /* 任务描述贴右，与 chevron 形成"右侧组" */
-      gap: 6px;
+      justify-content: flex-start;
       position: relative;
       z-index: 1;
-      padding-left: 8px;
+      padding-left: 2px;
     }
     .todo-progress-task {
       font-size: 0.75rem;
-      color: var(--text-primary); /* 提升到主文字色，避免被进度填充背景吃掉 */
+      color: var(--text-secondary);
       font-weight: 500;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       flex: 1;
       min-width: 0;
-      text-align: right; /* 长描述截断时优先保留右半（"做什么"） */
-    }
-    /* 当任务文字与进度填充重叠时，加一道半透白底色，提高可读性。 */
-    .todo-progress-header:has(.todo-progress-task:not(:empty)) .todo-progress-task {
-      background: linear-gradient(
-        to right,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.55) 12%,
-        rgba(255, 255, 255, 0.55) 88%,
-        rgba(255, 255, 255, 0) 100%
-      );
-      padding: 1px 6px;
-      border-radius: 6px;
+      text-align: left;
     }
     .todo-progress-chevron {
       color: var(--text-muted);
@@ -7017,13 +6990,13 @@
       left: 0;
       right: 0;
       bottom: calc(100% + 6px);
-      background: rgba(255, 251, 246, 0.98);
-      border: 1px solid var(--border-default);
-      border-radius: 12px;
-      padding: 8px 10px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+      background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 7px;
+      box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(14px) saturate(1.1);
+      -webkit-backdrop-filter: blur(14px) saturate(1.1);
       max-height: 320px;
       overflow-y: auto;
       z-index: 30;
@@ -7044,34 +7017,31 @@
       padding: 0;
       display: flex;
       flex-direction: column;
-      gap: 1px;
+      gap: 3px;
     }
     .todo-progress-item {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 6px 8px;
-      border-radius: 8px;
+      gap: 9px;
+      min-height: 34px;
+      padding: 7px 9px;
+      border-radius: 9px;
       font-size: 0.8125rem;
       color: var(--text-secondary);
       line-height: 1.35;
       transition: background var(--transition-fast);
     }
     .todo-progress-item + .todo-progress-item {
-      border-top: 1px solid var(--border-subtle);
-      border-radius: 0;
+      border-top: 0;
     }
-    .todo-progress-item:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
-    .todo-progress-item:last-child  { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
     .todo-progress-item.active {
       color: var(--text-primary);
-      font-weight: 500;
-      background: rgba(197, 101, 61, 0.07);
+      font-weight: 550;
+      background: var(--accent-muted);
     }
     .todo-progress-item.done {
       color: var(--text-muted);
-      text-decoration: line-through;
-      text-decoration-color: var(--text-muted);
+      opacity: 0.78;
     }
     .todo-progress-item > span:last-child {
       flex: 1;
@@ -7081,15 +7051,49 @@
       white-space: nowrap;
     }
     .todo-item-icon {
-      width: 16px;
-      min-width: 16px;
-      text-align: center;
-      font-size: 0.75rem;
+      display: inline-grid;
+      place-items: center;
+      width: 18px;
+      min-width: 18px;
+      height: 18px;
+      border: 1.5px solid currentColor;
+      border-radius: 50%;
+      font-size: 0;
       flex-shrink: 0;
     }
-    .todo-item-icon.pending { color: var(--text-muted); }
-    .todo-item-icon.active { color: var(--accent); }
-    .todo-item-icon.done { color: #4a7a4f; }
+    .todo-item-icon.pending { color: var(--border-strong); }
+    .todo-item-icon.active {
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    }
+    .todo-item-icon.active::after {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .todo-item-icon.done {
+      color: var(--success);
+      background: var(--success-muted);
+    }
+    .todo-item-icon.done::after {
+      content: "";
+      width: 7px;
+      height: 4px;
+      border-left: 1.5px solid currentColor;
+      border-bottom: 1.5px solid currentColor;
+      transform: translateY(-1px) rotate(-45deg);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .todo-ring-fill,
+      .todo-progress-fill,
+      .todo-progress-body,
+      .todo-progress-chevron {
+        transition: none;
+      }
+    }
 
     @keyframes spin {
       to { transform: rotate(360deg); }
@@ -10553,9 +10557,9 @@
       }
 
       /* Todo 进度条 - 紧凑 */
-      .todo-progress-header { padding: 3px 6px; gap: 4px; }
-      .todo-progress-counter { font-size: 0.5625rem; }
-      .todo-progress-task { font-size: 0.5625rem; }
+      .todo-progress-header { padding: 0 8px; gap: 6px; }
+      .todo-progress-counter { font-size: 0.75rem; }
+      .todo-progress-task { font-size: 0.75rem; }
       .todo-progress-chevron { width: 12px; height: 12px; }
       .todo-progress-body { padding: 4px 6px; }
 
