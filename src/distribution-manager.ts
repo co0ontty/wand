@@ -60,6 +60,15 @@ export interface DistributionManagerOptions {
 
 const GITHUB_CACHE_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * GitHub Release 正文还包含 Android/macOS/iOS 的安装指引；它们属于发布页，
+ * 不该出现在 Android 的更新弹窗。保留分隔线前的变更摘要，并兼容旧版正文。
+ */
+export function extractUpdateSummary(releaseBody: string): string {
+  const summary = releaseBody.split(/\r?\n---\s*(?:\r?\n|$)/, 1)[0]?.trim() ?? "";
+  return summary.slice(0, 500);
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? value as Record<string, unknown> : null;
 }
@@ -284,7 +293,7 @@ export class DistributionManager {
         downloadUrl: hit.asset.browser_download_url,
         fileName: hit.asset.name,
         size: hit.asset.size,
-        ...(extension === ".apk" && hit.body ? { releaseNotes: hit.body.trim().slice(0, 500) } : {}),
+        ...(extension === ".apk" && hit.body ? { releaseNotes: extractUpdateSummary(hit.body) } : {}),
       };
       this.githubCache.set(extension, { asset, timestamp: this.now() });
       return asset;

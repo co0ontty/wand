@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { DistributionManager } from "../src/distribution-manager.js";
+import { DistributionManager, extractUpdateSummary } from "../src/distribution-manager.js";
 import type { WandConfig } from "../src/types.js";
 
 function createFixture(releases: unknown[] = []) {
@@ -55,7 +55,7 @@ test("DistributionManager applies stable and beta APK selection behind one inter
 test("DistributionManager compares local and GitHub APKs and caches the external adapter", async () => {
   const fixture = createFixture([{
     tag_name: "v3.0.0",
-    body: "new release",
+    body: "## 更新内容\n\n- Android 修复\n\n---\n\n## macOS DMG\n\nmacOS 安装说明",
     assets: [{
       name: "wand-v3.0.0.apk",
       browser_download_url: "https://example.test/wand-v3.0.0.apk",
@@ -70,12 +70,19 @@ test("DistributionManager compares local and GitHub APKs and caches the external
 
     assert.equal(first?.source, "github");
     assert.equal(first?.version, "3.0.0");
-    assert.equal(first?.releaseNotes, "new release");
+    assert.equal(first?.releaseNotes, "## 更新内容\n\n- Android 修复");
     assert.deepEqual(second, first);
     assert.equal(fixture.fetchCount(), 1);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
+});
+
+test("extractUpdateSummary excludes platform download instructions from Android dialogs", () => {
+  assert.equal(
+    extractUpdateSummary("更新内容\r\n---\r\n## Android APK\r\n安装说明"),
+    "更新内容",
+  );
 });
 
 test("DistributionManager hot-refreshes config and builds settings for both artifacts", async () => {
