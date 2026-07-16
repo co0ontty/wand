@@ -1,21 +1,31 @@
 import { state, readStoredBoolean, writeStoredBoolean, configPath } from "./state";
 import { mergeWindowedMessages } from "./message-reconciliation";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml, formatElapsedShort, refreshTailMarqueePaths, renderTailMarqueePath, setTailMarqueePathText } from "./utils";
+import { escapeHtml, formatElapsedShort, refreshTailMarqueePaths } from "./utils";
 import { ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender, shortCommand } from "./chat-render";
-import { bindChatScrollListener, clearStructuredQueuePersistence, getConfigCwd, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, scrollChatToBottom, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
+import { bindChatScrollListener, clearStructuredQueuePersistence, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, scrollChatToBottom, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
 import { attachEventListeners } from "./events";
 import { applyTerminalScale, isMobileLayout, refreshFileExplorer, setFilePanelOpen, shouldShowSessionsBackdrop, updateFilePanelCwd, updateLayoutState } from "./file-browser";
-import { loadGitStatus, updateTopbarGitBadge, closeQuickCommitModal } from "./git-commit";
+import { loadGitStatus, updateTopbarGitBadge } from "./git-commit";
 import { activateSession, autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, closeSwipedItem, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter, updateVoiceTranscript } from "./input";
 import { _apkVersion, _getNativePermission, _hasNativeBridge, _macAppVersion, _syncWakeLock, _vibrate, clearSessionProgressNative, hideError, notifyTaskEnded, openWandDialog, performRestart, sendBrowserNotification, showError, showNotificationBubble, showRestartOverlay, showToast, tryPlayNotificationSound, wandAlert, wandConfirm, wandPrompt } from "./notifications";
 import { bindForegroundSyncListeners, getEffectiveCwd, render, renderAppShell, resetChatRenderCache, updateOfflineBanner } from "./render";
 import { ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, loadClaudeHistory, loadCodexHistory, renderSessions, renderSessionsListContent } from "./sidebar";
-import { fetchRecentPaths, initTerminal, maybeScheduleResyncForChunk, maybeScrollTerminalToBottom, saveWorkingDir, scheduleSoftResyncTerminal, syncTerminalBuffer, wandTerminalWrite } from "./terminal";
+import { initTerminal, maybeScheduleResyncForChunk, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, syncTerminalBuffer, wandTerminalWrite } from "./terminal";
 import { computeRunningSignal, renderStructuredStatusBar, updateRunningIndicators } from "./utils";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, scheduleTerminalResize, teardownTerminal } from "./viewport";
 import { forceReconnectWebSocket, initWebSocket, setView, startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
-import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } from "./session-ui";
+import { getSessionLatestUserText, getSessionStatusLabel } from "./session-ui";
+import { isBrowserReactShellMounted } from "./shell-runtime";
+import { notifyLegacyUiChange } from "./ui-store-bridge";
+import {
+  closeWorktreeMergeFromLegacy,
+  openWorktreeMergeForSession,
+} from "./worktree-merge-adapter";
+import { folderPickerController } from "../react/folder-picker/controller";
+import { quickCommitController } from "../react/quick-commit/controller";
+import { worktreeMergeController } from "../react/worktree-merge/controller";
+import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 
       // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
       // 这里揭示专用提示，并把「改用 HTTP」按钮指向同 host 的 http:// 地址。
@@ -94,6 +104,15 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         .then(function() {
           startPolling();
           render();
+          // Match the restored-session startup path: a fresh password login
+          // should also populate local Claude/Codex history after first paint.
+          // Without this warm-up, non-Wand sessions stay empty until reload or
+          // until the user enters manage mode.
+          if (!state.claudeHistoryLoaded) {
+            setTimeout(function() {
+              if (!state.claudeHistoryLoaded) ensureClaudeHistoryLoaded();
+            }, 600);
+          }
         })
         .catch(function(error) {
           if (error === "handled") return;
@@ -822,617 +841,12 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
               state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
               state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
               syncComposerModelSelect(getSelectedSession());
-              updateSettingsDefaultModelSelect(data);
-              syncCommitModelProvider(false);
             }
             return data;
           })
           .catch(function() { return null; });
       }
 
-      export function refreshAvailableModels() {
-        if (state.modelsRefreshing) return Promise.resolve(null);
-        state.modelsRefreshing = true;
-        var buttons = document.querySelectorAll("#cfg-default-model-refresh, #cfg-commit-model-refresh");
-        buttons.forEach(function(element) {
-          var btn = element as HTMLButtonElement;
-          var btnLabel = btn.querySelector("span");
-          btn.disabled = true;
-          btn.classList.add("is-loading");
-          btn.setAttribute("aria-busy", "true");
-          if (btnLabel) btnLabel.textContent = "检测中";
-        });
-        return fetch("/api/models/refresh", { method: "POST", credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data && Array.isArray(data.models)) {
-              state.availableModels = data.models;
-              state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
-              state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
-              syncComposerModelSelect(getSelectedSession());
-              updateSettingsDefaultModelSelect(data);
-              syncCommitModelProvider(false);
-              if (typeof showToast === "function") {
-                var verifiedCount = data.models.filter(function(model) { return model.availability === "verified"; }).length;
-                var message = "模型列表已刷新" + (data.claudeVersion ? "（claude " + data.claudeVersion + "）" : "");
-                if (verifiedCount) message += "；已验证 " + verifiedCount + " 个";
-                showToast(message, "success");
-              }
-            }
-            return data;
-          })
-          .catch(function() {
-            if (typeof showToast === "function") showToast("刷新模型列表失败", "error");
-            return null;
-          })
-          .finally(function() {
-            state.modelsRefreshing = false;
-            buttons.forEach(function(element) {
-              var btn = element as HTMLButtonElement;
-              var btnLabel = btn.querySelector("span");
-              btn.disabled = false;
-              btn.classList.remove("is-loading");
-              btn.removeAttribute("aria-busy");
-              if (btnLabel) btnLabel.textContent = "刷新列表";
-            });
-          });
-      }
-
-      // ── Environment-variable preview modal ──
-
-      // Lazily creates a modal showing the exact env vars wand will inject
-      // into PTY / structured child processes (mirrors buildChildEnv()).
-      export function openEnvPreviewModal() {
-        var modal = document.getElementById("env-preview-modal");
-        if (!modal) {
-          modal = document.createElement("section");
-          modal.id = "env-preview-modal";
-          modal.className = "modal-backdrop hidden";
-          modal.innerHTML =
-            '<div class="modal env-preview-modal" role="dialog" aria-labelledby="env-preview-title" aria-modal="true">' +
-              '<div class="modal-header">' +
-                '<div>' +
-                  '<h2 class="modal-title" id="env-preview-title">将注入子进程的环境变量</h2>' +
-                  '<p class="modal-subtitle" id="env-preview-subtitle">这些变量会被传给 claude / codex / opencode（PTY 与结构化运行器一致）。</p>' +
-                '</div>' +
-                '<button id="env-preview-close" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭">' +
-                  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">' +
-                    '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>' +
-                  '</svg>' +
-                '</button>' +
-              '</div>' +
-              '<div class="modal-body env-preview-body">' +
-                '<div class="env-preview-toolbar">' +
-                  '<div class="env-preview-meta" id="env-preview-meta">加载中…</div>' +
-                  '<div class="env-preview-controls">' +
-                    '<input id="env-preview-search" class="env-preview-search" type="search" placeholder="搜索变量名…" />' +
-                    '<label class="env-preview-reveal">' +
-                      '<input id="env-preview-reveal-toggle" type="checkbox" />' +
-                      '<span>显示敏感值</span>' +
-                    '</label>' +
-                  '</div>' +
-                '</div>' +
-                '<div class="env-preview-list" id="env-preview-list" tabindex="0">' +
-                  '<div class="env-preview-loading">加载中…</div>' +
-                '</div>' +
-              '</div>' +
-              '<div class="modal-footer env-preview-footer">' +
-                '<span class="env-preview-hint">敏感字段（含 KEY/TOKEN/SECRET 等）默认掩码，可勾选「显示敏感值」临时还原。</span>' +
-                '<button id="env-preview-close-2" class="btn btn-secondary btn-sm" type="button">关闭</button>' +
-              '</div>' +
-            '</div>';
-          document.body.appendChild(modal);
-
-          // Click outside to close
-          modal.addEventListener("click", function(e) {
-            if (e.target === modal) closeEnvPreviewModal();
-          });
-          var closeBtn = modal.querySelector("#env-preview-close");
-          if (closeBtn) closeBtn.addEventListener("click", closeEnvPreviewModal);
-          var closeBtn2 = modal.querySelector("#env-preview-close-2");
-          if (closeBtn2) closeBtn2.addEventListener("click", closeEnvPreviewModal);
-          var searchEl = modal.querySelector("#env-preview-search") as HTMLInputElement | null;
-          if (searchEl) searchEl.addEventListener("input", function() { renderEnvPreviewList(); });
-          var revealEl = modal.querySelector("#env-preview-reveal-toggle") as HTMLInputElement | null;
-          if (revealEl) revealEl.addEventListener("change", function() { loadEnvPreview(revealEl.checked); });
-        }
-
-        modal.classList.remove("closing");
-        modal.classList.remove("hidden");
-        var revealEl = modal.querySelector("#env-preview-reveal-toggle") as HTMLInputElement | null;
-        if (revealEl) revealEl.checked = false;
-        var searchEl = modal.querySelector("#env-preview-search") as HTMLInputElement | null;
-        if (searchEl) searchEl.value = "";
-        loadEnvPreview(false);
-      }
-
-      export function closeEnvPreviewModal() {
-        var modal = document.getElementById("env-preview-modal");
-        if (!modal) return;
-        animateModalClose(modal);
-      }
-
-      export function loadEnvPreview(reveal) {
-        var listEl = document.getElementById("env-preview-list");
-        var metaEl = document.getElementById("env-preview-meta");
-        if (listEl) listEl.innerHTML = '<div class="env-preview-loading">加载中…</div>';
-        if (metaEl) metaEl.textContent = "加载中…";
-        var url = "/api/settings/env-preview" + (reveal ? "?reveal=1" : "");
-        fetch(url, { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (!data || !Array.isArray(data.entries)) {
-              if (listEl) listEl.innerHTML = '<div class="env-preview-empty">读取失败。</div>';
-              if (metaEl) metaEl.textContent = "读取失败";
-              return;
-            }
-            state._envPreview = data;
-            if (metaEl) {
-              var inheritLabel = data.inheritEnv ? "继承父进程" : "最小白名单";
-              metaEl.innerHTML =
-                '<span class="env-preview-pill ' + (data.inheritEnv ? "is-inherit" : "is-minimal") + '">' + inheritLabel + '</span>' +
-                '<span class="env-preview-count">共 ' + data.total + ' 项</span>';
-            }
-            renderEnvPreviewList();
-          })
-          .catch(function() {
-            if (listEl) listEl.innerHTML = '<div class="env-preview-empty">读取失败，请稍后重试。</div>';
-            if (metaEl) metaEl.textContent = "读取失败";
-          });
-      }
-
-      export function renderEnvPreviewList() {
-        var listEl = document.getElementById("env-preview-list");
-        if (!listEl) return;
-        var data = state._envPreview;
-        if (!data || !Array.isArray(data.entries)) {
-          listEl.innerHTML = '<div class="env-preview-empty">尚未加载。</div>';
-          return;
-        }
-        var searchEl = document.getElementById("env-preview-search") as HTMLInputElement | null;
-        var query = (searchEl && searchEl.value || "").trim().toLowerCase();
-        var html = "";
-        var shown = 0;
-        for (var i = 0; i < data.entries.length; i++) {
-          var entry = data.entries[i];
-          if (query && entry.name.toLowerCase().indexOf(query) === -1) continue;
-          shown++;
-          var isPlaceholder = typeof entry.value === "string" && entry.value.charAt(0) === "<" && entry.value.charAt(entry.value.length - 1) === ">";
-          html += '<div class="env-preview-row' + (entry.sensitive ? " is-sensitive" : "") + '">' +
-            '<div class="env-preview-name">' +
-              escapeHtml(entry.name) +
-              (entry.sensitive ? '<span class="env-preview-badge" title="被识别为敏感字段">敏感</span>' : '') +
-              (isPlaceholder ? '<span class="env-preview-badge env-preview-badge-runtime" title="按会话动态注入">运行时</span>' : '') +
-            '</div>' +
-            '<div class="env-preview-value' + (isPlaceholder ? " is-runtime" : "") + '" title="' + escapeHtml(String(entry.value)) + '">' +
-              escapeHtml(String(entry.value)) +
-            '</div>' +
-            '<div class="env-preview-len">' + entry.length + ' 字符</div>' +
-          '</div>';
-        }
-        if (shown === 0) {
-          html = '<div class="env-preview-empty">没有匹配的变量。</div>';
-        }
-        listEl.innerHTML = html;
-      }
-
-      export function getSettingsModelsForProvider(provider) {
-        return provider === "codex"
-          ? (state.availableCodexModels || [])
-          : provider === "opencode"
-            ? (state.availableOpenCodeModels || [])
-            : (state.availableModels || []);
-      }
-
-      export function updateSettingsModelStatus(root) {
-        if (!root) return;
-        var provider = getProviderKey(root.getAttribute("data-provider"));
-        var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
-        var field = root.closest(".settings-model-field");
-        var status = field ? field.querySelector("[data-model-status]") : null;
-        if (!input || !status) return;
-        var value = (input.value || "").trim();
-        var models = getSettingsModelsForProvider(provider);
-        var known = null;
-        for (var i = 0; i < models.length; i++) {
-          if (models[i].id === value) { known = models[i]; break; }
-        }
-        status.classList.remove("is-custom", "is-known");
-        if (!value) {
-          status.textContent = "跟随 CLI 默认";
-          return;
-        }
-        if (known) {
-          if (known.availability === "verified") {
-            status.textContent = "已由 Claude Code 验证";
-          } else if (known.availability === "stale") {
-            status.textContent = "验证记录待刷新";
-          } else if (known.source === "models-api") {
-            status.textContent = "API 候选，尚未验证";
-          } else {
-            status.textContent = "已检测到，尚未验证";
-          }
-          status.classList.add("is-known");
-          return;
-        }
-        status.textContent = "自定义名称";
-        status.classList.add("is-custom");
-      }
-
-      export function renderSettingsModelCombobox(root) {
-        if (!root) return;
-        var provider = getProviderKey(root.getAttribute("data-provider"));
-        var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
-        var menu = root.querySelector(".model-combobox-menu");
-        if (!input || !menu) return;
-        var rawValue = input.value || "";
-        var value = rawValue.trim();
-        // 已选模型是字段值，不等于用户正在输入的搜索词。普通展开时展示完整列表；
-        // 只有 input 事件触发的编辑态才按当前文字过滤，否则保存过默认模型后下拉里
-        // 永远只看得到那一个精确匹配项。
-        var query = root.classList.contains("is-filtering") ? value.toLowerCase() : "";
-        var models = getSettingsModelsForProvider(provider);
-        var defaultModel = null;
-        var exactMatch = false;
-        var rows: any[] = [];
-        for (var i = 0; i < models.length; i++) {
-          var model = models[i];
-          if (model.id === "default") {
-            defaultModel = model;
-            continue;
-          }
-          if (model.id === value) exactMatch = true;
-          var label = model.label || model.id;
-          if (query && model.id.toLowerCase().indexOf(query) === -1 && label.toLowerCase().indexOf(query) === -1) continue;
-          var meta = provider !== "claude"
-            ? (label === model.id ? "已检测模型" : model.id)
-            : model.availability === "verified"
-              ? "已由 Claude Code 验证"
-              : model.availability === "stale"
-                ? "验证记录待刷新"
-                : model.source === "models-api"
-                  ? "API 候选，尚未验证"
-                  : model.note || "尚未验证";
-          rows.push({ value: model.id, label: label, meta: meta, custom: false });
-        }
-
-        var defaultLabel = provider === "codex" ? "跟随 Codex 默认" : provider === "opencode" ? "跟随 OpenCode 默认" : "跟随 Claude Code 默认";
-        var defaultMeta = defaultModel && defaultModel.label ? defaultModel.label : "不传 --model 参数";
-        var html = "";
-        if (!query || defaultLabel.toLowerCase().indexOf(query) !== -1 || defaultMeta.toLowerCase().indexOf(query) !== -1) {
-          html += '<button type="button" class="model-combobox-option' + (!value ? ' is-selected' : '') + '" role="option" aria-selected="' + (!value ? 'true' : 'false') + '" data-model-value="">' +
-            '<span class="model-combobox-option-check" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg></span>' +
-            '<span class="model-combobox-option-copy"><span class="model-combobox-option-label">' + escapeHtml(defaultLabel) + '</span><span class="model-combobox-option-meta">' + escapeHtml(defaultMeta) + '</span></span>' +
-          '</button>';
-        }
-        for (var r = 0; r < rows.length; r++) {
-          var row = rows[r];
-          var isSelected = row.value === value;
-          html += '<button type="button" class="model-combobox-option' + (isSelected ? ' is-selected' : '') + '" role="option" aria-selected="' + (isSelected ? 'true' : 'false') + '" data-model-value="' + escapeHtml(row.value) + '">' +
-            '<span class="model-combobox-option-check" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg></span>' +
-            '<span class="model-combobox-option-copy"><span class="model-combobox-option-label">' + escapeHtml(row.label) + '</span><span class="model-combobox-option-meta">' + escapeHtml(row.meta) + '</span></span>' +
-          '</button>';
-        }
-        if (value && !exactMatch) {
-          html += '<button type="button" class="model-combobox-option model-combobox-option-custom is-selected" role="option" aria-selected="true" data-model-value="' + escapeHtml(value) + '">' +
-            '<span class="model-combobox-option-custom-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></span>' +
-            '<span class="model-combobox-option-copy"><span class="model-combobox-option-label">使用自定义名称</span><span class="model-combobox-option-meta">' + escapeHtml(value) + '</span></span>' +
-          '</button>';
-        }
-        if (!html) {
-          html = '<div class="model-combobox-empty">没有匹配的模型，可以继续输入自定义名称。</div>';
-        }
-        menu.innerHTML = html;
-        var options = menu.querySelectorAll(".model-combobox-option");
-        var activeIndex = -1;
-        for (var o = 0; o < options.length; o++) {
-          if (options[o].getAttribute("aria-selected") === "true") { activeIndex = o; break; }
-        }
-        (root as any)._wandModelActiveIndex = activeIndex >= 0 ? activeIndex : (options.length ? 0 : -1);
-        updateSettingsModelActiveOption(root);
-        updateSettingsModelStatus(root);
-      }
-
-      export function updateSettingsModelActiveOption(root) {
-        if (!root) return;
-        var menu = root.querySelector(".model-combobox-menu");
-        var input = root.querySelector(".model-combobox-input");
-        if (!menu || !input) return;
-        var options = menu.querySelectorAll(".model-combobox-option");
-        var activeIndex = typeof (root as any)._wandModelActiveIndex === "number" ? (root as any)._wandModelActiveIndex : -1;
-        for (var i = 0; i < options.length; i++) {
-          options[i].classList.toggle("is-active", i === activeIndex);
-          if (i === activeIndex) {
-            if (!options[i].id) options[i].id = (menu.id || "model-listbox") + "-option-" + i;
-            input.setAttribute("aria-activedescendant", options[i].id);
-          }
-        }
-        if (activeIndex < 0) input.removeAttribute("aria-activedescendant");
-      }
-
-      export function openSettingsModelCombobox(root) {
-        if (!root) return;
-        var input = root.querySelector(".model-combobox-input");
-        var menu = root.querySelector(".model-combobox-menu");
-        if (!input || !menu) return;
-        document.querySelectorAll(".model-combobox.is-open").forEach(function(other) {
-          if (other !== root) closeSettingsModelCombobox(other);
-        });
-        renderSettingsModelCombobox(root);
-        root.classList.add("is-open");
-        menu.classList.remove("hidden");
-        input.setAttribute("aria-expanded", "true");
-      }
-
-      export function closeSettingsModelCombobox(root) {
-        if (!root) return;
-        var input = root.querySelector(".model-combobox-input");
-        var menu = root.querySelector(".model-combobox-menu");
-        root.classList.remove("is-open");
-        root.classList.remove("is-filtering");
-        if (menu) menu.classList.add("hidden");
-        if (input) {
-          input.setAttribute("aria-expanded", "false");
-          input.removeAttribute("aria-activedescendant");
-        }
-      }
-
-      export function selectSettingsModelOption(root, value) {
-        if (!root) return;
-        var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
-        if (!input) return;
-        var shouldRestoreInputFocus = document.activeElement === input;
-        input.value = value || "";
-        input.dataset.modelInitialized = "true";
-        input.dataset.modelDirty = "true";
-        root.classList.remove("is-filtering");
-        updateSettingsModelStatus(root);
-        closeSettingsModelCombobox(root);
-        if (shouldRestoreInputFocus) input.focus();
-      }
-
-      export function bindSettingsModelComboboxes() {
-        if (!(window as any).__wandSettingsModelOutsideBound) {
-          (window as any).__wandSettingsModelOutsideBound = true;
-          document.addEventListener("click", function(event) {
-            var target = event.target as Node | null;
-            document.querySelectorAll(".model-combobox.is-open").forEach(function(root) {
-              if (!target || !root.contains(target)) closeSettingsModelCombobox(root);
-            });
-          });
-        }
-        var roots = document.querySelectorAll(".model-combobox");
-        roots.forEach(function(root) {
-          if ((root as HTMLElement).dataset.bound === "true") return;
-          (root as HTMLElement).dataset.bound = "true";
-          var input = root.querySelector(".model-combobox-input") as HTMLInputElement | null;
-          var toggle = root.querySelector(".model-combobox-toggle") as HTMLButtonElement | null;
-          var menu = root.querySelector(".model-combobox-menu");
-          if (!input || !toggle || !menu) return;
-          input.addEventListener("focus", function() { openSettingsModelCombobox(root); });
-          input.addEventListener("input", function() {
-            input.dataset.modelInitialized = "true";
-            input.dataset.modelDirty = "true";
-            root.classList.add("is-filtering");
-            openSettingsModelCombobox(root);
-          });
-          input.addEventListener("keydown", function(event) {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              closeSettingsModelCombobox(root);
-              return;
-            }
-            if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
-            if (!root.classList.contains("is-open")) {
-              if (event.key === "Enter") return;
-              openSettingsModelCombobox(root);
-            }
-            var options = menu.querySelectorAll(".model-combobox-option");
-            if (!options.length) return;
-            event.preventDefault();
-            var index = typeof (root as any)._wandModelActiveIndex === "number" ? (root as any)._wandModelActiveIndex : -1;
-            if (event.key === "ArrowDown") index = index < options.length - 1 ? index + 1 : 0;
-            if (event.key === "ArrowUp") index = index > 0 ? index - 1 : options.length - 1;
-            (root as any)._wandModelActiveIndex = index;
-            updateSettingsModelActiveOption(root);
-            if (event.key === "Enter") {
-              var active = options[index] as HTMLElement | undefined;
-              if (active) selectSettingsModelOption(root, active.getAttribute("data-model-value") || "");
-            } else {
-              var activeOption = options[index] as HTMLElement | undefined;
-              if (activeOption && typeof activeOption.scrollIntoView === "function") activeOption.scrollIntoView({ block: "nearest" });
-            }
-          });
-          toggle.addEventListener("mousedown", function(event) { event.preventDefault(); });
-          toggle.addEventListener("click", function() {
-            if (root.classList.contains("is-open")) {
-              closeSettingsModelCombobox(root);
-            } else {
-              openSettingsModelCombobox(root);
-            }
-          });
-          menu.addEventListener("mousedown", function(event) { event.preventDefault(); });
-          menu.addEventListener("click", function(event) {
-            var option = (event.target as HTMLElement).closest(".model-combobox-option");
-            if (!option) return;
-            selectSettingsModelOption(root, option.getAttribute("data-model-value") || "");
-          });
-          root.addEventListener("focusout", function() {
-            setTimeout(function() {
-              if (!root.contains(document.activeElement)) closeSettingsModelCombobox(root);
-            }, 0);
-          });
-          renderSettingsModelCombobox(root);
-        });
-      }
-
-      export function syncCommitModelProvider(resetModel?) {
-        var cli = document.getElementById("cfg-commit-cli") as HTMLSelectElement | null;
-        var root = document.getElementById("cfg-commit-model-combobox");
-        var input = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
-        var label = document.getElementById("cfg-commit-model-provider");
-        if (!cli || !root || !input) return;
-        var provider = getProviderKey(cli.value);
-        root.setAttribute("data-provider", provider);
-        input.placeholder = provider === "codex" ? "跟随 Codex 默认" : provider === "opencode" ? "跟随 OpenCode 默认" : "跟随 Claude Code 默认";
-        if (label) label.textContent = provider === "codex" ? "Codex CLI" : provider === "opencode" ? "OpenCode CLI" : "Claude Code";
-        if (resetModel) {
-          input.value = "";
-          input.dataset.modelDirty = "true";
-        }
-        renderSettingsModelCombobox(root);
-      }
-
-      export function syncCommitSourceUI() {
-        var apiRadio = document.getElementById("cfg-commit-source-api") as HTMLInputElement | null;
-        var cliRadio = document.getElementById("cfg-commit-source-cli") as HTMLInputElement | null;
-        var apiPanel = document.getElementById("cfg-commit-api-panel") as HTMLElement | null;
-        var cliPanel = document.getElementById("cfg-commit-cli-panel") as HTMLElement | null;
-        var refresh = document.getElementById("cfg-commit-model-refresh") as HTMLElement | null;
-        var apiOption = document.getElementById("cfg-commit-source-api-option");
-        var cliOption = document.getElementById("cfg-commit-source-cli-option");
-        var apiSelected = apiRadio?.checked === true;
-
-        if (cliRadio && !apiRadio?.checked) cliRadio.checked = true;
-        if (apiPanel) apiPanel.hidden = !apiSelected;
-        if (cliPanel) cliPanel.hidden = apiSelected;
-        if (refresh) refresh.hidden = apiSelected;
-        if (apiOption) apiOption.classList.toggle("is-selected", apiSelected);
-        if (cliOption) cliOption.classList.toggle("is-selected", !apiSelected);
-
-        var status = document.getElementById("cfg-commit-api-status");
-        if (!status) return;
-        var baseUrl = ((document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null)?.value || "").trim();
-        var model = ((document.getElementById("cfg-system-ai-model") as HTMLInputElement | null)?.value || "").trim();
-        var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
-        var hasKey = Boolean((key?.value || "").trim() || key?.dataset.hasApiKey === "true");
-        var validUrl = false;
-        var host = "";
-        try {
-          var parsedUrl = baseUrl ? new URL(baseUrl) : null;
-          validUrl = parsedUrl?.protocol === "http:" || parsedUrl?.protocol === "https:";
-          host = parsedUrl?.host || "";
-        } catch (_error) {}
-        var ready = Boolean(validUrl && model && hasKey);
-        status.dataset.tone = ready ? "ready" : "warning";
-        status.textContent = ready
-          ? "已就绪：" + model + (host ? " · " + host : "")
-          : baseUrl && !validUrl
-            ? "尚未就绪：API 地址必须是有效的 http(s) URL。"
-            : "尚未就绪：请先填写 API 地址、API Key 和模型。";
-      }
-
-      export function organizeSettingsAiPanel() {
-        var target = document.getElementById("settings-ai-model-sections");
-        if (!target) return;
-        ["settings-model-card-title", "settings-system-ai-card-title", "settings-commit-model-card-title"].forEach(function(titleId) {
-          var title = document.getElementById(titleId);
-          var section = title && title.closest ? title.closest(".settings-model-card") : null;
-          if (section && section.parentElement !== target) target.appendChild(section);
-        });
-      }
-
-      function getActiveConfigMessage() {
-        return (document.querySelector(".settings-panel.active .settings-status-message") as HTMLElement | null)
-          || document.getElementById("config-message");
-      }
-
-      var configSavePending = false;
-
-      function fillSystemAiSettings(systemAi) {
-        systemAi = systemAi || {};
-        var enabled = document.getElementById("cfg-system-ai-enabled") as HTMLInputElement | null;
-        var protocol = document.getElementById("cfg-system-ai-protocol") as HTMLSelectElement | null;
-        var authHeader = document.getElementById("cfg-system-ai-auth-header") as HTMLSelectElement | null;
-        var baseUrl = document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null;
-        var model = document.getElementById("cfg-system-ai-model") as HTMLInputElement | null;
-        var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
-        var status = document.getElementById("cfg-system-ai-status");
-        if (enabled) enabled.checked = systemAi.enabled === true;
-        if (protocol) protocol.value = systemAi.protocol === "anthropic" ? "anthropic" : "openai";
-        if (authHeader) authHeader.value = systemAi.authHeader === "x-api-key" ? "x-api-key" : "bearer";
-        if (baseUrl) baseUrl.value = systemAi.baseUrl || "";
-        if (model) model.value = systemAi.model || "";
-        if (key) {
-          key.value = "";
-          key.placeholder = systemAi.hasApiKey ? "已保存；留空则保持不变" : "输入 API Key";
-          key.dataset.hasApiKey = systemAi.hasApiKey ? "true" : "false";
-          key.dataset.source = systemAi.source || "custom";
-        }
-        if (status) status.textContent = systemAi.source && systemAi.source !== "custom"
-          ? "已从 " + (systemAi.source === "claude" ? "Claude Code" : systemAi.source === "codex" ? "Codex" : "OpenCode") + " 导入。"
-          : "控制提示词优化和会话标题；Commit 来源在下方单独选择。";
-        syncCommitSourceUI();
-      }
-
-      export function importSystemAiConfig() {
-        var button = document.getElementById("cfg-system-ai-import") as HTMLButtonElement | null;
-        var message = getActiveConfigMessage();
-        var buttonLabel = button?.innerHTML || "";
-        if (button) {
-          button.disabled = true;
-          button.setAttribute("aria-busy", "true");
-          button.textContent = "导入中…";
-        }
-        fetch("/api/settings/system-ai/import", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ source: (document.getElementById("cfg-commit-cli") as HTMLSelectElement | null)?.value || "claude" })
-        }).then(function(res) { return res.json().then(function(data) { if (!res.ok) throw new Error(data.error || "导入失败"); return data; }); })
-          .then(function(data) {
-            fillSystemAiSettings(data.systemAi || {});
-            if (state.config) state.config.systemAi = data.systemAi;
-            if (message) { message.textContent = "API 配置已从 CLI 导入并保存；系统 AI 开关和 Commit 来源保持不变。"; message.style.color = "var(--success)"; message.classList.remove("hidden"); }
-          })
-          .catch(function(error) {
-            if (message) { message.textContent = error.message || "导入失败。"; message.style.color = "var(--error)"; message.classList.remove("hidden"); }
-          })
-          .finally(function() {
-            if (button) {
-              button.disabled = false;
-              button.removeAttribute("aria-busy");
-              button.innerHTML = buttonLabel;
-            }
-          });
-      }
-
-      export function updateSettingsDefaultModelSelect(data?) {
-        var defaults = getConfigDefaultModels();
-        var claudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
-        if (claudeInput) {
-          if (claudeInput.dataset.modelInitialized !== "true") {
-            claudeInput.value = (state.configDefaultModels && state.configDefaultModels.claude) || defaults.claude || "";
-            claudeInput.dataset.modelInitialized = "true";
-          }
-          var claudeRoot = claudeInput.closest(".model-combobox");
-          if (claudeRoot) renderSettingsModelCombobox(claudeRoot);
-        }
-        var codexInput = document.getElementById("cfg-default-codex-model") as HTMLInputElement | null;
-        if (codexInput) {
-          if (codexInput.dataset.modelInitialized !== "true") {
-            codexInput.value = (state.configDefaultModels && state.configDefaultModels.codex) || defaults.codex || "";
-            codexInput.dataset.modelInitialized = "true";
-          }
-          var codexRoot = codexInput.closest(".model-combobox");
-          if (codexRoot) renderSettingsModelCombobox(codexRoot);
-        }
-        var openCodeInput = document.getElementById("cfg-default-opencode-model") as HTMLInputElement | null;
-        if (openCodeInput) {
-          if (openCodeInput.dataset.modelInitialized !== "true") {
-            openCodeInput.value = (state.configDefaultModels && state.configDefaultModels.opencode) || defaults.opencode || "";
-            openCodeInput.dataset.modelInitialized = "true";
-          }
-          var openCodeRoot = openCodeInput.closest(".model-combobox");
-          if (openCodeRoot) renderSettingsModelCombobox(openCodeRoot);
-        }
-        var versionEl = document.getElementById("cfg-default-model-version");
-        if (versionEl && data) {
-          versionEl.textContent = data.claudeVersion
-            ? "已检测到 Claude CLI " + data.claudeVersion + "；列表已同步 Codex 与 OpenCode 可用模型。"
-            : "未读取到 Claude CLI 版本；仍可直接输入自定义模型名称。";
-        }
-      }
 
       export function getSelectedSession() {
         if (!state.selectedId) return null;
@@ -1569,6 +983,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function applyCurrentView() {
+        var reactShellActive = isBrowserReactShellMounted();
         var hasSession = !!state.selectedId;
         var terminalContainer = document.getElementById("output");
         var chatContainer = document.getElementById("chat-output");
@@ -1583,11 +998,11 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           state.currentView = "terminal";
         }
 
-        if (terminalContainer) {
+        if (!reactShellActive && terminalContainer) {
           terminalContainer.classList.toggle("active", showTerminal);
           terminalContainer.classList.toggle("hidden", !showTerminal);
         }
-        if (chatContainer) {
+        if (!reactShellActive && chatContainer) {
           chatContainer.classList.toggle("active", showChat);
           chatContainer.classList.toggle("hidden", !showChat);
         }
@@ -1596,7 +1011,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         // activateSession 在 updateSessionSnapshot 之前调 switchToSessionView 等
         // 瞬态）时会走 else 分支把 blank-chat 显示出来，但紧接着调到这里，应
         // 以 hasSession 为准重新隐藏，避免与 terminal/chat 同屏并存。
-        if (blankChat) {
+        if (!reactShellActive && blankChat) {
           blankChat.classList.toggle("hidden", hasSession);
         }
         if (chatContainer && showChat) {
@@ -1605,45 +1020,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         bindChatScrollListener();
         updateChatUnreadBubble();
         updateInteractiveControls();
-      }
-
-      export function syncSessionModalUI() {
-        var modeHint = document.getElementById("mode-description");
-        var kindHint = document.getElementById("session-kind-description");
-        var tool = state.sessionTool || "claude";
-        var sessionKind = state.sessionCreateKind || "structured";
-
-        state.sessionTool = tool;
-        state.modeValue = getSafeModeForTool(tool, state.modeValue || state.chatMode || "default");
-
-        var providerCards = document.querySelectorAll("#provider-cards .provider-card");
-        if (providerCards.length) {
-          providerCards.forEach(function(card) {
-            var provider = card.getAttribute("data-provider");
-            card.classList.toggle("active", provider === tool);
-            card.classList.remove("disabled");
-          });
-        }
-
-        var kindCards = document.querySelectorAll("#session-kind-cards .session-kind-card");
-        if (kindCards.length) {
-          kindCards.forEach(function(card) {
-            var kind = card.getAttribute("data-session-kind");
-            var disabled = false;
-            card.classList.toggle("active", kind === sessionKind);
-            card.classList.toggle("disabled", disabled);
-          });
-        }
-
-        var modeCards = document.querySelectorAll("#mode-cards .mode-card");
-        if (modeCards.length) {
-          modeCards.forEach(function(card) {
-            card.classList.toggle("active", card.getAttribute("data-mode") === state.modeValue);
-          });
-        }
-
-        if (kindHint) kindHint.textContent = getSessionKindHint(sessionKind);
-        if (modeHint) modeHint.textContent = getToolModeHint(tool, state.modeValue);
+        notifyLegacyUiChange("shell:view");
       }
 
       export function updateSessionSnapshot(snapshot) {
@@ -1838,9 +1215,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
             updateStructuredQueueCounter();
             state.bootstrapping = false;
             persistSelectedId();
-            if (state.modalOpen) {
-              updateSessionsList();
-            } else {
+            if (!isBrowserReactShellMounted()) {
               var listEl = document.getElementById("sessions-list");
               var rendered = renderSessionsListContent();
               if (listEl && listEl.innerHTML === rendered) {
@@ -1903,13 +1278,16 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function updateSessionsList() {
-        var listEl = document.getElementById("sessions-list");
-        var countEl = document.getElementById("session-count");
-        if (listEl) {
-          listEl.innerHTML = renderSessionsListContent();
-          refreshTailMarqueePaths(listEl);
+        if (!isBrowserReactShellMounted()) {
+          var listEl = document.getElementById("sessions-list");
+          var countEl = document.getElementById("session-count");
+          if (listEl) {
+            listEl.innerHTML = renderSessionsListContent();
+            refreshTailMarqueePaths(listEl);
+          }
+          if (countEl) countEl.textContent = String(state.sessions.length);
         }
-        if (countEl) countEl.textContent = String(state.sessions.length);
+        notifyLegacyUiChange("sessions:update");
         // History renders inline inside #sessions-list now, so the line above
         // already refreshed it — no separate docked region to update.
         if (typeof hideCollapsedTileBubble === "function") hideCollapsedTileBubble();
@@ -1919,6 +1297,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function updateShellChrome() {
+        var reactShellActive = isBrowserReactShellMounted();
         var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!selectedSession) {
           setTerminalInteractive(false);
@@ -1931,7 +1310,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var titleEl = document.getElementById("terminal-title");
         var infoEl = document.getElementById("terminal-info");
         var topbarTitleEl = document.querySelector(".topbar-session-title, .topbar-tagline");
-        if (topbarTitleEl && selectedSession) {
+        if (!reactShellActive && topbarTitleEl && selectedSession) {
           topbarTitleEl.classList.remove("topbar-tagline");
           topbarTitleEl.classList.add("topbar-session-title");
           topbarTitleEl.textContent = selectedSession.title || shortCommand(selectedSession.command);
@@ -1978,23 +1357,24 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
 
         var inputPanel = document.querySelector(".input-panel");
         if (selectedSession) {
-          if (blankChat) blankChat.classList.add("hidden");
-          if (terminalContainer) terminalContainer.classList.remove("hidden");
-          if (chatContainer) chatContainer.classList.remove("hidden");
+          if (!reactShellActive && blankChat) blankChat.classList.add("hidden");
+          if (!reactShellActive && terminalContainer) terminalContainer.classList.remove("hidden");
+          if (!reactShellActive && chatContainer) chatContainer.classList.remove("hidden");
           // v2: 停止按钮不在这里统一展示 —— 由 updateInteractiveControls()
           // 按 computeRunningSignal 判断「真在跑」时才露出（applyCurrentView 末尾会调用）。
-          if (inputPanel) inputPanel.classList.remove("hidden");
+          if (!reactShellActive && inputPanel) inputPanel.classList.remove("hidden");
         } else {
-          if (blankChat) blankChat.classList.remove("hidden");
-          if (terminalContainer) terminalContainer.classList.add("hidden");
-          if (chatContainer) chatContainer.classList.add("hidden");
+          if (!reactShellActive && blankChat) blankChat.classList.remove("hidden");
+          if (!reactShellActive && terminalContainer) terminalContainer.classList.add("hidden");
+          if (!reactShellActive && chatContainer) chatContainer.classList.add("hidden");
           if (stopBtn) stopBtn.classList.add("hidden");
-          if (inputPanel) inputPanel.classList.add("hidden");
+          if (!reactShellActive && inputPanel) inputPanel.classList.add("hidden");
         }
         syncComposerModeSelect();
         syncComposerModelSelect(getSelectedSession());
         applyCurrentView();
         reconcileInteractiveState();
+        notifyLegacyUiChange("shell:chrome");
       }
 
       export function loadOutput(id) {
@@ -2153,7 +1533,25 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         loadGitStatus(id, { force: true });
       }
 
+      /** DOM-free home navigation used by the React shell command port. */
+      export function goHome() {
+        if (!state.selectedId) return;
+        state.selectedId = null;
+        state.currentTask = null;
+        state.currentMessages = [];
+        state.gitStatus = null;
+        state.gitStatusSessionId = null;
+        persistSelectedId();
+        resetChatRenderCache();
+        dismissDrawerIfOverlay();
+        updateSessionsList();
+      }
+
       export function updatePinState() {
+        if (isBrowserReactShellMounted()) {
+          notifyLegacyUiChange("layout:pin");
+          return;
+        }
         var drawer = document.getElementById("sessions-drawer");
         var mainLayout = document.querySelector(".main-layout");
         // 与 renderAppShell 保持一致：手机端只允许窄条形态 anchored。
@@ -2178,6 +1576,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       }
 
       export function updateDrawerState() {
+        if (isBrowserReactShellMounted()) {
+          notifyLegacyUiChange("layout:drawer");
+          return;
+        }
         var drawer = document.getElementById("sessions-drawer");
         var backdrop = document.getElementById("sessions-drawer-backdrop");
         var mainLayout = document.querySelector(".main-layout");
@@ -2427,6 +1829,10 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       // 收窄按钮的图标/title/状态随 collapsed 切换。抽出来给轻量更新路径用，
       // 避免为了换一个箭头方向就走全量 render()。
       export function updateSidebarCollapseButton() {
+        if (isBrowserReactShellMounted()) {
+          notifyLegacyUiChange("layout:collapse-button");
+          return;
+        }
         var btn = document.getElementById("sidebar-collapse-btn");
         if (!btn) return;
         var isCollapsed = !!state.sidebarPinned && !!state.sidebarCollapsed;
@@ -2466,630 +1872,114 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
       // moved to state.state.lastFocusedElement
       // moved to state.state.focusTrapHandler
 
-      function applyNewSessionDefaults(config) {
-        if (!config || typeof config !== "object") return;
-        state.config = config;
-        var tool = getProviderKey(config.defaultProvider);
-        state.sessionTool = tool;
-        state.preferredCommand = tool;
-        state.sessionCreateKind = config.defaultSessionKind === "pty" ? "pty" : "structured";
-        state.modeValue = getSafeModeForTool(tool, config.defaultMode || "default");
+      function closeControllerForCompetingOverlay(controller: {
+        isOpen(): boolean;
+        closeIfOpen(): boolean;
+      } | undefined): boolean {
+        return !controller?.isOpen() || controller.closeIfOpen();
       }
 
-      var _newSessionPreferenceWrite = Promise.resolve();
-
-      export function persistNewSessionDefaults(fields) {
-        if (!fields || typeof fields !== "object") return Promise.resolve();
-        _newSessionPreferenceWrite = _newSessionPreferenceWrite
-          .catch(function() {})
-          .then(function() {
-            return fetch("/api/settings/config", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "same-origin",
-              body: JSON.stringify(fields)
-            });
-          })
-          .then(function(res) {
-            return res.json().then(function(data) {
-              if (!res.ok || data.error) throw new Error(data.error || "保存新建会话偏好失败");
-              if (data.config) state.config = data.config;
-              return data;
-            });
-          })
-          .catch(function(error) {
-            console.warn("[wand] Failed to persist new-session defaults", error);
-          });
-        return _newSessionPreferenceWrite;
+      function openSessionModalNow() {
+        if (
+          !closeControllerForCompetingOverlay(folderPickerController)
+          || !closeControllerForCompetingOverlay(quickCommitController)
+          || !closeControllerForCompetingOverlay(worktreeMergeController)
+          || !closeControllerForCompetingOverlay(window.__wandReactSettings)
+        ) return;
+        var reactNewSession = window.__wandReactNewSession;
+        if (reactNewSession && typeof reactNewSession.open === "function") {
+          try {
+            if (reactNewSession.open()) return;
+          } catch (error) {
+            console.warn("[wand] React new-session host unavailable", error);
+          }
+        }
+        try {
+          var queryDisabled = new URL(window.location.href).searchParams.get("reactUi") === "0";
+          if (queryDisabled) {
+            showToast("新建会话界面已被 ?reactUi=0 禁用；移除该参数并刷新后即可使用。", "error");
+            return;
+          }
+          if (window.localStorage.getItem("wand.reactUi.enabled") === "false") {
+            window.localStorage.setItem("wand.reactUi.enabled", "true");
+            showToast("正在启用新建会话界面…", "info");
+            window.setTimeout(function() { window.location.reload(); }, 120);
+            return;
+          }
+        } catch (_error) {}
+        showToast("新建会话界面未能启动，请刷新页面后重试。", "error");
       }
 
       export function openSessionModal() {
-        // Close settings modal first if open (mutual exclusion)
-        closeSettingsModal();
-        state.modalOpen = true;
-        state.sessionsDrawerOpen = false;
-        writeStoredBoolean("wand-sidebar-open", false);
-        updateDrawerState();
-        var modal = document.getElementById("session-modal");
-        if (modal) {
-          if ((modal as any)._wandCloseTimer) { clearTimeout((modal as any)._wandCloseTimer); (modal as any)._wandCloseTimer = null; }
-          modal.classList.remove("closing");
-          modal.classList.remove("hidden");
-          state.lastFocusedElement = document.activeElement;
-          state.sessionTool = getProviderKey(state.config && state.config.defaultProvider);
-          state.preferredCommand = state.sessionTool;
-          state.sessionCreateKind = state.config && state.config.defaultSessionKind === "pty" ? "pty" : "structured";
-          state.sessionCreateWorktree = false;
-          state.modeValue = getSafeModeForTool(
-            state.sessionTool,
-            state.config && state.config.defaultMode ? state.config.defaultMode : "default"
-          );
-          syncSessionModalUI();
-          // 页面可能长期打开；每次进入新建页都重新读取服务端，接收其它客户端
-          // 最近保存的 provider / 会话类型 / 模式，而不是沿用启动时缓存。
-          _newSessionPreferenceWrite.then(function() {
-            return fetch("/api/config", { credentials: "same-origin" });
-          })
-            .then(function(res) { return res.ok ? res.json() : null; })
-            .then(function(config) {
-              if (!config || !state.modalOpen) return;
-              applyNewSessionDefaults(config);
-              syncSessionModalUI();
-            })
-            .catch(function() {});
-          loadRecentPathBubbles();
-          setTimeout(function() {
-            var modeCardsEl = document.getElementById("mode-cards");
-            if (modeCardsEl) modeCardsEl.focus();
-          }, 20);
-          setupFocusTrap(modal);
-        }
+        if (!prepareFilePreviewForCompetingOverlay(openSessionModalNow)) return;
+        openSessionModalNow();
       }
 
       export function closeSessionModal() {
-        state.modalOpen = false;
-        var modal = document.getElementById("session-modal");
-        if (modal) {
-          // Remove focus trap before kicking off the exit animation
-          if (state.focusTrapHandler) {
-            document.removeEventListener("keydown", state.focusTrapHandler);
-            state.focusTrapHandler = null;
-          }
-          // Restore focus to last focused element
-          if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === "function") {
-            state.lastFocusedElement.focus();
-          }
-          animateModalClose(modal);
+        var reactNewSession = window.__wandReactNewSession;
+        if (reactNewSession && typeof reactNewSession.closeIfOpen === "function") {
+          try {
+            if (reactNewSession.closeIfOpen()) return;
+          } catch (_error) {}
         }
-        hidePathSuggestions();
       }
 
-      // Run the liquid-glass exit animation on a modal-backdrop, then mark it hidden.
-      // Falls back to instant hide when reduced-motion is requested or a tab is in the background.
-      export function animateModalClose(modal) {
-        if (!modal) return;
-        if (modal.classList.contains("hidden")) return;
-        var prefersReducedMotion = false;
-        try {
-          prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        } catch (_e) {}
-        if (prefersReducedMotion || document.hidden) {
-          modal.classList.remove("closing");
-          modal.classList.add("hidden");
-          return;
-        }
-        // Cancel any outstanding pending hide on the same node
-        if ((modal as any)._wandCloseTimer) {
-          clearTimeout((modal as any)._wandCloseTimer);
-          (modal as any)._wandCloseTimer = null;
-        }
-        modal.classList.add("closing");
-        (modal as any)._wandCloseTimer = setTimeout(function() {
-          modal.classList.remove("closing");
-          modal.classList.add("hidden");
-          (modal as any)._wandCloseTimer = null;
-        }, 170);
-      }
-
-      export function setupFocusTrap(modal) {
-        if (state.focusTrapHandler) {
-          document.removeEventListener("keydown", state.focusTrapHandler);
-        }
-
-        // Focusable elements selector
-        var focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
-
-        state.focusTrapHandler = function(e) {
-          if (e.key !== "Tab") return;
-
-          var focusableElements = modal.querySelectorAll(focusableSelector);
-          var firstEl = focusableElements[0];
-          var lastEl = focusableElements[focusableElements.length - 1];
-
-          if (!firstEl || !lastEl) return;
-
-          // Shift + Tab
-          if (e.shiftKey) {
-            if (document.activeElement === firstEl) {
-              e.preventDefault();
-              lastEl.focus();
-            }
-          } else {
-            // Tab
-            if (document.activeElement === lastEl) {
-              e.preventDefault();
-              firstEl.focus();
-            }
-          }
-        };
-
-        document.addEventListener("keydown", state.focusTrapHandler);
-      }
-
-      export function getActiveWorktreeMergeSession() {
-        if (!state.activeWorktreeMergeSessionId) return null;
-        return state.sessions.find(function(session) { return session.id === state.activeWorktreeMergeSessionId; }) || null;
-      }
-
-      export function renderWorktreeMergeContent() {
-        var container = document.getElementById("worktree-merge-content");
-        var confirmBtn = document.getElementById("worktree-merge-confirm-button") as HTMLButtonElement | null;
-        var errorEl = document.getElementById("worktree-merge-error");
-        var session = getActiveWorktreeMergeSession();
-        var result = state.worktreeMergeCheckResult;
-        if (!container || !confirmBtn) return;
-        if (!session || !session.worktree) {
-          container.innerHTML = '<p class="field-hint">未找到可合并的 worktree 会话。</p>';
-          confirmBtn.disabled = true;
-          return;
-        }
-        if (errorEl) {
-          if (state.worktreeMergeError) {
-            showError(errorEl, state.worktreeMergeError);
-          } else {
-            hideError(errorEl);
-          }
-        }
-        var rows = [
-          '<div class="worktree-merge-row"><span>来源分支</span><strong>' + escapeHtml(session.worktree.branch || "-") + '</strong></div>',
-          '<div class="worktree-merge-row"><span>工作目录</span><strong>' + escapeHtml(session.worktree.path || "-") + '</strong></div>'
-        ];
-        if (result) {
-          rows.push('<div class="worktree-merge-row"><span>目标分支</span><strong>' + escapeHtml(result.targetBranch || "-") + '</strong></div>');
-          rows.push('<div class="worktree-merge-row"><span>待合并提交</span><strong>' + escapeHtml(String(result.aheadCount || 0)) + '</strong></div>');
-          rows.push('<div class="worktree-merge-row"><span>未提交改动</span><strong>' + escapeHtml(result.hasUncommittedChanges ? "有" : "无") + '</strong></div>');
-          rows.push('<div class="worktree-merge-row"><span>冲突风险</span><strong>' + escapeHtml(result.hasConflicts ? "有" : "无") + '</strong></div>');
-          if (result.reason) {
-            rows.push('<p class="field-hint">' + escapeHtml(result.reason) + '</p>');
-          }
-        } else if (state.worktreeMergeLoading) {
-          rows.push('<p class="field-hint">正在检查 worktree 合并状态…</p>');
-        }
-        container.innerHTML = rows.join("");
-        confirmBtn.disabled = state.worktreeMergeLoading || state.worktreeMergeSubmitting || !result || result.ok !== true;
-        confirmBtn.textContent = state.worktreeMergeSubmitting ? "合并中..." : "确认合并并清理";
-      }
-
-      export function openWorktreeMergeModal(sessionId) {
-        state.activeWorktreeMergeSessionId = sessionId;
-        state.worktreeMergeCheckResult = null;
-        state.worktreeMergeLoading = true;
-        state.worktreeMergeSubmitting = false;
-        state.worktreeMergeError = "";
-        closeSessionModal();
-        closeSettingsModal();
-        var modal = document.getElementById("worktree-merge-modal");
-        if (modal) {
-          modal.classList.remove("hidden");
-          state.lastFocusedElement = document.activeElement;
-          setupFocusTrap(modal);
-        }
-        renderWorktreeMergeContent();
-        fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/worktree/merge/check", {
-          method: "POST",
-          credentials: "same-origin"
-        })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data && data.error) {
-              throw new Error(data.error);
-            }
-            if (data && data.session) {
-              updateSessionSnapshot(data.session);
-            }
-            state.worktreeMergeCheckResult = data.result || null;
-            state.worktreeMergeError = "";
-          })
-          .catch(function(error) {
-            state.worktreeMergeError = (error && error.message) || "无法检查 worktree 合并状态。";
-          })
-          .finally(function() {
-            state.worktreeMergeLoading = false;
-            renderWorktreeMergeContent();
-          });
+      export function openWorktreeMergeModal(sessionId: string) {
+        openWorktreeMergeForSession(sessionId, "merge");
       }
 
       export function closeWorktreeMergeModal() {
-        var modal = document.getElementById("worktree-merge-modal");
-        state.activeWorktreeMergeSessionId = null;
-        state.worktreeMergeCheckResult = null;
-        state.worktreeMergeLoading = false;
-        state.worktreeMergeSubmitting = false;
-        state.worktreeMergeError = "";
-        if (modal) {
-          modal.classList.add("hidden");
-        }
-        if (state.focusTrapHandler) {
-          document.removeEventListener("keydown", state.focusTrapHandler);
-          state.focusTrapHandler = null;
-        }
-        if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === "function") {
-          state.lastFocusedElement.focus();
-        }
+        return closeWorktreeMergeFromLegacy();
       }
 
-      export function confirmWorktreeMerge() {
-        if (!state.activeWorktreeMergeSessionId || state.worktreeMergeSubmitting) return;
-        state.worktreeMergeSubmitting = true;
-        state.worktreeMergeError = "";
-        renderWorktreeMergeContent();
-        fetch("/api/sessions/" + encodeURIComponent(state.activeWorktreeMergeSessionId) + "/worktree/merge", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({})
-        })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data && data.error) {
-              throw new Error(data.error);
-            }
-            if (data && data.session) {
-              updateSessionSnapshot(data.session);
-            }
-            showToast("已合并到 " + escapeHtml((data.result && data.result.targetBranch) || "主分支") + ((data.result && data.result.cleanupDone === false) ? "，但工作树待清理。" : "。"), "info");
-            closeWorktreeMergeModal();
-            return refreshAll();
-          })
-          .catch(function(error) {
-            state.worktreeMergeError = (error && error.message) || "无法合并 worktree。";
-            renderWorktreeMergeContent();
-          })
-          .finally(function() {
-            state.worktreeMergeSubmitting = false;
-            renderWorktreeMergeContent();
-          });
+      export function retryWorktreeCleanup(sessionId: string) {
+        openWorktreeMergeForSession(sessionId, "cleanup");
       }
 
-      export function retryWorktreeCleanup(sessionId) {
-        fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/worktree/cleanup", {
-          method: "POST",
-          credentials: "same-origin"
-        })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data && data.error) {
-              throw new Error(data.error);
-            }
-            if (data && data.session) {
-              updateSessionSnapshot(data.session);
-            }
-            showToast("已完成 worktree 清理。", "info");
-            return refreshAll();
-          })
-          .catch(function(error) {
-            showToast((error && error.message) || "无法清理 worktree。", "error");
-          });
+      function openSettingsModalNow() {
+        if (
+          !closeControllerForCompetingOverlay(folderPickerController)
+          || !closeControllerForCompetingOverlay(quickCommitController)
+          || !closeControllerForCompetingOverlay(worktreeMergeController)
+          || !closeControllerForCompetingOverlay(window.__wandReactNewSession)
+        ) return;
+        var controller = window.__wandReactSettings;
+        if (controller && typeof controller.open === "function") {
+          // WebKit does not focus buttons on click by default. Establish the
+          // invoking control explicitly so the dialog can restore it on close.
+          var settingsTrigger = document.getElementById("settings-button");
+          if (settingsTrigger) settingsTrigger.focus({ preventScroll: true });
+          controller.open("about");
+          return;
+        }
+        // The rollback flag can disable the React island. Settings has no
+        // second DOM implementation, so fail visibly and offer a safe recovery.
+        try {
+          var queryDisabled = new URL(window.location.href).searchParams.get("reactUi") === "0";
+          if (queryDisabled) {
+            showToast("设置界面已被 ?reactUi=0 禁用；移除该参数并刷新后即可使用。", "error");
+            return;
+          }
+          if (window.localStorage.getItem("wand.reactUi.enabled") === "false") {
+            window.localStorage.setItem("wand.reactUi.enabled", "true");
+            showToast("正在启用设置界面…", "info");
+            window.setTimeout(function() { window.location.reload(); }, 120);
+            return;
+          }
+        } catch (_error) {}
+        showToast("设置界面未能启动，请刷新页面后重试。", "error");
       }
 
       export function openSettingsModal() {
-        // Close session modal first if open (mutual exclusion)
-        closeSessionModal();
-        var modal = document.getElementById("settings-modal");
-        if (modal) {
-          if ((modal as any)._wandCloseTimer) { clearTimeout((modal as any)._wandCloseTimer); (modal as any)._wandCloseTimer = null; }
-          modal.classList.remove("closing");
-          modal.classList.remove("hidden");
-          state.lastFocusedElement = document.activeElement;
-          var passEl = document.getElementById("new-password") as HTMLInputElement | null;
-          var confirmEl = document.getElementById("confirm-password") as HTMLInputElement | null;
-          if (passEl) passEl.value = "";
-          if (confirmEl) confirmEl.value = "";
-          hideSettingsMessages();
-          setupFocusTrap(modal);
-          bindSettingsTabKeyboardNavigation();
-          modal.querySelectorAll(".model-combobox-input").forEach(function(node) {
-            (node as HTMLInputElement).dataset.modelDirty = "false";
-            (node as HTMLInputElement).dataset.modelInitialized = "false";
-          });
-          // Activate first tab
-          switchSettingsTab("about");
-          // Load settings data
-          loadSettingsData();
-          // Sync notification preferences
-          var soundEl = document.getElementById("cfg-notif-sound") as HTMLInputElement | null;
-          var bubbleEl = document.getElementById("cfg-notif-bubble") as HTMLInputElement | null;
-          if (soundEl) soundEl.checked = state.notifSound;
-          if (bubbleEl) bubbleEl.checked = state.notifBubble;
-          var volEl = document.getElementById("cfg-notif-volume") as HTMLInputElement | null;
-          var volValEl = document.getElementById("cfg-notif-volume-val");
-          if (volEl) {
-            volEl.value = state.notifVolume;
-            if (volValEl) volValEl.textContent = state.notifVolume + "%";
-            // Sync the iOS-style fill via the input listener (calls _syncRangeFill)
-            try { volEl.dispatchEvent(new Event("input", { bubbles: true })); } catch (_e) {}
-          }
-          var volField = document.getElementById("notif-volume-field");
-          if (volField) volField.style.display = state.notifSound ? "" : "none";
-          updateNotificationStatus();
-          // Load current app icon selection (APK only)
-          if (typeof WandNative !== "undefined" && typeof WandNative.getAppIcon === "function") {
-            try { _updateAppIconSelection(WandNative.getAppIcon() || "shorthair"); } catch (_e) {}
-          }
-          // Sync native notification sound selector and volume (APK only)
-          if (_hasNativeBridge && typeof WandNative.getNotificationSound === "function") {
-            try {
-              var nsSel = document.getElementById("native-sound-select") as HTMLSelectElement | null;
-              if (nsSel) nsSel.value = WandNative.getNotificationSound();
-            } catch (_e) {}
-          }
-          if (_hasNativeBridge && typeof WandNative.getNotificationVolume === "function") {
-            try {
-              var nativeVol = WandNative.getNotificationVolume();
-              state.notifVolume = nativeVol;
-              if (volEl) volEl.value = String(nativeVol);
-              if (volValEl) volValEl.textContent = nativeVol + "%";
-              // Sync the iOS-style fill so the orange track matches
-              if (volEl) { try { volEl.dispatchEvent(new Event("input", { bubbles: true })); } catch (_e) {} }
-              try { localStorage.setItem("wand-notif-volume", String(nativeVol)); } catch (_e) {}
-            } catch (_e) {}
-          }
-          if (_hasNativeBridge && typeof WandNative.isHapticEnabled === "function") {
-            try {
-              var hapticEl = document.getElementById("cfg-haptic-enabled") as HTMLInputElement | null;
-              if (hapticEl) hapticEl.checked = WandNative.isHapticEnabled();
-            } catch (_e) {}
-          }
-        }
+        if (!prepareFilePreviewForCompetingOverlay(openSettingsModalNow)) return;
+        openSettingsModalNow();
       }
 
       export function closeSettingsModal() {
-        var modal = document.getElementById("settings-modal");
-        if (modal) {
-          modal.querySelectorAll(".model-combobox.is-open").forEach(function(root) {
-            closeSettingsModelCombobox(root);
-          });
-          // Remove focus trap before kicking off the exit animation
-          if (state.focusTrapHandler) {
-            document.removeEventListener("keydown", state.focusTrapHandler);
-            state.focusTrapHandler = null;
-          }
-          // Restore focus to last focused element
-          if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === "function") {
-            state.lastFocusedElement.focus();
-          }
-          animateModalClose(modal);
-        }
+        var controller = window.__wandReactSettings;
+        if (controller && typeof controller.closeIfOpen === "function") controller.closeIfOpen();
       }
 
-      export function hideSettingsMessages() {
-        var errorEl = document.getElementById("settings-error");
-        var successEl = document.getElementById("settings-success");
-        if (errorEl) errorEl.classList.add("hidden");
-        if (successEl) successEl.classList.add("hidden");
-      }
-
-      export function savePassword() {
-        var newPass = (document.getElementById("new-password") as HTMLInputElement).value;
-        var confirmPass = (document.getElementById("confirm-password") as HTMLInputElement).value;
-        var errorEl = document.getElementById("settings-error");
-        var successEl = document.getElementById("settings-success");
-
-        hideSettingsMessages();
-
-        if (!newPass || newPass.length < 6) {
-          errorEl.textContent = "密码长度至少为 6 个字符。";
-          errorEl.classList.remove("hidden");
-          return;
-        }
-
-        if (newPass !== confirmPass) {
-          errorEl.textContent = "两次输入的密码不一致。";
-          errorEl.classList.remove("hidden");
-          return;
-        }
-
-        fetch("/api/set-password", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: newPass }),
-          credentials: "same-origin"
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) {
-            errorEl.textContent = data.error;
-            errorEl.classList.remove("hidden");
-            return;
-          }
-          successEl.textContent = "密码修改成功！";
-          successEl.classList.remove("hidden");
-          (document.getElementById("new-password") as HTMLInputElement).value = "";
-          (document.getElementById("confirm-password") as HTMLInputElement).value = "";
-        })
-        .catch(function() {
-          errorEl.textContent = "Failed to save password.";
-          errorEl.classList.remove("hidden");
-        });
-      }
-
-      // ── Settings tab/panel logic ──
-
-      export function switchSettingsTab(tabName) {
-        document.querySelectorAll(".model-combobox.is-open").forEach(function(root) {
-          closeSettingsModelCombobox(root);
-        });
-        var tabs = document.querySelectorAll(".settings-tab");
-        var panels = document.querySelectorAll(".settings-panel");
-        for (var i = 0; i < tabs.length; i++) {
-          var isActive = tabs[i].getAttribute("data-tab") === tabName;
-          if (isActive) {
-            tabs[i].classList.add("active");
-          } else {
-            tabs[i].classList.remove("active");
-          }
-          tabs[i].setAttribute("aria-selected", isActive ? "true" : "false");
-          tabs[i].setAttribute("tabindex", isActive ? "0" : "-1");
-        }
-        for (var j = 0; j < panels.length; j++) {
-          var isPanelActive = panels[j].id === "settings-tab-" + tabName;
-          if (isPanelActive) {
-            panels[j].classList.add("active");
-            panels[j].removeAttribute("hidden");
-          } else {
-            panels[j].classList.remove("active");
-            panels[j].setAttribute("hidden", "hidden");
-          }
-        }
-      }
-
-      export function handleSettingsTabKeydown(event) {
-        if (!event) return;
-        if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") {
-          return;
-        }
-        var tabs = Array.prototype.slice.call(document.querySelectorAll(".settings-tab"));
-        if (!tabs.length) return;
-        var tabList = event.currentTarget && event.currentTarget.closest ? event.currentTarget.closest(".settings-tabs") : null;
-        var horizontal = tabList && tabList.getAttribute("aria-orientation") === "horizontal";
-        if (horizontal && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
-        if (!horizontal && (event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
-        var currentIndex = tabs.indexOf(event.currentTarget);
-        if (currentIndex === -1) return;
-        event.preventDefault();
-        var nextIndex = currentIndex;
-        if (event.key === "ArrowUp" || event.key === "ArrowLeft") nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1;
-        if (event.key === "ArrowDown" || event.key === "ArrowRight") nextIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0;
-        if (event.key === "Home") nextIndex = 0;
-        if (event.key === "End") nextIndex = tabs.length - 1;
-        var nextTab = tabs[nextIndex];
-        if (!nextTab) return;
-        var nextName = nextTab.getAttribute("data-tab");
-        if (nextName) switchSettingsTab(nextName);
-        if (typeof nextTab.focus === "function") nextTab.focus();
-      }
-
-      export function bindSettingsTabKeyboardNavigation() {
-        var tabList = document.querySelector(".settings-tabs");
-        if (tabList) {
-          var horizontal = false;
-          try { horizontal = !!(window.matchMedia && window.matchMedia("(max-width: 760px)").matches); } catch (_e) {}
-          tabList.setAttribute("aria-orientation", horizontal ? "horizontal" : "vertical");
-        }
-        var tabs = document.querySelectorAll(".settings-tab");
-        for (var i = 0; i < tabs.length; i++) {
-          tabs[i].removeEventListener("keydown", handleSettingsTabKeydown);
-          tabs[i].addEventListener("keydown", handleSettingsTabKeydown);
-        }
-      }
-
-      export function updateSettingsSidebarStatus(data) {
-        if (!data) return;
-        var cfg = data.config || {};
-        var commitSourceLabel = cfg.commitAiSource === "api"
-          ? "Commit · 直连 API"
-          : "Commit · " + (cfg.commitCli === "codex" ? "Codex" : cfg.commitCli === "opencode" ? "OpenCode" : "Claude");
-        var metaMap = {
-          about: data.version ? ("当前 v" + data.version) : "版本与更新信息",
-          general: [cfg.defaultMode || "default", cfg.language || "自动语言"].filter(Boolean).join(" · "),
-          ai: commitSourceLabel,
-          notifications: state.notifSound ? ("提示音 " + state.notifVolume + "%") : "提示音已关闭",
-          security: data.hasCert ? "已安装 SSL 证书" : "密码与证书管理",
-          presets: cfg.commandPresets && cfg.commandPresets.length ? (cfg.commandPresets.length + " 条预设") : "暂无预设",
-          display: "控制卡片默认展开"
-        };
-        for (var key in metaMap) {
-          if (!Object.prototype.hasOwnProperty.call(metaMap, key)) continue;
-          var tab = document.querySelector('.settings-tab[data-tab="' + key + '"] .settings-tab-meta');
-          if (tab) {
-            var metaText = metaMap[key] || "";
-            tab.textContent = metaText;
-            tab.setAttribute("title", metaText);
-          }
-        }
-      }
-
-      export function renderConnectQrCode(code) {
-        var canvas = document.getElementById("android-connect-qr");
-        var empty = document.getElementById("android-connect-qr-empty");
-        var lib = window.QRCodeLib;
-        if (!canvas) return;
-        if (!lib || typeof lib.toCanvas !== "function") {
-          if (empty) empty.textContent = "二维码库未加载";
-          return;
-        }
-        try {
-          lib.toCanvas(canvas, code, {
-            width: 220,
-            margin: 1,
-            errorCorrectionLevel: "M",
-            color: { dark: "#1f1b17", light: "#ffffff00" }
-          }, function(err) {
-            if (err) {
-              if (empty) {
-                empty.textContent = "二维码生成失败";
-                empty.style.display = "";
-              }
-              canvas.style.visibility = "hidden";
-              return;
-            }
-            if (empty) empty.style.display = "none";
-            canvas.style.visibility = "visible";
-          });
-        } catch (e) {
-          if (empty) {
-            empty.textContent = "二维码生成失败";
-            empty.style.display = "";
-          }
-          canvas.style.visibility = "hidden";
-        }
-      }
-
-      export function showConnectQrModal(code) {
-        var lib = window.QRCodeLib;
-        if (!lib || typeof lib.toCanvas !== "function") return;
-        // Reuse existing overlay if open
-        var existing = document.getElementById("connect-qr-modal");
-        if (existing) existing.remove();
-        var overlay = document.createElement("div");
-        overlay.id = "connect-qr-modal";
-        overlay.className = "connect-qr-modal-overlay";
-        overlay.innerHTML =
-          '<div class="connect-qr-modal-card">' +
-            '<canvas id="connect-qr-modal-canvas"></canvas>' +
-            '<p class="connect-qr-modal-hint">用 Wand App 扫一扫，连接当前服务器</p>' +
-            '<button type="button" class="btn btn-secondary btn-sm connect-qr-modal-close">关闭</button>' +
-          '</div>';
-        document.body.appendChild(overlay);
-        var modalCanvas = overlay.querySelector("#connect-qr-modal-canvas");
-        var size = Math.min(window.innerWidth, window.innerHeight) * 0.7;
-        if (size < 240) size = 240;
-        if (size > 480) size = 480;
-        try {
-          lib.toCanvas(modalCanvas, code, {
-            width: size,
-            margin: 2,
-            errorCorrectionLevel: "M",
-            color: { dark: "#1f1b17", light: "#ffffff" }
-          });
-        } catch (e) {}
-        function close() { overlay.remove(); }
-        overlay.addEventListener("click", function(e) {
-          if (e.target === overlay) close();
-        });
-        var closeBtn = overlay.querySelector(".connect-qr-modal-close");
-        if (closeBtn) closeBtn.addEventListener("click", close);
-      }
 
       export function copyToClipboard(text, triggerBtn?, successCallback?) {
         if (!text) return;
@@ -3134,1001 +2024,6 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         return display + " " + units[unitIndex];
       }
 
-      export function loadSettingsData() {
-        var canManageSettings = !state.config || state.config.canManageSettings !== false;
-        var settingsUrl = canManageSettings ? "/api/settings" : "/api/settings/about";
-        fetch(settingsUrl, { credentials: "same-origin" })
-          .then(function(res) {
-            if (res.ok) return res.json();
-            // Older servers do not expose canManageSettings in /api/config, so
-            // retain a 403 fallback for connected-app sessions during upgrades.
-            if (res.status === 403 && settingsUrl === "/api/settings") {
-              return fetch("/api/settings/about", { credentials: "same-origin" }).then(function(aboutRes) {
-                if (!aboutRes.ok) throw new Error("无法加载关于信息 (HTTP " + aboutRes.status + ")");
-                return aboutRes.json();
-              });
-            }
-            throw new Error("无法加载设置 (HTTP " + res.status + ")");
-          })
-          .then(function(data) {
-            var hasAdminSettings = data.settingsAccess !== "read-only";
-            var accessNote = document.getElementById("settings-about-access-note");
-            if (accessNote) accessNote.classList.toggle("hidden", hasAdminSettings);
-            var providerCliSection = document.getElementById("provider-cli-update-section");
-            if (providerCliSection) providerCliSection.classList.toggle("hidden", !hasAdminSettings);
-            var connectSection = document.getElementById("android-connect-section");
-            if (connectSection) connectSection.classList.toggle("hidden", !hasAdminSettings);
-            ["check-update-button", "do-update-button", "do-restart-button"].forEach(function(id) {
-              var control = document.getElementById(id);
-              var actions = control && control.closest(".settings-update-actions");
-              if (actions) actions.classList.toggle("hidden", !hasAdminSettings);
-            });
-            ["beta-channel-toggle", "auto-update-web-toggle"].forEach(function(id) {
-              var control = document.getElementById(id);
-              var row = control && control.closest(".settings-toggle-row");
-              if (row) row.classList.toggle("hidden", !hasAdminSettings);
-            });
-            updateSettingsSidebarStatus(data);
-            // About
-            var nameEl = document.getElementById("settings-pkg-name");
-            var verEl = document.getElementById("settings-version");
-            var nodeEl = document.getElementById("settings-node-req");
-            var repoEl = document.getElementById("settings-repo-url");
-            if (nameEl) nameEl.textContent = data.packageName || "-";
-            if (verEl) verEl.textContent = data.version || "-";
-            if (nodeEl) nodeEl.textContent = data.nodeVersion || "-";
-            if (repoEl && data.repoUrl) {
-              repoEl.innerHTML = '<a href="' + escapeHtml(data.repoUrl) + '" target="_blank" rel="noopener">' + escapeHtml(data.repoUrl) + '</a>';
-            }
-
-            // Prefill update info if available
-            var latestEl = document.getElementById("settings-latest-version");
-            var updateBtn = document.getElementById("do-update-button");
-            if (data.latestVersion && latestEl) {
-              latestEl.textContent = data.latestVersion;
-              if (data.updateAvailable && updateBtn) {
-                updateBtn.classList.remove("hidden");
-              }
-            }
-
-            // Beta channel toggle
-            var betaChannelToggle = document.getElementById("beta-channel-toggle") as HTMLInputElement | null;
-            if (betaChannelToggle) betaChannelToggle.checked = data.updateChannel === "beta";
-
-            // Auto-update toggles
-            var autoUpdate = data.autoUpdate || {};
-            var autoUpdateWebToggle = document.getElementById("auto-update-web-toggle") as HTMLInputElement | null;
-            if (autoUpdateWebToggle) autoUpdateWebToggle.checked = !!autoUpdate.web;
-            var autoUpdateApkToggle = document.getElementById("auto-update-apk-toggle") as HTMLInputElement | null;
-            // 自动更新开关只对 APK 壳生效, 浏览器里不绑定状态(该行也保持隐藏), 避免静默写一个看不见的控件。
-            if (autoUpdateApkToggle) autoUpdateApkToggle.checked = !!_apkVersion && !!autoUpdate.apk;
-            var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle") as HTMLInputElement | null;
-            if (autoUpdateDmgToggle) autoUpdateDmgToggle.checked = !!_macAppVersion && !!autoUpdate.dmg;
-            var autoUpdateCliToggle = document.getElementById("auto-update-cli-toggle") as HTMLInputElement | null;
-            if (autoUpdateCliToggle) autoUpdateCliToggle.checked = !!autoUpdate.cli;
-            if (hasAdminSettings) loadProviderCliUpdates(false);
-
-            // ── 原生包下载 helper（APK / DMG 共用）──
-            function safeNotify(msg, type) {
-              wandAlert(msg, { type: type === "error" ? "danger" : "info" });
-            }
-            // 同源本地下载：先 HEAD 探测状态码, 避免 window.open("_self") 把整页导航成裸 JSON;
-            // 命中则用隐藏 <a download> 触发下载, 并给出明确反馈。
-            function triggerLocalDownload(url, fileName, btn) {
-              var original = btn ? btn.textContent : "";
-              if (btn) { btn.disabled = true; btn.textContent = "下载中…"; }
-              function restore() { if (btn) { btn.disabled = false; btn.textContent = original; } }
-              fetch(url, { method: "HEAD", credentials: "same-origin" })
-                .then(function(resp) {
-                  if (!resp.ok) {
-                    safeNotify(resp.status === 404 ? "下载未启用或文件已移除" : ("下载失败 (HTTP " + resp.status + ")"), "error");
-                    restore();
-                    return;
-                  }
-                  var a = document.createElement("a");
-                  a.href = url;
-                  a.download = fileName || "";
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  safeNotify("已开始下载，请在通知栏/下载管理中查看", "info");
-                  restore();
-                })
-                .catch(function(err) {
-                  safeNotify("下载失败: " + (err && err.message ? err.message : err), "error");
-                  restore();
-                });
-            }
-
-            // 设置页版本比较 — 安装序语义，镜像 Android versionCode（build.gradle computeVersionCode）：
-            // 三段数值比较优先；同三段时带 -debug 的包更【新】（debug 是 tag 之后的 master 构建，
-            // versionCode = base+1 > release 的 base+0）；两个 debug 按时间戳后缀分段比。
-            // 不能用标准 semver 的「prerelease < release」——那会诱导从 debug「升级」到同号
-            // release，下载后被系统按降级拒装。
-            function compareVer(a, b) {
-              function parse(v) {
-                var s = String(v || "").replace(/^v/, "");
-                var dash = s.indexOf("-");
-                var main = dash >= 0 ? s.slice(0, dash) : s;
-                var pre = dash >= 0 ? s.slice(dash + 1) : "";
-                return {
-                  parts: main.split(".").map(function(n) { return parseInt(n, 10) || 0; }),
-                  pre: pre,
-                  isDebug: pre.indexOf("debug") === 0
-                };
-              }
-              var pa = parse(a), pb = parse(b);
-              for (var i = 0; i < 3; i++) {
-                var d = (pa.parts[i] || 0) - (pb.parts[i] || 0);
-                if (d !== 0) return d > 0 ? 1 : -1;
-              }
-              if (pa.isDebug !== pb.isDebug) return pa.isDebug ? 1 : -1;
-              if (pa.isDebug && pb.isDebug) {
-                var sa = pa.pre.split("."), sb = pb.pre.split(".");
-                for (var j = 0; j < Math.max(sa.length, sb.length); j++) {
-                  if (sa[j] === undefined) return -1;
-                  if (sb[j] === undefined) return 1;
-                  var na = parseInt(sa[j], 10), nb = parseInt(sb[j], 10);
-                  if (!isNaN(na) && !isNaN(nb)) {
-                    if (na !== nb) return na > nb ? 1 : -1;
-                  } else if (sa[j] !== sb[j]) {
-                    return sa[j] > sb[j] ? 1 : -1;
-                  }
-                }
-              }
-              return 0;
-            }
-            // 壳内按钮: 据版本比较结果决定文案/可点性。
-            // allowDowngrade: APK 传 false —— Android 系统安装器会按「降级」拒装更旧的
-            // versionCode，按钮直接禁用，不诱导用户下载一个装不上的包；
-            // DMG 传 true —— macOS 拖装不校验版本，保留「重新安装」。
-            function applyApkButton(btn, cmp, url, fileName, source, allowDowngrade) {
-              btn.classList.remove("hidden");
-              btn.disabled = false;
-              if (cmp > 0) {
-                btn.textContent = "升级";
-              } else if (cmp === 0) {
-                btn.textContent = "已是最新";
-                btn.disabled = true;
-              } else if (allowDowngrade) {
-                btn.textContent = "重新安装";
-              } else {
-                btn.textContent = "版本较旧";
-                btn.disabled = true;
-              }
-              btn.onclick = btn.disabled ? null : function() {
-                try {
-                  WandNative.downloadUpdate(url, fileName, source);
-                } catch (e) {
-                  safeNotify("调用下载失败: " + (e && e.message ? e.message : e), "error");
-                }
-              };
-            }
-
-            // ── Android APK version display ──
-            var apkSection = document.getElementById("android-apk-section");
-            var apkCurrentRow = document.getElementById("android-apk-current-row");
-            var apkCurrentEl = document.getElementById("settings-android-apk-current");
-            var apkGithubRow = document.getElementById("android-apk-github-row");
-            var apkGithubEl = document.getElementById("settings-android-apk-github");
-            var apkGithubBtn = document.getElementById("download-github-apk-btn");
-            var apkLocalRow = document.getElementById("android-apk-local-row");
-            var apkLocalEl = document.getElementById("settings-android-apk-local");
-            var apkLocalBtn = document.getElementById("download-local-apk-btn");
-            var apkMessageEl = document.getElementById("android-apk-message");
-            var androidApk = data.androidApk || {};
-            var isInApk = !!_apkVersion;
-            // 浏览器模式下若管理员未启用 Android 分发(enabled===false), 整段隐藏; 壳内保留以便自升级。
-            var apkEnabled = androidApk.enabled !== false;
-            var hasApkInfo = isInApk || (apkEnabled && (!!androidApk.github || !!androidApk.local));
-            if (apkSection) {
-              if (hasApkInfo) apkSection.classList.remove("hidden");
-              else apkSection.classList.add("hidden");
-            }
-
-            if (isInApk) {
-              // ── APK 内模式：显示当前版本 + 线上版本 + 本地版本 ──
-              if (apkCurrentRow && apkCurrentEl) {
-                apkCurrentEl.textContent = "v" + _apkVersion;
-                apkCurrentRow.classList.remove("hidden");
-              }
-              // 线上版本
-              if (androidApk.github && apkGithubRow && apkGithubEl) {
-                var ghLabel = androidApk.github.version ? ("v" + androidApk.github.version) : androidApk.github.fileName;
-                if (typeof androidApk.github.size === "number") ghLabel += " · " + formatBytes(androidApk.github.size);
-                apkGithubEl.textContent = ghLabel;
-                apkGithubRow.classList.remove("hidden");
-                if (apkGithubBtn) {
-                  var ghCmp = androidApk.github.version ? compareVer(androidApk.github.version, _apkVersion) : 1;
-                  applyApkButton(apkGithubBtn, ghCmp, androidApk.github.downloadUrl, androidApk.github.fileName || "wand-update.apk", "github", false);
-                }
-              }
-              // 本地版本
-              if (androidApk.local && apkLocalRow && apkLocalEl) {
-                var lcLabel = androidApk.local.version ? ("v" + androidApk.local.version) : androidApk.local.fileName;
-                if (typeof androidApk.local.size === "number") lcLabel += " · " + formatBytes(androidApk.local.size);
-                apkLocalEl.textContent = lcLabel;
-                apkLocalRow.classList.remove("hidden");
-                if (apkLocalBtn) {
-                  var lcCmp = androidApk.local.version ? compareVer(androidApk.local.version, _apkVersion) : 1;
-                  applyApkButton(apkLocalBtn, lcCmp, androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", "local", false);
-                }
-              }
-              // 都没有时
-              if (!androidApk.github && !androidApk.local && apkMessageEl) {
-                apkMessageEl.textContent = "暂无可用更新";
-                apkMessageEl.classList.remove("hidden");
-              }
-              // Show APK auto-update toggle in APK mode
-              var apkAutoRow = document.getElementById("android-auto-update-row");
-              var apkAutoHint = document.getElementById("android-auto-update-hint");
-              if (apkAutoRow) apkAutoRow.classList.toggle("hidden", !hasAdminSettings);
-              if (apkAutoHint) apkAutoHint.classList.toggle("hidden", !hasAdminSettings);
-            } else {
-              // ── 浏览器模式：显示线上版本 + 本地版本 + 下载按钮 ──
-              if (androidApk.github && apkGithubRow && apkGithubEl) {
-                var ghLabel2 = androidApk.github.version ? ("v" + androidApk.github.version) : androidApk.github.fileName;
-                if (typeof androidApk.github.size === "number") ghLabel2 += " · " + formatBytes(androidApk.github.size);
-                apkGithubEl.textContent = ghLabel2;
-                apkGithubRow.classList.remove("hidden");
-                if (apkGithubBtn) {
-                  apkGithubBtn.textContent = "下载";
-                  apkGithubBtn.classList.remove("hidden");
-                  apkGithubBtn.onclick = function() {
-                    window.open(androidApk.github.downloadUrl, "_blank");
-                    safeNotify("正在打开下载页…", "info");
-                  };
-                }
-              }
-              // 本地版本
-              if (androidApk.local && apkLocalRow && apkLocalEl) {
-                var lcLabel2 = androidApk.local.version ? ("v" + androidApk.local.version) : androidApk.local.fileName;
-                if (typeof androidApk.local.size === "number") lcLabel2 += " · " + formatBytes(androidApk.local.size);
-                apkLocalEl.textContent = lcLabel2;
-                apkLocalRow.classList.remove("hidden");
-                if (apkLocalBtn) {
-                  apkLocalBtn.textContent = "下载";
-                  apkLocalBtn.classList.remove("hidden");
-                  apkLocalBtn.onclick = function() {
-                    triggerLocalDownload(androidApk.local.downloadUrl, androidApk.local.fileName || "wand-update.apk", apkLocalBtn);
-                  };
-                }
-              }
-              if (!androidApk.github && !androidApk.local && apkMessageEl) {
-                apkMessageEl.textContent = apkEnabled ? "在线版本暂时获取失败，可稍后重试" : "Android 下载未在服务端启用";
-                apkMessageEl.classList.remove("hidden");
-              }
-            }
-
-            // ── macOS DMG version display ──
-            var dmgSection = document.getElementById("macos-dmg-section");
-            var dmgCurrentRow = document.getElementById("macos-dmg-current-row");
-            var dmgCurrentEl = document.getElementById("settings-macos-dmg-current");
-            var dmgGithubRow = document.getElementById("macos-dmg-github-row");
-            var dmgGithubEl = document.getElementById("settings-macos-dmg-github");
-            var dmgGithubBtn = document.getElementById("download-github-dmg-btn");
-            var dmgLocalRow = document.getElementById("macos-dmg-local-row");
-            var dmgLocalEl = document.getElementById("settings-macos-dmg-local");
-            var dmgLocalBtn = document.getElementById("download-local-dmg-btn");
-            var dmgMessageEl = document.getElementById("macos-dmg-message");
-            var macosDmg = data.macosDmg || {};
-            var isInMacApp = !!_macAppVersion;
-            var dmgEnabled = macosDmg.enabled !== false;
-            var hasDmgInfo = isInMacApp || (dmgEnabled && (!!macosDmg.github || !!macosDmg.local));
-            if (dmgSection) {
-              if (hasDmgInfo) dmgSection.classList.remove("hidden");
-              else dmgSection.classList.add("hidden");
-            }
-
-            if (isInMacApp) {
-              // ── macOS 壳内：显示当前版本 + 线上 + 本地 + 下载安装按钮 ──
-              if (dmgCurrentRow && dmgCurrentEl) {
-                dmgCurrentEl.textContent = "v" + _macAppVersion;
-                dmgCurrentRow.classList.remove("hidden");
-              }
-              if (macosDmg.github && dmgGithubRow && dmgGithubEl) {
-                var dghLabel = macosDmg.github.version ? ("v" + macosDmg.github.version) : macosDmg.github.fileName;
-                if (typeof macosDmg.github.size === "number") dghLabel += " · " + formatBytes(macosDmg.github.size);
-                dmgGithubEl.textContent = dghLabel;
-                dmgGithubRow.classList.remove("hidden");
-                if (dmgGithubBtn) {
-                  var dghCmp = macosDmg.github.version ? compareVer(macosDmg.github.version, _macAppVersion) : 1;
-                  applyApkButton(dmgGithubBtn, dghCmp, macosDmg.github.downloadUrl, macosDmg.github.fileName || "wand-update.dmg", "github", true);
-                }
-              }
-              if (macosDmg.local && dmgLocalRow && dmgLocalEl) {
-                var dlcLabel = macosDmg.local.version ? ("v" + macosDmg.local.version) : macosDmg.local.fileName;
-                if (typeof macosDmg.local.size === "number") dlcLabel += " · " + formatBytes(macosDmg.local.size);
-                dmgLocalEl.textContent = dlcLabel;
-                dmgLocalRow.classList.remove("hidden");
-                if (dmgLocalBtn) {
-                  var dlcCmp = macosDmg.local.version ? compareVer(macosDmg.local.version, _macAppVersion) : 1;
-                  applyApkButton(dmgLocalBtn, dlcCmp, macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", "local", true);
-                }
-              }
-              if (!macosDmg.github && !macosDmg.local && dmgMessageEl) {
-                dmgMessageEl.textContent = "暂无可用更新";
-                dmgMessageEl.classList.remove("hidden");
-              }
-              var dmgAutoRow = document.getElementById("macos-auto-update-row");
-              var dmgAutoHint = document.getElementById("macos-auto-update-hint");
-              if (dmgAutoRow) dmgAutoRow.classList.toggle("hidden", !hasAdminSettings);
-              if (dmgAutoHint) dmgAutoHint.classList.toggle("hidden", !hasAdminSettings);
-            } else {
-              // ── 浏览器模式：仅展示下载入口 ──
-              if (macosDmg.github && dmgGithubRow && dmgGithubEl) {
-                var dghLabel2 = macosDmg.github.version ? ("v" + macosDmg.github.version) : macosDmg.github.fileName;
-                if (typeof macosDmg.github.size === "number") dghLabel2 += " · " + formatBytes(macosDmg.github.size);
-                dmgGithubEl.textContent = dghLabel2;
-                dmgGithubRow.classList.remove("hidden");
-                if (dmgGithubBtn) {
-                  dmgGithubBtn.textContent = "下载";
-                  dmgGithubBtn.classList.remove("hidden");
-                  dmgGithubBtn.onclick = function() {
-                    window.open(macosDmg.github.downloadUrl, "_blank");
-                    safeNotify("正在打开下载页…", "info");
-                  };
-                }
-              }
-              if (macosDmg.local && dmgLocalRow && dmgLocalEl) {
-                var dlcLabel2 = macosDmg.local.version ? ("v" + macosDmg.local.version) : macosDmg.local.fileName;
-                if (typeof macosDmg.local.size === "number") dlcLabel2 += " · " + formatBytes(macosDmg.local.size);
-                dmgLocalEl.textContent = dlcLabel2;
-                dmgLocalRow.classList.remove("hidden");
-                if (dmgLocalBtn) {
-                  dmgLocalBtn.textContent = "下载";
-                  dmgLocalBtn.classList.remove("hidden");
-                  dmgLocalBtn.onclick = function() {
-                    triggerLocalDownload(macosDmg.local.downloadUrl, macosDmg.local.fileName || "wand-update.dmg", dmgLocalBtn);
-                  };
-                }
-              }
-              if (!macosDmg.github && !macosDmg.local && dmgMessageEl) {
-                dmgMessageEl.textContent = dmgEnabled ? "在线版本暂时获取失败，可稍后重试" : "macOS 下载未在服务端启用";
-                dmgMessageEl.classList.remove("hidden");
-              }
-            }
-
-            // App connect code (encrypted)
-            var connectCodeEl = document.getElementById("android-connect-code");
-            var connectQrCanvas = document.getElementById("android-connect-qr");
-            var connectQrEmpty = document.getElementById("android-connect-qr-empty");
-            var connectQrWrap = document.getElementById("android-connect-qr-wrap");
-            if (connectCodeEl && hasAdminSettings) {
-              connectCodeEl.textContent = "加载中...";
-              if (connectQrEmpty) connectQrEmpty.textContent = "生成中…";
-              if (connectQrCanvas) connectQrCanvas.style.visibility = "hidden";
-              var connectCodeUrl = "/api/app-connect-code";
-              if (window.location && window.location.origin) {
-                connectCodeUrl += "?origin=" + encodeURIComponent(window.location.origin);
-              }
-              fetch(connectCodeUrl, { credentials: "same-origin" }).then(function(r) { return r.json(); }).then(function(d) {
-                if (d.code) {
-                  connectCodeEl.textContent = d.code;
-                  state.androidConnectCode = d.code;
-                  renderConnectQrCode(d.code);
-                } else {
-                  connectCodeEl.textContent = "生成失败";
-                  if (connectQrEmpty) connectQrEmpty.textContent = "生成失败";
-                }
-              }).catch(function() {
-                connectCodeEl.textContent = "获取失败";
-                if (connectQrEmpty) connectQrEmpty.textContent = "获取失败";
-              });
-            }
-            if (connectQrWrap && !connectQrWrap.dataset.bound) {
-              connectQrWrap.dataset.bound = "1";
-              connectQrWrap.addEventListener("click", function() {
-                if (state.androidConnectCode) showConnectQrModal(state.androidConnectCode);
-              });
-            }
-
-            // Config fields
-            var cfg = data.config || {};
-            var hostEl = document.getElementById("cfg-host") as HTMLInputElement | null;
-            var portEl = document.getElementById("cfg-port") as HTMLInputElement | null;
-            var httpsEl = document.getElementById("cfg-https") as HTMLInputElement | null;
-            var modeEl = document.getElementById("cfg-mode") as HTMLSelectElement | null;
-            var cwdEl = document.getElementById("cfg-cwd") as HTMLInputElement | null;
-            var shellEl = document.getElementById("cfg-shell") as HTMLInputElement | null;
-            if (hostEl) hostEl.value = cfg.host || "";
-            if (portEl) portEl.value = cfg.port || "";
-            if (httpsEl) httpsEl.checked = cfg.https === true;
-            if (modeEl) modeEl.value = cfg.defaultMode || "default";
-            if (cwdEl) cwdEl.value = cfg.defaultCwd || "";
-            if (shellEl) shellEl.value = cfg.shell || "";
-            var langEl = document.getElementById("cfg-language") as HTMLSelectElement | null;
-            if (langEl) langEl.value = cfg.language || "";
-
-            var srEl = document.getElementById("cfg-structured-runner") as HTMLSelectElement | null;
-            if (srEl) srEl.value = cfg.structuredRunner || "cli";
-
-            var inheritEnvEl = document.getElementById("cfg-inherit-env") as HTMLInputElement | null;
-            if (inheritEnvEl) inheritEnvEl.checked = cfg.inheritEnv !== false;
-
-            fillSystemAiSettings(cfg.systemAi);
-
-            var commitCliEl = document.getElementById("cfg-commit-cli") as HTMLSelectElement | null;
-            var commitModelEl = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
-            var commitSourceApiEl = document.getElementById("cfg-commit-source-api") as HTMLInputElement | null;
-            var commitSourceCliEl = document.getElementById("cfg-commit-source-cli") as HTMLInputElement | null;
-            if (commitCliEl) commitCliEl.value = getProviderKey(cfg.commitCli);
-            if (commitSourceApiEl) commitSourceApiEl.checked = cfg.commitAiSource === "api";
-            if (commitSourceCliEl) commitSourceCliEl.checked = cfg.commitAiSource !== "api";
-            if (commitModelEl) {
-              commitModelEl.value = cfg.commitModel || "";
-              commitModelEl.dataset.modelInitialized = "true";
-              commitModelEl.dataset.modelDirty = "false";
-            }
-            syncCommitModelProvider(false);
-            syncCommitSourceUI();
-
-            // Default model
-            var defaultModels = cfg.defaultModels && typeof cfg.defaultModels === "object"
-              ? cfg.defaultModels
-              : { claude: cfg.defaultModel || "", codex: cfg.defaultCodexModel || "", opencode: cfg.defaultOpenCodeModel || "" };
-            state.configDefaultModels = {
-              claude: defaultModels.claude || "",
-              codex: defaultModels.codex || "",
-              opencode: defaultModels.opencode || ""
-            };
-            state.configDefaultModel = state.configDefaultModels.claude;
-            var defaultClaudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
-            var defaultCodexInput = document.getElementById("cfg-default-codex-model") as HTMLInputElement | null;
-            var defaultOpenCodeInput = document.getElementById("cfg-default-opencode-model") as HTMLInputElement | null;
-            if (defaultClaudeInput && defaultClaudeInput.dataset.modelDirty !== "true") defaultClaudeInput.dataset.modelInitialized = "false";
-            if (defaultCodexInput && defaultCodexInput.dataset.modelDirty !== "true") defaultCodexInput.dataset.modelInitialized = "false";
-            if (defaultOpenCodeInput && defaultOpenCodeInput.dataset.modelDirty !== "true") defaultOpenCodeInput.dataset.modelInitialized = "false";
-            updateSettingsDefaultModelSelect();
-            fetchAvailableModels().then(function() {
-              updateSettingsDefaultModelSelect();
-            }).catch(function() {});
-
-            // Cert status
-            var certStatus = document.getElementById("cert-status");
-            if (certStatus) {
-              certStatus.textContent = data.hasCert ? "已安装 SSL 证书" : "未安装证书（使用自签名或 HTTP）";
-              certStatus.style.color = data.hasCert ? "var(--success)" : "var(--text-secondary)";
-            }
-
-            // Presets
-            var presetsList = document.getElementById("presets-list");
-            if (presetsList && cfg.commandPresets) {
-              var html = "";
-              for (var i = 0; i < cfg.commandPresets.length; i++) {
-                var p = cfg.commandPresets[i];
-                html += '<div class="preset-item">' +
-                  '<span class="preset-label">' + escapeHtml(p.label) + '</span>' +
-                  '<span class="preset-detail">' + escapeHtml(p.command) + (p.mode ? ' (' + escapeHtml(p.mode) + ')' : '') + '</span>' +
-                '</div>';
-              }
-              if (!html) html = '<div class="empty-state-compact"><span class="empty-icon">\u2699</span><span>\u6ca1\u6709\u547d\u4ee4\u9884\u8bbe</span><span class="hint">\u5728 config.json \u7684 commandPresets \u4e2d\u914d\u7f6e</span></div>';
-              presetsList.innerHTML = html;
-            }
-
-            // Card expand defaults
-            var cd = cfg.cardDefaults || {};
-            var cdEditEl = document.getElementById("cfg-card-edit") as HTMLInputElement | null;
-            var cdInlineEl = document.getElementById("cfg-card-inline") as HTMLInputElement | null;
-            var cdTerminalEl = document.getElementById("cfg-card-terminal") as HTMLInputElement | null;
-            var cdThinkingEl = document.getElementById("cfg-card-thinking") as HTMLInputElement | null;
-            var cdToolgroupEl = document.getElementById("cfg-card-toolgroup") as HTMLInputElement | null;
-            if (cdEditEl) cdEditEl.checked = cd.editCards === true;
-            if (cdInlineEl) cdInlineEl.checked = cd.inlineTools === true;
-            if (cdTerminalEl) cdTerminalEl.checked = cd.terminal === true;
-            if (cdThinkingEl) cdThinkingEl.checked = cd.thinking === true;
-            if (cdToolgroupEl) cdToolgroupEl.checked = cd.toolGroup === true;
-          })
-          .catch(function(error) {
-            var accessNote = document.getElementById("settings-about-access-note");
-            if (accessNote) {
-              accessNote.textContent = (error && error.message) || "关于信息加载失败，请稍后重试。";
-              accessNote.style.color = "var(--error)";
-              accessNote.classList.remove("hidden");
-            }
-          });
-      }
-
-      export function saveConfigSettings() {
-        if (configSavePending) return;
-        var savingAi = document.getElementById("settings-tab-ai")?.classList.contains("active") === true;
-        var msgEl = getActiveConfigMessage();
-        if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
-
-        var defaultModelValue = ((document.getElementById("cfg-default-model") as HTMLInputElement | null || {} as any).value || "").trim();
-        var defaultCodexModelValue = ((document.getElementById("cfg-default-codex-model") as HTMLInputElement | null || {} as any).value || "").trim();
-        var defaultOpenCodeModelValue = ((document.getElementById("cfg-default-opencode-model") as HTMLInputElement | null || {} as any).value || "").trim();
-        var commitModelValue = ((document.getElementById("cfg-commit-model") as HTMLInputElement | null || {} as any).value || "").trim();
-        var systemAiKey = ((document.getElementById("cfg-system-ai-key") as HTMLInputElement | null || {} as any).value || "").trim();
-        var systemAiKeyEl = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
-        var commitAiSource = (document.getElementById("cfg-commit-source-api") as HTMLInputElement | null)?.checked === true ? "api" : "cli";
-        var systemAiEnabled = (document.getElementById("cfg-system-ai-enabled") as HTMLInputElement | null)?.checked === true;
-        var systemAiBaseUrlEl = document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null;
-        var systemAiModelEl = document.getElementById("cfg-system-ai-model") as HTMLInputElement | null;
-        [systemAiBaseUrlEl, systemAiModelEl, systemAiKeyEl].forEach(function(field) {
-          if (field) field.removeAttribute("aria-invalid");
-        });
-        if (savingAi && (commitAiSource === "api" || systemAiEnabled)) {
-          var missingField = !systemAiBaseUrlEl?.value.trim()
-            ? systemAiBaseUrlEl
-            : !systemAiModelEl?.value.trim()
-              ? systemAiModelEl
-              : !(systemAiKey || systemAiKeyEl?.dataset.hasApiKey === "true")
-                ? systemAiKeyEl
-                : null;
-          if (missingField) {
-            missingField.setAttribute("aria-invalid", "true");
-            missingField.focus();
-            if (msgEl) {
-              msgEl.textContent = "API 配置尚未完整，请填写 API 地址、API Key 和模型。";
-              msgEl.style.color = "var(--error)";
-              msgEl.classList.remove("hidden");
-            }
-            syncCommitSourceUI();
-            return;
-          }
-          try {
-            var parsedSystemAiUrl = new URL(systemAiBaseUrlEl?.value.trim() || "");
-            if (parsedSystemAiUrl.protocol !== "http:" && parsedSystemAiUrl.protocol !== "https:") throw new Error("invalid protocol");
-          } catch (_error) {
-            systemAiBaseUrlEl?.setAttribute("aria-invalid", "true");
-            systemAiBaseUrlEl?.focus();
-            if (msgEl) {
-              msgEl.textContent = "API 地址必须是有效的 http(s) URL。";
-              msgEl.style.color = "var(--error)";
-              msgEl.classList.remove("hidden");
-            }
-            syncCommitSourceUI();
-            return;
-          }
-        }
-
-        var body: any = savingAi ? {
-          defaultModel: defaultModelValue,
-          defaultCodexModel: defaultCodexModelValue,
-          defaultOpenCodeModel: defaultOpenCodeModelValue,
-          defaultModels: {
-            claude: defaultModelValue,
-            codex: defaultCodexModelValue,
-            opencode: defaultOpenCodeModelValue
-          },
-          commitCli: getProviderKey((document.getElementById("cfg-commit-cli") as HTMLSelectElement | null || {} as any).value),
-          commitModel: commitModelValue,
-          commitAiSource: commitAiSource,
-          systemAi: {
-            enabled: systemAiEnabled,
-            protocol: (document.getElementById("cfg-system-ai-protocol") as HTMLSelectElement | null || {} as any).value || "openai",
-            baseUrl: ((document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null || {} as any).value || "").trim(),
-            apiKey: systemAiKey,
-            model: ((document.getElementById("cfg-system-ai-model") as HTMLInputElement | null || {} as any).value || "").trim(),
-            authHeader: (document.getElementById("cfg-system-ai-auth-header") as HTMLSelectElement | null)?.value === "x-api-key" ? "x-api-key" : "bearer",
-            source: systemAiKeyEl?.dataset.source || "custom"
-          }
-        } : {
-          host: (document.getElementById("cfg-host") as HTMLInputElement | null || {} as any).value,
-          port: Number((document.getElementById("cfg-port") as HTMLInputElement | null || {} as any).value),
-          https: (document.getElementById("cfg-https") as HTMLInputElement | null || {} as any).checked,
-          defaultMode: (document.getElementById("cfg-mode") as HTMLSelectElement | null || {} as any).value,
-          defaultCwd: (document.getElementById("cfg-cwd") as HTMLInputElement | null || {} as any).value,
-          shell: (document.getElementById("cfg-shell") as HTMLInputElement | null || {} as any).value,
-          language: (document.getElementById("cfg-language") as HTMLSelectElement | null || {} as any).value || "",
-          structuredRunner: (document.getElementById("cfg-structured-runner") as HTMLSelectElement | null || {} as any).value || "cli",
-          inheritEnv: (document.getElementById("cfg-inherit-env") as HTMLInputElement | null || {} as any).checked !== false
-        };
-
-        var previousDefaults = getConfigDefaultModels();
-        var nextDefaultModel = body.defaultModel || "";
-        var nextDefaultCodexModel = body.defaultCodexModel || "";
-        var nextDefaultOpenCodeModel = body.defaultOpenCodeModel || "";
-        var saveButtons = document.querySelectorAll("#save-config-button, #save-ai-config-button");
-        configSavePending = true;
-        for (var saveIndex = 0; saveIndex < saveButtons.length; saveIndex++) {
-          var pendingButton = saveButtons[saveIndex] as HTMLButtonElement;
-          pendingButton.dataset.saveLabel = pendingButton.textContent || "保存配置";
-          pendingButton.disabled = true;
-          if (pendingButton.closest(".settings-panel.active")) pendingButton.textContent = "保存中…";
-        }
-
-        fetch("/api/settings/config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(body)
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (msgEl) {
-            if (data.error) {
-              msgEl.textContent = data.error;
-              msgEl.style.color = "var(--error)";
-            } else {
-              msgEl.textContent = data.restartRequired
-                ? "配置已保存，部分部署字段（host/port/https/shell）需要重启服务才生效。"
-                : "配置已保存。";
-              msgEl.style.color = "var(--success)";
-            }
-            msgEl.classList.remove("hidden");
-          }
-          if (!data || !data.error) {
-            var returnedConfig = data.config || {};
-            if (state.config) Object.assign(state.config, returnedConfig);
-            if (!savingAi) return;
-            nextDefaultModel = returnedConfig.defaultModel || nextDefaultModel;
-            nextDefaultCodexModel = returnedConfig.defaultCodexModel || nextDefaultCodexModel;
-            nextDefaultOpenCodeModel = returnedConfig.defaultOpenCodeModel || nextDefaultOpenCodeModel;
-            fillSystemAiSettings(returnedConfig.systemAi || { ...body.systemAi, apiKey: "", hasApiKey: Boolean(systemAiKey || state.config?.systemAi?.hasApiKey) });
-            state.configDefaultModels = { claude: nextDefaultModel, codex: nextDefaultCodexModel, opencode: nextDefaultOpenCodeModel };
-            state.configDefaultModel = nextDefaultModel;
-            var savedClaudeInput = document.getElementById("cfg-default-model") as HTMLInputElement | null;
-            var savedCodexInput = document.getElementById("cfg-default-codex-model") as HTMLInputElement | null;
-            var savedOpenCodeInput = document.getElementById("cfg-default-opencode-model") as HTMLInputElement | null;
-            if (savedClaudeInput) savedClaudeInput.dataset.modelDirty = "false";
-            if (savedCodexInput) savedCodexInput.dataset.modelDirty = "false";
-            if (savedOpenCodeInput) savedOpenCodeInput.dataset.modelDirty = "false";
-            var savedCommitInput = document.getElementById("cfg-commit-model") as HTMLInputElement | null;
-            if (savedCommitInput) savedCommitInput.dataset.modelDirty = "false";
-            if (nextDefaultModel !== previousDefaults.claude) {
-              setChatModelForProvider("claude", "");
-            }
-            if (nextDefaultCodexModel !== previousDefaults.codex) {
-              setChatModelForProvider("codex", "");
-            }
-            if (nextDefaultOpenCodeModel !== previousDefaults.opencode) {
-              setChatModelForProvider("opencode", "");
-            }
-            if (nextDefaultModel !== previousDefaults.claude || nextDefaultCodexModel !== previousDefaults.codex || nextDefaultOpenCodeModel !== previousDefaults.opencode) {
-              syncComposerModelSelect(getSelectedSession());
-            }
-            var aiTabMeta = document.querySelector('.settings-tab[data-tab="ai"] .settings-tab-meta');
-            if (aiTabMeta) {
-              var savedSource = returnedConfig.commitAiSource || body.commitAiSource;
-              var savedCli = returnedConfig.commitCli || body.commitCli;
-              aiTabMeta.textContent = savedSource === "api"
-                ? "Commit · 直连 API"
-                : "Commit · " + (savedCli === "codex" ? "Codex" : savedCli === "opencode" ? "OpenCode" : "Claude");
-            }
-          }
-        })
-        .catch(function() {
-          if (msgEl) {
-            msgEl.textContent = "保存失败。";
-            msgEl.style.color = "var(--error)";
-            msgEl.classList.remove("hidden");
-          }
-        })
-        .finally(function() {
-          configSavePending = false;
-          for (var saveIndex = 0; saveIndex < saveButtons.length; saveIndex++) {
-            var pendingButton = saveButtons[saveIndex] as HTMLButtonElement;
-            pendingButton.disabled = false;
-            pendingButton.textContent = pendingButton.dataset.saveLabel || "保存配置";
-            delete pendingButton.dataset.saveLabel;
-          }
-        });
-      }
-
-      export function saveDisplaySettings() {
-        var msgEl = document.getElementById("display-message");
-        if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
-
-        var body = {
-          cardDefaults: {
-            editCards: !!(document.getElementById("cfg-card-edit") as HTMLInputElement | null || {} as any).checked,
-            inlineTools: !!(document.getElementById("cfg-card-inline") as HTMLInputElement | null || {} as any).checked,
-            terminal: !!(document.getElementById("cfg-card-terminal") as HTMLInputElement | null || {} as any).checked,
-            thinking: !!(document.getElementById("cfg-card-thinking") as HTMLInputElement | null || {} as any).checked,
-            toolGroup: !!(document.getElementById("cfg-card-toolgroup") as HTMLInputElement | null || {} as any).checked,
-          }
-        };
-
-        fetch("/api/settings/config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(body)
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (msgEl) {
-            if (data.error) {
-              msgEl.textContent = data.error;
-              msgEl.style.color = "var(--error)";
-            } else {
-              msgEl.textContent = "显示设置已保存";
-              msgEl.style.color = "var(--success)";
-            }
-            msgEl.classList.remove("hidden");
-          }
-          // Update local config so card defaults take effect immediately
-          if (!data.error && state.config) {
-            state.config.cardDefaults = body.cardDefaults;
-          }
-        })
-        .catch(function() {
-          if (msgEl) {
-            msgEl.textContent = "保存失败。";
-            msgEl.style.color = "var(--error)";
-            msgEl.classList.remove("hidden");
-          }
-        });
-      }
-
-      export function uploadCertificates() {
-        var keyFile = document.getElementById("cert-key-file") as HTMLInputElement | null;
-        var certFile = document.getElementById("cert-cert-file") as HTMLInputElement | null;
-        var msgEl = document.getElementById("cert-message");
-        if (msgEl) { msgEl.classList.add("hidden"); msgEl.textContent = ""; }
-
-        if (!keyFile || !keyFile.files || !keyFile.files[0] || !certFile || !certFile.files || !certFile.files[0]) {
-          if (msgEl) {
-            msgEl.textContent = "请选择私钥和证书文件。";
-            msgEl.style.color = "var(--error)";
-            msgEl.classList.remove("hidden");
-          }
-          return;
-        }
-
-        var keyReader = new FileReader();
-        keyReader.onload = function() {
-          var keyContent = keyReader.result;
-          var certReader = new FileReader();
-          certReader.onload = function() {
-            var certContent = certReader.result;
-            fetch("/api/settings/upload-cert", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "same-origin",
-              body: JSON.stringify({ key: keyContent, cert: certContent })
-            })
-            .then(function(res) { return res.json(); })
-            .then(function(data) {
-              if (msgEl) {
-                if (data.error) {
-                  msgEl.textContent = data.error;
-                  msgEl.style.color = "var(--error)";
-                } else {
-                  msgEl.textContent = "证书已上传，重启后生效。";
-                  msgEl.style.color = "var(--success)";
-                  // Update cert status
-                  var certStatus = document.getElementById("cert-status");
-                  if (certStatus) {
-                    certStatus.textContent = "已安装 SSL 证书";
-                    certStatus.style.color = "var(--success)";
-                  }
-                }
-                msgEl.classList.remove("hidden");
-              }
-            })
-            .catch(function() {
-              if (msgEl) {
-                msgEl.textContent = "上传失败。";
-                msgEl.style.color = "var(--error)";
-                msgEl.classList.remove("hidden");
-              }
-            });
-          };
-          certReader.readAsText(certFile.files[0]);
-        };
-        keyReader.readAsText(keyFile.files[0]);
-      }
-
-      export function checkForUpdate() {
-        var latestEl = document.getElementById("settings-latest-version");
-        var updateBtn = document.getElementById("do-update-button");
-        var msgEl = document.getElementById("update-message");
-        if (latestEl) latestEl.textContent = "检查中...";
-        if (msgEl) msgEl.classList.add("hidden");
-        if (updateBtn) updateBtn.classList.add("hidden");
-
-        fetch("/api/check-update", { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data.error) {
-              if (latestEl) latestEl.textContent = "检查失败";
-              return;
-            }
-            var isBeta = data.channel === "beta";
-            if (latestEl) latestEl.textContent = data.latest || (isBeta ? "beta 未发布" : "-");
-            if (!data.latest) {
-              if (msgEl) {
-                msgEl.textContent = isBeta ? "无法读取 npm beta 版本。" : "无法连接到 npm registry。";
-                msgEl.style.color = "var(--error)";
-                msgEl.classList.remove("hidden");
-              }
-              return;
-            }
-            if (updateBtn) {
-              updateBtn.textContent = data.updateAvailable
-                ? (isBeta ? "更新到 Beta" : "更新到最新版")
-                : (isBeta ? "重新安装 Beta" : "重新安装最新版");
-              updateBtn.classList.remove("hidden");
-            }
-            if (!data.updateAvailable && msgEl) {
-              msgEl.textContent = isBeta ? "已是最新 Beta 版本。" : "已是最新版本。";
-              msgEl.style.color = "var(--success)";
-              msgEl.classList.remove("hidden");
-            }
-          })
-          .catch(function() {
-            if (latestEl) latestEl.textContent = "检查失败";
-          });
-      }
-
-      export function renderProviderCliUpdates(data) {
-        var items = data && Array.isArray(data.items) ? data.items : [];
-        var available = 0;
-        ["claude", "codex", "opencode"].forEach(function(id) {
-          var el = document.getElementById("provider-cli-status-" + id);
-          if (!el) return;
-          var item = items.find(function(candidate) { return candidate.id === id; });
-          if (!item) {
-            el.textContent = "检测失败";
-            return;
-          }
-          el.setAttribute("title", item.error || item.executable || "");
-          if (!item.installed) {
-            el.textContent = "未安装";
-            return;
-          }
-          var current = item.currentVersion || "未知版本";
-          if (item.updateAvailable && item.updateSupported) {
-            available++;
-            el.textContent = current + " → " + (item.latestVersion || "最新版");
-            return;
-          }
-          if (item.updateAvailable && !item.updateSupported) {
-            el.textContent = current + " · 需迁移";
-            return;
-          }
-          el.textContent = item.latestVersion ? current + " · 最新" : current + " · 未读取到最新版";
-        });
-        var updateButton = document.getElementById("update-provider-clis") as HTMLButtonElement | null;
-        if (updateButton) {
-          updateButton.classList.toggle("hidden", available === 0);
-          updateButton.textContent = available > 0 ? "快速更新 (" + available + ")" : "快速更新";
-        }
-        var autoToggle = document.getElementById("auto-update-cli-toggle") as HTMLInputElement | null;
-        if (autoToggle && typeof data.autoUpdate === "boolean") autoToggle.checked = data.autoUpdate;
-      }
-
-      export function loadProviderCliUpdates(force?) {
-        var checkButton = document.getElementById("check-provider-cli-updates") as HTMLButtonElement | null;
-        var message = document.getElementById("provider-cli-update-message");
-        if (checkButton) { checkButton.disabled = true; checkButton.textContent = "检测中…"; }
-        return fetch("/api/provider-cli-updates" + (force ? "?refresh=1" : ""), { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data.error) throw new Error(data.error);
-            renderProviderCliUpdates(data);
-            if (message && force) {
-              message.textContent = "CLI 版本检查完成。";
-              message.style.color = "var(--success)";
-              message.classList.remove("hidden");
-            }
-            return data;
-          })
-          .catch(function(error) {
-            if (message) {
-              message.textContent = (error && error.message) || "CLI 版本检查失败。";
-              message.style.color = "var(--error)";
-              message.classList.remove("hidden");
-            }
-            return null;
-          })
-          .finally(function() {
-            if (checkButton) { checkButton.disabled = false; checkButton.textContent = "检查更新"; }
-          });
-      }
-
-      export function performProviderCliUpdates() {
-        var updateButton = document.getElementById("update-provider-clis") as HTMLButtonElement | null;
-        var checkButton = document.getElementById("check-provider-cli-updates") as HTMLButtonElement | null;
-        var message = document.getElementById("provider-cli-update-message");
-        if (updateButton) { updateButton.disabled = true; updateButton.textContent = "更新中…"; }
-        if (checkButton) checkButton.disabled = true;
-        if (message) {
-          message.textContent = "正在依次更新 CLI，请勿关闭服务…";
-          message.style.color = "var(--text-secondary)";
-          message.classList.remove("hidden");
-        }
-        fetch("/api/provider-cli-updates", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({}),
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) throw new Error(data.error);
-          renderProviderCliUpdates(data);
-          var results = Array.isArray(data.results) ? data.results : [];
-          var failures = results.filter(function(item) { return !item.ok; });
-          if (message) {
-            message.textContent = results.map(function(item) { return item.message; }).join(" ") || "没有需要更新的 CLI。";
-            message.style.color = failures.length ? "var(--warning)" : "var(--success)";
-          }
-        })
-        .catch(function(error) {
-          if (message) {
-            message.textContent = (error && error.message) || "CLI 更新失败。";
-            message.style.color = "var(--error)";
-          }
-        })
-        .finally(function() {
-          if (updateButton) updateButton.disabled = false;
-          if (checkButton) checkButton.disabled = false;
-        });
-      }
-
-      export function performUpdate() {
-        var msgEl = document.getElementById("update-message");
-        var updateBtn = document.getElementById("do-update-button") as HTMLButtonElement | null;
-        if (!updateBtn) return;
-        var originalButtonText = updateBtn.textContent || "更新到最新版";
-        var resetUpdateButton = function() {
-          updateBtn.disabled = false;
-          updateBtn.textContent = originalButtonText;
-          updateBtn.removeAttribute("aria-busy");
-        };
-        updateBtn.disabled = true;
-        updateBtn.textContent = "更新中...";
-        updateBtn.setAttribute("aria-busy", "true");
-        if (msgEl) {
-          msgEl.textContent = "正在更新，请稍候...";
-          msgEl.style.color = "var(--text-secondary)";
-          msgEl.classList.remove("hidden");
-        }
-
-        fetch("/api/update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin"
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) {
-            if (msgEl) {
-              msgEl.textContent = data.error;
-              msgEl.style.color = "var(--error)";
-              msgEl.classList.remove("hidden");
-            }
-            resetUpdateButton();
-            return;
-          }
-          // \u5b89\u88c5\u6210\u529f\uff1a\u81ea\u52a8\u8c03\u7528 /api/restart\uff0c\u8ba9\u670d\u52a1\u91cd\u542f\u751f\u6548\uff0c
-          // \u9875\u9762\u4f1a\u88ab restart overlay \u63a5\u624b\uff0c\u7b49\u540e\u7aef\u56de\u6765\u540e\u81ea\u52a8\u5237\u65b0\u3002
-          if (msgEl) {
-            msgEl.textContent = (data.message || "\u66f4\u65b0\u5b8c\u6210") + "\uff0c\u6b63\u5728\u91cd\u542f\u670d\u52a1\u2026";
-            msgEl.style.color = "var(--success)";
-            msgEl.classList.remove("hidden");
-          }
-          updateBtn.removeAttribute("aria-busy");
-          updateBtn.classList.add("hidden");
-          if (data.detachedUpdate) {
-            showRestartOverlay(data.previousInstanceId || null, data.version || null);
-          } else if (data.restartRequired !== false) {
-            performRestart(null, msgEl);
-          } else {
-            // \u670d\u52a1\u7aef\u660e\u786e\u8868\u793a\u4e0d\u9700\u8981\u91cd\u542f\uff0c\u4fdd\u7559\u624b\u52a8\u91cd\u542f\u6309\u94ae
-            var restartBtn = document.getElementById("do-restart-button");
-            if (restartBtn) restartBtn.classList.remove("hidden");
-          }
-        })
-        .catch(function() {
-          if (msgEl) {
-            msgEl.textContent = "\u66f4\u65b0\u5931\u8d25\u3002";
-            msgEl.style.color = "var(--error)";
-            msgEl.classList.remove("hidden");
-          }
-          resetUpdateButton();
-        });
-      }
-
-      export function performSettingsRestart() {
-        var restartBtn = document.getElementById("do-restart-button") as HTMLButtonElement | null;
-        var msgEl = document.getElementById("update-message");
-        performRestart(restartBtn, msgEl);
-      }
 
       export function checkApkAutoUpdate() {
         fetch("/api/auto-update", { credentials: "same-origin" })
@@ -4166,299 +2061,6 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
           .catch(function() {});
       }
 
-      export function toggleAutoUpdate(type, enabled) {
-        var body = {};
-        body[type] = enabled;
-        fetch("/api/auto-update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(body),
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          // Sync toggle state with server response
-          var webToggle = document.getElementById("auto-update-web-toggle") as HTMLInputElement | null;
-          var apkToggle = document.getElementById("auto-update-apk-toggle") as HTMLInputElement | null;
-          var dmgToggle = document.getElementById("auto-update-dmg-toggle") as HTMLInputElement | null;
-          var cliToggle = document.getElementById("auto-update-cli-toggle") as HTMLInputElement | null;
-          if (webToggle) webToggle.checked = !!data.web;
-          if (apkToggle) apkToggle.checked = !!data.apk;
-          if (dmgToggle) dmgToggle.checked = !!data.dmg;
-          if (cliToggle) cliToggle.checked = !!data.cli;
-        })
-        .catch(function() {
-          // Revert toggle on failure
-          var toggle = document.getElementById("auto-update-" + type + "-toggle") as HTMLInputElement | null;
-          if (toggle) toggle.checked = !enabled;
-        });
-      }
-
-      export function setUpdateChannel(channel) {
-        fetch("/api/update-channel", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ channel: channel }),
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          var toggle = document.getElementById("beta-channel-toggle") as HTMLInputElement | null;
-          if (toggle) toggle.checked = data.channel === "beta";
-          // 切换通道后重新检查更新，刷新"最新版本"显示与更新按钮。
-          checkForUpdate();
-        })
-        .catch(function() {
-          var toggle = document.getElementById("beta-channel-toggle") as HTMLInputElement | null;
-          if (toggle) toggle.checked = channel !== "beta";
-        });
-      }
-
-      // ── Notification Settings Helpers ──
-
-      export function _updateAppIconSelection(activeIcon) {
-        var opts = document.querySelectorAll(".settings-app-icon-option");
-        for (var i = 0; i < opts.length; i++) {
-          var isActive = opts[i].getAttribute("data-icon") === activeIcon;
-          opts[i].classList.toggle("selected", isActive);
-          opts[i].setAttribute("aria-pressed", isActive ? "true" : "false");
-        }
-      }
-
-      export function updateNotificationStatus() {
-        var statusEl = document.getElementById("notification-permission-status");
-        var requestBtn = document.getElementById("notification-request-btn");
-        var resetBtn = document.getElementById("notification-reset-btn");
-        var testMsgEl = document.getElementById("notification-test-message");
-        if (!statusEl) return;
-
-        // Determine permission state: native bridge or browser API
-        var perm = _getNativePermission();
-        if (perm === null) {
-          // No native bridge — fall back to browser Notification API
-          if (typeof Notification === "undefined") {
-            statusEl.textContent = "\u4e0d\u652f\u6301";
-            statusEl.style.color = "var(--fg-muted)";
-            if (requestBtn) requestBtn.classList.add("hidden");
-            if (resetBtn) resetBtn.classList.add("hidden");
-            return;
-          }
-          perm = Notification.permission;
-        }
-
-        if (perm === "granted") {
-          statusEl.textContent = "\u5df2\u6388\u6743 \u2713";
-          statusEl.style.color = "var(--success)";
-          if (requestBtn) requestBtn.classList.add("hidden");
-          if (resetBtn) resetBtn.classList.add("hidden");
-        } else if (perm === "denied") {
-          statusEl.textContent = "\u5df2\u62d2\u7edd";
-          statusEl.style.color = "var(--danger)";
-          if (requestBtn) requestBtn.classList.add("hidden");
-          if (resetBtn) resetBtn.classList.remove("hidden");
-        } else {
-          statusEl.textContent = "\u672a\u6388\u6743";
-          statusEl.style.color = "var(--warning)";
-          if (requestBtn) requestBtn.classList.remove("hidden");
-          if (resetBtn) resetBtn.classList.remove("hidden");
-        }
-      }
-
-      export function resetNotificationPermission() {
-        var testMsgEl = document.getElementById("notification-test-message");
-
-        // Native bridge path — trigger Android system permission dialog
-        if (_hasNativeBridge) {
-          // Listen for permission result callback from native
-          window._onNativePermissionResult = function(result) {
-            updateNotificationStatus();
-            if (testMsgEl) {
-              if (result === "granted") {
-                testMsgEl.textContent = "\u2713 \u5df2\u6388\u6743";
-                testMsgEl.style.color = "var(--success)";
-              } else {
-                testMsgEl.textContent = "\u2717 \u672a\u6388\u6743\uff0c\u8bf7\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u5f00\u542f Wand \u7684\u901a\u77e5\u6743\u9650";
-                testMsgEl.style.color = "var(--danger)";
-              }
-              testMsgEl.classList.remove("hidden");
-            }
-            delete window._onNativePermissionResult;
-          };
-          try { WandNative.requestPermission(); } catch (_e) {}
-          return;
-        }
-
-        if (typeof Notification === "undefined") return;
-
-        // Always call requestPermission — this triggers the browser's native
-        // permission dialog when allowed. In "default" state it always works.
-        // In "denied" state, some browsers (newer Chrome) re-prompt, others don't.
-        Notification.requestPermission().then(function(result) {
-          updateNotificationStatus();
-          if (result === "granted") {
-            if (testMsgEl) {
-              testMsgEl.textContent = "\u2713 \u5df2\u6388\u6743";
-              testMsgEl.style.color = "var(--success)";
-              testMsgEl.classList.remove("hidden");
-            }
-          } else if (result === "denied") {
-            // Browser blocked re-prompting — show inline guide with site-settings shortcut
-            if (testMsgEl) {
-              var origin = location.origin;
-              testMsgEl.innerHTML =
-                "\u6d4f\u89c8\u5668\u5df2\u62e6\u622a\u6388\u6743\u5f39\u7a97\uff0c\u8bf7\u624b\u52a8\u91cd\u7f6e\uff1a<br>" +
-                '<span style="display:inline-flex;align-items:center;gap:4px;margin:4px 0">' +
-                  "\u2460 \u70b9\u51fb\u5730\u5740\u680f\u5de6\u4fa7\u7684 " +
-                  '<span style="display:inline-flex;align-items:center;justify-content:center;' +
-                    "width:16px;height:16px;border-radius:50%;border:1px solid var(--border);" +
-                    'font-size:11px;vertical-align:middle">i</span>' +
-                  " \u6216\u9501\u56fe\u6807" +
-                "</span><br>" +
-                "\u2461 \u627e\u5230\u300c\u901a\u77e5\u300d\u2192 \u6539\u4e3a\u300c\u5141\u8bb8\u300d<br>" +
-                "\u2462 \u5237\u65b0\u9875\u9762\u5373\u53ef";
-              testMsgEl.style.color = "var(--fg-muted)";
-              testMsgEl.classList.remove("hidden");
-            }
-          }
-        });
-      }
-
-      export function resetDelayedNotificationButton() {
-        var delayBtn = document.getElementById("notification-test-delay-btn") as HTMLButtonElement | null;
-        if (!delayBtn) return;
-        delayBtn.disabled = false;
-        delayBtn.textContent = "10 秒后发送";
-      }
-
-      export function scheduleTestNotification() {
-        var testMsgEl = document.getElementById("notification-test-message");
-        if (state.delayedNotificationTimer) {
-          clearTimeout(state.delayedNotificationTimer);
-          state.delayedNotificationTimer = null;
-        }
-        var delayBtn = document.getElementById("notification-test-delay-btn") as HTMLButtonElement | null;
-        if (delayBtn) {
-          delayBtn.disabled = true;
-          delayBtn.textContent = "已安排（10s）";
-        }
-        if (testMsgEl) {
-          testMsgEl.innerHTML = "已安排 10 秒后发送测试通知，请切到后台等待。";
-          testMsgEl.style.color = "var(--text-secondary)";
-          testMsgEl.classList.remove("hidden");
-        }
-        state.delayedNotificationTimer = setTimeout(function() {
-          state.delayedNotificationTimer = null;
-          resetDelayedNotificationButton();
-          testNotification();
-        }, 10000);
-      }
-
-      export function testNotification() {
-        var testMsgEl = document.getElementById("notification-test-message");
-        var results = [];
-        if (state.delayedNotificationTimer) {
-          clearTimeout(state.delayedNotificationTimer);
-          state.delayedNotificationTimer = null;
-          resetDelayedNotificationButton();
-        }
-
-        // 1. Test sound playback
-        var soundOk = tryPlayNotificationSound();
-        results.push(soundOk ? "\u2713 \u63d0\u793a\u97f3" : "\u2717 \u63d0\u793a\u97f3\uff08\u65e0\u6cd5\u64ad\u653e\uff09");
-
-        // 2. Test in-app bubble
-        var bubbleEnabled = state.notifBubble;
-        showNotificationBubble({
-          title: "\u6d4b\u8bd5\u901a\u77e5",
-          body: "\u8fd9\u662f\u4e00\u6761\u6d4b\u8bd5\u901a\u77e5\u3002",
-          type: "info",
-          icon: "\u266a",
-          duration: 5000,
-          playSound: false, // sound already played above
-        });
-        results.push(bubbleEnabled ? "\u2713 \u5e94\u7528\u5185\u6c14\u6ce1" : "\u2013 \u5e94\u7528\u5185\u6c14\u6ce1\uff08\u5df2\u5173\u95ed\uff09");
-
-        // 3. Test system notification (native bridge or browser API)
-        if (_hasNativeBridge) {
-          var nativePerm = _getNativePermission();
-          if (nativePerm === "granted") {
-            try {
-              WandNative.sendNotification("Wand \u6d4b\u8bd5\u901a\u77e5", "\u7cfb\u7edf\u901a\u77e5\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002", "wand-test");
-              results.push("\u2713 \u7cfb\u7edf\u901a\u77e5");
-            } catch (_e) {
-              results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u53d1\u9001\u5931\u8d25\uff09");
-            }
-          } else if (nativePerm === "denied") {
-            results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u5df2\u62d2\u7edd\uff0c\u8bf7\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u5f00\u542f\uff09");
-          } else {
-            // "default" — request permission, then report
-            window._onNativePermissionResult = function(result) {
-              updateNotificationStatus();
-              if (result === "granted") {
-                try {
-                  WandNative.sendNotification("Wand \u6d4b\u8bd5\u901a\u77e5", "\u7cfb\u7edf\u901a\u77e5\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002", "wand-test");
-                  results.push("\u2713 \u7cfb\u7edf\u901a\u77e5\uff08\u5df2\u6388\u6743\uff09");
-                } catch (_e2) {
-                  results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u53d1\u9001\u5931\u8d25\uff09");
-                }
-              } else {
-                results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u672a\u6388\u6743\uff09");
-              }
-              showTestResults(testMsgEl, results);
-              delete window._onNativePermissionResult;
-            };
-            try { WandNative.requestPermission(); } catch (_e) {}
-            return; // async — results shown in callback
-          }
-          showTestResults(testMsgEl, results);
-          return;
-        }
-
-        if (typeof Notification === "undefined") {
-          results.push("\u2013 \u7cfb\u7edf\u901a\u77e5\uff08\u4e0d\u652f\u6301\uff09");
-          showTestResults(testMsgEl, results);
-          return;
-        }
-
-        var perm = Notification.permission;
-        if (perm === "granted") {
-          try {
-            var n = new Notification("Wand \u6d4b\u8bd5\u901a\u77e5", {
-              body: "\u7cfb\u7edf\u901a\u77e5\u5df2\u6b63\u5e38\u5de5\u4f5c\u3002",
-              icon: "/favicon.ico",
-              tag: "wand-test",
-            });
-            setTimeout(function() { n.close(); }, 5000);
-            results.push("\u2713 \u7cfb\u7edf\u901a\u77e5");
-          } catch (_e) {
-            results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u80fd\u9700\u8981 HTTPS\uff09");
-          }
-          showTestResults(testMsgEl, results);
-        } else if (perm === "denied") {
-          results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u5df2\u62d2\u7edd\uff09");
-          showTestResults(testMsgEl, results);
-        } else {
-          // "default" — try requesting
-          Notification.requestPermission().then(function(result) {
-            updateNotificationStatus();
-            if (result === "granted") {
-              results.push("\u2713 \u7cfb\u7edf\u901a\u77e5\uff08\u5df2\u6388\u6743\uff09");
-            } else {
-              results.push("\u2717 \u7cfb\u7edf\u901a\u77e5\uff08\u672a\u6388\u6743\uff09");
-            }
-            showTestResults(testMsgEl, results);
-          });
-        }
-      }
-
-      export function showTestResults(el, results) {
-        if (!el) return;
-        el.innerHTML = results.map(function(r) { return escapeHtml(r); }).join("<br>");
-        // color based on whether all passed
-        var allOk = results.every(function(r) { return r.indexOf("\u2713") === 0 || r.indexOf("\u2013") === 0; });
-        el.style.color = allOk ? "var(--success)" : "var(--warning)";
-        el.classList.remove("hidden");
-      }
 
       // 创建 PTY 会话时把当前终端的真实 cols/rows 注入 body，让后端 pty.spawn
       // 直接落在正确尺寸下。否则 PTY 先按 cols=120 启动，Claude/Codex 会基于
@@ -4512,7 +2114,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         var defaultMode = getSafeModeForTool(command, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
         state.preferredCommand = command;
         state.chatMode = getSafeModeForTool(command, state.chatMode);
-        ensureTerminalReady().then(function() {
+        return ensureTerminalReady().then(function() {
           return fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -4536,276 +2138,6 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         .catch(function() {
           showToast("无法启动会话。", "error");
         });
-      }
-
-      export var _sessionCreating = false;
-
-      export function runCommand() {
-        if (_sessionCreating) return;
-        var cwdEl = document.getElementById("cwd") as HTMLInputElement | null;
-        var errorEl = document.getElementById("modal-error");
-        var command = getPreferredTool();
-        var sessionKind = state.sessionCreateKind || "structured";
-        var worktreeEnabled = state.sessionCreateWorktree === true;
-
-        hideError(errorEl);
-
-        var defaultCwd = getEffectiveCwd();
-        var cwd = (cwdEl ? cwdEl.value.trim() : "") || defaultCwd;
-        var selectedMode = getSafeModeForTool(command, state.modeValue);
-
-        // 最终选择再整体写一次，避免用户点选后立刻创建时零散请求乱序。
-        persistNewSessionDefaults({
-          defaultProvider: command,
-          defaultSessionKind: sessionKind,
-          defaultMode: selectedMode
-        });
-
-        if (sessionKind === "structured") {
-          startStructuredSessionFromModal(cwd, selectedMode, worktreeEnabled, errorEl);
-          return;
-        }
-
-        runPtyCommandFromModal(command, cwd, selectedMode, worktreeEnabled, errorEl);
-      }
-
-      export function startStructuredSessionFromModal(cwd, mode, worktreeEnabled, errorEl) {
-        var provider = getProviderKey(state.sessionTool);
-        _sessionCreating = true;
-        state.modeValue = mode;
-        state.chatMode = mode;
-        state.sessionTool = provider;
-        state.preferredCommand = provider;
-        syncComposerModeSelect();
-        syncComposerModelSelect(getSelectedSession());
-        return createStructuredSession(undefined, cwd, mode, worktreeEnabled)
-          .then(function(data) {
-            saveWorkingDir(cwd);
-            closeSessionModal();
-            // 桌面常驻栏要保留：用户刚建完会话，希望左侧栏继续看到列表里的新条目，
-            // 不能因为模态关闭顺手把 sidebarPinned 抹掉让侧栏整体消失。
-            dismissDrawerIfOverlay();
-            return data;
-          })
-          .then(function() { focusInputBox(true); })
-          .catch(function(error) {
-            showError(errorEl, (error && error.message) || "无法启动结构化会话，请确认 Claude 已正确安装。");
-          })
-          .finally(function() { _sessionCreating = false; });
-      }
-
-      export function runPtyCommandFromModal(command, cwd, mode, worktreeEnabled, errorEl) {
-        _sessionCreating = true;
-        state.modeValue = mode;
-        state.chatMode = mode;
-        state.sessionTool = command;
-        state.preferredCommand = command;
-        syncComposerModeSelect();
-
-        ensureTerminalReady().then(function() {
-          return fetch("/api/commands", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({
-            command: command,
-            provider: command,
-            cwd: cwd,
-            mode: mode,
-            worktreeEnabled: worktreeEnabled,
-            sessionSource: "interactive"
-          }))
-        });
-        })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
-          if (data.error) {
-            showError(errorEl, data.error);
-            return;
-          }
-          state.selectedId = data.id;
-          persistSelectedId();
-          saveWorkingDir(cwd);
-          state.drafts[data.id] = "";
-          resetChatRenderCache();
-          closeSessionModal();
-          // 同 structured 路径：模态关闭后只收手机端的 overlay，保留桌面常驻侧栏。
-          dismissDrawerIfOverlay();
-          return refreshAll();
-        })
-        .then(function() {
-          if (state.selectedId) {
-            selectSession(state.selectedId);
-          } else {
-            focusInputBox(true);
-          }
-        })
-        .catch(function() {
-          showError(errorEl, command === "codex"
-            ? "无法启动 Codex 会话，请确认 codex 已正确安装并可在终端中执行。"
-            : command === "opencode"
-              ? "无法启动 OpenCode 会话，请确认 opencode-ai 已正确安装。"
-              : "无法启动 Claude 会话，请确认 Claude 已正确安装。");
-        })
-        .finally(function() { _sessionCreating = false; });
-      }
-
-      export function initBlankChatCwd() {
-        var cwdEl = document.getElementById("blank-chat-cwd");
-        if (!cwdEl) return;
-        cwdEl.addEventListener("click", toggleBlankChatCwdDropdown);
-        cwdEl.addEventListener("keydown", function(e) {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            toggleBlankChatCwdDropdown();
-          }
-        });
-        document.addEventListener("click", function(e) {
-          var dropdown = document.getElementById("blank-chat-cwd-dropdown");
-          if (!dropdown || dropdown.classList.contains("hidden")) return;
-          if (!(e.target as HTMLElement).closest(".blank-chat-cwd-wrap")) {
-            dropdown.classList.add("hidden");
-            var arrow = document.getElementById("blank-chat-cwd-arrow");
-            if (arrow) arrow.textContent = "▼";
-          }
-        });
-      }
-
-      export function toggleBlankChatCwdDropdown() {
-        var dropdown = document.getElementById("blank-chat-cwd-dropdown");
-        var arrow = document.getElementById("blank-chat-cwd-arrow");
-        if (!dropdown) return;
-        var isHidden = dropdown.classList.contains("hidden");
-        if (isHidden) {
-          loadBlankChatCwdDropdown(dropdown);
-          dropdown.classList.remove("hidden");
-          if (arrow) arrow.textContent = "▲";
-        } else {
-          dropdown.classList.add("hidden");
-          if (arrow) arrow.textContent = "▼";
-        }
-      }
-
-      export function loadBlankChatCwdDropdown(dropdown) {
-        var defaultCwd = getConfigCwd();
-        dropdown.innerHTML = '<div class="blank-chat-cwd-loading">加载中...</div>';
-        fetchRecentPaths(function(items) {
-            var html = "";
-            var currentDir = state.workingDir || defaultCwd;
-            html += '<div class="blank-chat-cwd-item' + (currentDir === defaultCwd ? " active" : "") + '" data-path="' + escapeHtml(defaultCwd) + '">' +
-              '<span class="blank-chat-cwd-item-label">默认</span>' +
-              renderTailMarqueePath(defaultCwd, "blank-chat-cwd-item-path") +
-            '</div>';
-            if (items.length) {
-              var seen = {};
-              seen[defaultCwd] = true;
-              items.forEach(function(item) {
-                if (seen[item.path]) return;
-                seen[item.path] = true;
-                html += '<div class="blank-chat-cwd-item' + (currentDir === item.path ? " active" : "") + '" data-path="' + escapeHtml(item.path) + '">' +
-                  renderTailMarqueePath(item.path, "blank-chat-cwd-item-path") +
-                '</div>';
-              });
-            }
-            dropdown.innerHTML = html;
-            refreshTailMarqueePaths(dropdown);
-            dropdown.querySelectorAll(".blank-chat-cwd-item").forEach(function(el) {
-              el.addEventListener("click", function(e) {
-                e.stopPropagation();
-                var path = (el as HTMLElement).dataset.path;
-                state.workingDir = path;
-                try { localStorage.setItem("wand-working-dir", path); } catch(e) {}
-                var pathEl = document.getElementById("blank-chat-cwd-path");
-                setTailMarqueePathText(pathEl, path);
-                dropdown.classList.add("hidden");
-                var arrow = document.getElementById("blank-chat-cwd-arrow");
-                if (arrow) arrow.textContent = "▼";
-                var fpInput = document.getElementById("folder-picker-input") as HTMLInputElement | null;
-                if (fpInput) fpInput.value = path;
-              });
-            });
-        });
-      }
-
-      export function loadRecentPathBubbles() {
-        var container = document.getElementById("recent-paths-bubbles");
-        if (!container) return;
-        fetchRecentPaths(function(items) {
-            if (!items.length) {
-              container.innerHTML = "";
-              return;
-            }
-            container.innerHTML = items.map(function(item) {
-              return '<button class="recent-path-bubble" data-path="' + escapeHtml(item.path) + '" title="' + escapeHtml(item.path) + '">' +
-                renderTailMarqueePath(item.path, "recent-path-bubble-path") +
-              '</button>';
-            }).join("");
-            refreshTailMarqueePaths(container);
-            container.querySelectorAll(".recent-path-bubble").forEach(function(el) {
-              el.addEventListener("click", function() {
-                var cwdEl = document.getElementById("cwd") as HTMLInputElement | null;
-                if (cwdEl) {
-                  cwdEl.value = (el as HTMLElement).dataset.path || "";
-                  state.cwdValue = (el as HTMLElement).dataset.path || "";
-                }
-              });
-            });
-        });
-      }
-
-      export function schedulePathSuggestions() {
-        if (state.suggestionTimer) clearTimeout(state.suggestionTimer);
-        state.suggestionTimer = setTimeout(loadPathSuggestions, 120);
-      }
-
-      export function loadPathSuggestions() {
-        var modal = document.getElementById("session-modal");
-        if (modal && modal.classList.contains("hidden")) {
-          hidePathSuggestions();
-          return;
-        }
-
-        var cwdEl = document.getElementById("cwd") as HTMLInputElement | null;
-        if (!cwdEl) return;
-
-        fetch("/api/path-suggestions?q=" + encodeURIComponent(cwdEl.value.trim()), { credentials: "same-origin" })
-          .then(function(res) { return res.json(); })
-          .then(renderPathSuggestions)
-          .catch(hidePathSuggestions);
-      }
-
-      export function renderPathSuggestions(items) {
-        var container = document.getElementById("cwd-suggestions");
-        if (!container || !items.length) {
-          hidePathSuggestions();
-          return;
-        }
-
-        container.innerHTML = items.map(function(item) {
-          return '<button class="suggestion-item" data-path="' + escapeHtml(item.path) + '">' +
-            '<strong>' + escapeHtml(item.name) + '</strong>' +
-            '<small>' + renderTailMarqueePath(item.path, "suggestion-item-path") + '</small>' +
-          '</button>';
-        }).join("");
-        refreshTailMarqueePaths(container);
-
-        container.querySelectorAll(".suggestion-item").forEach(function(el) {
-          el.addEventListener("click", function() {
-            (document.getElementById("cwd") as HTMLInputElement).value = (el as HTMLElement).dataset.path || "";
-            state.cwdValue = (el as HTMLElement).dataset.path || "";
-            hidePathSuggestions();
-          });
-        });
-
-        container.classList.remove("hidden");
-      }
-
-      export function hidePathSuggestions() {
-        var container = document.getElementById("cwd-suggestions");
-        if (container) {
-          container.classList.add("hidden");
-          container.innerHTML = "";
-        }
       }
 
       export function handleInputBoxKeydown(event) {

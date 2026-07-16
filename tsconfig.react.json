@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.browser.json",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true
+  },
+  "include": [
+    "src/web-ui/browser/types.ts",
+    "src/web-ui/react/**/*.ts",
+    "src/web-ui/react/**/*.tsx"
+  ]
+}

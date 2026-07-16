@@ -3,8 +3,14 @@ import { escapeHtml } from "./utils";
 import { persistSelectedId } from "./chat-scroll";
 import { setFilePanelOpen, isMobileLayout } from "./file-browser";
 import { render } from "./render";
-import { selectSession, closeSettingsModal, closeSessionModal, closeWorktreeMergeModal, closeSessionsDrawer } from "./session-engine";
+import { selectSession, closeSessionsDrawer } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
+import { openReactLegacyDialog, showReactLegacyToast } from "../react/legacy-overlays";
+import {
+  restartOverlayController,
+  showAutoUpdate as showReactAutoUpdate,
+  showRestart as showReactRestart,
+} from "../react/restart-overlay/controller";
 
 // TODO: import from correct modules when created
 
@@ -41,35 +47,21 @@ export function hideError(el: any) {
 }
 
 export function showToast(message: string, type?: string) {
-  var toast = document.createElement("div");
-  toast.className = "toast-message" + (type === "error" ? " toast-error" : "");
-  if (type !== "error") {
-    toast.style.background = "var(--accent)";
-    toast.style.color = "white";
-  }
-  toast.textContent = message;
-  document.body.appendChild(toast);
-  setTimeout(function() {
-    toast.remove();
-  }, type === "error" ? 4000 : 2200);
+  var duration = type === "error" ? 4000 : 2200;
+  if (showReactLegacyToast(message, type, duration)) return;
+
+  // The feature-flag fallback reuses the existing notification channel instead
+  // of maintaining a second hand-written toast DOM implementation.
+  showNotificationBubble({
+    title: message,
+    type: type === "error" ? "warning" : "info",
+    duration: duration,
+  });
 }
 
 // ── Wand Dialog (alert / confirm / prompt) ──
 // In-page dialogs keep confirmations consistent inside desktop browsers and
 // iOS / Android WebViews without invoking platform JavaScript alert chrome.
-
-export var _wandDialogStack: Function[] = [];
-export var _wandDialogIdCounter = 0;
-
-export function _wandDialogIcon(type: string) {
-  switch (type) {
-    case "warning": return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
-    case "danger": return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>';
-    case "success": return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
-    case "question": return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.5 2.5 0 1 1 4.5 1.5c-.9.8-2.2 1.2-2.2 2.5"/><path d="M12 17h.01"/></svg>';
-    default: return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg>';
-  }
-}
 
 /**
  * Open a Wand-styled in-page dialog. Returns a Promise resolving to the
@@ -91,194 +83,36 @@ export function _wandDialogIcon(type: string) {
  */
 export function openWandDialog(opts: any) {
   opts = opts || {};
-  var dismissable = opts.dismissable !== false;
-  var type = opts.type || "info";
-  var iconSvg = _wandDialogIcon(type);
-  var hasInput = !!opts.input;
+  var reactDialog = openReactLegacyDialog(opts);
+  if (reactDialog) return reactDialog;
+  return openNativeWandDialog(opts);
+}
 
-  return new Promise(function(resolve) {
-    var dialogId = "wand-dialog-" + (++_wandDialogIdCounter);
-    var previouslyFocused = document.activeElement as HTMLElement | null;
-    var backdrop = document.createElement("div");
-    backdrop.className = "wand-dialog-backdrop";
-    backdrop.setAttribute("role", "presentation");
+function openNativeWandDialog(opts: any): Promise<any> {
+  var title = opts.title == null ? "" : String(opts.title);
+  var message = opts.message == null ? "" : String(opts.message);
+  var text = title && message ? title + "\n\n" + message : title || message;
+  var buttons = Array.isArray(opts.buttons) && opts.buttons.length
+    ? opts.buttons
+    : [{ label: "好", value: true, kind: "primary" }];
 
-    var dialog = document.createElement("div");
-    dialog.className = "wand-dialog";
-    dialog.setAttribute("role", hasInput ? "dialog" : "alertdialog");
-    dialog.setAttribute("aria-modal", "true");
+  if (opts.input) {
+    return Promise.resolve(window.prompt(text, opts.inputValue == null ? "" : String(opts.inputValue)));
+  }
 
-    // Header
-    var header = document.createElement("div");
-    header.className = "wand-dialog-header";
+  if (buttons.length <= 1) {
+    window.alert(text);
+    return Promise.resolve(buttons[0]?.value);
+  }
 
-    var iconEl = document.createElement("div");
-    iconEl.className = "wand-dialog-icon " + type;
-    iconEl.setAttribute("aria-hidden", "true");
-    if (opts.icon) {
-      iconEl.textContent = String(opts.icon);
-    } else {
-      iconEl.innerHTML = iconSvg;
-    }
-    header.appendChild(iconEl);
-
-    var textWrap = document.createElement("div");
-    textWrap.className = "wand-dialog-textwrap";
-    if (opts.title) {
-      var titleEl = document.createElement("div");
-      titleEl.className = "wand-dialog-title";
-      titleEl.id = dialogId + "-title";
-      titleEl.textContent = opts.title;
-      textWrap.appendChild(titleEl);
-      dialog.setAttribute("aria-labelledby", titleEl.id);
-    }
-    if (opts.message) {
-      var msgEl = document.createElement("div");
-      msgEl.className = "wand-dialog-message";
-      msgEl.id = dialogId + "-message";
-      msgEl.textContent = opts.message;
-      textWrap.appendChild(msgEl);
-      dialog.setAttribute("aria-describedby", msgEl.id);
-    }
-    if (!opts.title) dialog.setAttribute("aria-label", type === "danger" ? "确认操作" : "提示");
-    header.appendChild(textWrap);
-    dialog.appendChild(header);
-
-    // Optional input (prompt mode)
-    var inputEl: HTMLInputElement | null = null;
-    if (hasInput) {
-      var bodyEl = document.createElement("div");
-      bodyEl.className = "wand-dialog-body";
-      inputEl = document.createElement("input");
-      inputEl.type = "text";
-      inputEl.className = "wand-dialog-input";
-      inputEl.setAttribute("aria-label", opts.inputLabel || opts.title || "输入内容");
-      inputEl.autocomplete = "off";
-      inputEl.spellcheck = false;
-      if (opts.inputPlaceholder) inputEl.placeholder = opts.inputPlaceholder;
-      if (opts.inputValue != null) inputEl.value = String(opts.inputValue);
-      bodyEl.appendChild(inputEl);
-      dialog.appendChild(bodyEl);
-    }
-
-    // Footer / buttons
-    var buttons = (opts.buttons && opts.buttons.length) ? opts.buttons : [
-      { label: "好", value: true, kind: "primary", autofocus: true },
-    ];
-
-    var footer = document.createElement("div");
-    footer.className = "wand-dialog-footer";
-
-    var firstFocusable: HTMLButtonElement | null = null;
-    var autofocusTarget: HTMLButtonElement | null = null;
-
-    function close(value: any) {
-      if (backdrop.classList.contains("closing")) return;
-      backdrop.classList.add("closing");
-      document.removeEventListener("keydown", keyHandler, true);
-      var idx = _wandDialogStack.indexOf(close);
-      if (idx >= 0) _wandDialogStack.splice(idx, 1);
-      var reduceMotion = false;
-      try { reduceMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (_e) {}
-      setTimeout(function() {
-        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
-        if (previouslyFocused && document.contains(previouslyFocused) && typeof previouslyFocused.focus === "function") {
-          try { previouslyFocused.focus(); } catch (_e) {}
-        }
-        resolve(value);
-      }, reduceMotion || document.hidden ? 0 : 140);
-    }
-
-    buttons.forEach(function(btnSpec: any) {
-      var btn = document.createElement("button");
-      var kind = btnSpec.kind || "secondary";
-      btn.className = "btn btn-" + kind;
-      btn.type = "button";
-      btn.textContent = btnSpec.label;
-      btn.addEventListener("click", function() {
-        if (hasInput && btnSpec.kind === "primary") {
-          close(inputEl ? inputEl.value : "");
-        } else {
-          close(btnSpec.value);
-        }
-      });
-      if (!firstFocusable) firstFocusable = btn;
-      if (btnSpec.autofocus) autofocusTarget = btn;
-      footer.appendChild(btn);
-    });
-    dialog.appendChild(footer);
-
-    backdrop.appendChild(dialog);
-
-    // Backdrop click → cancel (if dismissable)
-    backdrop.addEventListener("click", function(e) {
-      if (e.target === backdrop && dismissable) {
-        close(opts.cancelValue !== undefined ? opts.cancelValue : (hasInput ? null : false));
-      }
-    });
-
-    // Key handler — Esc cancels, Enter triggers primary (when not in textarea-like input)
-    function keyHandler(e: KeyboardEvent) {
-      // Only handle keys for the topmost dialog
-      if (_wandDialogStack[_wandDialogStack.length - 1] !== close) return;
-      if (e.key === "Escape" && dismissable) {
-        e.preventDefault();
-        e.stopPropagation();
-        close(opts.cancelValue !== undefined ? opts.cancelValue : (hasInput ? null : false));
-        return;
-      }
-      if (e.key === "Enter") {
-        // For prompt: Enter on input → submit. For alert/confirm: Enter → primary action.
-        var primary: any = null;
-        for (var i = 0; i < buttons.length; i++) {
-          if (buttons[i].kind === "primary") {
-            primary = buttons[i];
-            break;
-          }
-        }
-        if (!primary) primary = buttons[buttons.length - 1];
-        if (primary) {
-          e.preventDefault();
-          e.stopPropagation();
-          if (hasInput && primary.kind === "primary") {
-            close(inputEl ? inputEl.value : "");
-          } else {
-            close(primary.value);
-          }
-        }
-        return;
-      }
-      if (e.key === "Tab") {
-        var focusables = dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])');
-        if (!focusables.length) return;
-        var first = focusables[0] as HTMLElement;
-        var last = focusables[focusables.length - 1] as HTMLElement;
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    }
-    document.addEventListener("keydown", keyHandler, true);
-    _wandDialogStack.push(close);
-
-    document.body.appendChild(backdrop);
-
-    // Focus the most appropriate target
-    requestAnimationFrame(function() {
-      if (hasInput && inputEl) {
-        inputEl.focus();
-        try { inputEl.select(); } catch (e2) {}
-      } else if (autofocusTarget) {
-        autofocusTarget.focus();
-      } else if (firstFocusable) {
-        firstFocusable.focus();
-      }
-    });
-  });
+  var accepted = window.confirm(text);
+  if (!accepted) {
+    return Promise.resolve(opts.cancelValue !== undefined ? opts.cancelValue : false);
+  }
+  var primary = buttons.find(function(button: any) {
+    return button.kind === "primary" || button.kind === "danger";
+  }) || buttons[buttons.length - 1];
+  return Promise.resolve(primary.value);
 }
 
 /**
@@ -293,6 +127,7 @@ export function wandAlert(message: any, options?: any) {
     title: options.title || "提示",
     message: typeof message === "string" ? message : String(message == null ? "" : message),
     type: options.type || "info",
+    dismissable: options.dismissable,
     buttons: [
       { label: options.okLabel || "好", value: undefined, kind: "primary", autofocus: true },
     ],
@@ -313,6 +148,7 @@ export function wandConfirm(message: any, options?: any) {
     message: typeof message === "string" ? message : String(message == null ? "" : message),
     type: options.type || (danger ? "danger" : "question"),
     cancelValue: false,
+    dismissable: options.dismissable,
     buttons: [
       { label: options.cancelLabel || "取消", value: false, kind: "secondary" },
       {
@@ -343,6 +179,7 @@ export function wandPrompt(message: any, defaultValue?: any, options?: any) {
     inputValue: defaultValue == null ? "" : String(defaultValue),
     inputPlaceholder: options.placeholder || "",
     cancelValue: null,
+    dismissable: options.dismissable,
     buttons: [
       { label: options.cancelLabel || "取消", value: null, kind: "secondary" },
       { label: options.okLabel || "确定", value: undefined, kind: "primary" },
@@ -355,6 +192,7 @@ export function wandPrompt(message: any, defaultValue?: any, options?: any) {
 (window as any).wandConfirm = wandConfirm;
 (window as any).wandPrompt = wandPrompt;
 (window as any).openWandDialog = openWandDialog;
+(window as any).showToast = showToast;
 
 // ── Notification Bubble System ──
 
@@ -805,20 +643,50 @@ export function clearSessionProgressNative(sessionId: string) {
 
 // ── Android back button handler ──
 (window as any).handleNativeBack = function() {
-  var settingsModal = document.getElementById("settings-modal");
-  if (settingsModal && !settingsModal.classList.contains("hidden")) {
-    closeSettingsModal();
-    return true;
+  // Restart/update is intentionally non-dismissable. Consume the native back
+  // action so the WebView cannot reveal a half-restarted application state.
+  if (restartOverlayController.isOpen()) return true;
+  var reactOverlay = (window as any).__wandReactUi;
+  if (reactOverlay && typeof reactOverlay.closeTopmost === "function") {
+    try {
+      if (reactOverlay.closeTopmost()) return true;
+    } catch (_e) {}
   }
-  var sessionModal = document.getElementById("session-modal");
-  if (sessionModal && !sessionModal.classList.contains("hidden")) {
-    closeSessionModal();
-    return true;
+  var reactFilePreview = (window as any).__wandReactFilePreview;
+  if (reactFilePreview && typeof reactFilePreview.closeTopmost === "function") {
+    try {
+      if (reactFilePreview.closeTopmost()) return true;
+    } catch (_e) {}
   }
-  var worktreeModal = document.getElementById("worktree-merge-modal");
-  if (worktreeModal && !worktreeModal.classList.contains("hidden")) {
-    closeWorktreeMergeModal();
-    return true;
+  var reactQuickCommit = (window as any).__wandReactQuickCommit;
+  if (reactQuickCommit && typeof reactQuickCommit.closeTopmost === "function") {
+    try {
+      if (reactQuickCommit.closeTopmost()) return true;
+    } catch (_e) {}
+  }
+  var reactNewSession = (window as any).__wandReactNewSession;
+  if (reactNewSession && typeof reactNewSession.closeTopmost === "function") {
+    try {
+      if (reactNewSession.closeTopmost()) return true;
+    } catch (_e) {}
+  }
+  var reactFolderPicker = (window as any).__wandReactFolderPicker;
+  if (reactFolderPicker && typeof reactFolderPicker.closeTopmost === "function") {
+    try {
+      if (reactFolderPicker.closeTopmost()) return true;
+    } catch (_e) {}
+  }
+  var reactWorktreeMerge = (window as any).__wandReactWorktreeMerge;
+  if (reactWorktreeMerge && typeof reactWorktreeMerge.closeTopmost === "function") {
+    try {
+      if (reactWorktreeMerge.closeTopmost()) return true;
+    } catch (_e) {}
+  }
+  var reactSettings = (window as any).__wandReactSettings;
+  if (reactSettings && typeof reactSettings.closeTopmost === "function") {
+    try {
+      if (reactSettings.closeTopmost()) return true;
+    } catch (_e) {}
   }
   if (state.filePanelOpen && isMobileLayout()) {
     setFilePanelOpen(false);
@@ -1084,86 +952,12 @@ export function performRestart(btn?: HTMLButtonElement | null, msgEl?: HTMLEleme
   });
 }
 
-function normalizeUpdateVersion(value: unknown): string {
-  return typeof value === "string" ? value.trim().replace(/^v/, "").split("+")[0] : "";
-}
-
-function setRestartTarget(
-  overlay: HTMLElement,
-  previousInstanceId?: string | null,
-  expectedVersion?: string | null,
-): void {
-  if (previousInstanceId) overlay.dataset.previousInstanceId = previousInstanceId;
-  if (expectedVersion) overlay.dataset.expectedVersion = expectedVersion;
-}
-
-function startRestartPolling(overlay: HTMLElement): void {
-  if (overlay.dataset.restartPolling === "true") return;
-  overlay.dataset.restartPolling = "true";
-  var attempts = 0;
-  var maxAttempts = 180; // 180 * 2s = 6min; beta git installs can be slow
-  var timer = setInterval(function() {
-    attempts++;
-    fetch("/api/config", { credentials: "same-origin" })
-      .then(function(res) {
-        if (!res.ok) throw new Error("server not ready");
-        return res.json();
-      })
-      .then(function(config) {
-        var previousInstanceId = overlay.dataset.previousInstanceId || "";
-        var expectedVersion = normalizeUpdateVersion(overlay.dataset.expectedVersion || "");
-        var currentInstanceId = typeof config.serverInstanceId === "string" ? config.serverInstanceId : "";
-        var currentVersion = normalizeUpdateVersion(config.packageVersion || config.currentVersion);
-        var instanceReady = !previousInstanceId || (
-          currentInstanceId.length > 0 && currentInstanceId !== previousInstanceId
-        );
-        var versionReady = !expectedVersion || currentVersion === expectedVersion;
-        if (!instanceReady || !versionReady) return;
-        clearInterval(timer);
-        location.reload();
-      })
-      .catch(function() {
-        // Server not ready yet
-      });
-    if (attempts >= maxAttempts) {
-      clearInterval(timer);
-      var subtitle = overlay.querySelector(".restart-subtitle");
-      if (subtitle) {
-        subtitle.innerHTML = '重启超时，请 <a href="javascript:location.reload()" style="color:var(--accent);text-decoration:underline">手动刷新</a> 页面。';
-      }
-    }
-  }, 2000);
-}
-
 /**
  * Full-screen overlay shown during server restart or detached update.
  * An update only completes after both the process instance and package version change.
  */
 export function showRestartOverlay(previousInstanceId?: string | null, expectedVersion?: string | null) {
-  var overlay = document.getElementById("restart-overlay") as HTMLElement | null;
-  if (!overlay) {
-    overlay = document.createElement("div");
-    overlay.id = "restart-overlay";
-    overlay.className = "restart-overlay";
-    overlay.innerHTML =
-      '<div class="restart-overlay-content">' +
-        '<div class="restart-spinner"></div>' +
-        '<div class="restart-title"></div>' +
-        '<div class="restart-subtitle"></div>' +
-      '</div>';
-    document.body.appendChild(overlay);
-  }
-
-  setRestartTarget(overlay, previousInstanceId, expectedVersion);
-  var title = overlay.querySelector(".restart-title");
-  var subtitle = overlay.querySelector(".restart-subtitle");
-  if (title) title.textContent = expectedVersion ? "正在完成更新" : "服务正在重启";
-  if (subtitle) {
-    subtitle.textContent = expectedVersion
-      ? "安装完成并启动新版本后将自动刷新页面…"
-      : "稍后将自动刷新页面…";
-  }
-  startRestartPolling(overlay);
+  showReactRestart(previousInstanceId, expectedVersion);
 }
 
 export function showAutoUpdateOverlay(
@@ -1171,22 +965,5 @@ export function showAutoUpdateOverlay(
   latestVer: string,
   previousInstanceId?: string | null,
 ) {
-  var overlay = document.getElementById("restart-overlay") as HTMLElement | null;
-  if (!overlay) {
-    overlay = document.createElement("div");
-    overlay.id = "restart-overlay";
-    overlay.className = "restart-overlay";
-    overlay.innerHTML =
-      '<div class="restart-overlay-content">' +
-        '<div class="restart-spinner"></div>' +
-        '<div class="restart-title">自动更新中</div>' +
-        '<div class="restart-subtitle">' +
-          escapeHtml(currentVer) + ' → ' + escapeHtml(latestVer) +
-          '<br>正在下载并安装新版本，稍后将自动重启…' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(overlay);
-  }
-  setRestartTarget(overlay, previousInstanceId, latestVer);
-  startRestartPolling(overlay);
+  showReactAutoUpdate(currentVer, latestVer, previousInstanceId);
 }

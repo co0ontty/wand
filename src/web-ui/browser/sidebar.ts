@@ -6,6 +6,7 @@ import { closeSwipedItem } from "./input";
 import { showError, wandConfirm } from "./notifications";
 import { updateSessionsList, refreshAll, isStructuredSession } from "./session-engine";
 import { renderSessionItem } from "./session-ui";
+import { isBrowserReactShellMounted } from "./shell-runtime";
 
 const NON_WAND_SESSIONS_EXPANDED_KEY = "wand-non-wand-sessions-expanded";
 const AUTOMATION_SESSIONS_EXPANDED_KEY = "wand-automation-sessions-expanded";
@@ -31,6 +32,7 @@ document.addEventListener("toggle", function(event) {
 }, true);
 
 document.addEventListener("click", function(event) {
+  if (isBrowserReactShellMounted()) return;
   var target = event.target as Element | null;
   if (!target || typeof target.closest !== "function") return;
 

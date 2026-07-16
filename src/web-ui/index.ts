@@ -38,6 +38,7 @@ ${cssStyles}
 </head>
 <body>
   <div id="app"></div>
+  <div id="overlay-root" data-wand-ui-root></div>
 ${scriptOpen} src="${wtermSrc}">${scriptClose}
 ${scriptOpen} src="${qrcodeSrc}">${scriptClose}
 ${scriptOpen}>

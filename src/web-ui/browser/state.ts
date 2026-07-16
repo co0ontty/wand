@@ -1,8 +1,4 @@
 import type { AppState } from "./types";
-import { t } from "./i18n";
-import { resetChatRenderCache } from "./render";
-import { escapeHtml } from "./utils";
-import { evaluateWsHeartbeatStale } from "./websocket";
 
 export var configPath = "${escapeHtml(configPath)}";
 export var CHAT_EXPAND_STATE_STORAGE_KEY = "wand-chat-expand-state-v1";
@@ -66,7 +62,6 @@ export var state: AppState = {
   pollTimer: null,
   config: null,
   sessions: [],
-  suggestionTimer: null,
   terminal: null,
   terminalFitInProgress: false,
   terminalSessionId: null,
@@ -145,9 +140,6 @@ export var state: AppState = {
   // 新交互：桌面默认呼出即常驻；只有用户主动关闭过才记 "false"。
   sidebarPinned: readStoredBoolean("wand-sidebar-pinned", true),
   sidebarCollapsed: readStoredBoolean("wand-sidebar-collapsed", false),
-  modalOpen: false,
-  presetValue: "",
-  cwdValue: "",
   modeValue: "managed",
   chatMode: "managed",
   chatModels: (function() {
@@ -175,14 +167,7 @@ export var state: AppState = {
   availableCodexModels: [],
   availableOpenCodeModels: [],
   modelsRefreshing: false,
-  sessionCreateKind: "structured",
-  sessionCreateWorktree: false,
   sessionTool: "claude",
-  activeWorktreeMergeSessionId: null,
-  worktreeMergeCheckResult: null,
-  worktreeMergeLoading: false,
-  worktreeMergeSubmitting: false,
-  worktreeMergeError: "",
   preferredCommand: "claude",
   structuredRunner: "claude-cli-print",
   lastResize: { cols: 0, rows: 0 },
@@ -235,17 +220,6 @@ export var state: AppState = {
   gitStatusLoading: false,
   gitStatusInflight: null,
   gitStatusLastFetchAt: 0,
-  quickCommitOpen: false,
-  quickCommitSubmitting: false,
-  quickCommitGenerating: false,
-  quickCommitError: "",
-  quickCommitForm: { customMessage: "", tag: "", tagEdited: false },
-  quickCommitPushing: false,
-  quickCommitPushError: "",
-  quickCommitResult: null,
-  quickCommitDragAction: "commit",
-  // 本次提交是否纳入 submodule，仅用于「执行中…」忙碌文案。
-  quickCommitSubmoduleIntent: false,
   // Telegram 风格的"贴底"状态：true = 用户当前贴在底部，新消息会自然出现；
   // false = 用户向上滚了，未读会累积到气泡里，不会自动滚他们的视图。
   chatStickToBottom: true,

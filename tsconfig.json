@@ -16,6 +16,7 @@
     "src/**/*.ts"
   ],
   "exclude": [
-    "src/web-ui/browser/**"
+    "src/web-ui/browser/**",
+    "src/web-ui/react/**"
   ]
 }

@@ -22,7 +22,25 @@ import "./chat-render";  // includes initMobileCopyLongPress self-executing
 import "./notifications";
 import { t } from "./i18n";
 import { render, renderBootLoading, restoreLoginSession } from "./render";
-import { state } from "./state";
+import { configPath, state } from "./state";
+import { startReactUi } from "../react";
+import { installFolderPickerLegacyAdapter } from "./folder-picker-adapter";
+import { installNewSessionLegacyAdapter } from "./new-session-adapter";
+import { installSettingsRuntimeBridge } from "./settings-runtime-bridge";
+import { createBrowserShellCommands } from "./shell-commands";
+import { configureBrowserShellCommands } from "./shell-runtime";
+import { installWorktreeMergeLegacyAdapter } from "./worktree-merge-adapter";
+import { refreshAll } from "./session-engine";
+import { openWandDialog, showToast } from "./notifications";
+import { installFilePreviewLegacyAdapter } from "./file-preview-adapter";
+import {
+  appendToComposer,
+  copyTextSafely,
+  refreshFileExplorer,
+} from "./file-browser";
+
+installSettingsRuntimeBridge();
+configureBrowserShellCommands(createBrowserShellCommands());
 
 (function() {
   try {
@@ -35,6 +53,9 @@ import { state } from "./state";
     }
     if (/WandPlatform\/Android/.test(ua)) {
       document.documentElement.classList.add('is-wand-android');
+    }
+    if (/WandPlatform\/macOS/.test(ua)) {
+      document.documentElement.classList.add('is-wand-macos');
     }
   } catch (e) {}
 
@@ -54,4 +75,55 @@ import { state } from "./state";
   // iOS 原生壳据此判断网页是否已支持「侧边栏返回原生界面」按钮：
   // 旧版网页没有这个标记，壳会回退显示自己的顶部返回栏，避免用户被困在网页版。
   try { (window as any).__wandNativeBackHooked = true; } catch (e) {}
+
+  // Keep the server-injected config path observable when production
+  // tree-shaking removes otherwise-unused exports from state.ts.
+  try { (window as any).__wandConfigPath = configPath; } catch (e) {}
 })();
+
+// React owns the authenticated Shell plus the sibling overlay root. Terminal,
+// Chat, and Composer keep stable host nodes whose children remain legacy-owned.
+startReactUi();
+installNewSessionLegacyAdapter();
+installFolderPickerLegacyAdapter();
+installWorktreeMergeLegacyAdapter({
+  getSession(sessionId) {
+    return state.sessions.find((session: any) => session.id === sessionId) ?? null;
+  },
+  refreshSessions() {
+    return refreshAll();
+  },
+  toast(message, tone) {
+    showToast(message, tone);
+  },
+});
+installFilePreviewLegacyAdapter({
+  getSiblings() {
+    return state.allFiles;
+  },
+  confirmDiscard(reason) {
+    const replacing = reason === "replace";
+    return openWandDialog({
+      type: "warning",
+      title: replacing ? "切换预览文件？" : "放弃未保存的修改？",
+      message: replacing
+        ? "当前文件有未保存的改动，切换后会丢失。"
+        : reason === "exit-edit"
+          ? "当前文件有未保存的改动，退出编辑后会丢失。"
+          : "当前文件有未保存的改动，关闭后会丢失。",
+      buttons: [
+        { label: "继续编辑", value: false, kind: "secondary", autofocus: true },
+        { label: "放弃修改", value: true, kind: "danger" },
+      ],
+      cancelValue: false,
+    }).then((result: unknown) => result === true);
+  },
+  copyText: copyTextSafely,
+  appendToComposer,
+  notify(message, tone) {
+    showToast(message, tone);
+  },
+  onSaved() {
+    refreshFileExplorer();
+  },
+});

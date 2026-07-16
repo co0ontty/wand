@@ -197,8 +197,8 @@ export function isImagePath(value: any) {
 
 // ── Path display scroll helpers ──
 //
-// 长路径展示的几个小元素（topbar-cwd / file-explorer-cwd / working-dir-indicator
-// / blank-chat-cwd-path）都有一个老问题：内容比可视宽度长时被 CSS
+// 长路径展示的几个小元素（topbar-cwd / file-explorer-cwd /
+// blank-chat-cwd-path）都有一个老问题：内容比可视宽度长时被 CSS
 // `text-overflow: ellipsis` 截掉，用户看不见最后一段目录名；topbar 那条
 // 还用过 `direction: rtl` hack 来"优先显示尾段"，副作用是首字符 "/" 也被
 // 吃掉，导致显示文本跟实际 data-path / value 字符串对不上。

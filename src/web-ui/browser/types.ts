@@ -19,7 +19,6 @@ export interface AppState {
   chatUnreadCount: number;
   chatUnreadStartIndex: number;
   chatInitialRenderDone: boolean;
-  modalOpen: boolean;
   bootstrapping: boolean;
   loginChecked: boolean;
   isOnline: boolean;

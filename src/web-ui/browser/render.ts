@@ -5,15 +5,20 @@ import { getConfigCwd } from "./chat-scroll";
 import { renderChatEmptyState, shortCommand } from "./chat-render";
 import { attachEventListeners } from "./events";
 import { shouldShowSessionsBackdrop, isMobileLayout, refreshFileExplorer, renderFileExplorer, wandFileIcon } from "./file-browser";
-import { loadGitStatus, renderTopbarGitBadgeHtml, renderWorktreeMergeModal, renderSettingsModal, renderQuickCommitModal, renderTopbarMoreMenuHtml } from "./git-commit";
+import { loadGitStatus, renderTopbarGitBadgeHtml, renderTopbarMoreMenuHtml } from "./git-commit";
 import { getSelectedSession, updateInteractiveControls } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, syncSessionModalUI, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
-import { renderSessionModal, getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
+import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
+import { getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
 import { renderSessionsListContent, renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
 import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale, startPolling } from "./websocket";
+import {
+  isBrowserReactShellMounted,
+  renderBrowserReactShell,
+  unmountBrowserReactShell,
+} from "./shell-runtime";
 
 // 这些函数的实际 import 会在其他模块创建后补全
 // import { initTerminal, teardownTerminal, ensureTerminalFit, ensureTerminalFitWithRetry, maybeScrollTerminalToBottom } from "./terminal";
@@ -21,7 +26,7 @@ import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHe
 // import { renderSessionsListContent, renderSessions, loadSessions, getSelectedSession } from "./sessions";
 // import { updateDrawerState, closeTransientSessionsDrawer, shouldShowSessionsBackdrop, isMobileLayout } from "./layout";
 // import { syncComposerModeSelect, syncComposerModelSelect, getComposerTool, getSafeModeForTool, getComposerPlaceholder, renderChatModeTrioHtml, renderAutoApproveChip } from "./composer";
-// import { applyCurrentView, updateShellChrome, syncSessionModalUI } from "./view";
+// import { applyCurrentView, updateShellChrome } from "./view";
 // import { refreshFileExplorer, renderFileExplorer, wandFileIcon } from "./file-explorer";
 // import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale } from "./websocket";
 // import { startPolling, refreshAll } from "./polling";
@@ -30,7 +35,6 @@ import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHe
 // import { checkApkAutoUpdate, checkDmgAutoUpdate } from "./native-update";
 // import { loadClaudeHistory, ensureClaudeHistoryLoaded } from "./claude-history";
 // import { loadGitStatus, renderTopbarGitBadgeHtml } from "./git";
-// import { renderSessionModal, renderWorktreeMergeModal, renderSettingsModal, renderQuickCommitModal } from "./modals";
 // import { shortCommand, getSessionStatusClass, getSessionStatusLabel } from "./session-utils";
 // import { hasNativeSwitchServer } from "./native";
 // import { renderTopbarMoreMenuHtml } from "./topbar";
@@ -358,8 +362,8 @@ document.addEventListener("click", function(e) {
     ".modal-backdrop, .modal-overlay, .modal-container, " +
     "[role='dialog'], [role='menu'], " +
     ".topbar-more-menu, .sidebar-header-overflow, " +
-    ".folder-picker-dropdown, .path-suggestions, " +
-    ".permission-prompt-overlay, .restart-overlay"
+    ".path-suggestions, " +
+    ".permission-prompt-overlay"
   )) return;
   closeTransientSessionsDrawer();
 }, true);
@@ -370,12 +374,17 @@ restoreLoginSession();
 export function render(options?: any) {
   var skipShellChrome = options && options.skipShellChrome;
   var app = document.getElementById("app");
+  if (!app) return;
   var isLoggedIn = state.config !== null;
-  var wasModalOpen = state.modalOpen;
-  var shouldResetShell = !isLoggedIn || !!document.getElementById("output");
+  var reactShellWasMounted = isBrowserReactShellMounted();
+  var shouldResetShell = !isLoggedIn
+    || (!reactShellWasMounted && !!document.getElementById("output"));
 
   if (shouldResetShell) {
     teardownTerminal();
+  }
+  if (!isLoggedIn && reactShellWasMounted) {
+    unmountBrowserReactShell();
   }
 
   // Suppress CSS transitions during initial DOM build
@@ -389,10 +398,33 @@ export function render(options?: any) {
     state.sessionsDrawerOpen = true;
     writeStoredBoolean("wand-sidebar-open", true);
   }
-  app!.innerHTML = isLoggedIn ? renderAppShell() : renderLogin();
-  // Reset chat render tracking since DOM was fully replaced
-  resetChatRenderCache();
-  attachEventListeners();
+  var shellRenderResult: "disabled" | "mounted" | "updated" = "disabled";
+  var rebuiltLegacyHosts = false;
+  if (isLoggedIn) {
+    try {
+      shellRenderResult = renderBrowserReactShell(app, renderAppShell);
+    } catch (error) {
+      console.error("[wand] React shell mount failed; using legacy shell", error);
+      unmountBrowserReactShell();
+      app.innerHTML = renderAppShell();
+      shellRenderResult = "disabled";
+    }
+    if (shellRenderResult === "disabled") {
+      app.innerHTML = renderAppShell();
+      rebuiltLegacyHosts = true;
+    } else if (shellRenderResult === "mounted") {
+      rebuiltLegacyHosts = true;
+    }
+  } else {
+    app.innerHTML = renderLogin();
+    rebuiltLegacyHosts = true;
+  }
+
+  // Stable React slots bind once. Legacy fallback still rebuilds and rebinds.
+  if (rebuiltLegacyHosts) {
+    resetChatRenderCache();
+    attachEventListeners();
+  }
   updateDrawerState();
   syncComposerModeSelect();
   syncComposerModelSelect(getSelectedSession());
@@ -410,17 +442,6 @@ export function render(options?: any) {
     document.documentElement.classList.remove("no-transition");
   });
 
-  // Restore modal state if it was open
-  if (wasModalOpen && state.modalOpen) {
-    var modal = document.getElementById("session-modal");
-    if (modal) {
-      modal.classList.remove("hidden");
-      var cwdEl = document.getElementById("cwd") as HTMLInputElement | null;
-      if (cwdEl) cwdEl.value = state.cwdValue;
-      syncSessionModalUI();
-    }
-  }
-
   // 初始加载或会话切换后惰性触发 git 状态拉取（loadGitStatus 自带节流）。
   if (isLoggedIn && state.selectedId && state.gitStatusSessionId !== state.selectedId) {
     loadGitStatus(state.selectedId);
@@ -436,7 +457,6 @@ export function render(options?: any) {
   // 渲染刚完成，元素可能尚未完成布局，scrollPathElementToEnd 内部用 rAF 兜底。
   scrollPathElementToEnd(document.getElementById("topbar-cwd"));
   scrollPathElementToEnd(document.getElementById("blank-chat-cwd-path"));
-  scrollPathElementToEnd(document.getElementById("working-dir-indicator-path"));
   refreshTailMarqueePaths();
 }
 
@@ -716,14 +736,14 @@ export function renderAppShell() {
               '</button>' +
             '</div>' +
             '<div class="blank-chat-cwd-wrap">' +
-              '<div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" title="点击切换工作目录">' +
+              '<div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="点击切换工作目录">' +
                 '<span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + '</span>' +
                 renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') +
-                '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span>' +
+                '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span>' +
               '</div>' +
-              '<div class="blank-chat-cwd-dropdown hidden" id="blank-chat-cwd-dropdown"></div>' +
             '</div>' +
           '</div>' +
+          '<div id="cross-session-queue-host"></div>' +
         '</div>' +
         '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
           '<div class="composer-top-row">' +
@@ -847,29 +867,7 @@ export function renderAppShell() {
           '</div>' +
           '<p id="action-error" class="error-message hidden"></p>' +
         '</div>' +
-        // Folder picker modal (hidden by default)
-        '<section id="folder-picker-modal" class="modal-backdrop hidden">' +
-          '<div class="modal folder-picker-modal">' +
-            '<div class="modal-header">' +
-              '<h2 class="modal-title">选择工作目录</h2>' +
-              '<button id="close-folder-picker" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="关闭"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>' +
-            '</div>' +
-            '<div class="modal-body">' +
-              '<div class="folder-picker-quick-row">' +
-                '<button class="folder-picker-quick-btn btn-with-icon" data-path="/tmp">' + iconSvg("trash", { size: 13, strokeWidth: 1.7 }) + '<span>临时目录</span></button>' +
-                '<button class="folder-picker-quick-btn btn-with-icon" data-path="/">' + iconSvg("folder", { size: 13, strokeWidth: 1.7 }) + '<span>根目录</span></button>' +
-              '</div>' +
-              '<div id="folder-breadcrumb" class="folder-breadcrumb"></div>' +
-              '<div class="folder-picker">' +
-                '<span class="folder-picker-icon">' + iconSvg("folder", { size: 15, strokeWidth: 1.7 }) + '</span>' +
-                '<input type="text" id="folder-picker-input" class="folder-picker-input" value="" placeholder="输入或选择工作目录..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />' +
-              '</div>' +
-              '<div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div>' +
-              '<div id="folder-picker-validation" class="folder-picker-validation"></div>' +
-            '</div>' +
-          '</div>' +
-        '</section>' +
       '</main>' +
     '</div>' +
-  '</div>' + renderSessionModal() + renderWorktreeMergeModal() + renderSettingsModal() + renderQuickCommitModal();
+  '</div>';
 }

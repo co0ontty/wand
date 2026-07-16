@@ -10,6 +10,8 @@ import { getLastAssistantSummary } from "./session-ui";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS, clampClientTerminalOutput, maybeScrollTerminalToBottom, resetTerminal, softResyncTerminal, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
 import { ensureTerminalFitWithRetry, scheduleTerminalResize } from "./viewport";
 import { render, restoreLoginSession } from "./render";
+import { isBrowserReactShellMounted } from "./shell-runtime";
+import { notifyLegacyUiChange } from "./ui-store-bridge";
 
 // ── External functions not defined in this module ──
 
@@ -649,14 +651,16 @@ import { render, restoreLoginSession } from "./render";
       }
 
       export function updateTaskDisplay() {
+        var reactShellActive = isBrowserReactShellMounted();
         var taskEl = document.getElementById("current-task");
         var permissionActionsEl = document.getElementById("permission-actions");
         var permissionLabel = document.getElementById("permission-actions-label");
-        if (!taskEl) return;
+        if (!taskEl && !reactShellActive) return;
+        notifyLegacyUiChange("task:update");
         var selectedSession = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
         if (selectedSession && selectedSession.provider === "codex") {
           if (permissionActionsEl) permissionActionsEl.classList.add("hidden");
-          taskEl.classList.remove("permission-blocked");
+          if (!reactShellActive && taskEl) taskEl.classList.remove("permission-blocked");
         }
         var pendingEscalation = selectedSession && selectedSession.pendingEscalation ? selectedSession.pendingEscalation : null;
         var isBlocked = selectedSession && selectedSession.provider !== "codex"
@@ -686,19 +690,21 @@ import { render, restoreLoginSession } from "./render";
             if (denyBtn) denyBtn.classList.toggle("hidden", !!isAutoApprove);
           }
           // Hide top task bar — permission info is already shown in the composer
-          taskEl.textContent = "";
-          taskEl.classList.add("hidden");
-          taskEl.classList.remove("permission-blocked");
+          if (!reactShellActive && taskEl) {
+            taskEl.textContent = "";
+            taskEl.classList.add("hidden");
+            taskEl.classList.remove("permission-blocked");
+          }
           return;
         }
 
-        taskEl.classList.remove("permission-blocked");
+        if (!reactShellActive && taskEl) taskEl.classList.remove("permission-blocked");
         if (permissionActionsEl) permissionActionsEl.classList.add("hidden");
         var task = state.currentTask;
-        if (task && task.title) {
+        if (!reactShellActive && taskEl && task && task.title) {
           taskEl.textContent = task.title;
           taskEl.classList.remove("hidden");
-        } else {
+        } else if (!reactShellActive && taskEl) {
           taskEl.textContent = "";
           taskEl.classList.add("hidden");
         }

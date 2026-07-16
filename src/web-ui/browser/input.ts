@@ -14,6 +14,8 @@ import { initTerminal, maybeScheduleResyncForChunk, maybeScrollTerminalToBottom,
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, sendTerminalResize, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
 import { setView, initWebSocket, forceReconnectWebSocket } from "./websocket";
 import { getSessionStatusLabel } from "./session-ui";
+import { isBrowserReactShellMounted } from "./shell-runtime";
+import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
       // ─────────────────────────────────────────────────────────────────
@@ -481,7 +483,7 @@ import { getSessionStatusLabel } from "./session-ui";
         var inputPanel = document.querySelector(".input-panel");
         var statusBar = document.querySelector(".structured-status-bar");
         var composer = document.querySelector(".input-composer");
-        var blankChat = document.getElementById("blank-chat");
+        var blankQueueHost = document.getElementById("cross-session-queue-host");
 
         if (state.crossSessionQueue.length === 0) {
           if (container) container.remove();
@@ -489,9 +491,10 @@ import { getSessionStatusLabel } from "./session-ui";
           return;
         }
 
-        // Determine parent: input-panel (session view) or blank-chat (welcome view)
+        // The welcome queue uses a dedicated LegacyHost so this renderer never
+        // appends children into React-owned #blank-chat.
         var isInputPanelVisible = inputPanel && !inputPanel.classList.contains("hidden");
-        var parent = isInputPanelVisible ? inputPanel : blankChat;
+        var parent = isInputPanelVisible ? inputPanel : blankQueueHost;
         // Insert above status bar if present, otherwise above composer
         var insertBefore = isInputPanelVisible ? (statusBar || composer) : null;
 
@@ -712,6 +715,7 @@ import { getSessionStatusLabel } from "./session-ui";
       }
 
       export function switchToSessionView(sessionId) {
+        var reactShellActive = isBrowserReactShellMounted();
         var session = state.sessions.find(function(s) { return s.id === sessionId; });
         var blankChat = document.getElementById("blank-chat");
         var terminalContainer = document.getElementById("output");
@@ -722,11 +726,11 @@ import { getSessionStatusLabel } from "./session-ui";
         var sessionSummary = document.querySelector(".session-summary-value");
         var structured = isStructuredSession(session);
 
-        if (blankChat) blankChat.classList.add("hidden");
-        if (terminalContainer) {
+        if (!reactShellActive && blankChat) blankChat.classList.add("hidden");
+        if (!reactShellActive && terminalContainer) {
           terminalContainer.classList.toggle("hidden", structured);
         }
-        if (chatContainer) {
+        if (!reactShellActive && chatContainer) {
           chatContainer.classList.remove("hidden");
         }
         // v2: 不再无条件展示停止按钮 —— 由 updateInteractiveControls() 按
@@ -754,6 +758,7 @@ import { getSessionStatusLabel } from "./session-ui";
         // because chat/terminal panels swapped). Refit now so the terminal
         // picks up the real cols/rows instead of keeping the stale ones.
         if (!structured) ensureTerminalFit("view-switch", { forceReplay: true });
+        notifyLegacyUiChange("session:view");
       }
 
       export function sendInputFromBox(opts) {
@@ -1895,7 +1900,12 @@ import { getSessionStatusLabel } from "./session-ui";
       ]);
 
       export function shouldIgnoreInteractiveTarget(target) {
-        return !!(target && ignoredInteractiveTargetIds.has(target.id));
+        if (!target) return false;
+        if (ignoredInteractiveTargetIds.has(target.id)) return true;
+        // React/Radix overlays own their keyboard contract. In terminal-interactive
+        // mode the document capture listener otherwise consumes Escape before the
+        // dialog can dismiss itself (and can forward radio arrow keys to the PTY).
+        return !!(target.closest && target.closest('[role="dialog"], [role="alertdialog"]'));
       }
 
       export var modifierKeySet = new Set(["ctrl", "alt", "shift"]);
@@ -2320,7 +2330,9 @@ import { getSessionStatusLabel } from "./session-ui";
       }
 
       export function deleteSession(id) {
-        var item = document.querySelector('.session-item[data-session-id="' + id + '"]');
+        var item = isBrowserReactShellMounted()
+          ? null
+          : document.querySelector('.session-item[data-session-id="' + id + '"]');
         var session = state.sessions.find(function(candidate: any) { return candidate.id === id; });
         var providerSessionId = session && session.claudeSessionId;
         if (item) {
@@ -2669,20 +2681,7 @@ import { getSessionStatusLabel } from "./session-ui";
         var cwd = actionButton.dataset.cwd;
         if (!threadId) return;
         actionButton.disabled = true;
-        resumeCodexHistorySession(threadId, cwd)
-          .then(function(data) {
-            if (data && data.id) {
-              state.codexHistory = state.codexHistory.filter(function(s) {
-                return s.claudeSessionId !== threadId;
-              });
-              state.selectedId = data.id;
-              persistSelectedId();
-              state.drafts[data.id] = "";
-              activateSession(data).then(function() {
-                dismissDrawerIfOverlay();
-              });
-            }
-          })
+        resumeHistoryFromList("codex", threadId, cwd)
           .finally(function() {
             actionButton.disabled = false;
           });
@@ -2721,21 +2720,7 @@ import { getSessionStatusLabel } from "./session-ui";
           if (!ok) return;
           var item = actionButton.closest(".session-item");
           if (item) item.style.opacity = "0.5";
-          fetch("/api/codex-history/" + encodeURIComponent(threadId), {
-            method: "DELETE",
-            credentials: "same-origin"
-          })
-            .then(function(res) { return res.json(); })
-            .then(function(data) {
-              if (data && data.ok) {
-                state.codexHistory = state.codexHistory.filter(function(s) {
-                  return s.claudeSessionId !== threadId;
-                });
-                updateSessionsList();
-              } else if (item) {
-                item.style.opacity = "1";
-              }
-            })
+          deleteCodexHistorySession(threadId)
             .catch(function() {
               if (item) item.style.opacity = "1";
             });
@@ -2747,21 +2732,7 @@ import { getSessionStatusLabel } from "./session-ui";
         var cwd = actionButton.dataset.cwd;
         if (!claudeSessionId) return;
         actionButton.disabled = true;
-        resumeClaudeHistorySession(claudeSessionId, cwd)
-          .then(function(data) {
-            if (data && data.id) {
-              state.claudeHistory = state.claudeHistory.filter(function(s) {
-                return s.claudeSessionId !== claudeSessionId;
-              });
-              state.selectedId = data.id;
-              persistSelectedId();
-              state.drafts[data.id] = "";
-              activateSession(data).then(function() {
-                // 桌面常驻/窄条形态不要撤掉，仅手机端 overlay 需要收。
-                dismissDrawerIfOverlay();
-              });
-            }
-          })
+        resumeHistoryFromList("claude", claudeSessionId, cwd)
           .finally(function() {
             actionButton.disabled = false;
           });
@@ -2789,6 +2760,50 @@ import { getSessionStatusLabel } from "./session-ui";
           showToast((error && error.message) || "无法恢复会话。", "error");
           return null;
         });
+      }
+
+      /** DOM-free history resume port used by React shell actions. */
+      export function resumeHistoryFromList(provider, providerSessionId, cwd) {
+        var request = provider === "codex"
+          ? resumeCodexHistorySession(providerSessionId, cwd)
+          : resumeClaudeHistorySession(providerSessionId, cwd);
+        return request.then(function(data) {
+          if (!data || !data.id) return null;
+          if (provider === "codex") {
+            state.codexHistory = state.codexHistory.filter(function(s) {
+              return s.claudeSessionId !== providerSessionId;
+            });
+          } else {
+            state.claudeHistory = state.claudeHistory.filter(function(s) {
+              return s.claudeSessionId !== providerSessionId;
+            });
+          }
+          state.selectedId = data.id;
+          persistSelectedId();
+          state.drafts[data.id] = "";
+          return activateSession(data).then(function() {
+            // Desktop pinned/narrow layouts remain; only overlay drawers close.
+            dismissDrawerIfOverlay();
+            return data;
+          });
+        });
+      }
+
+      /** DOM-free Codex history deletion port; confirmation stays with callers. */
+      export function deleteCodexHistorySession(threadId) {
+        return fetch("/api/codex-history/" + encodeURIComponent(threadId), {
+          method: "DELETE",
+          credentials: "same-origin"
+        })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (!data || data.ok !== true) throw new Error((data && data.error) || "无法删除会话。");
+            state.codexHistory = state.codexHistory.filter(function(s) {
+              return s.claudeSessionId !== threadId;
+            });
+            updateSessionsList();
+            return data;
+          });
       }
 
       export function isTouchDevice() {

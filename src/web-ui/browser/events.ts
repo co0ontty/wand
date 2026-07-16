@@ -1,18 +1,19 @@
 import { state, readStoredBoolean, writeStoredBoolean } from "./state";
 import { t, iconSvg } from "./i18n";
-import { escapeHtml, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
+import { escapeHtml } from "./utils";
 import { formatInlineResult, scheduleChatRender } from "./chat-render";
 import { applyExpandedState, applyPersistedExpandState, persistCrossSessionQueue, persistElementExpandState, persistSelectedId, saveStructuredQueue, scrollChatToBottom } from "./chat-scroll";
 import { adjustTerminalScale, closeFilePanel, dismissFileContextMenu, filterFileTree, isMobileLayout, navigateExplorerUp, openFilePreview, refreshFileExplorer, setFilePanelOpen, toggleFilePanel, updateFilePanelState, updateScaleLabel } from "./file-browser";
-import { attachQuickCommitModalListeners, closeQuickCommitModal, loadGitStatus, openQuickCommitModal } from "./git-commit";
+import { loadGitStatus, openQuickCommitModal } from "./git-commit";
 import { attachQueueBarDelegates, beginComposerVoiceHold, bindInputTouchScroll, cancelComposerVoiceHold, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, endComposerVoiceHold, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleComposerVoiceMove, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, stopSession, toggleTerminalInteractive, updateQueueBar, welcomeInputSend } from "./input";
-import { _doPlaySound, _hasNativeBridge, _vibrate, hideError, showError, showToast, wandAlert, wandConfirm } from "./notifications";
-import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
-import { _updateAppIconSelection, addPendingAttachment, backToNativeApp, bindSettingsModelComboboxes, checkForUpdate, closePlusPopover, closeSessionModal, closeSessionsDrawer, closeSettingsModal, closeWorktreeMergeModal, confirmWorktreeMerge, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, hidePathSuggestions, importSystemAiConfig, initBlankChatCwd, isStructuredSession, loadProviderCliUpdates, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openEnvPreviewModal, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, organizeSettingsAiPanel, performProviderCliUpdates, performSettingsRestart, performUpdate, persistNewSessionDefaults, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, resetNotificationPermission, retryWorktreeCleanup, runCommand, saveConfigSettings, saveDisplaySettings, savePassword, schedulePathSuggestions, scheduleTestNotification, selectSession, setDraftValue, setUpdateChannel, switchServer, switchSettingsTab, syncCommitModelProvider, syncCommitSourceUI, syncComposerHasText, syncSessionModalUI, testNotification, toggleAutoUpdate, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin, updateNotificationStatus, uploadCertificates } from "./session-engine";
+import { hideError, showToast } from "./notifications";
+import { render, resetChatRenderCache } from "./render";
+import { addPendingAttachment, backToNativeApp, closePlusPopover, closeSessionsDrawer, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, isStructuredSession, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, retryWorktreeCleanup, selectSession, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin } from "./session-engine";
 import { batchDeleteSelected, clearSelections, confirmDelete, renderSessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
-import { activateSessionItem, addRecentPath, copySelectedSessionField, fetchRecentPaths, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, saveWorkingDir, softResyncTerminal } from "./terminal";
+import { copySelectedSessionField, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { ensureTerminalFit, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
 import { approvePermission, denyPermission, toggleAutoApprove } from "./websocket";
+import { isBrowserReactShellMounted } from "./shell-runtime";
 
       // Global toggle function for tool card headers — called via onclick attribute
       // Lazy-load tool content for truncated results
@@ -299,37 +300,20 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
 
         // sidebar overflow 菜单：外点 / 视口变化时关闭
         document.addEventListener("click", function() {
+          if (isBrowserReactShellMounted()) return;
           var el = document.getElementById("sidebar-overflow-menu");
           if (el) el.classList.remove("open");
         });
 
-        // 设置页可能随 shell 重绘而替换节点。更新操作使用全局委托，避免按钮节点更新后
-        // 丢失 click listener，也确保后续局部初始化异常不会让更新入口失效。
-        document.addEventListener("click", function(e) {
-          var target = e.target as HTMLElement | null;
-          if (!target || typeof target.closest !== "function") return;
-          var button = target.closest("#check-update-button, #do-update-button, #do-restart-button, #check-provider-cli-updates, #update-provider-clis") as HTMLButtonElement | null;
-          if (!button || button.disabled) return;
-          e.preventDefault();
-          if (button.id === "check-update-button") {
-            checkForUpdate();
-          } else if (button.id === "do-update-button") {
-            performUpdate();
-          } else if (button.id === "check-provider-cli-updates") {
-            loadProviderCliUpdates(true);
-          } else if (button.id === "update-provider-clis") {
-            performProviderCliUpdates();
-          } else {
-            performSettingsRestart();
-          }
-        });
         window.addEventListener("resize", function() {
+          if (isBrowserReactShellMounted()) return;
           var el = document.getElementById("sidebar-overflow-menu");
           if (el) el.classList.remove("open");
         });
 
         // topbar more 菜单：外点 / ESC 关闭
         var closeTopbarMore = function() {
+          if (isBrowserReactShellMounted()) return;
           state.topbarMoreOpen = false;
           var menu = document.getElementById("topbar-more-menu");
           var btn = document.getElementById("topbar-more-button");
@@ -340,12 +324,14 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           }
         };
         document.addEventListener("click", function(e) {
+          if (isBrowserReactShellMounted()) return;
           if (!state.topbarMoreOpen) return;
           var menu = document.getElementById("topbar-more-menu");
           var wrap = menu && menu.parentElement;
           if (wrap && !wrap.contains(e.target as Node)) closeTopbarMore();
         });
         document.addEventListener("keydown", function(e) {
+          if (isBrowserReactShellMounted()) return;
           if (e.key === "Escape" && state.topbarMoreOpen) closeTopbarMore();
         });
 
@@ -371,14 +357,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           if (!toggle) return;
           e.preventDefault();
           toggleAutoApprove();
-        });
-
-        // folder picker：外点关闭下拉
-        document.addEventListener("click", function(e) {
-          if (!(e.target as HTMLElement).closest(".folder-picker-container")) {
-            var dd = document.getElementById("folder-picker-dropdown");
-            if (dd) dd.classList.add("hidden");
-          }
         });
 
         // 三件套（模式 / 模型 / 思考）走全局委托，多个实例共用同一状态源。
@@ -440,6 +418,10 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           return;
         }
 
+        var reactShellActive = isBrowserReactShellMounted();
+
+        // Welcome/sidebar/topbar controls are React-owned after shell mount.
+        if (!reactShellActive) {
         // Welcome screen event listeners
         var welcomeInput = document.getElementById("welcome-input") as HTMLTextAreaElement | null;
         if (welcomeInput) {
@@ -491,8 +473,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
             });
           });
         }
-        initBlankChatCwd();
-
         var sessionsList = document.getElementById("sessions-list");
         if (sessionsList) {
           sessionsList.addEventListener("click", handleSessionItemClick);
@@ -507,60 +487,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         window.addEventListener("scroll", hideCollapsedTileBubble, true);
         window.addEventListener("resize", hideCollapsedTileBubble);
 
-        var providerCardsEl = document.getElementById("provider-cards");
-        if (providerCardsEl) providerCardsEl.addEventListener("click", function(e) {
-          var card = (e.target as HTMLElement).closest(".provider-card");
-          if (!card || card.classList.contains("disabled")) return;
-          var provider = card.getAttribute("data-provider");
-          if (provider) {
-            state.sessionTool = provider;
-            state.preferredCommand = provider;
-            // Codex 现在同时支持 PTY 与结构化 runner，不再强制把 kind 切成 pty。
-            // mode 由 syncSessionModalUI() 调用 getSafeModeForTool() 自动 clamp，
-            // 不在这里硬写。
-            syncSessionModalUI();
-            persistNewSessionDefaults({
-              defaultProvider: provider,
-              defaultMode: state.modeValue
-            });
-          }
-        });
-
-        var kindCardsEl = document.getElementById("session-kind-cards");
-        if (kindCardsEl) kindCardsEl.addEventListener("click", function(e) {
-          var card = (e.target as HTMLElement).closest(".session-kind-card");
-          if (!card || card.classList.contains("disabled")) return;
-          var kind = card.getAttribute("data-session-kind");
-          if (kind) {
-            state.sessionCreateKind = kind;
-            syncSessionModalUI();
-            persistNewSessionDefaults({ defaultSessionKind: kind });
-          }
-        });
-
-        var modeCardsEl = document.getElementById("mode-cards");
-        if (modeCardsEl) modeCardsEl.addEventListener("click", function(e) {
-          var card = (e.target as HTMLElement).closest(".mode-card");
-          if (!card) return;
-          var mode = card.getAttribute("data-mode");
-          if (mode) {
-            state.modeValue = mode;
-            syncSessionModalUI();
-            persistNewSessionDefaults({ defaultMode: state.modeValue });
-          }
-        });
-        var worktreeToggleEl = document.getElementById("session-worktree-toggle") as HTMLInputElement | null;
-        if (worktreeToggleEl) worktreeToggleEl.addEventListener("change", function() {
-          state.sessionCreateWorktree = worktreeToggleEl!.checked;
-        });
-        var cwdEl = document.getElementById("cwd") as HTMLInputElement | null;
-        if (cwdEl) {
-          cwdEl.addEventListener("input", function() { state.cwdValue = cwdEl!.value; });
-          cwdEl.addEventListener("change", function() { state.cwdValue = cwdEl!.value; });
-          cwdEl.addEventListener("input", schedulePathSuggestions);
-          cwdEl.addEventListener("focus", schedulePathSuggestions);
-          cwdEl.addEventListener("blur", function() { setTimeout(hidePathSuggestions, 120); });
-        }
         var sessionsToggle = document.getElementById("sessions-toggle-button");
         if (sessionsToggle) sessionsToggle.addEventListener("click", toggleSessionsDrawer);
         var drawerBackdrop = document.getElementById("sessions-drawer-backdrop");
@@ -602,279 +528,11 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         if (backToNativeBtn) backToNativeBtn.addEventListener("click", backToNativeApp);
         var settingsBtn = document.getElementById("settings-button");
         if (settingsBtn) settingsBtn.addEventListener("click", openSettingsModal);
-        var closeSettingsBtn = document.getElementById("close-settings-button");
-        if (closeSettingsBtn) closeSettingsBtn.addEventListener("click", closeSettingsModal);
-        var settingsModal = document.getElementById("settings-modal");
-        if (settingsModal) settingsModal.addEventListener("click", function(e) {
-          if ((e.target as HTMLElement).id === "settings-modal") closeSettingsModal();
-        });
-        var savePassBtn = document.getElementById("save-password-button");
-        if (savePassBtn) savePassBtn.addEventListener("click", savePassword);
-        // Settings tab clicks
-        var settingsTabs = document.querySelectorAll(".settings-tab");
-        for (var ti = 0; ti < settingsTabs.length; ti++) {
-          settingsTabs[ti].addEventListener("click", function(e) {
-            var btn = (e as any).currentTarget || this;
-            var tabName = btn && btn.getAttribute ? btn.getAttribute("data-tab") : null;
-            if (tabName) switchSettingsTab(tabName);
-          });
-        }
-        var saveConfigBtn = document.getElementById("save-config-button");
-        if (saveConfigBtn) saveConfigBtn.addEventListener("click", saveConfigSettings);
-        var saveAiConfigBtn = document.getElementById("save-ai-config-button");
-        if (saveAiConfigBtn) saveAiConfigBtn.addEventListener("click", saveConfigSettings);
-        organizeSettingsAiPanel();
-        bindSettingsModelComboboxes();
-        var defaultModelRefreshBtn = document.getElementById("cfg-default-model-refresh");
-        if (defaultModelRefreshBtn) defaultModelRefreshBtn.addEventListener("click", refreshAvailableModels);
-        var commitModelRefreshBtn = document.getElementById("cfg-commit-model-refresh");
-        if (commitModelRefreshBtn) commitModelRefreshBtn.addEventListener("click", refreshAvailableModels);
-        var commitCliSelect = document.getElementById("cfg-commit-cli");
-        if (commitCliSelect) commitCliSelect.addEventListener("change", function() { syncCommitModelProvider(true); });
-        var commitSourceInputs = document.querySelectorAll('input[name="commit-ai-source"]');
-        for (var csi = 0; csi < commitSourceInputs.length; csi++) {
-          commitSourceInputs[csi].addEventListener("change", syncCommitSourceUI);
-        }
-        ["cfg-system-ai-base-url", "cfg-system-ai-model", "cfg-system-ai-key"].forEach(function(id) {
-          var field = document.getElementById(id);
-          if (field) field.addEventListener("input", function(e) {
-            (e.currentTarget as HTMLElement | null)?.removeAttribute("aria-invalid");
-            var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
-            if (key) key.dataset.source = "custom";
-            syncCommitSourceUI();
-          });
-        });
-        var systemAiProtocol = document.getElementById("cfg-system-ai-protocol");
-        if (systemAiProtocol) systemAiProtocol.addEventListener("change", function() {
-          var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
-          var authHeader = document.getElementById("cfg-system-ai-auth-header") as HTMLSelectElement | null;
-          if (authHeader) authHeader.value = (systemAiProtocol as HTMLSelectElement).value === "anthropic" ? "x-api-key" : "bearer";
-          if (key) key.dataset.source = "custom";
-          syncCommitSourceUI();
-        });
-        var systemAiAuthHeader = document.getElementById("cfg-system-ai-auth-header");
-        if (systemAiAuthHeader) systemAiAuthHeader.addEventListener("change", function() {
-          var key = document.getElementById("cfg-system-ai-key") as HTMLInputElement | null;
-          if (key) key.dataset.source = "custom";
-        });
-        var systemAiEnabled = document.getElementById("cfg-system-ai-enabled");
-        if (systemAiEnabled) systemAiEnabled.addEventListener("change", syncCommitSourceUI);
-        var commitApiConfigure = document.getElementById("cfg-commit-api-configure");
-        if (commitApiConfigure) commitApiConfigure.addEventListener("click", function() {
-          var field = document.getElementById("cfg-system-ai-base-url") as HTMLInputElement | null;
-          if (!field) return;
-          var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          field.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
-          field.focus({ preventScroll: true });
-        });
-        var systemAiImportBtn = document.getElementById("cfg-system-ai-import");
-        if (systemAiImportBtn) systemAiImportBtn.addEventListener("click", importSystemAiConfig);
-        var viewEnvBtn = document.getElementById("cfg-view-env-btn");
-        if (viewEnvBtn) viewEnvBtn.addEventListener("click", openEnvPreviewModal);
-        var saveDisplayBtn = document.getElementById("save-display-button");
-        if (saveDisplayBtn) saveDisplayBtn.addEventListener("click", saveDisplaySettings);
-        // App icon picker (APK only)
-        var appIconPicker = document.getElementById("app-icon-picker");
-        if (appIconPicker) {
-          var appIconOpts = appIconPicker.querySelectorAll(".settings-app-icon-option");
-          for (var ai = 0; ai < appIconOpts.length; ai++) {
-            appIconOpts[ai].addEventListener("click", function() {
-              var iconName = (this as HTMLElement).getAttribute("data-icon");
-              if (!iconName || typeof WandNative === "undefined" || typeof WandNative.setAppIcon !== "function") return;
-              try {
-                WandNative.setAppIcon(iconName);
-                _updateAppIconSelection(iconName);
-                var msgEl = document.getElementById("app-icon-message");
-                if (msgEl) {
-                  msgEl.textContent = "图标已切换，返回桌面后生效";
-                  msgEl.style.color = "var(--success)";
-                  msgEl.classList.remove("hidden");
-                  setTimeout(function() { msgEl!.classList.add("hidden"); }, 3000);
-                }
-              } catch (_e) {}
-            });
-          }
-        }
-        var uploadCertBtn = document.getElementById("upload-cert-button");
-        if (uploadCertBtn) uploadCertBtn.addEventListener("click", uploadCertificates);
-        var filePickerInputs = document.querySelectorAll(".file-picker-input");
-        for (var fpi = 0; fpi < filePickerInputs.length; fpi++) {
-          (function(input: HTMLInputElement) {
-            input.addEventListener("change", function() {
-              var picker = input.closest(".file-picker");
-              if (!picker) return;
-              var nameEl = picker.querySelector(".file-picker-name") as HTMLElement | null;
-              if (!nameEl) return;
-              if (input.files && input.files[0]) {
-                nameEl.textContent = input.files[0].name;
-                picker.classList.add("file-picker-has-file");
-              } else {
-                nameEl.textContent = nameEl.getAttribute("data-default") || "未选择文件";
-                picker.classList.remove("file-picker-has-file");
-              }
-            });
-          })(filePickerInputs[fpi] as HTMLInputElement);
-        }
-        var autoUpdateWebToggle = document.getElementById("auto-update-web-toggle") as HTMLInputElement | null;
-        if (autoUpdateWebToggle) autoUpdateWebToggle.addEventListener("change", function() {
-          toggleAutoUpdate("web", autoUpdateWebToggle!.checked);
-        });
-        var autoUpdateApkToggle = document.getElementById("auto-update-apk-toggle") as HTMLInputElement | null;
-        if (autoUpdateApkToggle) autoUpdateApkToggle.addEventListener("change", function() {
-          toggleAutoUpdate("apk", autoUpdateApkToggle!.checked);
-        });
-        var autoUpdateDmgToggle = document.getElementById("auto-update-dmg-toggle") as HTMLInputElement | null;
-        if (autoUpdateDmgToggle) autoUpdateDmgToggle.addEventListener("change", function() {
-          toggleAutoUpdate("dmg", autoUpdateDmgToggle!.checked);
-        });
-        var autoUpdateCliToggle = document.getElementById("auto-update-cli-toggle") as HTMLInputElement | null;
-        if (autoUpdateCliToggle) autoUpdateCliToggle.addEventListener("change", function() {
-          toggleAutoUpdate("cli", autoUpdateCliToggle!.checked);
-        });
-        var betaChannelToggle = document.getElementById("beta-channel-toggle") as HTMLInputElement | null;
-        if (betaChannelToggle) betaChannelToggle.addEventListener("change", function() {
-          setUpdateChannel(betaChannelToggle!.checked ? "beta" : "stable");
-        });
-        var copyConnectCodeBtn = document.getElementById("copy-connect-code-button");
-        if (copyConnectCodeBtn) copyConnectCodeBtn.addEventListener("click", function() {
-          var text = document.getElementById("android-connect-code");
-          if (text) copyToClipboard(text.textContent!, copyConnectCodeBtn);
-        });
-        // Notification preferences
-        var notifSoundEl = document.getElementById("cfg-notif-sound") as HTMLInputElement | null;
-        if (notifSoundEl) {
-          notifSoundEl.checked = state.notifSound;
-          notifSoundEl.addEventListener("change", function() {
-            state.notifSound = notifSoundEl!.checked;
-            try { localStorage.setItem("wand-notif-sound", String(state.notifSound)); } catch (e) {}
-            // Preview sound when toggling on
-            if (state.notifSound) _doPlaySound();
-            // Toggle volume slider visibility
-            var volField = document.getElementById("notif-volume-field");
-            if (volField) volField.style.display = state.notifSound ? "" : "none";
-          });
-        }
-        // Volume slider
-        var notifVolumeEl = document.getElementById("cfg-notif-volume") as HTMLInputElement | null;
-        var notifVolumeVal = document.getElementById("cfg-notif-volume-val");
-        // Helper to keep the iOS-style range fill in sync with the input value
-        var _syncRangeFill = function(el: HTMLInputElement) {
-          if (!el) return;
-          var minVal = Number(el.min || 0);
-          var maxVal = Number(el.max || 100);
-          var curVal = Number(el.value || 0);
-          var pct = maxVal > minVal
-            ? Math.max(0, Math.min(100, ((curVal - minVal) / (maxVal - minVal)) * 100))
-            : 0;
-          el.style.setProperty("--range-fill", pct + "%");
-        };
-        if (notifVolumeEl) {
-          notifVolumeEl.value = String(state.notifVolume);
-          if (notifVolumeVal) notifVolumeVal.textContent = state.notifVolume + "%";
-          _syncRangeFill(notifVolumeEl);
-          // Hide if sound is off
-          var volField = document.getElementById("notif-volume-field");
-          if (volField) volField.style.display = state.notifSound ? "" : "none";
-          var _volDebounce: any = null;
-          notifVolumeEl.addEventListener("input", function() {
-            state.notifVolume = parseInt(notifVolumeEl!.value, 10);
-            if (notifVolumeVal) notifVolumeVal.textContent = state.notifVolume + "%";
-            _syncRangeFill(notifVolumeEl!);
-            try { localStorage.setItem("wand-notif-volume", String(state.notifVolume)); } catch (e) {}
-            // Also sync to native bridge if available
-            if (_hasNativeBridge && typeof WandNative.setNotificationVolume === "function") {
-              try { WandNative.setNotificationVolume(state.notifVolume); } catch (_e) {}
-            }
-          });
-          // Preview on release
-          notifVolumeEl.addEventListener("change", function() {
-            _doPlaySound();
-          });
-        }
-        var notifBubbleEl = document.getElementById("cfg-notif-bubble") as HTMLInputElement | null;
-        if (notifBubbleEl) {
-          notifBubbleEl.checked = state.notifBubble;
-          notifBubbleEl.addEventListener("change", function() {
-            state.notifBubble = notifBubbleEl!.checked;
-            try { localStorage.setItem("wand-notif-bubble", String(state.notifBubble)); } catch (e) {}
-          });
-        }
-        // Browser notification section
-        var notifRequestBtn = document.getElementById("notification-request-btn");
-        if (notifRequestBtn) notifRequestBtn.addEventListener("click", function() {
-          if (_hasNativeBridge) {
-            (window as any)._onNativePermissionResult = function() {
-              updateNotificationStatus();
-              delete (window as any)._onNativePermissionResult;
-            };
-            try { WandNative.requestPermission(); } catch (_e) {}
-          } else if (typeof Notification !== "undefined") {
-            Notification.requestPermission().then(function() { updateNotificationStatus(); });
-          }
-        });
-        var notifResetBtn = document.getElementById("notification-reset-btn");
-        if (notifResetBtn) notifResetBtn.addEventListener("click", resetNotificationPermission);
-        var notifTestBtn = document.getElementById("notification-test-btn");
-        if (notifTestBtn) notifTestBtn.addEventListener("click", testNotification);
-        var notifTestDelayBtn = document.getElementById("notification-test-delay-btn");
-        if (notifTestDelayBtn) notifTestDelayBtn.addEventListener("click", scheduleTestNotification);
-        updateNotificationStatus();
-        // Native notification sound selector (APK only)
-        if (_hasNativeBridge && typeof WandNative.getAvailableSounds === "function") {
-          var nativeSoundSection = document.getElementById("native-sound-section");
-          var nativeSoundSelect = document.getElementById("native-sound-select") as HTMLSelectElement | null;
-          var nativeSoundPreview = document.getElementById("native-sound-preview");
-          if (nativeSoundSection && nativeSoundSelect) {
-            nativeSoundSection.classList.remove("hidden");
-            try {
-              var sounds = JSON.parse(WandNative.getAvailableSounds());
-              var current = WandNative.getNotificationSound();
-              nativeSoundSelect.innerHTML = "";
-              for (var si = 0; si < sounds.length; si++) {
-                var opt = document.createElement("option");
-                opt.value = sounds[si].id;
-                opt.textContent = sounds[si].name;
-                if (sounds[si].id === current) opt.selected = true;
-                nativeSoundSelect.appendChild(opt);
-              }
-              nativeSoundSelect.addEventListener("change", function() {
-                try { WandNative.setNotificationSound(nativeSoundSelect!.value); } catch (_e) {}
-              });
-              if (nativeSoundPreview) {
-                nativeSoundPreview.addEventListener("click", function() {
-                  try { WandNative.previewSound(nativeSoundSelect!.value); } catch (_e) {}
-                });
-              }
-            } catch (_e) {}
-          }
-        }
-        // Native haptic toggle (APK only)
-        if (_hasNativeBridge && typeof WandNative.isHapticEnabled === "function") {
-          var hapticSection = document.getElementById("native-haptic-section");
-          var hapticToggle = document.getElementById("cfg-haptic-enabled") as HTMLInputElement | null;
-          if (hapticSection && hapticToggle) {
-            hapticSection.classList.remove("hidden");
-            try { hapticToggle.checked = WandNative.isHapticEnabled(); } catch (_e) {}
-            hapticToggle.addEventListener("change", function() {
-              try { WandNative.setHapticEnabled(hapticToggle!.checked); } catch (_e) {}
-              if (hapticToggle!.checked) _vibrate("medium");
-            });
-          }
-        }
         var newSessBtn = document.getElementById("topbar-new-session-button");
         if (newSessBtn) newSessBtn.addEventListener("click", openSessionModal);
         var drawerNewSessBtn = document.getElementById("drawer-new-session-button");
         if (drawerNewSessBtn) drawerNewSessBtn.addEventListener("click", openSessionModal);
-        var closeModalBtn = document.getElementById("close-modal-button");
-        if (closeModalBtn) closeModalBtn.addEventListener("click", closeSessionModal);
-        var closeWorktreeMergeBtn = document.getElementById("close-worktree-merge-button");
-        if (closeWorktreeMergeBtn) closeWorktreeMergeBtn.addEventListener("click", closeWorktreeMergeModal);
-        var worktreeMergeCancelBtn = document.getElementById("worktree-merge-cancel-button");
-        if (worktreeMergeCancelBtn) worktreeMergeCancelBtn.addEventListener("click", closeWorktreeMergeModal);
-        var worktreeMergeConfirmBtn = document.getElementById("worktree-merge-confirm-button");
-        if (worktreeMergeConfirmBtn) worktreeMergeConfirmBtn.addEventListener("click", confirmWorktreeMerge);
-        var runBtn = document.getElementById("run-button");
-        if (runBtn) runBtn.addEventListener("click", runCommand);
+        }
         var approvePermissionBtn = document.getElementById("approve-permission-btn");
         if (approvePermissionBtn) approvePermissionBtn.addEventListener("click", approvePermission);
         var denyPermissionBtn = document.getElementById("deny-permission-btn");
@@ -887,12 +545,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         });
         var stopBtn = document.getElementById("stop-button");
         if (stopBtn) stopBtn.addEventListener("click", stopSession);
-        var sessionModal = document.getElementById("session-modal");
-        if (sessionModal) sessionModal.addEventListener("click", function(e) {
-          if ((e.target as HTMLElement).id === "session-modal") closeSessionModal();
-          if ((e.target as HTMLElement).id === "worktree-merge-modal") closeWorktreeMergeModal();
-        });
-
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
         if (inputBox) {
           bindInputTouchScroll(inputBox);
@@ -1000,6 +652,7 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           var toggle = document.getElementById(id);
           if (toggle) toggle.addEventListener("click", toggleTerminalInteractive);
         });
+        if (!reactShellActive) {
         // File panel toggle
         var filePanelToggle = document.getElementById("file-panel-toggle-btn");
         if (filePanelToggle) filePanelToggle.addEventListener("click", toggleFilePanel);
@@ -1076,6 +729,7 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
             }
           });
         }
+        }
 
         // Terminal scale controls (topbar)
         var scaleDownBtn = document.getElementById("terminal-scale-down-top");
@@ -1105,6 +759,7 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
         if (chatUnreadBubble) chatUnreadBubble.addEventListener("click", function() {
           scrollChatToBottom(true);
         });
+        if (!reactShellActive) {
         var fileRefresh = document.getElementById("file-explorer-refresh");
         if (fileRefresh) fileRefresh.addEventListener("click", function() { refreshFileExplorer(); });
         var fileUp = document.getElementById("file-explorer-up");
@@ -1182,354 +837,6 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           });
         }
 
-        // Folder picker functionality with keyboard navigation
-        var folderPickerInput = document.getElementById("folder-picker-input") as HTMLInputElement | null;
-        var folderPickerDropdown = document.getElementById("folder-picker-dropdown");
-        var folderPickerDebounceTimer: any = null;
-        var selectedIndex = -1;
-        var folderItems: any[] = [];
-
-        // Helper functions for path validation feedback
-        function showValidationError(message: string) {
-          if (folderPickerInput) {
-            folderPickerInput.classList.add("invalid");
-          }
-          var validationEl = document.getElementById("folder-picker-validation");
-          if (validationEl) {
-            validationEl.textContent = message;
-            validationEl.classList.add("visible");
-          }
-        }
-
-        function clearValidationError() {
-          if (folderPickerInput) {
-            folderPickerInput.classList.remove("invalid");
-          }
-          var validationEl = document.getElementById("folder-picker-validation");
-          if (validationEl) {
-            validationEl.textContent = "";
-            validationEl.classList.remove("visible");
-          }
-        }
-
-        // Helper functions for recent paths (single source: backend API)
-        // NOTE: fetchRecentPaths and addRecentPath are defined at outer scope
-
-        function renderRecentPathsHtml(items: any[]) {
-          if (!items.length) return "";
-          var html = '<div class="folder-recent-section">' +
-            '<div class="folder-recent-title">最近使用</div>';
-          items.forEach(function(item) {
-            var p = item.path || item;
-            html += '<div class="folder-recent-item" data-path="' + escapeHtml(p) + '">' +
-              renderTailMarqueePath(p, "folder-recent-item-path") +
-            '</div>';
-          });
-          html += '</div>';
-          return html;
-        }
-
-        function showRecentPathsDropdown() {
-          if (!folderPickerDropdown) return;
-          fetchRecentPaths(function(items: any[]) {
-            var recentHtml = renderRecentPathsHtml(items);
-            if (recentHtml) {
-              folderPickerDropdown!.innerHTML = recentHtml;
-              folderPickerDropdown!.classList.remove("hidden");
-              refreshTailMarqueePaths(folderPickerDropdown);
-              folderPickerDropdown!.querySelectorAll(".folder-recent-item").forEach(function(item: any) {
-                item.addEventListener("click", function() {
-                  var path = (this as HTMLElement).dataset.path;
-                  if (folderPickerInput) {
-                    folderPickerInput.value = path!;
-                    saveWorkingDir(path!);
-                    loadFolderSuggestions(path!);
-                  }
-                });
-              });
-            } else {
-              hideFolderDropdown();
-            }
-          });
-        }
-
-        // Working directory indicator click handler for active sessions
-        var workingDirIndicator = document.getElementById("working-dir-indicator");
-        if (workingDirIndicator) {
-          workingDirIndicator.addEventListener("click", function() {
-            // 点击指示器时，取消当前会话选择，显示完整的目录选择器
-            state.selectedId = null;
-            persistSelectedId();
-            state.drafts = {};
-            render();
-            // 聚焦到目录输入框
-            setTimeout(function() {
-              var folderInput = document.getElementById("folder-picker-input");
-              if (folderInput) folderInput.focus();
-            }, 50);
-          });
-        }
-
-        // Compact folder picker toggle
-        var folderPickerToggle = document.getElementById("folder-picker-toggle");
-        var folderPickerDropdown = document.getElementById("folder-picker-dropdown");
-        if (folderPickerToggle && folderPickerDropdown) {
-          folderPickerToggle.addEventListener("click", function() {
-            folderPickerDropdown!.classList.toggle("hidden");
-            folderPickerToggle!.classList.toggle("open");
-          });
-        }
-
-        // Drag and drop support
-        var folderPickerContainer = document.querySelector(".folder-picker-compact");
-        if (folderPickerContainer) {
-          folderPickerContainer.addEventListener("dragover", function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            (this as HTMLElement).classList.add("drag-over");
-          });
-
-          folderPickerContainer.addEventListener("dragleave", function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            (this as HTMLElement).classList.remove("drag-over");
-          });
-
-          folderPickerContainer.addEventListener("drop", function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            (this as HTMLElement).classList.remove("drag-over");
-
-            var items = (e as DragEvent).dataTransfer && (e as DragEvent).dataTransfer!.items;
-            if (items) {
-              for (var i = 0; i < items.length; i++) {
-                var item = items[i];
-                if (item.kind === "file" && (item as any).webkitGetAsEntry) {
-                  var entry = (item as any).webkitGetAsEntry();
-                  if (entry && entry.isDirectory && folderPickerInput) {
-                    var path = entry.fullPath;
-                    folderPickerInput.value = path;
-                    saveWorkingDir(path);
-                    loadFolderSuggestions(path);
-                    break;
-                  }
-                }
-              }
-            }
-          });
-        }
-
-        // Quick path buttons (now inside dropdown)
-        if (folderPickerDropdown) {
-          folderPickerDropdown.addEventListener("click", function(e) {
-            var btn = (e.target as HTMLElement).closest(".folder-picker-quick-btn");
-            if (btn && folderPickerInput) {
-              var path = (btn as HTMLElement).dataset.path;
-              folderPickerInput.value = path!;
-              saveWorkingDir(path!);
-              loadFolderSuggestions(path!);
-              folderPickerDropdown!.classList.add("hidden");
-              var toggle = document.getElementById("folder-picker-toggle");
-              if (toggle) toggle.classList.remove("open");
-            }
-          });
-        }
-
-        if (folderPickerInput) {
-          // Load initial folders from saved or default path
-          var initialPath = getEffectiveCwd();
-          loadFolderSuggestions(initialPath);
-
-          folderPickerInput.addEventListener("focus", function() {
-            var path = (this as HTMLInputElement).value.trim();
-            if (path) {
-              loadFolderSuggestions(path);
-            } else {
-              // Show recent paths when input is empty
-              showRecentPathsDropdown();
-            }
-          });
-
-          folderPickerInput.addEventListener("input", function(e) {
-            var query = (e.target as HTMLInputElement).value.trim();
-            selectedIndex = -1;
-            if (folderPickerDebounceTimer) clearTimeout(folderPickerDebounceTimer);
-            folderPickerDebounceTimer = setTimeout(function() {
-              if (query) {
-                loadFolderSuggestions(query);
-              } else {
-                hideFolderDropdown();
-              }
-            }, 150);
-          });
-
-          // Keyboard navigation
-          folderPickerInput.addEventListener("keydown", function(e) {
-            if (e.key === "Escape") {
-              hideFolderDropdown();
-              (this as HTMLInputElement).blur();
-            } else if (e.key === "ArrowDown") {
-              e.preventDefault();
-              if (folderItems.length > 0) {
-                selectedIndex = Math.min(selectedIndex + 1, folderItems.length - 1);
-                updateSelectedIndex();
-              }
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              if (selectedIndex > 0) {
-                selectedIndex--;
-                updateSelectedIndex();
-              }
-            } else if (e.key === "Enter" && selectedIndex >= 0) {
-              e.preventDefault();
-              var selectedItem = folderItems[selectedIndex];
-              if (selectedItem) {
-                var selectedPath = selectedItem.dataset.path;
-                if (selectedPath === "..") {
-                  // Navigate to parent
-                  var currentPath = folderPickerInput!.value.trim();
-                  var parentPath = currentPath.substring(0, currentPath.lastIndexOf("/"));
-                  if (parentPath) {
-                    folderPickerInput!.value = parentPath || "/";
-                    saveWorkingDir(folderPickerInput!.value);
-                    loadFolderSuggestions(parentPath || "/");
-                  }
-                } else {
-                  folderPickerInput!.value = selectedPath;
-                  saveWorkingDir(selectedPath);
-                  hideFolderDropdown();
-                }
-              }
-            }
-          });
-        }
-
-        function updateSelectedIndex() {
-          folderItems.forEach(function(item: any, index: number) {
-            item.classList.toggle("active", index === selectedIndex);
-          });
-        }
-
-        function renderBreadcrumb(_path: string) {}
-
-        function loadFolderSuggestions(query: string) {
-          if (!folderPickerDropdown) return;
-
-          // Show loading state
-          folderPickerDropdown.innerHTML = '<div class="folder-picker-loading">加载中...</div>';
-          folderPickerDropdown.classList.remove("hidden");
-          selectedIndex = -1;
-          folderItems = [];
-
-          fetch("/api/folders?q=" + encodeURIComponent(query), { credentials: "same-origin" })
-            .then(function(res) {
-              return res.json().then(function(data: any) {
-                return { ok: res.ok, status: res.status, data: data };
-              });
-            })
-            .then(function(result) {
-              var data = result.data;
-
-              // Handle error responses
-              if (!result.ok || data.error) {
-                showValidationError(data.error || "路径无效");
-                folderPickerDropdown!.innerHTML = '<div class="folder-picker-error">' + escapeHtml(data.error || "路径无效") + '</div>';
-                return;
-              }
-
-              // Clear validation error on success
-              clearValidationError();
-
-              // Update breadcrumb navigation
-              renderBreadcrumb(data.currentPath || query);
-
-              var items = data.items || [];
-              var currentPath = data.currentPath || query;
-
-              if (items.length === 0) {
-                folderPickerDropdown!.innerHTML = '<div class="folder-picker-loading">空目录</div>';
-                return;
-              }
-
-              folderPickerDropdown!.innerHTML = items.map(function(item: any) {
-                var icon = item.type === "parent" ? "↩️" : "📁";
-                var name = item.type === "parent" ? ".. (返回上级)" : item.name;
-                return '<div class="folder-picker-item" data-path="' + escapeHtml(item.path) + '" data-type="' + item.type + '">' +
-                  '<span class="folder-picker-item-icon">' + icon + '</span>' +
-                  '<span>' + escapeHtml(name) + '</span>' +
-                '</div>';
-              }).join("");
-
-              folderItems = Array.from(folderPickerDropdown!.querySelectorAll(".folder-picker-item"));
-
-              // Add click handlers
-              folderItems.forEach(function(item: any) {
-                item.addEventListener("click", function() {
-                  var selectedPath = (this as HTMLElement).dataset.path;
-                  var type = (this as HTMLElement).dataset.type;
-                  if (folderPickerInput) {
-                    if (type === "parent") {
-                      // Navigate to parent directory
-                      var currentPath = folderPickerInput.value.trim();
-                      var parentPath = currentPath.substring(0, currentPath.lastIndexOf("/"));
-                      folderPickerInput.value = parentPath || "/";
-                      saveWorkingDir(folderPickerInput.value);
-                      loadFolderSuggestions(parentPath || "/");
-                    } else {
-                      folderPickerInput.value = selectedPath!;
-                      saveWorkingDir(selectedPath!);
-                      clearValidationError();
-                      hideFolderDropdown();
-                    }
-                  }
-                });
-              });
-            })
-            .catch(function(err) {
-              showValidationError("加载失败");
-              folderPickerDropdown!.innerHTML = '<div class="folder-picker-error">加载失败</div>';
-            });
-        }
-
-        function hideFolderDropdown() {
-          if (folderPickerDropdown) {
-            folderPickerDropdown.classList.add("hidden");
-          }
-          selectedIndex = -1;
-          folderItems = [];
-        }
-
-        // Folder picker modal functionality
-        var folderPickerModal = document.getElementById("folder-picker-modal");
-        var closeFolderPicker = document.getElementById("close-folder-picker");
-
-        function openFolderPickerWithInitialPath() {
-          if (!folderPickerModal) return;
-          folderPickerModal.classList.remove("hidden");
-          // Set initial path in input
-          if (folderPickerInput) {
-            folderPickerInput.value = getEffectiveCwd();
-          }
-          // Load initial folders
-          var initialPath = getEffectiveCwd();
-          loadFolderSuggestions(initialPath);
-          renderBreadcrumb(initialPath);
-        }
-
-        if (closeFolderPicker && folderPickerModal) {
-          closeFolderPicker.addEventListener("click", function() {
-            folderPickerModal!.classList.add("hidden");
-          });
-        }
-
-        if (folderPickerModal) {
-          folderPickerModal.addEventListener("click", function(e) {
-            if (e.target === folderPickerModal) {
-              folderPickerModal!.classList.add("hidden");
-            }
-          });
-        }
-
         var topbarGitBadge = document.getElementById("topbar-git-badge");
         if (topbarGitBadge) {
           topbarGitBadge.addEventListener("click", function(e) {
@@ -1537,16 +844,7 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
             openQuickCommitModal();
           });
         }
-        var quickCommitModal = document.getElementById("quick-commit-modal");
-        if (quickCommitModal) {
-          quickCommitModal.addEventListener("click", function(e) {
-            if ((e.target as HTMLElement).id === "quick-commit-modal" && !state.quickCommitSubmitting) {
-              closeQuickCommitModal();
-            }
-          });
         }
-        attachQuickCommitModalListeners();
-
         initTerminal();
         setupMobileKeyboardHandlers();
         setupVisualViewportHandlers();

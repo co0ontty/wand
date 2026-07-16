@@ -3,6 +3,7 @@
     "target": "ES2020",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "jsx": "react-jsx",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "noEmit": true,
     "declaration": false,
@@ -12,5 +13,5 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/web-ui/browser/**/*.ts"]
+  "include": ["src/web-ui/browser/**/*.ts", "src/web-ui/react/**/*.ts", "src/web-ui/react/**/*.tsx"]
 }
