@@ -5,7 +5,7 @@ import { formatInlineResult, scheduleChatRender } from "./chat-render";
 import { applyExpandedState, applyPersistedExpandState, persistCrossSessionQueue, persistElementExpandState, persistSelectedId, saveStructuredQueue, scrollChatToBottom } from "./chat-scroll";
 import { adjustTerminalScale, closeFilePanel, dismissFileContextMenu, filterFileTree, isMobileLayout, navigateExplorerUp, openFilePreview, refreshFileExplorer, setFilePanelOpen, toggleFilePanel, updateFilePanelState, updateScaleLabel } from "./file-browser";
 import { attachQuickCommitModalListeners, closeQuickCommitModal, loadGitStatus, openQuickCommitModal } from "./git-commit";
-import { attachQueueBarDelegates, bindInputTouchScroll, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, handleVoiceMove, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, startVoiceRecording, stopSession, stopVoiceRecording, toggleTerminalInteractive, toggleVoiceMode, updateQueueBar, welcomeInputSend } from "./input";
+import { attachQueueBarDelegates, beginComposerVoiceHold, bindInputTouchScroll, cancelComposerVoiceHold, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, endComposerVoiceHold, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleComposerVoiceMove, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, stopSession, toggleTerminalInteractive, updateQueueBar, welcomeInputSend } from "./input";
 import { _doPlaySound, _hasNativeBridge, _vibrate, hideError, showError, showToast, wandAlert, wandConfirm } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
 import { _updateAppIconSelection, addPendingAttachment, backToNativeApp, bindSettingsModelComboboxes, checkForUpdate, closePlusPopover, closeSessionModal, closeSessionsDrawer, closeSettingsModal, closeWorktreeMergeModal, confirmWorktreeMerge, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, hidePathSuggestions, initBlankChatCwd, isStructuredSession, loadProviderCliUpdates, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openEnvPreviewModal, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, performProviderCliUpdates, performSettingsRestart, performUpdate, persistNewSessionDefaults, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, resetNotificationPermission, retryWorktreeCleanup, runCommand, saveConfigSettings, saveDisplaySettings, savePassword, schedulePathSuggestions, scheduleTestNotification, selectSession, setDraftValue, setUpdateChannel, switchServer, switchSettingsTab, syncCommitModelProvider, syncComposerHasText, syncSessionModalUI, testNotification, toggleAutoUpdate, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin, updateNotificationStatus, uploadCertificates } from "./session-engine";
@@ -917,24 +917,13 @@ import { approvePermission, denyPermission, toggleAutoApprove } from "./websocke
           });
         }
 
-        // v2: 语音输入按钮 —— 点击切换语音模式。整组语音 UI（按住说话 + 退出按钮）
-        // 都在 .voice-input-mode 容器里，CSS 由 .input-composer.voice-mode 控制显隐。
-        var voiceBtn = document.getElementById("voice-btn");
-        if (voiceBtn) {
-          voiceBtn.addEventListener("click", function() { toggleVoiceMode(); });
-        }
-        var voiceCancelBtn = document.getElementById("voice-cancel-btn");
-        if (voiceCancelBtn) {
-          voiceCancelBtn.addEventListener("click", function() { toggleVoiceMode(false); });
-        }
-        // 按住说话 —— Pointer Events 统一鼠标/触摸：按住录音、上滑取消、松手填回。
-        // 核心逻辑见模块级 startVoiceRecording / handleVoiceMove / stopVoiceRecording。
-        var voiceRecordBtn = document.getElementById("voice-record-btn");
-        if (voiceRecordBtn) {
-          voiceRecordBtn.addEventListener("pointerdown", startVoiceRecording);
-          voiceRecordBtn.addEventListener("pointermove", handleVoiceMove);
-          voiceRecordBtn.addEventListener("pointerup", stopVoiceRecording);
-          voiceRecordBtn.addEventListener("pointercancel", stopVoiceRecording);
+        // 输入区统一交互：轻点保持原生 textarea 聚焦；空内容长按进入语音手势。
+        var voiceHoldInput = document.getElementById("input-box");
+        if (voiceHoldInput) {
+          voiceHoldInput.addEventListener("pointerdown", beginComposerVoiceHold);
+          voiceHoldInput.addEventListener("pointermove", handleComposerVoiceMove);
+          voiceHoldInput.addEventListener("pointerup", endComposerVoiceHold);
+          voiceHoldInput.addEventListener("pointercancel", cancelComposerVoiceHold);
         }
 
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");

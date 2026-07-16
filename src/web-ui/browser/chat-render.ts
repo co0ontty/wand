@@ -2238,7 +2238,6 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
       export function applyHistoryCollapse(chatMessages, selectedSession) {
         if (!chatMessages) return;
         var allMessages = state.currentMessages || [];
-        if (!selectedSession) selectedSession = getSelectedSession();
         var lastUserIdx = -1;
         for (var i = allMessages.length - 1; i >= 0; i--) {
           if (allMessages[i] && allMessages[i].role === "user") { lastUserIdx = i; break; }
@@ -2251,64 +2250,44 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           for (var h = 0; h < hidden.length; h++) hidden[h].classList.remove("chat-history-hidden");
           chatMessages.removeAttribute("data-history-sig");
         }
+        clearAll();
 
-        // 没有"最后一条用户消息之前的历史"就不折叠。
-        if (lastUserIdx < 1) { clearAll(); return; }
-
-        // 收集已渲染的消息元素，供视口判断和历史折叠共用，避免一轮 render 重复查 DOM。
-        var msgEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
-
-        // Codex / 结构化模式下先保持历史可见；等最新一轮回复自身撑满视口，
-        // 再把更早历史收起。短回复不再一发新消息就只剩一张"展开历史"卡。
-        var viewportDriven = shouldRequestChatFormat(selectedSession);
-        var collapseState = collectHistoryCollapseState(chatMessages, msgEls, lastUserIdx, viewportDriven && state.chatStickToBottom);
-        if (viewportDriven && (!state.chatStickToBottom || !collapseState.shouldCollapseForViewport)) {
-          clearAll();
-          return;
+        var msgEls = chatMessages.querySelectorAll(".chat-message.assistant[data-msg-index]");
+        for (var m = 0; m < msgEls.length; m++) {
+          var el = msgEls[m];
+          var idx = parseInt(el.getAttribute("data-msg-index") || "", 10);
+          if (isNaN(idx) || !allMessages[idx] || allMessages[idx].role !== "assistant") continue;
+          var historical = idx < lastUserIdx;
+          var key = buildExpandKey(historical ? "assistant-reply-history" : "assistant-reply-current", [getMessageKey(allMessages[idx], idx)]);
+          var persisted = getPersistedExpandState(key);
+          var expanded = persisted === null ? !historical : persisted;
+          var disclosure = el.querySelector(":scope > .assistant-reply-disclosure");
+          if (!disclosure) {
+            disclosure = document.createElement("button");
+            disclosure.className = "assistant-reply-disclosure";
+            disclosure.setAttribute("type", "button");
+            el.insertBefore(disclosure, el.firstChild);
+          }
+          disclosure.setAttribute("data-expand-key", key);
+          disclosure.setAttribute("aria-expanded", expanded ? "true" : "false");
+          disclosure.innerHTML =
+            '<span class="assistant-reply-label">回复</span>' +
+            '<span class="assistant-reply-preview">' + escapeHtml(getMessagePreviewText(allMessages[idx]) || "助手回复") + '</span>' +
+            '<span class="assistant-reply-action">' + (expanded ? "收起" : "展开") + '</span>' +
+            '<span class="assistant-reply-chevron">' + iconSvg("chevronDown", { size: 15 }) + '</span>';
+          el.classList.toggle("assistant-reply-collapsed", !expanded);
+          el.classList.toggle("assistant-reply-expanded", expanded);
+          disclosure.onclick = function() {
+            var parent = this.parentElement;
+            var nextExpanded = parent.classList.contains("assistant-reply-collapsed");
+            parent.classList.toggle("assistant-reply-collapsed", !nextExpanded);
+            parent.classList.toggle("assistant-reply-expanded", nextExpanded);
+            this.setAttribute("aria-expanded", nextExpanded ? "true" : "false");
+            var action = this.querySelector(".assistant-reply-action");
+            if (action) action.textContent = nextExpanded ? "收起" : "展开";
+            setPersistedExpandState(this.getAttribute("data-expand-key"), nextExpanded);
+          };
         }
-
-        var historyIndices = collapseState.historyIndices;
-        var firstHistoryEl = collapseState.firstHistoryEl;
-        // 至少折叠一整轮（≥2 条历史 turn）才值得出摘要，避免折叠孤零零一条短消息。
-        if (historyIndices.length < 2 || !firstHistoryEl) { clearAll(); return; }
-
-        var stats = computeHistoryStats(allMessages, historyIndices);
-        var key = buildExpandKey("history-summary", [lastUserIdx]);
-        var expanded = getPersistedExpandState(key) === true;
-        var sig = lastUserIdx + ":" + historyIndices.length + ":" + (expanded ? 1 : 0) +
-          ":" + stats.rounds + ":" + stats.tools + ":" + stats.agents + ":" + stats.errors;
-
-        // 签名未变且摘要卡还在 → 跳过，避免流式高频重建闪烁。
-        if (chatMessages.getAttribute("data-history-sig") === sig &&
-            chatMessages.querySelector(".chat-history-summary")) {
-          return;
-        }
-
-        // 重建：移除旧卡 + 清隐藏标记。
-        var prevCard = chatMessages.querySelector(".chat-history-summary");
-        if (prevCard) prevCard.remove();
-        var prevHidden = chatMessages.querySelectorAll(".chat-history-hidden");
-        for (var ph = 0; ph < prevHidden.length; ph++) prevHidden[ph].classList.remove("chat-history-hidden");
-
-        var metaText = buildHistorySummaryMetaText(stats);
-        var titleText = expanded ? t("history.collapse") : t("history.expand");
-        var summary = document.createElement("div");
-        summary.className = "chat-history-summary";
-        summary.setAttribute("data-expand-key", key);
-        summary.setAttribute("data-expanded", expanded ? "true" : "false");
-        summary.innerHTML =
-          '<button class="chat-history-summary-btn" type="button" onclick="window.__historySummaryToggle(this)" aria-expanded="' + (expanded ? "true" : "false") + '">' +
-            '<span class="chat-history-summary-icon">' + iconSvg("folder", { size: 15 }) + '</span>' +
-            '<span class="chat-history-summary-body">' +
-              '<span class="chat-history-summary-title">' + escapeHtml(titleText) + '</span>' +
-              '<span class="chat-history-summary-meta">' + escapeHtml(metaText) + '</span>' +
-            '</span>' +
-            '<span class="chat-history-summary-chevron">' + iconSvg("chevronDown", { size: 16 }) + '</span>' +
-          '</button>';
-
-        chatMessages.insertBefore(summary, firstHistoryEl);
-        applyHistoryHiddenState(summary, expanded);
-        chatMessages.setAttribute("data-history-sig", sig);
       }
 
       window.__historySummaryToggle = function(btn) {

@@ -19,6 +19,10 @@ import { getSessionStatusLabel } from "./session-ui";
       // ─────────────────────────────────────────────────────────────────
       export var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
       export var VOICE_CANCEL_THRESHOLD = 60; // 按住后上滑超过该像素进入"松开取消"态
+      export var VOICE_HOLD_DELAY = 180;
+      var composerVoiceHoldTimer = null;
+      var composerVoiceHoldStartY = 0;
+      var composerVoiceHoldPointerId = null;
 
       // STT 唯一注入点：写入累积文字并刷新气泡内容。
       // 网页端目前没有可用的语音识别后端（移动端走原生客户端的端侧 STT）；
@@ -86,6 +90,64 @@ import { getSessionStatusLabel } from "./session-ui";
           commitVoiceTranscript(text);
           toggleVoiceMode(false); // 松手提交后退出语音模式，回到打字态便于修改
         }
+      }
+
+      function clearComposerVoiceHoldTimer() {
+        if (composerVoiceHoldTimer !== null) {
+          clearTimeout(composerVoiceHoldTimer);
+          composerVoiceHoldTimer = null;
+        }
+      }
+
+      export function beginComposerVoiceHold(e) {
+        var box = e && e.currentTarget;
+        if (!box || state.terminalInteractive || (box.value || "").trim()) return;
+        clearComposerVoiceHoldTimer();
+        composerVoiceHoldStartY = typeof e.clientY === "number" ? e.clientY : 0;
+        composerVoiceHoldPointerId = e.pointerId;
+        composerVoiceHoldTimer = setTimeout(function() {
+          composerVoiceHoldTimer = null;
+          if ((box.value || "").trim()) return;
+          startVoiceRecording(e);
+          var composer = box.closest && box.closest(".input-composer");
+          if (composer) composer.classList.add("voice-holding");
+          box.placeholder = "松开结束 · 上滑取消";
+        }, VOICE_HOLD_DELAY);
+      }
+
+      export function handleComposerVoiceMove(e) {
+        if (composerVoiceHoldTimer !== null) {
+          var dy = Math.abs(composerVoiceHoldStartY - (typeof e.clientY === "number" ? e.clientY : composerVoiceHoldStartY));
+          if (dy > 10) clearComposerVoiceHoldTimer();
+          return;
+        }
+        if (voiceState.recording && (composerVoiceHoldPointerId === null || e.pointerId === composerVoiceHoldPointerId)) {
+          handleVoiceMove(e);
+          var box = e.currentTarget;
+          if (box) box.placeholder = voiceState.canceling ? "松开取消" : "松开结束 · 上滑取消";
+        }
+      }
+
+      function finishComposerVoiceHold(e, canceled) {
+        var wasPending = composerVoiceHoldTimer !== null;
+        clearComposerVoiceHoldTimer();
+        if (!wasPending && voiceState.recording) {
+          if (canceled) voiceState.canceling = true;
+          stopVoiceRecording(e);
+        }
+        composerVoiceHoldPointerId = null;
+        var box = e && e.currentTarget;
+        var composer = box && box.closest && box.closest(".input-composer");
+        if (composer) composer.classList.remove("voice-holding");
+        if (box) box.placeholder = getComposerPlaceholder(getSelectedSession(), state.terminalInteractive);
+      }
+
+      export function endComposerVoiceHold(e) {
+        finishComposerVoiceHold(e, false);
+      }
+
+      export function cancelComposerVoiceHold(e) {
+        finishComposerVoiceHold(e, true);
       }
 
       // 复位录音相关 UI（按钮 + 气泡），不改变是否处于语音模式。

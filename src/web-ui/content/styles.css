@@ -5350,6 +5350,53 @@
       transform: rotate(180deg);
     }
 
+    /* 每条助手回复独立折叠；用户输入始终完整显示。标题行无卡片底色。 */
+    .assistant-reply-disclosure {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-height: 34px;
+      padding: 4px 2px;
+      border: 0;
+      background: transparent;
+      color: var(--text-secondary);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .assistant-reply-label {
+      flex-shrink: 0;
+      color: var(--accent);
+      font-size: 0.72rem;
+      font-weight: 650;
+    }
+    .assistant-reply-preview {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-tertiary);
+      font-size: 0.78rem;
+    }
+    .assistant-reply-action {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+    .assistant-reply-chevron {
+      display: inline-flex;
+      flex-shrink: 0;
+      transition: transform 0.18s ease;
+    }
+    .chat-message.assistant-reply-expanded > .assistant-reply-disclosure .assistant-reply-chevron {
+      transform: rotate(180deg);
+    }
+    .chat-message.assistant-reply-collapsed > :not(.assistant-reply-disclosure) {
+      display: none !important;
+    }
+
     /* ──────────────────────────────────────────────────────────────
        Inline Tool — single read-only row (Read / Glob / Grep / Web*)
        Clean two-column layout: icon + title | meta. Hover lifts subtly.
@@ -6159,6 +6206,7 @@
          · .input-composer.voice-mode 时 textarea + ghost 隐藏，露出 .voice-input-mode。
        ─────────────────────────────────────────────────────────────────── */
     .input-composer {
+      --composer-action-size: 34px;
       background: rgba(255, 255, 255, 0.88);
       border: 1px solid var(--border-default);
       border-radius: 22px;
@@ -6171,6 +6219,10 @@
       border-color: var(--accent);
       box-shadow: 0 0 0 2px var(--accent-muted), 0 0 16px rgba(197, 101, 61, 0.08);
       background: rgba(255, 255, 255, 0.98);
+    }
+    .input-composer.voice-holding {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-muted);
     }
     /* 状态行：没"非隐藏"子节点时高度归零（不留视觉空白）；
        :has() 选择器在 Safari 15.4+/Chrome 105+ 均可用。 */
@@ -6200,15 +6252,15 @@
     .composer-main-row {
       display: flex;
       align-items: center;
-      gap: 4px;
-      padding: 4px 6px;
-      min-height: 44px;
+      gap: 6px;
+      padding: 5px 7px;
+      min-height: 48px;
     }
     .composer-actions-left,
     .composer-actions-right {
       display: flex;
       align-items: center;
-      gap: 2px;
+      gap: 6px;
       flex-shrink: 0;
     }
     .composer-input-wrap {
@@ -7465,27 +7517,28 @@
 
     /* Circular action buttons */
     .btn-circle {
-      width: 28px;
-      height: 28px;
-      min-width: 28px;
+      width: var(--composer-action-size);
+      height: var(--composer-action-size);
+      min-width: var(--composer-action-size);
       border-radius: 50%;
       border: none;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: all var(--transition-fast);
+      transition: background-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), opacity var(--transition-fast);
       flex-shrink: 0;
       padding: 0;
     }
     .btn-circle-send {
-      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
+      background: var(--accent);
       color: white;
-      box-shadow: 0 1px 6px rgba(197, 101, 61, 0.25);
+      box-shadow: none;
     }
     .btn-circle-send:hover {
-      transform: scale(1.08);
-      box-shadow: 0 3px 10px rgba(197, 101, 61, 0.35);
+      background: var(--accent-hover);
+      transform: scale(1.04);
+      box-shadow: none;
     }
     .btn-circle-send:active {
       transform: scale(0.95);
@@ -7510,12 +7563,12 @@
     /* send 按钮在「排队模式」下退到次要色，让相邻的"立即发送"成为视觉重点。
        不动尺寸 / 圆形，避免 layout shift。 */
     .btn-circle-send.queue-mode {
-      background: linear-gradient(180deg, rgba(197, 101, 61, 0.55) 0%, rgba(168, 82, 47, 0.55) 100%);
-      box-shadow: 0 1px 4px rgba(197, 101, 61, 0.15);
+      background: rgba(197, 101, 61, 0.58);
+      box-shadow: none;
     }
     .btn-circle-send.queue-mode:hover {
-      background: linear-gradient(180deg, var(--accent) 0%, #a8522f 100%);
-      box-shadow: 0 3px 10px rgba(197, 101, 61, 0.35);
+      background: var(--accent);
+      box-shadow: none;
     }
 
     /* Prompt optimize button — top-right of the input composer */
@@ -7523,8 +7576,8 @@
       position: absolute;
       top: 5px;
       right: 6px;
-      width: 28px;
-      height: 28px;
+      width: var(--composer-action-size);
+      height: var(--composer-action-size);
       border-radius: 50%;
       border: 1px solid rgba(197, 101, 61, 0.22);
       padding: 0;
@@ -7532,22 +7585,22 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      background: linear-gradient(135deg, rgba(255, 250, 242, 0.95) 0%, rgba(232, 197, 174, 0.35) 100%);
+      background: rgba(197, 101, 61, 0.09);
       color: var(--accent);
       z-index: 4;
-      box-shadow: 0 1px 4px rgba(197, 101, 61, 0.10);
-      transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+      box-shadow: none;
+      transition: background-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
     }
     .prompt-optimize-btn:hover {
-      background: linear-gradient(135deg, rgba(255, 250, 242, 1) 0%, rgba(232, 197, 174, 0.55) 100%);
+      background: rgba(197, 101, 61, 0.14);
       color: var(--accent-hover);
-      transform: scale(1.12);
+      transform: scale(1.04);
       border-color: rgba(197, 101, 61, 0.35);
-      box-shadow: 0 2px 10px rgba(197, 101, 61, 0.22), 0 0 0 3px rgba(197, 101, 61, 0.06);
+      box-shadow: none;
     }
     .prompt-optimize-btn:active {
       transform: scale(0.92);
-      box-shadow: 0 1px 3px rgba(197, 101, 61, 0.15);
+      box-shadow: none;
     }
     .prompt-optimize-btn:disabled {
       cursor: not-allowed;
@@ -7555,8 +7608,8 @@
     }
     .prompt-optimize-btn:disabled:hover {
       transform: none;
-      background: linear-gradient(135deg, rgba(255, 250, 242, 0.95) 0%, rgba(232, 197, 174, 0.35) 100%);
-      box-shadow: 0 1px 4px rgba(197, 101, 61, 0.10);
+      background: rgba(197, 101, 61, 0.09);
+      box-shadow: none;
       border-color: rgba(197, 101, 61, 0.22);
     }
     .prompt-optimize-icon {
@@ -7649,8 +7702,8 @@
 
     @media (max-width: 720px) {
       .prompt-optimize-btn {
-        width: 26px;
-        height: 26px;
+        width: var(--composer-action-size);
+        height: var(--composer-action-size);
       }
       .prompt-optimize-icon {
         width: 14px;
@@ -7666,16 +7719,16 @@
     .btn-circle-action {
       background: transparent;
       color: var(--text-muted);
-      width: 32px;
-      height: 32px;
-      min-width: 32px;
+      width: var(--composer-action-size);
+      height: var(--composer-action-size);
+      min-width: var(--composer-action-size);
       border-radius: 50%;
       border: none;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: all var(--transition-fast);
+      transition: background-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
       flex-shrink: 0;
       padding: 0;
     }
@@ -8029,22 +8082,22 @@
       top: auto;
       left: auto;
       transform: none;
-      width: 26px;
-      height: 26px;
+      width: var(--composer-action-size);
+      height: var(--composer-action-size);
       z-index: 4;
     }
     .input-composer.has-text .prompt-optimize-btn {
       display: inline-flex;
     }
     .input-composer.has-text .prompt-optimize-btn:hover {
-      transform: scale(1.12);
+      transform: scale(1.04);
     }
     .input-composer.has-text .prompt-optimize-btn:active {
       transform: scale(0.92);
     }
     /* has-text 时给 textarea 留出右内边距，避免文字被优化按钮压住 */
     .input-composer.has-text .input-textarea {
-      padding-right: 36px;
+      padding-right: 44px;
     }
 
     /* 语音输入模式 —— 模仿微信"按住说话"。整个 textarea 区域被替换为一颗大胶囊按钮。
@@ -8242,14 +8295,14 @@
 
     @media (max-width: 720px) {
       .btn-circle-action {
-        width: 30px;
-        height: 30px;
-        min-width: 30px;
+        width: var(--composer-action-size);
+        height: var(--composer-action-size);
+        min-width: var(--composer-action-size);
       }
       .composer-main-row {
-        padding: 3px 4px;
-        min-height: 42px;
-        gap: 2px;
+        padding: 5px 6px;
+        min-height: 48px;
+        gap: 5px;
       }
     }
 
@@ -10330,8 +10383,9 @@
       
 
       .btn-circle {
-        width: 26px;
-        height: 26px;
+        width: var(--composer-action-size);
+        height: var(--composer-action-size);
+        min-width: var(--composer-action-size);
         border-radius: 50%;
       }
       .btn-circle-send svg, .btn-circle-stop svg {
@@ -10350,6 +10404,10 @@
         padding: 7px 30px 5px 8px;
         font-size: 16px;
         line-height: 1.35;
+      }
+
+      .input-composer.has-text .input-textarea {
+        padding-right: 44px;
       }
 
       .input-textarea::placeholder {
@@ -10618,7 +10676,7 @@
       .input-composer { border-radius: 8px; }
       .input-textarea { min-height: 28px; padding: 5px 28px 2px 6px; font-size: 16px; }
 
-      .btn-circle { width: 28px; height: 28px; min-width: 28px; }
+      .btn-circle { width: var(--composer-action-size); height: var(--composer-action-size); min-width: var(--composer-action-size); }
 
       .session-item {
         padding: 6px 8px;
@@ -13547,52 +13605,17 @@
     }
 
     /* ── 结构化会话状态条 ── */
-    /* ── 输入框顶部波浪脉冲（回复中） ── */
+    /* 回复中只保留稳定的顶部状态线，避免输入框或发送键周围出现装饰性光圈。 */
     .input-composer.in-flight {
-      border-color: transparent;
+      border-color: var(--border-default);
+      box-shadow: inset 0 2px 0 rgba(var(--accent-rgb, 197, 101, 61), 0.34);
     }
-    .input-composer.in-flight::before {
-      content: "";
-      position: absolute;
-      top: -2px;
-      left: -60%;
-      width: 220%;
-      height: 3px;
-      border-radius: 14px 14px 0 0;
-      background:
-        radial-gradient(ellipse 280px 4px,
-          rgba(var(--accent-rgb, 197, 101, 61), 0.45) 0%,
-          rgba(var(--accent-rgb, 197, 101, 61), 0.12) 35%,
-          transparent 60%)
-        no-repeat;
-      background-size: 280px 4px;
-      animation: composerWaveSlide 7s cubic-bezier(0.35, 0, 0.65, 1) infinite;
-      z-index: 2;
-      pointer-events: none;
+    .input-composer.in-flight:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-muted), inset 0 2px 0 rgba(var(--accent-rgb, 197, 101, 61), 0.34);
     }
-    .input-composer.in-flight::after {
-      content: "";
-      position: absolute;
-      top: -2px;
-      left: -60%;
-      width: 220%;
-      height: 3px;
-      border-radius: 14px 14px 0 0;
-      background:
-        radial-gradient(ellipse 220px 3px,
-          rgba(var(--accent-rgb, 197, 101, 61), 0.25) 0%,
-          rgba(var(--accent-rgb, 197, 101, 61), 0.06) 35%,
-          transparent 60%)
-        no-repeat;
-      background-size: 220px 3px;
-      animation: composerWaveSlide 9s cubic-bezier(0.35, 0, 0.65, 1) infinite reverse;
-      z-index: 2;
-      pointer-events: none;
-    }
-    @keyframes composerWaveSlide {
-      0%   { background-position: 0% center; }
-      100% { background-position: 100% center; }
-    }
+    .input-composer.in-flight::before,
+    .input-composer.in-flight::after { content: none; }
 
     /* ── 结构化会话状态条（与 todo 折叠栏共处一行，靠右） ──
        Only opacity/color transition — `transition: all` would cause this bar to

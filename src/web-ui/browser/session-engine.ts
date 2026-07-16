@@ -197,7 +197,7 @@ import { getSessionKindHint, getSessionLatestUserText, getSessionStatusLabel } f
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) {
           return "回复中，可继续输入";
         }
-        return "输入消息";
+        return "打字或按住说话";
       }
 
       export function getToolModeHint(tool, mode) {

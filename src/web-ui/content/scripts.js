@@ -7448,24 +7448,12 @@
         fileInput.value = "";
       });
     }
-    var voiceBtn = document.getElementById("voice-btn");
-    if (voiceBtn) {
-      voiceBtn.addEventListener("click", function() {
-        toggleVoiceMode();
-      });
-    }
-    var voiceCancelBtn = document.getElementById("voice-cancel-btn");
-    if (voiceCancelBtn) {
-      voiceCancelBtn.addEventListener("click", function() {
-        toggleVoiceMode(false);
-      });
-    }
-    var voiceRecordBtn = document.getElementById("voice-record-btn");
-    if (voiceRecordBtn) {
-      voiceRecordBtn.addEventListener("pointerdown", startVoiceRecording);
-      voiceRecordBtn.addEventListener("pointermove", handleVoiceMove);
-      voiceRecordBtn.addEventListener("pointerup", stopVoiceRecording);
-      voiceRecordBtn.addEventListener("pointercancel", stopVoiceRecording);
+    var voiceHoldInput = document.getElementById("input-box");
+    if (voiceHoldInput) {
+      voiceHoldInput.addEventListener("pointerdown", beginComposerVoiceHold);
+      voiceHoldInput.addEventListener("pointermove", handleComposerVoiceMove);
+      voiceHoldInput.addEventListener("pointerup", endComposerVoiceHold);
+      voiceHoldInput.addEventListener("pointercancel", cancelComposerVoiceHold);
     }
     var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
     if (promptOptimizeBtn) {
@@ -8290,7 +8278,7 @@
     return '<div class="app-container"><div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div><div class="main-layout' + (state.sessionsDrawerOpen ? " sidebar-open" : "") + (isAnchored ? " sidebar-pinned" : "") + collapsedCls + '"><aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? " pinned" : "") + sidebarCollapsedCls + '"><div class="sidebar-header"><div class="sidebar-header-main"><div class="topbar-logo-icon">W</div><span class="sidebar-title">\u4F1A\u8BDD</span><span class="session-count" id="session-count">' + String(state.sessions.filter(function(session) {
       var source = String(session && session.sessionSource || "").toLowerCase();
       return source !== "automation" && source !== "startup";
-    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title" title="' + escapeHtml2(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml2(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml2(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml2(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml2(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml2(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd3(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div><div class="blank-chat-cwd-dropdown hidden" id="blank-chat-cwd-dropdown"></div></div></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><div class="todo-progress-header" id="todo-progress-toggle"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div><svg class="todo-progress-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></div></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer' + (currentDraft ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A" aria-haspopup="dialog" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml2(currentDraft) + '</textarea><button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09" aria-label="\u63D0\u793A\u8BCD\u4F18\u5316"><svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/><path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/></svg><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><div class="voice-input-mode hidden" id="voice-input-mode"><button id="voice-record-btn" class="voice-record-btn" type="button"><span class="voice-record-pulse" aria-hidden="true"></span><span class="voice-record-label">\u6309\u4F4F \u8BF4\u8BDD</span></button><button id="voice-cancel-btn" class="voice-cancel-btn" type="button" title="\u9000\u51FA\u8BED\u97F3\u6A21\u5F0F" aria-label="\u9000\u51FA\u8BED\u97F3\u6A21\u5F0F">' + iconSvg("x", { size: 14, strokeWidth: 2 }) + '</button></div></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" title="\u505C\u6B62"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="send-input-button" class="btn-circle btn-circle-send" title="\u53D1\u9001"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + '</div></div><div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div><section id="folder-picker-modal" class="modal-backdrop hidden"><div class="modal folder-picker-modal"><div class="modal-header"><h2 class="modal-title">\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55</h2><button id="close-folder-picker" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="\u5173\u95ED"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div><div class="modal-body"><div class="folder-picker-quick-row"><button class="folder-picker-quick-btn btn-with-icon" data-path="/tmp">' + iconSvg("trash", { size: 13, strokeWidth: 1.7 }) + '<span>\u4E34\u65F6\u76EE\u5F55</span></button><button class="folder-picker-quick-btn btn-with-icon" data-path="/">' + iconSvg("folder", { size: 13, strokeWidth: 1.7 }) + '<span>\u6839\u76EE\u5F55</span></button></div><div id="folder-breadcrumb" class="folder-breadcrumb"></div><div class="folder-picker"><span class="folder-picker-icon">' + iconSvg("folder", { size: 15, strokeWidth: 1.7 }) + '</span><input type="text" id="folder-picker-input" class="folder-picker-input" value="" placeholder="\u8F93\u5165\u6216\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /></div><div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div><div id="folder-picker-validation" class="folder-picker-validation"></div></div></div></section></main></div></div>' + renderSessionModal() + renderWorktreeMergeModal() + renderSettingsModal() + renderQuickCommitModal();
+    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title" title="' + escapeHtml2(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml2(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml2(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml2(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml2(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml2(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd3(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow" id="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div><div class="blank-chat-cwd-dropdown hidden" id="blank-chat-cwd-dropdown"></div></div></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><div class="todo-progress-header" id="todo-progress-toggle"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div><svg class="todo-progress-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></div></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer' + (currentDraft ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A" aria-haspopup="dialog" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml2(currentDraft) + '</textarea><button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09" aria-label="\u63D0\u793A\u8BCD\u4F18\u5316"><svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/><path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/></svg><span class="prompt-optimize-spinner" aria-hidden="true"></span></button></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" title="\u505C\u6B62"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="send-input-button" class="btn-circle btn-circle-send" title="\u53D1\u9001"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + '</div></div><div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div><section id="folder-picker-modal" class="modal-backdrop hidden"><div class="modal folder-picker-modal"><div class="modal-header"><h2 class="modal-title">\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55</h2><button id="close-folder-picker" class="btn btn-ghost btn-icon modal-close-btn" type="button" aria-label="\u5173\u95ED"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div><div class="modal-body"><div class="folder-picker-quick-row"><button class="folder-picker-quick-btn btn-with-icon" data-path="/tmp">' + iconSvg("trash", { size: 13, strokeWidth: 1.7 }) + '<span>\u4E34\u65F6\u76EE\u5F55</span></button><button class="folder-picker-quick-btn btn-with-icon" data-path="/">' + iconSvg("folder", { size: 13, strokeWidth: 1.7 }) + '<span>\u6839\u76EE\u5F55</span></button></div><div id="folder-breadcrumb" class="folder-breadcrumb"></div><div class="folder-picker"><span class="folder-picker-icon">' + iconSvg("folder", { size: 15, strokeWidth: 1.7 }) + '</span><input type="text" id="folder-picker-input" class="folder-picker-input" value="" placeholder="\u8F93\u5165\u6216\u9009\u62E9\u5DE5\u4F5C\u76EE\u5F55..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /></div><div id="folder-picker-dropdown" class="folder-picker-dropdown hidden"></div><div id="folder-picker-validation" class="folder-picker-validation"></div></div></div></section></main></div></div>' + renderSessionModal() + renderWorktreeMergeModal() + renderSettingsModal() + renderQuickCommitModal();
   }
 
   // src/web-ui/browser/notifications.ts
@@ -9227,6 +9215,10 @@
   // src/web-ui/browser/input.ts
   var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
   var VOICE_CANCEL_THRESHOLD = 60;
+  var VOICE_HOLD_DELAY = 180;
+  var composerVoiceHoldTimer = null;
+  var composerVoiceHoldStartY = 0;
+  var composerVoiceHoldPointerId = null;
   function updateVoiceTranscript(text) {
     voiceState.transcript = text || "";
     var textEl = document.getElementById("voice-transcript-text");
@@ -9285,6 +9277,58 @@
       commitVoiceTranscript(text);
       toggleVoiceMode(false);
     }
+  }
+  function clearComposerVoiceHoldTimer() {
+    if (composerVoiceHoldTimer !== null) {
+      clearTimeout(composerVoiceHoldTimer);
+      composerVoiceHoldTimer = null;
+    }
+  }
+  function beginComposerVoiceHold(e) {
+    var box = e && e.currentTarget;
+    if (!box || state.terminalInteractive || (box.value || "").trim()) return;
+    clearComposerVoiceHoldTimer();
+    composerVoiceHoldStartY = typeof e.clientY === "number" ? e.clientY : 0;
+    composerVoiceHoldPointerId = e.pointerId;
+    composerVoiceHoldTimer = setTimeout(function() {
+      composerVoiceHoldTimer = null;
+      if ((box.value || "").trim()) return;
+      startVoiceRecording(e);
+      var composer = box.closest && box.closest(".input-composer");
+      if (composer) composer.classList.add("voice-holding");
+      box.placeholder = "\u677E\u5F00\u7ED3\u675F \xB7 \u4E0A\u6ED1\u53D6\u6D88";
+    }, VOICE_HOLD_DELAY);
+  }
+  function handleComposerVoiceMove(e) {
+    if (composerVoiceHoldTimer !== null) {
+      var dy = Math.abs(composerVoiceHoldStartY - (typeof e.clientY === "number" ? e.clientY : composerVoiceHoldStartY));
+      if (dy > 10) clearComposerVoiceHoldTimer();
+      return;
+    }
+    if (voiceState.recording && (composerVoiceHoldPointerId === null || e.pointerId === composerVoiceHoldPointerId)) {
+      handleVoiceMove(e);
+      var box = e.currentTarget;
+      if (box) box.placeholder = voiceState.canceling ? "\u677E\u5F00\u53D6\u6D88" : "\u677E\u5F00\u7ED3\u675F \xB7 \u4E0A\u6ED1\u53D6\u6D88";
+    }
+  }
+  function finishComposerVoiceHold(e, canceled) {
+    var wasPending = composerVoiceHoldTimer !== null;
+    clearComposerVoiceHoldTimer();
+    if (!wasPending && voiceState.recording) {
+      if (canceled) voiceState.canceling = true;
+      stopVoiceRecording(e);
+    }
+    composerVoiceHoldPointerId = null;
+    var box = e && e.currentTarget;
+    var composer = box && box.closest && box.closest(".input-composer");
+    if (composer) composer.classList.remove("voice-holding");
+    if (box) box.placeholder = getComposerPlaceholder(getSelectedSession3(), state.terminalInteractive);
+  }
+  function endComposerVoiceHold(e) {
+    finishComposerVoiceHold(e, false);
+  }
+  function cancelComposerVoiceHold(e) {
+    finishComposerVoiceHold(e, true);
   }
   function resetVoiceRecordingUI() {
     voiceState.canceling = false;
@@ -13430,7 +13474,6 @@
   function applyHistoryCollapse(chatMessages, selectedSession) {
     if (!chatMessages) return;
     var allMessages = state.currentMessages || [];
-    if (!selectedSession) selectedSession = getSelectedSession3();
     var lastUserIdx = -1;
     for (var i = allMessages.length - 1; i >= 0; i--) {
       if (allMessages[i] && allMessages[i].role === "user") {
@@ -13445,44 +13488,39 @@
       for (var h = 0; h < hidden.length; h++) hidden[h].classList.remove("chat-history-hidden");
       chatMessages.removeAttribute("data-history-sig");
     }
-    if (lastUserIdx < 1) {
-      clearAll();
-      return;
+    clearAll();
+    var msgEls = chatMessages.querySelectorAll(".chat-message.assistant[data-msg-index]");
+    for (var m = 0; m < msgEls.length; m++) {
+      var el = msgEls[m];
+      var idx = parseInt(el.getAttribute("data-msg-index") || "", 10);
+      if (isNaN(idx) || !allMessages[idx] || allMessages[idx].role !== "assistant") continue;
+      var historical = idx < lastUserIdx;
+      var key = buildExpandKey(historical ? "assistant-reply-history" : "assistant-reply-current", [getMessageKey(allMessages[idx], idx)]);
+      var persisted = getPersistedExpandState(key);
+      var expanded = persisted === null ? !historical : persisted;
+      var disclosure = el.querySelector(":scope > .assistant-reply-disclosure");
+      if (!disclosure) {
+        disclosure = document.createElement("button");
+        disclosure.className = "assistant-reply-disclosure";
+        disclosure.setAttribute("type", "button");
+        el.insertBefore(disclosure, el.firstChild);
+      }
+      disclosure.setAttribute("data-expand-key", key);
+      disclosure.setAttribute("aria-expanded", expanded ? "true" : "false");
+      disclosure.innerHTML = '<span class="assistant-reply-label">\u56DE\u590D</span><span class="assistant-reply-preview">' + escapeHtml2(getMessagePreviewText(allMessages[idx]) || "\u52A9\u624B\u56DE\u590D") + '</span><span class="assistant-reply-action">' + (expanded ? "\u6536\u8D77" : "\u5C55\u5F00") + '</span><span class="assistant-reply-chevron">' + iconSvg("chevronDown", { size: 15 }) + "</span>";
+      el.classList.toggle("assistant-reply-collapsed", !expanded);
+      el.classList.toggle("assistant-reply-expanded", expanded);
+      disclosure.onclick = function() {
+        var parent = this.parentElement;
+        var nextExpanded = parent.classList.contains("assistant-reply-collapsed");
+        parent.classList.toggle("assistant-reply-collapsed", !nextExpanded);
+        parent.classList.toggle("assistant-reply-expanded", nextExpanded);
+        this.setAttribute("aria-expanded", nextExpanded ? "true" : "false");
+        var action = this.querySelector(".assistant-reply-action");
+        if (action) action.textContent = nextExpanded ? "\u6536\u8D77" : "\u5C55\u5F00";
+        setPersistedExpandState(this.getAttribute("data-expand-key"), nextExpanded);
+      };
     }
-    var msgEls = chatMessages.querySelectorAll(".chat-message:not(.system-info)");
-    var viewportDriven = shouldRequestChatFormat2(selectedSession);
-    var collapseState = collectHistoryCollapseState(chatMessages, msgEls, lastUserIdx, viewportDriven && state.chatStickToBottom);
-    if (viewportDriven && (!state.chatStickToBottom || !collapseState.shouldCollapseForViewport)) {
-      clearAll();
-      return;
-    }
-    var historyIndices = collapseState.historyIndices;
-    var firstHistoryEl = collapseState.firstHistoryEl;
-    if (historyIndices.length < 2 || !firstHistoryEl) {
-      clearAll();
-      return;
-    }
-    var stats = computeHistoryStats(allMessages, historyIndices);
-    var key = buildExpandKey("history-summary", [lastUserIdx]);
-    var expanded = getPersistedExpandState(key) === true;
-    var sig = lastUserIdx + ":" + historyIndices.length + ":" + (expanded ? 1 : 0) + ":" + stats.rounds + ":" + stats.tools + ":" + stats.agents + ":" + stats.errors;
-    if (chatMessages.getAttribute("data-history-sig") === sig && chatMessages.querySelector(".chat-history-summary")) {
-      return;
-    }
-    var prevCard = chatMessages.querySelector(".chat-history-summary");
-    if (prevCard) prevCard.remove();
-    var prevHidden = chatMessages.querySelectorAll(".chat-history-hidden");
-    for (var ph = 0; ph < prevHidden.length; ph++) prevHidden[ph].classList.remove("chat-history-hidden");
-    var metaText = buildHistorySummaryMetaText(stats);
-    var titleText = expanded ? t2("history.collapse") : t2("history.expand");
-    var summary = document.createElement("div");
-    summary.className = "chat-history-summary";
-    summary.setAttribute("data-expand-key", key);
-    summary.setAttribute("data-expanded", expanded ? "true" : "false");
-    summary.innerHTML = '<button class="chat-history-summary-btn" type="button" onclick="window.__historySummaryToggle(this)" aria-expanded="' + (expanded ? "true" : "false") + '"><span class="chat-history-summary-icon">' + iconSvg("folder", { size: 15 }) + '</span><span class="chat-history-summary-body"><span class="chat-history-summary-title">' + escapeHtml2(titleText) + '</span><span class="chat-history-summary-meta">' + escapeHtml2(metaText) + '</span></span><span class="chat-history-summary-chevron">' + iconSvg("chevronDown", { size: 16 }) + "</span></button>";
-    chatMessages.insertBefore(summary, firstHistoryEl);
-    applyHistoryHiddenState(summary, expanded);
-    chatMessages.setAttribute("data-history-sig", sig);
   }
   window.__historySummaryToggle = function(btn) {
     var wrap = btn && btn.closest ? btn.closest(".chat-history-summary") : null;
@@ -14801,7 +14839,7 @@
     if (isStructuredSession2(session) && session.structuredState && session.structuredState.inFlight) {
       return "\u56DE\u590D\u4E2D\uFF0C\u53EF\u7EE7\u7EED\u8F93\u5165";
     }
-    return "\u8F93\u5165\u6D88\u606F";
+    return "\u6253\u5B57\u6216\u6309\u4F4F\u8BF4\u8BDD";
   }
   function getToolModeHint2(tool, mode) {
     if (tool === "codex") {
@@ -14861,7 +14899,7 @@
   function getSessionKindDescription(session) {
     return isStructuredSession2(session) ? "\u7ED3\u6784\u5316 \xB7 \u5757\u7EA7\u8BB0\u5F55" : session && session.provider === "codex" ? "\u7EC8\u7AEF \xB7 Codex PTY\uFF08chat \u4E3A\u89E3\u6790\u89C6\u56FE\uFF09" : "\u7EC8\u7AEF \xB7 PTY \u4F1A\u8BDD";
   }
-  function shouldRequestChatFormat2(session) {
+  function shouldRequestChatFormat3(session) {
     if (!session) return false;
     return isStructuredSession2(session) || session.provider === "codex";
   }
@@ -15023,7 +15061,7 @@
     return '<div class="composer-config-controls" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E" title="' + escapeHtml2(title) + '"><span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="\u6A21\u5F0F\uFF1A' + escapeHtml2(modeLabel) + '">' + iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modeLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="mode" aria-label="\u6A21\u5F0F">' + renderChatModeOptionsRaw(preferredTool, mode) + '</select></span><span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="\u6A21\u578B\uFF1A' + escapeHtml2(modelLabel) + '">' + iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(modelLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="model" aria-label="\u6A21\u578B">' + renderChatModelOptions(model, session) + '</select></span><span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml2(thinking) + '" title="\u601D\u8003\u6DF1\u5EA6\uFF1A' + escapeHtml2(thinkingLabel) + '">' + iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml2(thinkingLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="thinking" aria-label="\u601D\u8003\u6DF1\u5EA6">' + renderThinkingOptions(thinking, session) + "</select></span></div>";
   }
   function refreshAllChatModeTrios2() {
-    var session = getSelectedSession5();
+    var session = getSelectedSession6();
     var preferredTool = getPreferredTool();
     var mode = state.chatMode || "default";
     var model = getEffectiveModel(session) || "";
@@ -15266,7 +15304,7 @@
       });
     }).then(function(outcome) {
       if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast2 === "function") {
-        showToast2(successMessage || "\u5DF2\u5207\u6362\u601D\u8003\u6DF1\u5EA6 \u2192 " + getThinkingCompactLabel(normalized, getSelectedSession5()), "success");
+        showToast2(successMessage || "\u5DF2\u5207\u6362\u601D\u8003\u6DF1\u5EA6 \u2192 " + getThinkingCompactLabel(normalized, getSelectedSession6()), "success");
       }
     }).catch(function(failure) {
       if (failure && failure.latest) recoverLatestSessionConfigMutation(session.id, "\u5207\u6362\u601D\u8003\u6DF1\u5EA6\u5931\u8D25");
@@ -15274,7 +15312,7 @@
   }
   function onChatThinkingChange(value) {
     var normalized = (value || "off").trim();
-    var session = getSelectedSession5();
+    var session = getSelectedSession6();
     var supported = getThinkingLevels(session).some(function(level) {
       return level.id === normalized;
     });
@@ -15306,7 +15344,7 @@
         state.availableModels = data.models;
         state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
         state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
-        syncComposerModelSelect(getSelectedSession5());
+        syncComposerModelSelect(getSelectedSession6());
         updateSettingsDefaultModelSelect(data);
         syncCommitModelProvider(false);
       }
@@ -15334,7 +15372,7 @@
         state.availableModels = data.models;
         state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
         state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
-        syncComposerModelSelect(getSelectedSession5());
+        syncComposerModelSelect(getSelectedSession6());
         updateSettingsDefaultModelSelect(data);
         syncCommitModelProvider(false);
         if (typeof showToast2 === "function") {
@@ -15727,7 +15765,7 @@
       versionEl.textContent = data.claudeVersion ? "\u5DF2\u68C0\u6D4B\u5230 Claude CLI " + data.claudeVersion + "\uFF1B\u5217\u8868\u5DF2\u540C\u6B65 Codex \u4E0E OpenCode \u53EF\u7528\u6A21\u578B\u3002" : "\u672A\u8BFB\u53D6\u5230 Claude CLI \u7248\u672C\uFF1B\u4ECD\u53EF\u76F4\u63A5\u8F93\u5165\u81EA\u5B9A\u4E49\u6A21\u578B\u540D\u79F0\u3002";
     }
   }
-  function getSelectedSession5() {
+  function getSelectedSession6() {
     if (!state.selectedId) return null;
     for (var i = 0; i < state.sessions.length; i++) {
       if (state.sessions[i].id === state.selectedId) return state.sessions[i];
@@ -15736,7 +15774,7 @@
   }
   function onChatModelChange(value) {
     var normalized = (value || "").trim();
-    var session = getSelectedSession5();
+    var session = getSelectedSession6();
     var provider = getProviderForSession(session);
     setChatModelForProvider(provider, normalized);
     if (session) setPendingSessionConfig(session.id, "model", normalized);
@@ -15767,7 +15805,7 @@
     }).then(function(outcome) {
       if (thinkingFallback) return;
       if (applyLatestSessionConfigSnapshot(session.id, outcome) && typeof showToast2 === "function") {
-        var display2 = getModelDisplayLabel(normalized, getSelectedSession5() || session);
+        var display2 = getModelDisplayLabel(normalized, getSelectedSession6() || session);
         var hint = session.provider === "codex" ? "\uFF08\u4E0B\u6B21\u5BF9\u8BDD\u751F\u6548\uFF09" : "";
         showToast2("\u5DF2\u5207\u6362\u6A21\u578B \u2192 " + display2 + hint, "success");
       }
@@ -15786,7 +15824,7 @@
     var normalized = getSafeModeForTool(getPreferredTool(), (value || "default").trim());
     state.chatMode = normalized;
     refreshAllChatModeTrios2();
-    var session = getSelectedSession5();
+    var session = getSelectedSession6();
     if (!session || !session.id) {
       showToast2 && showToast2("\u65B0\u4F1A\u8BDD\u6A21\u5F0F\uFF1A" + normalized, "info");
       return;
@@ -16208,7 +16246,7 @@
       if (inputPanel) inputPanel.classList.add("hidden");
     }
     syncComposerModeSelect();
-    syncComposerModelSelect(getSelectedSession5());
+    syncComposerModelSelect(getSelectedSession6());
     applyCurrentView();
     reconcileInteractiveState();
   }
@@ -16221,7 +16259,7 @@
       return s.id === id;
     });
     var url = "/api/sessions/" + id;
-    if (shouldRequestChatFormat2(sess)) {
+    if (shouldRequestChatFormat3(sess)) {
       url += "?format=chat";
     }
     return fetch(url, { credentials: "same-origin" }).then(function(res) {
@@ -17763,7 +17801,7 @@
           setChatModelForProvider("opencode", "");
         }
         if (nextDefaultModel !== previousDefaults.claude || nextDefaultCodexModel !== previousDefaults.codex || nextDefaultOpenCodeModel !== previousDefaults.opencode) {
-          syncComposerModelSelect(getSelectedSession5());
+          syncComposerModelSelect(getSelectedSession6());
         }
       }
     }).catch(function() {
@@ -18485,7 +18523,7 @@
     state.sessionTool = provider;
     state.preferredCommand = provider;
     syncComposerModeSelect();
-    syncComposerModelSelect(getSelectedSession5());
+    syncComposerModelSelect(getSelectedSession6());
     return createStructuredSession(void 0, cwd, mode, worktreeEnabled).then(function(data) {
       saveWorkingDir(cwd);
       closeSessionModal();
@@ -18734,7 +18772,7 @@
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      var escSess = getSelectedSession5();
+      var escSess = getSelectedSession6();
       if (isStructuredSession2(escSess)) {
         if (escSess && escSess.structuredState && escSess.structuredState.inFlight) {
           stopSession();
@@ -18750,7 +18788,7 @@
       if (hasSelectionC) {
         return;
       }
-      var ccSess = getSelectedSession5();
+      var ccSess = getSelectedSession6();
       if (isStructuredSession2(ccSess)) {
         event.preventDefault();
         if (ccSess && ccSess.structuredState && ccSess.structuredState.inFlight) {
@@ -18768,7 +18806,7 @@
       if (hasSelection2) {
         return;
       }
-      var cdSess = getSelectedSession5();
+      var cdSess = getSelectedSession6();
       if (isStructuredSession2(cdSess)) {
         event.preventDefault();
         return;
@@ -18779,7 +18817,7 @@
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
       event.preventDefault();
-      var clSess = getSelectedSession5();
+      var clSess = getSelectedSession6();
       if (isStructuredSession2(clSess)) {
         return;
       }

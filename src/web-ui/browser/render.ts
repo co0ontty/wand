@@ -800,16 +800,6 @@ export function renderAppShell() {
                   '</svg>' +
                   '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
                 '</button>' +
-                // 语音模式 UI（v1 仅 UI scaffolding；MediaRecorder 接入留待后续）
-                '<div class="voice-input-mode hidden" id="voice-input-mode">' +
-                  '<button id="voice-record-btn" class="voice-record-btn" type="button">' +
-                    '<span class="voice-record-pulse" aria-hidden="true"></span>' +
-                    '<span class="voice-record-label">按住 说话</span>' +
-                  '</button>' +
-                  '<button id="voice-cancel-btn" class="voice-cancel-btn" type="button" title="退出语音模式" aria-label="退出语音模式">' +
-                    iconSvg("x", { size: 14, strokeWidth: 2 }) +
-                  '</button>' +
-                '</div>' +
               '</div>' +
               '<div class="composer-actions-right">' +
                 // 停止按钮默认隐藏；updateInteractiveControls() 根据 computeRunningSignal
