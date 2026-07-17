@@ -35,6 +35,11 @@ const OPENCODE_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "default", label: "跟随 OpenCode 默认", alias: true },
 ];
 
+const GROK_FALLBACK_MODELS: ClaudeModelInfo[] = [
+  { id: "default", label: "跟随 Grok 默认", alias: true },
+  { id: "grok-4.5", label: "grok-4.5" },
+];
+
 export interface ModelCacheStorage {
   getConfigValue(key: string): string | null;
   setConfigValue(key: string, value: string): void;
@@ -81,6 +86,7 @@ export interface ModelCache {
   models: ClaudeModelInfo[];
   codexModels: ClaudeModelInfo[];
   opencodeModels: ClaudeModelInfo[];
+  grokModels: ClaudeModelInfo[];
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string;
@@ -298,6 +304,7 @@ function createInitialCache(options: ModelRefreshOptions): ModelCache {
     }),
     codexModels: cloneModels(CODEX_FALLBACK_MODELS),
     opencodeModels: cloneModels(OPENCODE_FALLBACK_MODELS),
+    grokModels: cloneModels(GROK_FALLBACK_MODELS),
     claudeVersion: null,
     opencodeVersion: null,
     refreshedAt: now.toISOString(),
@@ -365,6 +372,15 @@ async function probeOpenCode(
     ? extractSemver(versionResult.value.stdout) ?? (versionResult.value.stdout.trim().slice(0, 64) || null)
     : null;
   return { models, version };
+}
+
+async function probeGrokModels(runner: ModelCommandRunner, env: NodeJS.ProcessEnv): Promise<ClaudeModelInfo[]> {
+  try {
+    const { stdout } = await runner("grok", ["models"], { env, timeout: 8000 });
+    return parseGrokModels(stdout);
+  } catch {
+    return cloneModels(GROK_FALLBACK_MODELS);
+  }
 }
 
 function createOfficialModelsApi(apiKey: string): ClaudeModelsApi {
@@ -439,6 +455,46 @@ function mergeVerifications(
     });
   }
   return [...byId.values()];
+}
+
+/**
+ * Parse `grok models` human-readable output:
+ *
+ *   Default model: grok-4.5
+ *   Available models:
+ *     * grok-4.5 (default)
+ */
+export function parseGrokModels(stdout: string): ClaudeModelInfo[] {
+  const stripAnsi = (line: string) => line.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+  const lines = stdout.split(/\r?\n/).map((line) => stripAnsi(line).trim()).filter(Boolean);
+  let defaultModel = "";
+  const ids: string[] = [];
+  for (const line of lines) {
+    const defaultMatch = line.match(/^Default model:\s*([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\s*$/i);
+    if (defaultMatch) {
+      defaultModel = defaultMatch[1];
+      continue;
+    }
+    const bulletMatch = line.match(/^\*+\s*([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(?:\s*\(.*\))?\s*$/);
+    if (bulletMatch) {
+      ids.push(bulletMatch[1]);
+      continue;
+    }
+    // Some builds may print plain model ids after the "Available models" header.
+    if (/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(line) && !/^(available|default)\b/i.test(line)) {
+      ids.push(line);
+    }
+  }
+  const unique = Array.from(new Set(ids.filter((id) => id && id !== "default")));
+  if (defaultModel && !unique.includes(defaultModel)) unique.unshift(defaultModel);
+  if (!unique.length && !defaultModel) return cloneModels(GROK_FALLBACK_MODELS);
+  const defaultLabel = defaultModel
+    ? `${defaultModel}（Grok 默认）`
+    : "跟随 Grok 默认";
+  return [
+    { id: "default", label: defaultLabel, alias: true },
+    ...unique.map((id) => ({ id, label: id })),
+  ];
 }
 
 /** Parse `opencode models`, whose stable machine-friendly output is one provider/model id per line. */
@@ -522,10 +578,11 @@ export async function refreshModels(options: ModelRefreshOptions = {}): Promise<
   const now = options.now?.() ?? new Date();
   const env = resolveProbeEnv(options);
   const runner = options.commandRunner ?? defaultCommandRunner;
-  const [claudeVersion, codexModels, opencode, apiModels] = await Promise.all([
+  const [claudeVersion, codexModels, opencode, grokModels, apiModels] = await Promise.all([
     probeClaudeVersion(runner, env),
     probeCodexModels(runner, env),
     probeOpenCode(runner, env),
+    probeGrokModels(runner, env),
     listClaudeModelsFromApi(options, env),
   ]);
   const priorVerifications = loadClaudeVerifications(options.storage);
@@ -551,6 +608,7 @@ export async function refreshModels(options: ModelRefreshOptions = {}): Promise<
     }),
     codexModels,
     opencodeModels: opencode.models,
+    grokModels,
     claudeVersion,
     opencodeVersion: opencode.version,
     refreshedAt: now.toISOString(),

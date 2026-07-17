@@ -21,10 +21,6 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // ─────────────────────────────────────────────────────────────────
       export var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
       export var VOICE_CANCEL_THRESHOLD = 60; // 按住后上滑超过该像素进入"松开取消"态
-      export var VOICE_HOLD_DELAY = 180;
-      var composerVoiceHoldTimer = null;
-      var composerVoiceHoldStartY = 0;
-      var composerVoiceHoldPointerId = null;
 
       // STT 唯一注入点：写入累积文字并刷新气泡内容。
       // 网页端目前没有可用的语音识别后端（移动端走原生客户端的端侧 STT）；
@@ -38,13 +34,14 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function startVoiceRecording(e) {
+        if (state.terminalInteractive || voiceState.recording) return;
         if (e) {
           e.preventDefault();
           voiceState.startY = (typeof e.clientY === "number") ? e.clientY : 0;
           // 指针捕获：手指/鼠标移出按钮范围也能继续收到 move / up
           try {
-            if (e.pointerId !== undefined && e.target && e.target.setPointerCapture) {
-              e.target.setPointerCapture(e.pointerId);
+            if (e.pointerId !== undefined && e.currentTarget && e.currentTarget.setPointerCapture) {
+              e.currentTarget.setPointerCapture(e.pointerId);
             }
           } catch (_) {}
         }
@@ -54,6 +51,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var btn = document.getElementById("voice-record-btn");
         if (btn) {
           btn.classList.add("is-recording");
+          btn.setAttribute("aria-pressed", "true");
+          btn.setAttribute("title", "松开结束 · 上滑取消");
           var label = btn.querySelector(".voice-record-label");
           if (label) label.textContent = "松开 发送";
         }
@@ -90,66 +89,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         resetVoiceRecordingUI();
         if (commit) {
           commitVoiceTranscript(text);
-          toggleVoiceMode(false); // 松手提交后退出语音模式，回到打字态便于修改
         }
       }
 
-      function clearComposerVoiceHoldTimer() {
-        if (composerVoiceHoldTimer !== null) {
-          clearTimeout(composerVoiceHoldTimer);
-          composerVoiceHoldTimer = null;
-        }
-      }
-
-      export function beginComposerVoiceHold(e) {
-        var box = e && e.currentTarget;
-        if (!box || state.terminalInteractive || (box.value || "").trim()) return;
-        clearComposerVoiceHoldTimer();
-        composerVoiceHoldStartY = typeof e.clientY === "number" ? e.clientY : 0;
-        composerVoiceHoldPointerId = e.pointerId;
-        composerVoiceHoldTimer = setTimeout(function() {
-          composerVoiceHoldTimer = null;
-          if ((box.value || "").trim()) return;
-          startVoiceRecording(e);
-          var composer = box.closest && box.closest(".input-composer");
-          if (composer) composer.classList.add("voice-holding");
-          box.placeholder = "松开结束 · 上滑取消";
-        }, VOICE_HOLD_DELAY);
-      }
-
-      export function handleComposerVoiceMove(e) {
-        if (composerVoiceHoldTimer !== null) {
-          var dy = Math.abs(composerVoiceHoldStartY - (typeof e.clientY === "number" ? e.clientY : composerVoiceHoldStartY));
-          if (dy > 10) clearComposerVoiceHoldTimer();
-          return;
-        }
-        if (voiceState.recording && (composerVoiceHoldPointerId === null || e.pointerId === composerVoiceHoldPointerId)) {
-          handleVoiceMove(e);
-          var box = e.currentTarget;
-          if (box) box.placeholder = voiceState.canceling ? "松开取消" : "松开结束 · 上滑取消";
-        }
-      }
-
-      function finishComposerVoiceHold(e, canceled) {
-        var wasPending = composerVoiceHoldTimer !== null;
-        clearComposerVoiceHoldTimer();
-        if (!wasPending && voiceState.recording) {
-          if (canceled) voiceState.canceling = true;
-          stopVoiceRecording(e);
-        }
-        composerVoiceHoldPointerId = null;
-        var box = e && e.currentTarget;
-        var composer = box && box.closest && box.closest(".input-composer");
-        if (composer) composer.classList.remove("voice-holding");
-        if (box) box.placeholder = getComposerPlaceholder(getSelectedSession(), state.terminalInteractive);
-      }
-
-      export function endComposerVoiceHold(e) {
-        finishComposerVoiceHold(e, false);
-      }
-
-      export function cancelComposerVoiceHold(e) {
-        finishComposerVoiceHold(e, true);
+      export function cancelVoiceRecording(e) {
+        if (!voiceState.recording) return;
+        voiceState.canceling = true;
+        stopVoiceRecording(e);
       }
 
       // 复位录音相关 UI（按钮 + 气泡），不改变是否处于语音模式。
@@ -158,6 +104,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var btn = document.getElementById("voice-record-btn");
         if (btn) {
           btn.classList.remove("is-recording");
+          btn.setAttribute("aria-pressed", "false");
+          btn.setAttribute("title", "按住语音输入");
           var label = btn.querySelector(".voice-record-label");
           if (label) label.textContent = "按住 说话";
         }
@@ -180,27 +128,15 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         try { box.setSelectionRange(joined.length, joined.length); } catch (_) {}
       }
 
-      // v2: 切换语音输入模式（类似微信"按住说话"）
-      export function toggleVoiceMode(force?) {
-        var composer = document.querySelector(".input-composer");
-        if (!composer) return;
-        var willEnable = typeof force === "boolean" ? force : !composer.classList.contains("voice-mode");
-        composer.classList.toggle("voice-mode", willEnable);
-        if (!willEnable) {
-          // 退出语音模式：停掉可能在跑的录音 + 隐藏气泡，并把焦点交还 textarea
-          voiceState.recording = false;
-          resetVoiceRecordingUI();
-          var inputBox = document.getElementById("input-box");
-          if (inputBox && !state.terminalInteractive) {
-            try { inputBox.focus({ preventScroll: true }); } catch (_) {}
-          }
-        }
-      }
-
       export function autoResizeInput(el) {
         if (!el) return;
         var minHeight = 36;
-        var maxHeight = 120;
+        // Respect the responsive CSS cap (mobile uses min(160px, 35dvh)) instead
+        // of forcing every viewport back to the desktop 120px limit.
+        var computedMaxHeight = parseFloat(window.getComputedStyle(el).maxHeight || "");
+        var maxHeight = Number.isFinite(computedMaxHeight)
+          ? Math.max(minHeight, computedMaxHeight)
+          : 120;
         var touchDevice = isTouchDevice();
         // For empty content, reset to minimum height immediately
         if (!el.value || el.value.trim() === "") {
@@ -208,6 +144,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           el.style.minHeight = minHeight + "px";
           el.style.overflowY = touchDevice ? "auto" : "hidden";
           el.scrollTop = 0;
+          el.classList.remove("has-multiline-draft", "has-clipped-draft");
           syncComposerHasText(el);
           return;
         }
@@ -219,9 +156,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var contentHeight = el.scrollHeight;
         var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
         var shouldScrollInside = contentHeight > maxHeight;
+        var needsExpandedHeight = contentHeight > minHeight + 1;
         el.style.height = newHeight + "px";
         el.style.minHeight = minHeight + "px";
         el.style.overflowY = shouldScrollInside || touchDevice ? "auto" : "hidden";
+        el.classList.toggle("has-multiline-draft", needsExpandedHeight);
+        el.classList.toggle("has-clipped-draft", shouldScrollInside);
         if (shouldScrollInside) {
           syncInputBoxScroll(el);
         } else {
@@ -2045,12 +1985,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             !!state.terminalInteractive && !document.documentElement.classList.contains("is-wand-embed-terminal"),
           );
         }
-        // v2: 终端交互模式时强制退出语音模式（语义冲突）。三件套已不在输入框里，
-        // 不再需要 is-terminal-mode / has-placeholder 控制 ghost meta 显隐。
-        var composerEl = document.querySelector(".input-composer");
-        if (composerEl && state.terminalInteractive && composerEl.classList.contains("voice-mode")) {
-          composerEl.classList.remove("voice-mode");
-          // 同步停掉可能在跑的录音 + 隐藏气泡
+        // 终端直通时禁用独立语音按钮；若切换过程中正在录音则立即取消。
+        var voiceBtn = document.getElementById("voice-record-btn") as HTMLButtonElement | null;
+        if (voiceBtn) {
+          voiceBtn.disabled = state.terminalInteractive;
+          voiceBtn.setAttribute("aria-disabled", voiceBtn.disabled ? "true" : "false");
+        }
+        if (state.terminalInteractive && voiceState.recording) {
           voiceState.recording = false;
           resetVoiceRecordingUI();
         }
@@ -2882,6 +2823,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       export function handleInputBoxBlur(event) {
         var blurredEl = event && event.target ? event.target : document.getElementById('input-box');
         resetInputPanelViewportSpacing();
+        // A non-empty draft must not collapse to the compact one-line state when
+        // its wrapped content needs more room. Re-measure immediately and again
+        // while Android/iOS keyboard dismissal changes the available width.
+        if (blurredEl) autoResizeInput(blurredEl);
         scheduleClosedViewportBaselineWindow(2200, blurredEl);
         // blur 触发瞬间 vv.height 通常还停在键盘弹起时的旧值——iOS 上动画
         // 要再跑 ~250ms 才回弹完整。这里铺一串 settle tick 让 syncAppViewportHeight
@@ -2890,6 +2835,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         dismissTicks.forEach(function(delay, idx) {
           setTimeout(function() {
             syncAppViewportHeight(false);
+            if (blurredEl && blurredEl.value) autoResizeInput(blurredEl);
             // 第二档（200ms）顺便刷一次终端布局，再晚的 tick 仅校准视口变量。
             if (idx === 1 && isTouchDevice()) {
               ensureTerminalFit("keyboard-blur", { forceReplay: true });

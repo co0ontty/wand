@@ -18,20 +18,33 @@ export function resolveSessionProvider(snapshot: Pick<
   SessionSnapshot,
   "provider" | "structuredState" | "runner" | "command"
 >): SessionProvider {
-  if (snapshot.provider === "claude" || snapshot.provider === "codex" || snapshot.provider === "opencode") {
+  if (
+    snapshot.provider === "claude"
+    || snapshot.provider === "codex"
+    || snapshot.provider === "opencode"
+    || snapshot.provider === "grok"
+  ) {
     return snapshot.provider;
   }
-  if (snapshot.structuredState?.provider === "claude" || snapshot.structuredState?.provider === "codex" || snapshot.structuredState?.provider === "opencode") {
+  if (
+    snapshot.structuredState?.provider === "claude"
+    || snapshot.structuredState?.provider === "codex"
+    || snapshot.structuredState?.provider === "opencode"
+    || snapshot.structuredState?.provider === "grok"
+  ) {
     return snapshot.structuredState.provider;
   }
 
   const runner = snapshot.runner ?? snapshot.structuredState?.runner;
   if (runner === "codex-cli-exec") return "codex";
   if (runner === "opencode-cli-run") return "opencode";
+  if (runner === "grok-cli-headless") return "grok";
   if (runner === "claude-cli" || runner === "claude-cli-print" || runner === "claude-sdk") return "claude";
 
   if (/^codex\b/i.test(snapshot.command.trim())) return "codex";
-  return /^opencode\b/i.test(snapshot.command.trim()) ? "opencode" : "claude";
+  if (/^opencode\b/i.test(snapshot.command.trim())) return "opencode";
+  if (/^grok\b/i.test(snapshot.command.trim())) return "grok";
+  return "claude";
 }
 
 function normalizeModel(value: string | null | undefined): string | undefined {
@@ -45,7 +58,7 @@ export function resolveSessionAiContext(
     SessionSnapshot,
     "provider" | "structuredState" | "runner" | "command" | "selectedModel" | "thinkingEffort"
   >,
-  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultThinkingEffort" | "inheritEnv">,
+  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultThinkingEffort" | "inheritEnv">,
 ): SessionAiContext {
   const provider = resolveSessionProvider(snapshot);
   const sessionModel = normalizeModel(snapshot.selectedModel) ?? normalizeModel(snapshot.structuredState?.model);
@@ -70,6 +83,7 @@ export function resolveCommitAiContext(
     | "defaultModel"
     | "defaultCodexModel"
     | "defaultOpenCodeModel"
+    | "defaultGrokModel"
     | "defaultThinkingEffort"
     | "inheritEnv"
     | "commitCli"

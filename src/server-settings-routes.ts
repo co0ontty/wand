@@ -59,6 +59,7 @@ function publicConfig(config: WandConfig): Record<string, unknown> {
     defaultModel: defaultModels.claude,
     defaultCodexModel: defaultModels.codex,
     defaultOpenCodeModel: defaultModels.opencode,
+    defaultGrokModel: defaultModels.grok,
     defaultModels,
   };
 }
@@ -186,7 +187,10 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
   });
 
   app.post("/api/settings/config", requireAdminOrSessionPreferences, asyncRoute(async (req, res) => {
-    const body = req.body as Partial<WandConfig> & { defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown }; systemAi?: Record<string, unknown> };
+    const body = req.body as Partial<WandConfig> & {
+      defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown; grok?: unknown };
+      systemAi?: Record<string, unknown>;
+    };
     const previousDesiredConfig = runtimeConfig.desiredSnapshot();
     const candidateConfig = runtimeConfig.createCandidate();
     const stagedPreferences: Array<{ key: string; value: unknown }> = [];
@@ -227,6 +231,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         if (Object.hasOwn(body.defaultModels, "claude")) stagePreference("defaultModel", body.defaultModels.claude);
         if (Object.hasOwn(body.defaultModels, "codex")) stagePreference("defaultCodexModel", body.defaultModels.codex);
         if (Object.hasOwn(body.defaultModels, "opencode")) stagePreference("defaultOpenCodeModel", body.defaultModels.opencode);
+        if (Object.hasOwn(body.defaultModels, "grok")) stagePreference("defaultGrokModel", body.defaultModels.grok);
       }
       if (body.systemAi !== undefined) {
         if (!body.systemAi || typeof body.systemAi !== "object" || Array.isArray(body.systemAi)) {
@@ -289,6 +294,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       defaultModel: defaults.claude,
       defaultCodexModel: defaults.codex,
       defaultOpenCodeModel: defaults.opencode,
+      defaultGrokModel: defaults.grok,
       defaultModels: defaults,
     });
   });
@@ -302,6 +308,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         defaultModel: defaults.claude,
         defaultCodexModel: defaults.codex,
         defaultOpenCodeModel: defaults.opencode,
+        defaultGrokModel: defaults.grok,
         defaultModels: defaults,
       });
     } catch (error) {

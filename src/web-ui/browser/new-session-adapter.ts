@@ -47,6 +47,7 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
         claude: getChatModelForProvider("claude"),
         codex: getChatModelForProvider("codex"),
         opencode: getChatModelForProvider("opencode"),
+        grok: getChatModelForProvider("grok"),
       },
       thinkingEffort: state.chatThinking || "off",
     };

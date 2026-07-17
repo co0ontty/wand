@@ -9,6 +9,8 @@ export type SettingsTab =
 
 export type SettingsAccess = "admin" | "read-only";
 export type SettingsProvider = "claude" | "codex" | "opencode";
+/** Providers that have per-session default model preferences. */
+export type SettingsModelProvider = SettingsProvider | "grok";
 export type SettingsUpdateChannel = "stable" | "beta";
 export type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
 export type SettingsDistributionKind = "apk" | "dmg";
@@ -107,7 +109,8 @@ export interface SettingsConfig {
   defaultModel: string;
   defaultCodexModel: string;
   defaultOpenCodeModel: string;
-  defaultModels: Record<SettingsProvider, string>;
+  defaultGrokModel: string;
+  defaultModels: Record<SettingsModelProvider, string>;
   commitCli: SettingsProvider;
   commitModel: string;
   commitAiSource: "cli" | "api";
@@ -140,13 +143,15 @@ export interface SettingsModelCatalog {
   models: SettingsModelOption[];
   codexModels: SettingsModelOption[];
   opencodeModels: SettingsModelOption[];
+  grokModels: SettingsModelOption[];
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string | null;
   defaultModel: string;
   defaultCodexModel: string;
   defaultOpenCodeModel: string;
-  defaultModels: Record<SettingsProvider, string>;
+  defaultGrokModel: string;
+  defaultModels: Record<SettingsModelProvider, string>;
 }
 
 export interface SettingsProviderCliStatus {
@@ -264,6 +269,7 @@ export interface SettingsAiInput {
   defaultModel: string;
   defaultCodexModel: string;
   defaultOpenCodeModel: string;
+  defaultGrokModel: string;
   commitCli: SettingsProvider;
   commitModel: string;
   commitAiSource: "cli" | "api";

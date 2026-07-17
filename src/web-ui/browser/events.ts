@@ -5,7 +5,7 @@ import { formatInlineResult, scheduleChatRender } from "./chat-render";
 import { applyExpandedState, applyPersistedExpandState, persistCrossSessionQueue, persistElementExpandState, persistSelectedId, saveStructuredQueue, scrollChatToBottom } from "./chat-scroll";
 import { adjustTerminalScale, closeFilePanel, dismissFileContextMenu, filterFileTree, isMobileLayout, navigateExplorerUp, openFilePreview, refreshFileExplorer, setFilePanelOpen, toggleFilePanel, updateFilePanelState, updateScaleLabel } from "./file-browser";
 import { loadGitStatus, openQuickCommitModal } from "./git-commit";
-import { attachQueueBarDelegates, beginComposerVoiceHold, bindInputTouchScroll, cancelComposerVoiceHold, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, endComposerVoiceHold, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleComposerVoiceMove, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, stopSession, toggleTerminalInteractive, updateQueueBar, welcomeInputSend } from "./input";
+import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, handleVoiceMove, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, startVoiceRecording, stopSession, stopVoiceRecording, toggleTerminalInteractive, updateQueueBar, welcomeInputSend } from "./input";
 import { hideError, showToast } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
 import { addPendingAttachment, backToNativeApp, closePlusPopover, closeSessionsDrawer, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, isStructuredSession, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, retryWorktreeCleanup, selectSession, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin } from "./session-engine";
@@ -610,13 +610,14 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
           });
         }
 
-        // 输入区统一交互：轻点保持原生 textarea 聚焦；空内容长按进入语音手势。
-        var voiceHoldInput = document.getElementById("input-box");
-        if (voiceHoldInput) {
-          voiceHoldInput.addEventListener("pointerdown", beginComposerVoiceHold);
-          voiceHoldInput.addEventListener("pointermove", handleComposerVoiceMove);
-          voiceHoldInput.addEventListener("pointerup", endComposerVoiceHold);
-          voiceHoldInput.addEventListener("pointercancel", cancelComposerVoiceHold);
+        // 语音手势只绑定独立按钮；textarea 保留系统原生的长按、选区与粘贴行为。
+        var voiceRecordBtn = document.getElementById("voice-record-btn");
+        if (voiceRecordBtn) {
+          voiceRecordBtn.addEventListener("pointerdown", startVoiceRecording);
+          voiceRecordBtn.addEventListener("pointermove", handleVoiceMove);
+          voiceRecordBtn.addEventListener("pointerup", stopVoiceRecording);
+          voiceRecordBtn.addEventListener("pointercancel", cancelVoiceRecording);
+          voiceRecordBtn.addEventListener("contextmenu", function(e) { e.preventDefault(); });
         }
 
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");

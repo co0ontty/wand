@@ -91,7 +91,9 @@ function copyTopbarField(field: "providerSessionId" | "cwd" | "sessionId"): void
     ? "Codex thread ID 已复制"
     : provider === "opencode"
       ? "OpenCode session ID 已复制"
-      : "Claude 会话 ID 已复制";
+      : provider === "grok"
+        ? "Grok 会话 ID 已复制"
+        : "Claude 会话 ID 已复制";
   return copySelectedSessionField("claudeSessionId", label);
 }
 

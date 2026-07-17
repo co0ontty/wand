@@ -5968,7 +5968,8 @@
        输入区 v2：单行布局
        ─────────────────────────────────────────────────────────────────────
        结构：
-         .input-composer            外壳（圆角胶囊形）
+         .input-composer-row        输入框胶囊布局容器
+           .input-composer          外壳（圆角胶囊形）
            .composer-status-row     状态行（自动批准 / 权限 / 统计），无内容时折叠
            .composer-main-row       主输入行（单行）
              .composer-actions-left  [+] [🎤] [⌨]
@@ -5980,8 +5981,19 @@
          · ghost meta 在 textarea 为空时浮在输入位上，显示 mode·model·thinking；
            开始输入后整体淡出隐藏，textarea 文字接管这块区域。
          · 提示词优化按钮 (✨) 仅在 .input-composer.has-text 时显示，浮在右侧。
-         · .input-composer.voice-mode 时 textarea + ghost 隐藏，露出 .voice-input-mode。
+         · 语音手势只绑定独立麦克风按钮，textarea 始终保留原生文本交互。
        ─────────────────────────────────────────────────────────────────── */
+    .input-composer-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      width: 100%;
+      min-width: 0;
+    }
+    .input-composer-row > .input-composer {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
     .input-composer {
       --composer-action-size: 34px;
       background: rgba(255, 255, 255, 0.88);
@@ -7256,6 +7268,28 @@
     .btn-circle-action.active:hover {
       background: rgba(197, 101, 61, 0.22);
     }
+    .btn-circle-action.btn-circle-voice {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      color: var(--accent);
+      background: rgba(197, 101, 61, 0.08);
+      border: none;
+      box-shadow: none;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .btn-circle-voice.is-recording {
+      color: #fff;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-muted);
+      transform: scale(0.96);
+    }
+    .btn-circle-voice:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
 
     /* Ghost meta 已下线 —— 三件套搬到「空状态提示下方下拉」与「用户消息头像左侧按钮」两处。
        .composer-text-pill / .composer-text-label / .composer-text-hidden-select / .composer-text-sep
@@ -7699,17 +7733,6 @@
     .input-composer.voice-mode .voice-input-mode {
       display: flex;
     }
-    /* 语音入口暂时隐藏 —— 等接入 STT 后删掉这条即可恢复（交互逻辑与气泡 UI 均已保留）。 */
-    #voice-btn {
-      display: none;
-    }
-
-    /* voice 模式下，语音按钮高亮表示当前状态 */
-    .input-composer.voice-mode #voice-btn {
-      background: var(--accent-muted, rgba(197, 101, 61, 0.18));
-      color: var(--accent);
-    }
-
     /* 语音实时转写气泡 —— 按住录音时浮在输入框上方（.input-panel 内绝对定位，
        绕开 .input-composer 的 overflow:hidden）。逐字展示识别文字，松手填回输入框。 */
     .voice-transcript-bubble {
@@ -7787,7 +7810,8 @@
     .voice-bubble-arrow {
       position: absolute;
       top: 100%;
-      left: 28px;
+      left: auto;
+      right: 18px;
       width: 0;
       height: 0;
       border-left: 7px solid transparent;

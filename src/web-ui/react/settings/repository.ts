@@ -149,6 +149,7 @@ function normalizeConfig(value: unknown): SettingsConfig {
   const claude = stringValue(defaults.claude, stringValue(input.defaultModel));
   const codex = stringValue(defaults.codex, stringValue(input.defaultCodexModel));
   const opencode = stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel));
+  const grok = stringValue(defaults.grok, stringValue(input.defaultGrokModel));
   return {
     host: stringValue(input.host, "127.0.0.1"),
     port: numberValue(input.port, 3000),
@@ -162,7 +163,8 @@ function normalizeConfig(value: unknown): SettingsConfig {
     defaultModel: claude,
     defaultCodexModel: codex,
     defaultOpenCodeModel: opencode,
-    defaultModels: { claude, codex, opencode },
+    defaultGrokModel: grok,
+    defaultModels: { claude, codex, opencode, grok },
     commitCli,
     commitModel: stringValue(input.commitModel),
     commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
@@ -215,16 +217,19 @@ function normalizeModels(value: unknown): SettingsModelCatalog {
     models: models("models"),
     codexModels: models("codexModels"),
     opencodeModels: models("opencodeModels"),
+    grokModels: models("grokModels"),
     claudeVersion: nullableString(input.claudeVersion),
     opencodeVersion: nullableString(input.opencodeVersion),
     refreshedAt: nullableString(input.refreshedAt),
     defaultModel: stringValue(input.defaultModel),
     defaultCodexModel: stringValue(input.defaultCodexModel),
     defaultOpenCodeModel: stringValue(input.defaultOpenCodeModel),
+    defaultGrokModel: stringValue(input.defaultGrokModel),
     defaultModels: {
       claude: stringValue(defaults.claude, stringValue(input.defaultModel)),
       codex: stringValue(defaults.codex, stringValue(input.defaultCodexModel)),
       opencode: stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel)),
+      grok: stringValue(defaults.grok, stringValue(input.defaultGrokModel)),
     },
   };
 }
@@ -501,6 +506,7 @@ export class HttpSettingsRepository implements SettingsRepository {
             claude: command.value.defaultModel,
             codex: command.value.defaultCodexModel,
             opencode: command.value.defaultOpenCodeModel,
+            grok: command.value.defaultGrokModel,
           },
         }, options.signal);
         this.runtime.configSaved(normalizeConfig(record(result).config));

@@ -8,6 +8,7 @@ const config = {
   defaultModel: "claude-sonnet-4-6",
   defaultCodexModel: "gpt-5.5-codex",
   defaultOpenCodeModel: "anthropic/claude-sonnet-4-6",
+  defaultGrokModel: "grok-4.5",
   defaultThinkingEffort: "deep" as const,
   inheritEnv: true,
   commitCli: "claude" as const,
@@ -51,10 +52,25 @@ test("resolveSessionProvider recognizes OpenCode session representations", () =>
   assert.equal(resolveSessionProvider(session({ provider: undefined, command: "opencode run --format json" })), "opencode");
 });
 
+test("resolveSessionProvider recognizes Grok session representations", () => {
+  assert.equal(resolveSessionProvider(session({ provider: "grok" })), "grok");
+  assert.equal(resolveSessionProvider(session({ provider: undefined, runner: "grok-cli-headless" })), "grok");
+  assert.equal(resolveSessionProvider(session({
+    provider: undefined,
+    command: "grok -p --output-format streaming-json",
+  })), "grok");
+});
+
 test("resolveSessionAiContext uses the OpenCode default model", () => {
   const context = resolveSessionAiContext(session({ provider: "opencode", command: "opencode" }), config);
   assert.equal(context.provider, "opencode");
   assert.equal(context.model, "anthropic/claude-sonnet-4-6");
+});
+
+test("resolveSessionAiContext uses the Grok default model", () => {
+  const context = resolveSessionAiContext(session({ provider: "grok", command: "grok" }), config);
+  assert.equal(context.provider, "grok");
+  assert.equal(context.model, "grok-4.5");
 });
 
 test("resolveSessionAiContext keeps provider-specific model and effort", () => {

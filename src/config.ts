@@ -35,6 +35,7 @@ export const PREFERENCE_KEYS = [
   "defaultModel",
   "defaultCodexModel",
   "defaultOpenCodeModel",
+  "defaultGrokModel",
   "commitCli",
   "commitModel",
   "commitAiSource",
@@ -83,6 +84,7 @@ export const defaultConfig = (): WandConfig => ({
   defaultModel: "",
   defaultCodexModel: "",
   defaultOpenCodeModel: "",
+  defaultGrokModel: "",
   commitCli: "claude",
   commitModel: "",
   commitAiSource: "cli",
@@ -328,6 +330,10 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultOpenCodeModel"), defaults.defaultOpenCodeModel ?? "");
     if (typeof v === "string") config.defaultOpenCodeModel = v.trim();
   }
+  if (storage.hasPreference(preferenceStorageKey("defaultGrokModel"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("defaultGrokModel"), defaults.defaultGrokModel ?? "");
+    if (typeof v === "string") config.defaultGrokModel = v.trim();
+  }
   if (storage.hasPreference(preferenceStorageKey("commitCli"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("commitCli"), defaults.commitCli ?? "claude");
     if (v === "claude" || v === "codex" || v === "opencode") config.commitCli = v;
@@ -418,6 +424,12 @@ export function writePreferenceToStorage(
       const v = typeof value === "string" ? value.trim() : "";
       storage.setPreference(dbKey, v);
       config.defaultOpenCodeModel = v;
+      break;
+    }
+    case "defaultGrokModel": {
+      const v = typeof value === "string" ? value.trim() : "";
+      storage.setPreference(dbKey, v);
+      config.defaultGrokModel = v;
       break;
     }
     case "commitCli": {
@@ -650,6 +662,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
     defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
     defaultOpenCodeModel: typeof input.defaultOpenCodeModel === "string" ? input.defaultOpenCodeModel.trim() : defaults.defaultOpenCodeModel,
+    defaultGrokModel: typeof input.defaultGrokModel === "string" ? input.defaultGrokModel.trim() : defaults.defaultGrokModel,
     commitCli: input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
     commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
@@ -663,17 +676,29 @@ export function isExecutionMode(value: unknown): value is ExecutionMode {
   return value === "assist" || value === "agent" || value === "agent-max" || value === "auto-edit" || value === "default" || value === "full-access" || value === "native" || value === "managed";
 }
 
-export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel">): { claude: string; codex: string; opencode: string } {
+export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel">): {
+  claude: string;
+  codex: string;
+  opencode: string;
+  grok: string;
+} {
   return {
     claude: (config.defaultModel ?? "").trim(),
     codex: (config.defaultCodexModel ?? "").trim(),
     opencode: (config.defaultOpenCodeModel ?? "").trim(),
+    grok: (config.defaultGrokModel ?? "").trim(),
   };
 }
 
-export function getDefaultModelForProvider(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel">, provider: SessionProvider | undefined): string {
+export function getDefaultModelForProvider(
+  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel">,
+  provider: SessionProvider | undefined,
+): string {
   const defaults = getProviderDefaultModels(config);
-  return provider === "codex" ? defaults.codex : provider === "opencode" ? defaults.opencode : provider === "grok" ? "" : defaults.claude;
+  if (provider === "codex") return defaults.codex;
+  if (provider === "opencode") return defaults.opencode;
+  if (provider === "grok") return defaults.grok;
+  return defaults.claude;
 }
 
 export function normalizeMode(input: string | undefined, fallback: ExecutionMode): ExecutionMode {

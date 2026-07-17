@@ -125,6 +125,8 @@ export interface WandConfig {
   defaultCodexModel?: string;
   /** 新建 OpenCode 会话时默认使用的 provider/model。留空则由 opencode 自行决定。 */
   defaultOpenCodeModel?: string;
+  /** 新建 Grok 会话时默认使用的模型。留空则不传 --model，由 grok 自行决定。 */
+  defaultGrokModel?: string;
   /** 快捷提交生成 commit message / tag 时使用的 CLI。 */
   commitCli?: SessionProvider;
   /** 快捷提交专用模型。留空则跟随所选 CLI 的默认模型。 */

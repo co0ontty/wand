@@ -68,6 +68,77 @@ test("React shell keeps all legacy host roots, draft, and selection stable", asy
   });
 });
 
+test("voice input uses its own hold button without hijacking textarea gestures", async ({ page }) => {
+  await login(page);
+
+  const input = page.locator("#input-box");
+  const voiceButton = page.locator("#voice-record-btn");
+  const transcript = page.locator("#voice-transcript-bubble");
+
+  await expect(voiceButton).toBeAttached();
+  await expect(voiceButton).toHaveClass(/btn-circle-voice/);
+  expect(await voiceButton.evaluate((element) => ({
+    insideComposer: !!element.closest(".input-composer"),
+    insideComposerRow: !!element.closest(".input-composer-row"),
+    beforeSend: element.nextElementSibling?.id === "send-input-button",
+  }))).toEqual({ insideComposer: true, insideComposerRow: true, beforeSend: true });
+  const hitArea = await voiceButton.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { width: Number.parseFloat(style.width), height: Number.parseFloat(style.height) };
+  });
+  expect(hitArea.width).toBeGreaterThanOrEqual(44);
+  expect(hitArea.height).toBeGreaterThanOrEqual(44);
+
+  await input.dispatchEvent("pointerdown", { pointerId: 11, clientY: 240 });
+  await page.waitForTimeout(220);
+  await expect(transcript).toHaveClass(/hidden/);
+  await expect(voiceButton).toHaveAttribute("aria-pressed", "false");
+
+  await voiceButton.dispatchEvent("pointerdown", { pointerId: 12, clientY: 240 });
+  await expect(transcript).not.toHaveClass(/hidden/);
+  await expect(voiceButton).toHaveAttribute("aria-pressed", "true");
+  await voiceButton.dispatchEvent("pointerup", { pointerId: 12, clientY: 240 });
+  await expect(transcript).toHaveClass(/hidden/);
+  await expect(voiceButton).toHaveAttribute("aria-pressed", "false");
+});
+
+test("a wrapped draft stays expanded after the mobile keyboard closes", async ({ page }) => {
+  await login(page);
+
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLTextAreaElement>("#input-box");
+    if (!input) throw new Error("missing input box");
+    document.body.append(input);
+    Object.assign(input.style, {
+      display: "block",
+      position: "fixed",
+      left: "0",
+      bottom: "0",
+      width: "320px",
+      visibility: "visible",
+      opacity: "1",
+      zIndex: "9999",
+    });
+  });
+
+  const input = page.locator("#input-box");
+  await input.fill("第一行草稿需要完整显示\n第二行不能在键盘收起后消失\n第三行也必须保留可见");
+  await input.focus();
+  await input.evaluate((element) => element.blur());
+  await page.waitForTimeout(700);
+
+  const expanded = await input.evaluate((element) => ({
+    height: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    multiline: element.classList.contains("has-multiline-draft"),
+    clipped: element.classList.contains("has-clipped-draft"),
+  }));
+  expect(expanded.multiline).toBe(true);
+  expect(expanded.clipped).toBe(false);
+  expect(expanded.height).toBeGreaterThan(36);
+  expect(expanded.height).toBeGreaterThanOrEqual(expanded.scrollHeight - 1);
+});
+
 test("sidebar overflow dismisses on outside pointer and Escape", async ({ page }) => {
   await login(page);
   const trigger = page.locator("#sidebar-more-btn");

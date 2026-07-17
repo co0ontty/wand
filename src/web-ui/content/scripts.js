@@ -12969,10 +12969,11 @@
         return {
           claude: localStorage.getItem("wand-chat-model-claude") || legacy,
           codex: localStorage.getItem("wand-chat-model-codex") || "",
-          opencode: localStorage.getItem("wand-chat-model-opencode") || ""
+          opencode: localStorage.getItem("wand-chat-model-opencode") || "",
+          grok: localStorage.getItem("wand-chat-model-grok") || ""
         };
       } catch (e) {
-        return { claude: "", codex: "", opencode: "" };
+        return { claude: "", codex: "", opencode: "", grok: "" };
       }
     })(),
     chatModel: (function() {
@@ -12993,6 +12994,7 @@
     availableModels: [],
     availableCodexModels: [],
     availableOpenCodeModels: [],
+    availableGrokModels: [],
     modelsRefreshing: false,
     sessionTool: "claude",
     preferredCommand: "claude",
@@ -22102,6 +22104,7 @@
     const claude = stringValue(defaults.claude, stringValue(input.defaultModel));
     const codex = stringValue(defaults.codex, stringValue(input.defaultCodexModel));
     const opencode = stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel));
+    const grok = stringValue(defaults.grok, stringValue(input.defaultGrokModel));
     return {
       host: stringValue(input.host, "127.0.0.1"),
       port: numberValue(input.port, 3e3),
@@ -22115,7 +22118,8 @@
       defaultModel: claude,
       defaultCodexModel: codex,
       defaultOpenCodeModel: opencode,
-      defaultModels: { claude, codex, opencode },
+      defaultGrokModel: grok,
+      defaultModels: { claude, codex, opencode, grok },
       commitCli,
       commitModel: stringValue(input.commitModel),
       commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
@@ -22166,16 +22170,19 @@
       models: models("models"),
       codexModels: models("codexModels"),
       opencodeModels: models("opencodeModels"),
+      grokModels: models("grokModels"),
       claudeVersion: nullableString(input.claudeVersion),
       opencodeVersion: nullableString(input.opencodeVersion),
       refreshedAt: nullableString(input.refreshedAt),
       defaultModel: stringValue(input.defaultModel),
       defaultCodexModel: stringValue(input.defaultCodexModel),
       defaultOpenCodeModel: stringValue(input.defaultOpenCodeModel),
+      defaultGrokModel: stringValue(input.defaultGrokModel),
       defaultModels: {
         claude: stringValue(defaults.claude, stringValue(input.defaultModel)),
         codex: stringValue(defaults.codex, stringValue(input.defaultCodexModel)),
-        opencode: stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel))
+        opencode: stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel)),
+        grok: stringValue(defaults.grok, stringValue(input.defaultGrokModel))
       }
     };
   }
@@ -22456,7 +22463,8 @@
             defaultModels: {
               claude: command.value.defaultModel,
               codex: command.value.defaultCodexModel,
-              opencode: command.value.defaultOpenCodeModel
+              opencode: command.value.defaultOpenCodeModel,
+              grok: command.value.defaultGrokModel
             }
           }, options.signal);
           this.runtime.configSaved(normalizeConfig(record(result).config));
@@ -23234,6 +23242,7 @@
       defaultModel: config.defaultModel,
       defaultCodexModel: config.defaultCodexModel,
       defaultOpenCodeModel: config.defaultOpenCodeModel,
+      defaultGrokModel: config.defaultGrokModel,
       commitCli: config.commitCli,
       commitModel: config.commitModel,
       commitAiSource: config.commitAiSource,
@@ -23350,6 +23359,10 @@
             /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsField, { label: "OpenCode \u9ED8\u8BA4\u6A21\u578B", htmlFor: "settings-model-opencode", hint: "\u901A\u5E38\u4E3A provider/model", children: [
               /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-model-opencode", list: "settings-models-opencode", value: form.defaultOpenCodeModel, placeholder: "\u8DDF\u968F OpenCode \u9ED8\u8BA4", onChange: (value) => update("defaultOpenCodeModel", value) }),
               /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(ModelSuggestions, { id: "settings-models-opencode", models: models?.opencodeModels || [] })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsField, { label: "Grok \u9ED8\u8BA4\u6A21\u578B", htmlFor: "settings-model-grok", hint: "\u7559\u7A7A\u5219\u4E0D\u4F20 --model", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-model-grok", list: "settings-models-grok", value: form.defaultGrokModel, placeholder: "\u8DDF\u968F Grok \u9ED8\u8BA4", onChange: (value) => update("defaultGrokModel", value) }),
+              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(ModelSuggestions, { id: "settings-models-grok", models: models?.grokModels || [] })
             ] })
           ] })
         }
@@ -37192,12 +37205,15 @@
         fileInput.value = "";
       });
     }
-    var voiceHoldInput = document.getElementById("input-box");
-    if (voiceHoldInput) {
-      voiceHoldInput.addEventListener("pointerdown", beginComposerVoiceHold);
-      voiceHoldInput.addEventListener("pointermove", handleComposerVoiceMove);
-      voiceHoldInput.addEventListener("pointerup", endComposerVoiceHold);
-      voiceHoldInput.addEventListener("pointercancel", cancelComposerVoiceHold);
+    var voiceRecordBtn = document.getElementById("voice-record-btn");
+    if (voiceRecordBtn) {
+      voiceRecordBtn.addEventListener("pointerdown", startVoiceRecording);
+      voiceRecordBtn.addEventListener("pointermove", handleVoiceMove);
+      voiceRecordBtn.addEventListener("pointerup", stopVoiceRecording);
+      voiceRecordBtn.addEventListener("pointercancel", cancelVoiceRecording);
+      voiceRecordBtn.addEventListener("contextmenu", function(e) {
+        e.preventDefault();
+      });
     }
     var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
     if (promptOptimizeBtn) {
@@ -37751,7 +37767,7 @@
     return '<div class="app-container"><div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div><div class="main-layout' + (state.sessionsDrawerOpen ? " sidebar-open" : "") + (isAnchored ? " sidebar-pinned" : "") + collapsedCls + '"><aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? " pinned" : "") + sidebarCollapsedCls + '"><div class="sidebar-header"><div class="sidebar-header-main"><div class="topbar-logo-icon">W</div><span class="sidebar-title">\u4F1A\u8BDD</span><span class="session-count" id="session-count">' + String(state.sessions.filter(function(session) {
       var source = String(session && session.sessionSource || "").toLowerCase();
       return source !== "automation" && source !== "startup";
-    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title" title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer' + (currentDraft ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A" aria-haspopup="dialog" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea><button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09" aria-label="\u63D0\u793A\u8BCD\u4F18\u5316"><svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/><path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/></svg><span class="prompt-optimize-spinner" aria-hidden="true"></span></button></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" title="\u505C\u6B62"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="send-input-button" class="btn-circle btn-circle-send" title="\u53D1\u9001"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + '</div></div><div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div></main></div></div>';
+    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title" title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (currentDraft ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A" aria-haspopup="dialog" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea><button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09" aria-label="\u63D0\u793A\u8BCD\u4F18\u5316"><svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/><path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/></svg><span class="prompt-optimize-spinner" aria-hidden="true"></span></button></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" title="\u505C\u6B62"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" title="\u53D1\u9001"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + '</div></div><div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div></main></div></div>';
   }
 
   // src/web-ui/react/legacy-overlays.ts
@@ -38608,10 +38624,6 @@
   // src/web-ui/browser/input.ts
   var voiceState = { recording: false, canceling: false, transcript: "", startY: 0 };
   var VOICE_CANCEL_THRESHOLD = 60;
-  var VOICE_HOLD_DELAY = 180;
-  var composerVoiceHoldTimer = null;
-  var composerVoiceHoldStartY = 0;
-  var composerVoiceHoldPointerId = null;
   function updateVoiceTranscript(text5) {
     voiceState.transcript = text5 || "";
     var textEl = document.getElementById("voice-transcript-text");
@@ -38620,12 +38632,13 @@
     if (bubble) bubble.classList.toggle("has-text", !!voiceState.transcript);
   }
   function startVoiceRecording(e) {
+    if (state.terminalInteractive || voiceState.recording) return;
     if (e) {
       e.preventDefault();
       voiceState.startY = typeof e.clientY === "number" ? e.clientY : 0;
       try {
-        if (e.pointerId !== void 0 && e.target && e.target.setPointerCapture) {
-          e.target.setPointerCapture(e.pointerId);
+        if (e.pointerId !== void 0 && e.currentTarget && e.currentTarget.setPointerCapture) {
+          e.currentTarget.setPointerCapture(e.pointerId);
         }
       } catch (_) {
       }
@@ -38636,6 +38649,8 @@
     var btn = document.getElementById("voice-record-btn");
     if (btn) {
       btn.classList.add("is-recording");
+      btn.setAttribute("aria-pressed", "true");
+      btn.setAttribute("title", "\u677E\u5F00\u7ED3\u675F \xB7 \u4E0A\u6ED1\u53D6\u6D88");
       var label = btn.querySelector(".voice-record-label");
       if (label) label.textContent = "\u677E\u5F00 \u53D1\u9001";
     }
@@ -38668,66 +38683,20 @@
     resetVoiceRecordingUI();
     if (commit) {
       commitVoiceTranscript(text5);
-      toggleVoiceMode(false);
     }
   }
-  function clearComposerVoiceHoldTimer() {
-    if (composerVoiceHoldTimer !== null) {
-      clearTimeout(composerVoiceHoldTimer);
-      composerVoiceHoldTimer = null;
-    }
-  }
-  function beginComposerVoiceHold(e) {
-    var box = e && e.currentTarget;
-    if (!box || state.terminalInteractive || (box.value || "").trim()) return;
-    clearComposerVoiceHoldTimer();
-    composerVoiceHoldStartY = typeof e.clientY === "number" ? e.clientY : 0;
-    composerVoiceHoldPointerId = e.pointerId;
-    composerVoiceHoldTimer = setTimeout(function() {
-      composerVoiceHoldTimer = null;
-      if ((box.value || "").trim()) return;
-      startVoiceRecording(e);
-      var composer = box.closest && box.closest(".input-composer");
-      if (composer) composer.classList.add("voice-holding");
-      box.placeholder = "\u677E\u5F00\u7ED3\u675F \xB7 \u4E0A\u6ED1\u53D6\u6D88";
-    }, VOICE_HOLD_DELAY);
-  }
-  function handleComposerVoiceMove(e) {
-    if (composerVoiceHoldTimer !== null) {
-      var dy = Math.abs(composerVoiceHoldStartY - (typeof e.clientY === "number" ? e.clientY : composerVoiceHoldStartY));
-      if (dy > 10) clearComposerVoiceHoldTimer();
-      return;
-    }
-    if (voiceState.recording && (composerVoiceHoldPointerId === null || e.pointerId === composerVoiceHoldPointerId)) {
-      handleVoiceMove(e);
-      var box = e.currentTarget;
-      if (box) box.placeholder = voiceState.canceling ? "\u677E\u5F00\u53D6\u6D88" : "\u677E\u5F00\u7ED3\u675F \xB7 \u4E0A\u6ED1\u53D6\u6D88";
-    }
-  }
-  function finishComposerVoiceHold(e, canceled) {
-    var wasPending = composerVoiceHoldTimer !== null;
-    clearComposerVoiceHoldTimer();
-    if (!wasPending && voiceState.recording) {
-      if (canceled) voiceState.canceling = true;
-      stopVoiceRecording(e);
-    }
-    composerVoiceHoldPointerId = null;
-    var box = e && e.currentTarget;
-    var composer = box && box.closest && box.closest(".input-composer");
-    if (composer) composer.classList.remove("voice-holding");
-    if (box) box.placeholder = getComposerPlaceholder(getSelectedSession(), state.terminalInteractive);
-  }
-  function endComposerVoiceHold(e) {
-    finishComposerVoiceHold(e, false);
-  }
-  function cancelComposerVoiceHold(e) {
-    finishComposerVoiceHold(e, true);
+  function cancelVoiceRecording(e) {
+    if (!voiceState.recording) return;
+    voiceState.canceling = true;
+    stopVoiceRecording(e);
   }
   function resetVoiceRecordingUI() {
     voiceState.canceling = false;
     var btn = document.getElementById("voice-record-btn");
     if (btn) {
       btn.classList.remove("is-recording");
+      btn.setAttribute("aria-pressed", "false");
+      btn.setAttribute("title", "\u6309\u4F4F\u8BED\u97F3\u8F93\u5165");
       var label = btn.querySelector(".voice-record-label");
       if (label) label.textContent = "\u6309\u4F4F \u8BF4\u8BDD";
     }
@@ -38749,33 +38718,18 @@
     } catch (_) {
     }
   }
-  function toggleVoiceMode(force) {
-    var composer = document.querySelector(".input-composer");
-    if (!composer) return;
-    var willEnable = typeof force === "boolean" ? force : !composer.classList.contains("voice-mode");
-    composer.classList.toggle("voice-mode", willEnable);
-    if (!willEnable) {
-      voiceState.recording = false;
-      resetVoiceRecordingUI();
-      var inputBox = document.getElementById("input-box");
-      if (inputBox && !state.terminalInteractive) {
-        try {
-          inputBox.focus({ preventScroll: true });
-        } catch (_) {
-        }
-      }
-    }
-  }
   function autoResizeInput(el) {
     if (!el) return;
     var minHeight = 36;
-    var maxHeight = 120;
+    var computedMaxHeight = parseFloat(window.getComputedStyle(el).maxHeight || "");
+    var maxHeight = Number.isFinite(computedMaxHeight) ? Math.max(minHeight, computedMaxHeight) : 120;
     var touchDevice = isTouchDevice();
     if (!el.value || el.value.trim() === "") {
       el.style.height = minHeight + "px";
       el.style.minHeight = minHeight + "px";
       el.style.overflowY = touchDevice ? "auto" : "hidden";
       el.scrollTop = 0;
+      el.classList.remove("has-multiline-draft", "has-clipped-draft");
       syncComposerHasText(el);
       return;
     }
@@ -38785,9 +38739,12 @@
     var contentHeight = el.scrollHeight;
     var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
     var shouldScrollInside = contentHeight > maxHeight;
+    var needsExpandedHeight = contentHeight > minHeight + 1;
     el.style.height = newHeight + "px";
     el.style.minHeight = minHeight + "px";
     el.style.overflowY = shouldScrollInside || touchDevice ? "auto" : "hidden";
+    el.classList.toggle("has-multiline-draft", needsExpandedHeight);
+    el.classList.toggle("has-clipped-draft", shouldScrollInside);
     if (shouldScrollInside) {
       syncInputBoxScroll(el);
     } else {
@@ -40250,9 +40207,12 @@
         !!state.terminalInteractive && !document.documentElement.classList.contains("is-wand-embed-terminal")
       );
     }
-    var composerEl = document.querySelector(".input-composer");
-    if (composerEl && state.terminalInteractive && composerEl.classList.contains("voice-mode")) {
-      composerEl.classList.remove("voice-mode");
+    var voiceBtn = document.getElementById("voice-record-btn");
+    if (voiceBtn) {
+      voiceBtn.disabled = state.terminalInteractive;
+      voiceBtn.setAttribute("aria-disabled", voiceBtn.disabled ? "true" : "false");
+    }
+    if (state.terminalInteractive && voiceState.recording) {
       voiceState.recording = false;
       resetVoiceRecordingUI();
     }
@@ -40821,11 +40781,13 @@
   function handleInputBoxBlur2(event) {
     var blurredEl = event && event.target ? event.target : document.getElementById("input-box");
     resetInputPanelViewportSpacing();
+    if (blurredEl) autoResizeInput(blurredEl);
     scheduleClosedViewportBaselineWindow(2200, blurredEl);
     var dismissTicks = [80, 200, 380, 620, 900];
     dismissTicks.forEach(function(delay, idx) {
       setTimeout(function() {
         syncAppViewportHeight(false);
+        if (blurredEl && blurredEl.value) autoResizeInput(blurredEl);
         if (idx === 1 && isTouchDevice()) {
           ensureTerminalFit("keyboard-blur", { forceReplay: true });
           maybeScrollTerminalToBottom("keyboard");
@@ -44049,7 +44011,7 @@
     if (tool === "codex") {
       return ["full-access"];
     }
-    if (tool === "opencode") return ["default", "full-access", "managed"];
+    if (tool === "opencode" || tool === "grok") return ["default", "full-access", "managed"];
     return ["default", "full-access", "auto-edit", "native", "managed"];
   }
   function getSafeModeForTool2(tool, mode) {
@@ -44205,6 +44167,13 @@
     if (lower.indexOf("gpt-5.5") !== -1) return "GPT-5.5";
     if (lower.indexOf("gpt-5") !== -1) return "GPT-5";
     if (lower.indexOf("gpt-4") !== -1) return "GPT-4";
+    if (lower.indexOf("grok-4.5") !== -1) return "Grok 4.5";
+    if (lower.indexOf("grok-4") !== -1) return "Grok 4";
+    if (lower.indexOf("grok-3") !== -1) return "Grok 3";
+    if (lower.indexOf("grok") !== -1) {
+      if (label.length > 12) return label.slice(0, 10) + "\u2026";
+      return label;
+    }
     if (label.length > 12) return label.slice(0, 10) + "\u2026";
     return label;
   }
@@ -44311,7 +44280,7 @@
     }).join("");
   }
   function getProviderKey(provider) {
-    return provider === "codex" || provider === "opencode" ? provider : "claude";
+    return provider === "codex" || provider === "opencode" || provider === "grok" ? provider : "claude";
   }
   function getProviderForSession(session) {
     return getProviderKey(session && session.provider || state.sessionTool || "claude");
@@ -44321,13 +44290,17 @@
     return {
       claude: typeof configured.claude === "string" ? configured.claude : state.config && state.config.defaultModel || "",
       codex: typeof configured.codex === "string" ? configured.codex : state.config && state.config.defaultCodexModel || "",
-      opencode: typeof configured.opencode === "string" ? configured.opencode : state.config && state.config.defaultOpenCodeModel || ""
+      opencode: typeof configured.opencode === "string" ? configured.opencode : state.config && state.config.defaultOpenCodeModel || "",
+      grok: typeof configured.grok === "string" ? configured.grok : state.config && state.config.defaultGrokModel || ""
     };
   }
   function getConfigDefaultModelForProvider(provider) {
     var defaults = getConfigDefaultModels();
     var key = getProviderKey(provider);
-    return key === "codex" ? defaults.codex || "" : key === "opencode" ? defaults.opencode || "" : defaults.claude || "";
+    if (key === "codex") return defaults.codex || "";
+    if (key === "opencode") return defaults.opencode || "";
+    if (key === "grok") return defaults.grok || "";
+    return defaults.claude || "";
   }
   function getChatModelForProvider(provider) {
     var key = getProviderKey(provider);
@@ -44338,7 +44311,7 @@
   function setChatModelForProvider(provider, model) {
     var key = getProviderKey(provider);
     var normalized = (model || "").trim();
-    if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "" };
+    if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "" };
     state.chatModels[key] = normalized;
     state.chatModel = normalized;
     try {
@@ -44356,9 +44329,10 @@
     return selected || getConfigDefaultModelForProvider(provider) || "";
   }
   function getModelsForCurrentProvider(session) {
-    var provider = session && session.provider || state.sessionTool || "claude";
+    var provider = getProviderKey(session && session.provider || state.sessionTool || "claude");
     if (provider === "codex") return state.availableCodexModels || [];
     if (provider === "opencode") return state.availableOpenCodeModels || [];
+    if (provider === "grok") return state.availableGrokModels || [];
     return state.availableModels || [];
   }
   function renderChatModelOptions(selected, session) {
@@ -44518,6 +44492,7 @@
         state.availableModels = data.models;
         state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
         state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
+        state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
         syncComposerModelSelect(getSelectedSession4());
       }
       return data;
@@ -44616,13 +44591,14 @@
   }
   function createStructuredSession(prompt, cwdOverride, modeOverride, worktreeEnabled) {
     var provider = getProviderKey(state.sessionTool);
-    var modelPref = getChatModelForProvider(provider);
+    var modelPref = getChatModelForProvider(provider) || getConfigDefaultModelForProvider(provider);
     var thinkingPref = state.chatThinking || "off";
+    var structuredRunner2 = provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : provider === "grok" ? "grok-cli-headless" : state.config && state.config.structuredRunner === "sdk" ? "claude-sdk" : state.structuredRunner || "claude-cli-print";
     var payload = {
       cwd: cwdOverride || getEffectiveCwd(),
       mode: modeOverride || state.chatMode || state.config && state.config.defaultMode || "default",
       provider,
-      runner: provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : state.config && state.config.structuredRunner === "sdk" ? "claude-sdk" : state.structuredRunner || "claude-cli-print",
+      runner: structuredRunner2,
       prompt: prompt || void 0,
       worktreeEnabled: worktreeEnabled === true,
       model: modelPref || void 0,
@@ -46324,7 +46300,8 @@
         selectedModels: {
           claude: getChatModelForProvider("claude"),
           codex: getChatModelForProvider("codex"),
-          opencode: getChatModelForProvider("opencode")
+          opencode: getChatModelForProvider("opencode"),
+          grok: getChatModelForProvider("grok")
         },
         thinkingEffort: state.chatThinking || "off"
       };
@@ -46419,7 +46396,7 @@
     if (field === "cwd") return copySelectedSessionField("cwd", "\u5DE5\u4F5C\u76EE\u5F55\u5DF2\u590D\u5236");
     if (field === "sessionId") return copySelectedSessionField("id", "\u4F1A\u8BDD ID \u5DF2\u590D\u5236");
     const provider = selected?.provider;
-    const label = provider === "codex" ? "Codex thread ID \u5DF2\u590D\u5236" : provider === "opencode" ? "OpenCode session ID \u5DF2\u590D\u5236" : "Claude \u4F1A\u8BDD ID \u5DF2\u590D\u5236";
+    const label = provider === "codex" ? "Codex thread ID \u5DF2\u590D\u5236" : provider === "opencode" ? "OpenCode session ID \u5DF2\u590D\u5236" : provider === "grok" ? "Grok \u4F1A\u8BDD ID \u5DF2\u590D\u5236" : "Claude \u4F1A\u8BDD ID \u5DF2\u590D\u5236";
     return copySelectedSessionField("claudeSessionId", label);
   }
   function createBrowserShellCommands() {

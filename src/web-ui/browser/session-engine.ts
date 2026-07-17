@@ -228,6 +228,11 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             ? "OpenCode 将自动批准未显式拒绝的权限；支持 TUI 与 JSON 结构化会话。"
             : "OpenCode 使用自身权限配置；结构化模式会自动拒绝未批准的权限请求。";
         }
+        if (tool === "grok") {
+          return mode === "full-access" || mode === "managed" || mode === "auto-edit"
+            ? "Grok 将自动批准工具执行（--always-approve）；支持 TUI 与 streaming-json 结构化会话。"
+            : "Grok 使用自身权限配置；结构化模式支持多轮续聊与思考过程展示。";
+        }
         if (mode === "full-access") {
           return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
         }
@@ -247,7 +252,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         if (tool === "codex") {
           return ["full-access"];
         }
-        if (tool === "opencode") return ["default", "full-access", "managed"];
+        if (tool === "opencode" || tool === "grok") return ["default", "full-access", "managed"];
         return ["default", "full-access", "auto-edit", "native", "managed"];
       }
 
@@ -455,6 +460,13 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         if (lower.indexOf("gpt-5.5") !== -1) return "GPT-5.5";
         if (lower.indexOf("gpt-5") !== -1) return "GPT-5";
         if (lower.indexOf("gpt-4") !== -1) return "GPT-4";
+        if (lower.indexOf("grok-4.5") !== -1) return "Grok 4.5";
+        if (lower.indexOf("grok-4") !== -1) return "Grok 4";
+        if (lower.indexOf("grok-3") !== -1) return "Grok 3";
+        if (lower.indexOf("grok") !== -1) {
+          if (label.length > 12) return label.slice(0, 10) + "…";
+          return label;
+        }
         if (label.length > 12) return label.slice(0, 10) + "…";
         return label;
       }
@@ -592,7 +604,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
       }
 
       export function getProviderKey(provider) {
-        return provider === "codex" || provider === "opencode" ? provider : "claude";
+        return provider === "codex" || provider === "opencode" || provider === "grok" ? provider : "claude";
       }
 
       export function getProviderForSession(session) {
@@ -606,14 +618,18 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         return {
           claude: typeof configured.claude === "string" ? configured.claude : ((state.config && state.config.defaultModel) || ""),
           codex: typeof configured.codex === "string" ? configured.codex : ((state.config && state.config.defaultCodexModel) || ""),
-          opencode: typeof configured.opencode === "string" ? configured.opencode : ((state.config && state.config.defaultOpenCodeModel) || "")
+          opencode: typeof configured.opencode === "string" ? configured.opencode : ((state.config && state.config.defaultOpenCodeModel) || ""),
+          grok: typeof configured.grok === "string" ? configured.grok : ((state.config && state.config.defaultGrokModel) || "")
         };
       }
 
       export function getConfigDefaultModelForProvider(provider) {
         var defaults = getConfigDefaultModels();
         var key = getProviderKey(provider);
-        return key === "codex" ? (defaults.codex || "") : key === "opencode" ? (defaults.opencode || "") : (defaults.claude || "");
+        if (key === "codex") return defaults.codex || "";
+        if (key === "opencode") return defaults.opencode || "";
+        if (key === "grok") return defaults.grok || "";
+        return defaults.claude || "";
       }
 
       export function getChatModelForProvider(provider) {
@@ -626,7 +642,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
       export function setChatModelForProvider(provider, model) {
         var key = getProviderKey(provider);
         var normalized = (model || "").trim();
-        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "" };
+        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "" };
         state.chatModels[key] = normalized;
         state.chatModel = normalized;
         try {
@@ -645,9 +661,10 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
       }
 
       export function getModelsForCurrentProvider(session) {
-        var provider = (session && session.provider) || state.sessionTool || "claude";
+        var provider = getProviderKey((session && session.provider) || state.sessionTool || "claude");
         if (provider === "codex") return state.availableCodexModels || [];
         if (provider === "opencode") return state.availableOpenCodeModels || [];
+        if (provider === "grok") return state.availableGrokModels || [];
         return state.availableModels || [];
       }
 
@@ -840,6 +857,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
               state.availableModels = data.models;
               state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
               state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
+              state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
               syncComposerModelSelect(getSelectedSession());
             }
             return data;
@@ -944,13 +962,20 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 
       export function createStructuredSession(prompt?, cwdOverride?, modeOverride?, worktreeEnabled?) {
         var provider = getProviderKey(state.sessionTool);
-        var modelPref = getChatModelForProvider(provider);
+        var modelPref = getChatModelForProvider(provider) || getConfigDefaultModelForProvider(provider);
         var thinkingPref = state.chatThinking || "off";
+        var structuredRunner = provider === "codex"
+          ? "codex-cli-exec"
+          : provider === "opencode"
+            ? "opencode-cli-run"
+            : provider === "grok"
+              ? "grok-cli-headless"
+              : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print"));
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
           provider: provider,
-          runner: provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print")),
+          runner: structuredRunner,
           prompt: prompt || undefined,
           worktreeEnabled: worktreeEnabled === true,
           model: modelPref || undefined,

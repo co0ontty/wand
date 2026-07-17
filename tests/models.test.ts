@@ -5,6 +5,7 @@ import {
   ModelCommandRunner,
   ModelRefreshOptions,
   parseCodexModels,
+  parseGrokModels,
   parseOpenCodeModels,
   refreshModels,
 } from "../src/models.js";
@@ -36,6 +37,7 @@ function createCommandRunner(
     if (file === "claude" && args[0] === "--version") return { stdout: "2.1.149\n", stderr: "" };
     if (file === "codex") throw new Error("not installed");
     if (file === "opencode") throw new Error("not installed");
+    if (file === "grok") throw new Error("not installed");
     throw new Error(`Unexpected command: ${key}`);
   };
 }
@@ -120,6 +122,28 @@ test("OpenCode model discovery parses provider/model lines and removes duplicate
 test("OpenCode model discovery falls back when no model ids are present", () => {
   const models = parseOpenCodeModels("old opencode output");
   assert.deepEqual(models.map((model) => model.id), ["default"]);
+});
+
+test("Grok model discovery parses default and available models", () => {
+  const models = parseGrokModels([
+    "You are logged in with grok.com.",
+    "",
+    "Default model: grok-4.5",
+    "",
+    "Available models:",
+    "  * grok-4.5 (default)",
+    "  * grok-3",
+  ].join("\n"));
+
+  assert.deepEqual(models.map((model) => model.id), ["default", "grok-4.5", "grok-3"]);
+  assert.equal(models[0]?.alias, true);
+  assert.equal(models[0]?.label, "grok-4.5（Grok 默认）");
+});
+
+test("Grok model discovery falls back when output is empty", () => {
+  const models = parseGrokModels("not a model list");
+  assert.equal(models[0]?.id, "default");
+  assert.equal(models.some((model) => model.id === "grok-4.5"), true);
 });
 
 test("Claude candidates merge configured, verified, and Models API entries without asserting entitlement", async () => {

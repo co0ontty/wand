@@ -780,6 +780,7 @@ export function renderAppShell() {
           //  · 提示词优化按钮（✨）改成只在 textarea 有内容时显示，绝对定位浮在右侧。
           //  · 自动批准 / 权限操作行统一搬到 textarea 上方的状态行，
           //    输入主行保持极简。
+          '<div class="input-composer-row">' +
           '<div class="input-composer' + (currentDraft ? ' has-text' : '') + '">' +
             // 顶部状态行：自动批准 / 权限审批 / 统计 —— 仅在有内容时占位，
             // 否则折叠成 0 高度。避免与下方"主输入行"挤在一行。
@@ -801,7 +802,6 @@ export function renderAppShell() {
                 '</button>' +
                 // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
                 '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
-                // 语音按钮已暂时隐藏（按住说话交互保留，等接 STT 后再放出）；终端交互按钮搬进了 popover。
               '</div>' +
               '<div class="composer-inline-config">' +
                 renderComposerConfigControlsHtml(selectedSession) +
@@ -826,6 +826,10 @@ export function renderAppShell() {
                 '<button id="stop-button" class="btn-circle btn-circle-stop hidden" title="停止">' +
                   '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
                 '</button>' +
+                // 语音按钮位于输入框内部、发送按钮左侧；只在按钮自身处理长按。
+                '<button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="按住语音输入" aria-label="按住语音输入" aria-pressed="false"' + (state.terminalInteractive ? ' disabled' : '') + '>' +
+                  iconSvg("mic", { size: 19, strokeWidth: 2 }) +
+                '</button>' +
                 // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队点输入框上方那条气泡。
                 '<button id="send-input-button" class="btn-circle btn-circle-send" title="发送">' +
                   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
@@ -833,6 +837,7 @@ export function renderAppShell() {
               '</div>' +
             '</div>' +
             '<div id="attachment-preview" class="attachment-preview hidden"></div>' +
+          '</div>' +
           '</div>' +
           // 加号气泡 —— 浮在 + 按钮上方（.input-composer 之外，绕开它的 overflow:hidden）。
           // 内容：附件 / 终端交互 / 三件套（模式·模型·思考）。默认 hidden，点 + 切换；

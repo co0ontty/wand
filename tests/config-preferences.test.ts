@@ -110,6 +110,18 @@ test("OpenCode provider and model preferences round-trip through storage", () =>
   assert.equal(restored.commitCli, "opencode");
 });
 
+test("Grok provider and model preferences round-trip through storage", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+
+  writePreferenceToStorage(config, storage, "defaultProvider", "grok");
+  writePreferenceToStorage(config, storage, "defaultGrokModel", "  grok-4.5  ");
+
+  const restored = applyStoragePreferences(defaultConfig(), storage);
+  assert.equal(restored.defaultProvider, "grok");
+  assert.equal(restored.defaultGrokModel, "grok-4.5");
+});
+
 test("new-session preferences reject unsupported values", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorage;
 
