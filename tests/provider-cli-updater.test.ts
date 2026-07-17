@@ -29,11 +29,13 @@ case "$2" in
   @anthropic-ai/claude-code@latest) echo 2.2.0 ;;
   @openai/codex@latest) echo 0.144.1 ;;
   opencode-ai@latest) echo 1.1.0 ;;
+  @qoder-ai/qodercli@latest) echo 0.8.0 ;;
   *) exit 1 ;;
 esac`);
   executable(path.join(bin, "claude"), `[ "$1" = "--version" ] && echo '2.1.0 (Claude Code)' || echo claude >> "$UPDATE_LOG"`);
   executable(path.join(bin, "codex"), `[ "$1" = "--version" ] && echo 'codex-cli 0.144.1' || echo codex >> "$UPDATE_LOG"`);
   executable(path.join(bin, "opencode"), `[ "$1" = "--version" ] && echo '1.0.0' || echo opencode >> "$UPDATE_LOG"`);
+  executable(path.join(bin, "qodercli"), `[ "$1" = "--version" ] && echo '0.7.0' || echo qoder >> "$UPDATE_LOG"`);
 
   const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, WAND_NPM_BIN: path.join(bin, "npm"), UPDATE_LOG: log };
   const statuses = await checkProviderCliUpdates({ env });
@@ -41,14 +43,16 @@ esac`);
     ["claude", "2.1.0", "2.2.0", true],
     ["codex", "0.144.1", "0.144.1", false],
     ["opencode", "1.0.0", "1.1.0", true],
+    ["qoder", "0.7.0", "0.8.0", true],
   ]);
 
   const results = await updateProviderClis(statuses, undefined, { env });
   assert.deepEqual(results.map((item) => [item.id, item.ok, item.skipped]), [
     ["claude", true, false],
     ["opencode", true, false],
+    ["qoder", true, false],
   ]);
-  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["claude", "opencode"]);
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["claude", "opencode", "qoder"]);
 });
 
 test("legacy OpenCode is reported without running an unsafe automatic migration", async (t) => {

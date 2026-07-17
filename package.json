@@ -1,6 +1,6 @@
 {
   "name": "@co0ontty/wand",
-  "version": "4.6.1",
+  "version": "4.10.3",
   "description": "A web console for Claude Code, Codex, OpenCode, and other local CLI tools.",
   "type": "module",
   "bin": {

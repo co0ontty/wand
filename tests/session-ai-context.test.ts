@@ -9,6 +9,7 @@ const config = {
   defaultCodexModel: "gpt-5.5-codex",
   defaultOpenCodeModel: "anthropic/claude-sonnet-4-6",
   defaultGrokModel: "grok-4.5",
+  defaultQoderModel: "performance",
   defaultThinkingEffort: "deep" as const,
   inheritEnv: true,
   commitCli: "claude" as const,
@@ -61,6 +62,12 @@ test("resolveSessionProvider recognizes Grok session representations", () => {
   })), "grok");
 });
 
+test("resolveSessionProvider recognizes Qoder session representations", () => {
+  assert.equal(resolveSessionProvider(session({ provider: "qoder" })), "qoder");
+  assert.equal(resolveSessionProvider(session({ provider: undefined, runner: "qoder-cli-print" })), "qoder");
+  assert.equal(resolveSessionProvider(session({ provider: undefined, command: "qodercli -p hello" })), "qoder");
+});
+
 test("resolveSessionAiContext uses the OpenCode default model", () => {
   const context = resolveSessionAiContext(session({ provider: "opencode", command: "opencode" }), config);
   assert.equal(context.provider, "opencode");
@@ -71,6 +78,12 @@ test("resolveSessionAiContext uses the Grok default model", () => {
   const context = resolveSessionAiContext(session({ provider: "grok", command: "grok" }), config);
   assert.equal(context.provider, "grok");
   assert.equal(context.model, "grok-4.5");
+});
+
+test("resolveSessionAiContext uses the Qoder default model", () => {
+  const context = resolveSessionAiContext(session({ provider: "qoder", command: "qodercli" }), config);
+  assert.equal(context.provider, "qoder");
+  assert.equal(context.model, "performance");
 });
 
 test("resolveSessionAiContext keeps provider-specific model and effort", () => {

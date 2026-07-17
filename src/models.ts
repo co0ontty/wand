@@ -40,6 +40,15 @@ const GROK_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "grok-4.5", label: "grok-4.5" },
 ];
 
+const QODER_FALLBACK_MODELS: ClaudeModelInfo[] = [
+  { id: "default", label: "跟随 Qoder 默认", alias: true },
+  { id: "lite", label: "Lite" },
+  { id: "efficient", label: "Efficient" },
+  { id: "auto", label: "Auto" },
+  { id: "performance", label: "Performance" },
+  { id: "ultimate", label: "Ultimate" },
+];
+
 export interface ModelCacheStorage {
   getConfigValue(key: string): string | null;
   setConfigValue(key: string, value: string): void;
@@ -87,6 +96,7 @@ export interface ModelCache {
   codexModels: ClaudeModelInfo[];
   opencodeModels: ClaudeModelInfo[];
   grokModels: ClaudeModelInfo[];
+  qoderModels: ClaudeModelInfo[];
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string;
@@ -305,6 +315,7 @@ function createInitialCache(options: ModelRefreshOptions): ModelCache {
     codexModels: cloneModels(CODEX_FALLBACK_MODELS),
     opencodeModels: cloneModels(OPENCODE_FALLBACK_MODELS),
     grokModels: cloneModels(GROK_FALLBACK_MODELS),
+    qoderModels: cloneModels(QODER_FALLBACK_MODELS),
     claudeVersion: null,
     opencodeVersion: null,
     refreshedAt: now.toISOString(),
@@ -380,6 +391,15 @@ async function probeGrokModels(runner: ModelCommandRunner, env: NodeJS.ProcessEn
     return parseGrokModels(stdout);
   } catch {
     return cloneModels(GROK_FALLBACK_MODELS);
+  }
+}
+
+async function probeQoderModels(runner: ModelCommandRunner, env: NodeJS.ProcessEnv): Promise<ClaudeModelInfo[]> {
+  try {
+    const { stdout } = await runner("qodercli", ["--list-models"], { env, timeout: 8000 });
+    return parseQoderModels(stdout);
+  } catch {
+    return cloneModels(QODER_FALLBACK_MODELS);
   }
 }
 
@@ -497,6 +517,22 @@ export function parseGrokModels(stdout: string): ClaudeModelInfo[] {
   ];
 }
 
+/** Parse `qodercli --list-models`, whose custom entries end in their selectable model ID. */
+export function parseQoderModels(stdout: string): ClaudeModelInfo[] {
+  const discovered: ClaudeModelInfo[] = [];
+  const seen = new Set(QODER_FALLBACK_MODELS.map((model) => model.id));
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "").trim();
+    const match = line.match(/^(.*?)\s+\(([A-Za-z0-9][A-Za-z0-9._:-]*\/[A-Za-z0-9][A-Za-z0-9._:/-]*)\)\s*$/);
+    if (!match) continue;
+    const [, displayName, id] = match;
+    if (!displayName || !id || seen.has(id)) continue;
+    seen.add(id);
+    discovered.push({ id, label: displayName.trim() || id });
+  }
+  return [...cloneModels(QODER_FALLBACK_MODELS), ...discovered];
+}
+
 /** Parse `opencode models`, whose stable machine-friendly output is one provider/model id per line. */
 export function parseOpenCodeModels(stdout: string): ClaudeModelInfo[] {
   const ids = Array.from(new Set(
@@ -578,11 +614,12 @@ export async function refreshModels(options: ModelRefreshOptions = {}): Promise<
   const now = options.now?.() ?? new Date();
   const env = resolveProbeEnv(options);
   const runner = options.commandRunner ?? defaultCommandRunner;
-  const [claudeVersion, codexModels, opencode, grokModels, apiModels] = await Promise.all([
+  const [claudeVersion, codexModels, opencode, grokModels, qoderModels, apiModels] = await Promise.all([
     probeClaudeVersion(runner, env),
     probeCodexModels(runner, env),
     probeOpenCode(runner, env),
     probeGrokModels(runner, env),
+    probeQoderModels(runner, env),
     listClaudeModelsFromApi(options, env),
   ]);
   const priorVerifications = loadClaudeVerifications(options.storage);
@@ -609,6 +646,7 @@ export async function refreshModels(options: ModelRefreshOptions = {}): Promise<
     codexModels,
     opencodeModels: opencode.models,
     grokModels,
+    qoderModels,
     claudeVersion,
     opencodeVersion: opencode.version,
     refreshedAt: now.toISOString(),

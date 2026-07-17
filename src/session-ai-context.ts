@@ -23,6 +23,7 @@ export function resolveSessionProvider(snapshot: Pick<
     || snapshot.provider === "codex"
     || snapshot.provider === "opencode"
     || snapshot.provider === "grok"
+    || snapshot.provider === "qoder"
   ) {
     return snapshot.provider;
   }
@@ -31,6 +32,7 @@ export function resolveSessionProvider(snapshot: Pick<
     || snapshot.structuredState?.provider === "codex"
     || snapshot.structuredState?.provider === "opencode"
     || snapshot.structuredState?.provider === "grok"
+    || snapshot.structuredState?.provider === "qoder"
   ) {
     return snapshot.structuredState.provider;
   }
@@ -39,11 +41,13 @@ export function resolveSessionProvider(snapshot: Pick<
   if (runner === "codex-cli-exec") return "codex";
   if (runner === "opencode-cli-run") return "opencode";
   if (runner === "grok-cli-headless") return "grok";
+  if (runner === "qoder-cli-print") return "qoder";
   if (runner === "claude-cli" || runner === "claude-cli-print" || runner === "claude-sdk") return "claude";
 
   if (/^codex\b/i.test(snapshot.command.trim())) return "codex";
   if (/^opencode\b/i.test(snapshot.command.trim())) return "opencode";
   if (/^grok\b/i.test(snapshot.command.trim())) return "grok";
+  if (/^qodercli\b/i.test(snapshot.command.trim())) return "qoder";
   return "claude";
 }
 
@@ -58,7 +62,7 @@ export function resolveSessionAiContext(
     SessionSnapshot,
     "provider" | "structuredState" | "runner" | "command" | "selectedModel" | "thinkingEffort"
   >,
-  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultThinkingEffort" | "inheritEnv">,
+  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultThinkingEffort" | "inheritEnv">,
 ): SessionAiContext {
   const provider = resolveSessionProvider(snapshot);
   const sessionModel = normalizeModel(snapshot.selectedModel) ?? normalizeModel(snapshot.structuredState?.model);
@@ -84,6 +88,7 @@ export function resolveCommitAiContext(
     | "defaultCodexModel"
     | "defaultOpenCodeModel"
     | "defaultGrokModel"
+    | "defaultQoderModel"
     | "defaultThinkingEffort"
     | "inheritEnv"
     | "commitCli"

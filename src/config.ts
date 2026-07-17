@@ -36,6 +36,7 @@ export const PREFERENCE_KEYS = [
   "defaultCodexModel",
   "defaultOpenCodeModel",
   "defaultGrokModel",
+  "defaultQoderModel",
   "commitCli",
   "commitModel",
   "commitAiSource",
@@ -85,6 +86,7 @@ export const defaultConfig = (): WandConfig => ({
   defaultCodexModel: "",
   defaultOpenCodeModel: "",
   defaultGrokModel: "",
+  defaultQoderModel: "",
   commitCli: "claude",
   commitModel: "",
   commitAiSource: "cli",
@@ -304,7 +306,7 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
 
   if (storage.hasPreference(preferenceStorageKey("defaultProvider"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultProvider"), defaults.defaultProvider ?? "claude");
-    if (v === "claude" || v === "codex" || v === "opencode" || v === "grok") config.defaultProvider = v;
+    if (v === "claude" || v === "codex" || v === "opencode" || v === "grok" || v === "qoder") config.defaultProvider = v;
   }
   if (storage.hasPreference(preferenceStorageKey("defaultSessionKind"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultSessionKind"), defaults.defaultSessionKind ?? "structured");
@@ -333,6 +335,10 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
   if (storage.hasPreference(preferenceStorageKey("defaultGrokModel"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultGrokModel"), defaults.defaultGrokModel ?? "");
     if (typeof v === "string") config.defaultGrokModel = v.trim();
+  }
+  if (storage.hasPreference(preferenceStorageKey("defaultQoderModel"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("defaultQoderModel"), defaults.defaultQoderModel ?? "");
+    if (typeof v === "string") config.defaultQoderModel = v.trim();
   }
   if (storage.hasPreference(preferenceStorageKey("commitCli"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("commitCli"), defaults.commitCli ?? "claude");
@@ -385,7 +391,7 @@ export function writePreferenceToStorage(
   const dbKey = preferenceStorageKey(key);
   switch (key) {
     case "defaultProvider": {
-      if (value !== "claude" && value !== "codex" && value !== "opencode" && value !== "grok") throw new Error(`无效 Provider: ${value}`);
+      if (value !== "claude" && value !== "codex" && value !== "opencode" && value !== "grok" && value !== "qoder") throw new Error(`无效 Provider: ${value}`);
       storage.setPreference(dbKey, value);
       config.defaultProvider = value;
       break;
@@ -430,6 +436,12 @@ export function writePreferenceToStorage(
       const v = typeof value === "string" ? value.trim() : "";
       storage.setPreference(dbKey, v);
       config.defaultGrokModel = v;
+      break;
+    }
+    case "defaultQoderModel": {
+      const v = typeof value === "string" ? value.trim() : "";
+      storage.setPreference(dbKey, v);
+      config.defaultQoderModel = v;
       break;
     }
     case "commitCli": {
@@ -657,12 +669,13 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
-    defaultProvider: input.defaultProvider === "codex" || input.defaultProvider === "opencode" || input.defaultProvider === "grok" ? input.defaultProvider : "claude",
+    defaultProvider: input.defaultProvider === "codex" || input.defaultProvider === "opencode" || input.defaultProvider === "grok" || input.defaultProvider === "qoder" ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
     defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
     defaultOpenCodeModel: typeof input.defaultOpenCodeModel === "string" ? input.defaultOpenCodeModel.trim() : defaults.defaultOpenCodeModel,
     defaultGrokModel: typeof input.defaultGrokModel === "string" ? input.defaultGrokModel.trim() : defaults.defaultGrokModel,
+    defaultQoderModel: typeof input.defaultQoderModel === "string" ? input.defaultQoderModel.trim() : defaults.defaultQoderModel,
     commitCli: input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
     commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
@@ -676,28 +689,31 @@ export function isExecutionMode(value: unknown): value is ExecutionMode {
   return value === "assist" || value === "agent" || value === "agent-max" || value === "auto-edit" || value === "default" || value === "full-access" || value === "native" || value === "managed";
 }
 
-export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel">): {
+export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel">): {
   claude: string;
   codex: string;
   opencode: string;
   grok: string;
+  qoder: string;
 } {
   return {
     claude: (config.defaultModel ?? "").trim(),
     codex: (config.defaultCodexModel ?? "").trim(),
     opencode: (config.defaultOpenCodeModel ?? "").trim(),
     grok: (config.defaultGrokModel ?? "").trim(),
+    qoder: (config.defaultQoderModel ?? "").trim(),
   };
 }
 
 export function getDefaultModelForProvider(
-  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel">,
+  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel">,
   provider: SessionProvider | undefined,
 ): string {
   const defaults = getProviderDefaultModels(config);
   if (provider === "codex") return defaults.codex;
   if (provider === "opencode") return defaults.opencode;
   if (provider === "grok") return defaults.grok;
+  if (provider === "qoder") return defaults.qoder;
   return defaults.claude;
 }
 

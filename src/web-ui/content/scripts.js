@@ -12970,10 +12970,11 @@
           claude: localStorage.getItem("wand-chat-model-claude") || legacy,
           codex: localStorage.getItem("wand-chat-model-codex") || "",
           opencode: localStorage.getItem("wand-chat-model-opencode") || "",
-          grok: localStorage.getItem("wand-chat-model-grok") || ""
+          grok: localStorage.getItem("wand-chat-model-grok") || "",
+          qoder: localStorage.getItem("wand-chat-model-qoder") || ""
         };
       } catch (e) {
-        return { claude: "", codex: "", opencode: "", grok: "" };
+        return { claude: "", codex: "", opencode: "", grok: "", qoder: "" };
       }
     })(),
     chatModel: (function() {
@@ -12995,6 +12996,7 @@
     availableCodexModels: [],
     availableOpenCodeModels: [],
     availableGrokModels: [],
+    availableQoderModels: [],
     modelsRefreshing: false,
     sessionTool: "claude",
     preferredCommand: "claude",
@@ -22105,6 +22107,7 @@
     const codex = stringValue(defaults.codex, stringValue(input.defaultCodexModel));
     const opencode = stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel));
     const grok = stringValue(defaults.grok, stringValue(input.defaultGrokModel));
+    const qoder = stringValue(defaults.qoder, stringValue(input.defaultQoderModel));
     return {
       host: stringValue(input.host, "127.0.0.1"),
       port: numberValue(input.port, 3e3),
@@ -22119,7 +22122,8 @@
       defaultCodexModel: codex,
       defaultOpenCodeModel: opencode,
       defaultGrokModel: grok,
-      defaultModels: { claude, codex, opencode, grok },
+      defaultQoderModel: qoder,
+      defaultModels: { claude, codex, opencode, grok, qoder },
       commitCli,
       commitModel: stringValue(input.commitModel),
       commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
@@ -22171,6 +22175,7 @@
       codexModels: models("codexModels"),
       opencodeModels: models("opencodeModels"),
       grokModels: models("grokModels"),
+      qoderModels: models("qoderModels"),
       claudeVersion: nullableString(input.claudeVersion),
       opencodeVersion: nullableString(input.opencodeVersion),
       refreshedAt: nullableString(input.refreshedAt),
@@ -22178,11 +22183,13 @@
       defaultCodexModel: stringValue(input.defaultCodexModel),
       defaultOpenCodeModel: stringValue(input.defaultOpenCodeModel),
       defaultGrokModel: stringValue(input.defaultGrokModel),
+      defaultQoderModel: stringValue(input.defaultQoderModel),
       defaultModels: {
         claude: stringValue(defaults.claude, stringValue(input.defaultModel)),
         codex: stringValue(defaults.codex, stringValue(input.defaultCodexModel)),
         opencode: stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel)),
-        grok: stringValue(defaults.grok, stringValue(input.defaultGrokModel))
+        grok: stringValue(defaults.grok, stringValue(input.defaultGrokModel)),
+        qoder: stringValue(defaults.qoder, stringValue(input.defaultQoderModel))
       }
     };
   }
@@ -22464,7 +22471,8 @@
               claude: command.value.defaultModel,
               codex: command.value.defaultCodexModel,
               opencode: command.value.defaultOpenCodeModel,
-              grok: command.value.defaultGrokModel
+              grok: command.value.defaultGrokModel,
+              qoder: command.value.defaultQoderModel
             }
           }, options.signal);
           this.runtime.configSaved(normalizeConfig(record(result).config));
@@ -22968,7 +22976,7 @@
             }, "\u670D\u52A1\u6B63\u5728\u91CD\u542F\u2026"), children: "\u91CD\u542F\u670D\u52A1" }) : null
           ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsSection, { title: "\u5F00\u53D1 CLI", description: "Claude Code\u3001Codex \u4E0E OpenCode \u7684\u670D\u52A1\u7AEF\u7248\u672C\u3002", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsSection, { title: "\u5F00\u53D1 CLI", description: "Claude Code\u3001Codex\u3001OpenCode \u4E0E Qoder CLI \u7684\u670D\u52A1\u7AEF\u7248\u672C\u3002", children: [
           /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { className: "wand-settings-cli-list", children: [
             cliItems.map((item) => /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { children: [
               /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("strong", { children: item.label }),
@@ -23243,6 +23251,7 @@
       defaultCodexModel: config.defaultCodexModel,
       defaultOpenCodeModel: config.defaultOpenCodeModel,
       defaultGrokModel: config.defaultGrokModel,
+      defaultQoderModel: config.defaultQoderModel,
       commitCli: config.commitCli,
       commitModel: config.commitModel,
       commitAiSource: config.commitAiSource,
@@ -23363,6 +23372,10 @@
             /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsField, { label: "Grok \u9ED8\u8BA4\u6A21\u578B", htmlFor: "settings-model-grok", hint: "\u7559\u7A7A\u5219\u4E0D\u4F20 --model", children: [
               /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-model-grok", list: "settings-models-grok", value: form.defaultGrokModel, placeholder: "\u8DDF\u968F Grok \u9ED8\u8BA4", onChange: (value) => update("defaultGrokModel", value) }),
               /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(ModelSuggestions, { id: "settings-models-grok", models: models?.grokModels || [] })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsField, { label: "Qoder \u9ED8\u8BA4\u6A21\u578B", htmlFor: "settings-model-qoder", hint: "\u53EF\u9009 lite / efficient / auto / performance / ultimate", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-model-qoder", list: "settings-models-qoder", value: form.defaultQoderModel, placeholder: "\u8DDF\u968F Qoder \u9ED8\u8BA4", onChange: (value) => update("defaultQoderModel", value) }),
+              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(ModelSuggestions, { id: "settings-models-qoder", models: models?.qoderModels || [] })
             ] })
           ] })
         }
@@ -23928,7 +23941,7 @@
   }
 
   // src/web-ui/react/new-session/repository.ts
-  var PROVIDERS = ["claude", "codex", "opencode", "grok"];
+  var PROVIDERS = ["claude", "codex", "opencode", "grok", "qoder"];
   var KINDS = ["structured", "pty"];
   var MODES = [
     "default",
@@ -23983,6 +23996,7 @@
   function supportedModes(provider) {
     if (provider === "codex") return ["full-access"];
     if (provider === "opencode" || provider === "grok") return ["default", "full-access", "managed"];
+    if (provider === "qoder") return ["default", "full-access", "auto-edit", "managed"];
     return ["default", "full-access", "auto-edit", "native", "managed"];
   }
   function safeMode(provider, requested, fallback = "default") {
@@ -23995,6 +24009,7 @@
     if (provider === "codex") return "codex-cli-exec";
     if (provider === "opencode") return "opencode-cli-run";
     if (provider === "grok") return "grok-cli-headless";
+    if (provider === "qoder") return "qoder-cli-print";
     return configured === "sdk" || configured === "claude-sdk" ? "claude-sdk" : "claude-cli-print";
   }
   function buildCreateRequest(form, defaults, context, dimensions = {}) {
@@ -24128,7 +24143,8 @@
     { value: "claude", label: "Claude", description: "\u5B8C\u6574 Claude \u4F1A\u8BDD\u80FD\u529B" },
     { value: "codex", label: "Codex", description: "\u7ED3\u6784\u5316 JSONL \u6216 PTY \u4F1A\u8BDD" },
     { value: "opencode", label: "OpenCode", description: "\u591A\u6A21\u578B\u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" },
-    { value: "grok", label: "Grok", description: "Grok Build \u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" }
+    { value: "grok", label: "Grok", description: "Grok Build \u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" },
+    { value: "qoder", label: "Qoder", description: "Qoder CLI \u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" }
   ];
   var KINDS2 = [
     { value: "structured", label: "\u7ED3\u6784\u5316", description: "\u667A\u80FD\u5BF9\u8BDD\u6A21\u5F0F" },
@@ -24152,11 +24168,13 @@
       if (provider === "codex") return "Codex JSONL \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u591A\u8F6E\u5BF9\u8BDD\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
       if (provider === "opencode") return "OpenCode JSON \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u7EED\u804A\u3001\u601D\u8003\u8FC7\u7A0B\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
       if (provider === "grok") return "Grok streaming-json \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u591A\u8F6E\u7EED\u804A\u4E0E\u601D\u8003\u8FC7\u7A0B\u5C55\u793A\u3002";
+      if (provider === "qoder") return "Qoder stream-json \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u7EED\u804A\u3001\u601D\u8003\u8FC7\u7A0B\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
       return "\u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u591A\u8F6E\u5BF9\u8BDD\u3001\u6D41\u5F0F\u8F93\u51FA\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
     }
     if (provider === "codex") return "Codex PTY \u7EC8\u7AEF\u4F1A\u8BDD\uFF1Bterminal \u662F\u539F\u59CB\u8F93\u51FA\uFF0Cchat \u662F\u89E3\u6790\u540E\u7684\u9605\u8BFB\u89C6\u56FE\u3002";
     if (provider === "opencode") return "OpenCode TUI \u7684\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\u3002";
     if (provider === "grok") return "Grok Build TUI \u7684\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\u3002";
+    if (provider === "qoder") return "Qoder CLI TUI \u7684\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\u3002";
     return "\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\uFF0C\u652F\u6301\u6301\u7EED\u4EA4\u4E92\u3001\u7EC8\u7AEF\u89C6\u56FE\u548C\u6743\u9650\u6D41\u3002";
   }
   function modeHint(provider, mode) {
@@ -24169,6 +24187,9 @@
     if (provider === "grok") {
       return mode === "full-access" || mode === "managed" ? "Grok \u5C06\u4EE5 always-approve \u8FD0\u884C\uFF1B\u652F\u6301 TUI \u4E0E streaming-json \u7ED3\u6784\u5316\u4F1A\u8BDD\u3002" : "Grok \u4F7F\u7528\u81EA\u8EAB\u6743\u9650\u786E\u8BA4\uFF1B\u652F\u6301 TUI \u4E0E streaming-json \u7ED3\u6784\u5316\u4F1A\u8BDD\u3002";
     }
+    if (provider === "qoder") {
+      return mode === "full-access" || mode === "managed" ? "Qoder \u5C06\u4EE5 bypass_permissions \u8FD0\u884C\uFF1B\u652F\u6301 TUI \u4E0E stream-json \u7ED3\u6784\u5316\u4F1A\u8BDD\u3002" : mode === "auto-edit" ? "Qoder \u5C06\u81EA\u52A8\u6279\u51C6\u5DE5\u4F5C\u533A\u5185\u7684\u5B89\u5168\u7F16\u8F91\u3002" : "Qoder \u4F7F\u7528\u81EA\u8EAB\u6743\u9650\u786E\u8BA4\uFF1B\u7ED3\u6784\u5316\u6A21\u5F0F\u4E0B\u672A\u6279\u51C6\u7684\u64CD\u4F5C\u4F1A\u88AB\u62D2\u7EDD\u3002";
+    }
     if (mode === "full-access") return "\u81EA\u52A8\u786E\u8BA4\u6743\u9650\u8BF7\u6C42\u4E0E\u9AD8\u6743\u9650\u64CD\u4F5C\uFF0C\u9002\u5408\u4F60\u786E\u8BA4\u73AF\u5883\u5B89\u5168\u540E\u7684\u8FDE\u7EED\u4FEE\u6539\u3002";
     if (mode === "auto-edit") return "\u4FDD\u7559\u4EA4\u4E92\u5F0F\u4F1A\u8BDD\uFF0C\u540C\u65F6\u66F4\u504F\u5411\u76F4\u63A5\u7F16\u8F91\u4EE3\u7801\u3002";
     if (mode === "native") return "\u8C03\u7528 Claude \u539F\u751F API \u8F93\u51FA\uFF0C\u9002\u5408\u5FEB\u901F\u95EE\u7B54\u6216\u4E00\u6B21\u6027\u751F\u6210\u3002";
@@ -24180,6 +24201,7 @@
     if (provider === "codex") return "\u65E0\u6CD5\u542F\u52A8 Codex \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 codex \u5DF2\u6B63\u786E\u5B89\u88C5\u5E76\u53EF\u5728\u7EC8\u7AEF\u4E2D\u6267\u884C\u3002";
     if (provider === "opencode") return "\u65E0\u6CD5\u542F\u52A8 OpenCode \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 opencode-ai \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
     if (provider === "grok") return "\u65E0\u6CD5\u542F\u52A8 Grok \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 Grok Build CLI \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
+    if (provider === "qoder") return "\u65E0\u6CD5\u542F\u52A8 Qoder \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 @qoder-ai/qodercli \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
     return "\u65E0\u6CD5\u542F\u52A8 Claude \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 Claude \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
   }
   function presentError(error, fallback) {
@@ -24326,7 +24348,7 @@
           if (!open) newSessionController.close();
         },
         title: "\u65B0\u5BF9\u8BDD",
-        description: "\u542F\u52A8 Claude\u3001Codex\u3001OpenCode \u6216 Grok \u4F1A\u8BDD\uFF0C\u9009\u62E9 provider\u3001\u4F1A\u8BDD\u7C7B\u578B\u3001\u6A21\u5F0F\u548C\u5DE5\u4F5C\u76EE\u5F55\u3002",
+        description: "\u542F\u52A8 Claude\u3001Codex\u3001OpenCode\u3001Grok \u6216 Qoder \u4F1A\u8BDD\uFF0C\u9009\u62E9 provider\u3001\u4F1A\u8BDD\u7C7B\u578B\u3001\u6A21\u5F0F\u548C\u5DE5\u4F5C\u76EE\u5F55\u3002",
         className: "wand-new-session-dialog",
         overlayClassName: "wand-new-session-overlay",
         titleClassName: "wand-new-session-title",
@@ -44027,6 +44049,7 @@
       return ["full-access"];
     }
     if (tool === "opencode" || tool === "grok") return ["default", "full-access", "managed"];
+    if (tool === "qoder") return ["default", "full-access", "auto-edit", "managed"];
     return ["default", "full-access", "auto-edit", "native", "managed"];
   }
   function getSafeModeForTool2(tool, mode) {
@@ -44295,7 +44318,7 @@
     }).join("");
   }
   function getProviderKey(provider) {
-    return provider === "codex" || provider === "opencode" || provider === "grok" ? provider : "claude";
+    return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" ? provider : "claude";
   }
   function getProviderForSession(session) {
     return getProviderKey(session && session.provider || state.sessionTool || "claude");
@@ -44306,7 +44329,8 @@
       claude: typeof configured.claude === "string" ? configured.claude : state.config && state.config.defaultModel || "",
       codex: typeof configured.codex === "string" ? configured.codex : state.config && state.config.defaultCodexModel || "",
       opencode: typeof configured.opencode === "string" ? configured.opencode : state.config && state.config.defaultOpenCodeModel || "",
-      grok: typeof configured.grok === "string" ? configured.grok : state.config && state.config.defaultGrokModel || ""
+      grok: typeof configured.grok === "string" ? configured.grok : state.config && state.config.defaultGrokModel || "",
+      qoder: typeof configured.qoder === "string" ? configured.qoder : state.config && state.config.defaultQoderModel || ""
     };
   }
   function getConfigDefaultModelForProvider(provider) {
@@ -44315,6 +44339,7 @@
     if (key === "codex") return defaults.codex || "";
     if (key === "opencode") return defaults.opencode || "";
     if (key === "grok") return defaults.grok || "";
+    if (key === "qoder") return defaults.qoder || "";
     return defaults.claude || "";
   }
   function getChatModelForProvider(provider) {
@@ -44326,7 +44351,7 @@
   function setChatModelForProvider(provider, model) {
     var key = getProviderKey(provider);
     var normalized = (model || "").trim();
-    if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "" };
+    if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "", qoder: "" };
     state.chatModels[key] = normalized;
     state.chatModel = normalized;
     try {
@@ -44348,6 +44373,7 @@
     if (provider === "codex") return state.availableCodexModels || [];
     if (provider === "opencode") return state.availableOpenCodeModels || [];
     if (provider === "grok") return state.availableGrokModels || [];
+    if (provider === "qoder") return state.availableQoderModels || [];
     return state.availableModels || [];
   }
   function renderChatModelOptions(selected, session) {
@@ -44508,6 +44534,7 @@
         state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
         state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
         state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
+        state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
         syncComposerModelSelect(getSelectedSession4());
       }
       return data;
@@ -44608,7 +44635,7 @@
     var provider = getProviderKey(state.sessionTool);
     var modelPref = getChatModelForProvider(provider) || getConfigDefaultModelForProvider(provider);
     var thinkingPref = state.chatThinking || "off";
-    var structuredRunner2 = provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : provider === "grok" ? "grok-cli-headless" : state.config && state.config.structuredRunner === "sdk" ? "claude-sdk" : state.structuredRunner || "claude-cli-print";
+    var structuredRunner2 = provider === "codex" ? "codex-cli-exec" : provider === "opencode" ? "opencode-cli-run" : provider === "grok" ? "grok-cli-headless" : provider === "qoder" ? "qoder-cli-print" : state.config && state.config.structuredRunner === "sdk" ? "claude-sdk" : state.structuredRunner || "claude-cli-print";
     var payload = {
       cwd: cwdOverride || getEffectiveCwd(),
       mode: modeOverride || state.chatMode || state.config && state.config.defaultMode || "default",
@@ -46411,7 +46438,7 @@
     if (field === "cwd") return copySelectedSessionField("cwd", "\u5DE5\u4F5C\u76EE\u5F55\u5DF2\u590D\u5236");
     if (field === "sessionId") return copySelectedSessionField("id", "\u4F1A\u8BDD ID \u5DF2\u590D\u5236");
     const provider = selected?.provider;
-    const label = provider === "codex" ? "Codex thread ID \u5DF2\u590D\u5236" : provider === "opencode" ? "OpenCode session ID \u5DF2\u590D\u5236" : provider === "grok" ? "Grok \u4F1A\u8BDD ID \u5DF2\u590D\u5236" : "Claude \u4F1A\u8BDD ID \u5DF2\u590D\u5236";
+    const label = provider === "codex" ? "Codex thread ID \u5DF2\u590D\u5236" : provider === "opencode" ? "OpenCode session ID \u5DF2\u590D\u5236" : provider === "grok" ? "Grok \u4F1A\u8BDD ID \u5DF2\u590D\u5236" : provider === "qoder" ? "Qoder \u4F1A\u8BDD ID \u5DF2\u590D\u5236" : "Claude \u4F1A\u8BDD ID \u5DF2\u590D\u5236";
     return copySelectedSessionField("claudeSessionId", label);
   }
   function createBrowserShellCommands() {

@@ -18,7 +18,7 @@ import type {
 type FetchLike = typeof fetch;
 type JsonRecord = Record<string, unknown>;
 
-const PROVIDERS: readonly NewSessionProvider[] = ["claude", "codex", "opencode", "grok"];
+const PROVIDERS: readonly NewSessionProvider[] = ["claude", "codex", "opencode", "grok", "qoder"];
 const KINDS: readonly NewSessionKind[] = ["structured", "pty"];
 const MODES: readonly NewSessionMode[] = [
   "default",
@@ -82,6 +82,7 @@ function normalizePaths(value: unknown): NewSessionPath[] {
 export function supportedModes(provider: NewSessionProvider): readonly NewSessionMode[] {
   if (provider === "codex") return ["full-access"];
   if (provider === "opencode" || provider === "grok") return ["default", "full-access", "managed"];
+  if (provider === "qoder") return ["default", "full-access", "auto-edit", "managed"];
   return ["default", "full-access", "auto-edit", "native", "managed"];
 }
 
@@ -100,6 +101,7 @@ function structuredRunner(provider: NewSessionProvider, configured: string): str
   if (provider === "codex") return "codex-cli-exec";
   if (provider === "opencode") return "opencode-cli-run";
   if (provider === "grok") return "grok-cli-headless";
+  if (provider === "qoder") return "qoder-cli-print";
   return configured === "sdk" || configured === "claude-sdk"
     ? "claude-sdk"
     : "claude-cli-print";

@@ -129,7 +129,9 @@ export class SessionRegistry {
       ?? snapshot.structuredState?.provider
       ?? (/^codex\b/i.test(snapshot.command.trim())
         ? "codex"
-        : /^opencode\b/i.test(snapshot.command.trim()) ? "opencode" : "claude");
+        : /^opencode\b/i.test(snapshot.command.trim()) ? "opencode"
+          : /^grok\b/i.test(snapshot.command.trim()) ? "grok"
+            : /^qodercli\b/i.test(snapshot.command.trim()) ? "qoder" : "claude");
     if (provider === "claude") {
       this.processes.deleteClaudeHistoryFiles([{ claudeSessionId: providerSessionId, cwd: snapshot.cwd }]);
     } else if (provider === "codex") {

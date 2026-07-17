@@ -254,7 +254,7 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
             </div>
           </SettingsSection>
 
-          <SettingsSection title="开发 CLI" description="Claude Code、Codex 与 OpenCode 的服务端版本。">
+          <SettingsSection title="开发 CLI" description="Claude Code、Codex、OpenCode 与 Qoder CLI 的服务端版本。">
             <div className="wand-settings-cli-list">
               {cliItems.map((item) => (
                 <div key={item.id}><strong>{item.label}</strong><span>{item.installed ? item.currentVersion || "未知版本" : "未安装"}{item.updateAvailable ? ` → ${item.latestVersion || "最新版"}` : ""}</span></div>
@@ -533,6 +533,7 @@ function aiFromSnapshot(snapshot: SettingsSnapshot): SettingsAiInput {
     defaultCodexModel: config.defaultCodexModel,
     defaultOpenCodeModel: config.defaultOpenCodeModel,
     defaultGrokModel: config.defaultGrokModel,
+    defaultQoderModel: config.defaultQoderModel,
     commitCli: config.commitCli,
     commitModel: config.commitModel,
     commitAiSource: config.commitAiSource,
@@ -669,6 +670,10 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
           <SettingsField label="Grok 默认模型" htmlFor="settings-model-grok" hint="留空则不传 --model">
             <SettingsTextInput id="settings-model-grok" list="settings-models-grok" value={form.defaultGrokModel} placeholder="跟随 Grok 默认" onChange={(value) => update("defaultGrokModel", value)} />
             <ModelSuggestions id="settings-models-grok" models={models?.grokModels || []} />
+          </SettingsField>
+          <SettingsField label="Qoder 默认模型" htmlFor="settings-model-qoder" hint="可选 lite / efficient / auto / performance / ultimate">
+            <SettingsTextInput id="settings-model-qoder" list="settings-models-qoder" value={form.defaultQoderModel} placeholder="跟随 Qoder 默认" onChange={(value) => update("defaultQoderModel", value)} />
+            <ModelSuggestions id="settings-models-qoder" models={models?.qoderModels || []} />
           </SettingsField>
         </SettingsGrid>
       </SettingsSection>

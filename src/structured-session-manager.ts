@@ -36,6 +36,7 @@ import {
 } from "./structured-claude-protocol.js";
 import { OpenCodeRunner } from "./structured-opencode-adapter.js";
 import { GrokRunner } from "./structured-grok-adapter.js";
+import { QoderRunner } from "./structured-qoder-adapter.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerTurnState } from "./structured-runner.js";
 import {
   defaultStructuredRunner,
@@ -60,6 +61,7 @@ export interface StructuredSessionManagerRunners {
   codex?: StructuredRunnerAdapter;
   opencode?: StructuredRunnerAdapter;
   grok?: StructuredRunnerAdapter;
+  qoder?: StructuredRunnerAdapter;
 }
 
 interface CreateStructuredSessionOptions {
@@ -289,6 +291,7 @@ export class StructuredSessionManager {
   private readonly codexRunner: StructuredRunnerAdapter;
   private readonly openCodeRunner: StructuredRunnerAdapter;
   private readonly grokRunner: StructuredRunnerAdapter;
+  private readonly qoderRunner: StructuredRunnerAdapter;
   private disposed = false;
 
   constructor(
@@ -302,11 +305,12 @@ export class StructuredSessionManager {
     this.codexRunner = runners.codex ?? new CodexRunner();
     this.openCodeRunner = runners.opencode ?? new OpenCodeRunner();
     this.grokRunner = runners.grok ?? new GrokRunner();
+    this.qoderRunner = runners.qoder ?? new QoderRunner();
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
       const storedProvider = snapshot.provider ?? snapshot.structuredState?.provider;
-      const provider: SessionProvider = storedProvider === "codex" || storedProvider === "opencode" || storedProvider === "grok"
+      const provider: SessionProvider = storedProvider === "codex" || storedProvider === "opencode" || storedProvider === "grok" || storedProvider === "qoder"
         ? storedProvider
         : "claude";
       const storedRunner = snapshot.runner ?? snapshot.structuredState?.runner;
@@ -597,7 +601,7 @@ export class StructuredSessionManager {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
     const requestedProvider: unknown = options.provider ?? "claude";
-    if (requestedProvider !== "claude" && requestedProvider !== "codex" && requestedProvider !== "opencode" && requestedProvider !== "grok") {
+    if (requestedProvider !== "claude" && requestedProvider !== "codex" && requestedProvider !== "opencode" && requestedProvider !== "grok" && requestedProvider !== "qoder") {
       throw new Error(`不支持的结构化 provider: ${String(requestedProvider)}`);
     }
     const provider: SessionProvider = requestedProvider;
@@ -622,6 +626,8 @@ export class StructuredSessionManager {
             ? "opencode run --format json"
           : provider === "grok"
             ? "grok -p --output-format streaming-json"
+          : provider === "qoder"
+            ? "qodercli -p --output-format stream-json"
           : runner === "claude-sdk"
             ? "claude-agent-sdk (stream-json)"
             : "claude -p --output-format stream-json",
@@ -827,6 +833,14 @@ export class StructuredSessionManager {
         await this.runOpenCodeStreaming(id, updated, prompt, requestId);
       } else if (provider === "grok") {
         await this.runGrokStreaming(id, updated, prompt, requestId);
+      } else if (provider === "qoder") {
+        await this.runClaudeStreaming(id, updated, prompt, requestId, {
+          runner: this.qoderRunner,
+          provider: "qoder",
+          commandLabel: "qodercli -p",
+          logKind: "qoder-print",
+          installHint: "请安装 @qoder-ai/qodercli，或重跑 `wand service:install` 刷新服务的 PATH",
+        });
       } else if (runner === "claude-sdk") {
         await this.runClaudeSdkStreaming(id, updated, prompt, requestId);
       } else {
@@ -1794,6 +1808,13 @@ export class StructuredSessionManager {
     session: SessionSnapshot,
     prompt: string,
     requestId: string,
+    options: {
+      runner?: StructuredRunnerAdapter;
+      provider?: SessionProvider;
+      commandLabel?: string;
+      logKind?: string;
+      installHint?: string;
+    } = {},
   ): Promise<void> {
     let emitTimer: ReturnType<typeof setTimeout> | null = null;
     const syncSnapshot = (turnState: StructuredRunnerTurnState): void => {
@@ -1839,7 +1860,11 @@ export class StructuredSessionManager {
       if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
     };
 
-    const execution = this.claudeCliRunner.start({
+    const runner = options.runner ?? this.claudeCliRunner;
+    const provider = options.provider ?? "claude";
+    const commandLabel = options.commandLabel ?? "claude -p";
+    const logKind = options.logKind ?? "claude-print";
+    const execution = runner.start({
       session,
       prompt,
       env: buildChildEnv(this.config.inheritEnv !== false),
@@ -1855,8 +1880,8 @@ export class StructuredSessionManager {
     });
     this.pendingRunnerExecutions.set(sessionId, execution);
     this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "claude-print",
-      provider: "claude",
+      kind: logKind,
+      provider,
       pid: execution.pid,
       cwd: session.cwd,
       args: execution.args,
@@ -1881,13 +1906,13 @@ export class StructuredSessionManager {
 
     if (result.spawnError) {
       const hint = result.spawnError.code === "ENOENT"
-        ? "（PATH 中找不到 claude 可执行文件；请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH）"
+        ? `（PATH 中找不到 ${provider === "qoder" ? "qodercli" : "claude"} 可执行文件；${options.installHint ?? "请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH"}）`
         : "";
-      throw new Error(`claude -p 启动失败：${result.spawnError.message}${hint}`);
+      throw new Error(`${commandLabel} 启动失败：${result.spawnError.message}${hint}`);
     }
 
     this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "claude-print-close",
+      kind: `${logKind}-close`,
       pid: execution.pid,
       spawnedAt: execution.spawnedAt,
       closedAt: new Date().toISOString(),
@@ -1901,9 +1926,10 @@ export class StructuredSessionManager {
     const interruptedForQuestion = result.stopReason === "ask-user-question";
     const failedExit = (result.exitCode !== null && result.exitCode !== 0) || result.signal !== null;
     if (failedExit && !interruptedByUser && !interruptedForQuestion) {
-      const errorText = this.formatStructuredExitError("claude -p", result.exitCode, result.signal, {
+      const errorText = this.formatStructuredExitError(commandLabel, result.exitCode, result.signal, {
         stderr: result.stderr,
         stdoutTail: result.stdoutTail,
+        primary: result.primaryError,
       });
       const failed = this.finishStructuredFailure(
         current,
@@ -2559,7 +2585,7 @@ export class StructuredSessionManager {
    * 事件 / 最后一段 stdout 之类的上下文跟在后面，方便定位。
    */
   private formatStructuredExitError(
-    provider: "claude -p" | "codex exec" | "opencode run" | "grok",
+    provider: string,
     code: number | null,
     signal: NodeJS.Signals | null,
     options: {

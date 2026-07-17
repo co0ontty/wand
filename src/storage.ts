@@ -267,7 +267,7 @@ function parseQueuedMessages(raw: string | null): string[] | undefined {
 }
 
 function inferSessionProvider(row: Pick<SessionRow, "provider" | "runner" | "command">): SessionProvider | undefined {
-  if (row.provider === "claude" || row.provider === "codex" || row.provider === "opencode" || row.provider === "grok") {
+  if (row.provider === "claude" || row.provider === "codex" || row.provider === "opencode" || row.provider === "grok" || row.provider === "qoder") {
     return row.provider;
   }
   if (row.runner === "claude-cli" || row.runner === "claude-cli-print") {
@@ -280,9 +280,11 @@ function inferSessionProvider(row: Pick<SessionRow, "provider" | "runner" | "com
     return "opencode";
   }
   if (row.runner === "grok-cli-headless") return "grok";
+  if (row.runner === "qoder-cli-print") return "qoder";
   if (/^codex\b/i.test(row.command.trim())) return "codex";
   if (/^opencode\b/i.test(row.command.trim())) return "opencode";
   if (/^grok\b/i.test(row.command.trim())) return "grok";
+  if (/^qodercli\b/i.test(row.command.trim())) return "qoder";
   return /^claude\b/i.test(row.command.trim()) ? "claude" : undefined;
 }
 

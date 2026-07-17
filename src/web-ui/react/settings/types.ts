@@ -10,7 +10,8 @@ export type SettingsTab =
 export type SettingsAccess = "admin" | "read-only";
 export type SettingsProvider = "claude" | "codex" | "opencode";
 /** Providers that have per-session default model preferences. */
-export type SettingsModelProvider = SettingsProvider | "grok";
+export type SettingsModelProvider = SettingsProvider | "grok" | "qoder";
+export type SettingsCliProvider = SettingsProvider | "qoder";
 export type SettingsUpdateChannel = "stable" | "beta";
 export type SettingsAutoUpdateTarget = "web" | "apk" | "dmg" | "cli";
 export type SettingsDistributionKind = "apk" | "dmg";
@@ -110,6 +111,7 @@ export interface SettingsConfig {
   defaultCodexModel: string;
   defaultOpenCodeModel: string;
   defaultGrokModel: string;
+  defaultQoderModel: string;
   defaultModels: Record<SettingsModelProvider, string>;
   commitCli: SettingsProvider;
   commitModel: string;
@@ -144,6 +146,7 @@ export interface SettingsModelCatalog {
   codexModels: SettingsModelOption[];
   opencodeModels: SettingsModelOption[];
   grokModels: SettingsModelOption[];
+  qoderModels: SettingsModelOption[];
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string | null;
@@ -151,11 +154,12 @@ export interface SettingsModelCatalog {
   defaultCodexModel: string;
   defaultOpenCodeModel: string;
   defaultGrokModel: string;
+  defaultQoderModel: string;
   defaultModels: Record<SettingsModelProvider, string>;
 }
 
 export interface SettingsProviderCliStatus {
-  id: SettingsProvider;
+  id: SettingsCliProvider;
   label: string;
   command: string;
   executable: string | null;
@@ -169,7 +173,7 @@ export interface SettingsProviderCliStatus {
 }
 
 export interface SettingsProviderCliResult {
-  id: SettingsProvider;
+  id: SettingsCliProvider;
   label: string;
   ok: boolean;
   skipped: boolean;
@@ -270,6 +274,7 @@ export interface SettingsAiInput {
   defaultCodexModel: string;
   defaultOpenCodeModel: string;
   defaultGrokModel: string;
+  defaultQoderModel: string;
   commitCli: SettingsProvider;
   commitModel: string;
   commitAiSource: "cli" | "api";
@@ -337,7 +342,7 @@ export type SettingsCommand =
   | { type: "webUpdate.install" }
   | { type: "server.restart" }
   | { type: "cliUpdates.load"; force?: boolean }
-  | { type: "cliUpdates.install"; ids?: SettingsProvider[] }
+  | { type: "cliUpdates.install"; ids?: SettingsCliProvider[] }
   | { type: "autoUpdate.set"; target: SettingsAutoUpdateTarget; enabled: boolean }
   | { type: "updateChannel.set"; channel: SettingsUpdateChannel }
   | { type: "connectCode.load" }

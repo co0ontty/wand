@@ -5,6 +5,7 @@ import { buildClaudeCliArgs, buildClaudeSdkThinking } from "../src/structured-cl
 import { buildCodexArgs } from "../src/structured-codex-adapter.js";
 import { applyOpenCodeEvent, buildOpenCodeArgs } from "../src/structured-opencode-adapter.js";
 import { applyGrokEvent, buildGrokArgs } from "../src/structured-grok-adapter.js";
+import { buildQoderArgs } from "../src/structured-qoder-adapter.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 function session(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
@@ -141,4 +142,21 @@ test("Grok adapter maps official streaming-json chunks, usage, and resume argume
     totalCostUsd: 0.25,
   });
   assert.equal(applyGrokEvent(state, { type: "error", message: "boom" }), "boom");
+});
+
+test("Qoder adapter emits print, model, permission, and resume arguments", () => {
+  assert.deepEqual(buildQoderArgs(session({
+    provider: "qoder",
+    runner: "qoder-cli-print",
+    mode: "managed",
+    selectedModel: "performance",
+    claudeSessionId: "qoder-session-1",
+  }), "hello"), [
+    "-p", "hello", "--output-format", "stream-json",
+    "--model", "performance",
+    "--permission-mode", "bypass_permissions",
+    "-r", "qoder-session-1",
+  ]);
+
+  assert.ok(buildQoderArgs(session({ mode: "auto-edit" }), "hello").includes("accept_edits"));
 });

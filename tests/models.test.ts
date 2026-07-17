@@ -7,6 +7,7 @@ import {
   parseCodexModels,
   parseGrokModels,
   parseOpenCodeModels,
+  parseQoderModels,
   refreshModels,
 } from "../src/models.js";
 
@@ -38,6 +39,7 @@ function createCommandRunner(
     if (file === "codex") throw new Error("not installed");
     if (file === "opencode") throw new Error("not installed");
     if (file === "grok") throw new Error("not installed");
+    if (file === "qodercli") throw new Error("not installed");
     throw new Error(`Unexpected command: ${key}`);
   };
 }
@@ -144,6 +146,26 @@ test("Grok model discovery falls back when output is empty", () => {
   const models = parseGrokModels("not a model list");
   assert.equal(models[0]?.id, "default");
   assert.equal(models.some((model) => model.id === "grok-4.5"), true);
+});
+
+test("Qoder model catalog exposes the official tier aliases", async () => {
+  const result = await refreshModels(refreshOptions());
+  assert.deepEqual(result.qoderModels.map((model) => model.id), [
+    "default", "lite", "efficient", "auto", "performance", "ultimate",
+  ]);
+});
+
+test("Qoder model discovery merges BYOK models with official tier aliases", () => {
+  const models = parseQoderModels([
+    "MODEL",
+    "GLM-5.2 (Z.ai) (zhipu/glm5.2-cp)",
+    "GLM-5.2 duplicate (zhipu/glm5.2-cp)",
+  ].join("\n"));
+
+  assert.deepEqual(models.map((model) => model.id), [
+    "default", "lite", "efficient", "auto", "performance", "ultimate", "zhipu/glm5.2-cp",
+  ]);
+  assert.equal(models.at(-1)?.label, "GLM-5.2 (Z.ai)");
 });
 
 test("Claude candidates merge configured, verified, and Models API entries without asserting entitlement", async () => {

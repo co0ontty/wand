@@ -55,7 +55,7 @@ export interface PathRepairResult {
 }
 
 /** 关键的 CLI 工具，会被诊断输出。 */
-const PROBE_COMMANDS = ["claude", "codex", "opencode", "grok"] as const;
+const PROBE_COMMANDS = ["claude", "codex", "opencode", "grok", "qodercli"] as const;
 
 const DEEP_PROBE_TIMEOUT_MS = 4000;
 
@@ -312,6 +312,7 @@ interface ProbeResult {
   codex: string | null;
   opencode: string | null;
   grok: string | null;
+  qodercli: string | null;
 }
 
 function pickProbeShell(configured?: string): string | null {
@@ -340,7 +341,8 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
     `printf 'CLAUDE\\x1f%s\\n' "$(command -v claude 2>/dev/null)"; ` +
     `printf 'CODEX\\x1f%s\\n' "$(command -v codex 2>/dev/null)"; ` +
     `printf 'OPENCODE\\x1f%s\\n' "$(command -v opencode 2>/dev/null)"; ` +
-    `printf 'GROK\\x1f%s\\n' "$(command -v grok 2>/dev/null)"`;
+    `printf 'GROK\\x1f%s\\n' "$(command -v grok 2>/dev/null)"; ` +
+    `printf 'QODERCLI\\x1f%s\\n' "$(command -v qodercli 2>/dev/null)"`;
 
   return new Promise((resolve, reject) => {
     const child = spawn(shell, ["-l", "-c", script], {
@@ -377,7 +379,7 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
           reject(new Error(`login shell exited ${code}: ${stderr.trim().slice(0, 200)}`));
           return;
         }
-        const out: ProbeResult = { path: "", claude: null, codex: null, opencode: null, grok: null };
+        const out: ProbeResult = { path: "", claude: null, codex: null, opencode: null, grok: null, qodercli: null };
         for (const line of stdout.split("\n")) {
           const idx = line.indexOf("\x1f");
           if (idx < 0) continue;
@@ -389,6 +391,7 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
           else if (key === "CODEX") out.codex = val;
           else if (key === "OPENCODE") out.opencode = val;
           else if (key === "GROK") out.grok = val;
+          else if (key === "QODERCLI") out.qodercli = val;
         }
         resolve(out);
       });

@@ -33,7 +33,8 @@ export type { ClaudeHistorySession, CodexHistorySession } from "./provider-histo
 function resolveProviderFromCommand(command: string): SessionProvider {
   if (/^codex\b/.test(command.trim())) return "codex";
   if (/^opencode\b/.test(command.trim())) return "opencode";
-  return /^grok\b/.test(command.trim()) ? "grok" : "claude";
+  if (/^grok\b/.test(command.trim())) return "grok";
+  return /^qodercli\b/.test(command.trim()) ? "qoder" : "claude";
 }
 
 /**
@@ -2279,6 +2280,20 @@ export class ProcessManager extends EventEmitter {
       }
       if ((mode === "managed" || mode === "full-access" || mode === "auto-edit") && !/--(?:always-approve|yolo)(?:\s|$)/.test(result)) {
         result += " --always-approve";
+      }
+      return result;
+    }
+
+    if (provider === "qoder") {
+      let result = command;
+      const trimmedModel = model?.trim();
+      if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result)) {
+        result += ` --model '${trimmedModel.replace(/'/g, "'\\''")}'`;
+      }
+      if ((mode === "managed" || mode === "full-access") && !/--(?:yolo|dangerously-skip-permissions|permission-mode)(?:\s|=|$)/.test(result)) {
+        result += " --permission-mode bypass_permissions";
+      } else if (mode === "auto-edit" && !/--permission-mode(?:\s|=)/.test(result)) {
+        result += " --permission-mode accept_edits";
       }
       return result;
     }

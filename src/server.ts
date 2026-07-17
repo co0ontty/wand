@@ -294,6 +294,7 @@ const CONNECTED_APP_PREFERENCE_KEYS = new Set([
   "defaultCodexModel",
   "defaultOpenCodeModel",
   "defaultGrokModel",
+  "defaultQoderModel",
   "defaultModels",
   "defaultThinkingEffort",
   "defaultProvider",
@@ -873,6 +874,7 @@ export async function startServer(
       defaultCodexModel: defaultModels.codex,
       defaultOpenCodeModel: defaultModels.opencode,
       defaultGrokModel: defaultModels.grok,
+      defaultQoderModel: defaultModels.qoder,
       defaultModels,
       defaultThinkingEffort: config.defaultThinkingEffort ?? "off",
       commandPresets: config.commandPresets,
@@ -882,6 +884,7 @@ export async function startServer(
         { label: "Codex Structured", runner: "codex-cli-exec" },
         { label: "OpenCode Structured", runner: "opencode-cli-run" },
         { label: "Grok Structured", runner: "grok-cli-headless" },
+        { label: "Qoder Structured", runner: "qoder-cli-print" },
       ],
       structuredChatPersona,
       cardDefaults: config.cardDefaults,
@@ -1127,6 +1130,8 @@ export async function startServer(
           ? "opencode"
         : body.provider === "grok" || /^grok\b/.test(body.command.trim())
           ? "grok"
+        : body.provider === "qoder" || /^qodercli\b/.test(body.command.trim())
+          ? "qoder"
           : "claude";
       const effectiveModel = rawModel || getDefaultModelForProvider(config, provider) || undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;

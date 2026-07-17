@@ -4,7 +4,8 @@ export function isStructuredRunnerForProvider(provider: SessionProvider, runner:
   if (provider === "claude") return runner === "claude-sdk" || runner === "claude-cli-print";
   if (provider === "codex") return runner === "codex-cli-exec";
   if (provider === "opencode") return runner === "opencode-cli-run";
-  return runner === "grok-cli-headless";
+  if (provider === "grok") return runner === "grok-cli-headless";
+  return runner === "qoder-cli-print";
 }
 
 export function defaultStructuredRunner(
@@ -14,6 +15,7 @@ export function defaultStructuredRunner(
   if (provider === "codex") return "codex-cli-exec";
   if (provider === "opencode") return "opencode-cli-run";
   if (provider === "grok") return "grok-cli-headless";
+  if (provider === "qoder") return "qoder-cli-print";
   return configuredClaudeRunner === "sdk" ? "claude-sdk" : "claude-cli-print";
 }
 

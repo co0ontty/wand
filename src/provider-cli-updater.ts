@@ -14,7 +14,7 @@ const REGISTRY_TIMEOUT_MS = 15_000;
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const MAX_BUFFER = 4 * 1024 * 1024;
 
-export type ProviderCliId = "claude" | "codex" | "opencode";
+export type ProviderCliId = "claude" | "codex" | "opencode" | "qoder";
 
 interface ProviderCliSpec {
   id: ProviderCliId;
@@ -49,6 +49,14 @@ const PROVIDER_CLI_SPECS: readonly ProviderCliSpec[] = [
     npmPackage: "opencode-ai",
     versionArgs: ["--version"],
     updateArgs: ["upgrade"],
+  },
+  {
+    id: "qoder",
+    label: "Qoder CLI",
+    command: "qodercli",
+    npmPackage: "@qoder-ai/qodercli",
+    versionArgs: ["--version"],
+    updateArgs: ["update"],
   },
 ] as const;
 
@@ -121,7 +129,7 @@ function resolveInstallKind(executable: string | null, id: ProviderCliId, versio
   if (id === "opencode" && version && /^0\.0\./.test(version)) return "legacy";
   if (normalized.includes("/node_modules/") || normalized.includes("/npm/")) return "npm";
   if (normalized.includes("/cellar/") || normalized.includes("/caskroom/") || normalized.includes("/homebrew/")) return "brew";
-  if (normalized.includes("/.claude/") || normalized.includes("/.codex/") || normalized.includes("/.opencode/")) return "native";
+  if (normalized.includes("/.claude/") || normalized.includes("/.codex/") || normalized.includes("/.opencode/") || normalized.includes("/.qoder/")) return "native";
   return "unknown";
 }
 

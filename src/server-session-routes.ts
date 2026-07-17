@@ -429,11 +429,11 @@ export function registerSessionRoutes(
   app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
     const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown };
     try {
-      if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode" && body.provider !== "grok") {
-        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode 或 Grok provider。" });
+      if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode" && body.provider !== "grok" && body.provider !== "qoder") {
+        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok 或 Qoder provider。" });
         return;
       }
-      const provider: SessionProvider = body.provider === "codex" || body.provider === "opencode" || body.provider === "grok" ? body.provider : "claude";
+      const provider: SessionProvider = body.provider === "codex" || body.provider === "opencode" || body.provider === "grok" || body.provider === "qoder" ? body.provider : "claude";
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
       const snapshot = structured.createSession({

@@ -150,6 +150,7 @@ function normalizeConfig(value: unknown): SettingsConfig {
   const codex = stringValue(defaults.codex, stringValue(input.defaultCodexModel));
   const opencode = stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel));
   const grok = stringValue(defaults.grok, stringValue(input.defaultGrokModel));
+  const qoder = stringValue(defaults.qoder, stringValue(input.defaultQoderModel));
   return {
     host: stringValue(input.host, "127.0.0.1"),
     port: numberValue(input.port, 3000),
@@ -164,7 +165,8 @@ function normalizeConfig(value: unknown): SettingsConfig {
     defaultCodexModel: codex,
     defaultOpenCodeModel: opencode,
     defaultGrokModel: grok,
-    defaultModels: { claude, codex, opencode, grok },
+    defaultQoderModel: qoder,
+    defaultModels: { claude, codex, opencode, grok, qoder },
     commitCli,
     commitModel: stringValue(input.commitModel),
     commitAiSource: input.commitAiSource === "api" ? "api" : "cli",
@@ -218,6 +220,7 @@ function normalizeModels(value: unknown): SettingsModelCatalog {
     codexModels: models("codexModels"),
     opencodeModels: models("opencodeModels"),
     grokModels: models("grokModels"),
+    qoderModels: models("qoderModels"),
     claudeVersion: nullableString(input.claudeVersion),
     opencodeVersion: nullableString(input.opencodeVersion),
     refreshedAt: nullableString(input.refreshedAt),
@@ -225,11 +228,13 @@ function normalizeModels(value: unknown): SettingsModelCatalog {
     defaultCodexModel: stringValue(input.defaultCodexModel),
     defaultOpenCodeModel: stringValue(input.defaultOpenCodeModel),
     defaultGrokModel: stringValue(input.defaultGrokModel),
+    defaultQoderModel: stringValue(input.defaultQoderModel),
     defaultModels: {
       claude: stringValue(defaults.claude, stringValue(input.defaultModel)),
       codex: stringValue(defaults.codex, stringValue(input.defaultCodexModel)),
       opencode: stringValue(defaults.opencode, stringValue(input.defaultOpenCodeModel)),
       grok: stringValue(defaults.grok, stringValue(input.defaultGrokModel)),
+      qoder: stringValue(defaults.qoder, stringValue(input.defaultQoderModel)),
     },
   };
 }
@@ -507,6 +512,7 @@ export class HttpSettingsRepository implements SettingsRepository {
             codex: command.value.defaultCodexModel,
             opencode: command.value.defaultOpenCodeModel,
             grok: command.value.defaultGrokModel,
+            qoder: command.value.defaultQoderModel,
           },
         }, options.signal);
         this.runtime.configSaved(normalizeConfig(record(result).config));

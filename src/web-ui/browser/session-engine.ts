@@ -233,6 +233,13 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             ? "Grok 将自动批准工具执行（--always-approve）；支持 TUI 与 streaming-json 结构化会话。"
             : "Grok 使用自身权限配置；结构化模式支持多轮续聊与思考过程展示。";
         }
+        if (tool === "qoder") {
+          return mode === "full-access" || mode === "managed"
+            ? "Qoder 将以 bypass_permissions 运行；支持 TUI 与 stream-json 结构化会话。"
+            : mode === "auto-edit"
+              ? "Qoder 将自动批准工作区内的安全编辑。"
+              : "Qoder 使用自身权限配置；结构化模式支持多轮续聊与工具调用展示。";
+        }
         if (mode === "full-access") {
           return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
         }
@@ -253,6 +260,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
           return ["full-access"];
         }
         if (tool === "opencode" || tool === "grok") return ["default", "full-access", "managed"];
+        if (tool === "qoder") return ["default", "full-access", "auto-edit", "managed"];
         return ["default", "full-access", "auto-edit", "native", "managed"];
       }
 
@@ -604,7 +612,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
       }
 
       export function getProviderKey(provider) {
-        return provider === "codex" || provider === "opencode" || provider === "grok" ? provider : "claude";
+        return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" ? provider : "claude";
       }
 
       export function getProviderForSession(session) {
@@ -619,7 +627,8 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
           claude: typeof configured.claude === "string" ? configured.claude : ((state.config && state.config.defaultModel) || ""),
           codex: typeof configured.codex === "string" ? configured.codex : ((state.config && state.config.defaultCodexModel) || ""),
           opencode: typeof configured.opencode === "string" ? configured.opencode : ((state.config && state.config.defaultOpenCodeModel) || ""),
-          grok: typeof configured.grok === "string" ? configured.grok : ((state.config && state.config.defaultGrokModel) || "")
+          grok: typeof configured.grok === "string" ? configured.grok : ((state.config && state.config.defaultGrokModel) || ""),
+          qoder: typeof configured.qoder === "string" ? configured.qoder : ((state.config && state.config.defaultQoderModel) || "")
         };
       }
 
@@ -629,6 +638,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         if (key === "codex") return defaults.codex || "";
         if (key === "opencode") return defaults.opencode || "";
         if (key === "grok") return defaults.grok || "";
+        if (key === "qoder") return defaults.qoder || "";
         return defaults.claude || "";
       }
 
@@ -642,7 +652,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
       export function setChatModelForProvider(provider, model) {
         var key = getProviderKey(provider);
         var normalized = (model || "").trim();
-        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "" };
+        if (!state.chatModels) state.chatModels = { claude: "", codex: "", opencode: "", grok: "", qoder: "" };
         state.chatModels[key] = normalized;
         state.chatModel = normalized;
         try {
@@ -665,6 +675,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         if (provider === "codex") return state.availableCodexModels || [];
         if (provider === "opencode") return state.availableOpenCodeModels || [];
         if (provider === "grok") return state.availableGrokModels || [];
+        if (provider === "qoder") return state.availableQoderModels || [];
         return state.availableModels || [];
       }
 
@@ -858,6 +869,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
               state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
               state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
               state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
+              state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
               syncComposerModelSelect(getSelectedSession());
             }
             return data;
@@ -970,6 +982,8 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             ? "opencode-cli-run"
             : provider === "grok"
               ? "grok-cli-headless"
+            : provider === "qoder"
+              ? "qoder-cli-print"
               : ((state.config && state.config.structuredRunner === "sdk") ? "claude-sdk" : (state.structuredRunner || "claude-cli-print"));
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),

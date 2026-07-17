@@ -122,6 +122,18 @@ test("Grok provider and model preferences round-trip through storage", () => {
   assert.equal(restored.defaultGrokModel, "grok-4.5");
 });
 
+test("Qoder provider and model preferences round-trip through storage", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+
+  writePreferenceToStorage(config, storage, "defaultProvider", "qoder");
+  writePreferenceToStorage(config, storage, "defaultQoderModel", " performance ");
+
+  const restored = applyStoragePreferences(defaultConfig(), storage);
+  assert.equal(restored.defaultProvider, "qoder");
+  assert.equal(restored.defaultQoderModel, "performance");
+});
+
 test("new-session preferences reject unsupported values", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorage;
 
