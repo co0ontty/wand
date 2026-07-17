@@ -960,6 +960,12 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   line-height: 1.3;
 }
 
+.wand-provider-grok-mark {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
 .wand-new-session-choice-description {
   color: var(--text-muted);
   font-size: 0.68rem;

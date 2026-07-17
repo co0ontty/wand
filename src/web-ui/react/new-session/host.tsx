@@ -63,6 +63,16 @@ const MODES: ReadonlyArray<{
   { value: "native", label: "原生", description: "原生结构化输出" },
 ];
 
+/** xAI 官方 Grok SVG（2025-02 版）的 `#mark` 原始路径。 */
+function GrokMark() {
+  return (
+    <svg className="wand-provider-grok-mark" viewBox="0 0 34 33" aria-hidden="true" focusable="false">
+      <path d="M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449.844576C33.5314.730667 33.6139.616757 33.6964.5L29.1113 5.09055V5.07631L13.2343 21.0436Z" />
+      <path d="M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745.36364 32.5L10.9474 23.0341Z" />
+    </svg>
+  );
+}
+
 function kindHint(provider: NewSessionProvider, kind: NewSessionKind): string {
   if (kind === "structured") {
     if (provider === "codex") return "Codex JSONL 结构化聊天界面，支持多轮对话和工具调用展示。";
@@ -269,7 +279,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       open={controller.open}
       onOpenChange={(open) => { if (!open) newSessionController.close(); }}
       title="新对话"
-      description="启动 Claude、Codex 或 OpenCode 会话，选择 provider、会话类型、模式和工作目录。"
+      description="启动 Claude、Codex、OpenCode 或 Grok 会话，选择 provider、会话类型、模式和工作目录。"
       className="wand-new-session-dialog"
       overlayClassName="wand-new-session-overlay"
       titleClassName="wand-new-session-title"
@@ -307,6 +317,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                       providerRefs,
                     )}
                   >
+                    {provider.value === "grok" && <GrokMark />}
                     <span className="wand-new-session-choice-label">{provider.label}</span>
                     <span className="wand-new-session-choice-description">{provider.description}</span>
                   </button>
