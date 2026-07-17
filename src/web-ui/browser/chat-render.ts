@@ -776,6 +776,10 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
           if (!msg.content || !Array.isArray(msg.content)) continue;
           for (var j = msg.content.length - 1; j >= 0; j--) {
             var block = msg.content[j];
+            if (block.type === "tool_use" && block.semantic && block.semantic.kind === "task_list") {
+              todos = block.semantic.items;
+              break;
+            }
             if (block.type === "tool_use" && block.name === "TodoWrite" && block.input && block.input.todos) {
               todos = block.input.todos;
               break;
@@ -3136,8 +3140,11 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
         }
 
         // ── AskUserQuestion tool — special card with batch submit
-        if (toolName === "AskUserQuestion" && block.input && block.input.questions) {
-          var questions = block.input.questions;
+        var semanticQuestions = block.semantic && block.semantic.kind === "question_request"
+          ? block.semantic.questions
+          : null;
+        if (semanticQuestions || (toolName === "AskUserQuestion" && block.input && block.input.questions)) {
+          var questions = semanticQuestions || block.input.questions;
           if (questions && questions.length > 0) {
             var isAnswered = !!toolResult;
             var sel = state.askUserSelections[toolId] || {};

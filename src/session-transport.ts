@@ -1,4 +1,5 @@
 import type { ConversationTurn, SessionSnapshot } from "./types.js";
+import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 
 export const SESSION_TRANSPORT_OUTPUT_LIMIT = 200_000;
 
@@ -10,6 +11,7 @@ export interface SessionListItemDTO extends SessionBaseDTO {
 }
 
 export interface SessionDetailDTO extends SessionBaseDTO {
+  wandProtocolVersion: number;
   output: string;
   outputOffset: number;
   outputTotal: number;
@@ -90,11 +92,12 @@ export function toSessionDetailDTO(
   const outputOffset = Math.max(0, rawOutput.length - outputLimit);
   return {
     ...sessionBase(snapshot),
+    wandProtocolVersion: WAND_PROTOCOL_VERSION,
     output: outputOffset > 0 ? rawOutput.slice(outputOffset) : rawOutput,
     outputOffset,
     outputTotal: rawOutput.length,
     outputTruncated: outputOffset > 0,
-    ...(options.messages !== undefined ? { messages: options.messages } : {}),
+    ...(options.messages !== undefined ? { messages: enrichStructuredMessages(options.messages) } : {}),
     ...(options.messageOffset !== undefined ? { messageOffset: options.messageOffset } : {}),
     ...(options.messageTotal !== undefined ? { messageTotal: options.messageTotal } : {}),
     ...(options.leadingBlockOffset !== undefined ? { leadingBlockOffset: options.leadingBlockOffset } : {}),

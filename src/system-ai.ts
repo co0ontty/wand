@@ -94,6 +94,7 @@ export function discoverCliSystemAiConfig(preferred?: SessionProvider, home = os
   const discoverers = { claude: discoverClaude, codex: discoverCodex, opencode: discoverOpenCode } as const;
   const order: SessionProvider[] = [preferred ?? "claude", "claude", "opencode", "codex"];
   for (const provider of [...new Set(order)]) {
+    if (provider === "grok") continue;
     const found = discoverers[provider](home);
     if (found) return found;
   }

@@ -879,6 +879,7 @@ export async function startServer(
         { label: "Claude Structured", runner: "claude-cli-print" },
         { label: "Codex Structured", runner: "codex-cli-exec" },
         { label: "OpenCode Structured", runner: "opencode-cli-run" },
+        { label: "Grok Structured", runner: "grok-cli-headless" },
       ],
       structuredChatPersona,
       cardDefaults: config.cardDefaults,
@@ -1122,6 +1123,8 @@ export async function startServer(
         ? "codex"
         : body.provider === "opencode" || /^opencode\b/.test(body.command.trim())
           ? "opencode"
+        : body.provider === "grok" || /^grok\b/.test(body.command.trim())
+          ? "grok"
           : "claude";
       const effectiveModel = rawModel || getDefaultModelForProvider(config, provider) || undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;

@@ -4,6 +4,7 @@ import test from "node:test";
 import { buildClaudeCliArgs, buildClaudeSdkThinking } from "../src/structured-claude-adapter.js";
 import { buildCodexArgs } from "../src/structured-codex-adapter.js";
 import { applyOpenCodeEvent, buildOpenCodeArgs } from "../src/structured-opencode-adapter.js";
+import { applyGrokEvent, buildGrokArgs } from "../src/structured-grok-adapter.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 function session(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
@@ -100,4 +101,44 @@ test("OpenCode adapter maps args and stream events without session lifecycle sta
   ]);
 
   assert.equal(applyOpenCodeEvent(state, { type: "error", error: { message: { text: "boom" } } }), "boom");
+});
+
+test("Grok adapter maps official streaming-json chunks, usage, and resume arguments", () => {
+  assert.deepEqual(buildGrokArgs(session({
+    provider: "grok",
+    runner: "grok-cli-headless",
+    mode: "managed",
+    selectedModel: "grok-4.5",
+    thinkingEffort: "deep",
+    claudeSessionId: "grok-session-1",
+  }), "hello"), [
+    "--no-auto-update", "-p", "hello", "--output-format", "streaming-json",
+    "--model", "grok-4.5", "--effort", "high", "--always-approve",
+    "--resume", "grok-session-1",
+  ]);
+
+  const state = { blocks: [], result: "", sessionId: null };
+  applyGrokEvent(state, { type: "thought", data: "checking" });
+  applyGrokEvent(state, { type: "text", data: "WAND" });
+  applyGrokEvent(state, { type: "text", data: "_OK" });
+  assert.equal(applyGrokEvent(state, {
+    type: "end",
+    sessionId: "grok-session-2",
+    usage: { input_tokens: 10, output_tokens: 4, reasoning_tokens: 2, cache_read_input_tokens: 3 },
+    total_cost_usd: 0.25,
+  }), null);
+  assert.equal(state.sessionId, "grok-session-2");
+  assert.equal(state.result, "WAND_OK");
+  assert.deepEqual(state.blocks, [
+    { type: "thinking", thinking: "checking" },
+    { type: "text", text: "WAND_OK" },
+  ]);
+  assert.deepEqual(state.usage, {
+    inputTokens: 10,
+    outputTokens: 4,
+    reasoningOutputTokens: 2,
+    cacheReadInputTokens: 3,
+    totalCostUsd: 0.25,
+  });
+  assert.equal(applyGrokEvent(state, { type: "error", message: "boom" }), "boom");
 });

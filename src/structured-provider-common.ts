@@ -3,7 +3,8 @@ import type { SessionProvider, SessionRunner, SessionSnapshot, StructuredSession
 export function isStructuredRunnerForProvider(provider: SessionProvider, runner: unknown): runner is SessionRunner {
   if (provider === "claude") return runner === "claude-sdk" || runner === "claude-cli-print";
   if (provider === "codex") return runner === "codex-cli-exec";
-  return runner === "opencode-cli-run";
+  if (provider === "opencode") return runner === "opencode-cli-run";
+  return runner === "grok-cli-headless";
 }
 
 export function defaultStructuredRunner(
@@ -12,6 +13,7 @@ export function defaultStructuredRunner(
 ): SessionRunner {
   if (provider === "codex") return "codex-cli-exec";
   if (provider === "opencode") return "opencode-cli-run";
+  if (provider === "grok") return "grok-cli-headless";
   return configuredClaudeRunner === "sdk" ? "claude-sdk" : "claude-cli-print";
 }
 
@@ -69,6 +71,14 @@ export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["th
 }
 
 export function thinkingEffortToOpenCodeVariant(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  if (!effort || effort === "off") return null;
+  if (effort === "standard") return "low";
+  if (effort === "deep") return "high";
+  if (effort === "max") return "max";
+  return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
+}
+
+export function thinkingEffortToGrokEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
   if (!effort || effort === "off") return null;
   if (effort === "standard") return "low";
   if (effort === "deep") return "high";

@@ -55,7 +55,7 @@ export interface PathRepairResult {
 }
 
 /** 关键的 CLI 工具，会被诊断输出。 */
-const PROBE_COMMANDS = ["claude", "codex", "opencode"] as const;
+const PROBE_COMMANDS = ["claude", "codex", "opencode", "grok"] as const;
 
 const DEEP_PROBE_TIMEOUT_MS = 4000;
 
@@ -79,6 +79,7 @@ function candidateBinDirs(): string[] {
     path.join(home, ".local", "bin"),
     path.join(home, "bin"),
     path.join(home, ".bun", "bin"),
+    path.join(home, ".grok", "bin"),
     path.join(home, ".volta", "bin"),
     path.join(home, ".cargo", "bin"),
     path.join(home, ".deno", "bin"),
@@ -310,6 +311,7 @@ interface ProbeResult {
   claude: string | null;
   codex: string | null;
   opencode: string | null;
+  grok: string | null;
 }
 
 function pickProbeShell(configured?: string): string | null {
@@ -337,7 +339,8 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
     `printf 'PATH\\x1f%s\\n' "$PATH"; ` +
     `printf 'CLAUDE\\x1f%s\\n' "$(command -v claude 2>/dev/null)"; ` +
     `printf 'CODEX\\x1f%s\\n' "$(command -v codex 2>/dev/null)"; ` +
-    `printf 'OPENCODE\\x1f%s\\n' "$(command -v opencode 2>/dev/null)"`;
+    `printf 'OPENCODE\\x1f%s\\n' "$(command -v opencode 2>/dev/null)"; ` +
+    `printf 'GROK\\x1f%s\\n' "$(command -v grok 2>/dev/null)"`;
 
   return new Promise((resolve, reject) => {
     const child = spawn(shell, ["-l", "-c", script], {
@@ -374,7 +377,7 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
           reject(new Error(`login shell exited ${code}: ${stderr.trim().slice(0, 200)}`));
           return;
         }
-        const out: ProbeResult = { path: "", claude: null, codex: null, opencode: null };
+        const out: ProbeResult = { path: "", claude: null, codex: null, opencode: null, grok: null };
         for (const line of stdout.split("\n")) {
           const idx = line.indexOf("\x1f");
           if (idx < 0) continue;
@@ -385,6 +388,7 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
           else if (key === "CLAUDE") out.claude = val;
           else if (key === "CODEX") out.codex = val;
           else if (key === "OPENCODE") out.opencode = val;
+          else if (key === "GROK") out.grok = val;
         }
         resolve(out);
       });

@@ -35,6 +35,7 @@ import {
   type TaskMetaMap,
 } from "./structured-claude-protocol.js";
 import { OpenCodeRunner } from "./structured-opencode-adapter.js";
+import { GrokRunner } from "./structured-grok-adapter.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerTurnState } from "./structured-runner.js";
 import {
   defaultStructuredRunner,
@@ -43,6 +44,7 @@ import {
   normalizeThinkingEffort,
   resolveStructuredRunner,
 } from "./structured-provider-common.js";
+import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 
 export {
   isStructuredRunnerForProvider,
@@ -57,6 +59,7 @@ export interface StructuredSessionManagerRunners {
   claudeCli?: StructuredRunnerAdapter;
   codex?: StructuredRunnerAdapter;
   opencode?: StructuredRunnerAdapter;
+  grok?: StructuredRunnerAdapter;
 }
 
 interface CreateStructuredSessionOptions {
@@ -166,8 +169,9 @@ function shouldAutoApproveForMode(mode: ExecutionMode): boolean {
 
 function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["data"] {
   return {
+    wandProtocolVersion: WAND_PROTOCOL_VERSION,
     output: snapshot.output,
-    messages: snapshot.messages,
+    messages: snapshot.messages ? enrichStructuredMessages(snapshot.messages) : undefined,
     queuedMessages: snapshot.queuedMessages,
     sessionKind: "structured",
     structuredState: snapshot.structuredState,
@@ -227,12 +231,16 @@ function buildIncrementalStructuredPayload(
   cardDefaults: CardExpandDefaults,
 ): ProcessEvent["data"] {
   const messages = snapshot.messages ?? [];
-  const lastTurn = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  // Derive semantics from the complete current turn before taking the
+  // incremental tail; TaskCreate results can live in an earlier provider frame.
+  const clientMessages = enrichStructuredMessages(messages);
+  const lastTurn = clientMessages.length > 0 ? clientMessages[clientMessages.length - 1] : undefined;
   // Streaming turn (index 0 here) is preserved verbatim; truncation only kicks
   // in if the live response is already bigger than the transport threshold,
   // matching the PTY runner's behaviour in process-manager.ts.
   const lastMessage = lastTurn ? truncateMessagesForTransport([lastTurn], cardDefaults, 0)[0] : undefined;
   return {
+    wandProtocolVersion: WAND_PROTOCOL_VERSION,
     incremental: true,
     queuedMessages: snapshot.queuedMessages,
     sessionKind: "structured",
@@ -280,6 +288,7 @@ export class StructuredSessionManager {
   private readonly claudeCliRunner: StructuredRunnerAdapter;
   private readonly codexRunner: StructuredRunnerAdapter;
   private readonly openCodeRunner: StructuredRunnerAdapter;
+  private readonly grokRunner: StructuredRunnerAdapter;
   private disposed = false;
 
   constructor(
@@ -292,11 +301,12 @@ export class StructuredSessionManager {
     this.claudeCliRunner = runners.claudeCli ?? new ClaudeCliRunner({ language: () => this.config.language });
     this.codexRunner = runners.codex ?? new CodexRunner();
     this.openCodeRunner = runners.opencode ?? new OpenCodeRunner();
+    this.grokRunner = runners.grok ?? new GrokRunner();
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
       const storedProvider = snapshot.provider ?? snapshot.structuredState?.provider;
-      const provider: SessionProvider = storedProvider === "codex" || storedProvider === "opencode"
+      const provider: SessionProvider = storedProvider === "codex" || storedProvider === "opencode" || storedProvider === "grok"
         ? storedProvider
         : "claude";
       const storedRunner = snapshot.runner ?? snapshot.structuredState?.runner;
@@ -587,7 +597,7 @@ export class StructuredSessionManager {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
     const requestedProvider: unknown = options.provider ?? "claude";
-    if (requestedProvider !== "claude" && requestedProvider !== "codex" && requestedProvider !== "opencode") {
+    if (requestedProvider !== "claude" && requestedProvider !== "codex" && requestedProvider !== "opencode" && requestedProvider !== "grok") {
       throw new Error(`不支持的结构化 provider: ${String(requestedProvider)}`);
     }
     const provider: SessionProvider = requestedProvider;
@@ -610,6 +620,8 @@ export class StructuredSessionManager {
           ? "codex exec --json"
           : provider === "opencode"
             ? "opencode run --format json"
+          : provider === "grok"
+            ? "grok -p --output-format streaming-json"
           : runner === "claude-sdk"
             ? "claude-agent-sdk (stream-json)"
             : "claude -p --output-format stream-json",
@@ -813,6 +825,8 @@ export class StructuredSessionManager {
         await this.runCodexStreaming(id, updated, prompt, requestId);
       } else if (provider === "opencode") {
         await this.runOpenCodeStreaming(id, updated, prompt, requestId);
+      } else if (provider === "grok") {
+        await this.runGrokStreaming(id, updated, prompt, requestId);
       } else if (runner === "claude-sdk") {
         await this.runClaudeSdkStreaming(id, updated, prompt, requestId);
       } else {
@@ -1436,6 +1450,157 @@ export class StructuredSessionManager {
           console.error("[WAND] codex interrupt-and-send failed:", error);
         });
       });
+      return;
+    }
+    setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
+  }
+
+  private async runGrokStreaming(
+    sessionId: string,
+    session: SessionSnapshot,
+    prompt: string,
+    requestId: string,
+  ): Promise<void> {
+    let emitTimer: ReturnType<typeof setTimeout> | null = null;
+    const syncSnapshot = (turnState: StructuredRunnerTurnState): void => {
+      const current = this.currentSessionForRequest(sessionId, requestId);
+      if (!current) return;
+      const turn: ConversationTurn = {
+        role: "assistant",
+        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
+        usage: turnState.usage,
+      };
+      const messages = [...(current.messages ?? [])];
+      if (messages.at(-1)?.role === "assistant") messages[messages.length - 1] = turn;
+      else messages.push(turn);
+      const patched: SessionSnapshot = {
+        ...current,
+        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
+        messages,
+        output: turnState.result || current.output,
+      };
+      this.sessions.set(sessionId, patched);
+      this.saveStreamingSnapshot(patched);
+    };
+    const flushEmit = (): void => {
+      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+      emitTimer = null;
+      const current = this.currentSessionForRequest(sessionId, requestId);
+      if (current) this.emit({
+        type: "output",
+        sessionId,
+        data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}),
+      });
+    };
+    const scheduleEmit = (): void => {
+      if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
+    };
+
+    const execution = this.grokRunner.start({
+      session,
+      prompt,
+      env: buildChildEnv(this.config.inheritEnv !== false),
+    }, {
+      isActive: () => this.isCurrentRequest(sessionId, requestId),
+      onStdout: (text) => this.logger?.appendStructuredStdout(sessionId, text),
+      onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
+      onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
+      onUpdate: (turnState) => { syncSnapshot(turnState); scheduleEmit(); },
+    });
+    this.pendingRunnerExecutions.set(sessionId, execution);
+    this.logger?.appendStructuredSpawn(sessionId, {
+      kind: "grok-headless",
+      provider: "grok",
+      pid: execution.pid,
+      cwd: session.cwd,
+      args: execution.args,
+      prompt: prompt.slice(0, 2048),
+      promptLength: prompt.length,
+      sessionId: session.claudeSessionId,
+      spawnedAt: execution.spawnedAt,
+    });
+
+    let result;
+    try {
+      result = await execution.completion;
+    } finally {
+      const released = this.releasePendingRunnerExecution(sessionId, execution);
+      if (released) this.cancelStreamingCheckpointTimer(sessionId);
+    }
+    if (!this.isCurrentRequest(sessionId, requestId)) {
+      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
+      return;
+    }
+    flushEmit();
+    if (result.spawnError) {
+      const hint = result.spawnError.code === "ENOENT"
+        ? "（PATH 中找不到 grok；请安装 Grok Build CLI，或重跑 `wand service:install` 刷新服务 PATH）"
+        : "";
+      throw new Error(`grok 启动失败：${result.spawnError.message}${hint}`);
+    }
+    this.logger?.appendStructuredSpawn(sessionId, {
+      kind: "grok-headless-close",
+      pid: execution.pid,
+      spawnedAt: execution.spawnedAt,
+      closedAt: new Date().toISOString(),
+      exitCode: result.exitCode,
+      stderrTail: result.stderr.slice(-2048),
+      primaryError: result.primaryError,
+    });
+    const current = this.currentSessionForRequest(sessionId, requestId);
+    if (!current) return;
+    const interruptedByUser = this.interruptedWith.has(sessionId);
+    const interruptPrompt = this.interruptedWith.get(sessionId);
+    if ((result.primaryError || (result.exitCode !== 0 && result.exitCode !== null) || result.signal) && !interruptedByUser) {
+      const errorText = this.formatStructuredExitError(
+        "grok",
+        result.exitCode,
+        result.signal,
+        { stderr: result.stderr, primary: result.primaryError },
+      );
+      const failed = this.finishStructuredFailure(
+        current,
+        typeof result.exitCode === "number" ? result.exitCode : 1,
+        errorText,
+        result.state,
+      );
+      this.sessions.set(sessionId, failed);
+      this.saveAuthoritativeSession(failed);
+      this.emitStructuredSnapshot(failed);
+      this.emitStructuredSnapshot(failed, "ended");
+      throw new PersistedStructuredRunnerError(errorText);
+    }
+    const messages = this.buildCompletedAssistantMessages(current, result.state);
+    const keepRunning = !!interruptPrompt;
+    const finished: SessionSnapshot = {
+      ...current,
+      status: keepRunning ? "running" : "idle",
+      exitCode: keepRunning ? null : 0,
+      endedAt: keepRunning ? null : new Date().toISOString(),
+      output: result.state.result,
+      claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
+      messages,
+      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
+      pendingEscalation: null,
+      permissionBlocked: false,
+      structuredState: {
+        ...(current.structuredState as StructuredSessionState),
+        model: result.state.model ?? current.structuredState?.model,
+        inFlight: false,
+        activeRequestId: null,
+        lastError: null,
+      },
+    };
+    this.sessions.set(sessionId, finished);
+    this.saveAuthoritativeSession(finished);
+    this.emitStructuredSnapshot(finished);
+    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
+    if (interruptPrompt) {
+      this.interruptedWith.delete(sessionId);
+      this.preserveQueueOnInterrupt.delete(sessionId);
+      setImmediate(() => this.sendMessage(sessionId, interruptPrompt).catch((error) => {
+        console.error("[WAND] grok interrupt-and-send failed:", error);
+      }));
       return;
     }
     setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
@@ -2394,7 +2559,7 @@ export class StructuredSessionManager {
    * 事件 / 最后一段 stdout 之类的上下文跟在后面，方便定位。
    */
   private formatStructuredExitError(
-    provider: "claude -p" | "codex exec" | "opencode run",
+    provider: "claude -p" | "codex exec" | "opencode run" | "grok",
     code: number | null,
     signal: NodeJS.Signals | null,
     options: {

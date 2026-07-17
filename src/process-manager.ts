@@ -32,7 +32,8 @@ export type { ClaudeHistorySession, CodexHistorySession } from "./provider-histo
 
 function resolveProviderFromCommand(command: string): SessionProvider {
   if (/^codex\b/.test(command.trim())) return "codex";
-  return /^opencode\b/.test(command.trim()) ? "opencode" : "claude";
+  if (/^opencode\b/.test(command.trim())) return "opencode";
+  return /^grok\b/.test(command.trim()) ? "grok" : "claude";
 }
 
 /**
@@ -2262,6 +2263,22 @@ export class ProcessManager extends EventEmitter {
       }
       if ((mode === "managed" || mode === "full-access" || mode === "auto-edit") && !/--auto(?:\s|$)/.test(result)) {
         result += " --auto";
+      }
+      return result;
+    }
+
+    if (provider === "grok") {
+      let result = command;
+      const trimmedModel = model?.trim();
+      if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result) && !/(?:^|\s)-m(?:\s|$)/.test(result)) {
+        result += ` --model '${trimmedModel.replace(/'/g, "'\\''")}'`;
+      }
+      const effort = thinkingEffortToOpenCodeVariant(thinkingEffort ?? null);
+      if (effort && !/--(?:reasoning-)?effort(?:\s|=)/.test(result)) {
+        result += ` --effort '${effort.replace(/'/g, "'\\''")}'`;
+      }
+      if ((mode === "managed" || mode === "full-access" || mode === "auto-edit") && !/--(?:always-approve|yolo)(?:\s|$)/.test(result)) {
+        result += " --always-approve";
       }
       return result;
     }

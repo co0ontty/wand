@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
+import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, SessionProvider, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
 import { normalizeSystemAiConfig } from "./system-ai.js";
@@ -302,7 +302,7 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
 
   if (storage.hasPreference(preferenceStorageKey("defaultProvider"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultProvider"), defaults.defaultProvider ?? "claude");
-    if (v === "claude" || v === "codex" || v === "opencode") config.defaultProvider = v;
+    if (v === "claude" || v === "codex" || v === "opencode" || v === "grok") config.defaultProvider = v;
   }
   if (storage.hasPreference(preferenceStorageKey("defaultSessionKind"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultSessionKind"), defaults.defaultSessionKind ?? "structured");
@@ -379,7 +379,7 @@ export function writePreferenceToStorage(
   const dbKey = preferenceStorageKey(key);
   switch (key) {
     case "defaultProvider": {
-      if (value !== "claude" && value !== "codex" && value !== "opencode") throw new Error(`无效 Provider: ${value}`);
+      if (value !== "claude" && value !== "codex" && value !== "opencode" && value !== "grok") throw new Error(`无效 Provider: ${value}`);
       storage.setPreference(dbKey, value);
       config.defaultProvider = value;
       break;
@@ -645,7 +645,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     android: normalizeAndroidApkConfig(input.android) ?? defaults.android,
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
-    defaultProvider: input.defaultProvider === "codex" || input.defaultProvider === "opencode" ? input.defaultProvider : "claude",
+    defaultProvider: input.defaultProvider === "codex" || input.defaultProvider === "opencode" || input.defaultProvider === "grok" ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",
     defaultModel: typeof input.defaultModel === "string" ? input.defaultModel.trim() : defaults.defaultModel,
     defaultCodexModel: typeof input.defaultCodexModel === "string" ? input.defaultCodexModel.trim() : defaults.defaultCodexModel,
@@ -671,9 +671,9 @@ export function getProviderDefaultModels(config: Pick<WandConfig, "defaultModel"
   };
 }
 
-export function getDefaultModelForProvider(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel">, provider: "claude" | "codex" | "opencode" | undefined): string {
+export function getDefaultModelForProvider(config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel">, provider: SessionProvider | undefined): string {
   const defaults = getProviderDefaultModels(config);
-  return provider === "codex" ? defaults.codex : provider === "opencode" ? defaults.opencode : defaults.claude;
+  return provider === "codex" ? defaults.codex : provider === "opencode" ? defaults.opencode : provider === "grok" ? "" : defaults.claude;
 }
 
 export function normalizeMode(input: string | undefined, fallback: ExecutionMode): ExecutionMode {

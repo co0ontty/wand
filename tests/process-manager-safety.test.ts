@@ -131,9 +131,11 @@ class FakePty {
 function createHarness(t: test.TestContext, allowedCommandPrefixes: string[] = []) {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-pm-safety-"));
   const spawned: FakePty[] = [];
+  const spawnCalls: unknown[][] = [];
   const ptyModule = pty as unknown as { spawn: (...args: unknown[]) => IPty };
   const originalSpawn = ptyModule.spawn;
-  ptyModule.spawn = () => {
+  ptyModule.spawn = (...args: unknown[]) => {
+    spawnCalls.push(args);
     const child = new FakePty(10_000 + spawned.length);
     spawned.push(child);
     return child as unknown as IPty;
@@ -151,8 +153,21 @@ function createHarness(t: test.TestContext, allowedCommandPrefixes: string[] = [
     rmSync(root, { recursive: true, force: true });
   });
 
-  return { manager, root, spawned, storage };
+  return { manager, root, spawned, spawnCalls, storage };
 }
+
+test("Grok PTY launches the TUI with model, effort, and managed approval flags", (t) => {
+  const { manager, root, spawnCalls } = createHarness(t);
+  const session = manager.start("grok", root, "managed", undefined, {
+    provider: "grok",
+    model: "grok-4.5",
+    thinkingEffort: "deep",
+  });
+  assert.equal(session.provider, "grok");
+  assert.equal(session.runner, "pty");
+  const shellArgs = spawnCalls[0][1] as string[];
+  assert.match(shellArgs.at(-1) ?? "", /^grok --model 'grok-4\.5' --effort 'high' --always-approve$/);
+});
 
 test("command allowlist compares safe shell tokens instead of raw prefixes", () => {
   assert.equal(isCommandAllowedByPrefixes("claude --resume abc", ["claude"]), true);

@@ -8,6 +8,7 @@ import type { CardExpandDefaults, ConversationTurn, SessionSnapshot, ProcessEven
 import { readSessionCookie, type AuthService } from "./auth.js";
 import { blockWindowMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { boundSessionEventData, toSessionDetailDTO } from "./session-transport.js";
+import { enrichStructuredMessages } from "./structured-client-protocol.js";
 
 export type { ProcessEvent } from "./types.js";
 
@@ -335,6 +336,7 @@ export class WsBroadcastManager {
     if (!messages) {
       return { messages: undefined, messageOffset: 0, messageTotal: 0 };
     }
+    messages = enrichStructuredMessages(messages);
     if (client.blockBudget && client.blockBudget > 0) {
       const w = blockWindowMessagesForTransport(messages, this.getCardDefaults(), client.blockBudget);
       return {

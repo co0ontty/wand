@@ -23915,7 +23915,7 @@
   }
 
   // src/web-ui/react/new-session/repository.ts
-  var PROVIDERS = ["claude", "codex", "opencode"];
+  var PROVIDERS = ["claude", "codex", "opencode", "grok"];
   var KINDS = ["structured", "pty"];
   var MODES = [
     "default",
@@ -23969,7 +23969,7 @@
   }
   function supportedModes(provider) {
     if (provider === "codex") return ["full-access"];
-    if (provider === "opencode") return ["default", "full-access", "managed"];
+    if (provider === "opencode" || provider === "grok") return ["default", "full-access", "managed"];
     return ["default", "full-access", "auto-edit", "native", "managed"];
   }
   function safeMode(provider, requested, fallback = "default") {
@@ -23981,6 +23981,7 @@
   function structuredRunner(provider, configured) {
     if (provider === "codex") return "codex-cli-exec";
     if (provider === "opencode") return "opencode-cli-run";
+    if (provider === "grok") return "grok-cli-headless";
     return configured === "sdk" || configured === "claude-sdk" ? "claude-sdk" : "claude-cli-print";
   }
   function buildCreateRequest(form, defaults, context, dimensions = {}) {
@@ -24113,7 +24114,8 @@
   var PROVIDERS2 = [
     { value: "claude", label: "Claude", description: "\u5B8C\u6574 Claude \u4F1A\u8BDD\u80FD\u529B" },
     { value: "codex", label: "Codex", description: "\u7ED3\u6784\u5316 JSONL \u6216 PTY \u4F1A\u8BDD" },
-    { value: "opencode", label: "OpenCode", description: "\u591A\u6A21\u578B\u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" }
+    { value: "opencode", label: "OpenCode", description: "\u591A\u6A21\u578B\u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" },
+    { value: "grok", label: "Grok", description: "Grok Build \u7ED3\u6784\u5316\u6216 PTY \u4F1A\u8BDD" }
   ];
   var KINDS2 = [
     { value: "structured", label: "\u7ED3\u6784\u5316", description: "\u667A\u80FD\u5BF9\u8BDD\u6A21\u5F0F" },
@@ -24130,10 +24132,12 @@
     if (kind === "structured") {
       if (provider === "codex") return "Codex JSONL \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u591A\u8F6E\u5BF9\u8BDD\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
       if (provider === "opencode") return "OpenCode JSON \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u7EED\u804A\u3001\u601D\u8003\u8FC7\u7A0B\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
+      if (provider === "grok") return "Grok streaming-json \u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u591A\u8F6E\u7EED\u804A\u4E0E\u601D\u8003\u8FC7\u7A0B\u5C55\u793A\u3002";
       return "\u7ED3\u6784\u5316\u804A\u5929\u754C\u9762\uFF0C\u652F\u6301\u591A\u8F6E\u5BF9\u8BDD\u3001\u6D41\u5F0F\u8F93\u51FA\u548C\u5DE5\u5177\u8C03\u7528\u5C55\u793A\u3002";
     }
     if (provider === "codex") return "Codex PTY \u7EC8\u7AEF\u4F1A\u8BDD\uFF1Bterminal \u662F\u539F\u59CB\u8F93\u51FA\uFF0Cchat \u662F\u89E3\u6790\u540E\u7684\u9605\u8BFB\u89C6\u56FE\u3002";
     if (provider === "opencode") return "OpenCode TUI \u7684\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\u3002";
+    if (provider === "grok") return "Grok Build TUI \u7684\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\u3002";
     return "\u539F\u59CB PTY \u7EC8\u7AEF\u4F1A\u8BDD\uFF0C\u652F\u6301\u6301\u7EED\u4EA4\u4E92\u3001\u7EC8\u7AEF\u89C6\u56FE\u548C\u6743\u9650\u6D41\u3002";
   }
   function modeHint(provider, mode) {
@@ -24142,6 +24146,9 @@
     }
     if (provider === "opencode") {
       return mode === "full-access" || mode === "managed" || mode === "auto-edit" ? "OpenCode \u5C06\u81EA\u52A8\u6279\u51C6\u672A\u663E\u5F0F\u62D2\u7EDD\u7684\u6743\u9650\uFF1B\u652F\u6301 TUI \u4E0E JSON \u7ED3\u6784\u5316\u4F1A\u8BDD\u3002" : "OpenCode \u4F7F\u7528\u81EA\u8EAB\u6743\u9650\u914D\u7F6E\uFF1B\u7ED3\u6784\u5316\u6A21\u5F0F\u4F1A\u81EA\u52A8\u62D2\u7EDD\u672A\u6279\u51C6\u7684\u6743\u9650\u8BF7\u6C42\u3002";
+    }
+    if (provider === "grok") {
+      return mode === "full-access" || mode === "managed" ? "Grok \u5C06\u4EE5 always-approve \u8FD0\u884C\uFF1B\u652F\u6301 TUI \u4E0E streaming-json \u7ED3\u6784\u5316\u4F1A\u8BDD\u3002" : "Grok \u4F7F\u7528\u81EA\u8EAB\u6743\u9650\u786E\u8BA4\uFF1B\u652F\u6301 TUI \u4E0E streaming-json \u7ED3\u6784\u5316\u4F1A\u8BDD\u3002";
     }
     if (mode === "full-access") return "\u81EA\u52A8\u786E\u8BA4\u6743\u9650\u8BF7\u6C42\u4E0E\u9AD8\u6743\u9650\u64CD\u4F5C\uFF0C\u9002\u5408\u4F60\u786E\u8BA4\u73AF\u5883\u5B89\u5168\u540E\u7684\u8FDE\u7EED\u4FEE\u6539\u3002";
     if (mode === "auto-edit") return "\u4FDD\u7559\u4EA4\u4E92\u5F0F\u4F1A\u8BDD\uFF0C\u540C\u65F6\u66F4\u504F\u5411\u76F4\u63A5\u7F16\u8F91\u4EE3\u7801\u3002";
@@ -24153,6 +24160,7 @@
     if (kind === "structured") return "\u65E0\u6CD5\u542F\u52A8\u7ED3\u6784\u5316\u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4\u5BF9\u5E94 Provider \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
     if (provider === "codex") return "\u65E0\u6CD5\u542F\u52A8 Codex \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 codex \u5DF2\u6B63\u786E\u5B89\u88C5\u5E76\u53EF\u5728\u7EC8\u7AEF\u4E2D\u6267\u884C\u3002";
     if (provider === "opencode") return "\u65E0\u6CD5\u542F\u52A8 OpenCode \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 opencode-ai \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
+    if (provider === "grok") return "\u65E0\u6CD5\u542F\u52A8 Grok \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 Grok Build CLI \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
     return "\u65E0\u6CD5\u542F\u52A8 Claude \u4F1A\u8BDD\uFF0C\u8BF7\u786E\u8BA4 Claude \u5DF2\u6B63\u786E\u5B89\u88C5\u3002";
   }
   function presentError(error, fallback) {
@@ -41490,6 +41498,10 @@
       if (!msg.content || !Array.isArray(msg.content)) continue;
       for (var j = msg.content.length - 1; j >= 0; j--) {
         var block = msg.content[j];
+        if (block.type === "tool_use" && block.semantic && block.semantic.kind === "task_list") {
+          todos = block.semantic.items;
+          break;
+        }
         if (block.type === "tool_use" && block.name === "TodoWrite" && block.input && block.input.todos) {
           todos = block.input.todos;
           break;
@@ -43144,8 +43156,9 @@
     if (toolName === "Edit" || toolName === "Write" || toolName === "MultiEdit") {
       return renderDiffTool(block, toolResult, toolName, messageKey, index2, opts);
     }
-    if (toolName === "AskUserQuestion" && block.input && block.input.questions) {
-      var questions = block.input.questions;
+    var semanticQuestions = block.semantic && block.semantic.kind === "question_request" ? block.semantic.questions : null;
+    if (semanticQuestions || toolName === "AskUserQuestion" && block.input && block.input.questions) {
+      var questions = semanticQuestions || block.input.questions;
       if (questions && questions.length > 0) {
         var isAnswered = !!toolResult;
         var sel = state.askUserSelections[toolId] || {};

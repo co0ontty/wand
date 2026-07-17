@@ -1,7 +1,7 @@
 export type SessionKind = "pty" | "structured";
-export type SessionProvider = "claude" | "codex" | "opencode";
+export type SessionProvider = "claude" | "codex" | "opencode" | "grok";
 export type CommitAiSource = "cli" | "api";
-export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "pty";
+export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "grok-cli-headless" | "pty";
 export type SessionSource = "interactive" | "automation" | "startup";
 
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
@@ -426,12 +426,40 @@ export interface ThinkingBlock {
   __subagent?: SubagentMeta;
 }
 
+export interface StructuredQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface StructuredQuestion {
+  question: string;
+  header?: string;
+  multiSelect: boolean;
+  options: StructuredQuestionOption[];
+}
+
+export interface StructuredTaskItem {
+  id: string;
+  content: string;
+  status: string;
+  activeForm?: string;
+}
+
+/**
+ * Wand-owned semantic projection of provider-specific tools. Clients should
+ * render this field and treat `name` / `input` as a legacy fallback only.
+ */
+export type ToolUseSemantic =
+  | { kind: "question_request"; questions: StructuredQuestion[] }
+  | { kind: "task_list"; items: StructuredTaskItem[] };
+
 export interface ToolUseBlock {
   type: "tool_use";
   id: string;
   name: string;
   description?: string;
   input: Record<string, unknown>;
+  semantic?: ToolUseSemantic;
   __subagent?: SubagentMeta;
 }
 

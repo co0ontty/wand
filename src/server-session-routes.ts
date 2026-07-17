@@ -30,6 +30,7 @@ import { isProviderSessionId } from "./resume-policy.js";
 import { parseBoundedInteger } from "./request-limits.js";
 import { asyncRoute } from "./express-async.js";
 import { SessionRegistry } from "./session-registry.js";
+import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 
 export function parseExecutionMode(value: unknown, fallback: ExecutionMode): ExecutionMode {
   if (value === undefined) return fallback;
@@ -410,7 +411,10 @@ export function registerSessionRoutes(
   onSessionCreated?: (cwd: string | undefined | null) => void
 ): void {
   const sessionResponseDTO = (snapshot: SessionSnapshot) => {
-    const windowed = windowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {});
+    const windowed = windowMessagesForTransport(
+      enrichStructuredMessages(snapshot.messages ?? []),
+      config.cardDefaults ?? {},
+    );
     return toSessionDetailDTO(snapshot, {
       messages: windowed.messages,
       messageOffset: windowed.messageOffset,
@@ -425,11 +429,11 @@ export function registerSessionRoutes(
   app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
     const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown };
     try {
-      if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode") {
-        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex 或 OpenCode provider。" });
+      if (body.provider && body.provider !== "claude" && body.provider !== "codex" && body.provider !== "opencode" && body.provider !== "grok") {
+        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode 或 Grok provider。" });
         return;
       }
-      const provider: SessionProvider = body.provider === "codex" || body.provider === "opencode" ? body.provider : "claude";
+      const provider: SessionProvider = body.provider === "codex" || body.provider === "opencode" || body.provider === "grok" ? body.provider : "claude";
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
       const snapshot = structured.createSession({
@@ -912,7 +916,11 @@ export function registerSessionRoutes(
       const rawBudget = req.query.blockBudget;
       if (typeof rawBudget === "string" && /^\d+$/.test(rawBudget) && Number(rawBudget) > 0) {
         const blockBudget = parseBoundedInteger(rawBudget, 1, 1, 2_000);
-        const windowed = blockWindowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {}, blockBudget);
+        const windowed = blockWindowMessagesForTransport(
+          enrichStructuredMessages(snapshot.messages ?? []),
+          config.cardDefaults ?? {},
+          blockBudget,
+        );
         res.json(toSessionDetailDTO(snapshot, {
           output: transcriptOutput,
           messages: windowed.messages,
@@ -924,7 +932,10 @@ export function registerSessionRoutes(
         return;
       }
       // 与 WS init 对齐：只回最近一窗 turn + offset/total，更早的走 /messages 翻页。
-      const windowed = windowMessagesForTransport(snapshot.messages ?? [], config.cardDefaults ?? {});
+      const windowed = windowMessagesForTransport(
+        enrichStructuredMessages(snapshot.messages ?? []),
+        config.cardDefaults ?? {},
+      );
       res.json(toSessionDetailDTO(snapshot, {
         output: transcriptOutput,
         messages: windowed.messages,
@@ -944,7 +955,7 @@ export function registerSessionRoutes(
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
     }
-    const all = snapshot.messages ?? [];
+    const all = enrichStructuredMessages(snapshot.messages ?? []);
     const total = all.length;
 
     // 块级翻页（iOS）：?turn=<i>&blockOffset=<当前 leading 偏移>&blockLimit=<N>
@@ -963,8 +974,11 @@ export function registerSessionRoutes(
       const blockLimit = Math.min(Math.max(Number.isFinite(rawBlockLimit) ? rawBlockLimit : 40, 1), 200);
       const blockEnd = Math.min(Math.max(Number.isFinite(rawBlockOffset) ? rawBlockOffset : blockTotal, 0), blockTotal);
       const blockStart = Math.max(0, blockEnd - blockLimit);
-      const blocks = sliceTurnBlocksForTransport(turn, blockStart, blockEnd, config.cardDefaults ?? {});
-      res.json({ turnIndex, blocks, blockOffset: blockStart, blockTotal });
+      const blocks = enrichStructuredMessages([{
+        ...turn,
+        content: sliceTurnBlocksForTransport(turn, blockStart, blockEnd, config.cardDefaults ?? {}),
+      }])[0].content;
+      res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, turnIndex, blocks, blockOffset: blockStart, blockTotal });
       return;
     }
 
@@ -973,8 +987,8 @@ export function registerSessionRoutes(
     const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 40, 1), 200);
     const offset = Math.min(Math.max(Number.isFinite(rawOffset) ? rawOffset : 0, 0), total);
     const end = Math.min(offset + limit, total);
-    const slice = truncateMessagesForTransport(all.slice(offset, end), config.cardDefaults ?? {});
-    res.json({ messages: slice, offset, total });
+    const slice = enrichStructuredMessages(truncateMessagesForTransport(all.slice(offset, end), config.cardDefaults ?? {}));
+    res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, messages: slice, offset, total });
   });
 
   app.post("/api/sessions/:id/resume", (req, res) => {

@@ -39,6 +39,7 @@ const PROVIDERS: ReadonlyArray<{
   { value: "claude", label: "Claude", description: "完整 Claude 会话能力" },
   { value: "codex", label: "Codex", description: "结构化 JSONL 或 PTY 会话" },
   { value: "opencode", label: "OpenCode", description: "多模型结构化或 PTY 会话" },
+  { value: "grok", label: "Grok", description: "Grok Build 结构化或 PTY 会话" },
 ];
 
 const KINDS: ReadonlyArray<{
@@ -66,10 +67,12 @@ function kindHint(provider: NewSessionProvider, kind: NewSessionKind): string {
   if (kind === "structured") {
     if (provider === "codex") return "Codex JSONL 结构化聊天界面，支持多轮对话和工具调用展示。";
     if (provider === "opencode") return "OpenCode JSON 结构化聊天界面，支持续聊、思考过程和工具调用展示。";
+    if (provider === "grok") return "Grok streaming-json 结构化聊天界面，支持多轮续聊与思考过程展示。";
     return "结构化聊天界面，支持多轮对话、流式输出和工具调用展示。";
   }
   if (provider === "codex") return "Codex PTY 终端会话；terminal 是原始输出，chat 是解析后的阅读视图。";
   if (provider === "opencode") return "OpenCode TUI 的原始 PTY 终端会话。";
+  if (provider === "grok") return "Grok Build TUI 的原始 PTY 终端会话。";
   return "原始 PTY 终端会话，支持持续交互、终端视图和权限流。";
 }
 
@@ -82,6 +85,11 @@ function modeHint(provider: NewSessionProvider, mode: NewSessionMode): string {
       ? "OpenCode 将自动批准未显式拒绝的权限；支持 TUI 与 JSON 结构化会话。"
       : "OpenCode 使用自身权限配置；结构化模式会自动拒绝未批准的权限请求。";
   }
+  if (provider === "grok") {
+    return mode === "full-access" || mode === "managed"
+      ? "Grok 将以 always-approve 运行；支持 TUI 与 streaming-json 结构化会话。"
+      : "Grok 使用自身权限确认；支持 TUI 与 streaming-json 结构化会话。";
+  }
   if (mode === "full-access") return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
   if (mode === "auto-edit") return "保留交互式会话，同时更偏向直接编辑代码。";
   if (mode === "native") return "调用 Claude 原生 API 输出，适合快速问答或一次性生成。";
@@ -93,6 +101,7 @@ function creationFallback(provider: NewSessionProvider, kind: NewSessionKind): s
   if (kind === "structured") return "无法启动结构化会话，请确认对应 Provider 已正确安装。";
   if (provider === "codex") return "无法启动 Codex 会话，请确认 codex 已正确安装并可在终端中执行。";
   if (provider === "opencode") return "无法启动 OpenCode 会话，请确认 opencode-ai 已正确安装。";
+  if (provider === "grok") return "无法启动 Grok 会话，请确认 Grok Build CLI 已正确安装。";
   return "无法启动 Claude 会话，请确认 Claude 已正确安装。";
 }
 

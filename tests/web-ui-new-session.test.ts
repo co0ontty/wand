@@ -28,19 +28,20 @@ function json(value: unknown, status = 200): Response {
 test("provider modes are clamped without leaking unsupported values", () => {
   assert.deepEqual(supportedModes("codex"), ["full-access"]);
   assert.deepEqual(supportedModes("opencode"), ["default", "full-access", "managed"]);
+  assert.deepEqual(supportedModes("grok"), ["default", "full-access", "managed"]);
   assert.equal(safeMode("codex", "native", "default"), "full-access");
   assert.equal(safeMode("opencode", "auto-edit", "managed"), "managed");
   assert.equal(safeMode("claude", "native"), "native");
 });
 
 test("radio-card navigation wraps and skips values omitted by the caller", () => {
-  const providers = ["claude", "codex", "opencode"] as const;
-  assert.equal(nextChoice(providers, "claude", "ArrowLeft"), "opencode");
-  assert.equal(nextChoice(providers, "opencode", "ArrowRight"), "claude");
+  const providers = ["claude", "codex", "opencode", "grok"] as const;
+  assert.equal(nextChoice(providers, "claude", "ArrowLeft"), "grok");
+  assert.equal(nextChoice(providers, "opencode", "ArrowRight"), "grok");
   assert.equal(nextChoice(providers, "codex", "ArrowUp"), "claude");
   assert.equal(nextChoice(providers, "codex", "ArrowDown"), "opencode");
   assert.equal(nextChoice(providers, "codex", "Home"), "claude");
-  assert.equal(nextChoice(providers, "codex", "End"), "opencode");
+  assert.equal(nextChoice(providers, "codex", "End"), "grok");
   assert.equal(nextChoice(["full-access"] as const, "full-access", "ArrowRight"), "full-access");
 });
 
@@ -93,6 +94,14 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     cols: 98,
     rows: 31,
   });
+
+  assert.equal(buildCreateRequest({
+    provider: "grok",
+    kind: "structured",
+    cwd: "/repo",
+    mode: "managed",
+    worktreeEnabled: false,
+  }, config, context).runner, "grok-cli-headless");
 });
 
 test("HTTP repository serializes preferences and loads the latest server defaults", async () => {

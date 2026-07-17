@@ -136,6 +136,7 @@ test("session creation validates provider-runner combinations and applies defaul
   assert.equal(manager.createSession({ ...base, provider: "claude", runner: "claude-cli-print" }).runner, "claude-cli-print");
   assert.equal(manager.createSession({ ...base, provider: "codex" }).runner, "codex-cli-exec");
   assert.equal(manager.createSession({ ...base, provider: "opencode" }).runner, "opencode-cli-run");
+  assert.equal(manager.createSession({ ...base, provider: "grok" }).runner, "grok-cli-headless");
 
   const runners: SessionRunner[] = [
     "claude-cli",
@@ -143,14 +144,16 @@ test("session creation validates provider-runner combinations and applies defaul
     "claude-sdk",
     "codex-cli-exec",
     "opencode-cli-run",
+    "grok-cli-headless",
     "pty",
   ];
   const allowed: Record<SessionProvider, SessionRunner[]> = {
     claude: ["claude-cli-print", "claude-sdk"],
     codex: ["codex-cli-exec"],
     opencode: ["opencode-cli-run"],
+    grok: ["grok-cli-headless"],
   };
-  for (const provider of ["claude", "codex", "opencode"] as const) {
+  for (const provider of ["claude", "codex", "opencode", "grok"] as const) {
     for (const runner of runners) {
       if (allowed[provider].includes(runner)) continue;
       assert.throws(
