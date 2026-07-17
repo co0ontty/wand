@@ -1369,10 +1369,16 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         if (kindEl && kindEl.textContent !== kindText) kindEl.textContent = kindText;
         updateAutoApproveIndicator();
 
-        if (!state.terminal && terminalContainer && selectedSession) {
+        // 结构化会话没有 PTY。这里若初始化终端，initTerminal 的测量准备会
+        // 直接触碰 #output 可见性，并可能与 React 外壳的 chat 投影打架。
+        if (!state.terminal && terminalContainer && selectedSession && !isStructuredSession(selectedSession)) {
           initTerminal();
         }
-        if (state.terminal && terminalContainer && !terminalContainer.contains(state.terminal.element)) {
+        if (state.terminal
+            && terminalContainer
+            && selectedSession
+            && !isStructuredSession(selectedSession)
+            && !terminalContainer.contains(state.terminal.element)) {
           teardownTerminal();
           initTerminal();
         }

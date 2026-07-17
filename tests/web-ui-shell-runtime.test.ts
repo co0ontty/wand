@@ -88,3 +88,13 @@ test("React-owned controls are not rebound or imperatively rewritten", () => {
   assert.match(websocket, /notifyLegacyUiChange\("task:update"\)/);
   assert.match(websocket, /if \(!reactShellActive && taskEl && task && task\.title\)/);
 });
+
+test("terminal initialization cannot expose PTY chrome for a structured session", () => {
+  const terminal = readFileSync(path.join(root, "src/web-ui/browser/terminal.ts"), "utf8");
+  const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
+
+  assert.match(terminal, /var shouldExposeTerminal = !!selectedSession\s*&& !isStructuredSession\(selectedSession\)\s*&& state\.currentView === "terminal";/s);
+  assert.match(terminal, /if \(shouldExposeTerminal\) \{\s*container\.classList\.remove\("hidden"\);\s*container\.classList\.add\("active"\);/s);
+  assert.doesNotMatch(terminal, /if \(state\.selectedId\) \{\s*container\.classList\.remove\("hidden"\)/s);
+  assert.match(sessions, /!state\.terminal && terminalContainer && selectedSession && !isStructuredSession\(selectedSession\)/);
+});

@@ -1129,9 +1129,17 @@ import { batchDeleteSelected, clearAllClaudeHistory, clearSelections, confirmDel
         // initTerminal() 在 applyCurrentView() 之前同步执行——那时容器还是
         // display:none，_measureCharSize 返回 null → ResizeObserver 不挂
         // 载、首屏 cols 永远停在硬编码的 120，必须用户刷新/弹键盘/调窗口
-        // 才能恢复。这里在创建 wterm 之前先把 active 类挂上，让容器进入
-        // flex 布局，确保 _measureCharSize 拿到真实字符尺寸。
-        if (state.selectedId) {
+        // 才能恢复。只有当前确实选中了 PTY 终端视图时，才在创建 wterm 前
+        // 临时确保容器可见。结构化会话也会经 attachEventListeners 走到这里；
+        // 若只凭 selectedId 移除 hidden，会绕过 React 外壳的可见性状态，造成
+        // 顶部 PTY 与结构化 chat 同时出现。
+        var selectedSession = state.sessions.find(function(session) {
+          return session.id === state.selectedId;
+        });
+        var shouldExposeTerminal = !!selectedSession
+          && !isStructuredSession(selectedSession)
+          && state.currentView === "terminal";
+        if (shouldExposeTerminal) {
           container.classList.remove("hidden");
           container.classList.add("active");
         }

@@ -36592,7 +36592,11 @@
     }
     state.terminalInitRetries = 0;
     state.terminalInitializing = true;
-    if (state.selectedId) {
+    var selectedSession = state.sessions.find(function(session) {
+      return session.id === state.selectedId;
+    });
+    var shouldExposeTerminal = !!selectedSession && !isStructuredSession2(selectedSession) && state.currentView === "terminal";
+    if (shouldExposeTerminal) {
       container.classList.remove("hidden");
       container.classList.add("active");
     }
@@ -44983,10 +44987,10 @@
     var kindText = selectedSession ? getSessionKindLabel(selectedSession) : "\u7EC8\u7AEF";
     if (kindEl && kindEl.textContent !== kindText) kindEl.textContent = kindText;
     updateAutoApproveIndicator();
-    if (!state.terminal && terminalContainer && selectedSession) {
+    if (!state.terminal && terminalContainer && selectedSession && !isStructuredSession2(selectedSession)) {
       initTerminal2();
     }
-    if (state.terminal && terminalContainer && !terminalContainer.contains(state.terminal.element)) {
+    if (state.terminal && terminalContainer && selectedSession && !isStructuredSession2(selectedSession) && !terminalContainer.contains(state.terminal.element)) {
       teardownTerminal();
       initTerminal2();
     }
