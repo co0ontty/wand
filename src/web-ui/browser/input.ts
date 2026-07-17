@@ -145,6 +145,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           el.style.overflowY = touchDevice ? "auto" : "hidden";
           el.scrollTop = 0;
           el.classList.remove("has-multiline-draft", "has-clipped-draft");
+          el.closest(".input-composer")?.classList.remove("is-expanded");
           syncComposerHasText(el);
           return;
         }
@@ -162,6 +163,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         el.style.overflowY = shouldScrollInside || touchDevice ? "auto" : "hidden";
         el.classList.toggle("has-multiline-draft", needsExpandedHeight);
         el.classList.toggle("has-clipped-draft", shouldScrollInside);
+        // Keep the two-row composer open after blur whenever the draft wraps.
+        // This mirrors the native clients and prevents controls from squeezing
+        // a multi-line draft back into the compact row.
+        el.closest(".input-composer")?.classList.toggle("is-expanded", needsExpandedHeight);
         if (shouldScrollInside) {
           syncInputBoxScroll(el);
         } else {

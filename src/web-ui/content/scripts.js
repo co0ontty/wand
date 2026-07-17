@@ -38743,6 +38743,7 @@
       el.style.overflowY = touchDevice ? "auto" : "hidden";
       el.scrollTop = 0;
       el.classList.remove("has-multiline-draft", "has-clipped-draft");
+      el.closest(".input-composer")?.classList.remove("is-expanded");
       syncComposerHasText(el);
       return;
     }
@@ -38758,6 +38759,7 @@
     el.style.overflowY = shouldScrollInside || touchDevice ? "auto" : "hidden";
     el.classList.toggle("has-multiline-draft", needsExpandedHeight);
     el.classList.toggle("has-clipped-draft", shouldScrollInside);
+    el.closest(".input-composer")?.classList.toggle("is-expanded", needsExpandedHeight);
     if (shouldScrollInside) {
       syncInputBoxScroll(el);
     } else {
