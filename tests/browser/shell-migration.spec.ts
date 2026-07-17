@@ -68,6 +68,146 @@ test("React shell keeps all legacy host roots, draft, and selection stable", asy
   });
 });
 
+test("structured session switches never reveal or restore stale PTY chat", async ({ page }) => {
+  const structuredId = "structured-switch-fixture";
+  const ptyId = "pty-switch-fixture";
+  const baseSession = {
+    sessionSource: "interactive",
+    provider: "codex",
+    command: "codex",
+    cwd: "/tmp/wand-session-switch",
+    mode: "full-access",
+    status: "idle",
+    exitCode: null,
+    archived: false,
+  };
+  const structuredSession = {
+    ...baseSession,
+    id: structuredId,
+    sessionKind: "structured",
+    runner: "codex-cli-exec",
+    startedAt: "2026-07-17T01:00:00.000Z",
+    title: "Structured switch fixture",
+    structuredState: { provider: "codex", runner: "codex-cli-exec", inFlight: false },
+  };
+  const ptySession = {
+    ...baseSession,
+    id: ptyId,
+    sessionKind: "pty",
+    runner: "pty",
+    startedAt: "2026-07-17T00:00:00.000Z",
+    title: "PTY switch fixture",
+  };
+  const structuredMessages = [{
+    role: "assistant",
+    content: [{ type: "text", text: "STRUCTURED_CURRENT" }],
+  }];
+  const ptyMessages = [{
+    role: "assistant",
+    content: [{ type: "text", text: "PTY_STALE" }],
+  }];
+
+  let ptyRequestCount = 0;
+  let ptyResponseCount = 0;
+  let ptyGate: Promise<void> | null = null;
+  let releasePty: (() => void) | null = null;
+  let structuredGate: Promise<void> | null = null;
+  let releaseStructured: (() => void) | null = null;
+
+  await page.route("**/api/sessions", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify([structuredSession, ptySession]),
+  }));
+  await page.route(new RegExp(`/api/sessions/${structuredId}(?:\\?.*)?$`), async (route) => {
+    const gate = structuredGate;
+    structuredGate = null;
+    if (gate) await gate;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...structuredSession,
+        output: "",
+        messages: structuredMessages,
+        messageOffset: 0,
+        messageTotal: structuredMessages.length,
+      }),
+    });
+  });
+  await page.route(new RegExp(`/api/sessions/${ptyId}(?:\\?.*)?$`), async (route) => {
+    ptyRequestCount += 1;
+    const gate = ptyGate;
+    ptyGate = null;
+    if (gate) await gate;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...ptySession,
+        output: "",
+        messages: ptyMessages,
+        messageOffset: 0,
+        messageTotal: ptyMessages.length,
+      }),
+    });
+    ptyResponseCount += 1;
+  });
+
+  await login(page);
+  const chat = page.locator("#chat-output");
+  const structuredEntry = page.locator(`.session-item[data-session-id="${structuredId}"]`);
+  const ptyEntry = page.locator(`.session-item[data-session-id="${ptyId}"]`);
+  const drawer = page.locator("#sessions-drawer");
+  const sessionsToggle = page.locator("#sessions-toggle-button");
+  const overlayLayout = await page.evaluate(() => window.innerWidth <= 768);
+  const activateSession = async (entry: typeof structuredEntry) => {
+    const intersectsViewport = () => entry.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0
+        && rect.height > 0
+        && rect.right > 0
+        && rect.bottom > 0
+        && rect.left < window.innerWidth
+        && rect.top < window.innerHeight;
+    });
+    if (overlayLayout) {
+      const open = await drawer.evaluate((element) => element.classList.contains("open"));
+      if (!open) await sessionsToggle.click();
+      await expect(drawer).toHaveClass(/\bopen\b/);
+    } else if (!await intersectsViewport()) {
+      await sessionsToggle.click();
+    }
+    await expect.poll(intersectsViewport).toBe(true);
+    await entry.click();
+  };
+  await expect(chat).toContainText("STRUCTURED_CURRENT");
+
+  // First populate the hidden chat host with PTY content, then hold the
+  // structured response. The switch itself must synchronously remove PTY_STALE.
+  await activateSession(ptyEntry);
+  await expect.poll(() => ptyResponseCount).toBe(1);
+  await expect(chat).toContainText("PTY_STALE");
+  structuredGate = new Promise<void>((resolve) => { releaseStructured = resolve; });
+  await activateSession(structuredEntry);
+  await expect(chat).not.toHaveClass(/\bhidden\b/);
+  await expect(chat).not.toContainText("PTY_STALE");
+  releaseStructured?.();
+  await expect(chat).toContainText("STRUCTURED_CURRENT");
+
+  // Now let an older PTY request finish after the structured request. Its
+  // response must not overwrite the active session's shared message buffer.
+  ptyGate = new Promise<void>((resolve) => { releasePty = resolve; });
+  await activateSession(ptyEntry);
+  await expect.poll(() => ptyRequestCount).toBe(2);
+  await activateSession(structuredEntry);
+  await expect(chat).toContainText("STRUCTURED_CURRENT");
+  releasePty?.();
+  await expect.poll(() => ptyResponseCount).toBe(2);
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await expect(chat).toContainText("STRUCTURED_CURRENT");
+  await expect(chat).not.toContainText("PTY_STALE");
+});
+
 test("voice input uses its own hold button without hijacking textarea gestures", async ({ page }) => {
   await login(page);
 

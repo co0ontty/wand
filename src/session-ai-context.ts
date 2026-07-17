@@ -6,6 +6,8 @@ export interface SessionAiContext {
   model?: string;
   thinkingEffort: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
+  /** Direct API to try when Commit is configured to prefer its CLI. */
+  fallbackSystemAi?: SystemAiConfig;
   systemAi?: SystemAiConfig;
 }
 
@@ -54,6 +56,11 @@ export function resolveSessionProvider(snapshot: Pick<
 function normalizeModel(value: string | null | undefined): string | undefined {
   const model = value?.trim();
   return model && model !== "default" ? model : undefined;
+}
+
+function usableSystemAi(config: SystemAiConfig): SystemAiConfig | undefined {
+  if (!config.baseUrl.trim() || !config.apiKey.trim() || !config.model.trim()) return undefined;
+  return { ...config, enabled: true };
 }
 
 /** Build the provider-specific settings used by session-adjacent AI actions. */
@@ -105,10 +112,13 @@ export function resolveCommitAiContext(
     apiKey: "",
     model: "",
   };
+  const readyDirectApi = usableSystemAi(directApi);
   return {
     ...sessionContext,
     provider: config.commitCli === "codex" || config.commitCli === "opencode" ? config.commitCli : "claude",
     model: normalizeModel(config.commitModel),
-    ...(config.commitAiSource === "api" ? { systemAi: { ...directApi, enabled: true } } : {}),
+    ...(config.commitAiSource === "api"
+      ? { systemAi: { ...directApi, enabled: true } }
+      : readyDirectApi ? { fallbackSystemAi: readyDirectApi } : {}),
   };
 }

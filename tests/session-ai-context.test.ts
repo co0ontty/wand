@@ -150,7 +150,7 @@ test("resolveCommitAiContext leaves model unset when commit model follows the CL
   assert.equal(context.model, undefined);
 });
 
-test("resolveCommitAiContext keeps CLI selected when a direct API profile is enabled", () => {
+test("resolveCommitAiContext keeps CLI selected and retains direct API as fallback", () => {
   const context = resolveCommitAiContext(session({ provider: "claude" }), {
     ...config,
     commitAiSource: "cli",
@@ -164,6 +164,13 @@ test("resolveCommitAiContext keeps CLI selected when a direct API profile is ena
   });
 
   assert.equal(context.systemAi, undefined);
+  assert.deepEqual(context.fallbackSystemAi, {
+    enabled: true,
+    protocol: "anthropic",
+    baseUrl: "https://api.example.test",
+    apiKey: "secret",
+    model: "model-a",
+  });
 });
 
 test("resolveCommitAiContext uses the direct API selected for commits", () => {

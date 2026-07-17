@@ -59,6 +59,7 @@ export type QuickCommitErrorCode =
   | "EMPTY_MESSAGE"
   | "EMPTY_TAG"
   | "EMPTY_AI_MESSAGE"
+  | "AI_FALLBACK_FAILED"
   | "INVALID_AI_TAG"
   | "TAG_EXISTS"
   | "GIT_ADD_FAILED"
@@ -466,6 +467,8 @@ interface QuickCommitOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
+  /** Direct API to try when the selected Commit source is a CLI. */
+  fallbackSystemAi?: import("./types.js").SystemAiConfig;
   systemAi?: import("./types.js").SystemAiConfig;
   autoMessage: boolean;
   customMessage?: string;
@@ -485,6 +488,7 @@ interface QuickCommitAiOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
+  fallbackSystemAi?: import("./types.js").SystemAiConfig;
   systemAi?: import("./types.js").SystemAiConfig;
 }
 
@@ -652,14 +656,58 @@ async function callOpenCodeText(prompt: string, cwd: string, opts: QuickCommitAi
   return text;
 }
 
-async function callAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
-  if (opts.systemAi?.enabled) return callSystemAiText(prompt, opts.systemAi);
+async function callCliAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
   const provider = normalizeProvider(opts.provider);
   if (provider === "codex") {
     return callCodexText(prompt, cwd, opts);
   }
   if (provider === "opencode") return callOpenCodeText(prompt, cwd, opts);
   return callClaudeText(prompt, cwd, language, opts.model);
+}
+
+async function callDirectApiText(prompt: string, systemAi: import("./types.js").SystemAiConfig): Promise<string> {
+  const text = await callSystemAiText(prompt, systemAi);
+  if (!text.trim()) {
+    throw new QuickCommitError("直连 API 返回了空结果。", "EMPTY_AI_MESSAGE");
+  }
+  return text;
+}
+
+function aiFallbackFailed(primary: "直连 API" | "CLI", primaryError: unknown, fallbackError: unknown): QuickCommitError {
+  const fallback = primary === "直连 API" ? "CLI" : "直连 API";
+  return new QuickCommitError(
+    `${primary} 与 ${fallback} 均失败：${getGitErrorMessage(primaryError)}；${getGitErrorMessage(fallbackError)}`,
+    "AI_FALLBACK_FAILED",
+  );
+}
+
+async function callAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
+  if (opts.systemAi?.enabled) {
+    try {
+      return await callDirectApiText(prompt, opts.systemAi);
+    } catch (apiError) {
+      try {
+        // The user selected the direct API first. If it is unavailable or
+        // empty, retry this exact request through their selected CLI.
+        return await callCliAiText(prompt, cwd, language, opts);
+      } catch (cliError) {
+        throw aiFallbackFailed("直连 API", apiError, cliError);
+      }
+    }
+  }
+
+  try {
+    return await callCliAiText(prompt, cwd, language, opts);
+  } catch (cliError) {
+    if (!opts.fallbackSystemAi?.enabled) throw cliError;
+    try {
+      // The user selected the CLI first. A complete direct-API profile is only
+      // provided here as the reciprocal fallback, never as a second CLI try.
+      return await callDirectApiText(prompt, opts.fallbackSystemAi);
+    } catch (apiError) {
+      throw aiFallbackFailed("CLI", cliError, apiError);
+    }
+  }
 }
 
 async function collectStagedDiff(cwd: string): Promise<string> {
@@ -924,6 +972,8 @@ interface TagHeadOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
+  fallbackSystemAi?: import("./types.js").SystemAiConfig;
+  systemAi?: import("./types.js").SystemAiConfig;
   /** Explicit tag name. If empty and `autoTag` is true, ask the session provider to generate one. */
   tag?: string;
   autoTag?: boolean;
@@ -956,6 +1006,8 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
       model: opts.model,
       thinkingEffort: opts.thinkingEffort,
       inheritEnv: opts.inheritEnv,
+      fallbackSystemAi: opts.fallbackSystemAi,
+      systemAi: opts.systemAi,
     });
   }
   if (!tagName) {
@@ -1356,10 +1408,7 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
   };
 }
 
-function shouldFallbackToCli(error: QuickCommitError, opts: QuickCommitOptions): boolean {
-  // An explicit direct-API selection is a hard boundary: never execute a local
-  // provider CLI (especially the permission-bypassing fallback) behind it.
-  if (opts.systemAi?.enabled) return false;
+function shouldFallbackToCli(error: QuickCommitError): boolean {
   return ![
     "CWD_MISSING",
     "NO_CWD",
@@ -1369,6 +1418,7 @@ function shouldFallbackToCli(error: QuickCommitError, opts: QuickCommitOptions):
     "NOTHING_TO_PUSH",
     "EMPTY_MESSAGE",
     "EMPTY_TAG",
+    "AI_FALLBACK_FAILED",
     "TAG_EXISTS",
   ].includes(error.code);
 }
@@ -1377,7 +1427,7 @@ export async function runQuickCommitWithFallback(opts: QuickCommitOptions): Prom
   try {
     return await runQuickCommit(opts);
   } catch (error) {
-    if (error instanceof QuickCommitError && shouldFallbackToCli(error, opts)) {
+    if (error instanceof QuickCommitError && shouldFallbackToCli(error)) {
       return runQuickCommitFallbackCli(opts, error.message);
     }
     throw error;
@@ -1391,6 +1441,7 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     model: opts.model,
     thinkingEffort: opts.thinkingEffort,
     inheritEnv: opts.inheritEnv,
+    fallbackSystemAi: opts.fallbackSystemAi,
     systemAi: opts.systemAi,
   };
 

@@ -1416,7 +1416,13 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         notifyLegacyUiChange("shell:chrome");
       }
 
+      // Only the newest session-detail request may drive the active chat view.
+      // Rapid A -> B -> A switches can leave multiple requests for the same id
+      // in flight, so comparing selectedId alone is not enough: an older A
+      // response could otherwise overwrite the newer A render.
+      var sessionDetailRequestGeneration = 0;
       export function loadOutput(id) {
+        var requestGeneration = ++sessionDetailRequestGeneration;
         // Cancel any pending debounced chat render to avoid flicker
         if (state.chatRenderTimer) {
           clearTimeout(state.chatRenderTimer);
@@ -1430,6 +1436,13 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         return fetch(url, { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
+            // Session selection and detail loading are intentionally decoupled,
+            // but a response belongs to the view generation that requested it.
+            // Drop superseded responses before they can mutate either the
+            // selected session cache or the shared currentMessages buffer.
+            if (requestGeneration !== sessionDetailRequestGeneration || state.selectedId !== id) {
+              return;
+            }
             if (data.error) {
               // Session no longer exists — deselect and refresh list
               if (state.selectedId === id) {
@@ -1558,6 +1571,11 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         }
         updateSessionsList();
         switchToSessionView(id);
+        // switchToSessionView exposes #chat-output for structured sessions.
+        // Render the cleared buffer synchronously before the async detail
+        // request starts, otherwise the hidden chat DOM from the previous PTY
+        // session is visible until that request completes.
+        renderChat(true);
         // Update file panel cwd and refresh if open
         if (state.filePanelOpen) {
           updateFilePanelCwd(session);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -174,14 +174,137 @@ test("commit message generation uses the selected direct API", async () => {
   }
 });
 
-test("direct API quick commit never falls back to a provider CLI", async () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "wand-direct-no-fallback-"));
+test("direct API quick commit falls back to the selected CLI", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-direct-cli-fallback-"));
   const repo = path.join(root, "repo");
   const bin = path.join(root, "bin");
   const marker = path.join(root, "cli-called");
   mkdirSync(repo);
   mkdirSync(bin);
-  writeFileSync(path.join(bin, "codex"), '#!/bin/sh\n: > "$WAND_FALLBACK_MARKER"\n', { mode: 0o755 });
+  writeFileSync(path.join(bin, "codex"), [
+    "#!/bin/sh",
+    ': > "$WAND_FALLBACK_MARKER"',
+    "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"fix: use CLI fallback\"}}'",
+  ].join("\n"), { mode: 0o755 });
+
+  let requests = 0;
+  const server = createServer((_req, res) => {
+    requests += 1;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ choices: [{ message: { content: "" } }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const previousPath = process.env.PATH;
+  const previousMarker = process.env.WAND_FALLBACK_MARKER;
+  process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ""}`;
+  process.env.WAND_FALLBACK_MARKER = marker;
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "wand-test@example.test"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Wand Test"], { cwd: repo });
+    writeFileSync(path.join(repo, "README.md"), "changed\n");
+
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const result = await runQuickCommitWithFallback({
+      cwd: repo,
+      language: "English",
+      provider: "codex",
+      systemAi: {
+        enabled: true,
+        protocol: "openai",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        apiKey: "direct-secret",
+        model: "test-model",
+      },
+      autoMessage: true,
+    });
+
+    assert.equal(requests, 1);
+    assert.equal(result.commit.message, "fix: use CLI fallback");
+    assert.equal(existsSync(marker), true);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousMarker === undefined) delete process.env.WAND_FALLBACK_MARKER;
+    else process.env.WAND_FALLBACK_MARKER = previousMarker;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI quick commit falls back to a configured direct API", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-cli-api-fallback-"));
+  const repo = path.join(root, "repo");
+  const bin = path.join(root, "bin");
+  const marker = path.join(root, "cli-called");
+  mkdirSync(repo);
+  mkdirSync(bin);
+  writeFileSync(path.join(bin, "codex"), [
+    "#!/bin/sh",
+    ': > "$WAND_FALLBACK_MARKER"',
+    "echo 'CLI unavailable' >&2",
+    "exit 1",
+  ].join("\n"), { mode: 0o755 });
+
+  let requests = 0;
+  const server = createServer((_req, res) => {
+    requests += 1;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ choices: [{ message: { content: "fix: use API fallback" } }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const previousPath = process.env.PATH;
+  const previousMarker = process.env.WAND_FALLBACK_MARKER;
+  process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ""}`;
+  process.env.WAND_FALLBACK_MARKER = marker;
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "wand-test@example.test"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "Wand Test"], { cwd: repo });
+    writeFileSync(path.join(repo, "README.md"), "changed\n");
+
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const result = await runQuickCommitWithFallback({
+      cwd: repo,
+      language: "English",
+      provider: "codex",
+      fallbackSystemAi: {
+        enabled: true,
+        protocol: "openai",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        apiKey: "direct-secret",
+        model: "test-model",
+      },
+      autoMessage: true,
+    });
+
+    assert.equal(requests, 1);
+    assert.equal(result.commit.message, "fix: use API fallback");
+    assert.equal(existsSync(marker), true);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousMarker === undefined) delete process.env.WAND_FALLBACK_MARKER;
+    else process.env.WAND_FALLBACK_MARKER = previousMarker;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed API and CLI fallback do not retry the selected CLI", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-ai-fallback-once-"));
+  const repo = path.join(root, "repo");
+  const bin = path.join(root, "bin");
+  const marker = path.join(root, "cli-calls");
+  mkdirSync(repo);
+  mkdirSync(bin);
+  writeFileSync(path.join(bin, "codex"), [
+    "#!/bin/sh",
+    'printf x >> "$WAND_FALLBACK_MARKER"',
+    "exit 1",
+  ].join("\n"), { mode: 0o755 });
 
   const server = createServer((_req, res) => {
     res.setHeader("content-type", "application/json");
@@ -214,9 +337,9 @@ test("direct API quick commit never falls back to a provider CLI", async () => {
         },
         autoMessage: true,
       }),
-      (error: unknown) => error instanceof QuickCommitError && error.code === "EMPTY_AI_MESSAGE",
+      (error: unknown) => error instanceof QuickCommitError && error.code === "AI_FALLBACK_FAILED",
     );
-    assert.equal(existsSync(marker), false);
+    assert.equal(readFileSync(marker, "utf8"), "x");
   } finally {
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;

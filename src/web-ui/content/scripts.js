@@ -45017,7 +45017,9 @@
     reconcileInteractiveState();
     notifyLegacyUiChange("shell:chrome");
   }
+  var sessionDetailRequestGeneration = 0;
   function loadOutput(id) {
+    var requestGeneration = ++sessionDetailRequestGeneration;
     if (state.chatRenderTimer) {
       clearTimeout(state.chatRenderTimer);
       state.chatRenderTimer = null;
@@ -45032,6 +45034,9 @@
     return fetch(url, { credentials: "same-origin" }).then(function(res) {
       return res.json();
     }).then(function(data) {
+      if (requestGeneration !== sessionDetailRequestGeneration || state.selectedId !== id) {
+        return;
+      }
       if (data.error) {
         if (state.selectedId === id) {
           state.selectedId = null;
@@ -45139,6 +45144,7 @@
     }
     updateSessionsList();
     switchToSessionView2(id);
+    renderChat(true);
     if (state.filePanelOpen) {
       updateFilePanelCwd(session);
       refreshFileExplorer();
