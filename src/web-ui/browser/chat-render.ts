@@ -10,6 +10,7 @@ import { copyToClipboard, getPreferredMessages, isRecoverableToolError, isStruct
 import { renderStructuredStatusBar, updateRunningIndicators } from "./utils";
 import { getCardDefault, snapCollapsedSubagentPanelsToBottom } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
+import { shouldExtractPtySystemInfo } from "./pty-system-info";
 
       export function renderChat(forceFullRender?) {
         if (state.renderPending && !forceFullRender) return;
@@ -301,7 +302,9 @@ import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 
         function fullRenderChat() {
           // Extract system info from PTY output
-          var systemInfo = extractPtySystemInfo(selectedSession.output, messages);
+          var systemInfo = shouldExtractPtySystemInfo(selectedSession)
+            ? extractPtySystemInfo(selectedSession.output, messages)
+            : [];
 
           // Build HTML with system info cards interleaved
           var html = '';

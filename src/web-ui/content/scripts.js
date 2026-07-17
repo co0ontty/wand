@@ -40930,6 +40930,20 @@
     if (document.body) document.body.scrollTop = 0;
   }
 
+  // src/web-ui/browser/pty-system-info.ts
+  var STRUCTURED_RUNNERS = /* @__PURE__ */ new Set([
+    "claude-sdk",
+    "claude-cli-print",
+    "codex-cli-exec",
+    "opencode-cli-run",
+    "grok-cli-headless",
+    "qoder-cli-print"
+  ]);
+  function shouldExtractPtySystemInfo(session) {
+    if (!session || session.sessionKind === "structured") return false;
+    return typeof session.runner !== "string" || !STRUCTURED_RUNNERS.has(session.runner);
+  }
+
   // src/web-ui/browser/chat-render.ts
   function renderChat(forceFullRender) {
     if (state.renderPending && !forceFullRender) return;
@@ -41145,7 +41159,7 @@
     var existingCount = chatMessages.querySelectorAll(".chat-message:not(.system-info)").length;
     var needsFullRender = forceRender || existingCount === 0 || msgCount !== existingCount;
     function fullRenderChat() {
-      var systemInfo = extractPtySystemInfo(selectedSession.output, messages);
+      var systemInfo = shouldExtractPtySystemInfo(selectedSession) ? extractPtySystemInfo(selectedSession.output, messages) : [];
       var html = "";
       var reversedMessages2 = messages.slice().reverse();
       var visibleCount = messages.length;
