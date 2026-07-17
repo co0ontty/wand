@@ -127,8 +127,8 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
         panel.setAttribute("data-expanded", "true");
       };
 
-      // 固定高度角色窗口默认从头展示，便于看见任务入口。未来如果需要 live-tail
-      // 跟随，可给 panel 标 data-follow-tail="true"，这个入口会只处理那类窗口。
+      // 固定高度角色窗口始终展示尾部：首次打开直接看到最新几条，流式刷新后也
+      // 继续跟随最新内容。用户仍可在两次刷新之间自由滚动查看窗口内的历史。
       export function snapCollapsedSubagentPanelsToBottom(container: any) {
         if (!container) return;
         var panels = container.querySelectorAll('.subagent-panel[data-follow-tail="true"]');

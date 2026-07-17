@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import test from "node:test";
 
-import { getGitStatusAsync, runPush, runQuickCommit } from "../src/git-quick-commit.js";
+import { getGitStatusAsync, runPush, runQuickCommit, runQuickCommitWithFallback } from "../src/git-quick-commit.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
@@ -187,6 +187,62 @@ test("getGitStatusAsync returns repository state without blocking timers", async
     assert.equal(status.branch, "master");
     assert.equal(status.modifiedCount, 1);
     assert.equal(status.files?.[0]?.path, "tracked.txt");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Claude quick-commit fallback grants only git Bash commands without bypassing permissions", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wand-quick-commit-claude-permissions-"));
+  const repo = join(root, "repo");
+  const bin = join(root, "bin");
+  const argsFile = join(root, "claude-args");
+  try {
+    initRepo(repo);
+    mkdirSync(bin);
+    writeFileSync(join(repo, "tracked.txt"), "before\n");
+    git(repo, "add", "tracked.txt");
+    git(repo, "commit", "-m", "initial");
+    writeFileSync(join(repo, "tracked.txt"), "after\n");
+
+    const hooks = join(repo, ".git", "hooks");
+    writeFileSync(join(hooks, "pre-commit"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(bin, "claude"), [
+      "#!/bin/sh",
+      'printf \'%s\\n\' "$@" > "$WAND_CLAUDE_ARGS_FILE"',
+      "git commit --no-verify -m 'fallback commit' >/dev/null",
+      "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ok\"}'",
+    ].join("\n"), { mode: 0o755 });
+
+    const previousPath = process.env.PATH;
+    const previousArgsFile = process.env.WAND_CLAUDE_ARGS_FILE;
+    process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
+    process.env.WAND_CLAUDE_ARGS_FILE = argsFile;
+    try {
+      const result = await runQuickCommitWithFallback({
+        cwd: repo,
+        language: "English",
+        provider: "claude",
+        autoMessage: false,
+        customMessage: "built-in commit",
+      });
+      const args = readFileSync(argsFile, "utf8").trim().split("\n");
+
+      assert.equal(result.commit.message, "fallback commit");
+      assert.equal(args.includes("--permission-mode"), false);
+      assert.equal(args.includes("bypassPermissions"), false);
+      assert.deepEqual(args.slice(args.indexOf("--tools"), args.indexOf("--tools") + 4), [
+        "--tools",
+        "Bash",
+        "--allowedTools",
+        "Bash(git *)",
+      ]);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousArgsFile === undefined) delete process.env.WAND_CLAUDE_ARGS_FILE;
+      else process.env.WAND_CLAUDE_ARGS_FILE = previousArgsFile;
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

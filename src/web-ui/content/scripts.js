@@ -30516,7 +30516,7 @@
       statusLabel: sessionStatusLabel(session),
       active: id !== "" && id === state2.selectedId,
       selected: Boolean(manageSelection[id]),
-      resumable: kind !== "structured" && status !== "running" && (provider === "claude" || provider === "codex") && Boolean(session.claudeSessionId),
+      resumable: kind !== "structured" && status !== "running" && Boolean(session.claudeSessionId),
       permissionBlocked: Boolean(session.permissionBlocked),
       inFlight: Boolean(session.structuredState?.inFlight),
       ...session.startedAt ? { startedAt: session.startedAt } : {},
@@ -33571,9 +33571,10 @@
     var metaStatusClass = getSessionStatusClass(session);
     var resumeButton = "";
     var checkbox = renderManageCheckbox("sessions", session.id, "\u9009\u62E9\u4F1A\u8BDD " + session.command);
-    if ((session.provider === "claude" || session.provider === "codex") && session.claudeSessionId) {
+    if (session.claudeSessionId) {
       if (session.status !== "running" && !state.sessionsManageMode && !isStructuredSession2(session)) {
-        var resumeTitle = session.provider === "codex" ? "\u6062\u590D Codex \u4F1A\u8BDD" : "\u6062\u590D Claude \u4F1A\u8BDD";
+        var providerLabels = { claude: "Claude", codex: "Codex", opencode: "OpenCode", grok: "Grok", qoder: "Qoder" };
+        var resumeTitle = "\u6062\u590D " + (providerLabels[session.provider] || "Provider") + " \u4F1A\u8BDD";
         resumeButton = '<button class="session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="' + resumeTitle + '" title="' + resumeTitle + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
       }
     }
@@ -39898,7 +39899,7 @@
     updateSessionSnapshot({ id: sessionId, status: status || "exited" });
   }
   function canAutoResumeSession(session) {
-    return !!(session && !isStructuredSession2(session) && (session.provider === "claude" || session.provider === "codex") && session.status !== "running" && session.claudeSessionId);
+    return !!(session && !isStructuredSession2(session) && ["claude", "codex", "opencode", "grok", "qoder"].indexOf(session.provider) !== -1 && session.status !== "running" && session.claudeSessionId);
   }
   function ensureSessionReadyForInput(session, errorEl) {
     if (!session) {
@@ -39909,7 +39910,8 @@
       return Promise.resolve(session);
     }
     if (!canAutoResumeSession(session)) {
-      var providerLabel = session && session.provider === "codex" ? "Codex" : "Claude";
+      var providerLabels = { claude: "Claude", codex: "Codex", opencode: "OpenCode", grok: "Grok", qoder: "Qoder" };
+      var providerLabel = session && providerLabels[session.provider] || "Provider";
       showToast("\u8BE5\u4F1A\u8BDD\u6CA1\u6709\u53EF\u6062\u590D\u7684 " + providerLabel + " \u5386\u53F2\u4E0A\u4E0B\u6587\uFF0C\u8BF7\u65B0\u5EFA\u4F1A\u8BDD\u3002", "error");
       return Promise.resolve(null);
     }
@@ -42772,7 +42774,6 @@
     var subPalette = getSubagentPalette(sub);
     var subName = getSubagentDisplayName(sub);
     var taskId = sub.taskId || "";
-    var avatarSvg = buildPixelSvg(buildCatGrid(subPalette));
     var itemCount = countRenderableSegmentBlocks(seg.blocks);
     var titleHtml;
     if (includeHandoff) {
@@ -42783,7 +42784,7 @@
       titleHtml = '<span class="subagent-panel-attribution"><strong class="subagent-panel-name">' + escapeHtml(subName) + '</strong><span class="subagent-panel-task-desc"> ' + escapeHtml(t("subagent.continued")) + "</span></span>";
     }
     var expandKey = buildExpandKey("subagent-panel", [messageKey, taskId]);
-    return '<div class="subagent-panel" data-expand-kind="subagent-panel" data-expand-key="' + escapeHtml(expandKey) + '" data-agent-id="' + escapeHtml(taskId) + '" data-expanded="true" style="--agent-color:' + subPalette.primary + '"><div class="subagent-panel-header" aria-label="' + escapeHtml(t("subagent.title_aria")) + '"><span class="subagent-panel-avatar" aria-hidden="true">' + avatarSvg + "</span>" + titleHtml + '<span class="subagent-panel-count">' + escapeHtml(itemCount + " \u6761\u5185\u5BB9") + '</span></div><div class="subagent-panel-body">' + segHtml + "</div></div>";
+    return '<div class="subagent-panel" data-expand-kind="subagent-panel" data-expand-key="' + escapeHtml(expandKey) + '" data-agent-id="' + escapeHtml(taskId) + '" data-follow-tail="true" data-expanded="true" style="--agent-color:' + subPalette.primary + '"><div class="subagent-panel-header" aria-label="' + escapeHtml(t("subagent.title_aria")) + '">' + titleHtml + '<span class="subagent-panel-count">' + escapeHtml(itemCount + " \u6761\u5185\u5BB9") + '</span></div><div class="subagent-panel-body">' + segHtml + "</div></div>";
   }
   function countRenderableSegmentBlocks(blocks) {
     if (!Array.isArray(blocks)) return 0;

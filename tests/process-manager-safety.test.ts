@@ -165,8 +165,9 @@ test("Grok PTY launches the TUI with model, effort, and managed approval flags",
   });
   assert.equal(session.provider, "grok");
   assert.equal(session.runner, "pty");
+  assert.match(session.claudeSessionId ?? "", /^[0-9a-f-]{36}$/);
   const shellArgs = spawnCalls[0][1] as string[];
-  assert.match(shellArgs.at(-1) ?? "", /^grok --model 'grok-4\.5' --effort 'high' --always-approve$/);
+  assert.match(shellArgs.at(-1) ?? "", /^grok --model 'grok-4\.5' --effort 'high' --always-approve --session-id [0-9a-f-]{36}$/);
 });
 
 test("Qoder PTY launches the TUI with model and managed permission flags", (t) => {
@@ -177,8 +178,9 @@ test("Qoder PTY launches the TUI with model and managed permission flags", (t) =
   });
   assert.equal(session.provider, "qoder");
   assert.equal(session.runner, "pty");
+  assert.match(session.claudeSessionId ?? "", /^[0-9a-f-]{36}$/);
   const shellArgs = spawnCalls[0][1] as string[];
-  assert.match(shellArgs.at(-1) ?? "", /^qodercli --model 'performance' --permission-mode bypass_permissions$/);
+  assert.match(shellArgs.at(-1) ?? "", /^qodercli --model 'performance' --permission-mode bypass_permissions --session-id [0-9a-f-]{36}$/);
 });
 
 test("command allowlist compares safe shell tokens instead of raw prefixes", () => {

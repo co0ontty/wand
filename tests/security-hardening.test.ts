@@ -13,7 +13,13 @@ import {
   CONNECTED_APP_PRINCIPAL,
 } from "../src/auth.js";
 import { defaultConfig, loadConfigWithStorage, saveConfig } from "../src/config.js";
-import { isProviderSessionId } from "../src/resume-policy.js";
+import {
+  buildProviderResumeCommand,
+  getProviderCommandSessionId,
+  getProviderResumeCommandSessionId,
+  isProviderSessionId,
+  isSafeProviderSessionId,
+} from "../src/resume-policy.js";
 import { parseExecutionMode } from "../src/server-session-routes.js";
 import { WandStorage } from "../src/storage.js";
 
@@ -21,6 +27,43 @@ test("provider session IDs reject shell input", () => {
   assert.equal(isProviderSessionId("123e4567-e89b-12d3-a456-426614174000"), true);
   assert.equal(isProviderSessionId("123e4567-e89b-12d3-a456-426614174000; touch /tmp/pwned"), false);
   assert.equal(isProviderSessionId("$(touch /tmp/pwned)"), false);
+});
+
+test("PTY resume policy supports every provider-native CLI syntax", () => {
+  const cases = [
+    ["claude", "claude --model sonnet", "session-1", "claude --model sonnet --resume session-1"],
+    ["codex", "codex --no-alt-screen", "thread-1", "codex --no-alt-screen resume thread-1"],
+    ["opencode", "opencode --mini", "ses_123", "opencode --mini --session ses_123"],
+    ["grok", "grok --minimal", "019f6f1f-fd54-7d40-aa70-9f42f1be2a03", "grok --minimal --resume 019f6f1f-fd54-7d40-aa70-9f42f1be2a03"],
+    ["qoder", "qodercli --model coder", "qs_123", "qodercli --model coder --resume qs_123"],
+  ] as const;
+
+  for (const [provider, command, id, expected] of cases) {
+    assert.equal(isSafeProviderSessionId(id), true);
+    const resumed = buildProviderResumeCommand(provider, command, id);
+    assert.equal(resumed, expected);
+    assert.equal(getProviderResumeCommandSessionId(provider, resumed), id);
+    assert.equal(buildProviderResumeCommand(provider, resumed, id), expected);
+  }
+});
+
+test("PTY resume replaces a caller-assigned Grok or Qoder session ID", () => {
+  for (const provider of ["grok", "qoder"] as const) {
+    const executable = provider === "qoder" ? "qodercli" : provider;
+    const command = `${executable} --session-id original-id`;
+    assert.equal(getProviderCommandSessionId(provider, command), "original-id");
+    assert.equal(
+      buildProviderResumeCommand(provider, command, "restored-id"),
+      `${executable} --resume restored-id`,
+    );
+  }
+});
+
+test("PTY resume policy rejects command injection in non-UUID provider IDs", () => {
+  for (const value of ["ses_123;touch", "$(touch-pwned)", "id with spaces", "--flag"]) {
+    assert.equal(isSafeProviderSessionId(value), false);
+    assert.throws(() => buildProviderResumeCommand("opencode", "opencode", value), /格式无效/);
+  }
 });
 
 test("execution mode parser rejects supplied invalid values", () => {

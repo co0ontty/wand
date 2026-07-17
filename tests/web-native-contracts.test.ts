@@ -116,3 +116,50 @@ test("Apple WebViews preserve deep links, bridge globals, and terminal hooks", (
     "WandPlatform/macOS",
   ]);
 });
+
+test("subagent role windows stay compact, avatar-free, and follow the newest content", () => {
+  includesAll("src/web-ui/browser/chat-render.ts", [
+    'data-follow-tail="true"',
+    'class="subagent-panel-body"',
+  ]);
+  includesAll("src/web-ui/browser/events.ts", [
+    '.subagent-panel[data-follow-tail="true"]',
+    "body.scrollTop = body.scrollHeight",
+  ]);
+  includesAll("src/web-ui/content/styles.css", [
+    ".subagent-panel-body",
+    "height: 320px",
+    "overflow-y: auto",
+  ]);
+  assert.doesNotMatch(
+    source("src/web-ui/browser/chat-render.ts"),
+    /class="subagent-panel-avatar"/,
+    "Web subagent window must not reserve a left avatar box",
+  );
+
+  includesAll("ios/Wand/ChatView.swift", [
+    "private let subagentWindowContentHeight: CGFloat = 280",
+    "ScrollViewReader { proxy in",
+    "subagentTailRefreshToken(items)",
+    "proxy.scrollTo(tailAnchorID, anchor: .bottom)",
+  ]);
+  assert.ok(
+    !source("ios/Wand/ChatView.swift").includes("avatar(running: running(items))"),
+    "iOS subagent window must not keep the detached left avatar",
+  );
+
+  includesAll("android/app/src/main/java/com/wand/app/ui/screens/ChatBlocks.kt", [
+    "collapseActivities = false",
+    "snapshotFlow { scrollState.maxValue }",
+    "LaunchedEffect(refreshToken)",
+    "scrollState.scrollTo(maxValue)",
+    ".height(280.dp)",
+  ]);
+
+  includesAll("macos/Wand/ChatView.swift", [
+    "splitAssistantContentBySubagent(turn.content)",
+    "private let subagentWindowContentHeight: CGFloat = 280",
+    "subagentTailRefreshToken(items)",
+    "proxy.scrollTo(tailAnchorID, anchor: .bottom)",
+  ]);
+});

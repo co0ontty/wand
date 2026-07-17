@@ -1547,10 +1547,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function canAutoResumeSession(session) {
-        // 只要是 Claude/Codex PTY provider + 非运行中 + 有可恢复历史 id，
+        // 只要是受支持的 provider PTY + 非运行中 + 有可恢复历史 id，
         // 就允许在用户发送时静默触发恢复。不再要求 messages 里同时
         // 有 user + assistant 文本（slim 列表/截断历史会让该判断失真）。
-        return !!(session && !isStructuredSession(session) && (session.provider === "claude" || session.provider === "codex") && session.status !== "running" && session.claudeSessionId);
+        return !!(session && !isStructuredSession(session)
+          && ["claude", "codex", "opencode", "grok", "qoder"].indexOf(session.provider) !== -1
+          && session.status !== "running" && session.claudeSessionId);
       }
 
       export function ensureSessionReadyForInput(session, errorEl?) {
@@ -1562,7 +1564,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           return Promise.resolve(session);
         }
         if (!canAutoResumeSession(session)) {
-          var providerLabel = session && session.provider === "codex" ? "Codex" : "Claude";
+          var providerLabels = { claude: "Claude", codex: "Codex", opencode: "OpenCode", grok: "Grok", qoder: "Qoder" };
+          var providerLabel = (session && providerLabels[session.provider]) || "Provider";
           showToast("该会话没有可恢复的 " + providerLabel + " 历史上下文，请新建会话。", "error");
           return Promise.resolve(null);
         }

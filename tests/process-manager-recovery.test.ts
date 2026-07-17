@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { defaultConfig } from "../src/config.js";
@@ -124,4 +125,57 @@ test("ProcessManager recovers missing Claude session id for exited PTY sessions 
 
   assert.equal(manager.get(storedSession.id)?.claudeSessionId, claudeSessionId);
   assert.equal(storage.getSession(storedSession.id)?.claudeSessionId, claudeSessionId);
+  manager.dispose();
+});
+
+test("ProcessManager recovers an OpenCode ses_* id from its local session index", (t) => {
+  const oldDataHome = process.env.XDG_DATA_HOME;
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-opencode-recovery-"));
+  const dataHome = path.join(root, "data");
+  process.env.XDG_DATA_HOME = dataHome;
+  t.after(() => {
+    if (oldDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = oldDataHome;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const cwd = path.join(root, "workspace");
+  const dbDir = path.join(dataHome, "opencode");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(dbDir, { recursive: true });
+  const db = new DatabaseSync(path.join(dbDir, "opencode.db"));
+  db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER, time_updated INTEGER)");
+  const startedAtMs = Date.now() - 20_000;
+  const endedAtMs = startedAtMs + 10_000;
+  db.prepare("INSERT INTO session (id, directory, time_created, time_updated) VALUES (?, ?, ?, ?)")
+    .run("ses_wand_resume", cwd, startedAtMs + 1_000, endedAtMs - 1_000);
+  db.close();
+
+  const storedSession: SessionSnapshot = {
+    id: "wand-opencode-session",
+    sessionKind: "pty",
+    provider: "opencode",
+    runner: "pty",
+    command: "opencode",
+    cwd,
+    mode: "default",
+    status: "exited",
+    exitCode: 0,
+    startedAt: new Date(startedAtMs).toISOString(),
+    endedAt: new Date(endedAtMs).toISOString(),
+    output: "",
+    archived: false,
+    archivedAt: null,
+    claudeSessionId: null,
+  };
+  const storage = new FakeStorage([storedSession]) as unknown as WandStorage;
+  const manager = new ProcessManager(
+    { ...defaultConfig(), defaultCwd: cwd, startupCommands: [] },
+    storage,
+    path.join(root, ".wand"),
+  );
+
+  assert.equal(manager.get(storedSession.id)?.claudeSessionId, "ses_wand_resume");
+  assert.equal(storage.getSession(storedSession.id)?.claudeSessionId, "ses_wand_resume");
+  manager.dispose();
 });

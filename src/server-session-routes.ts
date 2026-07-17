@@ -26,7 +26,7 @@ import {
 } from "./git-quick-commit.js";
 
 import { getErrorMessage } from "./error-utils.js";
-import { isProviderSessionId } from "./resume-policy.js";
+import { buildProviderResumeCommand, isProviderSessionId } from "./resume-policy.js";
 import { parseBoundedInteger } from "./request-limits.js";
 import { asyncRoute } from "./express-async.js";
 import { SessionRegistry } from "./session-registry.js";
@@ -301,20 +301,19 @@ function getWorktreeMergePayload(error: unknown, fallback: string) {
   };
 }
 
-function buildCodexResumeCommand(command: string, threadId: string): string {
-  const trimmed = command.trim();
-  const withoutExistingResume = trimmed
-    .replace(/\s+resume\s+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\s|$)/i, " ")
-    .trim();
-  return `${withoutExistingResume || "codex"} resume ${threadId}`;
+function resolvePtyResumeProvider(snapshot: SessionSnapshot): SessionProvider {
+  if (snapshot.provider) return snapshot.provider;
+  const command = snapshot.command.trim();
+  if (/^codex\b/.test(command)) return "codex";
+  if (/^opencode\b/.test(command)) return "opencode";
+  if (/^grok\b/.test(command)) return "grok";
+  if (/^qodercli\b/.test(command)) return "qoder";
+  return "claude";
 }
 
-function resolvePtyResumeProvider(snapshot: SessionSnapshot): SessionProvider {
-  const provider = snapshot.provider ?? (/^codex\b/.test(snapshot.command.trim()) ? "codex" : "claude");
-  if (provider !== "claude" && provider !== "codex") {
-    throw new Error("只有 Claude 或 Codex provider 支持恢复功能。");
-  }
-  return provider;
+function isPtyProviderCommand(provider: SessionProvider, command: string): boolean {
+  const executable = provider === "qoder" ? "qodercli" : provider;
+  return new RegExp(`^${executable}\\b`, "i").test(command.trim());
 }
 
 function startResumedPtySession(
@@ -333,25 +332,20 @@ function startResumedPtySession(
   const provider = resolvePtyResumeProvider(existingSession);
   const resumeSessionId = existingSession.claudeSessionId;
   if (!resumeSessionId) {
-    throw new Error(provider === "codex" ? "此会话没有 Codex thread ID，无法恢复。" : "此会话没有 Claude 会话 ID，无法恢复。");
+    throw new Error(`此会话没有 ${provider} 会话 ID，无法恢复。`);
   }
 
-  if (provider === "claude" && !/^claude\b/.test(command)) {
-    throw new Error("只有 Claude 命令支持恢复功能。");
+  if (!isPtyProviderCommand(provider, command)) {
+    throw new Error(`当前命令不是 ${provider} CLI，无法恢复。`);
   }
   if (provider === "codex") {
-    if (!/^codex\b/.test(command)) {
-      throw new Error("只有 Codex 命令支持恢复功能。");
-    }
     if (!processes.hasCodexSessionFile(resumeSessionId)) {
       throw new Error("对应的 Codex 历史会话不存在，无法恢复。");
     }
   }
 
   const newMode = parseExecutionMode(body.mode, parseExecutionMode(existingSession.mode, defaultMode));
-  const resumeCommand = provider === "codex"
-    ? buildCodexResumeCommand(command, resumeSessionId)
-    : `${command} --resume ${resumeSessionId}`;
+  const resumeCommand = buildProviderResumeCommand(provider, command, resumeSessionId);
   const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
   const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
   return processes.start(resumeCommand, existingSession.cwd, newMode, initialInput, {
@@ -386,7 +380,8 @@ function canAutoResumePtyForInput(snapshot: SessionSnapshot | null, input: strin
     snapshot
     && (snapshot.sessionKind ?? "pty") === "pty"
     && snapshot.status !== "running"
-    && (snapshot.provider === "claude" || snapshot.provider === "codex" || /^codex\b/.test(snapshot.command.trim()) || /^claude\b/.test(snapshot.command.trim()))
+    && (snapshot.provider === "claude" || snapshot.provider === "codex" || snapshot.provider === "opencode" || snapshot.provider === "grok" || snapshot.provider === "qoder"
+      || /^(?:claude|codex|opencode|grok|qodercli)\b/.test(snapshot.command.trim()))
     && snapshot.claudeSessionId
     && input
   );

@@ -1381,12 +1381,20 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
       inheritEnv: opts.inheritEnv,
     });
   } else {
-    const args = ["-p", "--verbose", "--output-format", "stream-json"];
+    const args = [
+      "-p",
+      "--verbose",
+      "--output-format",
+      "stream-json",
+      "--tools",
+      "Bash",
+      "--allowedTools",
+      "Bash(git *)",
+    ];
     const model = opts.model?.trim();
     if (model && model !== "default") args.push("--model", model);
     const claudeEffort = thinkingEffortToClaudeCliEffort(opts.thinkingEffort ?? "off");
     if (claudeEffort) args.push("--effort", claudeEffort);
-    args.push("--permission-mode", "bypassPermissions");
     await runCliText("claude", args, prompt, {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,

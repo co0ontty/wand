@@ -57,7 +57,7 @@ wand config:password
 
 - **Dual view modes** — switch between raw terminal output and a structured conversation view for the same session
 - **Multiple providers** — create PTY or structured sessions for Claude Code, Codex, OpenCode, Grok, and Qoder CLI
-- **Session management** — create, archive, and resume sessions; restore Claude native history; show summaries in the session list
+- **Session management** — create, archive, and resume Claude, Codex, OpenCode, Grok, and Qoder sessions with their provider-native context; restore Claude/Codex native history; show summaries in the session list
 - **Permission control** — visual permission prompts with one-time approval, per-turn memory, and related policies
 
 #### Experience
@@ -206,7 +206,7 @@ npm install -g opencode-ai@latest
 
 - **双视图模式** — 终端原始输出和结构化对话视图可随时切换，同一会话两种呈现
 - **多 Provider 支持** — Claude Code、Codex、OpenCode、Grok 和 Qoder CLI 均可创建 PTY 或结构化会话
-- **会话管理** — 创建、归档、恢复会话；支持从 Claude 原生历史记录恢复；会话列表显示摘要
+- **会话管理** — 创建、归档并携带原生上下文恢复 Claude、Codex、OpenCode、Grok、Qoder 会话；支持恢复 Claude/Codex 原生历史记录；会话列表显示摘要
 - **权限控制** — 可视化权限提示，支持逐次确认、单次批准、本轮记忆等策略
 
 #### 交互体验

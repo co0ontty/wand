@@ -599,8 +599,8 @@ import { shouldExtractPtySystemInfo } from "./pty-system-info";
           fullRenderChat();
         }
 
-        // 子 Agent 现在是固定高度角色窗口。保留这个后处理入口给未来的 live-tail
-        // 跟随策略；默认不强制改 scrollTop，历史窗口打开时从任务开头读起。
+        // 子 Agent 是固定高度角色窗口：首次渲染和每次流式刷新都锚定尾部，
+        // 让窗口持续露出最新到达的几条内容。
         snapCollapsedSubagentPanelsToBottom(chatMessages);
 
         // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
@@ -2499,7 +2499,7 @@ import { shouldExtractPtySystemInfo } from "./pty-system-info";
 
       // 渲染整段 subagent 输出为一个固定高度角色窗口：
       //   ┌─ subagent-panel ──────────────────────────────────┐
-      //   │ [🐱] 猫猫审查猫 · Review changes        25 条内容 │  ← header
+      //   │ 猫猫审查猫 · Review changes             25 条内容 │  ← header
       //   ├───────────────────────────────────────────────────┤
       //   │ <tool 卡 1>                                       │
       //   │ <text>                                            │  ← body
@@ -2511,7 +2511,6 @@ import { shouldExtractPtySystemInfo } from "./pty-system-info";
         var subPalette = getSubagentPalette(sub);
         var subName = getSubagentDisplayName(sub);
         var taskId = sub.taskId || "";
-        var avatarSvg = buildPixelSvg(buildCatGrid(subPalette));
         var itemCount = countRenderableSegmentBlocks(seg.blocks);
 
         var titleHtml;
@@ -2538,10 +2537,10 @@ import { shouldExtractPtySystemInfo } from "./pty-system-info";
                     'data-expand-kind="subagent-panel" ' +
                     'data-expand-key="' + escapeHtml(expandKey) + '" ' +
                     'data-agent-id="' + escapeHtml(taskId) + '" ' +
+                    'data-follow-tail="true" ' +
                     'data-expanded="true" ' +
                     'style="--agent-color:' + subPalette.primary + '">' +
           '<div class="subagent-panel-header" aria-label="' + escapeHtml(t("subagent.title_aria")) + '">' +
-            '<span class="subagent-panel-avatar" aria-hidden="true">' + avatarSvg + '</span>' +
             titleHtml +
             '<span class="subagent-panel-count">' + escapeHtml(itemCount + " 条内容") + '</span>' +
           '</div>' +

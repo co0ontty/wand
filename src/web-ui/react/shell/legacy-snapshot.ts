@@ -179,7 +179,6 @@ function sessionToVm(
     selected: Boolean(manageSelection[id]),
     resumable: kind !== "structured"
       && status !== "running"
-      && (provider === "claude" || provider === "codex")
       && Boolean(session.claudeSessionId),
     permissionBlocked: Boolean(session.permissionBlocked),
     inFlight: Boolean(session.structuredState?.inFlight),

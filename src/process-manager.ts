@@ -5,6 +5,7 @@ import { existsSync, unlinkSync, rmSync, readFileSync, readdirSync, statSync } f
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
+import { DatabaseSync } from "node:sqlite";
 
 import pty, { IPty } from "node-pty";
 import { WandStorage } from "./storage.js";
@@ -17,7 +18,7 @@ import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
 import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
-import { getCodexResumeCommandSessionId, getResumeCommandSessionId } from "./resume-policy.js";
+import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
 import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-provider-common.js";
 import { generateSessionTopic } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
@@ -207,6 +208,10 @@ interface SessionRecord extends SessionSnapshot {
   knownCodexSessionMtimes?: Map<string, number>;
   /** Retry timer for discovering the real Codex resumable thread id */
   codexSessionDiscoveryTimer?: NodeJS.Timeout | null;
+  /** OpenCode sessions visible before this PTY started, keyed by provider session id. */
+  knownOpenCodeSessionMtimes?: Map<string, number>;
+  /** Retry timer for discovering the real OpenCode resumable session id. */
+  openCodeSessionDiscoveryTimer?: NodeJS.Timeout | null;
   /** Auto-approval stats per session */
   approvalStats: { tool: number; command: number; file: number; total: number };
 }
@@ -220,6 +225,13 @@ interface ClaudeProjectSessionCandidate {
 interface ClaudeProjectSessionDetails extends ClaudeProjectSessionCandidate {
   hasConversation: boolean;
   firstUserAtMs: number | null;
+}
+
+interface OpenCodeSessionCandidate {
+  id: string;
+  cwd: string;
+  createdAtMs: number;
+  updatedAtMs: number;
 }
 
 interface PersistedMessageState {
@@ -469,6 +481,72 @@ function getLatestCodexSessionId(
   return selectCodexSessionForRecord(record, sessions)?.claudeSessionId ?? null;
 }
 
+function getOpenCodeDatabasePath(): string {
+  const dataHome = process.env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), ".local", "share");
+  return path.join(dataHome, "opencode", "opencode.db");
+}
+
+function listOpenCodeSessionCandidates(): OpenCodeSessionCandidate[] {
+  const dbPath = getOpenCodeDatabasePath();
+  if (!existsSync(dbPath)) return [];
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const rows = db.prepare(
+      "SELECT id, directory, time_created, time_updated FROM session ORDER BY time_updated DESC LIMIT 500",
+    ).all() as Array<{ id: unknown; directory: unknown; time_created: unknown; time_updated: unknown }>;
+    return rows.flatMap((row) => {
+      if (typeof row.id !== "string" || typeof row.directory !== "string") return [];
+      const createdAtMs = Number(row.time_created);
+      const updatedAtMs = Number(row.time_updated);
+      if (!Number.isFinite(createdAtMs) || !Number.isFinite(updatedAtMs)) return [];
+      return [{ id: row.id, cwd: row.directory, createdAtMs, updatedAtMs }];
+    });
+  } catch {
+    return [];
+  } finally {
+    try { db?.close(); } catch { /* best-effort read-only probe */ }
+  }
+}
+
+function listOpenCodeSessionMtimes(): Map<string, number> {
+  return new Map(listOpenCodeSessionCandidates().map((session) => [session.id, session.updatedAtMs]));
+}
+
+function selectOpenCodeSessionForRecord(
+  record: Pick<SessionRecord, "cwd" | "startedAt" | "knownOpenCodeSessionMtimes">,
+): OpenCodeSessionCandidate | null {
+  const known = record.knownOpenCodeSessionMtimes ?? new Map<string, number>();
+  const startedAtMs = Date.parse(record.startedAt);
+  const candidates = listOpenCodeSessionCandidates()
+    .filter((session) => isSameResolvedPath(session.cwd, record.cwd))
+    .filter((session) => {
+      const previous = known.get(session.id);
+      return previous === undefined || session.updatedAtMs > previous;
+    })
+    .filter((session) => !Number.isFinite(startedAtMs) || session.updatedAtMs >= startedAtMs - START_TIME_SKEW_MS)
+    .sort((left, right) => right.updatedAtMs - left.updatedAtMs);
+  if (candidates.length === 0) return null;
+  const fresh = candidates.filter((session) => !known.has(session.id));
+  if (fresh.length === 1) return fresh[0];
+  return null;
+}
+
+function selectOpenCodeSessionForTimeWindow(
+  record: Pick<SessionRecord, "cwd" | "startedAt" | "endedAt">,
+): OpenCodeSessionCandidate | null {
+  const startedAtMs = Date.parse(record.startedAt);
+  if (!Number.isFinite(startedAtMs)) return null;
+  const endedAtMs = Date.parse(record.endedAt ?? "");
+  const windowEnd = (Number.isFinite(endedAtMs) ? endedAtMs : Date.now()) + START_TIME_SKEW_MS;
+  const candidates = listOpenCodeSessionCandidates()
+    .filter((session) => isSameResolvedPath(session.cwd, record.cwd))
+    .filter((session) => session.updatedAtMs >= startedAtMs - START_TIME_SKEW_MS && session.updatedAtMs <= windowEnd)
+    .filter((session) => session.createdAtMs <= windowEnd)
+    .sort((left, right) => right.updatedAtMs - left.updatedAtMs);
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 function selectCodexSessionForTimeWindow(
   record: Pick<SessionRecord, "cwd" | "startedAt" | "endedAt">,
   sessions: readonly CodexHistorySession[],
@@ -505,14 +583,14 @@ function recoverCodexSessionIdFromHistory(
   if (snapshot.provider !== "codex" || snapshot.claudeSessionId) {
     return null;
   }
-  return getCodexResumeCommandSessionId(snapshot.command) ?? selectCodexSessionForTimeWindow(snapshot, sessions)?.claudeSessionId ?? null;
+  return getProviderResumeCommandSessionId("codex", snapshot.command) ?? selectCodexSessionForTimeWindow(snapshot, sessions)?.claudeSessionId ?? null;
 }
 
 function recoverClaudeSessionIdFromHistory(snapshot: Pick<SessionSnapshot, "provider" | "command" | "cwd" | "startedAt" | "endedAt" | "claudeSessionId" | "messages">): string | null {
   if (snapshot.provider !== "claude" || snapshot.claudeSessionId) {
     return null;
   }
-  return getResumeCommandSessionId(snapshot.command) ?? selectClaudeProjectSessionForTimeWindow(snapshot)?.id ?? null;
+  return getProviderResumeCommandSessionId("claude", snapshot.command) ?? selectClaudeProjectSessionForTimeWindow(snapshot)?.id ?? null;
 }
 
 function snapshotMessages(record: Pick<SessionRecord, "ptyBridge" | "messages">): ConversationTurn[] {
@@ -621,11 +699,8 @@ export class ProcessManager extends EventEmitter {
       const provider = snapshot.provider ?? resolveProviderFromCommand(snapshot.command);
       const isClaudeCmd = provider === "claude";
       const isCodexCmd = provider === "codex";
-      const resumeCommandSessionId = isClaudeCmd
-        ? getResumeCommandSessionId(snapshot.command)
-        : isCodexCmd
-          ? getCodexResumeCommandSessionId(snapshot.command)
-          : null;
+      const isOpenCodeCmd = provider === "opencode";
+      const resumeCommandSessionId = getProviderCommandSessionId(provider, snapshot.command);
       const orphanEndedAt = snapshot.status === "running" ? new Date().toISOString() : null;
       const sessionIdFromHistory = isClaudeCmd
         ? recoverClaudeSessionIdFromHistory({
@@ -639,6 +714,12 @@ export class ProcessManager extends EventEmitter {
               provider: "codex",
               endedAt: snapshot.endedAt ?? orphanEndedAt,
             }, getStartupCodexHistory())
+          : isOpenCodeCmd
+            ? selectOpenCodeSessionForTimeWindow({
+                cwd: snapshot.cwd,
+                startedAt: snapshot.startedAt,
+                endedAt: snapshot.endedAt ?? orphanEndedAt,
+              })?.id ?? null
           : null;
       const restoredSessionId = resumeCommandSessionId ?? snapshot.claudeSessionId ?? sessionIdFromHistory;
       // Sessions restored from storage have ptyProcess: null — the old server's PTY
@@ -656,7 +737,7 @@ export class ProcessManager extends EventEmitter {
         };
         this.storage.saveSession(updated);
         if (restoredSessionId && restoredSessionId !== snapshot.claudeSessionId) {
-          const label = isCodexCmd ? "Codex thread" : "Claude session";
+          const label = isCodexCmd ? "Codex thread" : isOpenCodeCmd ? "OpenCode session" : "Claude session";
           process.stderr.write(`[wand] Recovered ${label} ID for orphan PTY ${snapshot.id}: ${restoredSessionId}\n`);
         }
         this.sessions.set(snapshot.id, {
@@ -689,6 +770,8 @@ export class ProcessManager extends EventEmitter {
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
           knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes(getStartupCodexHistory()) : undefined,
           codexSessionDiscoveryTimer: null,
+          knownOpenCodeSessionMtimes: isOpenCodeCmd ? listOpenCodeSessionMtimes() : undefined,
+          openCodeSessionDiscoveryTimer: null,
           claudeSessionId: restoredSessionId ?? updated.claudeSessionId,
           approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
           ptyCols: snapshot.ptyCols ?? 120,
@@ -701,7 +784,7 @@ export class ProcessManager extends EventEmitter {
           : snapshot;
         if (updated !== snapshot) {
           this.storage.saveSessionMetadata(updated);
-          const label = isCodexCmd ? "Codex thread" : "Claude session";
+          const label = isCodexCmd ? "Codex thread" : isOpenCodeCmd ? "OpenCode session" : "Claude session";
           process.stderr.write(`[wand] Recovered ${label} ID for saved PTY ${snapshot.id}: ${restoredSessionId}\n`);
         }
         this.sessions.set(snapshot.id, {
@@ -731,6 +814,8 @@ export class ProcessManager extends EventEmitter {
           knownClaudeProjectMtimes: isClaudeCmd ? listClaudeProjectSessionMtimes(updated.cwd) : undefined,
           knownCodexSessionMtimes: isCodexCmd ? listCodexSessionMtimes(getStartupCodexHistory()) : undefined,
           codexSessionDiscoveryTimer: null,
+          knownOpenCodeSessionMtimes: isOpenCodeCmd ? listOpenCodeSessionMtimes() : undefined,
+          openCodeSessionDiscoveryTimer: null,
           claudeSessionId: restoredSessionId ?? updated.claudeSessionId,
           approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
           ptyCols: snapshot.ptyCols ?? 120,
@@ -883,22 +968,29 @@ export class ProcessManager extends EventEmitter {
     const isClaudeProvider = provider === "claude";
     const selectedModel = opts?.model?.trim() || undefined;
     const initialThinkingEffort = normalizeThinkingEffort(opts?.thinkingEffort);
-    const processedCommand = this.processCommandForMode(command, effectiveMode, provider, selectedModel, initialThinkingEffort);
-    const resumeCommandSessionId = isClaudeProvider
-      ? getResumeCommandSessionId(processedCommand) ?? getResumeCommandSessionId(command)
-      : null;
+    let processedCommand = this.processCommandForMode(command, effectiveMode, provider, selectedModel, initialThinkingEffort);
     const isCodexProvider = provider === "codex";
-    const codexResumeCommandSessionId = isCodexProvider
-      ? getCodexResumeCommandSessionId(processedCommand) ?? getCodexResumeCommandSessionId(command)
+    const isOpenCodeProvider = provider === "opencode";
+    const existingProviderSessionId = getProviderCommandSessionId(provider, processedCommand)
+      ?? getProviderCommandSessionId(provider, command);
+    // Grok and Qoder accept caller-selected IDs for new conversations. Assigning
+    // one up front avoids depending on provider-specific TUI rendering to learn
+    // the durable ID later.
+    const assignedProviderSessionId = !existingProviderSessionId && (provider === "grok" || provider === "qoder")
+      ? randomUUID()
       : null;
+    if (assignedProviderSessionId) {
+      processedCommand = `${processedCommand} --session-id ${assignedProviderSessionId}`;
+    }
     const knownClaudeTaskIds = isClaudeProvider ? new Set(listRecentClaudeProjectSessionIds(resolvedCwd, new Date().toISOString())) : null;
     const knownClaudeProjectMtimes = isClaudeProvider ? listClaudeProjectSessionMtimes(resolvedCwd) : null;
-    const knownCodexSessionMtimes = isCodexProvider && !codexResumeCommandSessionId
+    const knownCodexSessionMtimes = isCodexProvider && !existingProviderSessionId
       ? listCodexSessionMtimes(this.providerHistory.listCodexHistorySessions())
       : null;
-    const initialClaudeSessionId = isClaudeProvider
-      ? resumeCommandSessionId ?? null
-      : codexResumeCommandSessionId ?? null;
+    const knownOpenCodeSessionMtimes = isOpenCodeProvider && !existingProviderSessionId
+      ? listOpenCodeSessionMtimes()
+      : null;
+    const initialClaudeSessionId = existingProviderSessionId ?? assignedProviderSessionId;
     const startedAt = new Date().toISOString();
 
     const record: SessionRecord = {
@@ -945,6 +1037,8 @@ export class ProcessManager extends EventEmitter {
       knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
       knownCodexSessionMtimes: knownCodexSessionMtimes ?? undefined,
       codexSessionDiscoveryTimer: null,
+      knownOpenCodeSessionMtimes: knownOpenCodeSessionMtimes ?? undefined,
+      openCodeSessionDiscoveryTimer: null,
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
       thinkingEffort: initialThinkingEffort,
@@ -970,12 +1064,8 @@ export class ProcessManager extends EventEmitter {
 
     this.sessions.set(id, record);
     this.persist(record, { forceFullSave: true });
-    if (initialClaudeSessionId) {
-      if (provider === "codex") {
-        this.providerHistory.invalidate("codex");
-      } else {
-        this.providerHistory.invalidate("claude");
-      }
+    if (initialClaudeSessionId && (provider === "claude" || provider === "codex")) {
+      this.providerHistory.invalidate(provider);
     }
     this.cleanupOldSessions();
 
@@ -1028,6 +1118,10 @@ export class ProcessManager extends EventEmitter {
         clearTimeout(current.codexSessionDiscoveryTimer);
         current.codexSessionDiscoveryTimer = null;
       }
+      if (current.openCodeSessionDiscoveryTimer) {
+        clearTimeout(current.openCodeSessionDiscoveryTimer);
+        current.openCodeSessionDiscoveryTimer = null;
+      }
       if (current.initialInputTimer) {
         clearTimeout(current.initialInputTimer);
         current.initialInputTimer = null;
@@ -1040,6 +1134,7 @@ export class ProcessManager extends EventEmitter {
       current.ptyPermissionBlocked = false;
       this.captureClaudeSessionId(current, { allowTimeWindowFallback: true });
       this.captureCodexSessionId(current, { allowTimeWindowFallback: true });
+      this.captureOpenCodeSessionId(current, { allowTimeWindowFallback: true });
       current.status = current.stopRequested ? "stopped" : exitCode === 0 ? "exited" : "failed";
       current.exitCode = current.stopRequested ? null : exitCode;
       current.endedAt = new Date().toISOString();
@@ -1154,7 +1249,7 @@ export class ProcessManager extends EventEmitter {
         if (current !== record || current.ptyProcess !== child || current.status !== "running" || current.claudeSessionId || !current.knownClaudeTaskIds) {
           return;
         }
-        if (getResumeCommandSessionId(current.command)) {
+        if (getProviderResumeCommandSessionId("claude", current.command)) {
           current.claudeTaskDiscoveryTimer = null;
           return;
         }
@@ -1185,7 +1280,7 @@ export class ProcessManager extends EventEmitter {
         if (current !== record || current.ptyProcess !== child || current.status !== "running" || current.claudeSessionId || !current.knownCodexSessionMtimes) {
           return;
         }
-        if (getCodexResumeCommandSessionId(current.command)) {
+        if (getProviderResumeCommandSessionId("codex", current.command)) {
           current.codexSessionDiscoveryTimer = null;
           return;
         }
@@ -1197,6 +1292,29 @@ export class ProcessManager extends EventEmitter {
         current.codexSessionDiscoveryTimer = setTimeout(tryDiscoverCodexSessionId, 1000);
       };
       record.codexSessionDiscoveryTimer = setTimeout(tryDiscoverCodexSessionId, 500);
+    }
+
+    if (record.knownOpenCodeSessionMtimes) {
+      const tryDiscoverOpenCodeSessionId = () => {
+        if (this.disposed) return;
+        const current = this.sessions.get(id);
+        if (current !== record || current.ptyProcess !== child || current.status !== "running" || current.claudeSessionId || !current.knownOpenCodeSessionMtimes) {
+          return;
+        }
+        if (getProviderResumeCommandSessionId("opencode", current.command)) {
+          current.openCodeSessionDiscoveryTimer = null;
+          return;
+        }
+        if (this.captureOpenCodeSessionId(current)) {
+          current.openCodeSessionDiscoveryTimer = null;
+          this.persist(current);
+          return;
+        }
+        current.openCodeSessionDiscoveryTimer = setTimeout(tryDiscoverOpenCodeSessionId, 1000);
+        current.openCodeSessionDiscoveryTimer.unref?.();
+      };
+      record.openCodeSessionDiscoveryTimer = setTimeout(tryDiscoverOpenCodeSessionId, 500);
+      record.openCodeSessionDiscoveryTimer.unref?.();
     }
 
     return this.snapshot(record);
@@ -1295,6 +1413,24 @@ export class ProcessManager extends EventEmitter {
     record.knownCodexSessionMtimes?.set(threadId, Date.now());
     this.providerHistory.invalidate("codex");
     process.stderr.write(`[wand] Captured Codex thread ID: ${threadId}\n`);
+    return true;
+  }
+
+  private captureOpenCodeSessionId(record: SessionRecord, options?: { allowTimeWindowFallback?: boolean }): boolean {
+    if (record.provider !== "opencode" || record.claudeSessionId) return false;
+    const discovered = record.knownOpenCodeSessionMtimes
+      ? selectOpenCodeSessionForRecord(record)
+      : null;
+    const fallback = discovered
+      ? null
+      : options?.allowTimeWindowFallback
+        ? selectOpenCodeSessionForTimeWindow(record)
+        : null;
+    const providerSessionId = discovered?.id ?? fallback?.id ?? null;
+    if (!providerSessionId) return false;
+    record.claudeSessionId = providerSessionId;
+    record.knownOpenCodeSessionMtimes?.set(providerSessionId, discovered?.updatedAtMs ?? fallback?.updatedAtMs ?? Date.now());
+    process.stderr.write(`[wand] Captured OpenCode session ID: ${providerSessionId}\n`);
     return true;
   }
 
@@ -1492,6 +1628,10 @@ export class ProcessManager extends EventEmitter {
       clearTimeout(record.codexSessionDiscoveryTimer);
       record.codexSessionDiscoveryTimer = null;
     }
+    if (record.openCodeSessionDiscoveryTimer) {
+      clearTimeout(record.openCodeSessionDiscoveryTimer);
+      record.openCodeSessionDiscoveryTimer = null;
+    }
     if (record.initialInputTimer) {
       clearTimeout(record.initialInputTimer);
       record.initialInputTimer = null;
@@ -1520,6 +1660,7 @@ export class ProcessManager extends EventEmitter {
     // discovery can still inspect the latest parsed turns.
     this.captureClaudeSessionId(record, { allowTimeWindowFallback: true });
     this.captureCodexSessionId(record, { allowTimeWindowFallback: true });
+    this.captureOpenCodeSessionId(record, { allowTimeWindowFallback: true });
     if (record.ptyBridge) {
       record.messages = record.ptyBridge.getMessages();
       record.ptyBridge.removeAllListeners();
@@ -1538,6 +1679,10 @@ export class ProcessManager extends EventEmitter {
     if (record.codexSessionDiscoveryTimer) {
       clearTimeout(record.codexSessionDiscoveryTimer);
       record.codexSessionDiscoveryTimer = null;
+    }
+    if (record.openCodeSessionDiscoveryTimer) {
+      clearTimeout(record.openCodeSessionDiscoveryTimer);
+      record.openCodeSessionDiscoveryTimer = null;
     }
     if (record.initialInputTimer) {
       clearTimeout(record.initialInputTimer);
@@ -1578,6 +1723,10 @@ export class ProcessManager extends EventEmitter {
     if (record.codexSessionDiscoveryTimer) {
       clearTimeout(record.codexSessionDiscoveryTimer);
       record.codexSessionDiscoveryTimer = null;
+    }
+    if (record.openCodeSessionDiscoveryTimer) {
+      clearTimeout(record.openCodeSessionDiscoveryTimer);
+      record.openCodeSessionDiscoveryTimer = null;
     }
     if (record.initialInputTimer) {
       clearTimeout(record.initialInputTimer);

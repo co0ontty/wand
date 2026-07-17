@@ -122,9 +122,10 @@ import { renderManageCheckbox } from "./sidebar";
         var resumeButton = "";
         var checkbox = renderManageCheckbox("sessions", session.id, "选择会话 " + session.command);
 
-        if ((session.provider === "claude" || session.provider === "codex") && session.claudeSessionId) {
+        if (session.claudeSessionId) {
           if (session.status !== "running" && !state.sessionsManageMode && !isStructuredSession(session)) {
-            var resumeTitle = session.provider === "codex" ? "恢复 Codex 会话" : "恢复 Claude 会话";
+            var providerLabels = { claude: "Claude", codex: "Codex", opencode: "OpenCode", grok: "Grok", qoder: "Qoder" };
+            var resumeTitle = "恢复 " + (providerLabels[session.provider] || "Provider") + " 会话";
             resumeButton = '<button class="session-action-btn" data-action="resume" data-session-id="' + session.id + '" type="button" aria-label="' + resumeTitle + '" title="' + resumeTitle + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
           }
         }

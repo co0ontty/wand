@@ -20,6 +20,26 @@ const mobileEnvironment: LegacySnapshotEnvironment = {
   historyExpanded: true,
 };
 
+test("legacy snapshot exposes PTY resume for every managed provider", () => {
+  const providers = ["claude", "codex", "opencode", "grok", "qoder"];
+  const snapshot = deriveLegacyUiSnapshot({
+    loginChecked: true,
+    sessions: providers.map((provider) => ({
+      id: provider,
+      provider,
+      command: provider === "qoder" ? "qodercli" : provider,
+      sessionKind: "pty",
+      status: "stopped",
+      claudeSessionId: `${provider}-session`,
+    })),
+  }, mobileEnvironment);
+
+  assert.deepEqual(
+    snapshot.sidebar.groups[0].entries.map((entry) => [entry.provider, entry.resumable]),
+    providers.map((provider) => [provider, true]),
+  );
+});
+
 test("legacy snapshot derivation projects the complete shell state and excludes hot fields", () => {
   const snapshot = deriveLegacyUiSnapshot({
     config: { defaultCwd: "/workspace" },
