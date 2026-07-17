@@ -69,7 +69,7 @@ export interface StructuredNewSessionCreateRequest extends NewSessionCreateReque
 
 export interface PtyNewSessionCreateRequest extends NewSessionCreateRequestBase {
   kind: "pty";
-  command: NewSessionProvider;
+  command: string;
   cols?: number;
   rows?: number;
 }

@@ -2148,17 +2148,18 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
       }
 
       export function quickStartSession() {
-        var command = getPreferredTool();
+        var provider = getPreferredTool();
+        var command = provider === "qoder" ? "qodercli" : provider;
         var defaultCwd = getEffectiveCwd();
-        var defaultMode = getSafeModeForTool(command, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
-        state.preferredCommand = command;
-        state.chatMode = getSafeModeForTool(command, state.chatMode);
+        var defaultMode = getSafeModeForTool(provider, (state.config && state.config.defaultMode) ? state.config.defaultMode : "default");
+        state.preferredCommand = provider;
+        state.chatMode = getSafeModeForTool(provider, state.chatMode);
         return ensureTerminalReady().then(function() {
           return fetch("/api/commands", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({ command: command, provider: command, cwd: defaultCwd, mode: defaultMode, sessionSource: "interactive" }))
+          body: JSON.stringify(withTerminalDimensions({ command: command, provider: provider, cwd: defaultCwd, mode: defaultMode, sessionSource: "interactive" }))
         });
         })
         .then(function(res) { return res.json(); })

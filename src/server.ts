@@ -1133,11 +1133,16 @@ export async function startServer(
         : body.provider === "qoder" || /^qodercli\b/.test(body.command.trim())
           ? "qoder"
           : "claude";
+      // Older clients used the provider id as the PTY command. Qoder's executable
+      // is named qodercli, so keep those clients working while preserving custom commands.
+      const command = provider === "qoder" && body.command.trim() === "qoder"
+        ? "qodercli"
+        : body.command;
       const effectiveModel = rawModel || getDefaultModelForProvider(config, provider) || undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
       const snapshot = processes.start(
-        body.command,
+        command,
         body.cwd,
         body.mode ?? config.defaultMode,
         initialInput || undefined,

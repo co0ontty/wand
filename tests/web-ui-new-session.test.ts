@@ -111,6 +111,14 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     mode: "managed",
     worktreeEnabled: false,
   }, config, context).runner, "qoder-cli-print");
+
+  assert.equal(buildCreateRequest({
+    provider: "qoder",
+    kind: "pty",
+    cwd: "/repo",
+    mode: "default",
+    worktreeEnabled: false,
+  }, config, context).command, "qodercli");
 });
 
 test("HTTP repository serializes preferences and loads the latest server defaults", async () => {

@@ -107,6 +107,10 @@ function structuredRunner(provider: NewSessionProvider, configured: string): str
     : "claude-cli-print";
 }
 
+function ptyCommand(provider: NewSessionProvider): string {
+  return provider === "qoder" ? "qodercli" : provider;
+}
+
 export function buildCreateRequest(
   form: NewSessionForm,
   defaults: NewSessionConfig,
@@ -133,7 +137,7 @@ export function buildCreateRequest(
     return {
       ...base,
       kind: "pty",
-      command: form.provider,
+      command: ptyCommand(form.provider),
       cols,
       rows,
     };

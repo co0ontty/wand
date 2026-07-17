@@ -24012,6 +24012,9 @@
     if (provider === "qoder") return "qoder-cli-print";
     return configured === "sdk" || configured === "claude-sdk" ? "claude-sdk" : "claude-cli-print";
   }
+  function ptyCommand(provider) {
+    return provider === "qoder" ? "qodercli" : provider;
+  }
   function buildCreateRequest(form, defaults, context, dimensions = {}) {
     const cwd = form.cwd.trim() || context.effectiveCwd.trim() || defaults.defaultCwd;
     const mode = safeMode(form.provider, form.mode, defaults.defaultMode);
@@ -24028,7 +24031,7 @@
       return {
         ...base,
         kind: "pty",
-        command: form.provider,
+        command: ptyCommand(form.provider),
         cols,
         rows
       };
@@ -45643,17 +45646,18 @@
     });
   }
   function quickStartSession() {
-    var command = getPreferredTool();
+    var provider = getPreferredTool();
+    var command = provider === "qoder" ? "qodercli" : provider;
     var defaultCwd2 = getEffectiveCwd();
-    var defaultMode = getSafeModeForTool2(command, state.config && state.config.defaultMode ? state.config.defaultMode : "default");
-    state.preferredCommand = command;
-    state.chatMode = getSafeModeForTool2(command, state.chatMode);
+    var defaultMode = getSafeModeForTool2(provider, state.config && state.config.defaultMode ? state.config.defaultMode : "default");
+    state.preferredCommand = provider;
+    state.chatMode = getSafeModeForTool2(provider, state.chatMode);
     return ensureTerminalReady().then(function() {
       return fetch("/api/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify(withTerminalDimensions({ command, provider: command, cwd: defaultCwd2, mode: defaultMode, sessionSource: "interactive" }))
+        body: JSON.stringify(withTerminalDimensions({ command, provider, cwd: defaultCwd2, mode: defaultMode, sessionSource: "interactive" }))
       });
     }).then(function(res) {
       return res.json();
