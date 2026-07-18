@@ -41,11 +41,20 @@ test("New Session supports keyboard choices, Worktree, and a typed create reques
   await kinds.getByRole("radio", { name: /PTY/ }).click();
   await expect(kinds.getByRole("radio", { name: /PTY/ })).toHaveAttribute("aria-checked", "true");
 
+  const advanced = dialog.getByRole("button", { name: /高级选项/ });
+  await expect(advanced).toHaveAttribute("aria-expanded", "true");
+  await advanced.click();
+  await expect(advanced).toHaveAttribute("aria-expanded", "false");
+  await advanced.click();
+  await expect(advanced).toHaveAttribute("aria-expanded", "true");
+
   const worktree = dialog.getByRole("switch", { name: "启用 Worktree 模式" });
   await worktree.click();
   await expect(worktree).toHaveAttribute("data-state", "checked");
 
   await dialog.getByRole("textbox", { name: "工作目录", exact: true }).fill("/tmp/wand-e2e-worktree");
+  await expect(dialog.getByText("即将启动")).toBeVisible();
+  await expect(dialog.getByText("/tmp/wand-e2e-worktree")).toBeVisible();
   await dialog.getByRole("button", { name: "启动会话" }).click();
 
   await expect(dialog.getByRole("alert")).toContainText("fixture create blocked");

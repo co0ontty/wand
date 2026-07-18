@@ -826,9 +826,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   position: fixed;
   inset: 0;
   z-index: 0;
-  background: rgba(20, 14, 8, 0.34);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  background: rgba(20, 14, 8, 0.42);
   pointer-events: auto;
 }
 
@@ -840,18 +838,33 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  width: min(560px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 32px));
+  width: min(720px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 32px));
   max-height: calc(100dvh - var(--wand-safe-top) - var(--wand-safe-bottom) - 32px);
   overflow: hidden;
-  border: 0.5px solid rgba(255, 255, 255, 0.6);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, white);
   border-radius: 26px;
   color: var(--text-primary);
-  background: rgba(255, 252, 247, 0.88);
-  box-shadow: var(--shadow-xl);
+  background: var(--bg-elevated);
+  box-shadow: 0 28px 72px rgba(43, 27, 16, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.76);
   transform: translate(-50%, -50%);
   pointer-events: auto;
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .wand-new-session-overlay {
+    background: rgba(20, 14, 8, 0.34);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+
+  .wand-new-session-dialog {
+    border-color: rgba(255, 255, 255, 0.62);
+    background:
+      radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.74), transparent 28%),
+      linear-gradient(148deg, rgba(255, 252, 247, 0.94), rgba(255, 247, 238, 0.76));
+    backdrop-filter: blur(36px) saturate(165%);
+    -webkit-backdrop-filter: blur(36px) saturate(165%);
+  }
 }
 
 .wand-new-session-dialog[data-state="open"] {
@@ -869,7 +882,14 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   justify-content: space-between;
   min-height: 56px;
   padding: 18px 22px 16px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 74%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .wand-new-session-header {
+    background: linear-gradient(104deg, rgba(255, 255, 255, 0.42), rgba(255, 246, 237, 0.18));
+  }
 }
 
 .wand-new-session-header > div {
@@ -925,6 +945,12 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   margin-bottom: 16px;
 }
 
+.wand-new-session-primary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+}
+
 .wand-new-session-fieldset {
   min-width: 0;
   padding: 0;
@@ -953,6 +979,10 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   gap: 8px;
 }
 
+.wand-new-session-provider-choice {
+  flex: 1 1 118px;
+}
+
 .wand-new-session-choice {
   display: flex;
   flex: 1 1 0;
@@ -960,42 +990,39 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  border: 1px solid rgba(125, 91, 57, 0.1);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 84%, transparent);
   border-radius: 12px;
   padding: 12px 10px;
   color: inherit;
-  background: rgba(255, 255, 255, 0.6);
-  box-shadow: 0 1px 2px rgba(125, 91, 57, 0.03);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58), 0 1px 2px rgba(125, 91, 57, 0.035);
   cursor: pointer;
   outline: none;
   text-align: center;
-  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
 .wand-new-session-choice:hover {
-  border-color: rgba(125, 91, 57, 0.2);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 4px 12px rgba(125, 91, 57, 0.08);
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+  background: color-mix(in srgb, var(--bg-elevated) 96%, var(--accent-muted));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74), 0 8px 18px rgba(125, 91, 57, 0.09);
   transform: translateY(-1px);
 }
 
 .wand-new-session-choice.active {
-  border: 0.5px solid rgba(255, 255, 255, 0.8);
-  background: linear-gradient(180deg, rgba(255, 252, 247, 0.95) 0%, rgba(255, 240, 224, 0.82) 100%);
+  border-color: color-mix(in srgb, var(--accent) 44%, white);
+  background: linear-gradient(148deg, color-mix(in srgb, var(--bg-elevated) 92%, white), var(--accent-muted));
   box-shadow:
-    0 0 0 1px rgba(197, 101, 61, 0.32),
-    0 0 0 4px rgba(197, 101, 61, 0.14),
-    0 8px 22px -4px rgba(197, 101, 61, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    inset 0 -1px 0 rgba(197, 101, 61, 0.08);
+    0 0 0 3px color-mix(in srgb, var(--accent-muted) 86%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent) 12%, transparent),
+    0 8px 20px rgba(125, 91, 57, 0.12);
   transform: none;
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
 }
 
-.wand-new-session-choice:focus-visible:not(.active) {
+.wand-new-session-choice:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1.5px var(--accent-muted);
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent);
 }
 
 .wand-new-session-choice-label {
@@ -1146,16 +1173,102 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
-.wand-new-session-recent-path:hover {
+.wand-new-session-recent-path:hover,
+.wand-new-session-recent-path.active {
   border-color: var(--accent);
   color: var(--accent);
   background: #fff7ef;
+}
+
+.wand-new-session-recent-path:hover {
   transform: translateY(-1px);
+}
+
+.wand-new-session-recent-path:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .wand-new-session-recent-path-value {
   min-width: 0;
   max-width: 100%;
+}
+
+.wand-new-session-advanced {
+  margin-top: 4px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .wand-new-session-advanced {
+    background: linear-gradient(142deg, rgba(255, 255, 255, 0.27), rgba(255, 241, 229, 0.16));
+    backdrop-filter: blur(16px) saturate(135%);
+    -webkit-backdrop-filter: blur(16px) saturate(135%);
+  }
+}
+
+.wand-new-session-advanced-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-radius: inherit;
+  padding: 10px 13px;
+  color: var(--text-primary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-align: left;
+}
+
+.wand-new-session-advanced-trigger::after {
+  color: var(--text-muted);
+  content: "+";
+  font-size: 1.1rem;
+  transition: transform var(--transition-fast);
+}
+
+.wand-new-session-advanced-trigger[aria-expanded="true"]::after {
+  transform: rotate(45deg);
+}
+
+.wand-new-session-advanced-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.wand-new-session-advanced-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wand-new-session-advanced-content {
+  padding: 0 13px 13px;
+  animation: wand-new-session-advanced-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.wand-new-session-mode-choices .wand-new-session-choice {
+  flex-basis: 110px;
+  padding: 9px 8px;
+}
+
+@keyframes wand-new-session-advanced-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .wand-new-session-worktree {
@@ -1191,11 +1304,131 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   flex: 0 0 auto;
 }
 
+.wand-new-session-summary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 28px;
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 68%, transparent);
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+  font-size: var(--font-size-xs);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .wand-new-session-summary {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.22), rgba(255, 244, 233, 0.14));
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+  }
+}
+
+.wand-new-session-summary strong {
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.wand-new-session-summary span:nth-child(3) {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wand-new-session-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: block;
   flex: 0 0 auto;
-  padding: 16px 28px 22px;
-  border-top: 1px solid rgba(125, 91, 57, 0.08);
+  padding: 14px 28px calc(18px + var(--wand-safe-bottom));
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 74%, transparent);
+  background: var(--bg-elevated);
+  box-shadow: 0 -12px 28px rgba(125, 91, 57, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.54);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .wand-new-session-footer {
+    background: linear-gradient(110deg, rgba(255, 253, 249, 0.88), rgba(255, 244, 233, 0.7));
+    backdrop-filter: blur(22px) saturate(150%);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .wand-new-session-overlay {
+    background: rgba(20, 14, 8, 0.42);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .wand-new-session-dialog {
+    border-color: color-mix(in srgb, var(--border-subtle) 70%, white);
+    background: var(--bg-elevated);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .wand-new-session-header {
+    background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  }
+
+  .wand-new-session-advanced {
+    background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .wand-new-session-summary {
+    background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .wand-new-session-footer {
+    background: var(--bg-elevated);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .wand-new-session-suggestions {
+    background: rgba(255, 252, 247, 0.96);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more), (forced-colors: active) {
+  .wand-new-session-overlay {
+    background: Canvas;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .wand-new-session-dialog,
+  .wand-new-session-header,
+  .wand-new-session-advanced,
+  .wand-new-session-summary,
+  .wand-new-session-footer,
+  .wand-new-session-suggestions {
+    border-color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .wand-new-session-choice {
+    border-color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+
+  .wand-new-session-choice.active {
+    outline: 2px solid Highlight;
+    outline-offset: -3px;
+  }
 }
 
 .wand-new-session-submit {
@@ -1204,19 +1437,18 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
 .wand-new-session-error {
   margin: 8px 0 0;
-  border: 1px solid rgba(178, 79, 69, 0.2);
+  border: 1px solid rgba(178, 79, 69, 0.32);
   border-radius: 10px;
   padding: 10px 12px;
   color: var(--danger);
   background: rgba(178, 79, 69, 0.1);
   font-size: 0.75rem;
-  animation: wand-new-session-shake 0.3s ease;
+  animation: wand-new-session-error-in 180ms ease-out;
 }
 
-@keyframes wand-new-session-shake {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-4px); }
-  75% { transform: translateX(4px); }
+@keyframes wand-new-session-error-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .wand-new-session-loading,
@@ -1807,7 +2039,15 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   .wand-new-session-header { padding: 16px 18px 14px; }
   .wand-new-session-title { font-size: 1.125rem; }
   .wand-new-session-body { padding: 14px 18px; }
-  .wand-new-session-footer { padding: 10px 12px 14px; }
+  .wand-new-session-primary-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .wand-new-session-summary {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 9px 18px;
+  }
+  .wand-new-session-summary span:nth-child(3) { grid-column: 1 / -1; }
+  .wand-new-session-summary span:last-child { grid-column: 1 / -1; }
+  .wand-new-session-footer { padding: 10px 18px calc(14px + var(--wand-safe-bottom)); }
+  .wand-new-session-advanced-summary { max-width: 19ch; }
   .wand-new-session-input { font-size: 16px; }
 }
 

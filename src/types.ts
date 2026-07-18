@@ -550,6 +550,8 @@ export interface SessionSnapshot {
   messages?: ConversationTurn[];
   /** Pending structured user inputs queued while an assistant response is in flight. */
   queuedMessages?: string[];
+  /** Per-message Claude Agent SDK skill allowlists aligned with queuedMessages. */
+  queuedMessageSkills?: string[][];
   structuredState?: StructuredSessionState;
   /** 此会话是从哪个 Wand 会话恢复而来 */
   resumedFromSessionId?: string | null;

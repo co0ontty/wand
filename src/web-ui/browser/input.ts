@@ -8,7 +8,7 @@ import { isMobileLayout, updateFilePanelCwd } from "./file-browser";
 import { loadGitStatus } from "./git-commit";
 import { showToast, wandConfirm, wandAlert, wandPrompt, openWandDialog, showError, hideError, sendBrowserNotification, _syncWakeLock } from "./notifications";
 import { render, resetChatRenderCache, getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, clearAttachments, dismissDrawerIfOverlay, getChatModelForProvider, getComposerPlaceholder, getComposerTool, getPreferredMessages, getPreferredTool, getSafeModeForTool, isStructuredSession, loadOutput, loadSessions, refreshAll, selectSession, setDraftValue, shouldRequestChatFormat, subscribeToSession, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { applyCurrentView, buildAttachmentPrefix, clearAttachments, dismissDrawerIfOverlay, getChatModelForProvider, getComposerPlaceholder, getComposerTool, getPreferredMessages, getPreferredTool, getSafeModeForTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, loadSessions, refreshAll, selectSession, setDraftValue, shouldRequestChatFormat, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, confirmDelete } from "./sidebar";
 import { initTerminal, maybeScheduleResyncForChunk, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, softResyncTerminal, syncTerminalBuffer } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, sendTerminalResize, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
@@ -266,7 +266,11 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ input: text, idempotencyKey: idempotencyKey })
+          body: JSON.stringify({
+            input: text,
+            idempotencyKey: idempotencyKey,
+            ...(supportsClaudeSkillSelection(session) ? { skills: getSelectedClaudeSkills(session) } : {}),
+          })
         })
           .then(function(res) {
             if (!res.ok) {
@@ -914,7 +918,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ input: input, interrupt: isInterrupting || undefined, idempotencyKey: idempotencyKey })
+          body: JSON.stringify({
+            input: input,
+            interrupt: isInterrupting || undefined,
+            idempotencyKey: idempotencyKey,
+            ...(supportsClaudeSkillSelection(session) ? { skills: getSelectedClaudeSkills(session) } : {}),
+          })
         })
         .then(function(res) {
           if (!res.ok) {

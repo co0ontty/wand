@@ -116,6 +116,41 @@ function createSdkHarness(t: TestContext, configuredRunner: "cli" | "sdk" = "sdk
   return { manager, queries, session };
 }
 
+test("Claude SDK receives the per-message skill allowlist", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-structured-skills-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const queries: DeferredSdkQuery[] = [];
+  const requests: Array<{ options?: { skills?: string[] } }> = [];
+  const sdkQueryFactory = ((request: { options?: { skills?: string[] } }) => {
+    requests.push(request);
+    const query = new DeferredSdkQuery();
+    queries.push(query);
+    return query;
+  }) as unknown as ConstructorParameters<typeof StructuredSessionManager>[3];
+  const manager = new StructuredSessionManager(
+    storage,
+    { ...defaultConfig(), defaultCwd: root, structuredRunner: "sdk" },
+    null,
+    sdkQueryFactory,
+  );
+  const session = manager.createSession({ cwd: root, mode: "assist", provider: "claude", runner: "claude-sdk" });
+  manager.setSessionTopic(session.id, "test", "test");
+  t.after(() => {
+    for (const query of queries) query.finish();
+    manager.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const run = manager.sendMessage(session.id, "review this", { skills: ["review", "testing"] });
+  await waitFor(() => requests.length === 1, "SDK query did not start");
+  assert.deepEqual(requests[0].options?.skills, ["review", "testing"]);
+
+  manager.stop(session.id);
+  queries[0].finish();
+  await run;
+});
+
 test("session runner overrides the opposite global Claude runner", async (t) => {
   const { manager, queries, session } = createSdkHarness(t, "cli");
   assert.equal(session.runner, "claude-sdk");
@@ -296,6 +331,27 @@ exec sleep 30
   assert.ok(waiting.messages?.at(-1)?.content.some(
     (block) => block.type === "tool_use" && block.name === "AskUserQuestion",
   ));
+});
+
+test("queued SDK messages retain their selected skills through queue operations", async (t) => {
+  const { manager, queries, session } = createSdkHarness(t);
+  const run = manager.sendMessage(session.id, "first");
+  await waitFor(() => queries.length === 1, "first SDK query did not start");
+
+  await manager.sendMessage(session.id, "second", { skills: ["review"] });
+  await manager.sendMessage(session.id, "third", { skills: ["testing"] });
+  assert.deepEqual(manager.get(session.id)?.queuedMessageSkills, [["review"], ["testing"]]);
+
+  manager.reorderQueuedMessages(session.id, [1, 0]);
+  assert.deepEqual(manager.get(session.id)?.queuedMessageSkills, [["testing"], ["review"]]);
+
+  manager.deleteQueuedMessage(session.id, 0);
+  assert.deepEqual(manager.get(session.id)?.queuedMessages, ["second"]);
+  assert.deepEqual(manager.get(session.id)?.queuedMessageSkills, [["review"]]);
+
+  manager.stop(session.id);
+  queries[0].finish();
+  await run;
 });
 
 test("SDK in-flight queries queue a second message instead of starting concurrently", async (t) => {

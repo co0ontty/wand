@@ -102,6 +102,24 @@ function getInputErrorResponse(error: unknown, sessionId: string) {
   };
 }
 
+function parseClaudeSdkSkills(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error("skills 必须是数组。");
+  }
+  if (value.length > 50) {
+    throw new Error("最多选择 50 个 skills。");
+  }
+
+  const names = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") throw new Error("skills 只能包含字符串。");
+    const name = item.trim();
+    if (!name || name.length > 128) throw new Error("skill 名称无效。");
+    names.add(name);
+  }
+  return Array.from(names);
+}
+
 function getInputDebugMeta(error: unknown) {
   if (error instanceof Error) {
     return { name: error.name, message: error.message, stack: error.stack };
@@ -640,7 +658,23 @@ export function registerSessionRoutes(
     const preserveQueue = !!req.body?.preserveQueue;
     const idempotencyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined;
     try {
-      const snapshot = await structured.sendMessage(req.params.id, input, { interrupt, preserveQueue, idempotencyKey });
+      const session = structured.get(req.params.id);
+      if (!session) {
+        res.status(404).json({ error: "未找到该结构化会话。" });
+        return;
+      }
+      const hasSkills = Object.prototype.hasOwnProperty.call(req.body ?? {}, "skills");
+      if (hasSkills && (session.provider !== "claude" || session.runner !== "claude-sdk")) {
+        res.status(400).json({ error: "skills 仅支持 Claude SDK 结构化会话。" });
+        return;
+      }
+      const skills = hasSkills ? parseClaudeSdkSkills(req.body.skills) : [];
+      const snapshot = await structured.sendMessage(req.params.id, input, {
+        interrupt,
+        preserveQueue,
+        idempotencyKey,
+        skills,
+      });
       res.json(sessionResponseDTO(snapshot));
     } catch (error) {
       const errorCode = (error as { code?: string } | null | undefined)?.code;

@@ -89,6 +89,19 @@ test("React-owned controls are not rebound or imperatively rewritten", () => {
   assert.match(websocket, /if \(!reactShellActive && taskEl && task && task\.title\)/);
 });
 
+test("composer skill picker stays scoped to Claude SDK structured sessions", () => {
+  const engine = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");
+  const input = readFileSync(path.join(root, "src/web-ui/browser/input.ts"), "utf8");
+  const events = readFileSync(path.join(root, "src/web-ui/browser/events.ts"), "utf8");
+
+  assert.match(engine, /session\.sessionKind === "structured"/);
+  assert.match(engine, /session\.provider === "claude"/);
+  assert.match(engine, /session\.runner === "claude-sdk"/);
+  assert.match(engine, /data-claude-skills-trigger/);
+  assert.match(input, /supportsClaudeSkillSelection\(session\) \? \{ skills: getSelectedClaudeSkills\(session\) \} : \{\}/);
+  assert.match(events, /data-claude-skill-name/);
+});
+
 test("terminal initialization cannot expose PTY chrome for a structured session", () => {
   const terminal = readFileSync(path.join(root, "src/web-ui/browser/terminal.ts"), "utf8");
   const sessions = readFileSync(path.join(root, "src/web-ui/browser/session-engine.ts"), "utf8");

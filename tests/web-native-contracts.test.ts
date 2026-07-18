@@ -149,11 +149,31 @@ test("subagent role windows stay compact, avatar-free, and follow the newest con
   );
 
   includesAll("android/app/src/main/java/com/wand/app/ui/screens/ChatBlocks.kt", [
+    "collectSubagentActivities",
+    "SubagentActivityDock",
+    "AgentBubbleRail",
+    "SubcomposeLayout",
+    "StackedAgentCluster",
+    "GeneratedAgentLogo",
+    "agentLogoVariant",
+    "Agent:",
+    "WandIcons.agent",
+    "Brush.linearGradient",
+    "正在运行",
+    "HorizontalPager",
+    "key = { page -> activities.getOrNull(page)?.id",
+    "pagerState.settledPage",
+    "ValueAnimator.areAnimatorsEnabled()",
     "collapseActivities = false",
     "snapshotFlow { scrollState.maxValue }",
     "LaunchedEffect(refreshToken)",
     "scrollState.scrollTo(maxValue)",
-    ".height(280.dp)",
+    "SubagentActivityPage(activity)",
+  ]);
+  includesAll("android/app/src/main/java/com/wand/app/ui/screens/ChatScreen.kt", [
+    "showActivityDock",
+    "SubagentActivityDock(",
+    ".align(Alignment.BottomCenter)",
   ]);
 
   includesAll("macos/Wand/ChatView.swift", [

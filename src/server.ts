@@ -21,6 +21,7 @@ import {
   SESSION_COOKIE_LEGACY,
 } from "./auth.js";
 import { ensureCertificates } from "./cert.js";
+import { listClaudeSkills } from "./claude-skills.js";
 import { buildChildEnv } from "./env-utils.js";
 import {
   getDefaultModelForProvider,
@@ -45,6 +46,7 @@ import {
   ServerUpdateState,
 } from "./server-update-routes.js";
 import { parseSessionCreationOrigin, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { resolveSessionCwd } from "./session-cwd.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute, jsonErrorHandler } from "./express-async.js";
 import {
@@ -840,6 +842,7 @@ export async function startServer(
     "/api/sessions",
     "/api/structured-sessions",
     "/api/commands",
+    "/api/claude-skills",
     "/api/claude-history",
     "/api/codex-history",
     "/api/claude-sessions",
@@ -902,6 +905,18 @@ export async function startServer(
   }));
 
   // ── Browser extension password vault endpoints ──
+
+  app.get("/api/claude-skills", (req, res) => {
+    try {
+      const cwd = resolveSessionCwd(
+        typeof req.query.cwd === "string" ? req.query.cwd : undefined,
+        config.defaultCwd,
+      );
+      res.json({ skills: listClaudeSkills(cwd) });
+    } catch (error) {
+      res.status(400).json({ error: getErrorMessage(error, "无法读取 skills。") });
+    }
+  });
 
   app.get("/api/browser-extension/status", (_req, res) => {
     res.json({

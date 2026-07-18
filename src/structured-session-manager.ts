@@ -176,6 +176,7 @@ function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["
     output: snapshot.output,
     messages: snapshot.messages ? enrichStructuredMessages(snapshot.messages) : undefined,
     queuedMessages: snapshot.queuedMessages,
+    queuedMessageSkills: snapshot.queuedMessageSkills,
     sessionKind: "structured",
     structuredState: snapshot.structuredState,
     title: snapshot.title,
@@ -246,6 +247,7 @@ function buildIncrementalStructuredPayload(
     wandProtocolVersion: WAND_PROTOCOL_VERSION,
     incremental: true,
     queuedMessages: snapshot.queuedMessages,
+    queuedMessageSkills: snapshot.queuedMessageSkills,
     sessionKind: "structured",
     structuredState: snapshot.structuredState,
     lastMessage,
@@ -264,6 +266,7 @@ export class StructuredSessionManager {
    */
   private readonly pendingSdkQueries = new Map<string, { interrupt(): Promise<void> }>();
   private readonly interruptedWith = new Map<string, string>();
+  private readonly interruptedSkills = new Map<string, string[]>();
   /**
    * Sessions where the current interrupt is a "queue promote" (用户从排队条点了「立即」
    * 把队首插队到 now)。退出处理三个分支默认会把 queuedMessages 清空——因为常规的
@@ -331,6 +334,7 @@ export class StructuredSessionManager {
         autoApprovePermissions: snapshot.autoApprovePermissions ?? shouldAutoApproveForMode(snapshot.mode),
         approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
         queuedMessages: snapshot.queuedMessages ?? [],
+        queuedMessageSkills: (snapshot.queuedMessages ?? []).map((_, index) => snapshot.queuedMessageSkills?.[index] ?? []),
         pendingEscalation: null,
         permissionBlocked: false,
         structuredState: {
@@ -424,6 +428,7 @@ export class StructuredSessionManager {
     this.pendingSdkQueries.clear();
     this.pendingSdkAbort.clear();
     this.interruptedWith.clear();
+    this.interruptedSkills.clear();
     this.preserveQueueOnInterrupt.clear();
     for (const timer of this.streamCheckpointTimers.values()) clearTimeout(timer);
     this.streamCheckpointTimers.clear();
@@ -689,12 +694,13 @@ export class StructuredSessionManager {
   async sendMessage(
     id: string,
     input: string,
-    opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean; queueAlreadyRemoved?: boolean },
+    opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean; queueAlreadyRemoved?: boolean; skills?: string[] },
   ): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("StructuredSessionManager has been disposed.");
     let session = this.requireSession(id);
     const prompt = input.trim();
     if (!prompt) return session;
+    const skills = opts?.skills ?? [];
     if (opts?.idempotencyKey) {
       const mapKey = `${id}:${opts.idempotencyKey}`;
       if (this.seenIdempotencyKeys.has(mapKey)) {
@@ -738,6 +744,7 @@ export class StructuredSessionManager {
         session = recovered;
       } else if (opts?.interrupt) {
         this.interruptedWith.set(id, prompt);
+        this.interruptedSkills.set(id, skills);
         if (opts.preserveQueue) {
           this.preserveQueueOnInterrupt.add(id);
           // 「立即发送」排队条某一条：interrupt 把它作为新输入重发，但该条仍留在
@@ -750,7 +757,12 @@ export class StructuredSessionManager {
             const removeAt = queue.indexOf(prompt);
             if (removeAt !== -1) {
               const trimmedQueue = queue.slice(0, removeAt).concat(queue.slice(removeAt + 1));
-              session = { ...session, queuedMessages: trimmedQueue };
+              const queuedMessageSkills = session.queuedMessageSkills ?? [];
+              session = {
+                ...session,
+                queuedMessages: trimmedQueue,
+                queuedMessageSkills: queuedMessageSkills.slice(0, removeAt).concat(queuedMessageSkills.slice(removeAt + 1)),
+              };
               this.sessions.set(id, session);
               this.storage.updateSessionRuntimeMetadata(session);
               this.emitStructuredSnapshot(session);
@@ -778,6 +790,7 @@ export class StructuredSessionManager {
         const queued: SessionSnapshot = {
           ...session,
           queuedMessages: [...queue, prompt],
+          queuedMessageSkills: [...queue.map((_, index) => session.queuedMessageSkills?.[index] ?? []), skills],
         };
         this.sessions.set(id, queued);
         this.storage.updateSessionRuntimeMetadata(queued);
@@ -861,7 +874,7 @@ export class StructuredSessionManager {
           installHint: "请安装 @qoder-ai/qodercli，或重跑 `wand service:install` 刷新服务的 PATH",
         });
       } else if (runner === "claude-sdk") {
-        await this.runClaudeSdkStreaming(id, updated, prompt, requestId);
+        await this.runClaudeSdkStreaming(id, updated, prompt, requestId, skills);
       } else {
         await this.runClaudeStreaming(id, updated, cliClaudePrompt, requestId);
       }
@@ -926,7 +939,11 @@ export class StructuredSessionManager {
       seen.add(idx);
     }
     const reordered = order.map((idx) => queue[idx]);
-    const updated: SessionSnapshot = { ...session, queuedMessages: reordered };
+    const updated: SessionSnapshot = {
+      ...session,
+      queuedMessages: reordered,
+      queuedMessageSkills: order.map((idx) => (session.queuedMessageSkills ?? [])[idx] ?? []),
+    };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
@@ -941,7 +958,12 @@ export class StructuredSessionManager {
       throw new Error("队列中没有该条消息（可能已被处理）。");
     }
     const next = queue.slice(0, index).concat(queue.slice(index + 1));
-    const updated: SessionSnapshot = { ...session, queuedMessages: next };
+    const skills = session.queuedMessageSkills ?? [];
+    const updated: SessionSnapshot = {
+      ...session,
+      queuedMessages: next,
+      queuedMessageSkills: skills.slice(0, index).concat(skills.slice(index + 1)),
+    };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
@@ -972,9 +994,16 @@ export class StructuredSessionManager {
     }
 
     const prompt = queue[index];
+    const skills = (session.queuedMessageSkills ?? [])[index] ?? [];
     const remaining = queue.slice(0, index).concat(queue.slice(index + 1));
+    const remainingSkills = (session.queuedMessageSkills ?? []).slice(0, index)
+      .concat((session.queuedMessageSkills ?? []).slice(index + 1));
     const inFlight = session.status === "running" && session.structuredState?.inFlight === true;
-    const updated: SessionSnapshot = { ...session, queuedMessages: remaining };
+    const updated: SessionSnapshot = {
+      ...session,
+      queuedMessages: remaining,
+      queuedMessageSkills: remainingSkills,
+    };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
@@ -985,6 +1014,7 @@ export class StructuredSessionManager {
         preserveQueue: inFlight,
         queueAlreadyRemoved: true,
         idempotencyKey,
+        skills,
       });
     } catch {
       // Once the item has been promoted it must not return to the queue: the
@@ -999,7 +1029,7 @@ export class StructuredSessionManager {
     if (!session.queuedMessages || session.queuedMessages.length === 0) {
       return session;
     }
-    const updated: SessionSnapshot = { ...session, queuedMessages: [] };
+    const updated: SessionSnapshot = { ...session, queuedMessages: [], queuedMessageSkills: [] };
     this.sessions.set(sessionId, updated);
     this.storage.updateSessionRuntimeMetadata(updated);
     this.emitStructuredSnapshot(updated);
@@ -1128,6 +1158,7 @@ export class StructuredSessionManager {
   stop(id: string): SessionSnapshot {
     const session = this.requireSession(id);
     this.interruptedWith.delete(id);
+    this.interruptedSkills.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
     // Clearing activeRequestId is the generation barrier: late data/close callbacks
     // from the cancelled runner can no longer mutate this session or a replacement turn.
@@ -1193,6 +1224,7 @@ export class StructuredSessionManager {
     }
     this.clearStreamingCheckpoint(id);
     this.interruptedWith.delete(id);
+    this.interruptedSkills.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
     this.storage.deleteSession(id);
     this.logger?.deleteSession(id);
@@ -1269,15 +1301,17 @@ export class StructuredSessionManager {
     if (!nextInput) {
       return;
     }
+    const [nextSkills = [], ...restSkills] = current.queuedMessageSkills ?? [];
     const nextSession: SessionSnapshot = {
       ...current,
       queuedMessages: restQueue,
+      queuedMessageSkills: restSkills,
     };
     this.sessions.set(sessionId, nextSession);
     this.storage.updateSessionRuntimeMetadata(nextSession);
     this.emitStructuredSnapshot(nextSession);
     try {
-      await this.sendMessage(sessionId, nextInput);
+      await this.sendMessage(sessionId, nextInput, { skills: nextSkills });
     } catch (error) {
       console.error("[WAND] flushNextQueuedMessage failed:", error);
       // 发送失败时把消息放回队首，避免永久丢失
@@ -1286,6 +1320,7 @@ export class StructuredSessionManager {
         const rescued: SessionSnapshot = {
           ...afterFail,
           queuedMessages: [nextInput, ...(afterFail.queuedMessages ?? [])],
+          queuedMessageSkills: [nextSkills, ...(afterFail.queuedMessageSkills ?? [])],
         };
         this.sessions.set(sessionId, rescued);
         this.storage.updateSessionRuntimeMetadata(rescued);
@@ -1460,6 +1495,7 @@ export class StructuredSessionManager {
       claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
       messages,
       queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
+      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -1476,10 +1512,12 @@ export class StructuredSessionManager {
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
 
     if (interruptPrompt) {
+      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
       this.interruptedWith.delete(sessionId);
+      this.interruptedSkills.delete(sessionId);
       this.preserveQueueOnInterrupt.delete(sessionId);
       setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
+        this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((error) => {
           console.error("[WAND] codex interrupt-and-send failed:", error);
         });
       });
@@ -1614,6 +1652,7 @@ export class StructuredSessionManager {
       claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
       messages,
       queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
+      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -1629,9 +1668,11 @@ export class StructuredSessionManager {
     this.emitStructuredSnapshot(finished);
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
     if (interruptPrompt) {
+      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
       this.interruptedWith.delete(sessionId);
+      this.interruptedSkills.delete(sessionId);
       this.preserveQueueOnInterrupt.delete(sessionId);
-      setImmediate(() => this.sendMessage(sessionId, interruptPrompt).catch((error) => {
+      setImmediate(() => this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((error) => {
         console.error("[WAND] grok interrupt-and-send failed:", error);
       }));
       return;
@@ -1780,6 +1821,7 @@ export class StructuredSessionManager {
       claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
       messages,
       queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
+      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -1796,10 +1838,12 @@ export class StructuredSessionManager {
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
 
     if (interruptPrompt) {
+      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
       this.interruptedWith.delete(sessionId);
+      this.interruptedSkills.delete(sessionId);
       this.preserveQueueOnInterrupt.delete(sessionId);
       setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
+        this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((error) => {
           console.error("[WAND] opencode interrupt-and-send failed:", error);
         });
       });
@@ -1975,6 +2019,7 @@ export class StructuredSessionManager {
       claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
       messages,
       queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
+      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -1991,10 +2036,12 @@ export class StructuredSessionManager {
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
 
     if (interruptPrompt) {
+      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
       this.interruptedWith.delete(sessionId);
+      this.interruptedSkills.delete(sessionId);
       this.preserveQueueOnInterrupt.delete(sessionId);
       setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
+        this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((error) => {
           console.error("[WAND] interrupt-and-send failed:", error);
         });
       });
@@ -2034,7 +2081,13 @@ export class StructuredSessionManager {
    * payloads for incremental text/thinking/tool_use updates, followed by a final
    * SDKAssistantMessage with the authoritative complete content.
    */
-  private async runClaudeSdkStreaming(sessionId: string, session: SessionSnapshot, prompt: string, requestId: string): Promise<void> {
+  private async runClaudeSdkStreaming(
+    sessionId: string,
+    session: SessionSnapshot,
+    prompt: string,
+    requestId: string,
+    skills: string[],
+  ): Promise<void> {
     const abortController = new AbortController();
     this.pendingSdkAbort.set(sessionId, abortController);
 
@@ -2059,6 +2112,7 @@ export class StructuredSessionManager {
       ...(permPolicy.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
       ...(permPolicy.allowedTools ? { allowedTools: permPolicy.allowedTools } : {}),
       ...(isManaged ? { disallowedTools: ["AskUserQuestion"] } : {}),
+      skills,
       thinking: sdkThinking,
       includePartialMessages: true,
       // 把子 agent 的 text/thinking 也转发回来，UI 才能把"被 Task 召唤来的协作者"
@@ -2476,6 +2530,7 @@ export class StructuredSessionManager {
       claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
       messages: msgs,
       queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
+      queuedMessageSkills: this.resolveQueuedMessageSkillsAfterInterrupt(sessionId, current, interruptPrompt),
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
@@ -2492,11 +2547,13 @@ export class StructuredSessionManager {
     if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
 
     if (interruptPrompt) {
+      const interruptedSkills = this.interruptedSkills.get(sessionId) ?? [];
       this.interruptedWith.delete(sessionId);
+      this.interruptedSkills.delete(sessionId);
       // 与 codex/cli runner 对齐：清掉"保留队列"标记，避免 stale flag 影响下一次普通 interrupt。
       this.preserveQueueOnInterrupt.delete(sessionId);
       setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt).catch((err) => {
+        this.sendMessage(sessionId, interruptPrompt, { skills: interruptedSkills }).catch((err) => {
           console.error("[WAND] sdk interrupt-and-send failed:", err);
         });
       });
@@ -2585,6 +2642,16 @@ export class StructuredSessionManager {
   ): string[] | undefined {
     if (interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId)) return [];
     return current.queuedMessages;
+  }
+
+  private resolveQueuedMessageSkillsAfterInterrupt(
+    sessionId: string,
+    current: SessionSnapshot,
+    interruptPrompt: string | undefined,
+  ): string[][] {
+    if (interruptPrompt && !this.preserveQueueOnInterrupt.has(sessionId)) return [];
+    const queue = current.queuedMessages ?? [];
+    return queue.map((_, index) => current.queuedMessageSkills?.[index] ?? []);
   }
 
 

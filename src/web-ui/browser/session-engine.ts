@@ -497,6 +497,143 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         select.value = getThinkingLevels(session).some(function(level) { return level.id === selected; }) ? selected : "off";
       }
 
+      export function supportsClaudeSkillSelection(session) {
+        return !!session
+          && session.sessionKind === "structured"
+          && session.provider === "claude"
+          && session.runner === "claude-sdk";
+      }
+
+      export function getSelectedClaudeSkills(session) {
+        if (!supportsClaudeSkillSelection(session)) return [];
+        var selected = state.selectedClaudeSkillsBySession && state.selectedClaudeSkillsBySession[session.id];
+        return Array.isArray(selected) ? selected : [];
+      }
+
+      var claudeSkillsTrigger: HTMLElement | null = null;
+
+      function refreshClaudeSkillControls() {
+        var session = getSelectedSession();
+        var selected = getSelectedClaudeSkills(session);
+        document.querySelectorAll("[data-claude-skills-trigger]").forEach(function(trigger) {
+          trigger.textContent = selected.length ? ("Skills " + selected.length) : "Skills";
+          trigger.setAttribute("aria-expanded", state.claudeSkillsPickerOpen ? "true" : "false");
+          trigger.setAttribute("title", selected.length ? ("已选择 " + selected.length + " 个 skills") : "选择本条消息要应用的 skills");
+        });
+        refreshClaudeSkillsPicker();
+      }
+
+      export function renderClaudeSkillsPickerHtml(session) {
+        if (!supportsClaudeSkillSelection(session)) return "";
+        var selected = getSelectedClaudeSkills(session);
+        var skills = state.claudeSkillsByCwd && Array.isArray(state.claudeSkillsByCwd[session.cwd])
+          ? state.claudeSkillsByCwd[session.cwd]
+          : [];
+        var loading = !!(state.claudeSkillsLoadingByCwd && state.claudeSkillsLoadingByCwd[session.cwd]);
+        var items = loading
+          ? '<div class="composer-skills-empty">正在加载 skills…</div>'
+          : skills.length
+            ? skills.map(function(skill) {
+              var name = typeof skill.name === "string" ? skill.name : "";
+              if (!name) return "";
+              var checked = selected.indexOf(name) !== -1;
+              var description = typeof skill.description === "string" ? skill.description : "";
+              var source = skill.source === "project" ? "项目" : "用户";
+              return '<button class="composer-skill-option' + (checked ? " is-selected" : "") + '" type="button" role="checkbox" aria-checked="' + checked + '" data-claude-skill-name="' + escapeHtml(name) + '">' +
+                '<span class="composer-skill-check" aria-hidden="true">' + (checked ? "✓" : "") + '</span>' +
+                '<span class="composer-skill-copy"><span class="composer-skill-name">' + escapeHtml(name) + '</span>' +
+                (description ? '<span class="composer-skill-description">' + escapeHtml(description) + '</span>' : "") +
+                '</span><span class="composer-skill-source">' + source + '</span></button>';
+            }).join("")
+            : '<div class="composer-skills-empty">当前目录没有可用 skills。</div>';
+        return '<div class="composer-skills-popover' + (state.claudeSkillsPickerOpen ? "" : " hidden") + '" id="composer-skills-popover" role="dialog" aria-label="选择 skills" tabindex="-1">' +
+          '<div class="composer-skills-heading"><span>Skills</span><span class="composer-skills-count">' + (selected.length ? ("已选 " + selected.length) : "本条不应用") + '</span></div>' +
+          '<div class="composer-skills-list">' + items + '</div>' +
+        '</div>';
+      }
+
+      function refreshClaudeSkillsPicker() {
+        var picker = document.getElementById("composer-skills-popover");
+        var session = getSelectedSession();
+        if (!supportsClaudeSkillSelection(session)) {
+          picker?.remove();
+          return;
+        }
+        var markup = renderClaudeSkillsPickerHtml(session);
+        if (picker) {
+          picker.outerHTML = markup;
+        } else {
+          var plusPopover = document.getElementById("composer-plus-popover");
+          if (!plusPopover) return;
+          var template = document.createElement("template");
+          template.innerHTML = markup;
+          plusPopover.insertAdjacentElement("afterend", template.content.firstElementChild as Element);
+        }
+        if (state.claudeSkillsPickerOpen) {
+          requestAnimationFrame(function() {
+            var nextPicker = document.getElementById("composer-skills-popover");
+            var focusTarget = nextPicker?.querySelector<HTMLElement>("[data-claude-skill-name]") ?? nextPicker;
+            focusTarget?.focus();
+          });
+        }
+      }
+
+      export function loadClaudeSkillsForSession(session) {
+        if (!supportsClaudeSkillSelection(session) || !session.cwd) return Promise.resolve();
+        var cwd = session.cwd;
+        if ((state.claudeSkillsByCwd && Object.prototype.hasOwnProperty.call(state.claudeSkillsByCwd, cwd))
+          || (state.claudeSkillsLoadingByCwd && state.claudeSkillsLoadingByCwd[cwd])) {
+          return Promise.resolve();
+        }
+        state.claudeSkillsLoadingByCwd[cwd] = true;
+        return fetch("/api/claude-skills?cwd=" + encodeURIComponent(cwd), { credentials: "same-origin" })
+          .then(function(res) {
+            if (!res.ok) throw new Error("无法加载 skills。");
+            return res.json();
+          })
+          .then(function(payload) {
+            state.claudeSkillsByCwd[cwd] = Array.isArray(payload && payload.skills) ? payload.skills : [];
+          })
+          .catch(function() {
+            state.claudeSkillsByCwd[cwd] = [];
+          })
+          .finally(function() {
+            delete state.claudeSkillsLoadingByCwd[cwd];
+            refreshClaudeSkillControls();
+          });
+      }
+
+      export function toggleClaudeSkillsPicker(trigger?: HTMLElement | null) {
+        var session = getSelectedSession();
+        if (!supportsClaudeSkillSelection(session)) return;
+        if (state.claudeSkillsPickerOpen) {
+          closeClaudeSkillsPicker();
+          return;
+        }
+        claudeSkillsTrigger = trigger ?? document.activeElement as HTMLElement | null;
+        state.claudeSkillsPickerOpen = true;
+        void loadClaudeSkillsForSession(session);
+        refreshClaudeSkillControls();
+      }
+
+      export function closeClaudeSkillsPicker() {
+        if (!state.claudeSkillsPickerOpen) return;
+        state.claudeSkillsPickerOpen = false;
+        refreshClaudeSkillControls();
+        claudeSkillsTrigger?.focus();
+        claudeSkillsTrigger = null;
+      }
+
+      export function toggleClaudeSkill(session, name) {
+        if (!supportsClaudeSkillSelection(session) || !name) return;
+        var selected = getSelectedClaudeSkills(session).slice();
+        var index = selected.indexOf(name);
+        if (index === -1) selected.push(name);
+        else selected.splice(index, 1);
+        state.selectedClaudeSkillsBySession[session.id] = selected;
+        refreshClaudeSkillControls();
+      }
+
       export function renderComposerConfigControlsHtml(session) {
         var preferredTool = getPreferredTool();
         var mode = state.chatMode || "default";
@@ -528,6 +665,9 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
               renderThinkingOptions(thinking, session) +
             '</select>' +
           '</span>' +
+          (supportsClaudeSkillSelection(session)
+            ? '<button class="composer-config-chip composer-config-skills" type="button" data-claude-skills-trigger aria-haspopup="dialog" aria-expanded="false" title="选择本条消息要应用的 skills">Skills</button>'
+            : "") +
         '</div>';
       }
 
@@ -600,7 +740,19 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             thinkingPart.setAttribute("title", "思考深度：" + thinkingLabel);
             syncThinkingSelect(thinkingPart, thinking, session);
           }
+          var skillsTrigger = control.querySelector("[data-claude-skills-trigger]");
+          if (supportsClaudeSkillSelection(session)) {
+            if (!skillsTrigger) {
+              control.insertAdjacentHTML(
+                "beforeend",
+                '<button class="composer-config-chip composer-config-skills" type="button" data-claude-skills-trigger aria-haspopup="dialog" aria-expanded="false" title="选择本条消息要应用的 skills">Skills</button>',
+              );
+            }
+          } else {
+            skillsTrigger?.remove();
+          }
         });
+        refreshClaudeSkillControls();
       }
 
       export function renderChatModeOptionsRaw(tool, selectedMode) {
@@ -1547,6 +1699,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
           teardownTerminal();
         }
         state.selectedId = id;
+        state.claudeSkillsPickerOpen = false;
         persistSelectedId();
         state.toolContentCache = {};
         // Clear queued inputs from the previous session to prevent cross-session leaks
@@ -1589,6 +1742,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         }
         loadOutput(id).then(function() { focusInputBox(true); });
         subscribeToSession(id);
+        loadClaudeSkillsForSession(foundSession);
         // 切换会话时清掉旧 git 状态，再异步刷新
         state.gitStatus = null;
         state.gitStatusSessionId = null;

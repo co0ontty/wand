@@ -64,6 +64,9 @@ const MODES: ReadonlyArray<{
   { value: "native", label: "原生", description: "原生结构化输出" },
 ];
 
+const PROVIDER_VALUES = PROVIDERS.map((provider) => provider.value);
+const KIND_VALUES = KINDS.map((kind) => kind.value);
+
 /** xAI 官方 Grok SVG（2025-02 版）的 `#mark` 原始路径。 */
 function GrokMark() {
   return (
@@ -153,6 +156,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState<NewSessionDefaults["recentPaths"]>([]);
   const [suggestionsActive, setSuggestionsActive] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const providerRefs = useRef<Partial<Record<NewSessionProvider, HTMLButtonElement | null>>>({});
   const kindRefs = useRef<Partial<Record<NewSessionKind, HTMLButtonElement | null>>>({});
   const modeRefs = useRef<Partial<Record<NewSessionMode, HTMLButtonElement | null>>>({});
@@ -168,6 +172,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
     setForm(null);
     setSuggestions([]);
     setSuggestionsActive(false);
+    setAdvancedOpen(false);
     void repository.load({ signal: abort.signal })
       .then((loaded) => {
         if (abort.signal.aborted) return;
@@ -225,6 +230,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
 
   const selectKind = useCallback((kind: NewSessionKind) => {
     setForm((current) => current ? { ...current, kind } : current);
+    if (kind === "pty") setAdvancedOpen(true);
     void repository.savePreferences({ defaultSessionKind: kind })
       .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
   }, [repository]);
@@ -236,10 +242,16 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
   }, [form, repository]);
 
-  const supported = useMemo(
-    () => new Set(form ? supportedModes(form.provider) : []),
+  const supportedModesForProvider = useMemo(
+    () => form ? supportedModes(form.provider) : [],
     [form?.provider],
   );
+  const supported = useMemo(() => new Set(supportedModesForProvider), [supportedModesForProvider]);
+  const effectiveCwd = form?.cwd.trim()
+    || newSessionStore.getRuntime()?.getContext().effectiveCwd
+    || defaults?.config.defaultCwd
+    || "当前工作目录";
+  const selectedMode = form ? MODES.find((mode) => mode.value === form.mode) : undefined;
 
   function navigateChoice<T extends string>(
     event: KeyboardEvent<HTMLButtonElement>,
@@ -323,7 +335,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                     onKeyDown={(event) => navigateChoice(
                       event,
                       form.provider,
-                      PROVIDERS.map((item) => item.value),
+                      PROVIDER_VALUES,
                       selectProvider,
                       providerRefs,
                     )}
@@ -336,137 +348,170 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
               </div>
             </fieldset>
 
-            <fieldset className="wand-new-session-field wand-new-session-fieldset">
-              <legend className="wand-new-session-field-label">会话类型</legend>
-              <div className="wand-new-session-choices" role="radiogroup" aria-label="会话类型">
-                {KINDS.map((kind) => (
-                  <button
-                    key={kind.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={form.kind === kind.value}
-                    tabIndex={form.kind === kind.value ? 0 : -1}
-                    ref={(element) => { kindRefs.current[kind.value] = element; }}
-                    className={`wand-new-session-choice wand-new-session-kind-choice${form.kind === kind.value ? " active" : ""}`}
-                    onClick={() => selectKind(kind.value)}
-                    onKeyDown={(event) => navigateChoice(
-                      event,
-                      form.kind,
-                      KINDS.map((item) => item.value),
-                      selectKind,
-                      kindRefs,
-                    )}
-                  >
-                    <span className="wand-new-session-choice-label">{kind.label}</span>
-                    <span className="wand-new-session-choice-description">{kind.description}</span>
-                  </button>
-                ))}
-              </div>
-              <p className="wand-new-session-field-hint">{kindHint(form.provider, form.kind)}</p>
-              <div className="wand-new-session-worktree">
-                <div>
-                  <strong>Worktree 模式</strong>
-                  <span>为本次会话创建独立的 Git worktree 与分支。</span>
+            <div className="wand-new-session-primary-grid">
+              <fieldset className="wand-new-session-field wand-new-session-fieldset">
+                <legend className="wand-new-session-field-label">会话类型</legend>
+                <div className="wand-new-session-choices" role="radiogroup" aria-label="会话类型">
+                  {KINDS.map((kind) => (
+                    <button
+                      key={kind.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={form.kind === kind.value}
+                      tabIndex={form.kind === kind.value ? 0 : -1}
+                      ref={(element) => { kindRefs.current[kind.value] = element; }}
+                      className={`wand-new-session-choice wand-new-session-kind-choice${form.kind === kind.value ? " active" : ""}`}
+                      onClick={() => selectKind(kind.value)}
+                      onKeyDown={(event) => navigateChoice(
+                        event,
+                        form.kind,
+                        KIND_VALUES,
+                        selectKind,
+                        kindRefs,
+                      )}
+                    >
+                      <span className="wand-new-session-choice-label">{kind.label}</span>
+                      <span className="wand-new-session-choice-description">{kind.description}</span>
+                    </button>
+                  ))}
                 </div>
-                <WandSwitch
-                  id="wand-new-session-worktree"
-                  checked={form.worktreeEnabled}
-                  ariaLabel="启用 Worktree 模式"
-                  onCheckedChange={(worktreeEnabled) => setForm({ ...form, worktreeEnabled })}
-                />
-              </div>
-            </fieldset>
+                <p className="wand-new-session-field-hint">{kindHint(form.provider, form.kind)}</p>
+              </fieldset>
 
-            <div className="wand-new-session-field">
-              <label className="wand-new-session-field-label" htmlFor="wand-new-session-cwd">工作目录</label>
-              <div className="wand-new-session-suggestions-wrap">
-                <input
-                  id="wand-new-session-cwd"
-                  className="wand-new-session-input"
-                  type="text"
-                  value={form.cwd}
-                  placeholder={newSessionStore.getRuntime()?.getContext().effectiveCwd || defaults.config.defaultCwd}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  onFocus={() => setSuggestionsActive(true)}
-                  onChange={(event) => setForm({ ...form, cwd: event.currentTarget.value })}
-                  onBlur={() => window.setTimeout(() => setSuggestionsActive(false), 120)}
-                />
-                {suggestionsActive && suggestions.length > 0 ? (
-                  <div className="wand-new-session-suggestions" role="listbox" aria-label="工作目录建议">
-                    {suggestions.map((item) => (
+              <div className="wand-new-session-field">
+                <label className="wand-new-session-field-label" htmlFor="wand-new-session-cwd">工作目录</label>
+                <div className="wand-new-session-suggestions-wrap">
+                  <input
+                    id="wand-new-session-cwd"
+                    className="wand-new-session-input"
+                    type="text"
+                    value={form.cwd}
+                    placeholder={newSessionStore.getRuntime()?.getContext().effectiveCwd || defaults.config.defaultCwd}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    aria-invalid={error.includes("目录") || undefined}
+                    aria-describedby="wand-new-session-cwd-hint"
+                    onFocus={() => setSuggestionsActive(true)}
+                    onChange={(event) => setForm({ ...form, cwd: event.currentTarget.value })}
+                    onBlur={() => window.setTimeout(() => setSuggestionsActive(false), 120)}
+                  />
+                  {suggestionsActive && suggestions.length > 0 ? (
+                    <div className="wand-new-session-suggestions" role="listbox" aria-label="工作目录建议">
+                      {suggestions.map((item) => (
+                        <button
+                          key={item.path}
+                          type="button"
+                          className="wand-new-session-suggestion"
+                          role="option"
+                          aria-selected={form.cwd === item.path}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setForm({ ...form, cwd: item.path });
+                            setSuggestionsActive(false);
+                          }}
+                        >
+                          <strong>{item.name}</strong>
+                          <small className="wand-new-session-suggestion-path">{item.path}</small>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <p id="wand-new-session-cwd-hint" className="wand-new-session-field-hint">留空则使用当前目录，支持路径自动补全。</p>
+                {defaults.recentPaths.length > 0 ? (
+                  <div className="wand-new-session-recent-paths" aria-label="最近使用的工作目录">
+                    {defaults.recentPaths.map((item) => (
                       <button
                         key={item.path}
                         type="button"
-                        className="wand-new-session-suggestion"
-                        role="option"
-                        aria-selected={form.cwd === item.path}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => {
-                          setForm({ ...form, cwd: item.path });
-                          setSuggestionsActive(false);
-                        }}
+                        className={`wand-new-session-recent-path${form.cwd === item.path ? " active" : ""}`}
+                        title={item.path}
+                        aria-pressed={form.cwd === item.path}
+                        onClick={() => setForm({ ...form, cwd: item.path })}
                       >
-                        <strong>{item.name}</strong>
-                        <small className="wand-new-session-suggestion-path">{item.path}</small>
+                        <span className="wand-new-session-recent-path-value">{item.path}</span>
                       </button>
                     ))}
                   </div>
                 ) : null}
               </div>
-              <p className="wand-new-session-field-hint">创建前先确认目录；留空则使用上方目录，支持路径自动补全。</p>
-              {defaults.recentPaths.length > 0 ? (
-                <div className="wand-new-session-recent-paths" aria-label="最近使用的工作目录">
-                  {defaults.recentPaths.map((item) => (
-                    <button
-                      key={item.path}
-                      type="button"
-                      className="wand-new-session-recent-path"
-                      title={item.path}
-                      onClick={() => setForm({ ...form, cwd: item.path })}
-                    >
-                      <span className="wand-new-session-recent-path-value">{item.path}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </div>
 
-            <fieldset className="wand-new-session-field wand-new-session-fieldset">
-              <legend className="wand-new-session-field-label">模式</legend>
-              <div className="wand-new-session-choices" role="radiogroup" aria-label="执行模式">
-                {MODES.map((mode) => {
-                  const disabled = !supported.has(mode.value);
-                  return (
-                    <button
-                      key={mode.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={form.mode === mode.value}
-                      aria-disabled={disabled}
-                      tabIndex={form.mode === mode.value ? 0 : -1}
-                      ref={(element) => { modeRefs.current[mode.value] = element; }}
-                      disabled={disabled}
-                      className={`wand-new-session-choice${form.mode === mode.value ? " active" : ""}${disabled ? " disabled" : ""}`}
-                      onClick={() => selectMode(mode.value)}
-                      onKeyDown={(event) => navigateChoice(
-                        event,
-                        form.mode,
-                        MODES.filter((item) => supported.has(item.value)).map((item) => item.value),
-                        selectMode,
-                        modeRefs,
-                      )}
-                    >
-                      <span className="wand-new-session-choice-label">{mode.label}</span>
-                      <span className="wand-new-session-choice-description">{mode.description}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="wand-new-session-field-hint">{modeHint(form.provider, form.mode)}</p>
-            </fieldset>
+            <section className="wand-new-session-advanced" aria-label="高级选项">
+              <button
+                type="button"
+                className="wand-new-session-advanced-trigger"
+                aria-expanded={advancedOpen}
+                aria-controls="wand-new-session-advanced-content"
+                onClick={() => setAdvancedOpen((open) => !open)}
+              >
+                <span>高级选项</span>
+                <span className="wand-new-session-advanced-summary">
+                  {selectedMode?.label ?? "标准"} · {form.worktreeEnabled ? "Worktree 已开启" : "不使用 Worktree"}
+                </span>
+              </button>
+              {advancedOpen ? (
+                <div id="wand-new-session-advanced-content" className="wand-new-session-advanced-content">
+                  <fieldset className="wand-new-session-field wand-new-session-fieldset">
+                    <legend className="wand-new-session-field-label">模式</legend>
+                    <div className="wand-new-session-choices wand-new-session-mode-choices" role="radiogroup" aria-label="执行模式">
+                      {MODES.map((mode) => {
+                        const disabled = !supported.has(mode.value);
+                        return (
+                          <button
+                            key={mode.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={form.mode === mode.value}
+                            aria-disabled={disabled}
+                            tabIndex={form.mode === mode.value ? 0 : -1}
+                            ref={(element) => { modeRefs.current[mode.value] = element; }}
+                            disabled={disabled}
+                            className={`wand-new-session-choice${form.mode === mode.value ? " active" : ""}${disabled ? " disabled" : ""}`}
+                            onClick={() => selectMode(mode.value)}
+                            onKeyDown={(event) => navigateChoice(
+                              event,
+                              form.mode,
+                              supportedModesForProvider,
+                              selectMode,
+                              modeRefs,
+                            )}
+                          >
+                            <span className="wand-new-session-choice-label">{mode.label}</span>
+                            <span className="wand-new-session-choice-description">{mode.description}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="wand-new-session-field-hint">{modeHint(form.provider, form.mode)}</p>
+                  </fieldset>
+                  <div className="wand-new-session-worktree">
+                    <div>
+                      <strong>Worktree 模式</strong>
+                      <span>为本次会话创建独立的 Git worktree 与分支。</span>
+                    </div>
+                    <WandSwitch
+                      id="wand-new-session-worktree"
+                      checked={form.worktreeEnabled}
+                      ariaLabel="启用 Worktree 模式"
+                      onCheckedChange={(worktreeEnabled) => {
+                        setForm({ ...form, worktreeEnabled });
+                        if (worktreeEnabled) setAdvancedOpen(true);
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          </div>
+
+          <div className="wand-new-session-summary" aria-live="polite">
+            <span>即将启动</span>
+            <strong>{PROVIDERS.find((provider) => provider.value === form.provider)?.label} · {form.kind === "structured" ? "结构化" : "PTY"}</strong>
+            <span title={effectiveCwd}>{effectiveCwd}</span>
+            <span>{selectedMode?.label ?? "标准"}{form.worktreeEnabled ? " · Worktree" : ""}</span>
           </div>
 
           <div className="wand-new-session-footer">

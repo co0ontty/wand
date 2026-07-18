@@ -176,6 +176,7 @@ test("targeted session checkpoints do not rewrite unrelated payload columns", (t
     output: "initial output",
     messages: initialMessages,
     queuedMessages: ["old queue"],
+    queuedMessageSkills: [["review"]],
   }));
 
   storage.updateSessionRuntimeMetadata(snapshot("targeted", {
@@ -183,12 +184,14 @@ test("targeted session checkpoints do not rewrite unrelated payload columns", (t
     output: "must not overwrite output",
     messages: [{ role: "assistant", content: [{ type: "text", text: "must not overwrite messages" }] }],
     queuedMessages: ["new queue"],
+    queuedMessageSkills: [["implement"]],
     title: "runtime metadata",
   }));
   let stored = storage.getSession("targeted");
   assert.equal(stored?.output, "initial output");
   assert.deepEqual(stored?.messages, initialMessages);
   assert.deepEqual(stored?.queuedMessages, ["new queue"]);
+  assert.deepEqual(stored?.queuedMessageSkills, [["implement"]]);
   assert.equal(stored?.title, "runtime metadata");
 
   storage.checkpointSessionOutput("targeted", "checkpointed output");

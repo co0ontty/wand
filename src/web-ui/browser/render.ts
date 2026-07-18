@@ -8,7 +8,7 @@ import { shouldShowSessionsBackdrop, isMobileLayout, refreshFileExplorer, render
 import { loadGitStatus, renderTopbarGitBadgeHtml, renderTopbarMoreMenuHtml } from "./git-commit";
 import { getSelectedSession, updateInteractiveControls } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
+import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderClaudeSkillsPickerHtml, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
 import { getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
 import { renderSessionsListContent, renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded } from "./sidebar";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer } from "./terminal";
@@ -860,6 +860,7 @@ export function renderAppShell() {
               renderComposerConfigControlsHtml(selectedSession) +
             '</div>' +
           '</div>' +
+          renderClaudeSkillsPickerHtml(selectedSession) +
           // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
           // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
           '<div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite">' +

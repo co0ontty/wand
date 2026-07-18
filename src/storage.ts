@@ -37,6 +37,7 @@ interface SessionRow {
   claude_session_id: string | null;
   messages: string | null;
   queued_messages: string | null;
+  queued_message_skills: string | null;
   structured_state: string | null;
   resumed_from_session_id: string | null;
   auto_recovered: number;
@@ -266,6 +267,17 @@ function parseQueuedMessages(raw: string | null): string[] | undefined {
   return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : undefined;
 }
 
+function parseQueuedMessageSkills(raw: string | null, queueLength: number): string[][] | undefined {
+  const parsed = safeJsonParse<unknown>(raw);
+  if (!Array.isArray(parsed)) return undefined;
+  return Array.from({ length: queueLength }, (_, index) => {
+    const skills = parsed[index];
+    return Array.isArray(skills)
+      ? skills.filter((skill): skill is string => typeof skill === "string")
+      : [];
+  });
+}
+
 function inferSessionProvider(row: Pick<SessionRow, "provider" | "runner" | "command">): SessionProvider | undefined {
   if (row.provider === "claude" || row.provider === "codex" || row.provider === "opencode" || row.provider === "grok" || row.provider === "qoder") {
     return row.provider;
@@ -329,13 +341,13 @@ function mapWorktreeMergeFields(row: SessionRow): Pick<SessionSnapshot, "worktre
 }
 
 function sessionSelectFields(): string {
-  return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, structured_state
+  return `id, session_source, automation_id, provider, session_kind, runner, command, cwd, mode, status, exit_code, started_at, ended_at, output, archived, archived_at, claude_session_id, messages, queued_messages, queued_message_skills, structured_state
              , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options`;
 }
 
 function sessionPersistFields(): string {
   return `id, session_source, automation_id, command, cwd, mode, status, exit_code, started_at, ended_at, output
-             , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, structured_state
+             , archived, archived_at, claude_session_id, provider, session_kind, runner, messages, queued_messages, queued_message_skills, structured_state
              , resumed_from_session_id, auto_recovered, worktree_enabled, worktree_info, worktree_merge_status, worktree_merge_info, title, description, session_options`;
 }
 
@@ -358,6 +370,7 @@ function sessionPersistAssignments(): string {
              runner = excluded.runner,
              messages = excluded.messages,
              queued_messages = excluded.queued_messages,
+             queued_message_skills = excluded.queued_message_skills,
              structured_state = excluded.structured_state,
              resumed_from_session_id = excluded.resumed_from_session_id,
              auto_recovered = excluded.auto_recovered,
@@ -375,7 +388,7 @@ function sessionRuntimeMetadataAssignments(): string {
            command = ?, cwd = ?, mode = ?, status = ?, exit_code = ?,
            started_at = ?, ended_at = ?,
            archived = ?, archived_at = ?, claude_session_id = ?,
-           provider = ?, session_kind = ?, runner = ?, queued_messages = ?, structured_state = ?,
+           provider = ?, session_kind = ?, runner = ?, queued_messages = ?, queued_message_skills = ?, structured_state = ?,
            resumed_from_session_id = ?, auto_recovered = ?,
            worktree_enabled = ?, worktree_info = ?, worktree_merge_status = ?, worktree_merge_info = ?,
            title = ?, description = ?, session_options = ?`;
@@ -402,6 +415,7 @@ function sessionPersistValues(snapshot: SessionSnapshot): Array<string | number 
     snapshot.runner ?? null,
     snapshot.messages ? JSON.stringify(snapshot.messages) : null,
     snapshot.queuedMessages ? JSON.stringify(snapshot.queuedMessages) : null,
+    snapshot.queuedMessageSkills ? JSON.stringify(snapshot.queuedMessageSkills) : null,
     snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
     snapshot.resumedFromSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
@@ -433,6 +447,7 @@ function sessionRuntimeMetadataValues(snapshot: SessionSnapshot): Array<string |
     snapshot.sessionKind ?? "pty",
     snapshot.runner ?? null,
     snapshot.queuedMessages ? JSON.stringify(snapshot.queuedMessages) : null,
+    snapshot.queuedMessageSkills ? JSON.stringify(snapshot.queuedMessageSkills) : null,
     snapshot.structuredState ? JSON.stringify(snapshot.structuredState) : null,
     snapshot.resumedFromSessionId ?? null,
     snapshot.autoRecovered ? 1 : 0,
@@ -450,6 +465,7 @@ function sessionRuntimeMetadataValues(snapshot: SessionSnapshot): Array<string |
 function mapSessionCore(row: SessionRow): SessionSnapshot {
   const provider = inferSessionProvider(row);
   const sessionOptions = parseSessionOptions(row.session_options);
+  const queuedMessages = parseQueuedMessages(row.queued_messages);
   return {
     id: row.id,
     sessionSource: normalizeSessionSource(row.session_source),
@@ -469,7 +485,8 @@ function mapSessionCore(row: SessionRow): SessionSnapshot {
     archivedAt: row.archived_at,
     claudeSessionId: row.claude_session_id,
     messages: safeJsonParse<ConversationTurn[]>(row.messages),
-    queuedMessages: parseQueuedMessages(row.queued_messages),
+    queuedMessages,
+    queuedMessageSkills: parseQueuedMessageSkills(row.queued_message_skills, queuedMessages?.length ?? 0),
     structuredState: safeJsonParse<StructuredSessionState>(row.structured_state),
     resumedFromSessionId: row.resumed_from_session_id ?? undefined,
     autoRecovered: Boolean(row.auto_recovered),
@@ -537,6 +554,7 @@ const INIT_SQL = `
     runner TEXT,
     messages TEXT,
     queued_messages TEXT,
+    queued_message_skills TEXT,
     structured_state TEXT,
     resumed_from_session_id TEXT,
     resumed_to_session_id TEXT,
@@ -935,7 +953,7 @@ export class WandStorage {
       .prepare(
         `INSERT INTO command_sessions (
          ${sessionPersistFields()}
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            ${sessionPersistAssignments()}`
       )
@@ -1075,6 +1093,7 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["runner", "ALTER TABLE command_sessions ADD COLUMN runner TEXT"],
   ["messages", "ALTER TABLE command_sessions ADD COLUMN messages TEXT"],
   ["queued_messages", "ALTER TABLE command_sessions ADD COLUMN queued_messages TEXT"],
+  ["queued_message_skills", "ALTER TABLE command_sessions ADD COLUMN queued_message_skills TEXT"],
   ["structured_state", "ALTER TABLE command_sessions ADD COLUMN structured_state TEXT"],
   ["resumed_from_session_id", "ALTER TABLE command_sessions ADD COLUMN resumed_from_session_id TEXT"],
   ["resumed_to_session_id", "ALTER TABLE command_sessions ADD COLUMN resumed_to_session_id TEXT"],

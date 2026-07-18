@@ -8,7 +8,7 @@ import { loadGitStatus, openQuickCommitModal } from "./git-commit";
 import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, handleVoiceMove, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, startVoiceRecording, stopSession, stopVoiceRecording, toggleTerminalInteractive, updateQueueBar, welcomeInputSend } from "./input";
 import { hideError, showToast } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
-import { addPendingAttachment, backToNativeApp, closePlusPopover, closeSessionsDrawer, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, isStructuredSession, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, retryWorktreeCleanup, selectSession, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin } from "./session-engine";
+import { addPendingAttachment, backToNativeApp, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, isStructuredSession, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, retryWorktreeCleanup, selectSession, setDraftValue, switchServer, syncComposerHasText, toggleClaudeSkill, toggleClaudeSkillsPicker, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin } from "./session-engine";
 import { batchDeleteSelected, clearSelections, confirmDelete, renderSessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { copySelectedSessionField, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { ensureTerminalFit, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
@@ -347,6 +347,27 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
         });
         document.addEventListener("keydown", function(e) {
           if (e.key === "Escape" && state.plusPopoverOpen) closePlusPopover();
+          if (e.key === "Escape") closeClaudeSkillsPicker();
+        });
+
+        document.addEventListener("click", function(e) {
+          var target = e.target as HTMLElement;
+          if (!target || typeof target.closest !== "function") return;
+          var trigger = target.closest("[data-claude-skills-trigger]");
+          if (trigger) {
+            e.preventDefault();
+            toggleClaudeSkillsPicker(trigger as HTMLElement);
+            return;
+          }
+          var option = target.closest("[data-claude-skill-name]");
+          if (option) {
+            e.preventDefault();
+            var session = state.sessions.find(function(item) { return item.id === state.selectedId; });
+            toggleClaudeSkill(session, option.getAttribute("data-claude-skill-name"));
+            return;
+          }
+          var picker = document.getElementById("composer-skills-popover");
+          if (picker && !picker.contains(target)) closeClaudeSkillsPicker();
         });
 
         // 自动批准 chip 会随输入栏/会话状态局部刷新，使用委托避免刷新后丢失点击绑定。

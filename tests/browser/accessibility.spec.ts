@@ -44,4 +44,12 @@ test("login and migrated overlay have no serious automated accessibility violati
   await expect(page.getByTestId("settings-dialog")).toBeVisible();
   await expectNoBlockingViolations(page, "#overlay-root");
   await page.keyboard.press("Escape");
+
+  await page.locator("#drawer-new-session-button").evaluate((element: HTMLButtonElement) => element.click());
+  const newSessionDialog = page.getByTestId("new-session-dialog");
+  await expect(newSessionDialog).toBeVisible();
+  await expect(newSessionDialog.getByRole("button", { name: /高级选项/ })).toHaveAttribute("aria-expanded", "false");
+  await expect(newSessionDialog.locator(".wand-new-session-summary")).toHaveAttribute("aria-live", "polite");
+  await expectNoBlockingViolations(page, "#overlay-root");
+  await page.keyboard.press("Escape");
 });
