@@ -30,11 +30,12 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-dialog {
   display: flex;
   flex-direction: column;
-  width: min(1120px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 40px));
-  height: min(820px, calc(100dvh - var(--wand-safe-top) - var(--wand-safe-bottom) - 40px));
+  width: min(1080px, calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 48px));
+  height: min(790px, calc(100dvh - var(--wand-safe-top) - var(--wand-safe-bottom) - 48px));
   min-height: 520px;
   overflow: hidden;
-  border-radius: var(--radius-lg);
+  border-color: var(--border-subtle);
+  border-radius: 20px;
 }
 
 .wand-settings-nested-dialog {
@@ -50,7 +51,12 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 .wand-settings-dialog[data-state="open"],
 .wand-settings-nested-dialog[data-state="open"] {
-  animation: wand-ui-dialog-in var(--transition-normal);
+  animation: wand-settings-fade-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes wand-settings-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .wand-settings-header {
@@ -59,14 +65,16 @@ export const settingsAndQuickCommitStyles = String.raw`
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 18px 20px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
+  padding: 17px 20px 16px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
 }
 
 .wand-settings-title {
   margin: 0;
-  font-size: var(--font-size-xl);
+  font-size: 1.125rem;
   line-height: var(--line-height-tight);
+  letter-spacing: -0.015em;
 }
 
 .wand-settings-description,
@@ -101,7 +109,7 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 .wand-settings-tabs {
   display: grid;
-  grid-template-columns: 238px minmax(0, 1fr);
+  grid-template-columns: 246px minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -110,18 +118,48 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-tabs > .wand-ui-tabs-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   box-sizing: border-box;
   overflow: auto;
-  border-right: 1px solid var(--border-subtle);
-  padding: 14px 12px;
-  background: var(--bg-secondary);
+  border-right: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
+  border-radius: 0;
+  padding: 13px 11px;
+  background: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));
 }
 
 .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger {
-  min-height: 54px;
-  padding: 9px 11px;
+  position: relative;
+  min-height: 52px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 12px 8px 14px;
   text-align: left;
+  box-shadow: none;
+  transition:
+    color 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-elevated) 66%, transparent);
+}
+
+.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-state="active"] {
+  border-color: color-mix(in srgb, var(--accent) 16%, var(--border-subtle));
+  background: color-mix(in srgb, var(--bg-elevated) 90%, var(--accent-muted));
+}
+
+.wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-state="active"]::before {
+  position: absolute;
+  top: 11px;
+  bottom: 11px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  content: "";
 }
 
 .wand-settings-tab-label {
@@ -134,6 +172,7 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-tab-label strong {
   color: inherit;
   font-size: var(--font-size-sm);
+  line-height: 1.25;
 }
 
 .wand-settings-tab-label span {
@@ -151,6 +190,7 @@ export const settingsAndQuickCommitStyles = String.raw`
   margin: 0;
   overflow: auto;
   overscroll-behavior: contain;
+  background: color-mix(in srgb, var(--bg-primary) 58%, var(--bg-elevated));
 }
 
 .wand-ui-popover-content.wand-shell-menu-popover {
@@ -161,13 +201,13 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-panel {
   box-sizing: border-box;
   width: 100%;
-  max-width: 860px;
+  max-width: 820px;
   margin: 0 auto;
-  padding: 22px 24px 34px;
+  padding: 25px 26px 36px;
 }
 
 .wand-settings-panel-heading {
-  margin-bottom: 20px;
+  margin-bottom: 22px;
 }
 
 .wand-settings-panel-heading h2,
@@ -176,15 +216,15 @@ export const settingsAndQuickCommitStyles = String.raw`
   color: var(--text-primary);
 }
 
-.wand-settings-panel-heading h2 { font-size: var(--font-size-lg); }
+.wand-settings-panel-heading h2 { font-size: 1.25rem; letter-spacing: -0.018em; }
 .wand-settings-section-heading h3 { font-size: var(--font-size-base); }
 
 .wand-settings-section {
-  margin-bottom: 16px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
-  box-shadow: var(--shadow-xs);
+  margin-bottom: 18px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  box-shadow: 0 8px 24px -24px color-mix(in srgb, var(--text-primary) 38%, transparent);
 }
 
 .wand-settings-section-heading {
@@ -192,8 +232,8 @@ export const settingsAndQuickCommitStyles = String.raw`
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 14px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  padding: 15px 17px 14px;
 }
 
 .wand-settings-section-action { flex: 0 0 auto; }
@@ -201,8 +241,8 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-section-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px;
+  gap: 15px;
+  padding: 17px;
 }
 
 .wand-settings-grid {
@@ -269,6 +309,11 @@ export const settingsAndQuickCommitStyles = String.raw`
   gap: 18px;
 }
 
+.wand-settings-toggle-row,
+.wand-settings-download-row {
+  min-height: 44px;
+}
+
 .wand-settings-toggle-row > div,
 .wand-settings-download-row > div {
   display: flex;
@@ -299,16 +344,16 @@ export const settingsAndQuickCommitStyles = String.raw`
 
 .wand-settings-save-bar {
   position: sticky;
-  bottom: -34px;
+  bottom: 0;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  margin: 18px -24px -34px;
-  border-top: 1px solid var(--border-default);
-  padding: 13px 24px calc(13px + var(--wand-safe-bottom));
-  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  margin: 18px -26px -36px;
+  border-top: 1px solid var(--border-subtle);
+  padding: 13px 26px calc(13px + var(--wand-safe-bottom));
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
   backdrop-filter: blur(12px);
 }
 
@@ -1296,6 +1341,120 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
 .wand-folder-picker-input[aria-invalid="true"] { border-color: var(--danger); }
 
+/* Shared text-input treatment across every React-owned surface. The field stays
+   quiet at rest, responds immediately on focus, and never uses bouncy motion
+   while the user is typing. Path-oriented fields keep their local mono font. */
+:is(
+  .wand-ui-dialog-input,
+  .wand-settings-input,
+  .wand-quick-field input,
+  .wand-quick-field textarea,
+  .wand-new-session-input,
+  .wand-folder-picker-input
+) {
+  min-height: 44px;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  outline: none;
+  caret-color: var(--accent);
+  background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 42%, transparent);
+  transition:
+    border-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:is(
+  .wand-ui-dialog-input,
+  .wand-settings-input,
+  .wand-quick-field input,
+  .wand-quick-field textarea,
+  .wand-new-session-input,
+  .wand-folder-picker-input
+):hover:not(:disabled):not([aria-invalid="true"]) {
+  border-color: var(--border-strong);
+  background: var(--bg-primary);
+}
+
+:is(
+  .wand-ui-dialog-input,
+  .wand-settings-input,
+  .wand-quick-field input,
+  .wand-quick-field textarea,
+  .wand-new-session-input,
+  .wand-folder-picker-input
+):focus {
+  border-color: var(--accent);
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 3px var(--accent-muted),
+    0 10px 24px -20px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+:is(
+  .wand-ui-dialog-input,
+  .wand-settings-input,
+  .wand-quick-field input,
+  .wand-quick-field textarea,
+  .wand-new-session-input,
+  .wand-folder-picker-input
+)::placeholder {
+  color: var(--text-muted);
+  opacity: 0.72;
+}
+
+:is(
+  .wand-ui-dialog-input,
+  .wand-settings-input,
+  .wand-quick-field input,
+  .wand-quick-field textarea,
+  .wand-new-session-input,
+  .wand-folder-picker-input
+):disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+:is(
+  .wand-ui-dialog-input,
+  .wand-settings-input,
+  .wand-quick-field input,
+  .wand-quick-field textarea,
+  .wand-new-session-input,
+  .wand-folder-picker-input
+)[aria-invalid="true"] {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-muted);
+}
+
+@media (prefers-contrast: more) {
+  :is(
+    .wand-ui-dialog-input,
+    .wand-settings-input,
+    .wand-quick-field input,
+    .wand-quick-field textarea,
+    .wand-new-session-input,
+    .wand-folder-picker-input
+  ) {
+    border-color: var(--border-strong);
+    background: var(--bg-primary);
+    box-shadow: none;
+  }
+
+  :is(
+    .wand-ui-dialog-input,
+    .wand-settings-input,
+    .wand-quick-field input,
+    .wand-quick-field textarea,
+    .wand-new-session-input,
+    .wand-folder-picker-input
+  ):focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+}
+
 .wand-folder-picker-options {
   min-height: 112px;
   max-height: min(310px, 42dvh);
@@ -1587,10 +1746,10 @@ export const sessionPickerAndWorktreeStyles = String.raw`
     width: calc(100vw - var(--wand-safe-left) - var(--wand-safe-right) - 12px);
     height: calc(100dvh - var(--wand-safe-top) - var(--wand-safe-bottom) - 12px);
     min-height: 0;
-    border-radius: var(--radius-md);
+    border-radius: 18px;
   }
 
-  .wand-settings-header { padding: 14px 15px; }
+  .wand-settings-header { padding: 14px 15px 13px; }
   .wand-settings-description { display: none; }
 
   .wand-settings-tabs {
@@ -1602,28 +1761,42 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   .wand-settings-tabs > .wand-ui-tabs-list {
     grid-row: 1;
     flex-direction: row;
-    gap: 5px;
+    gap: 3px;
     overflow-x: auto;
     border-right: 0;
     border-bottom: 1px solid var(--border-subtle);
-    padding: 8px;
+    padding: 7px 8px;
     scrollbar-width: none;
   }
 
   .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger {
     flex: 0 0 auto;
-    min-height: 36px;
-    padding: 7px 11px;
+    min-height: 38px;
+    border-radius: 9px;
+    padding: 7px 12px;
+  }
+
+  .wand-settings-tabs > .wand-ui-tabs-list .wand-ui-tabs-trigger[data-state="active"]::before {
+    top: auto;
+    right: 10px;
+    bottom: 3px;
+    left: 10px;
+    width: auto;
+    height: 2px;
   }
 
   .wand-settings-tab-label span { display: none; }
   .wand-settings-tabs > .wand-ui-tabs-content { grid-column: 1; grid-row: 2; }
-  .wand-settings-panel { padding: 18px 14px 28px; }
+  .wand-settings-panel { padding: 20px 14px 28px; }
+  .wand-settings-panel-heading { margin-bottom: 18px; }
+  .wand-settings-section { margin-bottom: 14px; border-radius: 14px; }
+  .wand-settings-section-heading { padding: 14px; }
+  .wand-settings-section-body { padding: 14px; }
   .wand-settings-grid, .wand-settings-file-grid, .wand-settings-env-toolbar { grid-template-columns: minmax(0, 1fr); }
   .wand-settings-section-heading { flex-direction: column; }
   .wand-settings-section-action { width: 100%; }
   .wand-settings-section-action .wand-ui-button { width: 100%; }
-  .wand-settings-save-bar { bottom: -28px; margin: 16px -14px -28px; padding: 10px 14px calc(10px + var(--wand-safe-bottom)); }
+  .wand-settings-save-bar { bottom: 0; margin: 16px -14px -28px; padding: 10px 14px calc(10px + var(--wand-safe-bottom)); }
   .wand-settings-save-bar { flex-direction: column; align-items: stretch; }
   .wand-settings-toggle-row, .wand-settings-download-row { align-items: flex-start; }
   .wand-settings-about-list dd { max-width: 62%; }

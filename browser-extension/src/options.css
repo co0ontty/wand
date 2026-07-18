@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #172033;
   background: #f5f7fb;
 }
@@ -62,15 +62,34 @@ p {
   min-height: 16px;
 }
 
-input {
+input:not([type="checkbox"]) {
+  appearance: none;
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   border: 1px solid #cbd5e1;
-  border-radius: 7px;
-  padding: 0 11px;
+  border-radius: 12px;
+  padding: 0 13px;
+  outline: none;
+  background: rgba(255, 255, 255, .84);
   font: inherit;
   color: #172033;
+  caret-color: #2458a6;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7);
+  transition: border-color 160ms cubic-bezier(.2,.8,.2,1), background-color 160ms cubic-bezier(.2,.8,.2,1), box-shadow 160ms cubic-bezier(.2,.8,.2,1);
 }
+
+input:not([type="checkbox"]):hover {
+  border-color: #9babc2;
+  background: #fff;
+}
+
+input:not([type="checkbox"]):focus {
+  border-color: #2458a6;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(36, 88, 166, .14), 0 10px 24px -20px rgba(36, 88, 166, .65);
+}
+
+input:not([type="checkbox"])::placeholder { color: #667189; opacity: .72; }
 
 .actions {
   display: flex;
@@ -87,6 +106,12 @@ button {
   font: inherit;
   color: #172033;
   cursor: pointer;
+}
+
+button:focus-visible,
+input:not([type="checkbox"]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(36, 88, 166, .18);
 }
 
 button:hover {
@@ -115,4 +140,13 @@ button:hover {
 
 .status.ok {
   color: #1f6b45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  input:not([type="checkbox"]) { transition: none; }
+}
+
+@media (prefers-contrast: more) {
+  input:not([type="checkbox"]) { border-color: #526079; background: #fff; box-shadow: none; }
+  input:not([type="checkbox"]):focus { border-color: #143f78; box-shadow: 0 0 0 2px #143f78; }
 }

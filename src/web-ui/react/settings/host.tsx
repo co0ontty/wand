@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
 import { WandButton, WandDialogSurface, WandTabs } from "../ui";
@@ -21,14 +21,24 @@ export interface SettingsHostProps {
 }
 
 const TAB_LABELS: Record<SettingsTab, { title: string; description: string }> = {
-  about: { title: "关于", description: "版本、更新与连接方式" },
   general: { title: "基本配置", description: "连接、模式与运行环境" },
   ai: { title: "AI 与模型", description: "默认模型、系统 API 与 Commit" },
   notifications: { title: "通知", description: "提示音与系统通知" },
+  display: { title: "显示", description: "卡片默认展开行为" },
   security: { title: "安全", description: "密码与证书" },
   presets: { title: "命令预设", description: "查看已有预设" },
-  display: { title: "显示", description: "卡片默认展开行为" },
+  about: { title: "关于", description: "版本、更新与连接方式" },
 };
+
+const ADMIN_TAB_ORDER: SettingsTab[] = [
+  "general",
+  "ai",
+  "notifications",
+  "display",
+  "security",
+  "presets",
+  "about",
+];
 
 export function SettingsHost({
   repository = httpSettingsRepository,
@@ -71,27 +81,26 @@ export function SettingsHost({
   const tabs = useMemo(() => {
     if (!snapshot) return [];
     const props = { snapshot, repository, refresh, setSnapshot, toast, showRestart };
-    const items = [
-      { value: "about", content: <AboutSettingsTab {...props} /> },
-      { value: "general", content: <GeneralSettingsTab {...props} /> },
-      { value: "ai", content: <AiSettingsTab {...props} /> },
-      { value: "notifications", content: <NotificationSettingsTab {...props} /> },
-      { value: "security", content: <SecuritySettingsTab {...props} /> },
-      { value: "presets", content: <PresetSettingsTab {...props} /> },
-      { value: "display", content: <DisplaySettingsTab {...props} /> },
-    ] as const;
-    return items
-      .filter((item) => snapshot.access === "admin" || item.value === "about")
-      .map((item) => ({
-        value: item.value,
-        label: (
-          <span className="wand-settings-tab-label">
-            <strong>{TAB_LABELS[item.value].title}</strong>
-            <span>{TAB_LABELS[item.value].description}</span>
-          </span>
-        ),
-        content: item.content,
-      }));
+    const contentByTab: Record<SettingsTab, ReactNode> = {
+      general: <GeneralSettingsTab {...props} />,
+      ai: <AiSettingsTab {...props} />,
+      notifications: <NotificationSettingsTab {...props} />,
+      display: <DisplaySettingsTab {...props} />,
+      security: <SecuritySettingsTab {...props} />,
+      presets: <PresetSettingsTab {...props} />,
+      about: <AboutSettingsTab {...props} />,
+    };
+    const order = snapshot.access === "admin" ? ADMIN_TAB_ORDER : ["about" as const];
+    return order.map((value) => ({
+      value,
+      label: (
+        <span className="wand-settings-tab-label">
+          <strong>{TAB_LABELS[value].title}</strong>
+          <span>{TAB_LABELS[value].description}</span>
+        </span>
+      ),
+      content: contentByTab[value],
+    }));
   }, [refresh, repository, showRestart, snapshot, toast]);
 
   return (

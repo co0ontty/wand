@@ -567,7 +567,7 @@ export interface SessionSnapshot {
   description?: string;
   /** 会话标题正在根据最新消息重新生成；仅用于实时展示，重启时强制清空。 */
   titleGenerating?: boolean;
-  /** 当前正在执行的任务标题（用于会话列表展示） */
+  /** 当前正在执行的任务标题（用于进度展示，不作为会话标题） */
   currentTaskTitle?: string;
   /** 用户为此会话选定的 Claude 模型（别名或完整 ID）。结构化会话下次 spawn 时使用；PTY 会话仅用于展示。 */
   selectedModel?: string | null;

@@ -99,6 +99,33 @@ test("ClaudeCliProtocolReducer tags subagents, normalizes questions, and detects
   assert.equal(reducer.askUserQuestionDetected, true);
 });
 
+test("ClaudeCliProtocolReducer normalizes Qoder TodoWrite descriptions", () => {
+  const reducer = new ClaudeCliProtocolReducer(session());
+  reducer.apply({
+    type: "assistant",
+    message: {
+      id: "qoder-todos",
+      content: [{
+        type: "tool_use",
+        id: "todo-1",
+        name: "TodoWrite",
+        input: {
+          todos: [
+            { description: "检查格式", status: "in_progress" },
+            { description: "运行测试", status: "pending" },
+          ],
+        },
+      }],
+    },
+  }, false);
+
+  const todo = reducer.state.blocks[0];
+  assert.deepEqual(todo.type === "tool_use" ? todo.input.todos : null, [
+    { description: "检查格式", content: "检查格式", status: "in_progress" },
+    { description: "运行测试", content: "运行测试", status: "pending" },
+  ]);
+});
+
 test("ClaudeCliProtocolReducer keeps final model, usage, and result authoritative", () => {
   const reducer = new ClaudeCliProtocolReducer(session());
   reducer.apply({

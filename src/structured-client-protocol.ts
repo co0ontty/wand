@@ -84,7 +84,7 @@ function tasksFromSegment(messages: ConversationTurn[], start: number, end: numb
       if (!todo) return [];
       return [{
         id: text(todo.id) ?? String(index + 1),
-        content: text(todo.content) ?? text(todo.subject) ?? "",
+        content: text(todo.content) ?? text(todo.subject) ?? text(todo.description) ?? "",
         status: text(todo.status) ?? "pending",
         ...(text(todo.activeForm) ? { activeForm: text(todo.activeForm) } : {}),
       }];

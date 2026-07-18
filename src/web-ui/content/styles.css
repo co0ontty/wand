@@ -95,7 +95,7 @@
       --transition-fast: 0.15s ease;
       --transition-normal: 0.25s ease;
       --transition-slow: 0.4s ease;
-      --transition-spring: 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+      --transition-spring: 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
 
       /* ===== 布局尺寸 ===== */
       --sidebar-width: 300px;
@@ -131,6 +131,36 @@
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
+      }
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      .input-composer,
+      .field-input,
+      .file-search-input,
+      input.file-explorer-path {
+        background: var(--bg-elevated);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+      }
+    }
+
+    @media (prefers-contrast: more) {
+      .input-composer,
+      .field-input,
+      .file-search-input,
+      input.file-explorer-path {
+        border-color: var(--border-strong);
+        background: var(--bg-elevated);
+        box-shadow: none;
+      }
+
+      .input-composer:focus-within,
+      .field-input:focus,
+      .file-search-input:focus,
+      input.file-explorer-path:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent);
       }
     }
 
@@ -1078,9 +1108,11 @@
       height: 30px;
       line-height: 1.2;
       cursor: text;
+      caret-color: var(--accent);
       transition: background-color var(--transition-fast),
                   border-color var(--transition-fast),
-                  color var(--transition-fast);
+                  color var(--transition-fast),
+                  box-shadow var(--transition-fast);
       outline: none;
       text-overflow: ellipsis;
       width: max-content;
@@ -1101,7 +1133,7 @@
       border-color: var(--accent);
       color: var(--text-primary);
       text-overflow: clip;
-      box-shadow: 0 0 0 3px rgba(212, 152, 99, 0.12);
+      box-shadow: 0 0 0 3px var(--accent-muted);
     }
 
 
@@ -1353,11 +1385,13 @@
       flex: 1;
       padding: 7px 32px 7px 30px;
       border: 1px solid var(--border);
-      border-radius: 8px;
+      min-height: 36px;
+      border-radius: 10px;
       font-size: 0.8125rem;
       font-family: var(--font-sans);
       background: var(--bg-secondary);
       color: var(--text-primary);
+      caret-color: var(--accent);
       outline: none;
       transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
     }
@@ -1365,7 +1399,7 @@
     .file-search-input:focus {
       border-color: var(--accent);
       background: var(--bg-primary);
-      box-shadow: 0 0 0 3px rgba(212, 152, 99, 0.12);
+      box-shadow: 0 0 0 3px var(--accent-muted);
     }
 
     .file-search-input::placeholder {
@@ -6001,7 +6035,8 @@
       background: rgba(255, 255, 255, 0.88);
       border: 1px solid var(--border-default);
       border-radius: 24px;
-      transition: border-color var(--transition-fast), border-radius var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+      box-shadow: 0 3px 14px rgba(89, 58, 32, 0.05);
+      transition: border-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1), border-radius 220ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 160ms cubic-bezier(0.2, 0.8, 0.2, 1), background 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
       overflow: hidden;
       position: relative;
       overscroll-behavior: contain;
@@ -6009,7 +6044,7 @@
     .input-composer:focus-within {
       border-color: var(--accent);
       border-radius: 18px;
-      box-shadow: 0 0 0 2px var(--accent-muted), 0 0 16px rgba(197, 101, 61, 0.08);
+      box-shadow: 0 0 0 3px var(--accent-muted), 0 10px 28px -22px rgba(197, 101, 61, 0.62);
       background: rgba(255, 255, 255, 0.98);
     }
     .input-composer.is-expanded {
@@ -6101,6 +6136,71 @@
     .input-composer.is-expanded .composer-actions-right {
       grid-column: 3;
       grid-row: 2;
+    }
+
+    /* Desktop composer: keep one stable geometry before, during, and after
+       focus. The old focus-within layout switch made the whole control jump
+       between one and two rows every time the user clicked in or out. On the
+       web there is room for a persistent writing row + toolbar, so focus only
+       changes the surface treatment and multiline content is the sole source
+       of vertical growth. Mobile keeps the compact focus-driven layout. */
+    @media (min-width: 721px) {
+      .input-composer {
+        border-radius: 20px;
+        transition:
+          border-color 160ms cubic-bezier(0.23, 1, 0.32, 1),
+          background-color 160ms cubic-bezier(0.23, 1, 0.32, 1),
+          box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1);
+      }
+
+      .input-composer:focus-within,
+      .input-composer.is-expanded {
+        border-radius: 20px;
+      }
+
+      .composer-main-row,
+      .input-composer:focus-within .composer-main-row,
+      .input-composer.is-expanded .composer-main-row {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        row-gap: 2px;
+        padding: 7px 8px;
+      }
+
+      .composer-input-wrap,
+      .input-composer:focus-within .composer-input-wrap,
+      .input-composer.is-expanded .composer-input-wrap {
+        grid-column: 1 / -1;
+        grid-row: 1;
+      }
+
+      .composer-actions-left,
+      .input-composer:focus-within .composer-actions-left,
+      .input-composer.is-expanded .composer-actions-left {
+        grid-column: 1;
+        grid-row: 2;
+      }
+
+      .composer-inline-config,
+      .input-composer:focus-within .composer-inline-config,
+      .input-composer.is-expanded .composer-inline-config {
+        display: flex;
+        grid-column: 2;
+        grid-row: 2;
+        overflow: hidden;
+      }
+
+      .composer-actions-right,
+      .input-composer:focus-within .composer-actions-right,
+      .input-composer.is-expanded .composer-actions-right {
+        grid-column: 3;
+        grid-row: 2;
+      }
+
+      .input-composer .input-textarea {
+        /* Typing is a high-frequency interaction. Retargeting a height
+           transition on every keystroke feels elastic and lags the caret. */
+        transition: none;
+      }
     }
     .composer-config-controls {
       display: inline-flex;
@@ -6925,11 +7025,12 @@
 
     .input-textarea {
       --input-max-height: 120px;
-      font-family: var(--font-mono);
-      font-size: 0.8125rem;
+      font-family: var(--font-sans);
+      font-size: 0.9375rem;
       background: transparent;
       border: none;
       color: var(--text-primary);
+      caret-color: var(--accent);
       /* autoResizeInput 强制 minHeight=36px；padding 上下各 9px 让单行文字
          （line-height 18.2px）在 36px 高度内垂直居中：9+18.2+9 ≈ 36。 */
       padding: 9px 8px;
@@ -6942,7 +7043,7 @@
       overflow-y: hidden;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-      transition: height 0.15s ease-out;
+      transition: height 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
       box-sizing: border-box;
       line-height: 1.4;
       touch-action: pan-y;
@@ -6973,9 +7074,9 @@
     .input-textarea::placeholder {
       color: var(--text-tertiary);
       font-family: var(--font-sans);
-      font-weight: 500;
+      font-weight: 400;
       letter-spacing: 0;
-      opacity: 0.62;
+      opacity: 0.72;
     }
     /* 终端交互模式下 textarea 设为 readonly，按键透传到 PTY。
        视觉上给一个降饱和度 + 斜体 placeholder，让用户感知到"这里
@@ -7689,6 +7790,31 @@
       padding-right: 44px;
     }
 
+    /* Desktop pointer feedback: color carries hover; a small press compression
+       confirms the click. Growing icons on hover made the toolbar shimmer as
+       the pointer crossed it and amplified the composer's old size jump. */
+    @media (min-width: 721px) and (hover: hover) and (pointer: fine) {
+      .input-composer .btn-circle-send:hover,
+      .input-composer .btn-circle-stop:hover,
+      .input-composer .btn-circle-action:hover,
+      .input-composer.has-text .prompt-optimize-btn:hover {
+        transform: none;
+      }
+
+      .input-composer .btn-circle-send:active,
+      .input-composer .btn-circle-stop:active,
+      .input-composer .btn-circle-action:active,
+      .input-composer.has-text .prompt-optimize-btn:active {
+        transform: scale(0.97);
+        transition-duration: 120ms;
+      }
+
+      .input-composer .prompt-optimize-btn:hover .prompt-optimize-icon {
+        animation: none;
+        transform: none;
+      }
+    }
+
     /* 语音输入模式 —— 模仿微信"按住说话"。整个 textarea 区域被替换为一颗大胶囊按钮。
        v1 仅提供 UI scaffolding，MediaRecorder + STT 后续接入。 */
     .voice-input-mode {
@@ -8187,6 +8313,7 @@
       border: 1px solid rgba(125, 91, 57, 0.22);
       border-radius: 12px;
       color: var(--text-primary);
+      caret-color: var(--accent);
       padding: 12px 14px;
       outline: none;
       transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
@@ -8195,10 +8322,10 @@
 
     .field-input:focus {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-muted), 0 0 20px rgba(197, 101, 61, 0.08);
+      box-shadow: 0 0 0 3px var(--accent-muted), 0 10px 28px -22px rgba(197, 101, 61, 0.62);
       background: rgba(255, 255, 255, 0.9);
     }
-    .field-input::placeholder { color: var(--text-muted); }
+    .field-input::placeholder { color: var(--text-muted); opacity: 0.72; }
 
     /* ============================================================ */
     /* ── Liquid Glass dialog system                              ── */
@@ -12099,6 +12226,62 @@
       .automation-session-chevron,
       .non-wand-session-chevron {
         transition: none;
+      }
+    }
+
+    /* Session-list finish: one calm scan line per row. Context answers
+       “which assistant / which mode” without adding another badge, while the
+       status and date keep fixed positions as titles change. */
+    .session-context {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--text-muted);
+      font-size: 0.65625rem;
+      font-weight: 500;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-status {
+      transition:
+        color 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        background-color 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    .title-generating {
+      /* Titles can refresh often. Keep state feedback, but never make the row
+         itself bob while the user is scanning or using the keyboard. */
+      animation: none;
+      opacity: 0.72;
+      transform: none;
+    }
+
+    .session-item:focus-visible {
+      border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+      outline: none;
+      box-shadow: 0 0 0 3px var(--accent-muted);
+    }
+
+    .session-action-btn {
+      transition:
+        color 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        background-color 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      .session-action-btn:hover {
+        transform: none;
+      }
+    }
+
+    @media (hover: none), (pointer: coarse) {
+      .session-item:not(.active):not(.selected):hover,
+      .automation-session-list .session-item:hover,
+      .non-wand-session-list .session-item.non-wand-session:hover {
+        border-color: transparent;
+        background: transparent;
+        box-shadow: none;
       }
     }
 

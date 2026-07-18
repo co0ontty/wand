@@ -68,6 +68,15 @@ export function normalizeClaudeToolInput(name: unknown, input: unknown): Record<
       if (Array.isArray(parsed)) record[field] = parsed;
     } catch { /* Preserve malformed provider data verbatim. */ }
   }
+  if (name === "TodoWrite" && Array.isArray(record.todos)) {
+    record.todos = record.todos.map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+      const todo = item as Record<string, unknown>;
+      return typeof todo.content !== "string" && typeof todo.description === "string"
+        ? { ...todo, content: todo.description }
+        : item;
+    });
+  }
   return record;
 }
 

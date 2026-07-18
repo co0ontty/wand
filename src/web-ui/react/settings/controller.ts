@@ -21,7 +21,7 @@ type Listener = () => void;
 
 let snapshot: SettingsControllerSnapshot = {
   open: false,
-  tab: "about",
+  tab: "general",
   nested: null,
   revision: 0,
 };
@@ -34,13 +34,13 @@ function publish(next: Omit<SettingsControllerSnapshot, "revision">): void {
 }
 
 export const settingsController: WandSettingsController = {
-  open(tab = "about"): void {
+  open(tab = "general"): void {
     publish({ open: true, tab, nested: null });
   },
 
   close(): void {
     if (!snapshot.open && snapshot.nested === null) return;
-    publish({ open: false, tab: "about", nested: null });
+    publish({ open: false, tab: "general", nested: null });
   },
 
   closeTopmost(): boolean {

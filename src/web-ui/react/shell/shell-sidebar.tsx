@@ -218,6 +218,15 @@ function formatEntryTime(entry: Readonly<UiSessionVm>): string {
   return parsed.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
+function entryProviderLabel(entry: Readonly<UiSessionVm>): string {
+  switch (entry.provider) {
+    case "codex": return "Codex";
+    case "opencode": return "OpenCode";
+    case "claude": return "Claude";
+    default: return entry.provider || "AI";
+  }
+}
+
 function SessionEntry({
   entry,
   manageMode,
@@ -294,15 +303,11 @@ function SessionEntry({
               {time && <span className="session-time">{time}</span>}
             </div>
             {entry.description && <div className="session-description">{entry.description}</div>}
-            {entry.inFlight && <div className="session-activity">思考中</div>}
             <div className="session-meta">
               {isHistory ? (
-                <>
-                  <span className="session-id" title={entry.claudeSessionId ?? entry.id}>
-                    {entry.id.slice(0, 8)}
-                  </span>
-                  <span>{time}</span>
-                </>
+                <span className="session-context">
+                  {entryProviderLabel(entry)} · 可恢复
+                </span>
               ) : (
                 <>
                   <span className={classNames("session-status", entry.permissionBlocked
@@ -311,6 +316,9 @@ function SessionEntry({
                       ? "running"
                       : entry.status)}>
                     {entry.statusLabel}
+                  </span>
+                  <span className="session-context">
+                    {entryProviderLabel(entry)} · {entry.kind === "structured" ? "聊天" : "终端"}
                   </span>
                   <WorktreeBadges entry={entry}/>
                 </>

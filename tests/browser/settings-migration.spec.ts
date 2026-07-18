@@ -11,17 +11,16 @@ test("Settings exposes all admin tabs, keyboard navigation, validation, and nest
   await expect(dialog).toBeVisible();
   const tabs = dialog.getByRole("tab");
   await expect(tabs).toHaveCount(7);
-  await expect(dialog.getByRole("tab", { name: /关于/ })).toHaveAttribute("data-state", "active");
+  const generalTab = dialog.getByRole("tab", { name: /基本配置/ });
+  await expect(generalTab).toHaveAttribute("data-state", "active");
 
-  const aboutTab = dialog.getByRole("tab", { name: /关于/ });
-  await aboutTab.focus();
+  await generalTab.focus();
   await page.keyboard.press("End");
-  await expect(dialog.getByRole("tab", { name: /显示/ })).toHaveAttribute("data-state", "active");
-  await expect(dialog.getByRole("heading", { name: "显示" })).toBeVisible();
+  await expect(dialog.getByRole("tab", { name: /关于/ })).toHaveAttribute("data-state", "active");
+  await expect(dialog.getByRole("heading", { name: "关于 Wand" })).toBeVisible();
   await page.keyboard.press("Home");
-  await expect(aboutTab).toHaveAttribute("data-state", "active");
+  await expect(generalTab).toHaveAttribute("data-state", "active");
 
-  await dialog.getByRole("tab", { name: /基本配置/ }).click();
   const port = dialog.getByLabel("端口");
   const originalPort = await port.inputValue();
   await port.fill("70000");

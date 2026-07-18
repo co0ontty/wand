@@ -57,6 +57,29 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.deepEqual(listed.map((session) => session.id), [created.id]);
     assert.equal(listed[0].output, "");
 
+    const firstPageResponse = await fetch(`${baseUrl}/api/session-list?offset=0&limit=1`);
+    assert.equal(firstPageResponse.status, 200);
+    const firstPage = await firstPageResponse.json() as { entries: Array<{ key: string }>; revision: string };
+    assert.deepEqual(firstPage.entries.map((entry) => entry.key), [`session-${created.id}`]);
+    assert.equal(typeof firstPage.revision, "string");
+
+    const stalePageResponse = await fetch(
+      `${baseUrl}/api/session-list?offset=1&limit=1&revision=${encodeURIComponent(firstPage.revision)}&cacheBust=1`,
+    );
+    assert.equal(stalePageResponse.status, 200);
+
+    const secondCreatedResponse = await fetch(`${baseUrl}/api/structured-sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd: root, provider: "opencode", mode: "assist" }),
+    });
+    assert.equal(secondCreatedResponse.status, 201);
+
+    const changedPageResponse = await fetch(
+      `${baseUrl}/api/session-list?offset=1&limit=1&revision=${encodeURIComponent(firstPage.revision)}&cacheBust=2`,
+    );
+    assert.equal(changedPageResponse.status, 409);
+
     for (const [endpoint, body] of [
       ["model", { model: "anthropic/claude-sonnet-4-6" }],
       ["thinking-effort", { thinkingEffort: "deep" }],

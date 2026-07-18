@@ -3,7 +3,10 @@ import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-cl
 
 export const SESSION_TRANSPORT_OUTPUT_LIMIT = 200_000;
 
-export type SessionBaseDTO = Omit<SessionSnapshot, "output" | "messages">;
+export type SessionBaseDTO = Omit<SessionSnapshot, "output" | "messages" | "title"> & {
+  /** Canonical server-resolved title. Clients must not invent their own fallback. */
+  title: string;
+};
 
 export interface SessionListItemDTO extends SessionBaseDTO {
   /** Kept for compatibility with clients that initialize terminal state from the list. */
@@ -21,6 +24,21 @@ export interface SessionDetailDTO extends SessionBaseDTO {
   messageTotal?: number;
   leadingBlockOffset?: number;
   leadingBlockTotal?: number;
+}
+
+function cleanDisplayTitle(value: string | undefined): string {
+  return value?.replace(/\s+/g, " ").trim().slice(0, 40) ?? "";
+}
+
+/** Resolve every client-visible title on the server so all clients show the same value. */
+export function resolveSessionDisplayTitle(snapshot: SessionSnapshot): string {
+  for (const candidate of [snapshot.title, snapshot.description, snapshot.summary]) {
+    const title = cleanDisplayTitle(candidate);
+    if (title) return title;
+  }
+  const cwd = snapshot.cwd.replace(/[\\/]+$/, "");
+  const directory = cleanDisplayTitle(cwd.split(/[\\/]/).pop());
+  return directory || "会话";
 }
 
 /** Explicit allow-list separating the server's session object from its wire DTO. */
@@ -59,7 +77,7 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     autoApprovePermissions: snapshot.autoApprovePermissions,
     approvalStats: snapshot.approvalStats,
     summary: snapshot.summary,
-    title: snapshot.title,
+    title: resolveSessionDisplayTitle(snapshot),
     description: snapshot.description,
     currentTaskTitle: snapshot.currentTaskTitle,
     selectedModel: snapshot.selectedModel,

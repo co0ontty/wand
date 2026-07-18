@@ -2012,7 +2012,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
           // invoking control explicitly so the dialog can restore it on close.
           var settingsTrigger = document.getElementById("settings-button");
           if (settingsTrigger) settingsTrigger.focus({ preventScroll: true });
-          controller.open("about");
+          controller.open("general");
           return;
         }
         // The rollback flag can disable the React island. Settings has no

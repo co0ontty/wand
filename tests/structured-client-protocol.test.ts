@@ -79,3 +79,29 @@ test("protocol v2 prefers the latest TodoWrite snapshot", () => {
     items: [{ id: "1", content: "新任务", status: "in_progress", activeForm: "正在执行" }],
   });
 });
+
+test("protocol v2 reads Qoder TodoWrite description fields", () => {
+  const messages: ConversationTurn[] = [{
+    role: "assistant",
+    content: [{
+      type: "tool_use",
+      id: "qoder-todo",
+      name: "TodoWrite",
+      input: {
+        todos: [
+          { description: "统一时间格式化", status: "in_progress" },
+          { description: "运行测试", status: "pending" },
+        ],
+      },
+    }],
+  }];
+
+  const block = enrichStructuredMessages(messages)[0].content[0] as ToolUseBlock;
+  assert.deepEqual(block.semantic, {
+    kind: "task_list",
+    items: [
+      { id: "1", content: "统一时间格式化", status: "in_progress" },
+      { id: "2", content: "运行测试", status: "pending" },
+    ],
+  });
+});

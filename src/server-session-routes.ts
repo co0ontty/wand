@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Express } from "express";
 
 import { ProcessManager, SessionInputError } from "./process-manager.js";
@@ -212,8 +213,85 @@ export function deleteSessionWithProviderHistory(
 
 type ProviderHistorySession = {
   claudeSessionId: string;
+  cwd: string;
+  firstUserMessage: string;
+  timestamp: string;
+  mtimeMs: number;
+  hasConversation: boolean;
   managedByWand: boolean;
+  provider?: "claude" | "codex";
 };
+
+export type SessionListPageEntry =
+  | {
+    type: "managed";
+    key: string;
+    sortTimestamp: number;
+    session: ReturnType<typeof toSessionListItemDTO>;
+  }
+  | {
+    type: "recoverable";
+    key: string;
+    sortTimestamp: number;
+    history: ProviderHistorySession & { provider: "claude" | "codex" };
+  };
+
+export interface SessionListPage {
+  entries: SessionListPageEntry[];
+  offset: number;
+  total: number;
+  revision: string;
+}
+
+function sessionSortTimestamp(snapshot: SessionSnapshot): number {
+  const timestamp = Date.parse(snapshot.startedAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+export function buildSessionListPage(
+  sessions: SessionSnapshot[],
+  claudeHistory: ProviderHistorySession[],
+  codexHistory: ProviderHistorySession[],
+  hiddenHistoryIds: Set<string>,
+  offset: number,
+  limit: number,
+): SessionListPage {
+  const managed = sessions.map<SessionListPageEntry>((session) => ({
+    type: "managed",
+    key: `session-${session.id}`,
+    sortTimestamp: sessionSortTimestamp(session),
+    session: toSessionListItemDTO(session),
+  }));
+  const recoverable = [
+    ...markManagedProviderHistory(claudeHistory, sessions, "claude"),
+    ...markManagedProviderHistory(codexHistory, sessions, "codex"),
+  ].flatMap<SessionListPageEntry>((history) => {
+    const provider = history.provider === "codex" ? "codex" : "claude";
+    if (!history.hasConversation || history.managedByWand || hiddenHistoryIds.has(history.claudeSessionId)) {
+      return [];
+    }
+    return [{
+      type: "recoverable",
+      key: `recoverable-${provider}-${history.claudeSessionId}`,
+      sortTimestamp: history.mtimeMs,
+      history: { ...history, provider },
+    }];
+  });
+  const entries = [...managed, ...recoverable].sort((left, right) => {
+    const timestampOrder = right.sortTimestamp - left.sortTimestamp;
+    return timestampOrder || left.key.localeCompare(right.key);
+  });
+  const boundedOffset = Math.min(Math.max(offset, 0), entries.length);
+  const revision = createHash("sha256")
+    .update(JSON.stringify(entries.map((entry) => [entry.key, entry.sortTimestamp])))
+    .digest("base64url");
+  return {
+    entries: entries.slice(boundedOffset, boundedOffset + limit),
+    offset: boundedOffset,
+    total: entries.length,
+    revision,
+  };
+}
 
 /**
  * Provider history is scanned by ProcessManager, but structured sessions live
@@ -416,6 +494,30 @@ export function registerSessionRoutes(
       messageTotal: windowed.messageTotal,
     });
   };
+
+  app.get("/api/session-list", (req, res) => {
+    try {
+      const offset = parseBoundedInteger(req.query.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+      const limit = parseBoundedInteger(req.query.limit, 40, 1, 200);
+      const requestedRevision = typeof req.query.revision === "string" ? req.query.revision : "";
+      const currentSessions = sessions.listSlim();
+      const page = buildSessionListPage(
+        currentSessions,
+        processes.listClaudeHistorySessions(),
+        processes.listCodexHistorySessions(),
+        getHiddenClaudeSessionIds(storage),
+        offset,
+        limit,
+      );
+      if (offset > 0 && requestedRevision !== page.revision) {
+        res.status(409).json({ error: "会话列表已更新，请重新加载。", revision: page.revision });
+        return;
+      }
+      res.json(page);
+    } catch (error) {
+      res.status(500).json({ error: getErrorMessage(error, "无法加载会话列表。") });
+    }
+  });
 
   app.get("/api/sessions", (_req, res) => {
     res.json(sessions.listSlim().map(toSessionListItemDTO));
