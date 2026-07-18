@@ -179,8 +179,12 @@ export function escapeHtml(value: any) {
 
 export function renderTailMarqueePath(value: any, className: string, attrs?: string) {
   var text = String(value || "");
+  var separator = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
+  var prefix = separator >= 0 ? text.slice(0, separator + 1) : "";
+  var leaf = separator >= 0 ? text.slice(separator + 1) : text;
   return '<span class="' + className + ' tail-marquee-path" title="' + escapeHtml(text) + '"' + (attrs || "") + '>' +
-    '<span class="tail-marquee-path-inner">' + escapeHtml(text) + '</span>' +
+    '<span class="tail-marquee-path-inner"><span class="tail-marquee-prefix">' + escapeHtml(prefix) + '</span>' +
+      '<span class="tail-marquee-leaf">' + escapeHtml(leaf) + '</span></span>' +
   '</span>';
 }
 
@@ -250,7 +254,19 @@ export function setTailMarqueePathText(el: any, value: any) {
   if (!el) return;
   var text = String(value || "");
   var inner = el.querySelector && el.querySelector(".tail-marquee-path-inner");
-  if (inner) inner.textContent = text;
+  if (inner) {
+    var separator = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
+    var prefix = separator >= 0 ? text.slice(0, separator + 1) : "";
+    var leaf = separator >= 0 ? text.slice(separator + 1) : text;
+    inner.textContent = "";
+    var prefixEl = document.createElement("span");
+    prefixEl.className = "tail-marquee-prefix";
+    prefixEl.textContent = prefix;
+    var leafEl = document.createElement("span");
+    leafEl.className = "tail-marquee-leaf";
+    leafEl.textContent = leaf;
+    inner.append(prefixEl, leafEl);
+  }
   else el.textContent = text;
   if (el.setAttribute) el.setAttribute("title", text);
   scrollPathElementToEnd(el);

@@ -20,9 +20,10 @@ export const settingsAndQuickCommitStyles = String.raw`
   z-index: 31;
   box-sizing: border-box;
   color: var(--text-primary);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  box-shadow: var(--shadow-xl);
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+  border: 1px solid color-mix(in srgb, white 55%, var(--border-subtle));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--text-primary) 7%, transparent);
+  backdrop-filter: blur(18px) saturate(130%);
   transform: translate(-50%, -50%);
   pointer-events: auto;
 }
@@ -67,7 +68,8 @@ export const settingsAndQuickCommitStyles = String.raw`
   gap: 20px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
   padding: 17px 20px 16px;
-  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 68%, transparent);
+  backdrop-filter: blur(18px) saturate(130%);
 }
 
 .wand-settings-title {
@@ -223,8 +225,9 @@ export const settingsAndQuickCommitStyles = String.raw`
   margin-bottom: 18px;
   border: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
   border-radius: 15px;
-  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
-  box-shadow: 0 8px 24px -24px color-mix(in srgb, var(--text-primary) 38%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 76%, transparent);
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--text-primary) 4%, transparent);
+  backdrop-filter: blur(14px) saturate(120%);
 }
 
 .wand-settings-section-heading {

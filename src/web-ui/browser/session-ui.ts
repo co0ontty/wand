@@ -1,5 +1,5 @@
 import { state } from "./state";
-import { escapeHtml } from "./utils";
+import { escapeHtml, renderTailMarqueePath } from "./utils";
 import { isStructuredSession } from "./session-engine";
 import { renderManageCheckbox } from "./sidebar";
 
@@ -198,6 +198,7 @@ import { renderManageCheckbox } from "./sidebar";
                 activityHtml +
                 '<div class="session-meta">' +
                   '<span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + '</span>' +
+                  (session.cwd ? renderTailMarqueePath(session.cwd, "session-path") : '') +
                   badgesHtml +
                   recoveryHtml +
                 '</div>' +

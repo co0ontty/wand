@@ -28891,9 +28891,10 @@
   z-index: 31;
   box-sizing: border-box;
   color: var(--text-primary);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  box-shadow: var(--shadow-xl);
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+  border: 1px solid color-mix(in srgb, white 55%, var(--border-subtle));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--text-primary) 7%, transparent);
+  backdrop-filter: blur(18px) saturate(130%);
   transform: translate(-50%, -50%);
   pointer-events: auto;
 }
@@ -28938,7 +28939,8 @@
   gap: 20px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
   padding: 17px 20px 16px;
-  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 68%, transparent);
+  backdrop-filter: blur(18px) saturate(130%);
 }
 
 .wand-settings-title {
@@ -29094,8 +29096,9 @@
   margin-bottom: 18px;
   border: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
   border-radius: 15px;
-  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
-  box-shadow: 0 8px 24px -24px color-mix(in srgb, var(--text-primary) 38%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 76%, transparent);
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--text-primary) 4%, transparent);
+  backdrop-filter: blur(14px) saturate(120%);
 }
 
 .wand-settings-section-heading {
@@ -31734,6 +31737,18 @@
     if (!value) return "";
     const parsed = new Date(value);
     if (!Number.isFinite(parsed.getTime())) return "";
+    if (!entry.endedAt && entry.status === "running" && entry.startedAt) {
+      const seconds = Math.max(0, Math.floor((Date.now() - new Date(entry.startedAt).getTime()) / 1e3));
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor(seconds % 3600 / 60);
+      const rest = seconds % 60;
+      return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}` : `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+    }
+    const delta = Math.max(0, Date.now() - parsed.getTime());
+    if (delta < 6e4) return "\u521A\u521A";
+    if (delta < 36e5) return `${Math.floor(delta / 6e4)}\u5206\u949F\u524D`;
+    if (delta < 864e5) return `${Math.floor(delta / 36e5)}\u5C0F\u65F6\u524D`;
+    if (delta < 6048e5) return `${Math.floor(delta / 864e5)}\u5929\u524D`;
     return parsed.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
   }
   function entryProviderLabel(entry) {
@@ -31747,6 +31762,54 @@
       default:
         return entry.provider || "AI";
     }
+  }
+  function ProviderMark({ entry }) {
+    const label = entryProviderLabel(entry);
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: classNames3("session-provider-mark", `provider-${entry.provider || "claude"}`), "aria-hidden": "true", children: entry.provider === "codex" ? "C" : /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(Icon, { name: "spark", size: 15 }) });
+  }
+  function PathReveal({ path }) {
+    const containerRef = React40.useRef(null);
+    const [overflow, setOverflow] = React40.useState(0);
+    const normalized = path.replace(/\\/g, "/").replace(/\/$/, "");
+    const separator = normalized.lastIndexOf("/");
+    const prefix = separator >= 0 ? normalized.slice(0, separator + 1) : "";
+    const leaf = separator >= 0 ? normalized.slice(separator + 1) : normalized;
+    const staggerMs = Array.from(normalized).reduce((sum, character) => sum + character.charCodeAt(0), 0) % 1200;
+    React40.useLayoutEffect(() => {
+      const container = containerRef.current;
+      if (!container) return;
+      const measure = () => {
+        const inner = container.firstElementChild;
+        setOverflow(Math.max(0, (inner?.scrollWidth ?? 0) - container.clientWidth));
+      };
+      const frame = requestAnimationFrame(measure);
+      const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+      observer?.observe(container);
+      return () => {
+        cancelAnimationFrame(frame);
+        observer?.disconnect();
+      };
+    }, [normalized]);
+    const travelSeconds = Math.max(4.8, overflow / 28);
+    if (!path) return null;
+    return /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
+      "span",
+      {
+        ref: containerRef,
+        className: classNames3("session-path", "tail-marquee-path", overflow > 1 && "is-overflowing"),
+        title: path,
+        "aria-label": path,
+        style: {
+          "--tail-marquee-shift": `${overflow}px`,
+          "--tail-marquee-duration": `${Math.min(8, travelSeconds)}s`,
+          "--tail-marquee-delay": `${1.8 + staggerMs / 1e3}s`
+        },
+        children: /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("span", { className: "tail-marquee-path-inner", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "tail-marquee-prefix", children: prefix }),
+          /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "tail-marquee-leaf", children: leaf })
+        ] })
+      }
+    );
   }
   function SessionEntry({
     entry,
@@ -31806,6 +31869,7 @@
             manageMode && /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(ManageCheckbox, { entry, dispatch }),
             /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "session-main", children: [
               /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "session-title-row", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "session-leading-slot", children: /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(ProviderMark, { entry }) }),
                 /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
                   "div",
                   {
@@ -31816,22 +31880,23 @@
                     "aria-busy": entry.titleGenerating || void 0,
                     children: entry.title
                   }
-                ),
-                time && /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "session-time", children: time })
+                )
               ] }),
               entry.description && /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "session-description", children: entry.description }),
-              /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("div", { className: "session-meta", children: isHistory ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("span", { className: "session-context", children: [
-                entryProviderLabel(entry),
-                " \xB7 \u53EF\u6062\u590D"
-              ] }) : /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(import_jsx_runtime38.Fragment, { children: [
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: classNames3("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("span", { className: "session-context", children: [
-                  entryProviderLabel(entry),
-                  " \xB7 ",
-                  entry.kind === "structured" ? "\u804A\u5929" : "\u7EC8\u7AEF"
-                ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WorktreeBadges, { entry })
-              ] }) })
+              /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("div", { className: "session-meta", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: "session-leading-slot session-time", children: time }),
+                isHistory ? /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(import_jsx_runtime38.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("span", { className: "session-context session-context-recoverable", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(Icon, { name: "history", size: 11 }),
+                    "\u53EF\u6062\u590D"
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PathReveal, { path: entry.cwd })
+                ] }) : /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(import_jsx_runtime38.Fragment, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime38.jsx)("span", { className: classNames3("session-status", entry.permissionBlocked ? "permission-blocked" : entry.inFlight ? "running" : entry.status), children: entry.statusLabel }),
+                  /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(PathReveal, { path: entry.cwd }),
+                  /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(WorktreeBadges, { entry })
+                ] })
+              ] })
             ] }),
             !manageMode && /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)("span", { className: "session-actions", children: [
               actions.resume && /* @__PURE__ */ (0, import_jsx_runtime38.jsx)(
@@ -34134,7 +34199,7 @@
     var badgesHtml = renderWorktreeBadge(session);
     var recoveryHtml = session.autoRecovered ? '<span class="session-recovery-hint">\u81EA\u52A8\u6062\u590D</span>' : "";
     var swipeBgHtml = state.sessionsManageMode ? "" : '<div class="session-swipe-bg" aria-hidden="true"><button class="session-swipe-delete" data-action="swipe-delete-session" data-session-id="' + session.id + '" type="button" tabindex="-1" aria-label="\u5220\u9664\u4F1A\u8BDD"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg><span>\u5220\u9664</span></button></div>';
-    return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' + swipeBgHtml + '<div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-title-row">' + titleHtml + timeDisplay + "</div>" + descriptionHtml + activityHtml + '<div class="session-meta"><span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + "</span>" + badgesHtml + recoveryHtml + "</div></div>" + actionsHtml + "</div></div></div>";
+    return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' + swipeBgHtml + '<div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-title-row">' + titleHtml + timeDisplay + "</div>" + descriptionHtml + activityHtml + '<div class="session-meta"><span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + "</span>" + (session.cwd ? renderTailMarqueePath(session.cwd, "session-path") : "") + badgesHtml + recoveryHtml + "</div></div>" + actionsHtml + "</div></div></div>";
   }
   function getWorktreeMergeStatusLabel(session) {
     if (!session || !session.worktreeMergeStatus) return "";
@@ -46882,7 +46947,10 @@
   }
   function renderTailMarqueePath(value, className, attrs) {
     var text5 = String(value || "");
-    return '<span class="' + className + ' tail-marquee-path" title="' + escapeHtml(text5) + '"' + (attrs || "") + '><span class="tail-marquee-path-inner">' + escapeHtml(text5) + "</span></span>";
+    var separator = Math.max(text5.lastIndexOf("/"), text5.lastIndexOf("\\"));
+    var prefix = separator >= 0 ? text5.slice(0, separator + 1) : "";
+    var leaf = separator >= 0 ? text5.slice(separator + 1) : text5;
+    return '<span class="' + className + ' tail-marquee-path" title="' + escapeHtml(text5) + '"' + (attrs || "") + '><span class="tail-marquee-path-inner"><span class="tail-marquee-prefix">' + escapeHtml(prefix) + '</span><span class="tail-marquee-leaf">' + escapeHtml(leaf) + "</span></span></span>";
   }
   var IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|heic|heif)$/i;
   function isImagePath(value) {
@@ -46925,8 +46993,19 @@
     if (!el) return;
     var text5 = String(value || "");
     var inner = el.querySelector && el.querySelector(".tail-marquee-path-inner");
-    if (inner) inner.textContent = text5;
-    else el.textContent = text5;
+    if (inner) {
+      var separator = Math.max(text5.lastIndexOf("/"), text5.lastIndexOf("\\"));
+      var prefix = separator >= 0 ? text5.slice(0, separator + 1) : "";
+      var leaf = separator >= 0 ? text5.slice(separator + 1) : text5;
+      inner.textContent = "";
+      var prefixEl = document.createElement("span");
+      prefixEl.className = "tail-marquee-prefix";
+      prefixEl.textContent = prefix;
+      var leafEl = document.createElement("span");
+      leafEl.className = "tail-marquee-leaf";
+      leafEl.textContent = leaf;
+      inner.append(prefixEl, leafEl);
+    } else el.textContent = text5;
     if (el.setAttribute) el.setAttribute("title", text5);
     scrollPathElementToEnd(el);
   }

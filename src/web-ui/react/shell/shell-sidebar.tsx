@@ -215,6 +215,20 @@ function formatEntryTime(entry: Readonly<UiSessionVm>): string {
   if (!value) return "";
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) return "";
+  if (!entry.endedAt && entry.status === "running" && entry.startedAt) {
+    const seconds = Math.max(0, Math.floor((Date.now() - new Date(entry.startedAt).getTime()) / 1000));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const rest = seconds % 60;
+    return hours > 0
+      ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`
+      : `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+  }
+  const delta = Math.max(0, Date.now() - parsed.getTime());
+  if (delta < 60_000) return "刚刚";
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}分钟前`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}小时前`;
+  if (delta < 604_800_000) return `${Math.floor(delta / 86_400_000)}天前`;
   return parsed.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
@@ -225,6 +239,62 @@ function entryProviderLabel(entry: Readonly<UiSessionVm>): string {
     case "claude": return "Claude";
     default: return entry.provider || "AI";
   }
+}
+
+function ProviderMark({ entry }: { entry: Readonly<UiSessionVm> }) {
+  const label = entryProviderLabel(entry);
+  return (
+    <span className={classNames("session-provider-mark", `provider-${entry.provider || "claude"}`)} aria-hidden="true">
+      {entry.provider === "codex" ? "C" : <Icon name="spark" size={15}/>}
+    </span>
+  );
+}
+
+function PathReveal({ path }: { path: string }) {
+  const containerRef = React.useRef<HTMLSpanElement>(null);
+  const [overflow, setOverflow] = React.useState(0);
+  const normalized = path.replace(/\\/g, "/").replace(/\/$/, "");
+  const separator = normalized.lastIndexOf("/");
+  const prefix = separator >= 0 ? normalized.slice(0, separator + 1) : "";
+  const leaf = separator >= 0 ? normalized.slice(separator + 1) : normalized;
+  const staggerMs = Array.from(normalized).reduce((sum, character) => sum + character.charCodeAt(0), 0) % 1_200;
+
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const measure = () => {
+      const inner = container.firstElementChild as HTMLElement | null;
+      setOverflow(Math.max(0, (inner?.scrollWidth ?? 0) - container.clientWidth));
+    };
+    const frame = requestAnimationFrame(measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(container);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [normalized]);
+
+  const travelSeconds = Math.max(4.8, overflow / 28);
+  if (!path) return null;
+  return (
+    <span
+      ref={containerRef}
+      className={classNames("session-path", "tail-marquee-path", overflow > 1 && "is-overflowing")}
+      title={path}
+      aria-label={path}
+      style={{
+        "--tail-marquee-shift": `${overflow}px`,
+        "--tail-marquee-duration": `${Math.min(8, travelSeconds)}s`,
+        "--tail-marquee-delay": `${1.8 + staggerMs / 1_000}s`,
+      } as React.CSSProperties}
+    >
+      <span className="tail-marquee-path-inner">
+        <span className="tail-marquee-prefix">{prefix}</span>
+        <span className="tail-marquee-leaf">{leaf}</span>
+      </span>
+    </span>
+  );
 }
 
 function SessionEntry({
@@ -291,6 +361,7 @@ function SessionEntry({
           {manageMode && <ManageCheckbox entry={entry} dispatch={dispatch}/>} 
           <div className="session-main">
             <div className="session-title-row">
+              <span className="session-leading-slot"><ProviderMark entry={entry}/></span>
               <div
                 className={classNames(
                   isHistory ? "session-command claude-history-preview" : "session-title",
@@ -300,14 +371,15 @@ function SessionEntry({
               >
                 {entry.title}
               </div>
-              {time && <span className="session-time">{time}</span>}
             </div>
             {entry.description && <div className="session-description">{entry.description}</div>}
             <div className="session-meta">
+              <span className="session-leading-slot session-time">{time}</span>
               {isHistory ? (
-                <span className="session-context">
-                  {entryProviderLabel(entry)} · 可恢复
-                </span>
+                <>
+                  <span className="session-context session-context-recoverable"><Icon name="history" size={11}/>可恢复</span>
+                  <PathReveal path={entry.cwd}/>
+                </>
               ) : (
                 <>
                   <span className={classNames("session-status", entry.permissionBlocked
@@ -317,9 +389,7 @@ function SessionEntry({
                       : entry.status)}>
                     {entry.statusLabel}
                   </span>
-                  <span className="session-context">
-                    {entryProviderLabel(entry)} · {entry.kind === "structured" ? "聊天" : "终端"}
-                  </span>
+                  <PathReveal path={entry.cwd}/>
                   <WorktreeBadges entry={entry}/>
                 </>
               )}

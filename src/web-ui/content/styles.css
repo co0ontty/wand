@@ -1,25 +1,25 @@
     :root {
       /* ===== 背景色系统 ===== */
-      --bg-primary: #f6f1e8;
-      --bg-secondary: rgba(255, 251, 245, 0.92);
-      --bg-tertiary: #f0e5d7;
-      --bg-elevated: #fffaf2;
-      --bg-surface: rgba(255, 255, 255, 0.6);
+      --bg-primary: #f5f3ee;
+      --bg-secondary: rgba(255, 253, 249, 0.86);
+      --bg-tertiary: #ece8e1;
+      --bg-elevated: #fcfaf6;
+      --bg-surface: rgba(255, 253, 249, 0.62);
       --bg-terminal: #1f1b17;
       --bg-overlay: rgba(42, 28, 18, 0.4);
 
       /* ===== 边框系统 ===== */
-      --border-subtle: rgba(150, 118, 85, 0.12);
-      --border-default: rgba(125, 91, 57, 0.25);
-      --border-strong: rgba(125, 91, 57, 0.4);
+      --border-subtle: rgba(109, 88, 72, 0.1);
+      --border-default: #d9d2c9;
+      --border-strong: rgba(109, 88, 72, 0.34);
       --border: var(--border-default);
       --border-focus: rgba(197, 101, 61, 0.5);
 
       /* ===== 文本系统 ===== */
-      --text-primary: #2a1f16;
-      --text-secondary: #5a4535;
-      --text-tertiary: #7a6350;
-      --text-muted: #8c735f;
+      --text-primary: #28231f;
+      --text-secondary: #625a53;
+      --text-tertiary: #7a7168;
+      --text-muted: #8b8279;
       --text-inverse: #ffffff;
       --text-link: #c5653d;
 
@@ -372,15 +372,15 @@
       height: 100%;
       /* 兜底背景：iOS Safari 在键盘弹起 / 地址栏收起 / 安全区时
          body 可能短于 html，露出的部分必须也是奶油色，否则会看到默认白底。 */
-      background-color: #f6f1e8;
+      background-color: #f5f3ee;
     }
 
     body {
       font-family: var(--font-sans);
       background:
-        radial-gradient(circle at top left, rgba(208, 138, 92, 0.18), transparent 35%),
-        radial-gradient(circle at bottom right, rgba(148, 107, 74, 0.1), transparent 40%),
-        linear-gradient(180deg, #fbf7f1 0%, #f6f1e8 100%);
+        radial-gradient(circle at 8% -4%, rgba(197, 101, 61, 0.034), transparent 42%),
+        radial-gradient(circle at 102% 42%, rgba(180, 155, 134, 0.024), transparent 30%),
+        #f5f3ee;
       color: var(--text-primary);
       min-height: 100vh;
       min-height: 100dvh;
@@ -2555,14 +2555,16 @@
     .tail-marquee-path-inner {
       display: inline-block;
       white-space: nowrap;
-      transform: translateX(calc(-1 * var(--tail-marquee-shift)));
+      transform: translateX(0);
     }
     .tail-marquee-path.is-overflowing .tail-marquee-path-inner {
-      animation: tailPathMarquee var(--tail-marquee-duration) linear var(--tail-marquee-delay) infinite alternate both;
+      animation: tailPathReveal var(--tail-marquee-duration) linear var(--tail-marquee-delay) 1 both;
     }
-    @keyframes tailPathMarquee {
-      0%, 22% { transform: translateX(calc(-1 * var(--tail-marquee-shift))); }
-      78%, 100% { transform: translateX(0); }
+    .tail-marquee-prefix { color: inherit; }
+    .tail-marquee-leaf { color: var(--text-secondary); font-weight: 500; }
+    @keyframes tailPathReveal {
+      from { transform: translateX(0); }
+      to { transform: translateX(calc(-1 * var(--tail-marquee-shift))); }
     }
     @media (prefers-reduced-motion: reduce) {
       .tail-marquee-path.is-overflowing .tail-marquee-path-inner {
@@ -8212,20 +8214,20 @@
     .login-card {
       width: 100%;
       max-width: 380px;
-      background: rgba(255, 251, 245, 0.92);
-      border: 1px solid rgba(150, 118, 85, 0.16);
+      background: rgba(255, 253, 249, 0.76);
+      border: 1px solid rgba(255, 255, 255, 0.72);
       border-radius: var(--radius-lg);
       overflow: hidden;
-      box-shadow: var(--shadow-soft);
+      box-shadow: 0 1px 2px rgba(73, 51, 35, 0.055);
+      backdrop-filter: blur(18px) saturate(130%);
+      -webkit-backdrop-filter: blur(18px) saturate(130%);
     }
 
     .login-header {
       padding: 28px 24px 22px;
       text-align: center;
       border-bottom: 1px solid var(--border-subtle);
-      background:
-        radial-gradient(circle at top, rgba(214, 144, 100, 0.26), transparent 45%),
-        linear-gradient(180deg, rgba(255, 246, 235, 0.85), rgba(255, 251, 245, 0.85));
+      background: rgba(255, 253, 249, 0.48);
     }
 
     .boot-loading {
@@ -8267,10 +8269,11 @@
 
     .login-logo-icon {
       width: 42px; height: 42px;
-      background: linear-gradient(135deg, #d67b52 0%, #ab522e 100%);
+      background: var(--accent);
       border-radius: var(--radius-md);
       display: flex; align-items: center; justify-content: center;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      box-shadow: 0 1px 1px rgba(197, 101, 61, 0.10);
       font-size: 18px; color: white; font-weight: 700;
     }
 
@@ -12392,3 +12395,117 @@
     }
 
     /* 结束标记 */
+
+    /* Four-client session alignment: fixed provider/time leading column and a
+       single full-path reveal that settles on the leaf directory. */
+    .session-main {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .session-title-row {
+      display: grid;
+      grid-template-columns: 46px minmax(0, 1fr);
+      align-items: start;
+      column-gap: 8px;
+    }
+
+    .session-title-row .session-title,
+    .session-title-row .session-command,
+    .session-title-row .claude-history-preview {
+      display: -webkit-box;
+      overflow: hidden;
+      white-space: normal;
+      text-overflow: ellipsis;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .session-leading-slot {
+      display: inline-flex;
+      width: 46px;
+      min-width: 46px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .session-provider-mark {
+      display: inline-flex;
+      width: 28px;
+      height: 28px;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    .session-provider-mark.provider-codex { color: var(--info); }
+
+    .session-meta {
+      display: grid;
+      grid-template-columns: 46px auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .session-meta .session-time {
+      display: block;
+      overflow: hidden;
+      color: var(--text-muted);
+      font-size: 0.625rem;
+      font-weight: 500;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-meta .session-status {
+      width: 6px;
+      min-width: 6px;
+      height: 6px;
+      overflow: hidden;
+      border-radius: 50%;
+      padding: 0;
+      color: transparent;
+      background: var(--text-muted);
+    }
+
+    .session-meta .session-status.running { background: var(--success); }
+    .session-meta .session-status.permission-blocked { background: var(--warning); }
+    .session-meta .session-status.failed { background: var(--danger); }
+
+    .session-context-recoverable {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .session-path {
+      display: block;
+      width: 100%;
+      max-width: none;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 0.625rem;
+    }
+
+    .session-item {
+      background: color-mix(in srgb, var(--bg-elevated) 76%, transparent);
+      border-color: color-mix(in srgb, white 62%, var(--border-subtle));
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      box-shadow: 0 1px 1px rgba(73, 51, 35, 0.04);
+    }
+
+    @media (max-width: 640px) {
+      .session-title-row { grid-template-columns: 42px minmax(0, 1fr); }
+      .session-leading-slot { width: 42px; min-width: 42px; }
+      .session-meta { grid-template-columns: 42px auto minmax(0, 1fr); }
+      .session-provider-mark { width: 26px; height: 26px; }
+    }
