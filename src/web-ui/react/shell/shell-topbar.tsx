@@ -97,7 +97,11 @@ export function ShellTopbar() {
       <div className="topbar-center">
         {selected ? (
           <>
-            <span className="topbar-session-title" title={snapshot.topbar.description || selected.title}>
+            <span
+              className={classNames("topbar-session-title", snapshot.topbar.titleGenerating && "title-generating")}
+              title={snapshot.topbar.description || selected.title}
+              aria-busy={snapshot.topbar.titleGenerating || undefined}
+            >
               {snapshot.topbar.title}
             </span>
             <span

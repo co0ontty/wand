@@ -34,6 +34,7 @@ function selectedSession(): UiSessionVm {
     resumable: true,
     permissionBlocked: false,
     inFlight: false,
+    titleGenerating: false,
   };
 }
 
@@ -70,6 +71,7 @@ function fixture(layout: Partial<UiSnapshotData["layout"]> = {}): UiSnapshotData
       statusTone: "idle",
       cwd: selected.cwd,
       currentTask: "",
+      titleGenerating: false,
       git: null,
     },
     legacyVisibility: { terminal: true, chat: false, blank: false, composer: true },

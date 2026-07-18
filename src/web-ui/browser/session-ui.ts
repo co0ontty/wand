@@ -143,9 +143,11 @@ import { renderManageCheckbox } from "./sidebar";
         var actionsHtml = '<span class="session-actions">' + resumeButton + mergeButton + deleteButton + '</span>';
 
         // Model-generated topic, with legacy summary/command fallbacks.
+        var topicBusyClass = session.titleGenerating ? ' title-generating' : '';
+        var topicBusyAttr = session.titleGenerating ? ' aria-busy="true"' : '';
         var titleHtml = session.title || session.summary
-          ? '<div class="session-title">' + escapeHtml(session.title || session.summary) + '</div>'
-          : '<div class="session-command">' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '').replace(/\s+resume\s+[0-9a-f-]+/, '') : session.command) + '</div>';
+          ? '<div class="session-title' + topicBusyClass + '"' + topicBusyAttr + '>' + escapeHtml(session.title || session.summary) + '</div>'
+          : '<div class="session-command' + topicBusyClass + '"' + topicBusyAttr + '>' + escapeHtml(session.resumedFromSessionId ? session.command.replace(/\s+--resume\s+\S+/, '').replace(/\s+resume\s+[0-9a-f-]+/, '') : session.command) + '</div>';
 
         // Activity description for running sessions
         var activityDesc = getSessionActivityDesc(session);

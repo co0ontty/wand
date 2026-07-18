@@ -36,6 +36,7 @@ function selectedSession(): UiSessionVm {
     resumable: false,
     permissionBlocked: false,
     inFlight: false,
+    titleGenerating: false,
   };
 }
 
@@ -71,6 +72,7 @@ function fixture(overrides: Partial<UiSnapshotData> = {}): UiSnapshotData {
       statusTone: "running",
       cwd: selected.cwd,
       currentTask: "",
+      titleGenerating: false,
       git: null,
     },
     legacyVisibility: { terminal: true, chat: false, blank: false, composer: true },
@@ -124,6 +126,7 @@ test("ShellMainContent SSR renders the complete React welcome state contract", (
       statusTone: "",
       cwd: "/chosen/project",
       currentTask: "",
+      titleGenerating: false,
       git: null,
     },
     legacyVisibility: { terminal: false, chat: false, blank: true, composer: false },

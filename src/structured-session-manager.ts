@@ -14,8 +14,9 @@ import { truncateMessagesForTransport } from "./message-truncator.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
-import { generateSessionTopic } from "./session-topic.js";
+import { SessionTopicCoordinator } from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import { resolveCommitAiContext } from "./session-ai-context.js";
 import { CodexRunner } from "./structured-codex-adapter.js";
 import { normalizeStructuredToolResultContent } from "./structured-content.js";
 import {
@@ -285,7 +286,7 @@ export class StructuredSessionManager {
   private readonly seenIdempotencyKeys = new Map<string, number>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   private archiveTimer: NodeJS.Timeout | null = null;
-  private readonly topicRequests = new Set<string>();
+  private readonly topicCoordinator = new SessionTopicCoordinator();
   private readonly streamEmitTimers = new Set<NodeJS.Timeout>();
   private readonly claudeCliRunner: StructuredRunnerAdapter;
   private readonly codexRunner: StructuredRunnerAdapter;
@@ -341,6 +342,7 @@ export class StructuredSessionManager {
           activeRequestId: null,
         },
         selectedModel: snapshot.selectedModel ?? null,
+        titleGenerating: false,
       };
       this.sessions.set(restored.id, restored);
       this.storage.saveSession(restored);
@@ -427,7 +429,7 @@ export class StructuredSessionManager {
     this.streamCheckpointTimers.clear();
     this.streamCheckpointDirty.clear();
     this.lastStreamSaveAt.clear();
-    this.topicRequests.clear();
+    this.topicCoordinator.clear();
     this.emitEvent = null;
   }
 
@@ -549,9 +551,17 @@ export class StructuredSessionManager {
     const current = this.requireSession(id);
     const updated: SessionSnapshot = { ...current, title, description, summary: description };
     this.sessions.set(id, updated);
-    this.storage.updateSessionRuntimeMetadata(updated);
+    this.storage.updateSessionRuntimeMetadata({ ...updated, titleGenerating: undefined });
     this.emitStructuredSnapshot(updated);
     return updated;
+  }
+
+  private setSessionTopicGenerating(id: string, titleGenerating: boolean): void {
+    const current = this.sessions.get(id);
+    if (!current || current.titleGenerating === titleGenerating) return;
+    const updated = { ...current, titleGenerating };
+    this.sessions.set(id, updated);
+    this.emit({ type: "output", sessionId: id, data: { sessionKind: "structured", titleGenerating } });
   }
 
   /**
@@ -586,14 +596,23 @@ export class StructuredSessionManager {
 
   private maybeGenerateSessionTopic(id: string, input: string): void {
     const session = this.sessions.get(id);
-    if (this.disposed || !session || session.title || this.topicRequests.has(id)) return;
-    this.topicRequests.add(id);
-    void generateSessionTopic(input, session.cwd, this.config.language, this.config.systemAi)
-      .then(({ title, description }) => {
+    if (this.disposed || !session || !input.trim()) return;
+    this.topicCoordinator.request(id, {
+      messages: session.messages,
+      input,
+      cwd: session.cwd,
+      language: this.config.language,
+      ai: resolveCommitAiContext(session, this.config),
+      onGenerating: (generating) => {
+        if (!this.disposed) this.setSessionTopicGenerating(id, generating);
+      },
+      onTopic: ({ title, description }) => {
         if (!this.disposed && this.sessions.has(id)) this.setSessionTopic(id, title, description);
-      })
-      .catch((error) => console.error(`[StructuredSessionManager] Failed to generate session topic ${id}:`, getErrorMessage(error)))
-      .finally(() => this.topicRequests.delete(id));
+      },
+      onError: (error) => {
+        console.error(`[StructuredSessionManager] Failed to generate session topic ${id}:`, getErrorMessage(error));
+      },
+    });
   }
 
   createSession(options: CreateStructuredSessionOptions): SessionSnapshot {
@@ -676,7 +695,6 @@ export class StructuredSessionManager {
     let session = this.requireSession(id);
     const prompt = input.trim();
     if (!prompt) return session;
-    this.maybeGenerateSessionTopic(id, prompt);
     if (opts?.idempotencyKey) {
       const mapKey = `${id}:${opts.idempotencyKey}`;
       if (this.seenIdempotencyKeys.has(mapKey)) {
@@ -693,6 +711,7 @@ export class StructuredSessionManager {
         }
       }
     }
+    this.maybeGenerateSessionTopic(id, prompt);
     if (session.structuredState?.inFlight) {
       const runnerExecution = this.pendingRunnerExecutions.get(id);
       const sdkAbort = this.pendingSdkAbort.get(id);

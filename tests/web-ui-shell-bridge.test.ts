@@ -177,6 +177,7 @@ test("legacy snapshot derivation projects the complete shell state and excludes 
     statusTone: "running",
     cwd: "/migration",
     currentTask: "Live task",
+    titleGenerating: false,
     git: { branch: "codex/shell", modifiedCount: 2, clean: false },
   });
   assert.deepEqual(snapshot.legacyVisibility, {

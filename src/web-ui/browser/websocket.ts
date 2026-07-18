@@ -282,6 +282,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
                 snapshot.description = msg.data.description;
                 topicMetadataChanged = true;
               }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'titleGenerating')) {
+                snapshot.titleGenerating = !!msg.data.titleGenerating;
+                topicMetadataChanged = true;
+              }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'summary')) {
                 snapshot.summary = msg.data.summary;
               }
@@ -333,7 +337,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
                     if (msg.sessionId === state.selectedId) updateTaskDisplay();
                   }
                 }
-              } else if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined || snapshot.title || snapshot.description) {
+              } else if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined || snapshot.title || snapshot.description || snapshot.titleGenerating !== undefined) {
                 updateSessionSnapshot(snapshot);
                 if (topicMetadataChanged) scheduleSessionListUpdate();
                 if (msg.sessionId === state.selectedId) {

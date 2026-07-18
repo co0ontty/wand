@@ -22,6 +22,7 @@ export interface UiSessionVm {
   resumable: boolean;
   permissionBlocked: boolean;
   inFlight: boolean;
+  titleGenerating: boolean;
   startedAt?: string;
   endedAt?: string;
   claudeSessionId?: string;
@@ -85,6 +86,7 @@ export interface UiSnapshotData {
     statusTone: string;
     cwd: string;
     currentTask: string;
+    titleGenerating: boolean;
     git: null | Readonly<{
       branch: string;
       modifiedCount: number;

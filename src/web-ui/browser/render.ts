@@ -649,7 +649,7 @@ export function renderAppShell() {
           '<div class="topbar-center">' +
             (selectedSession
               ? (
-                  '<span class="topbar-session-title" title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span>' +
+                  '<span class="topbar-session-title' + (selectedSession.titleGenerating ? ' title-generating' : '') + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : '') + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span>' +
                   '<span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span>' +
                   '<span class="current-task hidden" id="current-task"></span>' +
                   (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : '')

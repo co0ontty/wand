@@ -36,6 +36,7 @@ function selectedSession(): UiSessionVm {
     resumable: true,
     permissionBlocked: false,
     inFlight: false,
+    titleGenerating: true,
     claudeSessionId: "codex-thread-1",
     worktree: {
       enabled: true,
@@ -78,6 +79,7 @@ function fixture(overrides: Partial<UiSnapshotData> = {}): UiSnapshotData {
       statusTone: "idle",
       cwd: selected.cwd,
       currentTask: "实现 Shell chrome",
+      titleGenerating: true,
       git: { branch: "codex/chrome", modifiedCount: 3, clean: false },
     },
     legacyVisibility: { terminal: true, chat: false, blank: false, composer: true },
@@ -110,7 +112,7 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
 
   assert.match(html, /class="floating-sidebar-toggle active"/);
   assert.match(html, /class="topbar-brand"[^>]*>W</);
-  assert.match(html, /class="topbar-session-title"[^>]*>Chrome migration</);
+  assert.match(html, /class="topbar-session-title title-generating"[^>]*aria-busy="true"[^>]*>Chrome migration</);
   assert.match(html, /class="session-status-pill idle"/);
   assert.match(html, /实现 Shell chrome/);
   assert.match(html, /class="topbar-cwd tail-marquee-path"/);
@@ -137,6 +139,7 @@ test("ShellTopbar SSR renders the home state and an empty stable git slot", () =
       statusTone: "",
       cwd: "/workspace",
       currentTask: "",
+      titleGenerating: false,
       git: null,
     },
   }));

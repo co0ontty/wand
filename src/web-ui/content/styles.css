@@ -1926,6 +1926,24 @@
       line-height: 1.3;
     }
 
+    @keyframes titleGeneratingRhythm {
+      0%, 100% { opacity: 0.62; transform: translateY(0); }
+      50% { opacity: 1; transform: translateY(-1px); }
+    }
+
+    .title-generating {
+      animation: titleGeneratingRhythm 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+      transform-origin: left center;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .title-generating {
+        animation: none !important;
+        opacity: 0.72;
+        transform: none;
+      }
+    }
+
     /* ===== 会话元信息 ===== */
     .session-meta {
       display: flex;

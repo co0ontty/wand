@@ -483,7 +483,7 @@ interface QuickCommitOptions {
   submodule?: boolean;
 }
 
-interface QuickCommitAiOptions {
+export interface QuickCommitAiOptions {
   provider?: SessionProvider;
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
@@ -681,7 +681,16 @@ function aiFallbackFailed(primary: "直连 API" | "CLI", primaryError: unknown, 
   );
 }
 
-async function callAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
+/**
+ * Run a lightweight AI request through the same source ordering used by quick
+ * commit: the user's selected source first, then the reciprocal source once.
+ */
+export async function callConfiguredAiText(
+  prompt: string,
+  cwd: string,
+  language: string,
+  opts: QuickCommitAiOptions,
+): Promise<string> {
   if (opts.systemAi?.enabled) {
     try {
       return await callDirectApiText(prompt, opts.systemAi);
@@ -734,7 +743,7 @@ async function generateCommitMessage(cwd: string, language: string, ai: QuickCom
   const diff = await collectStagedDiff(cwd);
   const lang = language.trim() || "中文";
   const prompt = `阅读以下 git diff，用${lang}写一条简洁的 commit message。要求：祈使句，不超过 50 字，描述「做了什么」。只输出 message 本身，不要引号、不要 Markdown 格式、不要任何额外说明。\n\n${diff}`;
-  const raw = await callAiText(prompt, cwd, language, ai);
+  const raw = await callConfiguredAiText(prompt, cwd, language, ai);
   const message = normalizeAiText(raw);
   if (!message) {
     throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -797,7 +806,7 @@ async function generateCommitMessageWithTag(
 
 git diff:
 ${diff}`;
-  const raw = await callAiText(prompt, cwd, language, ai);
+  const raw = await callConfiguredAiText(prompt, cwd, language, ai);
   const parsed = tryParseJson(raw);
 
   let message: string;
@@ -881,7 +890,7 @@ commit message：${commitMessage}
 
 git diff：
 ${diff}`;
-  const raw = await callAiText(prompt, cwd, language, ai);
+  const raw = await callConfiguredAiText(prompt, cwd, language, ai);
   const parsed = tryParseJson(raw);
   let suggested: string | undefined;
   if (parsed && typeof parsed.tag === "string") {

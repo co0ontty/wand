@@ -556,10 +556,12 @@ export interface SessionSnapshot {
   approvalStats?: { tool: number; command: number; file: number; total: number };
   /** 会话摘要：从首条用户消息或当前任务提取 */
   summary?: string;
-  /** 由模型根据首条用户消息生成的短标题。 */
+  /** 由模型根据全部用户消息生成的短标题。 */
   title?: string;
-  /** 由模型根据首条用户消息生成的一句话描述。 */
+  /** 由模型根据全部用户消息生成的一句话描述。 */
   description?: string;
+  /** 会话标题正在根据最新消息重新生成；仅用于实时展示，重启时强制清空。 */
+  titleGenerating?: boolean;
   /** 当前正在执行的任务标题（用于会话列表展示） */
   currentTaskTitle?: string;
   /** 用户为此会话选定的 Claude 模型（别名或完整 ID）。结构化会话下次 spawn 时使用；PTY 会话仅用于展示。 */

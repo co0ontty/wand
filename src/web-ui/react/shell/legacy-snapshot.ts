@@ -42,6 +42,7 @@ export interface LegacySession {
   title?: string;
   description?: string;
   summary?: string;
+  titleGenerating?: boolean;
   cwd?: string;
   status?: string;
   permissionBlocked?: boolean;
@@ -182,6 +183,7 @@ function sessionToVm(
       && Boolean(session.claudeSessionId),
     permissionBlocked: Boolean(session.permissionBlocked),
     inFlight: Boolean(session.structuredState?.inFlight),
+    titleGenerating: Boolean(session.titleGenerating),
     ...(session.startedAt ? { startedAt: session.startedAt } : {}),
     ...(session.endedAt ? { endedAt: session.endedAt } : {}),
     ...(session.claudeSessionId ? { claudeSessionId: session.claudeSessionId } : {}),
@@ -225,6 +227,7 @@ function historyToVm(
     resumable: Boolean(id),
     permissionBlocked: false,
     inFlight: false,
+    titleGenerating: false,
     ...(historyStartedAt ? { startedAt: historyStartedAt } : {}),
     ...(id ? { claudeSessionId: id } : {}),
   };
@@ -350,6 +353,7 @@ export function deriveLegacyUiSnapshot(
       cwd: effectiveCwd,
       currentTask: asString(state.currentTask?.title)
         || asString(selectedLegacy?.currentTaskTitle),
+      titleGenerating: Boolean(selectedLegacy?.titleGenerating),
       git: gitStatus,
     },
     legacyVisibility: {

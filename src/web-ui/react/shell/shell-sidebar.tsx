@@ -282,7 +282,13 @@ function SessionEntry({
           {manageMode && <ManageCheckbox entry={entry} dispatch={dispatch}/>} 
           <div className="session-main">
             <div className="session-title-row">
-              <div className={isHistory ? "session-command claude-history-preview" : "session-title"}>
+              <div
+                className={classNames(
+                  isHistory ? "session-command claude-history-preview" : "session-title",
+                  entry.titleGenerating && "title-generating",
+                )}
+                aria-busy={entry.titleGenerating || undefined}
+              >
                 {entry.title}
               </div>
               {time && <span className="session-time">{time}</span>}

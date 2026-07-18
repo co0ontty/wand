@@ -20,8 +20,9 @@ import { buildLanguageDirective, buildManagedAutonomyDirective } from "./languag
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
 import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-provider-common.js";
-import { generateSessionTopic } from "./session-topic.js";
+import { SessionTopicCoordinator } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
+import { resolveCommitAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import {
   ProviderHistoryScanner,
@@ -675,7 +676,7 @@ export class ProcessManager extends EventEmitter {
   private readonly dirtySessions = new Map<string, SessionDirtyState>();
   /** 启动时被识别为孤儿 PTY 并标记为 exited 的旧会话数（旧服务器进程已死） */
   private orphanRecoveredCount = 0;
-  private readonly topicRequests = new Set<string>();
+  private readonly topicCoordinator = new SessionTopicCoordinator();
   private disposed = false;
 
   constructor(
@@ -774,6 +775,7 @@ export class ProcessManager extends EventEmitter {
           openCodeSessionDiscoveryTimer: null,
           claudeSessionId: restoredSessionId ?? updated.claudeSessionId,
           approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
+          titleGenerating: false,
           ptyCols: snapshot.ptyCols ?? 120,
           ptyRows: snapshot.ptyRows ?? 36,
         });
@@ -818,6 +820,7 @@ export class ProcessManager extends EventEmitter {
           openCodeSessionDiscoveryTimer: null,
           claudeSessionId: restoredSessionId ?? updated.claudeSessionId,
           approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
+          titleGenerating: false,
           ptyCols: snapshot.ptyCols ?? 120,
           ptyRows: snapshot.ptyRows ?? 36,
         });
@@ -873,7 +876,7 @@ export class ProcessManager extends EventEmitter {
       }
     }
 
-    this.topicRequests.clear();
+    this.topicCoordinator.clear();
     this.removeAllListeners("process");
     this.logger.dispose();
   }
@@ -1880,9 +1883,16 @@ export class ProcessManager extends EventEmitter {
     record.title = title;
     record.description = description;
     const snapshot = this.snapshot(record);
-    this.storage.updateSessionRuntimeMetadata(snapshot);
+    this.storage.updateSessionRuntimeMetadata({ ...snapshot, titleGenerating: undefined });
     this.emitEvent({ type: "output", sessionId: id, data: { title, description, summary: description } });
     return snapshot;
+  }
+
+  private setSessionTopicGenerating(id: string, titleGenerating: boolean): void {
+    const record = this.sessions.get(id);
+    if (!record || record.titleGenerating === titleGenerating) return;
+    record.titleGenerating = titleGenerating;
+    this.emitEvent({ type: "output", sessionId: id, data: { titleGenerating } });
   }
 
   /**
@@ -1916,14 +1926,23 @@ export class ProcessManager extends EventEmitter {
   private maybeGenerateSessionTopic(id: string, input: string): void {
     const prompt = input.trim();
     const record = this.sessions.get(id);
-    if (this.disposed || !prompt || !record || record.title || this.topicRequests.has(id)) return;
-    this.topicRequests.add(id);
-    void generateSessionTopic(prompt, record.cwd, this.config.language, this.config.systemAi)
-      .then(({ title, description }) => {
+    if (this.disposed || !prompt || !record) return;
+    this.topicCoordinator.request(id, {
+      messages: snapshotMessages(record),
+      input: prompt,
+      cwd: record.cwd,
+      language: this.config.language,
+      ai: resolveCommitAiContext(record, this.config),
+      onGenerating: (generating) => {
+        if (!this.disposed) this.setSessionTopicGenerating(id, generating);
+      },
+      onTopic: ({ title, description }) => {
         if (!this.disposed && this.sessions.has(id)) this.setSessionTopic(id, title, description);
-      })
-      .catch((error) => console.error(`[ProcessManager] Failed to generate session topic ${id}:`, getErrorMessage(error)))
-      .finally(() => this.topicRequests.delete(id));
+      },
+      onError: (error) => {
+        console.error(`[ProcessManager] Failed to generate session topic ${id}:`, getErrorMessage(error));
+      },
+    });
   }
 
   private defaultAutonomyPolicy(mode: ExecutionMode): AutonomyPolicy {
