@@ -1,4 +1,5 @@
 import { getDefaultModelForProvider } from "./config.js";
+import { systemAiProfiles } from "./system-ai.js";
 import type { SessionProvider, SessionSnapshot, SystemAiConfig, WandConfig } from "./types.js";
 
 export interface SessionAiContext {
@@ -59,7 +60,7 @@ function normalizeModel(value: string | null | undefined): string | undefined {
 }
 
 function usableSystemAi(config: SystemAiConfig): SystemAiConfig | undefined {
-  if (!config.baseUrl.trim() || !config.apiKey.trim() || !config.model.trim()) return undefined;
+  if (!systemAiProfiles(config, true).length) return undefined;
   return { ...config, enabled: true };
 }
 
@@ -81,6 +82,21 @@ export function resolveSessionAiContext(
     thinkingEffort: snapshot.thinkingEffort ?? config.defaultThinkingEffort,
     inheritEnv: config.inheritEnv,
   };
+}
+
+/** Build the source order for Wand-owned AI features such as titles. */
+export function resolveSystemAiContext(
+  snapshot: Parameters<typeof resolveSessionAiContext>[0],
+  config: Parameters<typeof resolveSessionAiContext>[1] & Pick<WandConfig, "systemAi" | "commitCli" | "commitModel">,
+): SessionAiContext {
+  const sessionContext = resolveSessionAiContext(snapshot, config);
+  const directApi = config.systemAi ? usableSystemAi(config.systemAi) : undefined;
+  const cliContext: SessionAiContext = {
+    ...sessionContext,
+    provider: config.commitCli === "codex" || config.commitCli === "opencode" ? config.commitCli : "claude",
+    model: normalizeModel(config.commitModel),
+  };
+  return directApi && config.systemAi?.enabled ? { ...cliContext, systemAi: directApi } : cliContext;
 }
 
 /** Build the AI context for quick-commit actions from their global preferences. */

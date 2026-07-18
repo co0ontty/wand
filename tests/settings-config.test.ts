@@ -47,6 +47,11 @@ test("settings validate atomically, persist without secrets, and password rotati
       },
       model: "imported-model",
     }));
+    mkdirSync(path.join(importHome, ".config", "opencode"), { recursive: true });
+    writeFileSync(path.join(importHome, ".config", "opencode", "opencode.json"), JSON.stringify({
+      model: "imported/imported-opencode-model",
+      provider: { imported: { options: { baseURL: "https://opencode.example.test/v1", apiKey: "imported-opencode-secret" } } },
+    }));
     const previousHome = process.env.HOME;
     process.env.HOME = importHome;
     let importedResponse: Response | undefined;
@@ -63,13 +68,18 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.ok(importedResponse);
     assert.equal(importedResponse.status, 200);
     const importedBody = await importedResponse.json() as {
-      systemAi?: { enabled?: boolean; apiKey?: string; hasApiKey?: boolean };
+      count?: number;
+      systemAi?: { enabled?: boolean; apiKey?: string; hasApiKey?: boolean; fallbacks?: Array<{ apiKey?: string; hasApiKey?: boolean }> };
     };
+    assert.equal(importedBody.count, 2);
     assert.equal(importedBody.systemAi?.enabled, false);
     assert.equal(importedBody.systemAi?.apiKey, "");
     assert.equal(importedBody.systemAi?.hasApiKey, true);
+    assert.equal(importedBody.systemAi?.fallbacks?.[0]?.apiKey, "");
+    assert.equal(importedBody.systemAi?.fallbacks?.[0]?.hasApiKey, true);
     assert.equal(config.systemAi?.enabled, false);
     assert.equal(config.systemAi?.apiKey, "imported-system-ai-secret");
+    assert.equal(config.systemAi?.fallbacks?.[0]?.apiKey, "imported-opencode-secret");
     assert.equal(config.commitAiSource, "cli");
 
     const connectedLogin = await fetch(`${baseUrl}/api/login`, {
@@ -142,7 +152,7 @@ test("settings validate atomically, persist without secrets, and password rotati
       headers,
       body: JSON.stringify({
         commitAiSource: "api",
-        systemAi: { enabled: false, baseUrl: "", apiKey: "", model: "" },
+        systemAi: { enabled: false, baseUrl: "", apiKey: "", model: "", fallbacks: [] },
       }),
     });
     assert.equal(incompleteDirectApi.status, 400);

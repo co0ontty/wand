@@ -16,7 +16,7 @@ import { getCachedModels, refreshModels, type ModelRefreshOptions } from "./mode
 import { DEPLOYMENT_CONFIG_KEYS, type RuntimeConfigState } from "./runtime-config.js";
 import type { WandStorage } from "./storage.js";
 import type { WandConfig } from "./types.js";
-import { discoverCliSystemAiConfig, normalizeSystemAiConfig } from "./system-ai.js";
+import { discoverCliSystemAiConfigs, normalizeSystemAiConfig } from "./system-ai.js";
 
 interface SettingsDistributionPayload {
   androidApk: Record<string, unknown>;
@@ -51,17 +51,28 @@ function publicConfig(config: WandConfig): Record<string, unknown> {
   const defaultModels = getProviderDefaultModels(config);
   return {
     ...safe,
-    systemAi: safe.systemAi ? {
-      ...safe.systemAi,
-      apiKey: "",
-      hasApiKey: Boolean(safe.systemAi.apiKey),
-    } : undefined,
+    systemAi: publicSystemAi(safe.systemAi),
     defaultModel: defaultModels.claude,
     defaultCodexModel: defaultModels.codex,
     defaultOpenCodeModel: defaultModels.opencode,
     defaultGrokModel: defaultModels.grok,
     defaultQoderModel: defaultModels.qoder,
     defaultModels,
+  };
+}
+
+function publicSystemAi(systemAi: WandConfig["systemAi"]): Record<string, unknown> | undefined {
+  if (!systemAi) return undefined;
+  return {
+    ...systemAi,
+    apiKey: "",
+    hasApiKey: Boolean(systemAi.apiKey),
+    fallbacks: systemAi.fallbacks?.map((profile) => ({
+      ...profile,
+      apiKey: "",
+      hasApiKey: Boolean(profile.apiKey),
+      fallbacks: undefined,
+    })),
   };
 }
 
@@ -169,18 +180,19 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     const source = body.source === "codex" || body.source === "opencode" || body.source === "claude"
       ? body.source
       : config.commitCli;
-    const imported = discoverCliSystemAiConfig(source);
-    if (!imported) {
+    const imported = discoverCliSystemAiConfigs(source);
+    if (!imported.length) {
       res.status(404).json({ error: "没有在已配置的 CLI 文件中找到可直连的 API 地址、密钥和模型。" });
       return;
     }
     const candidate = runtimeConfig.createCandidate();
     writePreferenceToStorage(candidate, storage, "systemAi", {
-      ...imported,
+      ...imported[0],
       enabled: candidate.systemAi?.enabled === true,
+      fallbacks: imported.slice(1),
     });
     runtimeConfig.commit(candidate, new Set(["systemAi"]));
-    res.json({ ok: true, systemAi: (publicConfig(candidate).systemAi) });
+    res.json({ ok: true, count: imported.length, systemAi: (publicConfig(candidate).systemAi) });
   });
 
   app.get("/api/app-connect-code", requireAdmin, (req, res) => {
@@ -243,7 +255,15 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         const apiKey = typeof body.systemAi.apiKey === "string" && body.systemAi.apiKey.trim()
           ? body.systemAi.apiKey.trim()
           : previous?.apiKey ?? "";
-        stagePreference("systemAi", normalizeSystemAiConfig({ ...previous, ...body.systemAi, apiKey }, previous));
+        const submittedFallbacks = Array.isArray(body.systemAi.fallbacks)
+          ? body.systemAi.fallbacks.map((item, index) => {
+            const raw = item && typeof item === "object" && !Array.isArray(item) ? item as unknown as Record<string, unknown> : {};
+            const prior = previous?.fallbacks?.[index];
+            const fallbackApiKey = typeof raw.apiKey === "string" && raw.apiKey.trim() ? raw.apiKey.trim() : prior?.apiKey ?? "";
+            return { ...prior, ...raw, apiKey: fallbackApiKey, fallbacks: undefined };
+          })
+          : previous?.fallbacks;
+        stagePreference("systemAi", normalizeSystemAiConfig({ ...previous, ...body.systemAi, apiKey, fallbacks: submittedFallbacks }, previous));
       }
       for (const field of PREFERENCE_KEYS) {
         if (field === "systemAi") continue;

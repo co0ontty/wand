@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { generateCommitMessageOnly, QuickCommitError, runQuickCommitWithFallback } from "../src/git-quick-commit.js";
-import { callSystemAiText, discoverCliSystemAiConfig } from "../src/system-ai.js";
+import { callSystemAiText, callSystemAiTextWithFallback, discoverCliSystemAiConfig, discoverCliSystemAiConfigs } from "../src/system-ai.js";
 
 test("CLI discovery copies Claude API settings without mutating the source", () => {
   const home = mkdtempSync(path.join(os.tmpdir(), "wand-system-ai-"));
@@ -29,6 +29,80 @@ test("CLI discovery copies Claude API settings without mutating the source", () 
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("CLI discovery imports every configured API in preferred-provider order", () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "wand-system-ai-all-"));
+  try {
+    mkdirSync(path.join(home, ".claude"));
+    mkdirSync(path.join(home, ".codex"));
+    mkdirSync(path.join(home, ".config", "opencode"), { recursive: true });
+    writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({
+      env: { ANTHROPIC_AUTH_TOKEN: "claude-secret" }, model: "claude-model",
+    }));
+    writeFileSync(path.join(home, ".codex", "auth.json"), JSON.stringify({ OPENAI_API_KEY: "codex-secret" }));
+    writeFileSync(path.join(home, ".codex", "config.toml"), 'model = "codex-model"\nbase_url = "https://codex.example/v1"\n');
+    writeFileSync(path.join(home, ".config", "opencode", "opencode.json"), JSON.stringify({
+      model: "first/first-model",
+      provider: {
+        first: { options: { apiKey: "first-secret", baseURL: "https://first.example/v1" } },
+        second: {
+          options: { apiKey: "second-secret", baseURL: "https://second.example/v1" },
+          models: { "second-model": {} },
+        },
+      },
+    }));
+
+    const found = discoverCliSystemAiConfigs("opencode", home);
+    assert.deepEqual(found.map(({ source, baseUrl, model }) => ({ source, baseUrl, model })), [
+      { source: "opencode", baseUrl: "https://first.example/v1", model: "first-model" },
+      { source: "opencode", baseUrl: "https://second.example/v1", model: "second-model" },
+      { source: "claude", baseUrl: "https://api.anthropic.com", model: "claude-model" },
+      { source: "codex", baseUrl: "https://codex.example/v1", model: "codex-model" },
+    ]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("system AI tries configured APIs in order until one returns text", async () => {
+  const requests: string[] = [];
+  const server = createServer((req, res) => {
+    requests.push(`${req.headers.authorization}:${req.url}`);
+    res.setHeader("content-type", "application/json");
+    if (req.headers.authorization === "Bearer first-secret") {
+      res.statusCode = 503;
+      res.end(JSON.stringify({ error: "unavailable" }));
+      return;
+    }
+    res.end(JSON.stringify({ choices: [{ message: { content: "second API result" } }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const baseUrl = `http://127.0.0.1:${address.port}/v1`;
+    const text = await callSystemAiTextWithFallback("prompt", {
+      enabled: true,
+      protocol: "openai",
+      baseUrl,
+      apiKey: "first-secret",
+      model: "first-model",
+      source: "codex",
+      fallbacks: [{
+        enabled: true,
+        protocol: "openai",
+        baseUrl,
+        apiKey: "second-secret",
+        model: "second-model",
+        source: "opencode",
+      }],
+    });
+    assert.equal(text, "second API result");
+    assert.deepEqual(requests.map((request) => request.split(":", 1)[0]), ["Bearer first-secret", "Bearer second-secret"]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
 

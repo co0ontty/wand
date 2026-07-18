@@ -16,7 +16,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { resolveSdkClaudeBinary } from "./claude-sdk-runner.js";
 import { SessionTopicCoordinator } from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { resolveCommitAiContext } from "./session-ai-context.js";
+import { resolveSystemAiContext } from "./session-ai-context.js";
 import { CodexRunner } from "./structured-codex-adapter.js";
 import { normalizeStructuredToolResultContent } from "./structured-content.js";
 import {
@@ -602,7 +602,7 @@ export class StructuredSessionManager {
       input,
       cwd: session.cwd,
       language: this.config.language,
-      ai: resolveCommitAiContext(session, this.config),
+      ai: resolveSystemAiContext(session, this.config),
       onGenerating: (generating) => {
         if (!this.disposed) this.setSessionTopicGenerating(id, generating);
       },

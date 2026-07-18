@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
-import { callSystemAiText } from "./system-ai.js";
+import { callSystemAiTextWithFallback } from "./system-ai.js";
 import { buildChildEnv } from "./env-utils.js";
 import {
   runGit as runGitBase,
@@ -666,7 +666,7 @@ async function callCliAiText(prompt: string, cwd: string, language: string, opts
 }
 
 async function callDirectApiText(prompt: string, systemAi: import("./types.js").SystemAiConfig): Promise<string> {
-  const text = await callSystemAiText(prompt, systemAi);
+  const text = await callSystemAiTextWithFallback(prompt, systemAi);
   if (!text.trim()) {
     throw new QuickCommitError("直连 API 返回了空结果。", "EMPTY_AI_MESSAGE");
   }

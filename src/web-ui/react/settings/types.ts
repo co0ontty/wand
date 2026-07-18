@@ -95,6 +95,7 @@ export interface SettingsSystemAi {
   model: string;
   authHeader: "bearer" | "x-api-key";
   source: SettingsProvider | "custom";
+  fallbacks?: SettingsSystemAi[];
 }
 
 export interface SettingsConfig {
@@ -371,7 +372,7 @@ interface SettingsCommandResultMap {
   "certificate.upload": { ok: boolean; restartRequired: boolean; hasCert: boolean };
   "environment.load": SettingsEnvironmentPreview;
   "models.refresh": SettingsModelCatalog;
-  "systemAi.import": { ok: boolean; systemAi: SettingsSystemAi };
+  "systemAi.import": { ok: boolean; count: number; systemAi: SettingsSystemAi };
   "webUpdate.check": SettingsWebUpdate;
   "webUpdate.install": SettingsWebUpdateInstallResult;
   "server.restart": { ok: boolean; message: string };

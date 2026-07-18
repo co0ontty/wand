@@ -589,7 +589,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
     try {
       const result = await repository.execute({ type: "systemAi.import", source: form.commitCli });
       setForm((current) => ({ ...current, systemAi: { ...result.systemAi, apiKey: "" } }));
-      setStatus(`已从 ${form.commitCli} CLI 导入并保存 API 配置。`);
+      setStatus(`已从全部已配置 CLI 导入并保存 ${result.count} 个 API；${form.commitCli} 来源优先。`);
       setTone("success");
       await refresh();
     } catch (cause) {
@@ -603,7 +603,9 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
   async function save() {
     const systemRequired = form.systemAi.enabled || form.commitAiSource === "api";
     const nextErrors: Record<string, string> = {};
-    if (systemRequired) {
+    const configuredFallback = (form.systemAi.fallbacks || []).some((profile) =>
+      profile.baseUrl.trim() && profile.model.trim() && (profile.apiKey.trim() || profile.hasApiKey));
+    if (systemRequired && !configuredFallback) {
       if (!form.systemAi.baseUrl.trim()) nextErrors.baseUrl = "请输入 API 地址。";
       else {
         try {
@@ -642,6 +644,9 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
     : form.commitCli === "opencode"
       ? models?.opencodeModels || []
       : models?.models || [];
+  const systemAiProfiles = [form.systemAi, ...(form.systemAi.fallbacks || [])]
+    .filter((profile) => profile.baseUrl && profile.model && (profile.apiKey || profile.hasApiKey));
+  const systemAiOrder = systemAiProfiles.map((profile) => profile.source === "custom" ? "自定义" : profile.source).join(" → ");
 
   return (
     <section className="wand-settings-panel" aria-label="AI 与模型">
@@ -681,7 +686,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
       <SettingsSection
         title="系统 AI API"
         description="用于提示词优化、会话标题，以及可选的快捷提交。API Key 不会从服务端回传。"
-        action={<SettingsActionButton pending={pending === "import"} kind="secondary" onClick={() => void importSystemAi()}>从 CLI 导入</SettingsActionButton>}
+        action={<SettingsActionButton pending={pending === "import"} kind="secondary" onClick={() => void importSystemAi()}>导入全部 CLI API</SettingsActionButton>}
       >
         <SettingsToggle
           label="用于系统 AI 功能"
@@ -689,6 +694,11 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
           checked={form.systemAi.enabled}
           onCheckedChange={(checked) => updateSystem("enabled", checked)}
         />
+        {systemAiProfiles.length > 0 ? (
+          <SettingsStatus tone="success">
+            已配置 {systemAiProfiles.length} 个 API，将按 {systemAiOrder || "当前列表"} 依次尝试；全部不可用时回退 CLI。
+          </SettingsStatus>
+        ) : null}
         <SettingsGrid>
           <SettingsField label="接口格式">
             <SettingsSelect
@@ -727,8 +737,8 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
           <label><input type="radio" name="settings-commit-source" value="api" checked={form.commitAiSource === "api"} onChange={() => update("commitAiSource", "api")} />直连 API</label>
         </fieldset>
         {form.commitAiSource === "api" ? (
-          <SettingsStatus tone={form.systemAi.baseUrl && form.systemAi.model && (form.systemAi.apiKey || form.systemAi.hasApiKey) ? "success" : "warning"}>
-            {form.systemAi.baseUrl && form.systemAi.model && (form.systemAi.apiKey || form.systemAi.hasApiKey) ? "直连 API 已就绪。" : "请先补全上方直连 API 配置。"}
+          <SettingsStatus tone={systemAiProfiles.length ? "success" : "warning"}>
+            {systemAiProfiles.length ? `已就绪 ${systemAiProfiles.length} 个 API；全部失败后回退 CLI。` : "请先补全上方直连 API 配置。"}
           </SettingsStatus>
         ) : (
           <SettingsGrid>

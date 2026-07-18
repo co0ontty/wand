@@ -25,7 +25,7 @@ export function normalizeSystemAiConfig(value: unknown, fallback?: SystemAiConfi
     try { parsed = new URL(baseUrl); } catch { throw new Error("系统 AI API 地址无效。"); }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("系统 AI API 地址必须使用 http 或 https。");
   }
-  return {
+  const normalized: SystemAiConfig = {
     enabled: raw.enabled === true,
     protocol,
     baseUrl,
@@ -34,6 +34,23 @@ export function normalizeSystemAiConfig(value: unknown, fallback?: SystemAiConfi
     authHeader: raw.authHeader === "x-api-key" ? "x-api-key" : "bearer",
     source: raw.source === "claude" || raw.source === "codex" || raw.source === "opencode" ? raw.source : "custom",
   };
+  if (Array.isArray(raw.fallbacks)) {
+    normalized.fallbacks = raw.fallbacks
+      .map((item, index) => {
+        try {
+          const itemFallback = fallback?.fallbacks?.[index];
+          const profile = normalizeSystemAiConfig(item, itemFallback);
+          delete profile.fallbacks;
+          return profile;
+        } catch {
+          return null;
+        }
+      })
+      .filter((item): item is SystemAiConfig => item !== null);
+  } else if (fallback?.fallbacks?.length) {
+    normalized.fallbacks = fallback.fallbacks.map((item) => ({ ...item, fallbacks: undefined }));
+  }
+  return normalized;
 }
 
 function readJson(filePath: string): Record<string, unknown> | null {
@@ -60,18 +77,34 @@ function discoverClaude(home: string): SystemAiConfig | null {
   });
 }
 
-function discoverOpenCode(home: string): SystemAiConfig | null {
+function discoverOpenCode(home: string): SystemAiConfig[] {
   const config = readJson(path.join(home, ".config", "opencode", "opencode.json"));
   const selectedModel = typeof config?.model === "string" ? config.model : "";
   const providerId = selectedModel.split("/", 1)[0] ?? "";
   const providers = config?.provider && typeof config.provider === "object" ? config.provider as Record<string, unknown> : {};
-  const provider = providers[providerId] && typeof providers[providerId] === "object" ? providers[providerId] as Record<string, unknown> : null;
-  const options = provider?.options && typeof provider.options === "object" ? provider.options as Record<string, unknown> : {};
-  const apiKey = typeof options.apiKey === "string" ? options.apiKey : "";
-  const baseUrl = typeof options.baseURL === "string" ? options.baseURL : typeof options.baseUrl === "string" ? options.baseUrl : "";
-  if (!apiKey || !baseUrl || !selectedModel) return null;
-  const model = selectedModel.includes("/") ? selectedModel.slice(selectedModel.indexOf("/") + 1) : selectedModel;
-  return normalizeSystemAiConfig({ enabled: true, protocol: "openai", baseUrl, apiKey, model, authHeader: "bearer", source: "opencode" });
+  const orderedProviders = [providerId, ...Object.keys(providers).filter((id) => id !== providerId)];
+  const found: SystemAiConfig[] = [];
+  for (const id of orderedProviders) {
+    const provider = providers[id] && typeof providers[id] === "object" ? providers[id] as Record<string, unknown> : null;
+    const options = provider?.options && typeof provider.options === "object" ? provider.options as Record<string, unknown> : {};
+    const apiKey = typeof options.apiKey === "string" ? options.apiKey : "";
+    const baseUrl = typeof options.baseURL === "string" ? options.baseURL : typeof options.baseUrl === "string" ? options.baseUrl : "";
+    const models = provider?.models && typeof provider.models === "object" ? provider.models as Record<string, unknown> : {};
+    const configuredModel = id === providerId && selectedModel
+      ? (selectedModel.includes("/") ? selectedModel.slice(selectedModel.indexOf("/") + 1) : selectedModel)
+      : typeof provider?.model === "string" ? provider.model : Object.keys(models)[0] ?? "";
+    if (!apiKey || !baseUrl || !configuredModel) continue;
+    found.push(normalizeSystemAiConfig({
+      enabled: true,
+      protocol: "openai",
+      baseUrl,
+      apiKey,
+      model: configuredModel,
+      authHeader: "bearer",
+      source: "opencode",
+    }));
+  }
+  return found;
 }
 
 function discoverCodex(home: string): SystemAiConfig | null {
@@ -89,16 +122,46 @@ function discoverCodex(home: string): SystemAiConfig | null {
   return normalizeSystemAiConfig({ enabled: true, protocol: "openai", baseUrl, apiKey, model, authHeader: "bearer", source: "codex" });
 }
 
-/** Copy the first usable direct-API profile from the user's configured CLIs. */
-export function discoverCliSystemAiConfig(preferred?: SessionProvider, home = os.homedir()): SystemAiConfig | null {
-  const discoverers = { claude: discoverClaude, codex: discoverCodex, opencode: discoverOpenCode } as const;
+/** Copy every usable direct-API profile from the user's configured CLIs. */
+export function discoverCliSystemAiConfigs(preferred?: SessionProvider, home = os.homedir()): SystemAiConfig[] {
+  const discoverers = {
+    claude: (dir: string) => [discoverClaude(dir)].filter((item): item is SystemAiConfig => item !== null),
+    codex: (dir: string) => [discoverCodex(dir)].filter((item): item is SystemAiConfig => item !== null),
+    opencode: discoverOpenCode,
+  } as const;
   const order: SessionProvider[] = [preferred ?? "claude", "claude", "opencode", "codex"];
+  const found: SystemAiConfig[] = [];
+  const seen = new Set<string>();
   for (const provider of [...new Set(order)]) {
     if (provider === "grok" || provider === "qoder") continue;
-    const found = discoverers[provider](home);
-    if (found) return found;
+    for (const profile of discoverers[provider](home)) {
+      const key = [profile.protocol, profile.baseUrl, profile.apiKey, profile.model].join("\0");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push(profile);
+    }
   }
-  return null;
+  return found;
+}
+
+/** Backward-compatible first-profile discovery. */
+export function discoverCliSystemAiConfig(preferred?: SessionProvider, home = os.homedir()): SystemAiConfig | null {
+  return discoverCliSystemAiConfigs(preferred, home)[0] ?? null;
+}
+
+/** Return the configured API chain in call order, excluding incomplete entries. */
+export function systemAiProfiles(config: SystemAiConfig | undefined, forceEnabled = false): SystemAiConfig[] {
+  if (!config || (!forceEnabled && !config.enabled)) return [];
+  const candidates = [config, ...(config.fallbacks ?? [])];
+  const seen = new Set<string>();
+  return candidates.flatMap((candidate) => {
+    const normalized = normalizeSystemAiConfig({ ...candidate, enabled: true, fallbacks: undefined });
+    if (!normalized.baseUrl || !normalized.apiKey || !normalized.model) return [];
+    const key = [normalized.protocol, normalized.baseUrl, normalized.apiKey, normalized.model].join("\0");
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [normalized];
+  });
 }
 
 function endpoint(baseUrl: string, protocol: SystemAiProtocol): string {
@@ -151,4 +214,27 @@ export async function callSystemAiText(prompt: string, config: SystemAiConfig, t
   } catch {
     throw new SystemAiError("系统 AI API 返回了无法解析的响应。", "SYSTEM_AI_INVALID_RESPONSE");
   }
+}
+
+/** Try every configured API in order. Empty responses are treated as unavailable. */
+export async function callSystemAiTextWithFallback(
+  prompt: string,
+  config: SystemAiConfig,
+  timeoutMs = SYSTEM_AI_TIMEOUT_MS,
+): Promise<string> {
+  const profiles = systemAiProfiles(config, true);
+  if (!profiles.length) {
+    throw new SystemAiError("系统 AI API 配置不完整。", "SYSTEM_AI_CONFIG_INVALID");
+  }
+  const errors: string[] = [];
+  for (const profile of profiles) {
+    try {
+      const text = await callSystemAiText(prompt, profile, timeoutMs);
+      if (text.trim()) return text;
+      errors.push(`${profile.source ?? "custom"}: 返回空结果`);
+    } catch (error) {
+      errors.push(`${profile.source ?? "custom"}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new SystemAiError(`所有系统 AI API 均不可用：${errors.join("；")}`, "SYSTEM_AI_ALL_FAILED");
 }

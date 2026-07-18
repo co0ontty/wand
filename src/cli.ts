@@ -127,6 +127,11 @@ async function main(): Promise<void> {
           systemAi: config.systemAi ? {
             ...config.systemAi,
             apiKey: config.systemAi.apiKey ? "<set>" : "",
+            fallbacks: config.systemAi.fallbacks?.map((profile) => ({
+              ...profile,
+              apiKey: profile.apiKey ? "<set>" : "",
+              fallbacks: undefined,
+            })),
           } : undefined,
         };
         process.stdout.write(`${JSON.stringify(display, null, 2)}\n`);

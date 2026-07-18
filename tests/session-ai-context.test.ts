@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveCommitAiContext, resolveSessionAiContext, resolveSessionProvider } from "../src/session-ai-context.js";
+import { resolveCommitAiContext, resolveSessionAiContext, resolveSessionProvider, resolveSystemAiContext } from "../src/session-ai-context.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 const config = {
@@ -195,4 +195,23 @@ test("resolveCommitAiContext uses the direct API selected for commits", () => {
     model: "model-a",
     authHeader: "x-api-key",
   });
+});
+
+test("resolveSystemAiContext follows the system feature switch independently of Commit", () => {
+  const context = resolveSystemAiContext(session({ provider: "codex" }), {
+    ...config,
+    commitAiSource: "cli",
+    systemAi: {
+      enabled: true,
+      protocol: "openai",
+      baseUrl: "https://api.example.test",
+      apiKey: "secret",
+      model: "model-a",
+    },
+  });
+
+  assert.equal(context.provider, "claude");
+  assert.equal(context.model, "claude-haiku-4-5");
+  assert.equal(context.systemAi?.enabled, true);
+  assert.equal(context.fallbackSystemAi, undefined);
 });

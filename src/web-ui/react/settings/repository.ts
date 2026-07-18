@@ -117,12 +117,12 @@ function normalizeDistribution(value: unknown): SettingsDistribution {
   };
 }
 
-function normalizeSystemAi(value: unknown): SettingsSystemAi {
+function normalizeSystemAi(value: unknown, includeFallbacks = true): SettingsSystemAi {
   const input = record(value);
   const source = input.source === "claude" || input.source === "codex" || input.source === "opencode"
     ? input.source
     : "custom";
-  return {
+  const normalized: SettingsSystemAi = {
     ...EMPTY_SYSTEM_AI,
     enabled: input.enabled === true,
     protocol: input.protocol === "anthropic" ? "anthropic" : "openai",
@@ -133,6 +133,10 @@ function normalizeSystemAi(value: unknown): SettingsSystemAi {
     authHeader: input.authHeader === "x-api-key" ? "x-api-key" : "bearer",
     source,
   };
+  if (includeFallbacks && Array.isArray(input.fallbacks)) {
+    normalized.fallbacks = input.fallbacks.map((profile) => normalizeSystemAi(profile, false));
+  }
+  return normalized;
 }
 
 function normalizeConfig(value: unknown): SettingsConfig {

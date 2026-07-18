@@ -161,6 +161,11 @@ export interface SystemAiConfig {
   authHeader?: SystemAiAuthHeader;
   /** 自动导入时记录来源，仅用于设置页说明。 */
   source?: "claude" | "codex" | "opencode" | "custom";
+  /**
+   * 其余可直连 API，按数组顺序依次尝试。保留顶层字段作为首选项，
+   * 以兼容已有配置与手工编辑入口。
+   */
+  fallbacks?: SystemAiConfig[];
 }
 
 export type ClaudeModelSource = "builtin" | "configured" | "verified-cache" | "models-api";

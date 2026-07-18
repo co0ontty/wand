@@ -22,7 +22,7 @@ import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "
 import { normalizeThinkingEffort, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-provider-common.js";
 import { SessionTopicCoordinator } from "./session-topic.js";
 import { getErrorMessage } from "./error-utils.js";
-import { resolveCommitAiContext } from "./session-ai-context.js";
+import { resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import {
   ProviderHistoryScanner,
@@ -1932,7 +1932,7 @@ export class ProcessManager extends EventEmitter {
       input: prompt,
       cwd: record.cwd,
       language: this.config.language,
-      ai: resolveCommitAiContext(record, this.config),
+      ai: resolveSystemAiContext(record, this.config),
       onGenerating: (generating) => {
         if (!this.disposed) this.setSessionTopicGenerating(id, generating);
       },

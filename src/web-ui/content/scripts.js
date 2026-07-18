@@ -22072,10 +22072,10 @@
       github
     };
   }
-  function normalizeSystemAi(value) {
+  function normalizeSystemAi(value, includeFallbacks = true) {
     const input = record(value);
     const source = input.source === "claude" || input.source === "codex" || input.source === "opencode" ? input.source : "custom";
-    return {
+    const normalized = {
       ...EMPTY_SYSTEM_AI,
       enabled: input.enabled === true,
       protocol: input.protocol === "anthropic" ? "anthropic" : "openai",
@@ -22086,6 +22086,10 @@
       authHeader: input.authHeader === "x-api-key" ? "x-api-key" : "bearer",
       source
     };
+    if (includeFallbacks && Array.isArray(input.fallbacks)) {
+      normalized.fallbacks = input.fallbacks.map((profile) => normalizeSystemAi(profile, false));
+    }
+    return normalized;
   }
   function normalizeConfig(value) {
     const input = record(value);
@@ -23296,7 +23300,7 @@
       try {
         const result = await repository.execute({ type: "systemAi.import", source: form.commitCli });
         setForm((current) => ({ ...current, systemAi: { ...result.systemAi, apiKey: "" } }));
-        setStatus(`\u5DF2\u4ECE ${form.commitCli} CLI \u5BFC\u5165\u5E76\u4FDD\u5B58 API \u914D\u7F6E\u3002`);
+        setStatus(`\u5DF2\u4ECE\u5168\u90E8\u5DF2\u914D\u7F6E CLI \u5BFC\u5165\u5E76\u4FDD\u5B58 ${result.count} \u4E2A API\uFF1B${form.commitCli} \u6765\u6E90\u4F18\u5148\u3002`);
         setTone("success");
         await refresh();
       } catch (cause) {
@@ -23309,7 +23313,8 @@
     async function save() {
       const systemRequired = form.systemAi.enabled || form.commitAiSource === "api";
       const nextErrors = {};
-      if (systemRequired) {
+      const configuredFallback = (form.systemAi.fallbacks || []).some((profile) => profile.baseUrl.trim() && profile.model.trim() && (profile.apiKey.trim() || profile.hasApiKey));
+      if (systemRequired && !configuredFallback) {
         if (!form.systemAi.baseUrl.trim()) nextErrors.baseUrl = "\u8BF7\u8F93\u5165 API \u5730\u5740\u3002";
         else {
           try {
@@ -23345,6 +23350,8 @@
     }
     const models = snapshot7.models;
     const commitModels = form.commitCli === "codex" ? models?.codexModels || [] : form.commitCli === "opencode" ? models?.opencodeModels || [] : models?.models || [];
+    const systemAiProfiles = [form.systemAi, ...form.systemAi.fallbacks || []].filter((profile) => profile.baseUrl && profile.model && (profile.apiKey || profile.hasApiKey));
+    const systemAiOrder = systemAiProfiles.map((profile) => profile.source === "custom" ? "\u81EA\u5B9A\u4E49" : profile.source).join(" \u2192 ");
     return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("section", { className: "wand-settings-panel", "aria-label": "AI \u4E0E\u6A21\u578B", children: [
       /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("header", { className: "wand-settings-panel-heading", children: [
         /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("h2", { children: "AI \u4E0E\u6A21\u578B" }),
@@ -23385,7 +23392,7 @@
         {
           title: "\u7CFB\u7EDF AI API",
           description: "\u7528\u4E8E\u63D0\u793A\u8BCD\u4F18\u5316\u3001\u4F1A\u8BDD\u6807\u9898\uFF0C\u4EE5\u53CA\u53EF\u9009\u7684\u5FEB\u6377\u63D0\u4EA4\u3002API Key \u4E0D\u4F1A\u4ECE\u670D\u52A1\u7AEF\u56DE\u4F20\u3002",
-          action: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "import", kind: "secondary", onClick: () => void importSystemAi(), children: "\u4ECE CLI \u5BFC\u5165" }),
+          action: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "import", kind: "secondary", onClick: () => void importSystemAi(), children: "\u5BFC\u5165\u5168\u90E8 CLI API" }),
           children: [
             /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
               SettingsToggle,
@@ -23396,6 +23403,13 @@
                 onCheckedChange: (checked) => updateSystem("enabled", checked)
               }
             ),
+            systemAiProfiles.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsStatus, { tone: "success", children: [
+              "\u5DF2\u914D\u7F6E ",
+              systemAiProfiles.length,
+              " \u4E2A API\uFF0C\u5C06\u6309 ",
+              systemAiOrder || "\u5F53\u524D\u5217\u8868",
+              " \u4F9D\u6B21\u5C1D\u8BD5\uFF1B\u5168\u90E8\u4E0D\u53EF\u7528\u65F6\u56DE\u9000 CLI\u3002"
+            ] }) : null,
             /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsGrid, { children: [
               /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "\u63A5\u53E3\u683C\u5F0F", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
                 SettingsSelect,
@@ -23436,7 +23450,7 @@
             "\u76F4\u8FDE API"
           ] })
         ] }),
-        form.commitAiSource === "api" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: form.systemAi.baseUrl && form.systemAi.model && (form.systemAi.apiKey || form.systemAi.hasApiKey) ? "success" : "warning", children: form.systemAi.baseUrl && form.systemAi.model && (form.systemAi.apiKey || form.systemAi.hasApiKey) ? "\u76F4\u8FDE API \u5DF2\u5C31\u7EEA\u3002" : "\u8BF7\u5148\u8865\u5168\u4E0A\u65B9\u76F4\u8FDE API \u914D\u7F6E\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsGrid, { children: [
+        form.commitAiSource === "api" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: systemAiProfiles.length ? "success" : "warning", children: systemAiProfiles.length ? `\u5DF2\u5C31\u7EEA ${systemAiProfiles.length} \u4E2A API\uFF1B\u5168\u90E8\u5931\u8D25\u540E\u56DE\u9000 CLI\u3002` : "\u8BF7\u5148\u8865\u5168\u4E0A\u65B9\u76F4\u8FDE API \u914D\u7F6E\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsGrid, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "Commit CLI", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
             SettingsSelect,
             {

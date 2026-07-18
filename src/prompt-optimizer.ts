@@ -1,5 +1,5 @@
 import { ClaudeRunError, runClaudePrint } from "./claude-sdk-runner.js";
-import { callSystemAiText } from "./system-ai.js";
+import { callSystemAiTextWithFallback } from "./system-ai.js";
 import type { SystemAiConfig } from "./types.js";
 
 const CLAUDE_TIMEOUT_MS = 60_000;
@@ -57,7 +57,16 @@ export async function optimizePrompt(rawText: string, language: string, cwd?: st
     );
   }
   const prompt = buildOptimizePrompt(text, language);
-  const raw = systemAi?.enabled ? await callSystemAiText(prompt, systemAi) : await callClaudeText(prompt, cwd, language);
+  let raw: string;
+  if (systemAi?.enabled) {
+    try {
+      raw = await callSystemAiTextWithFallback(prompt, systemAi);
+    } catch {
+      raw = await callClaudeText(prompt, cwd, language);
+    }
+  } else {
+    raw = await callClaudeText(prompt, cwd, language);
+  }
   const cleaned = raw
     .replace(/^```[a-zA-Z]*\n?/, "")
     .replace(/\n?```$/, "")

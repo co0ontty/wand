@@ -97,6 +97,7 @@ test("config:show redacts every runtime secret", (t) => {
   const password = "config-show-password";
   const appSecret = "c".repeat(64);
   const apiKey = "config-show-api-key";
+  const fallbackApiKey = "config-show-fallback-api-key";
   writeFileSync(configPath, JSON.stringify({ host: "127.0.0.1" }));
 
   const storage = new WandStorage(path.join(dir, "wand.db"));
@@ -108,6 +109,13 @@ test("config:show redacts every runtime secret", (t) => {
     baseUrl: "https://api.example.test/v1",
     apiKey,
     model: "test-model",
+    fallbacks: [{
+      enabled: true,
+      protocol: "anthropic",
+      baseUrl: "https://fallback.example.test",
+      apiKey: fallbackApiKey,
+      model: "fallback-model",
+    }],
   });
   storage.close();
 
@@ -118,15 +126,17 @@ test("config:show redacts every runtime secret", (t) => {
   const displayed = JSON.parse(output) as {
     password?: string;
     appSecret?: string;
-    systemAi?: { apiKey?: string };
+    systemAi?: { apiKey?: string; fallbacks?: Array<{ apiKey?: string }> };
   };
 
   assert.equal(displayed.password, "<set>");
   assert.equal(displayed.appSecret, "<set>");
   assert.equal(displayed.systemAi?.apiKey, "<set>");
+  assert.equal(displayed.systemAi?.fallbacks?.[0]?.apiKey, "<set>");
   assert.equal(output.includes(password), false);
   assert.equal(output.includes(appSecret), false);
   assert.equal(output.includes(apiKey), false);
+  assert.equal(output.includes(fallbackApiKey), false);
 });
 
 test("config loading never copies provider CLI credentials", async (t) => {
