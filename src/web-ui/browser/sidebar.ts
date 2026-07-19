@@ -472,7 +472,7 @@ document.addEventListener("click", function(event) {
           session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) +
           '" type="button" aria-label="恢复会话" title="' + (isCodex ? "恢复此 Codex 会话" : "恢复此 Claude 会话") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
 
-        return '<div class="session-item non-wand-session' + (state.sessionsManageMode && selMap[session.claudeSessionId] ? ' selected' : '') + '" data-claude-history-id="' + session.claudeSessionId + '" data-provider="' + (isCodex ? 'codex' : 'claude') + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
+        return '<div class="session-item non-wand-session' + (state.sessionsManageMode ? ' session-managing' : '') + (state.sessionsManageMode && selMap[session.claudeSessionId] ? ' selected' : '') + '" data-claude-history-id="' + session.claudeSessionId + '" data-provider="' + (isCodex ? 'codex' : 'claude') + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0">' +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +
               checkbox +

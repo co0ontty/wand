@@ -12538,27 +12538,18 @@
     }
     .session-item:hover { background: rgba(125, 91, 57, 0.055); }
     .session-item.active {
-      background: rgba(255, 253, 249, 0.9);
-      border-color: rgba(197, 101, 61, 0.24);
+      background: transparent;
+      border-color: transparent;
       box-shadow: none;
     }
 
-    /* Active work must remain scannable in a long list even when motion is
-       disabled. The rail and quiet row tint carry distance recognition; the
-       explicit badge carries meaning. Selection keeps visual priority. */
+    /* List state is intentionally lightweight: selection gets one slim rail;
+       work state is carried by a dot and label, never a colored row or pill. */
     .session-item.status-prominent {
       --session-prominent-color: var(--success);
     }
     .session-item.status-prominent-warning {
       --session-prominent-color: var(--warning);
-    }
-    .session-item.status-prominent:not(.active):not(.selected) {
-      background: color-mix(in srgb, var(--session-prominent-color) 5.5%, transparent);
-    }
-    .session-item.status-prominent:not(.selected)::before {
-      background: var(--session-prominent-color);
-      opacity: 0.9;
-      transform: scaleY(1);
     }
     .session-item.status-prominent .session-meta .session-status {
       width: auto;
@@ -12566,9 +12557,9 @@
       height: auto;
       overflow: visible;
       gap: 4px;
-      padding: 3px 7px;
+      padding: 0;
       color: var(--session-prominent-color);
-      background: color-mix(in srgb, var(--session-prominent-color) 12%, transparent);
+      background: transparent;
       white-space: nowrap;
     }
     .session-item.status-prominent .session-meta .session-status::before {
@@ -12578,6 +12569,29 @@
       flex: 0 0 5px;
       border-radius: 50%;
       background: currentColor;
+    }
+
+    .session-item.active::before {
+      opacity: 1;
+      transform: scaleY(1);
+    }
+    .session-item.selected,
+    .session-item.session-managing.active {
+      background: transparent;
+      border-color: transparent;
+    }
+    .session-item.selected::before,
+    .session-item.session-managing::before {
+      opacity: 0;
+      transform: scaleY(0);
+    }
+
+    .session-manage-check span {
+      border-radius: 50%;
+      box-shadow: none;
+    }
+    .session-manage-check input:checked + span {
+      box-shadow: none;
     }
 
     .input-composer {

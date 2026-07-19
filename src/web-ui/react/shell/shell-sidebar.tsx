@@ -329,6 +329,7 @@ function SessionEntry({
         isHistory && "non-wand-session",
         entry.active && "active",
         manageMode && entry.selected && "selected",
+        manageMode && "session-managing",
         prominentStatus && "status-prominent",
         prominentWarning && "status-prominent-warning",
       )}

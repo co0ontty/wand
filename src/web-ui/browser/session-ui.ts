@@ -121,6 +121,7 @@ import { renderManageCheckbox } from "./sidebar";
       export function renderSessionItem(session, kind?) {
         var activeClass = session.id === state.selectedId ? " active" : "";
         var selectedClass = state.sessionsManageMode && state.selectedSessionIds[session.id] ? " selected" : "";
+        var managingClass = state.sessionsManageMode ? " session-managing" : "";
         var metaStatus = getSessionStatusLabel(session);
         var metaStatusClass = getSessionStatusClass(session);
         var prominentStatus = session.permissionBlocked
@@ -196,7 +197,7 @@ import { renderManageCheckbox } from "./sidebar";
             '</button>' +
           '</div>';
 
-        return '<div class="session-item' + activeClass + selectedClass + prominentClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
+        return '<div class="session-item' + activeClass + selectedClass + managingClass + prominentClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
           swipeBgHtml +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +

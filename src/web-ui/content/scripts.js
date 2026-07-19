@@ -31836,6 +31836,7 @@
           isHistory && "non-wand-session",
           entry.active && "active",
           manageMode && entry.selected && "selected",
+          manageMode && "session-managing",
           prominentStatus && "status-prominent",
           prominentWarning && "status-prominent-warning"
         ),
@@ -34173,6 +34174,7 @@
   function renderSessionItem(session, kind) {
     var activeClass = session.id === state.selectedId ? " active" : "";
     var selectedClass = state.sessionsManageMode && state.selectedSessionIds[session.id] ? " selected" : "";
+    var managingClass = state.sessionsManageMode ? " session-managing" : "";
     var metaStatus = getSessionStatusLabel(session);
     var metaStatusClass = getSessionStatusClass(session);
     var prominentStatus = session.permissionBlocked || isStructuredSession2(session) && session.structuredState && session.structuredState.inFlight || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].indexOf(session.status) !== -1;
@@ -34214,7 +34216,7 @@
     var badgesHtml = renderWorktreeBadge(session);
     var recoveryHtml = session.autoRecovered ? '<span class="session-recovery-hint">\u81EA\u52A8\u6062\u590D</span>' : "";
     var swipeBgHtml = state.sessionsManageMode ? "" : '<div class="session-swipe-bg" aria-hidden="true"><button class="session-swipe-delete" data-action="swipe-delete-session" data-session-id="' + session.id + '" type="button" tabindex="-1" aria-label="\u5220\u9664\u4F1A\u8BDD"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg><span>\u5220\u9664</span></button></div>';
-    return '<div class="session-item' + activeClass + selectedClass + prominentClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' + swipeBgHtml + '<div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-title-row">' + titleHtml + timeDisplay + "</div>" + descriptionHtml + activityHtml + '<div class="session-meta"><span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + "</span>" + (session.cwd ? renderTailMarqueePath(session.cwd, "session-path") : "") + badgesHtml + recoveryHtml + "</div></div>" + actionsHtml + "</div></div></div>";
+    return '<div class="session-item' + activeClass + selectedClass + managingClass + prominentClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' + swipeBgHtml + '<div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-title-row">' + titleHtml + timeDisplay + "</div>" + descriptionHtml + activityHtml + '<div class="session-meta"><span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + "</span>" + (session.cwd ? renderTailMarqueePath(session.cwd, "session-path") : "") + badgesHtml + recoveryHtml + "</div></div>" + actionsHtml + "</div></div></div>";
   }
   function getWorktreeMergeStatusLabel(session) {
     if (!session || !session.worktreeMergeStatus) return "";
@@ -34591,7 +34593,7 @@
     var checkbox = renderManageCheckbox(kind, session.claudeSessionId, "\u9009\u62E9\u4F1A\u8BDD " + preview);
     var deleteButton = state.sessionsManageMode ? "" : '<button class="session-action-btn delete-btn" data-action="' + dAct + '" data-claude-session-id="' + session.claudeSessionId + '" type="button" aria-label="\u5220\u9664\u4F1A\u8BDD" title="\u5220\u9664\u4F1A\u8BDD"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>';
     var resumeButton = state.sessionsManageMode ? "" : '<button class="session-action-btn" data-action="' + rAct + '" data-claude-session-id="' + session.claudeSessionId + '" data-cwd="' + escapeHtml(session.cwd) + '" type="button" aria-label="\u6062\u590D\u4F1A\u8BDD" title="' + (isCodex ? "\u6062\u590D\u6B64 Codex \u4F1A\u8BDD" : "\u6062\u590D\u6B64 Claude \u4F1A\u8BDD") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/></svg></button>';
-    return '<div class="session-item non-wand-session' + (state.sessionsManageMode && selMap[session.claudeSessionId] ? " selected" : "") + '" data-claude-history-id="' + session.claudeSessionId + '" data-provider="' + (isCodex ? "codex" : "claude") + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0"><div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-command claude-history-preview">' + escapeHtml(preview) + '</div><div class="session-meta"><span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + "</span><span>" + escapeHtml(timeStr) + '</span></div></div><span class="session-actions">' + resumeButton + deleteButton + "</span></div></div></div>";
+    return '<div class="session-item non-wand-session' + (state.sessionsManageMode ? " session-managing" : "") + (state.sessionsManageMode && selMap[session.claudeSessionId] ? " selected" : "") + '" data-claude-history-id="' + session.claudeSessionId + '" data-provider="' + (isCodex ? "codex" : "claude") + '" data-cwd="' + escapeHtml(session.cwd) + '" role="button" tabindex="0"><div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-command claude-history-preview">' + escapeHtml(preview) + '</div><div class="session-meta"><span class="session-id" title="' + escapeHtml(session.claudeSessionId) + '">' + escapeHtml(shortId) + "</span><span>" + escapeHtml(timeStr) + '</span></div></div><span class="session-actions">' + resumeButton + deleteButton + "</span></div></div></div>";
   }
   function formatHistoryTime(isoStr) {
     if (!isoStr) return "";
