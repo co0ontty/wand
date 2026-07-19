@@ -12509,3 +12509,122 @@
       .session-meta { grid-template-columns: 42px auto minmax(0, 1fr); }
       .session-provider-mark { width: 26px; height: 26px; }
     }
+
+    /* Restrained Liquid alignment: material belongs to functional chrome;
+       content surfaces stay calm and nearly opaque. */
+    .main-header-row {
+      background: rgba(255, 253, 249, 0.74);
+      border-bottom: 1px solid var(--border-subtle);
+      backdrop-filter: blur(18px) saturate(135%);
+      -webkit-backdrop-filter: blur(18px) saturate(135%);
+    }
+
+    .sidebar {
+      background: rgba(255, 253, 249, 0.88);
+      border-right-color: var(--border-subtle);
+      backdrop-filter: blur(20px) saturate(135%);
+      -webkit-backdrop-filter: blur(20px) saturate(135%);
+      box-shadow: 4px 0 20px -12px rgba(89, 58, 32, 0.16);
+    }
+    .sidebar.open { box-shadow: 8px 0 28px -14px rgba(89, 58, 32, 0.22); }
+    .sidebar.pinned { box-shadow: 2px 0 12px -10px rgba(89, 58, 32, 0.12); }
+
+    .session-item {
+      background: transparent;
+      border-color: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: none;
+    }
+    .session-item:hover { background: rgba(125, 91, 57, 0.055); }
+    .session-item.active {
+      background: rgba(255, 253, 249, 0.9);
+      border-color: rgba(197, 101, 61, 0.24);
+      box-shadow: none;
+    }
+
+    /* Active work must remain scannable in a long list even when motion is
+       disabled. The rail and quiet row tint carry distance recognition; the
+       explicit badge carries meaning. Selection keeps visual priority. */
+    .session-item.status-prominent {
+      --session-prominent-color: var(--success);
+    }
+    .session-item.status-prominent-warning {
+      --session-prominent-color: var(--warning);
+    }
+    .session-item.status-prominent:not(.active):not(.selected) {
+      background: color-mix(in srgb, var(--session-prominent-color) 5.5%, transparent);
+    }
+    .session-item.status-prominent:not(.selected)::before {
+      background: var(--session-prominent-color);
+      opacity: 0.9;
+      transform: scaleY(1);
+    }
+    .session-item.status-prominent .session-meta .session-status {
+      width: auto;
+      min-width: 0;
+      height: auto;
+      overflow: visible;
+      gap: 4px;
+      padding: 3px 7px;
+      color: var(--session-prominent-color);
+      background: color-mix(in srgb, var(--session-prominent-color) 12%, transparent);
+      white-space: nowrap;
+    }
+    .session-item.status-prominent .session-meta .session-status::before {
+      content: '';
+      width: 5px;
+      height: 5px;
+      flex: 0 0 5px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .input-composer {
+      background: rgba(255, 253, 249, 0.8);
+      backdrop-filter: blur(18px) saturate(135%);
+      -webkit-backdrop-filter: blur(18px) saturate(135%);
+      box-shadow: 0 3px 12px rgba(89, 58, 32, 0.045);
+    }
+    .input-composer:focus-within {
+      background: rgba(255, 253, 249, 0.94);
+      box-shadow: 0 0 0 2px var(--accent-muted), 0 4px 14px rgba(89, 58, 32, 0.045);
+    }
+
+    .modal {
+      background: rgba(255, 253, 249, 0.92);
+      border: 1px solid rgba(125, 91, 57, 0.12);
+      border-radius: 20px;
+      backdrop-filter: blur(24px) saturate(140%);
+      -webkit-backdrop-filter: blur(24px) saturate(140%);
+      box-shadow: 0 18px 52px -24px rgba(20, 14, 8, 0.28);
+    }
+    .modal-backdrop {
+      background: rgba(20, 14, 8, 0.28);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    .tool-use-card,
+    .inline-diff {
+      background: rgba(255, 253, 249, 0.9);
+      border-color: var(--border-subtle);
+      box-shadow: none;
+    }
+    .tool-use-card:hover,
+    .inline-diff:hover {
+      border-color: rgba(125, 91, 57, 0.2);
+      box-shadow: none;
+      transform: none;
+    }
+
+    @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+      .main-header-row,
+      .sidebar,
+      .input-composer,
+      .modal {
+        background: var(--bg-elevated);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+      }
+    }

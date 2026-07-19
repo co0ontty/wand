@@ -30952,6 +30952,10 @@
     idle: "\u7A7A\u95F2",
     stopped: "\u5DF2\u505C\u6B62",
     running: "\u8FD0\u884C\u4E2D",
+    thinking: "\u601D\u8003\u4E2D",
+    "waiting-input": "\u7B49\u5F85\u8F93\u5165",
+    waiting_input: "\u7B49\u5F85\u8F93\u5165",
+    reconnecting: "\u91CD\u8FDE\u4E2D",
     exited: "\u5DF2\u9000\u51FA",
     failed: "\u5DF2\u5931\u8D25"
   };
@@ -31822,6 +31826,8 @@
     const data = isHistory ? { historyId: entry.id, cwd: entry.cwd } : { sessionId: entry.id };
     const activate = () => void dispatch(actions.primary);
     const time = formatEntryTime(entry);
+    const prominentStatus = !isHistory && (entry.permissionBlocked || entry.inFlight || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].includes(entry.status));
+    const prominentWarning = entry.permissionBlocked || ["waiting-input", "waiting_input", "reconnecting"].includes(entry.status);
     return /* @__PURE__ */ (0, import_jsx_runtime38.jsxs)(
       "div",
       {
@@ -31829,7 +31835,9 @@
           "session-item",
           isHistory && "non-wand-session",
           entry.active && "active",
-          manageMode && entry.selected && "selected"
+          manageMode && entry.selected && "selected",
+          prominentStatus && "status-prominent",
+          prominentWarning && "status-prominent-warning"
         ),
         "data-session-id": isHistory ? void 0 : entry.id,
         "data-claude-history-id": isHistory ? entry.id : void 0,
@@ -34095,6 +34103,10 @@
       "idle": "\u7A7A\u95F2",
       "stopped": "\u5DF2\u505C\u6B62",
       "running": "\u8FD0\u884C\u4E2D",
+      "thinking": "\u601D\u8003\u4E2D",
+      "waiting-input": "\u7B49\u5F85\u8F93\u5165",
+      "waiting_input": "\u7B49\u5F85\u8F93\u5165",
+      "reconnecting": "\u91CD\u8FDE\u4E2D",
       "exited": "\u5DF2\u9000\u51FA",
       "failed": "\u5DF2\u5931\u8D25"
     };
@@ -34163,6 +34175,9 @@
     var selectedClass = state.sessionsManageMode && state.selectedSessionIds[session.id] ? " selected" : "";
     var metaStatus = getSessionStatusLabel(session);
     var metaStatusClass = getSessionStatusClass(session);
+    var prominentStatus = session.permissionBlocked || isStructuredSession2(session) && session.structuredState && session.structuredState.inFlight || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].indexOf(session.status) !== -1;
+    var prominentWarning = session.permissionBlocked || ["waiting-input", "waiting_input", "reconnecting"].indexOf(session.status) !== -1;
+    var prominentClass = prominentStatus ? " status-prominent" + (prominentWarning ? " status-prominent-warning" : "") : "";
     var resumeButton = "";
     var checkbox = renderManageCheckbox("sessions", session.id, "\u9009\u62E9\u4F1A\u8BDD " + session.command);
     if (session.claudeSessionId) {
@@ -34199,7 +34214,7 @@
     var badgesHtml = renderWorktreeBadge(session);
     var recoveryHtml = session.autoRecovered ? '<span class="session-recovery-hint">\u81EA\u52A8\u6062\u590D</span>' : "";
     var swipeBgHtml = state.sessionsManageMode ? "" : '<div class="session-swipe-bg" aria-hidden="true"><button class="session-swipe-delete" data-action="swipe-delete-session" data-session-id="' + session.id + '" type="button" tabindex="-1" aria-label="\u5220\u9664\u4F1A\u8BDD"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg><span>\u5220\u9664</span></button></div>';
-    return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' + swipeBgHtml + '<div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-title-row">' + titleHtml + timeDisplay + "</div>" + descriptionHtml + activityHtml + '<div class="session-meta"><span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + "</span>" + (session.cwd ? renderTailMarqueePath(session.cwd, "session-path") : "") + badgesHtml + recoveryHtml + "</div></div>" + actionsHtml + "</div></div></div>";
+    return '<div class="session-item' + activeClass + selectedClass + prominentClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' + swipeBgHtml + '<div class="session-item-content"><div class="session-item-row">' + checkbox + '<div class="session-main"><div class="session-title-row">' + titleHtml + timeDisplay + "</div>" + descriptionHtml + activityHtml + '<div class="session-meta"><span class="session-status ' + metaStatusClass + '">' + escapeHtml(metaStatus) + "</span>" + (session.cwd ? renderTailMarqueePath(session.cwd, "session-path") : "") + badgesHtml + recoveryHtml + "</div></div>" + actionsHtml + "</div></div></div>";
   }
   function getWorktreeMergeStatusLabel(session) {
     if (!session || !session.worktreeMergeStatus) return "";

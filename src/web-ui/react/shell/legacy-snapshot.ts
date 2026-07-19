@@ -97,6 +97,10 @@ const STATUS_LABELS: Readonly<Record<string, string>> = {
   idle: "空闲",
   stopped: "已停止",
   running: "运行中",
+  thinking: "思考中",
+  "waiting-input": "等待输入",
+  waiting_input: "等待输入",
+  reconnecting: "重连中",
   exited: "已退出",
   failed: "已失败",
 };

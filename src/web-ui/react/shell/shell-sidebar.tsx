@@ -314,6 +314,13 @@ function SessionEntry({
     : { sessionId: entry.id };
   const activate = () => void dispatch(actions.primary);
   const time = formatEntryTime(entry);
+  const prominentStatus = !isHistory && (
+    entry.permissionBlocked
+    || entry.inFlight
+    || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].includes(entry.status)
+  );
+  const prominentWarning = entry.permissionBlocked
+    || ["waiting-input", "waiting_input", "reconnecting"].includes(entry.status);
 
   return (
     <div
@@ -322,6 +329,8 @@ function SessionEntry({
         isHistory && "non-wand-session",
         entry.active && "active",
         manageMode && entry.selected && "selected",
+        prominentStatus && "status-prominent",
+        prominentWarning && "status-prominent-warning",
       )}
       data-session-id={isHistory ? undefined : entry.id}
       data-claude-history-id={isHistory ? entry.id : undefined}

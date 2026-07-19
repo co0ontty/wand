@@ -40,6 +40,10 @@ import { renderManageCheckbox } from "./sidebar";
           "idle": "空闲",
           "stopped": "已停止",
           "running": "运行中",
+          "thinking": "思考中",
+          "waiting-input": "等待输入",
+          "waiting_input": "等待输入",
+          "reconnecting": "重连中",
           "exited": "已退出",
           "failed": "已失败"
         };
@@ -119,6 +123,14 @@ import { renderManageCheckbox } from "./sidebar";
         var selectedClass = state.sessionsManageMode && state.selectedSessionIds[session.id] ? " selected" : "";
         var metaStatus = getSessionStatusLabel(session);
         var metaStatusClass = getSessionStatusClass(session);
+        var prominentStatus = session.permissionBlocked
+          || (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight)
+          || ["running", "thinking", "waiting-input", "waiting_input", "reconnecting"].indexOf(session.status) !== -1;
+        var prominentWarning = session.permissionBlocked
+          || ["waiting-input", "waiting_input", "reconnecting"].indexOf(session.status) !== -1;
+        var prominentClass = prominentStatus
+          ? " status-prominent" + (prominentWarning ? " status-prominent-warning" : "")
+          : "";
         var resumeButton = "";
         var checkbox = renderManageCheckbox("sessions", session.id, "选择会话 " + session.command);
 
@@ -184,7 +196,7 @@ import { renderManageCheckbox } from "./sidebar";
             '</button>' +
           '</div>';
 
-        return '<div class="session-item' + activeClass + selectedClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
+        return '<div class="session-item' + activeClass + selectedClass + prominentClass + '" data-session-id="' + session.id + '" role="button" tabindex="0">' +
           swipeBgHtml +
           '<div class="session-item-content">' +
             '<div class="session-item-row">' +
