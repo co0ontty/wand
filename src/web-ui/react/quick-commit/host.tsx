@@ -132,6 +132,27 @@ function ChangedFiles({ status }: { status: QuickCommitStatus }) {
   );
 }
 
+/** 提交前先明确当前分支与工作区状态，避免表单脱离上下文。 */
+function CommitWorkspaceLens({ status }: { status: QuickCommitStatus }) {
+  const hasChanges = status.modifiedCount > 0;
+  const hasAhead = status.ahead > 0;
+  const tone = hasChanges ? "accent" : "success";
+  const state = hasChanges
+    ? `${status.modifiedCount} 个改动待处理`
+    : (hasAhead ? `${status.ahead} 个 commit 待推送` : "工作区干净");
+
+  return (
+    <section className={`wand-quick-workspace-lens is-${tone}`} aria-label="当前工作区">
+      <span className="wand-quick-workspace-icon" aria-hidden="true">⌘</span>
+      <div>
+        <strong title={status.branch || "未识别分支"}>{status.branch || "未识别分支"}</strong>
+        <span>{state}</span>
+      </div>
+      {hasChanges && hasAhead ? <code>↑{status.ahead}</code> : null}
+    </section>
+  );
+}
+
 export function QuickCommitHost({ repository = httpQuickCommitRepository }: QuickCommitHostProps) {
   const controller = useSyncExternalStore(
     quickCommitStore.subscribe,
@@ -235,7 +256,6 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   async function submit(event?: FormEvent<HTMLFormElement>): Promise<void> {
     event?.preventDefault();
     if (!context || !status || !canCommit) return;
-    quickCommitController.setDismissable(false);
     setSubmitting(true);
     setError("");
     setPushError("");
@@ -253,8 +273,11 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         response,
       );
       const summary = commitSummary(nextOutcome);
-      if (selectedMeta.push && !response.pushError) {
-        quickCommitStore.getRuntime()?.toast(`${summary}，已推送。`, "success");
+      if (!response.pushError) {
+        quickCommitStore.getRuntime()?.toast(
+          selectedMeta.push ? `${summary}，已推送。` : `${summary}。`,
+          "success",
+        );
         void reloadStatus(context.sessionId);
         quickCommitController.close();
         return;
@@ -268,16 +291,16 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       }
       await reloadStatus(context.sessionId);
     } catch (commitError) {
-      setError(presentError(commitError, "快捷提交失败。"));
+      const message = presentError(commitError, "快捷提交失败。");
+      setError(message);
+      quickCommitStore.getRuntime()?.toast(message, "error");
     } finally {
-      quickCommitController.setDismissable(true);
       setSubmitting(false);
     }
   }
 
   async function pushAndClose(): Promise<void> {
     if (!context || !outcome || pushing) return;
-    quickCommitController.setDismissable(false);
     setPushing(true);
     setPushError("");
     try {
@@ -304,7 +327,6 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       setPushError(message);
       quickCommitStore.getRuntime()?.toast(message, "error");
     } finally {
-      quickCommitController.setDismissable(true);
       setPushing(false);
     }
   }
@@ -328,7 +350,6 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       headerClassName="wand-quick-header"
       closeLabel="关闭快捷提交"
       testId="quick-commit-dialog"
-      dismissable={!busy}
     >
       {loading ? (
         <div className="wand-quick-loading" role="status">正在加载 Git 状态…</div>
@@ -351,7 +372,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
             <p className="wand-quick-error" role="alert">{pushError || outcome.pushError}</p>
           ) : null}
           <div className="wand-quick-result-actions">
-            <WandButton kind="ghost" disabled={pushing} onClick={() => quickCommitController.close()}>
+            <WandButton kind="ghost" onClick={() => quickCommitController.close()}>
               关闭
             </WandButton>
             {outcome.pushed ? (
@@ -366,6 +387,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       ) : status ? (
         <form className="wand-quick-form" aria-busy={busy} onSubmit={(event) => void submit(event)}>
           <div className="wand-quick-body">
+            <CommitWorkspaceLens status={status} />
             <ChangedFiles status={status} />
             <section className="wand-quick-editor" aria-labelledby="wand-quick-editor-title">
               <div className="wand-quick-section-heading">
@@ -381,7 +403,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
                 </WandButton>
               </div>
               <label className="wand-quick-field" htmlFor="wand-quick-message">
-                <span>Commit message</span>
+                <span>新的 Commit 信息</span>
                 <textarea
                   id="wand-quick-message"
                   ref={messageInput}
@@ -395,7 +417,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
                 />
               </label>
               <label className="wand-quick-field" htmlFor="wand-quick-tag">
-                <span>版本 Tag</span>
+                <span>Tag（可选）</span>
                 <input
                   id="wand-quick-tag"
                   type="text"
@@ -454,7 +476,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
           <footer className="wand-quick-footer">
             <span>{hasQuickCommitChanges(status) ? "⌘/Ctrl + Enter 快速执行" : "工作区干净，无可提交改动"}</span>
             <div>
-              <WandButton kind="ghost" disabled={busy} onClick={() => quickCommitController.close()}>
+              <WandButton kind="ghost" onClick={() => quickCommitController.close()}>
                 取消
               </WandButton>
               <WandButton kind="primary" type="submit" disabled={!canCommit}>

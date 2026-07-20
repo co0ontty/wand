@@ -22937,7 +22937,15 @@
         ] }) : null
       ] }) }),
       snapshot7.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(import_jsx_runtime28.Fragment, { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsSection, { title: "Web \u7AEF\u66F4\u65B0", description: `\u66F4\u65B0\u901A\u9053\uFF1A${about.updateChannel === "beta" ? "Beta" : "\u7A33\u5B9A\u7248"}`, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsSection, { title: "\u4FDD\u6301\u5728\u6700\u65B0\u7248\u672C", description: `\u5F53\u524D ${about.version} \xB7 ${about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053"}`, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { className: "wand-settings-update-deck", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("span", { className: "wand-settings-update-deck-icon", "aria-hidden": "true", children: "\u21BB" }),
+            /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("strong", { children: "\u68C0\u67E5\u5E76\u7BA1\u7406 Web \u670D\u52A1\u66F4\u65B0" }),
+              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("span", { children: update?.latest || about.latestVersion ? "\u5DF2\u83B7\u53D6\u53EF\u7528\u7248\u672C\u4FE1\u606F" : "\u9009\u62E9\u68C0\u67E5\u66F4\u65B0\u4EE5\u83B7\u53D6\u6700\u65B0\u7248\u672C\u3002" })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("span", { className: about.updateChannel === "beta" ? "wand-settings-update-channel is-beta" : "wand-settings-update-channel", children: about.updateChannel === "beta" ? "BETA" : "STABLE" })
+          ] }),
           /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("div", { className: "wand-settings-about-list", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { children: [
             /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("span", { children: "\u6700\u65B0\u7248\u672C" }),
             /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("strong", { children: update?.latest || about.latestVersion || "\u5C1A\u672A\u68C0\u67E5" })
@@ -22970,8 +22978,8 @@
             }
           ),
           /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { className: "wand-settings-button-row", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "check", kind: "secondary", onClick: () => void action("check", async () => setUpdate(await repository.execute({ type: "webUpdate.check" })), "\u7248\u672C\u68C0\u67E5\u5B8C\u6210\u3002"), children: "\u68C0\u67E5\u66F4\u65B0" }),
-            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "install", kind: "primary", onClick: () => void action("install", async () => {
+            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { className: "wand-settings-update-primary", pending: pending === "check", kind: "primary", onClick: () => void action("check", async () => setUpdate(await repository.execute({ type: "webUpdate.check" })), "\u7248\u672C\u68C0\u67E5\u5B8C\u6210\u3002"), children: "\u68C0\u67E5\u66F4\u65B0" }),
+            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "install", kind: "secondary", onClick: () => void action("install", async () => {
               const result = await repository.execute({ type: "webUpdate.install" });
               setStatus(result.message);
             }, void 0), children: "\u66F4\u65B0\u6216\u91CD\u65B0\u5B89\u88C5" }),
@@ -23809,6 +23817,33 @@
     "presets",
     "about"
   ];
+  var PLATFORM_LABELS = {
+    browser: "\u7F51\u9875\u63A7\u5236\u53F0",
+    android: "Android \u539F\u751F",
+    ios: "iOS \u539F\u751F",
+    macos: "macOS \u539F\u751F"
+  };
+  function SettingsOverview({ snapshot: snapshot7 }) {
+    const version = snapshot7.platform.appVersion || snapshot7.about.version || "\u672A\u77E5\u7248\u672C";
+    return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)("section", { className: "wand-settings-overview", "aria-label": "\u5F53\u524D\u8BBE\u7F6E\u6982\u89C8", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("span", { className: "wand-settings-overview-mark", "aria-hidden": "true", children: "\u2726" }),
+      /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)("div", { className: "wand-settings-overview-copy", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)("div", { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("strong", { children: "\u7CFB\u7EDF\u8BBE\u7F6E" }),
+          /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("span", { children: "\u8FDE\u63A5\u3001\u8BBE\u5907\u548C\u5DE5\u4F5C\u6D41\u504F\u597D\u90FD\u5728\u8FD9\u91CC\u8C03\u6574\u3002" })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)("div", { className: "wand-settings-overview-pills", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("span", { className: "is-success", children: snapshot7.access === "admin" ? "\u7BA1\u7406\u5458\u8FDE\u63A5" : "App \u8FDE\u63A5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("span", { className: snapshot7.about.updateChannel === "beta" ? "is-warning" : "is-info", children: snapshot7.about.updateChannel === "beta" ? "Beta \u901A\u9053" : "Stable \u901A\u9053" }),
+          /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("span", { className: "is-accent", children: PLATFORM_LABELS[snapshot7.platform.kind] })
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)("code", { children: [
+        "v",
+        version.replace(/^v/, "")
+      ] })
+    ] });
+  }
   function SettingsHost({
     repository = httpSettingsRepository,
     showRestart: showRestart2 = () => {
@@ -23873,7 +23908,7 @@
         onOpenChange: (open) => {
           if (!open) settingsController.close();
         },
-        title: "\u8BBE\u7F6E",
+        title: "\u7CFB\u7EDF\u8BBE\u7F6E",
         description: "\u8C03\u6574\u5E94\u7528\u914D\u7F6E\u3001\u901A\u77E5\u3001\u5B89\u5168\u548C\u663E\u793A\u504F\u597D",
         className: "wand-settings-dialog",
         overlayClassName: "wand-settings-overlay",
@@ -23886,6 +23921,7 @@
           /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("p", { children: loadError }),
           /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(WandButton, { kind: "primary", onClick: () => void load(), children: "\u91CD\u8BD5\u52A0\u8F7D\u8BBE\u7F6E" })
         ] }) : snapshot7 ? /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(import_jsx_runtime29.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(SettingsOverview, { snapshot: snapshot7 }),
           snapshot7.access === "read-only" ? /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("div", { className: "wand-settings-readonly", role: "note", children: "\u5F53\u524D\u662F App \u8FDE\u63A5\u4F1A\u8BDD\uFF0C\u4EC5\u5C55\u793A\u7248\u672C\u4E0E\u5BA2\u6237\u7AEF\u4E0B\u8F7D\u4FE1\u606F\u3002\u7BA1\u7406\u8BBE\u7F6E\u9700\u8981\u7BA1\u7406\u5458\u767B\u5F55\u3002" }) : null,
           /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
             WandTabs,
@@ -25356,6 +25392,23 @@
       }) }) : /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("p", { className: "wand-quick-empty", children: "\u6CA1\u6709\u53EF\u63D0\u4EA4\u7684\u6539\u52A8\u3002" })
     ] });
   }
+  function CommitWorkspaceLens({ status }) {
+    const hasChanges = status.modifiedCount > 0;
+    const hasAhead = status.ahead > 0;
+    const tone = hasChanges ? "accent" : "success";
+    const state2 = hasChanges ? `${status.modifiedCount} \u4E2A\u6539\u52A8\u5F85\u5904\u7406` : hasAhead ? `${status.ahead} \u4E2A commit \u5F85\u63A8\u9001` : "\u5DE5\u4F5C\u533A\u5E72\u51C0";
+    return /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("section", { className: `wand-quick-workspace-lens is-${tone}`, "aria-label": "\u5F53\u524D\u5DE5\u4F5C\u533A", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("span", { className: "wand-quick-workspace-icon", "aria-hidden": "true", children: "\u2318" }),
+      /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("div", { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("strong", { title: status.branch || "\u672A\u8BC6\u522B\u5206\u652F", children: status.branch || "\u672A\u8BC6\u522B\u5206\u652F" }),
+        /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("span", { children: state2 })
+      ] }),
+      hasChanges && hasAhead ? /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("code", { children: [
+        "\u2191",
+        status.ahead
+      ] }) : null
+    ] });
+  }
   function QuickCommitHost({ repository = httpQuickCommitRepository }) {
     const controller = (0, import_react12.useSyncExternalStore)(
       quickCommitStore.subscribe,
@@ -25449,7 +25502,6 @@
     async function submit(event) {
       event?.preventDefault();
       if (!context || !status || !canCommit) return;
-      quickCommitController.setDismissable(false);
       setSubmitting(true);
       setError("");
       setPushError("");
@@ -25467,8 +25519,11 @@
           response
         );
         const summary = commitSummary(nextOutcome);
-        if (selectedMeta.push && !response.pushError) {
-          quickCommitStore.getRuntime()?.toast(`${summary}\uFF0C\u5DF2\u63A8\u9001\u3002`, "success");
+        if (!response.pushError) {
+          quickCommitStore.getRuntime()?.toast(
+            selectedMeta.push ? `${summary}\uFF0C\u5DF2\u63A8\u9001\u3002` : `${summary}\u3002`,
+            "success"
+          );
           void reloadStatus(context.sessionId);
           quickCommitController.close();
           return;
@@ -25482,15 +25537,15 @@
         }
         await reloadStatus(context.sessionId);
       } catch (commitError) {
-        setError(presentError3(commitError, "\u5FEB\u6377\u63D0\u4EA4\u5931\u8D25\u3002"));
+        const message = presentError3(commitError, "\u5FEB\u6377\u63D0\u4EA4\u5931\u8D25\u3002");
+        setError(message);
+        quickCommitStore.getRuntime()?.toast(message, "error");
       } finally {
-        quickCommitController.setDismissable(true);
         setSubmitting(false);
       }
     }
     async function pushAndClose() {
       if (!context || !outcome || pushing) return;
-      quickCommitController.setDismissable(false);
       setPushing(true);
       setPushError("");
       try {
@@ -25515,7 +25570,6 @@
         setPushError(message);
         quickCommitStore.getRuntime()?.toast(message, "error");
       } finally {
-        quickCommitController.setDismissable(true);
         setPushing(false);
       }
     }
@@ -25540,7 +25594,6 @@
         headerClassName: "wand-quick-header",
         closeLabel: "\u5173\u95ED\u5FEB\u6377\u63D0\u4EA4",
         testId: "quick-commit-dialog",
-        dismissable: !busy,
         children: loading ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("div", { className: "wand-quick-loading", role: "status", children: "\u6B63\u5728\u52A0\u8F7D Git \u72B6\u6001\u2026" }) : outcome ? /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("section", { className: "wand-quick-result", "aria-label": "\u63D0\u4EA4\u7ED3\u679C", children: [
           /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
             ResultPair,
@@ -25565,11 +25618,12 @@
           ] }) : null,
           outcome.pushError || pushError ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("p", { className: "wand-quick-error", role: "alert", children: pushError || outcome.pushError }) : null,
           /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("div", { className: "wand-quick-result-actions", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(WandButton, { kind: "ghost", disabled: pushing, onClick: () => quickCommitController.close(), children: "\u5173\u95ED" }),
+            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(WandButton, { kind: "ghost", onClick: () => quickCommitController.close(), children: "\u5173\u95ED" }),
             outcome.pushed ? /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("span", { className: "wand-quick-pushed", children: "\u5DF2\u63A8\u9001" }) : /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(WandButton, { kind: "primary", disabled: pushing, onClick: () => void pushAndClose(), children: pushing ? "\u63A8\u9001\u4E2D\u2026" : "Push & Close" })
           ] })
         ] }) : status ? /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("form", { className: "wand-quick-form", "aria-busy": busy, onSubmit: (event) => void submit(event), children: [
           /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("div", { className: "wand-quick-body", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(CommitWorkspaceLens, { status }),
             /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(ChangedFiles, { status }),
             /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("section", { className: "wand-quick-editor", "aria-labelledby": "wand-quick-editor-title", children: [
               /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("div", { className: "wand-quick-section-heading", children: [
@@ -25587,7 +25641,7 @@
                 )
               ] }),
               /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("label", { className: "wand-quick-field", htmlFor: "wand-quick-message", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("span", { children: "Commit message" }),
+                /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("span", { children: "\u65B0\u7684 Commit \u4FE1\u606F" }),
                 /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
                   "textarea",
                   {
@@ -25604,7 +25658,7 @@
                 )
               ] }),
               /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("label", { className: "wand-quick-field", htmlFor: "wand-quick-tag", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("span", { children: "\u7248\u672C Tag" }),
+                /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("span", { children: "Tag\uFF08\u53EF\u9009\uFF09" }),
                 /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(
                   "input",
                   {
@@ -25670,7 +25724,7 @@
           /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("footer", { className: "wand-quick-footer", children: [
             /* @__PURE__ */ (0, import_jsx_runtime32.jsx)("span", { children: hasQuickCommitChanges(status) ? "\u2318/Ctrl + Enter \u5FEB\u901F\u6267\u884C" : "\u5DE5\u4F5C\u533A\u5E72\u51C0\uFF0C\u65E0\u53EF\u63D0\u4EA4\u6539\u52A8" }),
             /* @__PURE__ */ (0, import_jsx_runtime32.jsxs)("div", { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(WandButton, { kind: "ghost", disabled: busy, onClick: () => quickCommitController.close(), children: "\u53D6\u6D88" }),
+              /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(WandButton, { kind: "ghost", onClick: () => quickCommitController.close(), children: "\u53D6\u6D88" }),
               /* @__PURE__ */ (0, import_jsx_runtime32.jsx)(WandButton, { kind: "primary", type: "submit", disabled: !canCommit, children: submitting ? form.message.trim() ? "\u6267\u884C\u4E2D\u2026" : "AI \u751F\u6210 + \u63D0\u4EA4\u4E2D\u2026" : selectedMeta.verb })
             ] })
           ] })
@@ -28958,6 +29012,71 @@
   font-size: var(--font-size-sm);
 }
 
+.wand-settings-overview {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 18px 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 17%, var(--border-subtle));
+  border-radius: 16px;
+  padding: 13px 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 82%, var(--accent-muted));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.wand-settings-overview-mark,
+.wand-settings-update-deck-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: 12px;
+  color: var(--accent-active);
+  background: var(--accent-muted);
+  font-size: 18px;
+  font-weight: var(--font-weight-bold);
+}
+
+.wand-settings-overview-copy {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 8px;
+}
+
+.wand-settings-overview-copy > div:first-child { display: grid; gap: 2px; }
+.wand-settings-overview-copy strong { color: var(--text-primary); font-size: var(--font-size-sm); }
+.wand-settings-overview-copy > div:first-child span { color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-settings-overview > code { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-xs); white-space: nowrap; }
+
+.wand-settings-overview-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wand-settings-overview-pills > span,
+.wand-settings-update-channel {
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  padding: 4px 7px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.wand-settings-overview-pills .is-success { border-color: color-mix(in srgb, var(--success) 20%, transparent); color: var(--success); background: var(--success-muted); }
+.wand-settings-overview-pills .is-warning,
+.wand-settings-update-channel.is-beta { border-color: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); background: var(--warning-muted); }
+.wand-settings-overview-pills .is-info { border-color: color-mix(in srgb, var(--info) 20%, transparent); color: var(--info); background: var(--info-muted); }
+.wand-settings-overview-pills .is-accent { border-color: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent-active); background: var(--accent-muted); }
+
 .wand-settings-loading,
 .wand-settings-load-error {
   display: grid;
@@ -29258,6 +29377,30 @@
 .wand-settings-about-list dt { color: var(--text-secondary); }
 .wand-settings-about-list dd { margin: 0; max-width: 70%; overflow-wrap: anywhere; text-align: right; }
 
+.wand-settings-update-deck {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid color-mix(in srgb, var(--success) 20%, var(--border-subtle));
+  border-radius: 13px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--success-muted) 45%, var(--bg-secondary));
+}
+
+.wand-settings-update-deck-icon {
+  width: 34px;
+  height: 34px;
+  border-color: color-mix(in srgb, var(--success) 26%, transparent);
+  color: var(--success);
+  background: var(--success-muted);
+  font-size: 20px;
+}
+
+.wand-settings-update-deck > div { display: grid; flex: 1 1 auto; min-width: 0; gap: 2px; }
+.wand-settings-update-deck strong { color: var(--text-primary); font-size: var(--font-size-sm); }
+.wand-settings-update-deck span { color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-settings-update-primary { min-width: 112px; }
+
 .wand-settings-connect-code {
   display: block;
   overflow: auto;
@@ -29415,6 +29558,41 @@
   overflow-y: auto;
   padding: 18px 22px 20px;
 }
+
+.wand-quick-workspace-lens {
+  --wand-quick-lens-tone: var(--accent);
+  --wand-quick-lens-muted: var(--accent-muted);
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--wand-quick-lens-tone) 26%, var(--border-subtle));
+  border-radius: 14px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--wand-quick-lens-muted) 48%, var(--bg-elevated));
+}
+
+.wand-quick-workspace-lens.is-success {
+  --wand-quick-lens-tone: var(--success);
+  --wand-quick-lens-muted: var(--success-muted);
+}
+
+.wand-quick-workspace-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--wand-quick-lens-tone);
+  background: var(--wand-quick-lens-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: var(--font-weight-bold);
+}
+
+.wand-quick-workspace-lens > div { display: grid; min-width: 0; gap: 2px; }
+.wand-quick-workspace-lens strong { overflow: hidden; color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-sm); text-overflow: ellipsis; white-space: nowrap; }
+.wand-quick-workspace-lens > div > span { color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-quick-workspace-lens > code { border-radius: var(--radius-full); padding: 5px 7px; color: var(--success); background: var(--success-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-xs); }
 
 .wand-quick-files,
 .wand-quick-editor,
@@ -30802,6 +30980,7 @@
 
   .wand-quick-header { padding: 16px 15px 13px; }
   .wand-quick-body { gap: 13px; padding: 13px 12px 16px; }
+  .wand-quick-workspace-lens { padding: 10px; }
   .wand-quick-action-grid { grid-template-columns: minmax(0, 1fr); }
   .wand-quick-field { grid-template-columns: minmax(0, 1fr); gap: 5px; }
   .wand-quick-field > span { padding-top: 0; }
@@ -30855,6 +31034,9 @@
 
   .wand-settings-header { padding: 14px 15px 13px; }
   .wand-settings-description { display: none; }
+  .wand-settings-overview { gap: 10px; margin: 8px 12px 0; padding: 11px; }
+  .wand-settings-overview-copy > div:first-child span { display: none; }
+  .wand-settings-overview > code { align-self: flex-start; }
 
   .wand-settings-tabs {
     display: grid;

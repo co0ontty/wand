@@ -40,6 +40,37 @@ const ADMIN_TAB_ORDER: SettingsTab[] = [
   "about",
 ];
 
+const PLATFORM_LABELS = {
+  browser: "网页控制台",
+  android: "Android 原生",
+  ios: "iOS 原生",
+  macos: "macOS 原生",
+} as const;
+
+/** 把当前连接、通道和端形态放在设置入口，而不是埋在各个分组中。 */
+function SettingsOverview({ snapshot }: { snapshot: SettingsSnapshot }) {
+  const version = snapshot.platform.appVersion || snapshot.about.version || "未知版本";
+  return (
+    <section className="wand-settings-overview" aria-label="当前设置概览">
+      <span className="wand-settings-overview-mark" aria-hidden="true">✦</span>
+      <div className="wand-settings-overview-copy">
+        <div>
+          <strong>系统设置</strong>
+          <span>连接、设备和工作流偏好都在这里调整。</span>
+        </div>
+        <div className="wand-settings-overview-pills">
+          <span className="is-success">{snapshot.access === "admin" ? "管理员连接" : "App 连接"}</span>
+          <span className={snapshot.about.updateChannel === "beta" ? "is-warning" : "is-info"}>
+            {snapshot.about.updateChannel === "beta" ? "Beta 通道" : "Stable 通道"}
+          </span>
+          <span className="is-accent">{PLATFORM_LABELS[snapshot.platform.kind]}</span>
+        </div>
+      </div>
+      <code>v{version.replace(/^v/, "")}</code>
+    </section>
+  );
+}
+
 export function SettingsHost({
   repository = httpSettingsRepository,
   showRestart = () => {},
@@ -107,7 +138,7 @@ export function SettingsHost({
     <WandDialogSurface
       open={controller.open}
       onOpenChange={(open) => { if (!open) settingsController.close(); }}
-      title="设置"
+      title="系统设置"
       description="调整应用配置、通知、安全和显示偏好"
       className="wand-settings-dialog"
       overlayClassName="wand-settings-overlay"
@@ -126,6 +157,7 @@ export function SettingsHost({
             </div>
           ) : snapshot ? (
             <>
+              <SettingsOverview snapshot={snapshot} />
               {snapshot.access === "read-only" ? (
                 <div className="wand-settings-readonly" role="note">
                   当前是 App 连接会话，仅展示版本与客户端下载信息。管理设置需要管理员登录。

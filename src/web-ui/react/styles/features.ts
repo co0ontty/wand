@@ -87,6 +87,71 @@ export const settingsAndQuickCommitStyles = String.raw`
   font-size: var(--font-size-sm);
 }
 
+.wand-settings-overview {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 18px 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 17%, var(--border-subtle));
+  border-radius: 16px;
+  padding: 13px 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 82%, var(--accent-muted));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.wand-settings-overview-mark,
+.wand-settings-update-deck-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: 12px;
+  color: var(--accent-active);
+  background: var(--accent-muted);
+  font-size: 18px;
+  font-weight: var(--font-weight-bold);
+}
+
+.wand-settings-overview-copy {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 8px;
+}
+
+.wand-settings-overview-copy > div:first-child { display: grid; gap: 2px; }
+.wand-settings-overview-copy strong { color: var(--text-primary); font-size: var(--font-size-sm); }
+.wand-settings-overview-copy > div:first-child span { color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-settings-overview > code { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-xs); white-space: nowrap; }
+
+.wand-settings-overview-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wand-settings-overview-pills > span,
+.wand-settings-update-channel {
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  padding: 4px 7px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.wand-settings-overview-pills .is-success { border-color: color-mix(in srgb, var(--success) 20%, transparent); color: var(--success); background: var(--success-muted); }
+.wand-settings-overview-pills .is-warning,
+.wand-settings-update-channel.is-beta { border-color: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); background: var(--warning-muted); }
+.wand-settings-overview-pills .is-info { border-color: color-mix(in srgb, var(--info) 20%, transparent); color: var(--info); background: var(--info-muted); }
+.wand-settings-overview-pills .is-accent { border-color: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent-active); background: var(--accent-muted); }
+
 .wand-settings-loading,
 .wand-settings-load-error {
   display: grid;
@@ -387,6 +452,30 @@ export const settingsAndQuickCommitStyles = String.raw`
 .wand-settings-about-list dt { color: var(--text-secondary); }
 .wand-settings-about-list dd { margin: 0; max-width: 70%; overflow-wrap: anywhere; text-align: right; }
 
+.wand-settings-update-deck {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid color-mix(in srgb, var(--success) 20%, var(--border-subtle));
+  border-radius: 13px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--success-muted) 45%, var(--bg-secondary));
+}
+
+.wand-settings-update-deck-icon {
+  width: 34px;
+  height: 34px;
+  border-color: color-mix(in srgb, var(--success) 26%, transparent);
+  color: var(--success);
+  background: var(--success-muted);
+  font-size: 20px;
+}
+
+.wand-settings-update-deck > div { display: grid; flex: 1 1 auto; min-width: 0; gap: 2px; }
+.wand-settings-update-deck strong { color: var(--text-primary); font-size: var(--font-size-sm); }
+.wand-settings-update-deck span { color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-settings-update-primary { min-width: 112px; }
+
 .wand-settings-connect-code {
   display: block;
   overflow: auto;
@@ -544,6 +633,41 @@ export const settingsAndQuickCommitStyles = String.raw`
   overflow-y: auto;
   padding: 18px 22px 20px;
 }
+
+.wand-quick-workspace-lens {
+  --wand-quick-lens-tone: var(--accent);
+  --wand-quick-lens-muted: var(--accent-muted);
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--wand-quick-lens-tone) 26%, var(--border-subtle));
+  border-radius: 14px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--wand-quick-lens-muted) 48%, var(--bg-elevated));
+}
+
+.wand-quick-workspace-lens.is-success {
+  --wand-quick-lens-tone: var(--success);
+  --wand-quick-lens-muted: var(--success-muted);
+}
+
+.wand-quick-workspace-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--wand-quick-lens-tone);
+  background: var(--wand-quick-lens-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: var(--font-weight-bold);
+}
+
+.wand-quick-workspace-lens > div { display: grid; min-width: 0; gap: 2px; }
+.wand-quick-workspace-lens strong { overflow: hidden; color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-sm); text-overflow: ellipsis; white-space: nowrap; }
+.wand-quick-workspace-lens > div > span { color: var(--text-secondary); font-size: var(--font-size-xs); }
+.wand-quick-workspace-lens > code { border-radius: var(--radius-full); padding: 5px 7px; color: var(--success); background: var(--success-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-xs); }
 
 .wand-quick-files,
 .wand-quick-editor,
@@ -1933,6 +2057,7 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
   .wand-quick-header { padding: 16px 15px 13px; }
   .wand-quick-body { gap: 13px; padding: 13px 12px 16px; }
+  .wand-quick-workspace-lens { padding: 10px; }
   .wand-quick-action-grid { grid-template-columns: minmax(0, 1fr); }
   .wand-quick-field { grid-template-columns: minmax(0, 1fr); gap: 5px; }
   .wand-quick-field > span { padding-top: 0; }
@@ -1986,6 +2111,9 @@ export const sessionPickerAndWorktreeStyles = String.raw`
 
   .wand-settings-header { padding: 14px 15px 13px; }
   .wand-settings-description { display: none; }
+  .wand-settings-overview { gap: 10px; margin: 8px 12px 0; padding: 11px; }
+  .wand-settings-overview-copy > div:first-child span { display: none; }
+  .wand-settings-overview > code { align-self: flex-start; }
 
   .wand-settings-tabs {
     display: grid;

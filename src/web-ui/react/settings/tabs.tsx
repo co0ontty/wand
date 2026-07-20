@@ -216,7 +216,17 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
 
       {snapshot.access === "admin" ? (
         <>
-          <SettingsSection title="Web 端更新" description={`更新通道：${about.updateChannel === "beta" ? "Beta" : "稳定版"}`}>
+          <SettingsSection title="保持在最新版本" description={`当前 ${about.version} · ${about.updateChannel === "beta" ? "Beta 通道" : "Stable 通道"}`}>
+            <div className="wand-settings-update-deck">
+              <span className="wand-settings-update-deck-icon" aria-hidden="true">↻</span>
+              <div>
+                <strong>检查并管理 Web 服务更新</strong>
+                <span>{update?.latest || about.latestVersion ? "已获取可用版本信息" : "选择检查更新以获取最新版本。"}</span>
+              </div>
+              <span className={about.updateChannel === "beta" ? "wand-settings-update-channel is-beta" : "wand-settings-update-channel"}>
+                {about.updateChannel === "beta" ? "BETA" : "STABLE"}
+              </span>
+            </div>
             <div className="wand-settings-about-list">
               <div><span>最新版本</span><strong>{update?.latest || about.latestVersion || "尚未检查"}</strong></div>
             </div>
@@ -242,8 +252,8 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
               }, "自动更新偏好已保存。")}
             />
             <div className="wand-settings-button-row">
-              <SettingsActionButton pending={pending === "check"} kind="secondary" onClick={() => void action("check", async () => setUpdate(await repository.execute({ type: "webUpdate.check" })), "版本检查完成。")}>检查更新</SettingsActionButton>
-              <SettingsActionButton pending={pending === "install"} kind="primary" onClick={() => void action("install", async () => { const result = await repository.execute({ type: "webUpdate.install" }); setStatus(result.message); }, undefined)}>更新或重新安装</SettingsActionButton>
+              <SettingsActionButton className="wand-settings-update-primary" pending={pending === "check"} kind="primary" onClick={() => void action("check", async () => setUpdate(await repository.execute({ type: "webUpdate.check" })), "版本检查完成。")}>检查更新</SettingsActionButton>
+              <SettingsActionButton pending={pending === "install"} kind="secondary" onClick={() => void action("install", async () => { const result = await repository.execute({ type: "webUpdate.install" }); setStatus(result.message); }, undefined)}>更新或重新安装</SettingsActionButton>
               {snapshot.restartRequired ? <SettingsActionButton pending={pending === "restart"} kind="secondary" onClick={() => void action("restart", async () => {
                 try {
                   await repository.execute({ type: "server.restart" });
