@@ -75,8 +75,23 @@ jobs:
           mv android/app/build/outputs/apk/debug/app-debug.apk \
              android/app/build/outputs/apk/debug/wand-v${{ steps.version.outputs.asset_version }}.apk
 
-      # body 由 .github/workflows/release-notes.yml 单点管理，这里只上传 APK。
+      # body 由 release-notes.yml 单点管理，这里只上传 APK。GitHub 的附件上传
+      # 端点偶尔会返回 5xx / "Error creating policy"，因此以退避重试上传，避免已
+      # 成功构建的发布因瞬时服务故障而失败。
       - name: Upload APK to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: android/app/build/outputs/apk/debug/wand-v${{ steps.version.outputs.asset_version }}.apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: android/app/build/outputs/apk/debug/wand-v${{ steps.version.outputs.asset_version }}.apk
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber; then
+              exit 0
+            fi
+            delay=$((attempt * 20))
+            echo "Release upload failed (attempt ${attempt}/5); retrying in ${delay}s..." >&2
+            sleep "$delay"
+          done
+          echo "Release upload failed after 5 attempts." >&2
+          exit 1
