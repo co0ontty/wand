@@ -155,17 +155,25 @@ test("Qoder model catalog exposes the official tier aliases", async () => {
   ]);
 });
 
-test("Qoder model discovery merges BYOK models with official tier aliases", () => {
+test("Qoder model discovery accepts bare and provider-qualified IDs", () => {
   const models = parseQoderModels([
-    "MODEL",
+    "outside-list-id",
+    "\x1b[1mMODEL\x1b[0m",
     "GLM-5.2 (Z.ai) (zhipu/glm5.2-cp)",
+    "Claude Sonnet 4.6 (claude-sonnet-4-6)",
+    "glm51",
     "GLM-5.2 duplicate (zhipu/glm5.2-cp)",
+    "Unsafe (model;rm-rf)",
   ].join("\n"));
 
   assert.deepEqual(models.map((model) => model.id), [
-    "default", "lite", "efficient", "auto", "performance", "ultimate", "zhipu/glm5.2-cp",
+    "default", "lite", "efficient", "auto", "performance", "ultimate",
+    "zhipu/glm5.2-cp", "claude-sonnet-4-6", "glm51",
   ]);
-  assert.equal(models.at(-1)?.label, "GLM-5.2 (Z.ai)");
+  assert.equal(models.find((model) => model.id === "zhipu/glm5.2-cp")?.label, "GLM-5.2 (Z.ai)");
+  assert.equal(models.find((model) => model.id === "claude-sonnet-4-6")?.label, "Claude Sonnet 4.6");
+  assert.equal(models.some((model) => model.id === "outside-list-id"), false);
+  assert.equal(models.some((model) => model.id === "model;rm-rf"), false);
 });
 
 test("Claude candidates merge configured, verified, and Models API entries without asserting entitlement", async () => {

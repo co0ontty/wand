@@ -125,6 +125,7 @@ export var ICON_PATHS: Record<string, string> = {
   wrench:    '<path d="M14.7 6.3a4 4 0 1 1 4 4l-9 9-3.5 1 1-3.5 7.5-7.5z"/>',
   paw:       '<circle cx="7.5" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="6.8" r="2" fill="currentColor" stroke="none"/><circle cx="16.5" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="18" cy="13.3" r="1.8" fill="currentColor" stroke="none"/><path d="M7.2 16.3c.5-2.9 2.3-4.8 4.8-4.8s4.3 1.9 4.8 4.8c.3 1.8-.9 3.2-2.6 2.6-.8-.3-1.4-.6-2.2-.6s-1.4.3-2.2.6c-1.7.6-2.9-.8-2.6-2.6z" fill="currentColor" stroke="none"/>',
   edit:      '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  refresh:   '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
   signal:    '<path d="M2 12a15 15 0 0 1 20 0"/><path d="M5 16a10 10 0 0 1 14 0"/><path d="M9 20a4 4 0 0 1 6 0"/><circle cx="12" cy="20" r="0.5" fill="currentColor"/>',
   file:      '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="14 3 14 9 20 9"/>',
   sigma:     '<polyline points="18 4 6 4 13 12 6 20 18 20"/>',

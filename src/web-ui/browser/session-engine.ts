@@ -419,10 +419,17 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             '</select>' +
           '</span>';
         }
+        var refreshButton = '<button class="model-refresh-button" type="button" data-models-refresh ' +
+          'aria-label="刷新模型列表" title="刷新模型列表"' +
+          (state.modelsRefreshing ? ' disabled aria-busy="true"' : '') + '>' +
+          iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) +
+          '<span class="model-refresh-label">刷新模型列表</span>' +
+          '</button>';
         return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="会话设置">' +
           pill("mode", "模式", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) +
           '<span class="composer-text-sep" aria-hidden="true">·</span>' +
           pill("model", "模型", modelLabel, renderChatModelOptionsRaw(modelText, session)) +
+          refreshButton +
           '<span class="composer-text-sep" aria-hidden="true">·</span>' +
           pill("thinking", "思考", getThinkingCompactLabel(thinkingText, session), renderThinkingOptions(thinkingText, session)) +
         '</div>';
@@ -658,6 +665,11 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
               renderChatModelOptions(model, session) +
             '</select>' +
           '</span>' +
+          '<button class="model-refresh-button composer-model-refresh-button" type="button" data-models-refresh aria-label="刷新模型列表" title="刷新模型列表"' +
+            (state.modelsRefreshing ? ' disabled aria-busy="true"' : '') + '>' +
+            iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) +
+            '<span class="model-refresh-label">刷新模型列表</span>' +
+          '</button>' +
           '<span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '" title="思考深度：' + escapeHtml(thinkingLabel) + '">' +
             iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) +
             '<span class="composer-config-label">' + escapeHtml(thinkingLabel) + '</span>' +
@@ -1016,17 +1028,62 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         return fetch("/api/models", { credentials: "same-origin" })
           .then(function(res) { return res.json(); })
           .then(function(data) {
-            if (data && Array.isArray(data.models)) {
-              state.availableModels = data.models;
-              state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
-              state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
-              state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
-              state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
-              syncComposerModelSelect(getSelectedSession());
-            }
+            applyAvailableModels(data);
             return data;
           })
           .catch(function() { return null; });
+      }
+
+      function applyAvailableModels(data) {
+        if (!data || !Array.isArray(data.models)) return false;
+        state.availableModels = data.models;
+        state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
+        state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
+        state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
+        state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
+        syncComposerModelSelect(getSelectedSession());
+        return true;
+      }
+
+      function syncModelRefreshButtons() {
+        var buttons = document.querySelectorAll("[data-models-refresh]");
+        buttons.forEach(function(button) {
+          var refreshing = !!state.modelsRefreshing;
+          button.toggleAttribute("disabled", refreshing);
+          button.setAttribute("aria-busy", refreshing ? "true" : "false");
+          button.setAttribute("title", refreshing ? "正在刷新模型列表" : "刷新模型列表");
+          button.setAttribute("aria-label", refreshing ? "正在刷新模型列表" : "刷新模型列表");
+          button.classList.toggle("is-refreshing", refreshing);
+        });
+      }
+
+      /** Refresh every provider catalog and immediately repopulate all visible model selectors. */
+      export function refreshAvailableModels() {
+        if (state.modelsRefreshing) return Promise.resolve(null);
+        state.modelsRefreshing = true;
+        syncModelRefreshButtons();
+        return fetch("/api/models/refresh", { method: "POST", credentials: "same-origin" })
+          .then(function(res) {
+            if (!res.ok) {
+              return res.json().catch(function() { return {}; }).then(function(data) {
+                throw new Error(data && data.error ? data.error : "刷新模型列表失败。");
+              });
+            }
+            return res.json();
+          })
+          .then(function(data) {
+            if (!applyAvailableModels(data)) throw new Error("刷新模型列表失败。");
+            showToast("模型列表已刷新。", "success");
+            return data;
+          })
+          .catch(function(error) {
+            showToast(error && error.message ? error.message : "刷新模型列表失败。", "error");
+            return null;
+          })
+          .finally(function() {
+            state.modelsRefreshing = false;
+            syncModelRefreshButtons();
+          });
       }
 
 

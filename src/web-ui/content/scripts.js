@@ -13286,6 +13286,7 @@
     wrench: '<path d="M14.7 6.3a4 4 0 1 1 4 4l-9 9-3.5 1 1-3.5 7.5-7.5z"/>',
     paw: '<circle cx="7.5" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="6.8" r="2" fill="currentColor" stroke="none"/><circle cx="16.5" cy="9" r="2" fill="currentColor" stroke="none"/><circle cx="18" cy="13.3" r="1.8" fill="currentColor" stroke="none"/><path d="M7.2 16.3c.5-2.9 2.3-4.8 4.8-4.8s4.3 1.9 4.8 4.8c.3 1.8-.9 3.2-2.6 2.6-.8-.3-1.4-.6-2.2-.6s-1.4.3-2.2.6c-1.7.6-2.9-.8-2.6-2.6z" fill="currentColor" stroke="none"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    refresh: '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
     signal: '<path d="M2 12a15 15 0 0 1 20 0"/><path d="M5 16a10 10 0 0 1 14 0"/><path d="M9 20a4 4 0 0 1 6 0"/><circle cx="12" cy="20" r="0.5" fill="currentColor"/>',
     file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="14 3 14 9 20 9"/>',
     sigma: '<polyline points="18 4 6 4 13 12 6 20 18 20"/>',
@@ -37839,6 +37840,12 @@
     document.addEventListener("click", function(e) {
       var target = e.target;
       if (!target || typeof target.closest !== "function") return;
+      var modelRefresh = target.closest("[data-models-refresh]");
+      if (modelRefresh) {
+        e.preventDefault();
+        if (!modelRefresh.disabled) void refreshAvailableModels();
+        return;
+      }
       var toggle = target.closest("#auto-approve-toggle");
       if (!toggle) return;
       e.preventDefault();
@@ -45019,7 +45026,8 @@
       var tagHtml = kind === "compact" ? "" : '<span class="chat-mode-trio-tag">' + escapeHtml(label) + "</span>";
       return '<span class="composer-text-pill chat-mode-trio-pill" data-mode-control-pill="' + ctrl + '" title="' + escapeHtml(label) + '">' + tagHtml + '<span class="composer-text-label">' + escapeHtml(value) + '</span><select class="composer-text-hidden-select" data-mode-control="' + ctrl + '" aria-label="' + escapeHtml(label) + '">' + optionsHtml + "</select></span>";
     }
-    return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelLabel, renderChatModelOptionsRaw(modelText, session)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("thinking", "\u601D\u8003", getThinkingCompactLabel(thinkingText, session), renderThinkingOptions(thinkingText, session)) + "</div>";
+    var refreshButton = '<button class="model-refresh-button" type="button" data-models-refresh aria-label="\u5237\u65B0\u6A21\u578B\u5217\u8868" title="\u5237\u65B0\u6A21\u578B\u5217\u8868"' + (state.modelsRefreshing ? ' disabled aria-busy="true"' : "") + ">" + iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) + '<span class="model-refresh-label">\u5237\u65B0\u6A21\u578B\u5217\u8868</span></button>';
+    return '<div class="chat-mode-trio chat-mode-trio-' + kind + '" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E">' + pill("mode", "\u6A21\u5F0F", composerMode, renderChatModeOptionsRaw(preferredTool, composerMode)) + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("model", "\u6A21\u578B", modelLabel, renderChatModelOptionsRaw(modelText, session)) + refreshButton + '<span class="composer-text-sep" aria-hidden="true">\xB7</span>' + pill("thinking", "\u601D\u8003", getThinkingCompactLabel(thinkingText, session), renderThinkingOptions(thinkingText, session)) + "</div>";
   }
   function getThinkingCompactLabel(id, session) {
     var effort = getThinkingLabel(id, session);
@@ -45202,7 +45210,7 @@
     var modelLabel = getShortModelLabel(model, session);
     var thinkingLabel = getThinkingCompactLabel(thinking, session);
     var title = "\u6A21\u5F0F " + modeLabel + " \xB7 \u6A21\u578B " + modelLabel + " \xB7 \u601D\u8003 " + thinkingLabel;
-    return '<div class="composer-config-controls" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E" title="' + escapeHtml(title) + '"><span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="\u6A21\u5F0F\uFF1A' + escapeHtml(modeLabel) + '">' + iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml(modeLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="mode" aria-label="\u6A21\u5F0F">' + renderChatModeOptionsRaw(preferredTool, mode) + '</select></span><span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="\u6A21\u578B\uFF1A' + escapeHtml(modelLabel) + '">' + iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml(modelLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="model" aria-label="\u6A21\u578B">' + renderChatModelOptions(model, session) + '</select></span><span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '" title="\u601D\u8003\u6DF1\u5EA6\uFF1A' + escapeHtml(thinkingLabel) + '">' + iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml(thinkingLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="thinking" aria-label="\u601D\u8003\u6DF1\u5EA6">' + renderThinkingOptions(thinking, session) + "</select></span>" + (supportsClaudeSkillSelection(session) ? '<button class="composer-config-chip composer-config-skills" type="button" data-claude-skills-trigger aria-haspopup="dialog" aria-expanded="false" title="\u9009\u62E9\u672C\u6761\u6D88\u606F\u8981\u5E94\u7528\u7684 skills">Skills</button>' : "") + "</div>";
+    return '<div class="composer-config-controls" role="group" aria-label="\u4F1A\u8BDD\u8BBE\u7F6E" title="' + escapeHtml(title) + '"><span class="composer-config-chip composer-config-chip-mode" data-mode-control-pill="mode" title="\u6A21\u5F0F\uFF1A' + escapeHtml(modeLabel) + '">' + iconSvg("shield", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml(modeLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="mode" aria-label="\u6A21\u5F0F">' + renderChatModeOptionsRaw(preferredTool, mode) + '</select></span><span class="composer-config-chip composer-config-model" data-mode-control-pill="model" title="\u6A21\u578B\uFF1A' + escapeHtml(modelLabel) + '">' + iconSvg("cpu", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml(modelLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="model" aria-label="\u6A21\u578B">' + renderChatModelOptions(model, session) + '</select></span><button class="model-refresh-button composer-model-refresh-button" type="button" data-models-refresh aria-label="\u5237\u65B0\u6A21\u578B\u5217\u8868" title="\u5237\u65B0\u6A21\u578B\u5217\u8868"' + (state.modelsRefreshing ? ' disabled aria-busy="true"' : "") + ">" + iconSvg("refresh", { size: 13, strokeWidth: 1.9, cls: "model-refresh-icon" }) + '<span class="model-refresh-label">\u5237\u65B0\u6A21\u578B\u5217\u8868</span></button><span class="composer-config-chip composer-config-thinking" data-mode-control-pill="thinking" data-thinking="' + escapeHtml(thinking) + '" title="\u601D\u8003\u6DF1\u5EA6\uFF1A' + escapeHtml(thinkingLabel) + '">' + iconSvg("brain", { size: 13, strokeWidth: 1.8, cls: "composer-config-icon" }) + '<span class="composer-config-label">' + escapeHtml(thinkingLabel) + '</span><select class="composer-text-hidden-select" data-mode-control="thinking" aria-label="\u601D\u8003\u6DF1\u5EA6">' + renderThinkingOptions(thinking, session) + "</select></span>" + (supportsClaudeSkillSelection(session) ? '<button class="composer-config-chip composer-config-skills" type="button" data-claude-skills-trigger aria-haspopup="dialog" aria-expanded="false" title="\u9009\u62E9\u672C\u6761\u6D88\u606F\u8981\u5E94\u7528\u7684 skills">Skills</button>' : "") + "</div>";
   }
   function refreshAllChatModeTrios2() {
     var session = getSelectedSession4();
@@ -45501,17 +45509,56 @@
     return fetch("/api/models", { credentials: "same-origin" }).then(function(res) {
       return res.json();
     }).then(function(data) {
-      if (data && Array.isArray(data.models)) {
-        state.availableModels = data.models;
-        state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
-        state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
-        state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
-        state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
-        syncComposerModelSelect(getSelectedSession4());
-      }
+      applyAvailableModels(data);
       return data;
     }).catch(function() {
       return null;
+    });
+  }
+  function applyAvailableModels(data) {
+    if (!data || !Array.isArray(data.models)) return false;
+    state.availableModels = data.models;
+    state.availableCodexModels = Array.isArray(data.codexModels) ? data.codexModels : [];
+    state.availableOpenCodeModels = Array.isArray(data.opencodeModels) ? data.opencodeModels : [];
+    state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
+    state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
+    syncComposerModelSelect(getSelectedSession4());
+    return true;
+  }
+  function syncModelRefreshButtons() {
+    var buttons = document.querySelectorAll("[data-models-refresh]");
+    buttons.forEach(function(button) {
+      var refreshing = !!state.modelsRefreshing;
+      button.toggleAttribute("disabled", refreshing);
+      button.setAttribute("aria-busy", refreshing ? "true" : "false");
+      button.setAttribute("title", refreshing ? "\u6B63\u5728\u5237\u65B0\u6A21\u578B\u5217\u8868" : "\u5237\u65B0\u6A21\u578B\u5217\u8868");
+      button.setAttribute("aria-label", refreshing ? "\u6B63\u5728\u5237\u65B0\u6A21\u578B\u5217\u8868" : "\u5237\u65B0\u6A21\u578B\u5217\u8868");
+      button.classList.toggle("is-refreshing", refreshing);
+    });
+  }
+  function refreshAvailableModels() {
+    if (state.modelsRefreshing) return Promise.resolve(null);
+    state.modelsRefreshing = true;
+    syncModelRefreshButtons();
+    return fetch("/api/models/refresh", { method: "POST", credentials: "same-origin" }).then(function(res) {
+      if (!res.ok) {
+        return res.json().catch(function() {
+          return {};
+        }).then(function(data) {
+          throw new Error(data && data.error ? data.error : "\u5237\u65B0\u6A21\u578B\u5217\u8868\u5931\u8D25\u3002");
+        });
+      }
+      return res.json();
+    }).then(function(data) {
+      if (!applyAvailableModels(data)) throw new Error("\u5237\u65B0\u6A21\u578B\u5217\u8868\u5931\u8D25\u3002");
+      showToast("\u6A21\u578B\u5217\u8868\u5DF2\u5237\u65B0\u3002", "success");
+      return data;
+    }).catch(function(error) {
+      showToast(error && error.message ? error.message : "\u5237\u65B0\u6A21\u578B\u5217\u8868\u5931\u8D25\u3002", "error");
+      return null;
+    }).finally(function() {
+      state.modelsRefreshing = false;
+      syncModelRefreshButtons();
     });
   }
   function getSelectedSession4() {

@@ -12,6 +12,10 @@ const CLAUDE_PROBE_TIMEOUT_MS = 15_000;
 const MAX_CLAUDE_MODEL_PROBES = 12;
 const CLAUDE_PROBE_CONCURRENCY = 3;
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+// Qoder returns both tier/frontier IDs (for example `glm51`) and custom
+// provider IDs (for example `zhipu/glm5.2-cp`). Keep this intentionally
+// conservative because these values are later forwarded to `--model`.
+const QODER_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 
 const CLAUDE_BUILTIN_MODELS: ClaudeModelInfo[] = [
   {
@@ -517,18 +521,37 @@ export function parseGrokModels(stdout: string): ClaudeModelInfo[] {
   ];
 }
 
-/** Parse `qodercli --list-models`, whose custom entries end in their selectable model ID. */
+/**
+ * Parse `qodercli --list-models`.
+ *
+ * Qoder has used both provider-qualified custom IDs (`zhipu/glm5.2-cp`) and
+ * plain tier/frontier IDs (`glm51`). The CLI's human-readable rows put the
+ * selectable value in the final parentheses; some versions also emit a bare
+ * safe ID below the `MODEL` header.
+ */
 export function parseQoderModels(stdout: string): ClaudeModelInfo[] {
   const discovered: ClaudeModelInfo[] = [];
   const seen = new Set(QODER_FALLBACK_MODELS.map((model) => model.id));
+  let inModelList = false;
+  const add = (id: string, label: string): void => {
+    if (!QODER_MODEL_ID_PATTERN.test(id) || seen.has(id)) return;
+    seen.add(id);
+    discovered.push({ id, label: label || id });
+  };
   for (const rawLine of stdout.split(/\r?\n/)) {
     const line = rawLine.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "").trim();
-    const match = line.match(/^(.*?)\s+\(([A-Za-z0-9][A-Za-z0-9._:-]*\/[A-Za-z0-9][A-Za-z0-9._:/-]*)\)\s*$/);
-    if (!match) continue;
-    const [, displayName, id] = match;
-    if (!displayName || !id || seen.has(id)) continue;
-    seen.add(id);
-    discovered.push({ id, label: displayName.trim() || id });
+    if (/^models?\s*:?$/i.test(line)) {
+      inModelList = true;
+      continue;
+    }
+    const match = line.match(/^(.+?)\s+\(([^()]+)\)\s*$/);
+    if (match) {
+      const displayName = match[1].trim();
+      const id = match[2].trim();
+      if (displayName) add(id, displayName);
+      continue;
+    }
+    if (inModelList && QODER_MODEL_ID_PATTERN.test(line)) add(line, line);
   }
   return [...cloneModels(QODER_FALLBACK_MODELS), ...discovered];
 }

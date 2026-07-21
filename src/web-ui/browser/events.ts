@@ -8,7 +8,7 @@ import { loadGitStatus, openQuickCommitModal } from "./git-commit";
 import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, createSessionFromInput, createSessionFromWelcomeInput, deleteClaudeHistoryDirectory, deleteClaudeHistorySession, deleteSession, focusInputBox, getHistoryItemsByCwd, getSelectedSession, handleDeleteCodexHistoryAction, handleInputBoxBlur, handleInputBoxFocus, handleResumeAction, handleResumeCodexHistoryAction, handleResumeHistoryAction, handleVoiceMove, initSwipeToDelete, postInput, queueDirectInput, refreshInputBoxState, resumeSessionFromList, sendOrStart, setupMobileKeyboardHandlers, startAndActivateCommand, startVoiceRecording, stopSession, stopVoiceRecording, toggleTerminalInteractive, updateQueueBar, welcomeInputSend } from "./input";
 import { hideError, showToast } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
-import { addPendingAttachment, backToNativeApp, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, isStructuredSession, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, retryWorktreeCleanup, selectSession, setDraftValue, switchServer, syncComposerHasText, toggleClaudeSkill, toggleClaudeSkillsPicker, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin } from "./session-engine";
+import { addPendingAttachment, backToNativeApp, closeClaudeSkillsPicker, closePlusPopover, closeSessionsDrawer, copyToClipboard, createStructuredSession, dismissDrawerIfOverlay, getSafeModeForTool, handleCollapsedTileHover, handleCollapsedTileLeave, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, hideCollapsedTileBubble, isStructuredSession, loadSessions, login, logout, onChatModeChange, onChatModelChange, onChatThinkingChange, openSessionModal, openSettingsModal, openWorktreeMergeModal, optimizePromptText, positionSidebarOverflowMenu, quickStartSession, refreshAll, refreshAllChatModeTrios, refreshAvailableModels, retryWorktreeCleanup, selectSession, setDraftValue, switchServer, syncComposerHasText, toggleClaudeSkill, toggleClaudeSkillsPicker, togglePlusPopover, toggleSessionsDrawer, toggleSidebarCollapsed, toggleSidebarPin } from "./session-engine";
 import { batchDeleteSelected, clearSelections, confirmDelete, renderSessions, selectAllVisibleItems, toggleManageMode, toggleManagedItemSelection } from "./sidebar";
 import { copySelectedSessionField, handleSessionItemClick, handleSessionItemKeydown, initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
 import { ensureTerminalFit, setupVisualViewportHandlers, teardownTerminal } from "./viewport";
@@ -374,6 +374,12 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
         document.addEventListener("click", function(e) {
           var target = e.target as HTMLElement;
           if (!target || typeof target.closest !== "function") return;
+          var modelRefresh = target.closest("[data-models-refresh]") as HTMLButtonElement | null;
+          if (modelRefresh) {
+            e.preventDefault();
+            if (!modelRefresh.disabled) void refreshAvailableModels();
+            return;
+          }
           var toggle = target.closest("#auto-approve-toggle");
           if (!toggle) return;
           e.preventDefault();

@@ -6425,6 +6425,47 @@
     }
     .composer-text-hidden-select:focus { outline: none; }
 
+    .model-refresh-button {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      color: var(--text-muted);
+      background: transparent;
+      cursor: pointer;
+      transition:
+        color 150ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        background 150ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        transform 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .model-refresh-button:hover:not(:disabled),
+    .model-refresh-button:focus-visible {
+      color: var(--accent);
+      background: var(--accent-muted);
+      outline: none;
+    }
+    .model-refresh-button:active:not(:disabled) { transform: scale(0.96); }
+    .model-refresh-button:disabled { cursor: wait; opacity: 0.62; }
+    .model-refresh-button.is-refreshing .model-refresh-icon {
+      animation: modelRefreshSpin 760ms linear infinite;
+    }
+    @keyframes modelRefreshSpin { to { transform: rotate(360deg); } }
+    .model-refresh-label { display: none; }
+    .composer-model-refresh-button { margin-left: -3px; }
+
+    /* The spin only reinforces the already-disabled busy state, so it is safe
+       to remove for people who prefer reduced motion. */
+    @media (prefers-reduced-motion: reduce) {
+      .model-refresh-button { transition: none; }
+      .model-refresh-button.is-refreshing .model-refresh-icon { animation: none; }
+    }
+
     .composer-text-sep {
       color: var(--text-tertiary, #b5a89a);
       font-size: 0.7rem;
@@ -7775,6 +7816,26 @@
       justify-content: flex-start;
       padding: 0 10px;
     }
+    .plus-popover-trio-wrap .model-refresh-button,
+    .chat-mode-trio-popover .model-refresh-button {
+      width: 100%;
+      min-height: 36px;
+      border-radius: 12px;
+      justify-content: flex-start;
+      gap: 8px;
+      padding: 0 10px;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 0.82rem;
+    }
+    .plus-popover-trio-wrap .model-refresh-label,
+    .chat-mode-trio-popover .model-refresh-label {
+      display: inline;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
 
     /* 三件套 popover 形态：纵向列表，每行 = tag + 当前值（点击触发原生 select）*/
     .chat-mode-trio-popover {
@@ -7840,7 +7901,9 @@
         min-height: 44px;
       }
       .plus-popover-trio-wrap .composer-config-chip,
-      .chat-mode-trio-dropdown .chat-mode-trio-pill {
+      .chat-mode-trio-dropdown .chat-mode-trio-pill,
+      .plus-popover-trio-wrap .model-refresh-button,
+      .chat-mode-trio-popover .model-refresh-button {
         min-height: 44px;
       }
       .composer-config-chip {

@@ -17,6 +17,16 @@ function createCommandRunner(): ModelCommandRunner {
     if (file === "claude" && args[0] === "--model" && args[1] === "claude-endpoint-good") {
       return { stdout: "ok\n", stderr: "" };
     }
+    if (file === "qodercli" && args.join(" ") === "--list-models") {
+      return {
+        stdout: [
+          "MODEL",
+          "Frontier Model (qoder-frontier-1)",
+          "Custom Model (zhipu/glm5.2-cp)",
+        ].join("\n"),
+        stderr: "",
+      };
+    }
     throw new Error(`Unavailable command: ${file} ${args.join(" ")}`);
   };
 }
@@ -67,9 +77,19 @@ test("model endpoints return candidates and persist only positive verification",
 
     const refreshed = await fetch(`${baseUrl}/api/models/refresh`, { method: "POST", headers });
     assert.equal(refreshed.status, 200);
-    const refreshedBody = await refreshed.json() as { models: Array<{ id: string; availability?: string }> };
+    const refreshedBody = await refreshed.json() as {
+      models: Array<{ id: string; availability?: string }>;
+      qoderModels: Array<{ id: string; label: string }>;
+    };
     assert.equal(refreshedBody.models.find((model) => model.id === "claude-endpoint-good")?.availability, "verified");
     assert.equal(refreshedBody.models.find((model) => model.id === "claude-api-candidate")?.availability, "candidate");
+    assert.deepEqual(
+      refreshedBody.qoderModels.filter((model) => ["qoder-frontier-1", "zhipu/glm5.2-cp"].includes(model.id)),
+      [
+        { id: "qoder-frontier-1", label: "Frontier Model" },
+        { id: "zhipu/glm5.2-cp", label: "Custom Model" },
+      ],
+    );
 
     const cached = await fetch(`${baseUrl}/api/models`, { headers });
     const cachedBody = await cached.json() as { models: Array<{ id: string; availability?: string }> };
