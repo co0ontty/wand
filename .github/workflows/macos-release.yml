@@ -97,7 +97,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ASSET: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
-          TAG: ${{ steps.version.outputs.tag }}
+          # Resolve version only writes `version`/`asset_version`; there is no
+          # `tag` output.  Use the ref name for tag-triggered runs so gh looks
+          # up the actual release (for example, v4.20.0), rather than an empty
+          # tag name.
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4 5; do
