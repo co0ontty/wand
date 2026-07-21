@@ -10,6 +10,11 @@ on:
         description: "版本号（如 1.16.0），仅用于文件名与版本字段"
         required: false
         default: "0.0.0-dev"
+      publish_release:
+        description: "上传到已有的 v<version> Release（同版本 DMG 已存在时自动跳过）"
+        required: false
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -65,6 +70,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build_stamp=$BUILD_STAMP" >> "$GITHUB_OUTPUT"
           echo "asset_version=$ASSET_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build DMG
         working-directory: macos
@@ -90,18 +96,39 @@ jobs:
           path: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
           if-no-files-found: error
 
-      # 仅 tag push 时传到 Release（body 由 release-notes.yml 单点管理，这里只放文件）。
-      # 以退避重试抵御 GitHub 附件上传端点的瞬时 5xx / policy 创建错误。
+      # GitHub Release 是本地 gh 触发和 tag CI 共用的发布账本：同一个基础版本
+      # 已有 DMG 时保留本次 artifact 供验证，但不重复提交 Release asset。
+      - name: Check whether this DMG is already published
+        id: release_asset
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.release_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets 2>/dev/null \
+            | jq -e --arg legacy "wand-v${VERSION}.dmg" --arg stamped "wand-v${VERSION}+" \
+              'any(.assets[].name; . == $legacy or startswith($stamped))' > exists.txt; then
+            EXISTS="$(<exists.txt)"
+          else
+            # Release notes workflow may not have created the tag's Release yet.
+            EXISTS=false
+          fi
+          echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
+          if [[ "$EXISTS" == true ]]; then
+            echo "DMG for v${VERSION} already exists on $TAG; skipping duplicate Release upload."
+          fi
+
+      # Tag push always publishes. A local `gh workflow run` can opt in with
+      # publish_release=true. Release body remains owned by release-notes.yml.
+      # Retry covers the short interval before that workflow creates the Release.
       - name: Upload DMG to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: (startsWith(github.ref, 'refs/tags/') || inputs.publish_release) && steps.release_asset.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           ASSET: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
-          # Resolve version only writes `version`/`asset_version`; there is no
-          # `tag` output.  Use the ref name for tag-triggered runs so gh looks
-          # up the actual release (for example, v4.20.0), rather than an empty
-          # tag name.
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.version.outputs.release_tag }}
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4 5; do
