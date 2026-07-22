@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { ProviderHistoryScanner } from "../src/provider-history-scanner.js";
@@ -100,6 +101,102 @@ test("provider history scanner hides legacy Wand quick-commit Codex sessions", (
       scanner.listCodexHistorySessions().map((session) => session.firstUserMessage),
       ["阅读以下 git diff，并解释这次改动"],
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("provider history scanner exposes resumable OpenCode and Qoder sessions created outside Wand", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-external-provider-history-"));
+  try {
+    const cwd = path.join(root, "project");
+    mkdirSync(cwd, { recursive: true });
+
+    const openCodeDatabasePath = path.join(root, "opencode.db");
+    const database = new DatabaseSync(openCodeDatabasePath);
+    database.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY,
+        directory TEXT NOT NULL,
+        title TEXT NOT NULL,
+        time_created INTEGER NOT NULL,
+        time_updated INTEGER NOT NULL
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+    `);
+    const openCodeId = "ses_external_123";
+    database.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?)").run(
+      openCodeId,
+      cwd,
+      "External OpenCode work",
+      Date.parse("2026-07-20T00:00:00.000Z"),
+      Date.parse("2026-07-20T00:02:00.000Z"),
+    );
+    database.prepare("INSERT INTO message VALUES (?, ?, ?)").run("message-user", openCodeId, JSON.stringify({ role: "user" }));
+    database.prepare("INSERT INTO message VALUES (?, ?, ?)").run("message-assistant", openCodeId, JSON.stringify({ role: "assistant" }));
+    database.close();
+
+    const qoderProjectsDir = path.join(root, ".qoder-cn", "projects");
+    const qoderProjectDir = path.join(qoderProjectsDir, "project");
+    mkdirSync(qoderProjectDir, { recursive: true });
+    const qoderId = "qs_external_123";
+    writeFileSync(path.join(qoderProjectDir, `${qoderId}.jsonl`), [
+      JSON.stringify({ type: "workspace-directories", sessionId: qoderId, directories: [cwd] }),
+      JSON.stringify({
+        type: "user",
+        timestamp: "2026-07-21T00:00:00.000Z",
+        cwd,
+        message: { role: "user", content: "Continue the external Qoder task" },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-07-21T00:00:01.000Z",
+        cwd,
+        message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+      }),
+      JSON.stringify({ type: "ai-title", sessionId: qoderId, aiTitle: "External Qoder work" }),
+      "",
+    ].join("\n"));
+
+    const scanner = new ProviderHistoryScanner({
+      claudeHome: path.join(root, ".claude"),
+      codexSessionsDir: path.join(root, ".codex", "sessions"),
+      openCodeDatabasePath,
+      qoderProjectsDirs: [qoderProjectsDir],
+    });
+
+    assert.deepEqual(scanner.listOpenCodeHistorySessions(), [{
+      claudeSessionId: openCodeId,
+      cwd,
+      firstUserMessage: "External OpenCode work",
+      timestamp: "2026-07-20T00:00:00.000Z",
+      mtimeMs: Date.parse("2026-07-20T00:02:00.000Z"),
+      hasConversation: true,
+      managedByWand: false,
+      provider: "opencode",
+    }]);
+    assert.deepEqual(scanner.listQoderHistorySessions().map((session) => ({
+      id: session.claudeSessionId,
+      cwd: session.cwd,
+      title: session.firstUserMessage,
+      resumable: session.hasConversation,
+      provider: session.provider,
+    })), [{
+      id: qoderId,
+      cwd,
+      title: "External Qoder work",
+      resumable: true,
+      provider: "qoder",
+    }]);
+
+    assert.equal(scanner.deleteOpenCodeHistorySessions([openCodeId]), 1);
+    assert.equal(scanner.listOpenCodeHistorySessions().length, 0);
+    assert.equal(scanner.deleteQoderHistoryFiles([qoderId]), 1);
+    assert.deepEqual(scanner.listQoderHistorySessions(), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

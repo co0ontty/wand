@@ -30,6 +30,8 @@ function makeHarness(value: SessionSnapshot) {
     structuredDeletes: [] as string[],
     claudeDeletes: [] as Array<Array<{ claudeSessionId: string; cwd: string }>>,
     codexDeletes: [] as string[][],
+    openCodeDeletes: [] as string[][],
+    qoderDeletes: [] as string[][],
   };
   const config = new Map<string, string>();
   const processes = {
@@ -41,6 +43,14 @@ function makeHarness(value: SessionSnapshot) {
     },
     deleteCodexHistoryFiles: (ids: string[]) => {
       calls.codexDeletes.push(ids);
+      return ids.length;
+    },
+    deleteOpenCodeHistorySessions: (ids: string[]) => {
+      calls.openCodeDeletes.push(ids);
+      return ids.length;
+    },
+    deleteQoderHistoryFiles: (ids: string[]) => {
+      calls.qoderDeletes.push(ids);
       return ids.length;
     },
   };
@@ -117,4 +127,18 @@ test("deleting a session without a provider history id only removes the Wand rec
   assert.deepEqual(harness.calls.claudeDeletes, []);
   assert.deepEqual(harness.calls.codexDeletes, []);
   assert.equal(harness.config.has("hidden_claude_session_ids"), false);
+});
+
+test("deleting managed OpenCode and Qoder sessions also removes their native history", () => {
+  for (const [provider, command, expected] of [
+    ["opencode", "opencode run", "openCodeDeletes"],
+    ["qoder", "qodercli -p", "qoderDeletes"],
+  ] as const) {
+    const value = snapshot({ provider, command, claudeSessionId: `${provider}-session-1` });
+    const harness = makeHarness(value);
+
+    deleteSessionWithProviderHistory(harness.processes, harness.structured, harness.storage, value.id);
+
+    assert.deepEqual(harness.calls[expected], [[value.claudeSessionId]]);
+  }
 });

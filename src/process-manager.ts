@@ -28,9 +28,16 @@ import {
   ProviderHistoryScanner,
   type ClaudeHistorySession,
   type CodexHistorySession,
+  type OpenCodeHistorySession,
+  type QoderHistorySession,
 } from "./provider-history-scanner.js";
 
-export type { ClaudeHistorySession, CodexHistorySession } from "./provider-history-scanner.js";
+export type {
+  ClaudeHistorySession,
+  CodexHistorySession,
+  OpenCodeHistorySession,
+  QoderHistorySession,
+} from "./provider-history-scanner.js";
 
 function resolveProviderFromCommand(command: string): SessionProvider {
   if (/^codex\b/.test(command.trim())) return "codex";
@@ -482,13 +489,9 @@ function getLatestCodexSessionId(
   return selectCodexSessionForRecord(record, sessions)?.claudeSessionId ?? null;
 }
 
-function getOpenCodeDatabasePath(): string {
-  const dataHome = process.env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), ".local", "share");
-  return path.join(dataHome, "opencode", "opencode.db");
-}
-
 function listOpenCodeSessionCandidates(): OpenCodeSessionCandidate[] {
-  const dbPath = getOpenCodeDatabasePath();
+  const dataHome = process.env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), ".local", "share");
+  const dbPath = path.join(dataHome, "opencode", "opencode.db");
   if (!existsSync(dbPath)) return [];
   let db: DatabaseSync | null = null;
   try {
@@ -1390,6 +1393,22 @@ export class ProcessManager extends EventEmitter {
 
   deleteCodexHistoryFiles(threadIds: string[]): number {
     return this.providerHistory.deleteCodexHistoryFiles(threadIds);
+  }
+
+  listOpenCodeHistorySessions(): OpenCodeHistorySession[] {
+    return this.providerHistory.listOpenCodeHistorySessions();
+  }
+
+  deleteOpenCodeHistorySessions(sessionIds: string[]): number {
+    return this.providerHistory.deleteOpenCodeHistorySessions(sessionIds);
+  }
+
+  listQoderHistorySessions(): QoderHistorySession[] {
+    return this.providerHistory.listQoderHistorySessions();
+  }
+
+  deleteQoderHistoryFiles(sessionIds: string[]): number {
+    return this.providerHistory.deleteQoderHistoryFiles(sessionIds);
   }
 
   private captureCodexSessionId(record: SessionRecord, options?: { allowTimeWindowFallback?: boolean }): boolean {

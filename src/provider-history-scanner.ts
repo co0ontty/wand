@@ -11,8 +11,10 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PROVIDER_SESSION_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,199}$/i;
 const WORKTREE_DIR_PATTERN = /--?\.?(?:wand-worktrees|claude-worktrees)-/;
 
 export interface ClaudeHistorySession {
@@ -39,9 +41,36 @@ export interface CodexHistorySession {
   provider: "codex";
 }
 
+/** OpenCode persists session metadata and messages in its local SQLite database. */
+export interface OpenCodeHistorySession {
+  claudeSessionId: string;
+  cwd: string;
+  firstUserMessage: string;
+  timestamp: string;
+  mtimeMs: number;
+  hasConversation: boolean;
+  managedByWand: boolean;
+  provider: "opencode";
+}
+
+/** Qoder CLI keeps one JSONL transcript per project-local native session. */
+export interface QoderHistorySession {
+  claudeSessionId: string;
+  cwd: string;
+  firstUserMessage: string;
+  timestamp: string;
+  mtimeMs: number;
+  hasConversation: boolean;
+  managedByWand: boolean;
+  provider: "qoder";
+}
+
 export interface ProviderHistoryScannerOptions {
   claudeHome?: string;
   codexSessionsDir?: string;
+  openCodeDatabasePath?: string;
+  /** Qoder and Qoder CN use separate config roots; callers may override both for tests. */
+  qoderProjectsDirs?: string[];
 }
 
 interface CachedSummary<T> {
@@ -145,6 +174,78 @@ function isCodexSystemInjectedText(text: string): boolean {
   return trimmed.startsWith("#") || trimmed.startsWith("<");
 }
 
+function qoderMessageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((block): block is { type?: unknown; text?: unknown } => Boolean(block && typeof block === "object"))
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n");
+}
+
+function isQoderGeneratedMessage(text: string): boolean {
+  const trimmed = text.trimStart();
+  return trimmed.startsWith("<local-command-caveat>") || trimmed.startsWith("<command-message>");
+}
+
+function parseQoderSummary(
+  id: string,
+  head: { text: string; mtimeMs: number },
+): QoderHistorySession {
+  let cwd = "";
+  let timestamp = "";
+  let firstUserMessage = "";
+  let aiTitle = "";
+  let hasUser = false;
+  let hasAssistant = false;
+
+  for (const line of head.text.split("\n")) {
+    if (!line.trim()) continue;
+    let parsed: {
+      type?: unknown;
+      timestamp?: unknown;
+      cwd?: unknown;
+      directories?: unknown;
+      sessionId?: unknown;
+      isMeta?: unknown;
+      message?: { role?: unknown; content?: unknown };
+      aiTitle?: unknown;
+    };
+    try { parsed = JSON.parse(line); } catch { continue; }
+    if (!timestamp && typeof parsed.timestamp === "string") timestamp = parsed.timestamp;
+    if (!cwd && typeof parsed.cwd === "string") cwd = parsed.cwd;
+    if (!cwd && parsed.type === "workspace-directories" && Array.isArray(parsed.directories)) {
+      const directory = parsed.directories.find((value): value is string => typeof value === "string" && value.trim().length > 0);
+      if (directory) cwd = directory;
+    }
+    if (parsed.type === "ai-title" && typeof parsed.aiTitle === "string" && parsed.aiTitle.trim()) {
+      aiTitle = parsed.aiTitle.trim();
+    }
+    const role = parsed.message?.role;
+    if (parsed.type === "user" && role === "user") {
+      const text = qoderMessageText(parsed.message?.content).trim();
+      if (text && parsed.isMeta !== true && !isQoderGeneratedMessage(text)) {
+        hasUser = true;
+        if (!firstUserMessage) firstUserMessage = text.slice(0, 120);
+      }
+    } else if (parsed.type === "assistant" && role === "assistant") {
+      hasAssistant = true;
+    }
+  }
+
+  return {
+    claudeSessionId: id,
+    cwd,
+    firstUserMessage: aiTitle || firstUserMessage,
+    timestamp: timestamp || new Date(head.mtimeMs).toISOString(),
+    mtimeMs: head.mtimeMs,
+    hasConversation: hasUser && hasAssistant,
+    managedByWand: false,
+    provider: "qoder",
+  };
+}
+
 /**
  * Codex versions used before quick commit enabled `--ephemeral` persisted these
  * internal one-shot prompts as ordinary sessions. Hide those legacy artifacts
@@ -233,23 +334,45 @@ export class ProviderHistoryScanner {
   private readonly claudeHome: string;
   private readonly claudeProjectsDir: string;
   private readonly codexSessionsDir: string;
+  private readonly openCodeDatabasePath: string;
+  private readonly qoderProjectsDirs: string[];
   private readonly claudeIndex = new Map<string, CachedSummary<ClaudeHistorySession>>();
   private readonly codexIndex = new Map<string, CachedSummary<CodexHistorySession>>();
+  private readonly qoderIndex = new Map<string, CachedSummary<QoderHistorySession>>();
+  private openCodeFingerprint: string | null = null;
+  private openCodeSessions: OpenCodeHistorySession[] = [];
   private parsedFiles = 0;
 
   constructor(options: ProviderHistoryScannerOptions = {}) {
     this.claudeHome = options.claudeHome ?? path.join(os.homedir(), ".claude");
     this.claudeProjectsDir = path.join(this.claudeHome, "projects");
     this.codexSessionsDir = options.codexSessionsDir ?? path.join(os.homedir(), ".codex", "sessions");
+    const dataHome = process.env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), ".local", "share");
+    this.openCodeDatabasePath = options.openCodeDatabasePath ?? path.join(dataHome, "opencode", "opencode.db");
+    this.qoderProjectsDirs = options.qoderProjectsDirs ?? [
+      path.join(os.homedir(), ".qoder", "projects"),
+      path.join(os.homedir(), ".qoder-cn", "projects"),
+    ];
   }
 
-  getDiagnostics(): { parsedFiles: number; claudeEntries: number; codexEntries: number } {
-    return { parsedFiles: this.parsedFiles, claudeEntries: this.claudeIndex.size, codexEntries: this.codexIndex.size };
+  getDiagnostics(): { parsedFiles: number; claudeEntries: number; codexEntries: number; openCodeEntries: number; qoderEntries: number } {
+    return {
+      parsedFiles: this.parsedFiles,
+      claudeEntries: this.claudeIndex.size,
+      codexEntries: this.codexIndex.size,
+      openCodeEntries: this.openCodeSessions.length,
+      qoderEntries: this.qoderIndex.size,
+    };
   }
 
-  invalidate(provider?: "claude" | "codex"): void {
+  invalidate(provider?: "claude" | "codex" | "opencode" | "qoder"): void {
     if (!provider || provider === "claude") this.claudeIndex.clear();
     if (!provider || provider === "codex") this.codexIndex.clear();
+    if (!provider || provider === "opencode") {
+      this.openCodeFingerprint = null;
+      this.openCodeSessions = [];
+    }
+    if (!provider || provider === "qoder") this.qoderIndex.clear();
   }
 
   listClaudeHistorySessions(): ClaudeHistorySession[] {
@@ -337,6 +460,126 @@ export class ProviderHistoryScanner {
       && this.listCodexHistorySessions().some((session) => session.claudeSessionId === threadId);
   }
 
+  listOpenCodeHistorySessions(): OpenCodeHistorySession[] {
+    const databasePaths = [this.openCodeDatabasePath, `${this.openCodeDatabasePath}-wal`];
+    const fingerprint = databasePaths.map((filePath) => {
+      try {
+        const stats = statSync(filePath);
+        return `${filePath}:${stats.mtimeMs}:${stats.size}`;
+      } catch {
+        return `${filePath}:missing`;
+      }
+    }).join("|");
+    if (fingerprint === this.openCodeFingerprint) {
+      return this.openCodeSessions.map((session) => ({ ...session, managedByWand: false }));
+    }
+
+    this.openCodeFingerprint = fingerprint;
+    if (!existsSync(this.openCodeDatabasePath)) {
+      this.openCodeSessions = [];
+      return [];
+    }
+
+    let database: DatabaseSync | null = null;
+    try {
+      database = new DatabaseSync(this.openCodeDatabasePath, { readOnly: true });
+      const rows = database.prepare(`
+        SELECT
+          session.id AS id,
+          session.directory AS cwd,
+          session.title AS title,
+          session.time_created AS time_created,
+          session.time_updated AS time_updated,
+          SUM(CASE WHEN json_extract(message.data, '$.role') = 'user' THEN 1 ELSE 0 END) AS user_count,
+          SUM(CASE WHEN json_extract(message.data, '$.role') = 'assistant' THEN 1 ELSE 0 END) AS assistant_count
+        FROM session
+        LEFT JOIN message ON message.session_id = session.id
+        GROUP BY session.id
+        ORDER BY session.time_updated DESC
+        LIMIT 1000
+      `).all() as Array<{
+        id: unknown;
+        cwd: unknown;
+        title: unknown;
+        time_created: unknown;
+        time_updated: unknown;
+        user_count: unknown;
+        assistant_count: unknown;
+      }>;
+      this.openCodeSessions = rows.flatMap((row) => {
+        if (typeof row.id !== "string" || !PROVIDER_SESSION_ID_PATTERN.test(row.id)) return [];
+        if (typeof row.cwd !== "string" || !row.cwd.trim()) return [];
+        const mtimeMs = Number(row.time_updated);
+        const createdMs = Number(row.time_created);
+        if (!Number.isFinite(mtimeMs) || !Number.isFinite(createdMs)) return [];
+        return [{
+          claudeSessionId: row.id,
+          cwd: row.cwd,
+          firstUserMessage: typeof row.title === "string" ? row.title.trim().slice(0, 120) : "",
+          timestamp: new Date(createdMs).toISOString(),
+          mtimeMs,
+          hasConversation: Number(row.user_count) > 0 && Number(row.assistant_count) > 0,
+          managedByWand: false,
+          provider: "opencode" as const,
+        }];
+      });
+      return this.openCodeSessions.map((session) => ({ ...session }));
+    } catch {
+      this.openCodeSessions = [];
+      return [];
+    } finally {
+      try { database?.close(); } catch { /* best-effort read-only probe */ }
+    }
+  }
+
+  private listQoderTranscriptFiles(): string[] {
+    const files: string[] = [];
+    for (const projectsDir of this.qoderProjectsDirs) {
+      let projects: Dirent<string>[];
+      try { projects = readdirSync(projectsDir, { withFileTypes: true }); } catch { continue; }
+      for (const project of projects) {
+        if (!project.isDirectory()) continue;
+        const projectDir = path.join(projectsDir, project.name);
+        let entries: Dirent<string>[];
+        try { entries = readdirSync(projectDir, { withFileTypes: true }); } catch { continue; }
+        for (const entry of entries) {
+          if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path.join(projectDir, entry.name));
+        }
+      }
+    }
+    return files;
+  }
+
+  listQoderHistorySessions(): QoderHistorySession[] {
+    const observed = new Set<string>();
+    const bySessionId = new Map<string, QoderHistorySession>();
+    for (const filePath of this.listQoderTranscriptFiles()) {
+      const id = path.basename(filePath, ".jsonl");
+      if (!PROVIDER_SESSION_ID_PATTERN.test(id)) continue;
+      observed.add(filePath);
+      let stats: { mtimeMs: number; size: number };
+      try { stats = statSync(filePath); } catch { continue; }
+      let cached = this.qoderIndex.get(filePath);
+      if (!cached || cached.mtimeMs !== stats.mtimeMs || cached.size !== stats.size) {
+        const head = readHead(filePath, 65536);
+        if (!head) continue;
+        cached = { mtimeMs: head.mtimeMs, size: head.size, summary: parseQoderSummary(id, head) };
+        this.qoderIndex.set(filePath, cached);
+        this.parsedFiles += 1;
+      }
+      const summary = cached.summary;
+      if (!summary || !summary.cwd) continue;
+      const existing = bySessionId.get(summary.claudeSessionId);
+      if (!existing || summary.mtimeMs > existing.mtimeMs) {
+        bySessionId.set(summary.claudeSessionId, { ...summary, managedByWand: false });
+      }
+    }
+    for (const filePath of this.qoderIndex.keys()) {
+      if (!observed.has(filePath)) this.qoderIndex.delete(filePath);
+    }
+    return Array.from(bySessionId.values()).sort((left, right) => right.mtimeMs - left.mtimeMs);
+  }
+
   deleteClaudeHistoryFiles(sessions: Array<{ claudeSessionId: string; cwd: string }>): number {
     let deleted = 0;
     for (const { claudeSessionId, cwd } of sessions) {
@@ -370,6 +613,38 @@ export class ProviderHistoryScanner {
         try { unlinkSync(filePath); deleted += 1; } catch { /* already absent */ }
         this.codexIndex.delete(filePath);
       }
+    }
+    return deleted;
+  }
+
+  deleteOpenCodeHistorySessions(sessionIds: string[]): number {
+    const ids = sessionIds.filter((id) => PROVIDER_SESSION_ID_PATTERN.test(id));
+    if (ids.length === 0 || !existsSync(this.openCodeDatabasePath)) return 0;
+    let database: DatabaseSync | null = null;
+    try {
+      database = new DatabaseSync(this.openCodeDatabasePath);
+      database.exec("PRAGMA foreign_keys = ON");
+      const remove = database.prepare("DELETE FROM session WHERE id = ?");
+      let deleted = 0;
+      for (const id of ids) deleted += Number(remove.run(id).changes ?? 0);
+      this.invalidate("opencode");
+      return deleted;
+    } catch {
+      return 0;
+    } finally {
+      try { database?.close(); } catch { /* best effort */ }
+    }
+  }
+
+  deleteQoderHistoryFiles(sessionIds: string[]): number {
+    const ids = new Set(sessionIds.filter((id) => PROVIDER_SESSION_ID_PATTERN.test(id)));
+    if (ids.size === 0) return 0;
+    let deleted = 0;
+    for (const filePath of this.listQoderTranscriptFiles()) {
+      const id = path.basename(filePath, ".jsonl");
+      if (!ids.has(id)) continue;
+      try { unlinkSync(filePath); deleted += 1; } catch { /* already absent */ }
+      this.qoderIndex.delete(filePath);
     }
     return deleted;
   }

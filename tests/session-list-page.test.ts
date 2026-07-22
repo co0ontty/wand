@@ -31,7 +31,7 @@ function session(id: string, startedAt: string, claudeSessionId: string | null =
 function history(
   claudeSessionId: string,
   mtimeMs: number,
-  provider: "claude" | "codex" = "claude",
+  provider: "claude" | "codex" | "opencode" | "qoder" = "claude",
 ) {
   return {
     claudeSessionId,
@@ -41,7 +41,7 @@ function history(
     mtimeMs,
     hasConversation: true,
     managedByWand: false,
-    ...(provider === "codex" ? { provider } : {}),
+    ...(provider === "claude" ? {} : { provider }),
   };
 }
 
@@ -92,4 +92,25 @@ test("session list page clamps offsets and limits the returned window", () => {
     1,
   );
   assert.notEqual(changed.revision, firstPage.revision);
+});
+
+test("session list page includes recoverable OpenCode and Qoder provider histories", () => {
+  const page = buildSessionListPage(
+    [],
+    [],
+    [],
+    new Set(),
+    0,
+    40,
+    [history("ses_external", Date.parse("2026-07-20T12:00:00.000Z"), "opencode")],
+    [history("qs_external", Date.parse("2026-07-20T11:00:00.000Z"), "qoder")],
+  );
+
+  assert.deepEqual(page.entries.map((entry) => entry.key), [
+    "recoverable-opencode-ses_external",
+    "recoverable-qoder-qs_external",
+  ]);
+  assert.deepEqual(page.entries.map((entry) => (
+    entry.type === "recoverable" ? entry.history.provider : null
+  )), ["opencode", "qoder"]);
 });
