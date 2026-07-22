@@ -12,7 +12,7 @@ import {
   validateCommitAiConfig,
   writePreferenceToStorage,
 } from "./config.js";
-import { getCachedModels, refreshModels, type ModelRefreshOptions } from "./models.js";
+import type { ModelCatalogService } from "./models.js";
 import { DEPLOYMENT_CONFIG_KEYS, type RuntimeConfigState } from "./runtime-config.js";
 import type { WandStorage } from "./storage.js";
 import type { WandConfig } from "./types.js";
@@ -42,7 +42,7 @@ export interface ServerSettingsRoutesDependencies {
   getCachedUpdateInfo(): { updateAvailable: boolean; latest: string | null } | null;
   getUpdateChannel(): "stable" | "beta";
   getDistributionSettings(): Promise<SettingsDistributionPayload>;
-  getModelRefreshOptions(): ModelRefreshOptions;
+  modelCatalog: ModelCatalogService;
   resolveAppConnectCode(req: Request): { code: string; url: string };
 }
 
@@ -309,7 +309,10 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
   }));
 
   app.get("/api/models", (_req, res) => {
-    const cached = getCachedModels(deps.getModelRefreshOptions());
+    // Every client reads the server's persisted snapshot. Avoid browser/proxy
+    // cache races after an administrator or scheduled server refresh.
+    res.set("Cache-Control", "no-store");
+    const cached = deps.modelCatalog.snapshot();
     const defaults = getProviderDefaultModels(config);
     res.json({
       ...cached,
@@ -322,9 +325,9 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     });
   });
 
-  app.post("/api/models/refresh", asyncRoute(async (_req, res) => {
+  app.post("/api/models/refresh", requireAdmin, asyncRoute(async (_req, res) => {
     try {
-      const refreshed = await refreshModels({ ...deps.getModelRefreshOptions(), verifyClaudeCandidates: true });
+      const refreshed = await deps.modelCatalog.refresh({ verifyClaudeCandidates: true });
       const defaults = getProviderDefaultModels(config);
       res.json({
         ...refreshed,

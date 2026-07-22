@@ -2,7 +2,7 @@ import type { Express, RequestHandler } from "express";
 
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
-import { refreshModels, type ModelRefreshOptions } from "./models.js";
+import type { ModelCatalogService } from "./models.js";
 import type { PackageUpdateInfo, UpdateChannel } from "./npm-update-utils.js";
 import {
   checkProviderCliUpdates,
@@ -147,7 +147,7 @@ export interface AdminUpdateRoutesDependencies {
   requireAdmin: RequestHandler;
   state: ServerUpdateState;
   getDistributionSettings(): Promise<{ androidApk: Record<string, unknown>; macosDmg: Record<string, unknown> }>;
-  getModelRefreshOptions(): ModelRefreshOptions;
+  modelCatalog: ModelCatalogService;
   getUpdateChannel(): UpdateChannel;
   checkLatestPackageVersion(channel: UpdateChannel, forceRefresh?: boolean): Promise<PackageUpdateInfo>;
   buildInfo: { commit: string | null; builtAt: string | null; channel: string | null };
@@ -197,7 +197,9 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
       });
       const after = await refreshProviderCliUpdateState(state, config);
       const results = verifyProviderCliUpdateResults(commandResults, after.items);
-      void refreshModels(deps.getModelRefreshOptions()).catch(() => {});
+      // Model discovery is server-owned and persisted; clients only consume
+      // the latest snapshot after a CLI update.
+      void deps.modelCatalog.refresh().catch(() => {});
       res.json({ ok: results.every((item) => item.ok), results, ...after, autoUpdate: storage.getConfigValue("autoUpdateProviderClis") === "true" });
     } catch (error) {
       res.status(500).json({ error: getErrorMessage(error, "更新 CLI 失败。") });

@@ -5989,14 +5989,18 @@
 
 
     .input-panel {
-      padding: 6px 10px;
-      padding-bottom: calc(6px + var(--input-safe-bottom, var(--safe-bottom, 0px)));
+      padding: 12px 18px 16px;
+      padding-bottom: calc(16px + var(--input-safe-bottom, var(--safe-bottom, 0px)));
       flex-shrink: 0;
       position: relative; /* 语音转写气泡（.voice-transcript-bubble）的定位参照 */
       z-index: 26;
       overscroll-behavior: contain;
       touch-action: pan-y;
-      border-top: 1px solid var(--border-subtle);
+      /* The composer belongs to the workspace surface, not a separate white
+         sheet. A short fade gives the terminal/chat area a quiet landing zone
+         without introducing another hard horizontal band. */
+      background:
+        linear-gradient(180deg, rgba(245, 243, 238, 0) 0%, rgba(245, 243, 238, 0.78) 34%, var(--bg-primary) 78%);
       transition: opacity 0.2s ease, visibility 0s;
     }
 
@@ -6034,23 +6038,23 @@
     }
     .input-composer {
       --composer-action-size: 40px;
-      background: rgba(255, 255, 255, 0.88);
-      border: 1px solid var(--border-default);
-      border-radius: 24px;
-      box-shadow: 0 3px 14px rgba(89, 58, 32, 0.05);
+      background: color-mix(in srgb, var(--bg-elevated) 78%, var(--bg-tertiary));
+      border: 1px solid rgba(109, 88, 72, 0.2);
+      border-radius: 18px;
+      box-shadow: 0 10px 24px -22px rgba(89, 58, 32, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.62);
       transition: border-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1), border-radius 220ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 160ms cubic-bezier(0.2, 0.8, 0.2, 1), background 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
       overflow: hidden;
       position: relative;
       overscroll-behavior: contain;
     }
     .input-composer:focus-within {
-      border-color: var(--accent);
-      border-radius: 18px;
-      box-shadow: 0 0 0 3px var(--accent-muted), 0 10px 28px -22px rgba(197, 101, 61, 0.62);
-      background: rgba(255, 255, 255, 0.98);
+      border-color: color-mix(in srgb, var(--accent) 62%, var(--border-default));
+      border-radius: 16px;
+      box-shadow: 0 0 0 3px rgba(197, 101, 61, 0.1), 0 14px 30px -24px rgba(89, 58, 32, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      background: var(--bg-elevated);
     }
     .input-composer.is-expanded {
-      border-radius: 18px;
+      border-radius: 16px;
     }
     .input-composer.voice-holding {
       border-color: var(--accent);
@@ -6148,7 +6152,7 @@
        of vertical growth. Mobile keeps the compact focus-driven layout. */
     @media (min-width: 721px) {
       .input-composer {
-        border-radius: 20px;
+        border-radius: 18px;
         transition:
           border-color 160ms cubic-bezier(0.23, 1, 0.32, 1),
           background-color 160ms cubic-bezier(0.23, 1, 0.32, 1),
@@ -6157,15 +6161,15 @@
 
       .input-composer:focus-within,
       .input-composer.is-expanded {
-        border-radius: 20px;
+        border-radius: 16px;
       }
 
       .composer-main-row,
       .input-composer:focus-within .composer-main-row,
       .input-composer.is-expanded .composer-main-row {
         grid-template-columns: auto minmax(0, 1fr) auto;
-        row-gap: 2px;
-        padding: 7px 8px;
+        row-gap: 4px;
+        padding: 6px 8px 7px;
       }
 
       .composer-input-wrap,
@@ -6173,6 +6177,19 @@
       .input-composer.is-expanded .composer-input-wrap {
         grid-column: 1 / -1;
         grid-row: 1;
+      }
+
+      /* A hairline between writing and controls creates hierarchy without
+         turning the composer into a stack of separate cards. */
+      .composer-input-wrap::after {
+        content: "";
+        position: absolute;
+        right: 2px;
+        bottom: -3px;
+        left: 2px;
+        height: 1px;
+        background: var(--border-subtle);
+        pointer-events: none;
       }
 
       .composer-actions-left,
@@ -6225,21 +6242,21 @@
     }
     .composer-config-chip {
       max-width: 76px;
-      padding: 0 8px;
-      border: 1px solid var(--border-subtle);
-      border-radius: 999px;
-      background: rgba(246, 241, 232, 0.72);
+      padding: 0 7px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
       transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
     }
     .composer-config-chip-mode {
       color: var(--accent);
-      background: rgba(197, 101, 61, 0.1);
-      border-color: rgba(197, 101, 61, 0.22);
+      background: rgba(197, 101, 61, 0.08);
+      border-color: rgba(197, 101, 61, 0.14);
     }
     .composer-config-chip:hover,
     .composer-config-chip:focus-within {
-      border-color: var(--accent);
-      background: rgba(255, 248, 242, 0.96);
+      border-color: rgba(197, 101, 61, 0.2);
+      background: rgba(197, 101, 61, 0.08);
     }
     .composer-config-chip:focus-within {
       outline: 2px solid var(--accent-muted);
@@ -7180,9 +7197,9 @@
       border: none;
       color: var(--text-primary);
       caret-color: var(--accent);
-      /* autoResizeInput 强制 minHeight=36px；padding 上下各 9px 让单行文字
-         （line-height 18.2px）在 36px 高度内垂直居中：9+18.2+9 ≈ 36。 */
-      padding: 9px 8px;
+      /* autoResizeInput controls the 36px minimum. The vertical padding keeps
+         a single line optically centered while multiline drafts grow upward. */
+      padding: 9px 10px;
       outline: none;
       resize: none;
       min-height: 36px;
@@ -7194,7 +7211,8 @@
       -webkit-overflow-scrolling: touch;
       transition: height 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
       box-sizing: border-box;
-      line-height: 1.4;
+      line-height: 1.45;
+      letter-spacing: -0.005em;
       touch-action: pan-y;
       scrollbar-gutter: stable;
     }
@@ -7225,7 +7243,7 @@
       font-family: var(--font-sans);
       font-weight: 400;
       letter-spacing: 0;
-      opacity: 0.72;
+      opacity: 0.82;
     }
     /* 终端交互模式下 textarea 设为 readonly，按键透传到 PTY。
        视觉上给一个降饱和度 + 斜体 placeholder，让用户感知到"这里
@@ -7342,7 +7360,7 @@
     .btn-circle-send {
       background: var(--accent);
       color: white;
-      box-shadow: none;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 3px 7px rgba(175, 83, 48, 0.16);
     }
     .btn-circle-send:hover {
       background: var(--accent-hover);
@@ -7557,12 +7575,12 @@
       background: rgba(197, 101, 61, 0.22);
     }
     .btn-circle-action.btn-circle-voice {
-      width: 44px;
-      height: 44px;
-      min-width: 44px;
+      width: var(--composer-action-size);
+      height: var(--composer-action-size);
+      min-width: var(--composer-action-size);
       color: var(--accent);
-      background: rgba(197, 101, 61, 0.08);
-      border: none;
+      background: rgba(197, 101, 61, 0.07);
+      border: 1px solid rgba(197, 101, 61, 0.1);
       box-shadow: none;
       touch-action: none;
       user-select: none;
@@ -9476,15 +9494,15 @@
       /* 移动端输入面板 - 紧凑 */
       .input-panel {
         z-index: 30;
-        padding: 4px 6px;
-        padding-bottom: calc(6px + var(--input-safe-bottom, var(--safe-bottom, 0px)) + var(--keyboard-offset, 0px));
+        padding: 8px 10px 10px;
+        padding-bottom: calc(10px + var(--input-safe-bottom, var(--safe-bottom, 0px)) + var(--keyboard-offset, 0px));
         flex: 0 0 auto;
         margin-top: auto;
         /* 渐变只覆盖上半段做平滑过渡，下半段用纯色铺满 safe-area 区域，
            避免 iOS Safari 在 home indicator / 安全区域露出 html 背景。 */
         background:
-          linear-gradient(180deg, rgba(246, 241, 232, 0.5) 0%, rgba(246, 241, 232, 0.88) 30%, #f6f1e8 100%),
-          #f6f1e8;
+          linear-gradient(180deg, rgba(245, 243, 238, 0) 0%, rgba(245, 243, 238, 0.86) 34%, var(--bg-primary) 100%),
+          var(--bg-primary);
         backdrop-filter: blur(12px);
       }
 
@@ -9493,12 +9511,12 @@
       }
 
       .input-composer {
-        border-radius: 24px;
-        box-shadow: 0 3px 14px rgba(89, 58, 32, 0.07);
+        border-radius: 18px;
+        box-shadow: 0 8px 20px -18px rgba(89, 58, 32, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.62);
       }
       .input-composer:focus-within,
       .input-composer.is-expanded {
-        border-radius: 18px;
+        border-radius: 16px;
       }
 
 

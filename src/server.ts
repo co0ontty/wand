@@ -32,7 +32,7 @@ import {
   saveConfig,
   writePreferenceToStorage,
 } from "./config.js";
-import { getCachedModels, ModelRefreshOptions, refreshModels } from "./models.js";
+import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
 import { SessionRegistry } from "./session-registry.js";
@@ -119,6 +119,7 @@ const PKG_REPO_URL = "https://github.com/co0ontty/wand";
 // ── Update check cache ──
 
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const MODEL_CATALOG_AUTO_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 
 /** Cached update result broadcast to new clients on connect. */
 let cachedUpdateInfo: Pick<PackageUpdateInfo, "channel" | "current" | "latest" | "updateAvailable"> | null = null;
@@ -618,6 +619,9 @@ export async function startServer(
       ],
     };
   };
+  // This service is the only owner of CLI model discovery for this server.
+  // Clients receive its persisted snapshot via GET /api/models.
+  const modelCatalog = new ModelCatalogService(getModelRefreshOptions);
   const configDir = resolveConfigDir(configPath);
   const distributionManager = new DistributionManager({
     configDir,
@@ -1055,7 +1059,7 @@ export async function startServer(
     getCachedUpdateInfo: () => cachedUpdateInfo,
     getUpdateChannel,
     getDistributionSettings,
-    getModelRefreshOptions,
+    modelCatalog,
     resolveAppConnectCode: (req) => {
       const effectivePassword = getEffectivePassword(storage, config);
       const requestProtocol = getPublicRequestProtocol(req, useHttps ? "https" : "http");
@@ -1074,7 +1078,7 @@ export async function startServer(
     requireAdmin,
     state: updateState,
     getDistributionSettings,
-    getModelRefreshOptions,
+    modelCatalog,
     getUpdateChannel,
     checkLatestPackageVersion,
     buildInfo: BUILD_INFO,
@@ -1351,9 +1355,15 @@ export async function startServer(
     processes.runStartupCommands();
   }
 
-  // Pre-warm model cache (probes claude --version + codex debug models).
+  // Model discovery runs exclusively in the server. Its first result is
+  // persisted; later checks only write when catalog content changes.
+  let modelCatalogRefreshTimer: NodeJS.Timeout | null = null;
   if (!testMode) {
-    refreshModels(getModelRefreshOptions()).catch(() => {});
+    void modelCatalog.refresh().catch(() => {});
+    modelCatalogRefreshTimer = setInterval(() => {
+      if (!shuttingDown) void modelCatalog.refresh().catch(() => {});
+    }, MODEL_CATALOG_AUTO_REFRESH_INTERVAL_MS);
+    modelCatalogRefreshTimer.unref();
   }
 
   // ── Auto-update endpoints ──
@@ -1521,7 +1531,7 @@ export async function startServer(
       for (const result of results) {
         process.stdout.write(`[wand] CLI 自动更新 ${result.ok ? "完成" : "失败"}: ${result.message}\n`);
       }
-      refreshModels(getModelRefreshOptions()).catch(() => {});
+      void modelCatalog.refresh().catch(() => {});
     } catch (error) {
       process.stdout.write(`[wand] CLI 自动更新失败: ${getErrorMessage(error)}\n`);
     } finally {
@@ -1564,6 +1574,10 @@ export async function startServer(
       if (providerCliUpdateTimer) {
         clearTimeout(providerCliUpdateTimer);
         providerCliUpdateTimer = null;
+      }
+      if (modelCatalogRefreshTimer) {
+        clearInterval(modelCatalogRefreshTimer);
+        modelCatalogRefreshTimer = null;
       }
 
       // Stop accepting requests first. Existing requests get a short grace

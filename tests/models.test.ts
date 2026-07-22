@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MODEL_CATALOG_CACHE_KEY,
+  ModelCatalogService,
   ModelCommandRunner,
   ModelRefreshOptions,
   parseCodexModels,
@@ -174,6 +176,93 @@ test("Qoder model discovery accepts bare and provider-qualified IDs", () => {
   assert.equal(models.find((model) => model.id === "claude-sonnet-4-6")?.label, "Claude Sonnet 4.6");
   assert.equal(models.some((model) => model.id === "outside-list-id"), false);
   assert.equal(models.some((model) => model.id === "model;rm-rf"), false);
+});
+
+test("server model catalog persists every provider and writes only when its content changes", async () => {
+  const storage = new FakeModelStorage();
+  let now = new Date("2026-07-14T12:00:00.000Z");
+  let qoderOutput = ["MODEL", "Frontier (qoder-frontier-1)"].join("\n");
+  const runner: ModelCommandRunner = async (file, args) => {
+    if (file === "claude" && args.join(" ") === "--version") return { stdout: "2.1.149\n", stderr: "" };
+    if (file === "codex" && args.join(" ") === "debug models") {
+      return { stdout: JSON.stringify({ models: [{ slug: "gpt-5.5", visibility: "list", priority: 0 }] }), stderr: "" };
+    }
+    if (file === "opencode" && args.join(" ") === "models") return { stdout: "openai/gpt-5.4\n", stderr: "" };
+    if (file === "opencode" && args.join(" ") === "--version") return { stdout: "1.2.3\n", stderr: "" };
+    if (file === "grok" && args.join(" ") === "models") return { stdout: "Default model: grok-4.5\n* grok-4.5\n* grok-3", stderr: "" };
+    if (file === "qodercli" && args.join(" ") === "--list-models") return { stdout: qoderOutput, stderr: "" };
+    throw new Error(`Unexpected command: ${file} ${args.join(" ")}`);
+  };
+  const options = (): ModelRefreshOptions => ({ env: {}, storage, commandRunner: runner, now: () => now });
+  const catalog = new ModelCatalogService(options);
+
+  const first = await catalog.refresh();
+  assert.equal(first.changed, true);
+  assert.deepEqual(first.codexModels.map((model) => model.id), ["default", "gpt-5.5"]);
+  assert.deepEqual(first.opencodeModels.map((model) => model.id), ["default", "openai/gpt-5.4"]);
+  assert.deepEqual(first.grokModels.map((model) => model.id), ["default", "grok-4.5", "grok-3"]);
+  assert.equal(first.qoderModels.some((model) => model.id === "qoder-frontier-1"), true);
+  const firstRaw = storage.getRaw(MODEL_CATALOG_CACHE_KEY);
+  assert.ok(firstRaw);
+
+  now = new Date("2026-07-14T13:00:00.000Z");
+  const unchanged = await catalog.refresh();
+  assert.equal(unchanged.changed, false);
+  assert.equal(unchanged.refreshedAt, first.refreshedAt);
+  assert.equal(storage.getRaw(MODEL_CATALOG_CACHE_KEY), firstRaw);
+
+  qoderOutput = ["MODEL", "Frontier (qoder-frontier-2)"].join("\n");
+  now = new Date("2026-07-14T14:00:00.000Z");
+  const changed = await catalog.refresh();
+  assert.equal(changed.changed, true);
+  assert.notEqual(changed.revision, first.revision);
+  assert.equal(changed.qoderModels.some((model) => model.id === "qoder-frontier-2"), true);
+  assert.notEqual(storage.getRaw(MODEL_CATALOG_CACHE_KEY), firstRaw);
+
+  // A new server instance serves its persisted model directory immediately;
+  // transient CLI outages do not replace it with fallback values.
+  const unavailable: ModelCommandRunner = async () => { throw new Error("CLI unavailable"); };
+  const reloaded = new ModelCatalogService(() => ({ ...options(), commandRunner: unavailable }));
+  assert.equal(reloaded.snapshot().qoderModels.some((model) => model.id === "qoder-frontier-2"), true);
+  const retained = await reloaded.refresh();
+  assert.equal(retained.changed, false);
+  assert.equal(retained.qoderModels.some((model) => model.id === "qoder-frontier-2"), true);
+});
+
+test("server model catalog coalesces concurrent refreshes", async () => {
+  const storage = new FakeModelStorage();
+  let calls = 0;
+  let releaseProbe: (() => void) | undefined;
+  const qoderProbeStarted = new Promise<void>((resolve) => {
+    releaseProbe = resolve;
+  });
+  let allowQoder: (() => void) | undefined;
+  const qoderGate = new Promise<void>((resolve) => {
+    allowQoder = resolve;
+  });
+  const runner: ModelCommandRunner = async (file, args) => {
+    calls += 1;
+    if (file === "qodercli") {
+      releaseProbe?.();
+      await qoderGate;
+      return { stdout: "MODEL\nFrontier (qoder-frontier-1)", stderr: "" };
+    }
+    if (file === "claude") return { stdout: "2.1.149\n", stderr: "" };
+    if (file === "codex") return { stdout: "{}", stderr: "" };
+    if (file === "opencode" && args[0] === "models") return { stdout: "", stderr: "" };
+    if (file === "opencode") return { stdout: "1.2.3\n", stderr: "" };
+    if (file === "grok") return { stdout: "", stderr: "" };
+    throw new Error(`Unexpected command: ${file}`);
+  };
+  const catalog = new ModelCatalogService(() => ({ env: {}, storage, commandRunner: runner }));
+  const first = catalog.refresh();
+  await qoderProbeStarted;
+  const second = catalog.refresh();
+  allowQoder?.();
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+  assert.equal(firstResult.revision, secondResult.revision);
+  // claude, codex, opencode models/version, grok, qoder: one server scan.
+  assert.equal(calls, 6);
 });
 
 test("Claude candidates merge configured, verified, and Models API entries without asserting entitlement", async () => {

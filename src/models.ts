@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import Anthropic from "@anthropic-ai/sdk";
 import { buildChildEnv } from "./env-utils.js";
@@ -7,6 +8,13 @@ import { extractSemver } from "./version-utils.js";
 
 const execFileAsync = promisify(execFile);
 const CLAUDE_VERIFICATION_CACHE_KEY = "claude-model-verifications-v1";
+/**
+ * The complete server-side model catalog. Keep this separate from the Claude
+ * verification cache: the former is a client-facing snapshot for every
+ * provider, whereas the latter records evidence from individual probes.
+ */
+export const MODEL_CATALOG_CACHE_KEY = "model-catalog-v1";
+const MODEL_CATALOG_CACHE_VERSION = 1;
 const CLAUDE_VERIFICATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CLAUDE_PROBE_TIMEOUT_MS = 15_000;
 const MAX_CLAUDE_MODEL_PROBES = 12;
@@ -106,6 +114,24 @@ export interface ModelCache {
   refreshedAt: string;
 }
 
+/** Immutable-looking snapshot returned to API clients. */
+export interface ModelCatalogSnapshot extends ModelCache {
+  /** SHA-256 of the catalog excluding `refreshedAt`. Changes only with content. */
+  revision: string;
+}
+
+export interface ModelCatalogRefreshResult extends ModelCatalogSnapshot {
+  /** True only when the persisted catalog content changed (or was first saved). */
+  changed: boolean;
+  /** Time this server-side refresh check ran; it is deliberately not persisted. */
+  checkedAt: string;
+}
+
+export interface ModelCatalogRefreshRequest {
+  /** Administrator-triggered refreshes may also validate Claude candidates. */
+  verifyClaudeCandidates?: boolean;
+}
+
 interface CodexModelEntry {
   slug: string;
   display_name?: string;
@@ -137,10 +163,36 @@ interface ClaudeCandidate {
   source: ClaudeModelSource;
 }
 
-let cache: ModelCache | null = null;
+interface PersistedModelCatalog {
+  version: typeof MODEL_CATALOG_CACHE_VERSION;
+  revision: string;
+  catalog: ModelCache;
+}
+
+type ProbeResult<T> =
+  | { ok: true; value: T }
+  | { ok: false };
 
 function cloneModels(models: readonly ClaudeModelInfo[]): ClaudeModelInfo[] {
-  return models.map((model) => ({ ...model }));
+  return models.map((model) => ({
+    ...model,
+    ...(model.reasoningEfforts
+      ? { reasoningEfforts: model.reasoningEfforts.map((level) => ({ ...level })) }
+      : {}),
+  }));
+}
+
+function cloneCache(cache: ModelCache): ModelCache {
+  return {
+    models: cloneModels(cache.models),
+    codexModels: cloneModels(cache.codexModels),
+    opencodeModels: cloneModels(cache.opencodeModels),
+    grokModels: cloneModels(cache.grokModels),
+    qoderModels: cloneModels(cache.qoderModels),
+    claudeVersion: cache.claudeVersion,
+    opencodeVersion: cache.opencodeVersion,
+    refreshedAt: cache.refreshedAt,
+  };
 }
 
 function defaultCommandRunner(
@@ -326,24 +378,12 @@ function createInitialCache(options: ModelRefreshOptions): ModelCache {
   };
 }
 
-function refreshCachedClaudeModels(options: ModelRefreshOptions): void {
-  if (!cache) return;
-  const now = options.now?.() ?? new Date();
-  cache.models = buildClaudeModels({
-    configuredClaudeModels: options.configuredClaudeModels,
-    existingModels: cache.models,
-    verifications: loadClaudeVerifications(options.storage),
-    claudeVersion: cache.claudeVersion,
-    now,
-  });
-}
-
-async function probeClaudeVersion(runner: ModelCommandRunner, env: NodeJS.ProcessEnv): Promise<string | null> {
+async function probeClaudeVersion(runner: ModelCommandRunner, env: NodeJS.ProcessEnv): Promise<ProbeResult<string | null>> {
   try {
     const { stdout } = await runner("claude", ["--version"], { env, timeout: 5000 });
-    return extractSemver(stdout) ?? (stdout.trim().slice(0, 64) || null);
+    return { ok: true, value: extractSemver(stdout) ?? (stdout.trim().slice(0, 64) || null) };
   } catch {
-    return null;
+    return { ok: false };
   }
 }
 
@@ -363,47 +403,59 @@ async function probeClaudeModel(
   }
 }
 
-async function probeCodexModels(runner: ModelCommandRunner, env: NodeJS.ProcessEnv): Promise<ClaudeModelInfo[]> {
+async function probeCodexModels(
+  runner: ModelCommandRunner,
+  env: NodeJS.ProcessEnv,
+): Promise<ProbeResult<ClaudeModelInfo[]>> {
   try {
     const { stdout } = await runner("codex", ["debug", "models"], { env, timeout: 8000 });
-    return parseCodexModels(stdout);
+    return { ok: true, value: parseCodexModels(stdout) };
   } catch {
-    return cloneModels(CODEX_FALLBACK_MODELS);
+    return { ok: false };
   }
 }
 
 async function probeOpenCode(
   runner: ModelCommandRunner,
   env: NodeJS.ProcessEnv,
-): Promise<{ models: ClaudeModelInfo[]; version: string | null }> {
+): Promise<{ models: ProbeResult<ClaudeModelInfo[]>; version: ProbeResult<string | null> }> {
   const [modelsResult, versionResult] = await Promise.allSettled([
     runner("opencode", ["models"], { env, timeout: 8000 }),
     runner("opencode", ["--version"], { env, timeout: 5000 }),
   ]);
   const models = modelsResult.status === "fulfilled"
-    ? parseOpenCodeModels(modelsResult.value.stdout)
-    : cloneModels(OPENCODE_FALLBACK_MODELS);
+    ? { ok: true as const, value: parseOpenCodeModels(modelsResult.value.stdout) }
+    : { ok: false as const };
   const version = versionResult.status === "fulfilled"
-    ? extractSemver(versionResult.value.stdout) ?? (versionResult.value.stdout.trim().slice(0, 64) || null)
-    : null;
+    ? {
+      ok: true as const,
+      value: extractSemver(versionResult.value.stdout) ?? (versionResult.value.stdout.trim().slice(0, 64) || null),
+    }
+    : { ok: false as const };
   return { models, version };
 }
 
-async function probeGrokModels(runner: ModelCommandRunner, env: NodeJS.ProcessEnv): Promise<ClaudeModelInfo[]> {
+async function probeGrokModels(
+  runner: ModelCommandRunner,
+  env: NodeJS.ProcessEnv,
+): Promise<ProbeResult<ClaudeModelInfo[]>> {
   try {
     const { stdout } = await runner("grok", ["models"], { env, timeout: 8000 });
-    return parseGrokModels(stdout);
+    return { ok: true, value: parseGrokModels(stdout) };
   } catch {
-    return cloneModels(GROK_FALLBACK_MODELS);
+    return { ok: false };
   }
 }
 
-async function probeQoderModels(runner: ModelCommandRunner, env: NodeJS.ProcessEnv): Promise<ClaudeModelInfo[]> {
+async function probeQoderModels(
+  runner: ModelCommandRunner,
+  env: NodeJS.ProcessEnv,
+): Promise<ProbeResult<ClaudeModelInfo[]>> {
   try {
     const { stdout } = await runner("qodercli", ["--list-models"], { env, timeout: 8000 });
-    return parseQoderModels(stdout);
+    return { ok: true, value: parseQoderModels(stdout) };
   } catch {
-    return cloneModels(QODER_FALLBACK_MODELS);
+    return { ok: false };
   }
 }
 
@@ -414,9 +466,12 @@ function createOfficialModelsApi(apiKey: string): ClaudeModelsApi {
   };
 }
 
-async function listClaudeModelsFromApi(options: ModelRefreshOptions, env: NodeJS.ProcessEnv): Promise<ClaudeModelsApiEntry[]> {
+async function listClaudeModelsFromApi(
+  options: ModelRefreshOptions,
+  env: NodeJS.ProcessEnv,
+): Promise<ProbeResult<ClaudeModelsApiEntry[]>> {
   const apiKey = options.apiKey?.trim() || env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) return [];
+  if (!apiKey) return { ok: false };
   try {
     const api = options.modelsApi ?? createOfficialModelsApi(apiKey);
     const models: ClaudeModelsApiEntry[] = [];
@@ -424,9 +479,9 @@ async function listClaudeModelsFromApi(options: ModelRefreshOptions, env: NodeJS
       const id = normalizeClaudeModelId(model?.id);
       if (id) models.push({ id, ...(typeof model.display_name === "string" ? { display_name: model.display_name } : {}) });
     }
-    return models;
+    return { ok: true, value: models };
   } catch {
-    return [];
+    return { ok: false };
   }
 }
 
@@ -624,20 +679,157 @@ function formatCodexModelLabel(model: CodexModelEntry): string {
     : model.slug;
 }
 
-export function getCachedModels(options: ModelRefreshOptions = {}): ModelCache {
-  if (!cache) {
-    cache = createInitialCache(options);
-  } else if (options.storage || options.configuredClaudeModels) {
-    refreshCachedClaudeModels(options);
-  }
-  return cache;
+function catalogRevision(cache: ModelCache): string {
+  // `refreshedAt` answers "when did content last change", so it must not
+  // create a false change by itself. JSON keeps the provider/model order that
+  // the CLIs publish; that order is part of the client-facing catalog.
+  const content = JSON.stringify({
+    models: cache.models,
+    codexModels: cache.codexModels,
+    opencodeModels: cache.opencodeModels,
+    grokModels: cache.grokModels,
+    qoderModels: cache.qoderModels,
+    claudeVersion: cache.claudeVersion,
+    opencodeVersion: cache.opencodeVersion,
+  });
+  return createHash("sha256").update(content).digest("hex");
 }
 
-export async function refreshModels(options: ModelRefreshOptions = {}): Promise<ModelCache> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function safePersistedString(value: unknown, maxLength = 512): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= maxLength ? trimmed : null;
+}
+
+function parsePersistedModelInfo(value: unknown): ClaudeModelInfo | null {
+  if (!isRecord(value)) return null;
+  const id = safePersistedString(value.id, 128);
+  const label = safePersistedString(value.label);
+  if (!id || !QODER_MODEL_ID_PATTERN.test(id) || !label) return null;
+  const source = value.source === "builtin" || value.source === "configured"
+    || value.source === "verified-cache" || value.source === "models-api"
+    ? value.source
+    : undefined;
+  const availability = value.availability === "default" || value.availability === "candidate"
+    || value.availability === "verified" || value.availability === "stale"
+    ? value.availability
+    : undefined;
+  const reasoningEfforts = Array.isArray(value.reasoningEfforts)
+    ? value.reasoningEfforts.flatMap((entry) => {
+      if (!isRecord(entry)) return [];
+      const effort = safePersistedString(entry.effort, 128);
+      if (!effort) return [];
+      const description = safePersistedString(entry.description);
+      return [{ effort, ...(description ? { description } : {}) }];
+    })
+    : undefined;
+  const note = safePersistedString(value.note);
+  const lastVerifiedAt = safePersistedString(value.lastVerifiedAt, 64);
+  const verifiedWithClaudeVersion = safePersistedString(value.verifiedWithClaudeVersion, 128);
+  const defaultReasoningEffort = safePersistedString(value.defaultReasoningEffort, 128);
+  return {
+    id,
+    label,
+    ...(typeof value.alias === "boolean" ? { alias: value.alias } : {}),
+    ...(source ? { source } : {}),
+    ...(availability ? { availability } : {}),
+    ...(note ? { note } : {}),
+    ...(lastVerifiedAt && !Number.isNaN(Date.parse(lastVerifiedAt)) ? { lastVerifiedAt } : {}),
+    ...(verifiedWithClaudeVersion ? { verifiedWithClaudeVersion } : {}),
+    ...(reasoningEfforts?.length ? { reasoningEfforts } : {}),
+    ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
+  };
+}
+
+function parsePersistedModelList(value: unknown): ClaudeModelInfo[] | null {
+  if (!Array.isArray(value)) return null;
+  const result: ClaudeModelInfo[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const model = parsePersistedModelInfo(entry);
+    if (!model || seen.has(model.id)) return null;
+    seen.add(model.id);
+    result.push(model);
+  }
+  return result;
+}
+
+function parsePersistedModelCatalog(value: unknown): PersistedModelCatalog | null {
+  if (!isRecord(value) || value.version !== MODEL_CATALOG_CACHE_VERSION || !isRecord(value.catalog)) return null;
+  const catalog = value.catalog;
+  const models = parsePersistedModelList(catalog.models);
+  const codexModels = parsePersistedModelList(catalog.codexModels);
+  const opencodeModels = parsePersistedModelList(catalog.opencodeModels);
+  const grokModels = parsePersistedModelList(catalog.grokModels);
+  const qoderModels = parsePersistedModelList(catalog.qoderModels);
+  const refreshedAt = safePersistedString(catalog.refreshedAt, 64);
+  if (
+    !models || !codexModels || !opencodeModels || !grokModels || !qoderModels
+    || !refreshedAt || Number.isNaN(Date.parse(refreshedAt))
+  ) {
+    return null;
+  }
+  const nullableVersion = (field: unknown): string | null | undefined =>
+    field === null ? null : safePersistedString(field, 128) ?? undefined;
+  const claudeVersion = nullableVersion(catalog.claudeVersion);
+  const opencodeVersion = nullableVersion(catalog.opencodeVersion);
+  if (claudeVersion === undefined || opencodeVersion === undefined) return null;
+  const parsedCatalog: ModelCache = {
+    models,
+    codexModels,
+    opencodeModels,
+    grokModels,
+    qoderModels,
+    claudeVersion,
+    opencodeVersion,
+    refreshedAt,
+  };
+  // A stale/missing revision should not make a previously good snapshot
+  // unreadable. It is recomputed instead of trusted.
+  return {
+    version: MODEL_CATALOG_CACHE_VERSION,
+    revision: catalogRevision(parsedCatalog),
+    catalog: parsedCatalog,
+  };
+}
+
+function loadPersistedModelCatalog(storage: ModelCacheStorage | undefined): PersistedModelCatalog | null {
+  if (!storage) return null;
+  const raw = storage.getConfigValue(MODEL_CATALOG_CACHE_KEY);
+  if (!raw) return null;
+  try {
+    return parsePersistedModelCatalog(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedModelCatalog(
+  storage: ModelCacheStorage | undefined,
+  cache: ModelCache,
+  revision: string,
+): void {
+  if (!storage) return;
+  const persisted: PersistedModelCatalog = {
+    version: MODEL_CATALOG_CACHE_VERSION,
+    revision,
+    catalog: cloneCache(cache),
+  };
+  storage.setConfigValue(MODEL_CATALOG_CACHE_KEY, JSON.stringify(persisted));
+}
+
+async function discoverModelCache(
+  options: ModelRefreshOptions,
+  previous: ModelCache,
+): Promise<ModelCache> {
   const now = options.now?.() ?? new Date();
   const env = resolveProbeEnv(options);
   const runner = options.commandRunner ?? defaultCommandRunner;
-  const [claudeVersion, codexModels, opencode, grokModels, qoderModels, apiModels] = await Promise.all([
+  const [claudeVersionProbe, codexProbe, opencodeProbe, grokProbe, qoderProbe, apiProbe] = await Promise.all([
     probeClaudeVersion(runner, env),
     probeCodexModels(runner, env),
     probeOpenCode(runner, env),
@@ -645,10 +837,14 @@ export async function refreshModels(options: ModelRefreshOptions = {}): Promise<
     probeQoderModels(runner, env),
     listClaudeModelsFromApi(options, env),
   ]);
+  const claudeVersion = claudeVersionProbe.ok ? claudeVersionProbe.value : previous.claudeVersion;
   const priorVerifications = loadClaudeVerifications(options.storage);
+  // A failed Models API request is not evidence that its prior models vanished.
+  // Keep the last good candidate set until a successful catalog request says
+  // otherwise; configured and verification-backed candidates are merged below.
   const initialModels = buildClaudeModels({
     configuredClaudeModels: options.configuredClaudeModels,
-    apiModels,
+    ...(apiProbe.ok ? { apiModels: apiProbe.value } : { existingModels: previous.models }),
     verifications: priorVerifications,
     claudeVersion,
     now,
@@ -658,21 +854,109 @@ export async function refreshModels(options: ModelRefreshOptions = {}): Promise<
     : new Set<string>();
   const verifications = mergeVerifications(priorVerifications, initialModels, verifiedIds, claudeVersion, now);
   if (verifiedIds.size > 0) saveClaudeVerifications(options.storage, verifications);
-  cache = {
+  return {
     models: buildClaudeModels({
       configuredClaudeModels: options.configuredClaudeModels,
-      apiModels,
+      ...(apiProbe.ok ? { apiModels: apiProbe.value } : { existingModels: previous.models }),
       verifications,
       claudeVersion,
       now,
     }),
-    codexModels,
-    opencodeModels: opencode.models,
-    grokModels,
-    qoderModels,
+    codexModels: codexProbe.ok ? codexProbe.value : cloneModels(previous.codexModels),
+    opencodeModels: opencodeProbe.models.ok ? opencodeProbe.models.value : cloneModels(previous.opencodeModels),
+    grokModels: grokProbe.ok ? grokProbe.value : cloneModels(previous.grokModels),
+    qoderModels: qoderProbe.ok ? qoderProbe.value : cloneModels(previous.qoderModels),
     claudeVersion,
-    opencodeVersion: opencode.version,
+    opencodeVersion: opencodeProbe.version.ok ? opencodeProbe.version.value : previous.opencodeVersion,
     refreshedAt: now.toISOString(),
   };
-  return cache;
+}
+
+/**
+ * Server-owned, persisted model directory.
+ *
+ * It deliberately has a tiny surface: clients read `snapshot`; only server
+ * jobs and an administrator route may call `refresh`. Each service instance
+ * owns its cache and single-flight lock, so test servers and multiple hosts in
+ * the same Node process cannot leak a catalog into one another.
+ */
+export class ModelCatalogService {
+  private cache: ModelCache;
+  private revision: string;
+  private hasPersistedSnapshot: boolean;
+  private refreshPromise: Promise<ModelCatalogRefreshResult> | null = null;
+  private inFlightIncludesVerification = false;
+
+  constructor(private readonly getOptions: () => ModelRefreshOptions) {
+    const initialOptions = getOptions();
+    const persisted = loadPersistedModelCatalog(initialOptions.storage);
+    this.cache = persisted ? cloneCache(persisted.catalog) : createInitialCache(initialOptions);
+    this.revision = persisted?.revision ?? catalogRevision(this.cache);
+    this.hasPersistedSnapshot = persisted !== null;
+  }
+
+  snapshot(): ModelCatalogSnapshot {
+    return { ...cloneCache(this.cache), revision: this.revision };
+  }
+
+  refresh(request: ModelCatalogRefreshRequest = {}): Promise<ModelCatalogRefreshResult> {
+    const verifyClaudeCandidates = request.verifyClaudeCandidates === true;
+    if (this.refreshPromise) {
+      const sharedRefresh = this.refreshPromise;
+      const sharedIncludesVerification = this.inFlightIncludesVerification;
+      return sharedRefresh.then((result) =>
+        verifyClaudeCandidates && !sharedIncludesVerification
+          ? this.refresh({ verifyClaudeCandidates: true })
+          : result,
+      );
+    }
+
+    this.inFlightIncludesVerification = verifyClaudeCandidates;
+    const refresh = this.performRefresh({ verifyClaudeCandidates });
+    this.refreshPromise = refresh;
+    return refresh.finally(() => {
+      if (this.refreshPromise === refresh) {
+        this.refreshPromise = null;
+        this.inFlightIncludesVerification = false;
+      }
+    });
+  }
+
+  private async performRefresh(request: ModelCatalogRefreshRequest): Promise<ModelCatalogRefreshResult> {
+    const baseOptions = this.getOptions();
+    const options: ModelRefreshOptions = {
+      ...baseOptions,
+      verifyClaudeCandidates: request.verifyClaudeCandidates === true,
+    };
+    const checkedAt = (options.now?.() ?? new Date()).toISOString();
+    const discovered = await discoverModelCache(options, this.cache);
+    const discoveredRevision = catalogRevision(discovered);
+    const changed = !this.hasPersistedSnapshot || discoveredRevision !== this.revision;
+    if (changed) {
+      // The timestamp is only advanced with a meaningful catalog revision.
+      discovered.refreshedAt = checkedAt;
+      this.cache = cloneCache(discovered);
+      this.revision = catalogRevision(this.cache);
+      savePersistedModelCatalog(options.storage, this.cache, this.revision);
+      this.hasPersistedSnapshot = Boolean(options.storage);
+    }
+    return { ...this.snapshot(), changed, checkedAt };
+  }
+}
+
+/**
+ * Compatibility helper for callers that only need a synchronous fallback
+ * catalog. It intentionally does not own or mutate process-global state.
+ */
+export function getCachedModels(options: ModelRefreshOptions = {}): ModelCache {
+  const persisted = loadPersistedModelCatalog(options.storage);
+  return cloneCache(persisted?.catalog ?? createInitialCache(options));
+}
+
+/**
+ * Compatibility helper for direct callers and unit tests. Server code should
+ * use `ModelCatalogService` so the result is persisted and diffed.
+ */
+export async function refreshModels(options: ModelRefreshOptions = {}): Promise<ModelCache> {
+  return discoverModelCache(options, createInitialCache(options));
 }

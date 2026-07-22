@@ -31,7 +31,7 @@ function createCommandRunner(): ModelCommandRunner {
   };
 }
 
-test("model endpoints return candidates and persist only positive verification", async () => {
+test("model endpoints expose the server snapshot to apps while only admins can refresh it", async () => {
   process.env.WAND_TEST_MODE = "1";
   const dir = mkdtempSync(path.join(os.tmpdir(), "wand-models-server-"));
   const configPath = path.join(dir, "config.json");
@@ -71,16 +71,37 @@ test("model endpoints return candidates and persist only positive verification",
 
     const initial = await fetch(`${baseUrl}/api/models`, { headers });
     assert.equal(initial.status, 200);
+    assert.equal(initial.headers.get("cache-control"), "no-store");
     const initialBody = await initial.json() as { models: Array<{ id: string; availability?: string }> };
     assert.equal(initialBody.models.find((model) => model.id === "claude-endpoint-good")?.availability, "candidate");
     assert.equal(initialBody.models.some((model) => model.id === "claude-api-candidate"), false);
 
-    const refreshed = await fetch(`${baseUrl}/api/models/refresh`, { method: "POST", headers });
+    const denied = await fetch(`${baseUrl}/api/models/refresh`, { method: "POST", headers });
+    assert.equal(denied.status, 403);
+
+    const adminLogin = await fetch(`${baseUrl}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "test-password" }),
+    });
+    assert.equal(adminLogin.status, 200);
+    const setCookie = adminLogin.headers.get("set-cookie") ?? "";
+    const cookie = setCookie.match(/wand_session_local=([^;]+)/)?.[0];
+    assert.ok(cookie, "expected an administrator session cookie");
+
+    const refreshed = await fetch(`${baseUrl}/api/models/refresh`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+    });
     assert.equal(refreshed.status, 200);
     const refreshedBody = await refreshed.json() as {
       models: Array<{ id: string; availability?: string }>;
       qoderModels: Array<{ id: string; label: string }>;
+      changed: boolean;
+      revision: string;
     };
+    assert.equal(refreshedBody.changed, true);
+    assert.match(refreshedBody.revision, /^[a-f0-9]{64}$/);
     assert.equal(refreshedBody.models.find((model) => model.id === "claude-endpoint-good")?.availability, "verified");
     assert.equal(refreshedBody.models.find((model) => model.id === "claude-api-candidate")?.availability, "candidate");
     assert.deepEqual(
