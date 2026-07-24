@@ -12953,6 +12953,14 @@
     queueBarDrag: null,
     queueBarPromoting: false,
     drafts: {},
+    // Attachments are composer state, so they must follow the same per-session
+    // isolation as drafts. File objects cannot be persisted across reloads, but
+    // they do survive in-memory session switches.
+    attachmentsBySession: {},
+    // Active composer submissions are keyed by session and fingerprint. A
+    // second gesture for the same captured payload reuses the first submission,
+    // while a newly typed payload can still enter the structured-session queue.
+    composerSubmissionsBySession: {},
     isSyncingInputBox: false,
     loginPending: false,
     loginChecked: false,
@@ -13164,8 +13172,6 @@
     // { toolUseId: { 0: [optIdx...], submitted: false } }
     queueEpoch: 0,
     // Monotonic counter for queue state freshness
-    pendingAttachments: [],
-    // [{ file, previewUrl, name, size }]
     // Load last used working directory from localStorage
     workingDir: (function() {
       try {
@@ -13176,6 +13182,14 @@
       }
     })()
   };
+  if (state.selectedId) {
+    try {
+      initialDraft = localStorage.getItem("wand-draft-" + state.selectedId);
+      if (initialDraft !== null) state.drafts[state.selectedId] = initialDraft;
+    } catch (e) {
+    }
+  }
+  var initialDraft;
 
   // src/web-ui/browser/i18n.ts
   var I18N_DEFAULT_LANG = "\u4E2D\u6587";
@@ -35912,7 +35926,8 @@
     document.addEventListener("touchend", state.resizeTouchEnd);
   }
   function isJoystickAvailable() {
-    return !!getSelectedSession();
+    var selectedSession = getSelectedSession();
+    return !!selectedSession && !isStructuredSession2(selectedSession) && (isMobileLayout() || document.documentElement.classList.contains("is-wand-embed-terminal"));
   }
   function clampJoystickPos(pos) {
     var maxRight = Math.max(JOYSTICK_EDGE_MARGIN, window.innerWidth - JOYSTICK_BALL_SIZE - JOYSTICK_EDGE_MARGIN);
@@ -37769,6 +37784,7 @@
       window.__askRender(toolUseId);
     });
   };
+  var composerInputResizeObserver = null;
   function bindGlobalListenersOnce() {
     if (state.__globalListenersBound) return;
     state.__globalListenersBound = true;
@@ -37869,6 +37885,10 @@
   }
   function attachEventListeners() {
     bindGlobalListenersOnce();
+    if (composerInputResizeObserver) {
+      composerInputResizeObserver.disconnect();
+      composerInputResizeObserver = null;
+    }
     var loginButton = document.getElementById("login-button");
     if (loginButton) {
       loginButton.addEventListener("click", login);
@@ -38050,6 +38070,23 @@
         handleInputBoxFocus({ target: inputBox });
       });
       inputBox.addEventListener("blur", handleInputBoxBlur2);
+      refreshInputBoxState(inputBox);
+      var composerInputWrap = inputBox.closest(".composer-input-wrap");
+      if (composerInputWrap && typeof ResizeObserver !== "undefined") {
+        var lastComposerInputWidth = -1;
+        composerInputResizeObserver = new ResizeObserver(function(entries) {
+          if (!inputBox.isConnected) {
+            composerInputResizeObserver?.disconnect();
+            composerInputResizeObserver = null;
+            return;
+          }
+          var width = entries[0] ? entries[0].contentRect.width : composerInputWrap.getBoundingClientRect().width;
+          if (width <= 0 || Math.abs(width - lastComposerInputWidth) < 0.5) return;
+          lastComposerInputWidth = width;
+          refreshInputBoxState(inputBox);
+        });
+        composerInputResizeObserver.observe(composerInputWrap);
+      }
     }
     var attachBtn = document.getElementById("attach-btn");
     var fileInput = document.getElementById("file-upload-input");
@@ -38089,6 +38126,7 @@
     var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
     if (promptOptimizeBtn) {
       promptOptimizeBtn.addEventListener("click", function() {
+        closePlusPopover();
         optimizePromptText();
       });
     }
@@ -38589,6 +38627,9 @@
     }
     void document.body.offsetHeight;
     requestAnimationFrame(function() {
+      if (isLoggedIn) {
+        autoResizeInput(document.getElementById("input-box"));
+      }
       document.documentElement.classList.remove("no-transition");
     });
     if (isLoggedIn && state.selectedId && state.gitStatusSessionId !== state.selectedId) {
@@ -38638,7 +38679,7 @@
     return '<div class="app-container"><div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div><div class="main-layout' + (state.sessionsDrawerOpen ? " sidebar-open" : "") + (isAnchored ? " sidebar-pinned" : "") + collapsedCls + '"><aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? " pinned" : "") + sidebarCollapsedCls + '"><div class="sidebar-header"><div class="sidebar-header-main"><div class="topbar-logo-icon">W</div><span class="sidebar-title">\u4F1A\u8BDD</span><span class="session-count" id="session-count">' + String(state.sessions.filter(function(session) {
       var source = String(session && session.sessionSource || "").toLowerCase();
       return source !== "automation" && source !== "startup";
-    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (currentDraft ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A" aria-haspopup="dialog" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea><button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09" aria-label="\u63D0\u793A\u8BCD\u4F18\u5316"><svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/><path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/></svg><span class="prompt-optimize-spinner" aria-hidden="true"></span></button></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" title="\u505C\u6B62"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" title="\u53D1\u9001"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
+    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (currentDraft ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A" aria-haspopup="dialog" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" aria-label="\u6D88\u606F\u8F93\u5165" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="\u505C\u6B62" aria-label="\u505C\u6B62\u751F\u6210"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="\u53D1\u9001" aria-label="\u53D1\u9001\u6D88\u606F"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item prompt-optimize-menu-item" id="prompt-optimize-btn" type="button" title="\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09">' + iconSvg("edit", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon prompt-optimize-icon" }) + '<span class="plus-popover-label">\u4F18\u5316\u63D0\u793A\u8BCD</span><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
     // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
     '<div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div></main></div></div>';
   }
@@ -39607,13 +39648,18 @@
       syncComposerHasText(el);
       return;
     }
-    var prevOverflow = el.style.overflowY;
+    var prevInlineTransition = el.style.transition;
+    var renderedHeight = el.getBoundingClientRect().height;
     el.style.overflowY = "hidden";
+    el.style.transition = "none";
     el.style.height = minHeight + "px";
     var contentHeight = el.scrollHeight;
     var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
     var shouldScrollInside = contentHeight > maxHeight;
     var needsExpandedHeight = contentHeight > minHeight + 1;
+    el.style.height = renderedHeight + "px";
+    void el.offsetHeight;
+    el.style.transition = prevInlineTransition;
     el.style.height = newHeight + "px";
     el.style.minHeight = minHeight + "px";
     el.style.overflowY = shouldScrollInside || touchDevice ? "auto" : "hidden";
@@ -39626,16 +39672,6 @@
       el.scrollTop = 0;
     }
     syncComposerHasText(el);
-  }
-  function isSelectedSessionRunning() {
-    if (!state.selectedId) return false;
-    var selectedSession = state.sessions.find(function(session) {
-      return session.id === state.selectedId;
-    });
-    if (isStructuredSession2(selectedSession)) {
-      return !!(selectedSession.structuredState && selectedSession.structuredState.inFlight);
-    }
-    return !!selectedSession && selectedSession.status === "running";
   }
   var _queueLaunching = false;
   function sessionIsBusyForQueue(s) {
@@ -39689,6 +39725,32 @@
     }
     return "";
   }
+  var structuredQueueMutationRevisionBySession = {};
+  function getStructuredQueueMutationRevision(sessionId) {
+    return sessionId ? structuredQueueMutationRevisionBySession[sessionId] || 0 : 0;
+  }
+  function bumpStructuredQueueMutationRevision(sessionId) {
+    if (!sessionId) return 0;
+    var next = getStructuredQueueMutationRevision(sessionId) + 1;
+    structuredQueueMutationRevisionBySession[sessionId] = next;
+    return next;
+  }
+  function removeOneQueuedMessage(sessionId, text5, preferredIndex) {
+    var latestSession = state.sessions.find(function(item) {
+      return item.id === sessionId;
+    });
+    var latestQueue = latestSession && Array.isArray(latestSession.queuedMessages) ? latestSession.queuedMessages.slice() : [];
+    var index2 = typeof preferredIndex === "number" && latestQueue[preferredIndex] === text5 ? preferredIndex : latestQueue.lastIndexOf(text5);
+    if (index2 >= 0) latestQueue.splice(index2, 1);
+    return latestQueue;
+  }
+  function stripStaleStructuredQueueSnapshot(snapshot7, sessionId, requestRevision, requestQueueEpoch) {
+    if (!snapshot7 || !snapshot7.queuedMessages) return snapshot7;
+    if (getStructuredQueueMutationRevision(sessionId) !== requestRevision || state.queueEpoch > requestQueueEpoch) {
+      delete snapshot7.queuedMessages;
+    }
+    return snapshot7;
+  }
   function continueStructuredSession(session, text5) {
     var normalizedText2 = typeof text5 === "string" ? text5.trim() : "";
     if (normalizedText2 && getLastStructuredSubmittedInput(session) === normalizedText2) {
@@ -39699,6 +39761,8 @@
     var prevQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
     var nextQueue = prevQueue.slice();
     nextQueue.push(text5);
+    var queueRevision = bumpStructuredQueueMutationRevision(session.id);
+    var queueEpoch = state.queueEpoch;
     updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
     if (session.id === state.selectedId) updateQueueBar();
     var label = session.title || shortCommand(session.command) || "\u5F53\u524D\u4F1A\u8BDD";
@@ -39723,11 +39787,14 @@
       return res.json();
     }).then(function(snapshot7) {
       if (snapshot7 && snapshot7.id) {
+        stripStaleStructuredQueueSnapshot(snapshot7, session.id, queueRevision, queueEpoch);
         updateSessionSnapshot(snapshot7);
         if (snapshot7.id === state.selectedId) updateQueueBar();
       }
     }).catch(function(err) {
-      updateSessionSnapshot({ id: session.id, queuedMessages: prevQueue });
+      var rollbackQueue = removeOneQueuedMessage(session.id, text5, prevQueue.length);
+      bumpStructuredQueueMutationRevision(session.id);
+      updateSessionSnapshot({ id: session.id, queuedMessages: rollbackQueue });
       if (session.id === state.selectedId) updateQueueBar();
       showToast(err && err.message || "\u6392\u961F\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5\u3002", "error");
     });
@@ -39982,11 +40049,11 @@
     opts = opts || {};
     var welcomeInput = document.getElementById("welcome-input");
     var inputBox = document.getElementById("input-box");
-    var value = welcomeInput && welcomeInput.value.trim() ? welcomeInput.value.trim() : inputBox ? inputBox.value.trim() : "";
+    var welcomeValue = welcomeInput ? welcomeInput.value.trim() : "";
+    var inputValue = inputBox ? inputBox.value : "";
+    var value = welcomeValue || inputValue.trim();
     if (state.selectedId) {
-      if (value) {
-        sendInputFromBox(opts);
-      }
+      if (canSendComposer(inputValue, state.selectedId)) sendInputFromBox(opts);
       return;
     }
     if (value && hasAnyBusySession()) {
@@ -40066,9 +40133,50 @@
       if (!state.terminal) initTerminal2();
     }
     applyCurrentView();
+    restoreComposerStateForSession(sessionId);
     focusInputBox2(true);
     if (!structured) ensureTerminalFit("view-switch", { forceReplay: true });
     notifyLegacyUiChange("session:view");
+  }
+  function getComposerSubmissionFingerprint(value, attachments) {
+    var attachmentPart = (attachments || []).map(function(item) {
+      return [item.name || "", item.size || 0, item.file && item.file.lastModified || 0].join(":");
+    }).join("|");
+    return String(value || "").trim() + "\0" + attachmentPart;
+  }
+  function restoreFailedComposerSubmission(sessionId, value, attachments) {
+    var currentDraft = getDraftValueForSession(sessionId);
+    var restoredDraft = value;
+    if (currentDraft && currentDraft !== value) {
+      restoredDraft = value ? value + "\n" + currentDraft : currentDraft;
+    }
+    setDraftValueForSession(sessionId, restoredDraft, true);
+    restorePendingAttachments(sessionId, attachments);
+    if (sessionId === state.selectedId) {
+      var currentInput = document.getElementById("input-box");
+      if (currentInput) {
+        currentInput.value = restoredDraft;
+        autoResizeInput(currentInput);
+        try {
+          currentInput.setSelectionRange(restoredDraft.length, restoredDraft.length);
+        } catch (e) {
+        }
+      }
+    }
+    updateInteractiveControls3();
+  }
+  function refocusComposerAfterTouchSubmit(inputBox, sessionId) {
+    if (!inputBox || !isTouchDevice()) return;
+    var refocus = function() {
+      if (state.selectedId !== sessionId || !inputBox.isConnected || inputBox.disabled) return;
+      try {
+        inputBox.focus({ preventScroll: true });
+      } catch (e) {
+        inputBox.focus();
+      }
+    };
+    refocus();
+    requestAnimationFrame(refocus);
   }
   function sendInputFromBox(opts) {
     opts = opts || {};
@@ -40079,113 +40187,152 @@
       return Promise.resolve();
     }
     var inputBox = document.getElementById("input-box");
-    var value = inputBox ? inputBox.value : "";
     var selectedSession = getSelectedSession();
-    var hasAttachments = state.pendingAttachments.length > 0;
-    if (value || hasAttachments) {
-      var attachUpload = hasAttachments && state.selectedId ? uploadAttachments(state.selectedId).catch(function(err) {
+    var sessionId = selectedSession && selectedSession.id || state.selectedId;
+    var selectedView = state.currentView;
+    var value = inputBox ? inputBox.value : getDraftValueForSession(sessionId);
+    var pendingAttachments = getPendingAttachments(sessionId);
+    if (!sessionId || !canSendComposer(value, sessionId)) return Promise.resolve();
+    var fingerprint = getComposerSubmissionFingerprint(value, pendingAttachments);
+    var activeSubmissions = state.composerSubmissionsBySession[sessionId];
+    if (!activeSubmissions) {
+      activeSubmissions = {};
+      state.composerSubmissionsBySession[sessionId] = activeSubmissions;
+    }
+    var existingSubmission = activeSubmissions[fingerprint];
+    if (existingSubmission) {
+      return existingSubmission.promise || Promise.resolve();
+    }
+    var capturedAttachments = takePendingAttachments(sessionId);
+    setDraftValueForSession(sessionId, "", true);
+    if (inputBox && state.selectedId === sessionId) {
+      inputBox.value = "";
+      autoResizeInput(inputBox);
+    }
+    updateInteractiveControls3();
+    refocusComposerAfterTouchSubmit(inputBox, sessionId);
+    var submission = { fingerprint, promise: null };
+    activeSubmissions[fingerprint] = submission;
+    var submissionPromise = Promise.resolve().then(function() {
+      if (!capturedAttachments.length) return [];
+      return uploadAttachments(sessionId, capturedAttachments).catch(function(err) {
         showToast("\u9644\u4EF6\u4E0A\u4F20\u5931\u8D25: " + (err && err.message || err), "error");
         var marked = err instanceof Error ? err : new Error(String(err));
         marked.__wandToasted = true;
         throw marked;
-      }) : Promise.resolve([]);
-      return attachUpload.then(function(uploadedFiles) {
-        var prefix = buildAttachmentPrefix(uploadedFiles);
-        var finalValue = prefix + (value || (uploadedFiles.length ? "\u8BF7\u67E5\u770B\u9644\u4EF6\u3002" : ""));
-        if (uploadedFiles.length) clearAttachments();
-        var todoEl = document.getElementById("todo-progress");
-        if (todoEl) todoEl.classList.add("hidden");
-        if (isStructuredSession2(selectedSession)) {
-          return postStructuredInput(finalValue, inputBox, selectedSession, { interrupt: interruptFlag });
-        }
-        var submitChunks = getTerminalSubmitChunks(selectedSession, finalValue);
-        var isOffline = !state.wsConnected;
-        if (isOffline) {
-          queueOfflineTerminalChunks(submitChunks);
-          if (inputBox) {
-            inputBox.value = "";
-            autoResizeInput(inputBox);
-          }
-          setDraftValue("");
-          return Promise.resolve();
-        }
-        return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
-          if (!readySession) {
-            return null;
-          }
-          var submitView = state.currentView;
-          if (readySession && readySession.provider === "codex" && state.selectedId !== readySession.id) {
-            throw new Error("Codex session changed before input send.");
-          }
-          prepareChatBottomFollow();
-          return sendTerminalChunks(submitChunks, "enter_text", 30, submitView).then(function() {
-            if (inputBox && inputBox.value === value) {
-              inputBox.value = "";
-              autoResizeInput(inputBox);
-            }
-            setDraftValue("");
-          });
-        }).catch(function(err) {
-          showToast(getInputErrorMessage(err), "error");
-          if (err) err.__wandToasted = true;
-          throw err;
-        });
-      }).catch(function(err) {
-        if (!(err && err.__wandToasted)) {
-          showToast(getInputErrorMessage(err), "error");
-        }
-        throw err;
       });
-    }
-    return Promise.resolve();
+    }).then(function(uploadedFiles) {
+      var prefix = buildAttachmentPrefix(uploadedFiles);
+      var hasText = !!value.trim();
+      var finalValue = prefix + (hasText ? value : uploadedFiles.length ? "\u8BF7\u67E5\u770B\u9644\u4EF6\u3002" : "");
+      var todoEl = document.getElementById("todo-progress");
+      if (todoEl && sessionId === state.selectedId) todoEl.classList.add("hidden");
+      if (isStructuredSession2(selectedSession)) {
+        return postStructuredInput(finalValue, inputBox, selectedSession, {
+          interrupt: interruptFlag,
+          composerCaptured: true
+        });
+      }
+      var submitChunks = getTerminalSubmitChunks(selectedSession, finalValue);
+      if (state.selectedId !== sessionId) {
+        throw new Error("\u53D1\u9001\u524D\u4F1A\u8BDD\u5DF2\u5207\u6362\uFF0C\u539F\u8349\u7A3F\u5DF2\u6062\u590D\u3002");
+      }
+      if (!state.wsConnected) {
+        throw new Error("\u7F51\u7EDC\u5DF2\u65AD\u5F00\uFF0C\u6D88\u606F\u672A\u53D1\u9001\uFF0C\u539F\u8349\u7A3F\u5DF2\u6062\u590D\u3002");
+      }
+      return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
+        if (!readySession) {
+          var unavailable = new Error("\u4F1A\u8BDD\u5C1A\u672A\u51C6\u5907\u597D\uFF0C\u6D88\u606F\u672A\u53D1\u9001\u3002");
+          unavailable.__wandToasted = true;
+          throw unavailable;
+        }
+        if (state.selectedId !== sessionId) {
+          throw new Error("\u53D1\u9001\u524D\u4F1A\u8BDD\u5DF2\u5207\u6362\uFF0C\u539F\u8349\u7A3F\u5DF2\u6062\u590D\u3002");
+        }
+        prepareChatBottomFollow();
+        return sendTerminalChunks(submitChunks, "enter_text", 30, selectedView, readySession.id || sessionId);
+      });
+    }).then(function(result) {
+      discardPendingAttachments(capturedAttachments);
+      return result;
+    }).catch(function(err) {
+      restoreFailedComposerSubmission(sessionId, value, capturedAttachments);
+      if (!(err && (err.__wandToasted || err.__wandHandled))) {
+        showToast(getInputErrorMessage(err), "error");
+      }
+    }).finally(function() {
+      if (activeSubmissions[fingerprint] === submission) {
+        delete activeSubmissions[fingerprint];
+      }
+      if (Object.keys(activeSubmissions).length === 0 && state.composerSubmissionsBySession[sessionId] === activeSubmissions) {
+        delete state.composerSubmissionsBySession[sessionId];
+      }
+      updateInteractiveControls3();
+    });
+    submission.promise = submissionPromise;
+    return submissionPromise;
   }
   var _structuredLastSubmitAt = {};
   var DUPLICATE_SUBMIT_WINDOW_MS = 350;
   function postStructuredInput(input, inputBox, session, opts) {
     opts = opts || {};
     var requestedInterrupt = !!opts.interrupt;
-    if (!state.selectedId || !input) return Promise.resolve();
+    if (!input) return Promise.resolve();
     if (!session) {
       showToast("\u4F1A\u8BDD\u4E0D\u5B58\u5728\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u6216\u65B0\u5EFA\u4F1A\u8BDD\u3002", "error");
-      return Promise.resolve();
+      var missingSession = new Error("\u4F1A\u8BDD\u4E0D\u5B58\u5728\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u6216\u65B0\u5EFA\u4F1A\u8BDD\u3002");
+      missingSession.__wandToasted = true;
+      return Promise.reject(missingSession);
     }
     var sessionInFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
     if (sessionInFlight && !requestedInterrupt && getLastStructuredSubmittedInput(session) === input.trim()) {
-      if (inputBox) {
-        inputBox.value = "";
-        autoResizeInput(inputBox);
+      if (!opts.composerCaptured) {
+        if (inputBox && session.id === state.selectedId) {
+          inputBox.value = "";
+          autoResizeInput(inputBox);
+        }
+        setDraftValueForSession(session.id, "", true);
       }
-      setDraftValue("");
       showToast("\u4E0E\u4E0A\u4E00\u6761\u6D88\u606F\u76F8\u540C\uFF0C\u5DF2\u5FFD\u7565\uFF0C\u4E0D\u4F1A\u52A0\u5165\u6392\u961F\u3002", "warning");
-      updateInputHint("Enter \u53D1\u9001 \xB7 Shift+Enter \u6362\u884C");
+      if (session.id === state.selectedId) updateInputHint("Enter \u53D1\u9001 \xB7 Shift+Enter \u6362\u884C");
       return Promise.resolve();
     }
     var nowTs = Date.now();
-    var lastTs = _structuredLastSubmitAt[session.id] || 0;
-    if (nowTs - lastTs < DUPLICATE_SUBMIT_WINDOW_MS) {
+    var rapidDuplicateGuardEnabled = !opts.composerCaptured;
+    var lastSubmit = _structuredLastSubmitAt[session.id];
+    var lastTs = typeof lastSubmit === "number" ? lastSubmit : lastSubmit && lastSubmit.at || 0;
+    var lastInput = typeof lastSubmit === "number" ? input : lastSubmit && lastSubmit.input;
+    if (rapidDuplicateGuardEnabled && lastInput === input && nowTs - lastTs < DUPLICATE_SUBMIT_WINDOW_MS) {
       console.log("[wand] postStructuredInput: duplicate submit (within " + DUPLICATE_SUBMIT_WINDOW_MS + "ms) ignored for session", session.id);
       return Promise.resolve();
     }
-    _structuredLastSubmitAt[session.id] = nowTs;
+    var submitStamp = rapidDuplicateGuardEnabled ? { at: nowTs, input } : null;
+    if (submitStamp) _structuredLastSubmitAt[session.id] = submitStamp;
     var isInterrupting = sessionInFlight && requestedInterrupt;
     var isQueueing = sessionInFlight && !requestedInterrupt;
+    var requestQueueRevision = getStructuredQueueMutationRevision(session.id);
+    var optimisticQueueIndex = -1;
     var userMsgs = stripRenderOnlyStructuredMessages(Array.isArray(session.messages) ? session.messages.slice() : []);
     var optimisticPatch;
     if (isQueueing) {
       var nextQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+      optimisticQueueIndex = nextQueue.length;
       nextQueue.push(input);
+      requestQueueRevision = bumpStructuredQueueMutationRevision(session.id);
       optimisticPatch = {
         id: session.id,
         queuedMessages: nextQueue
       };
       updateSessionSnapshot(optimisticPatch);
-      var queueRefreshed = state.sessions.find(function(s) {
-        return s.id === session.id;
-      }) || session;
-      state.currentMessages = buildMessagesForRender(queueRefreshed, getPreferredMessages(queueRefreshed, queueRefreshed.output, false));
-      updateInputHint("\u5DF2\u52A0\u5165\u6392\u961F\u2026");
-      renderChat(true);
-      updateStructuredQueueCounter();
+      if (session.id === state.selectedId) {
+        var queueRefreshed = state.sessions.find(function(s) {
+          return s.id === session.id;
+        }) || session;
+        state.currentMessages = buildMessagesForRender(queueRefreshed, getPreferredMessages(queueRefreshed, queueRefreshed.output, false));
+        updateInputHint("\u5DF2\u52A0\u5165\u6392\u961F\u2026");
+        renderChat(true);
+        updateStructuredQueueCounter();
+      }
       showToast(nextQueue.length > 1 ? "\u5DF2\u52A0\u5165\u6392\u961F\uFF08\u5171 " + nextQueue.length + " \u6761\u7B49\u5F85\uFF09" : "\u5DF2\u52A0\u5165\u6392\u961F\uFF0C\u7B49\u5F53\u524D\u56DE\u590D\u5B8C\u6210\u4F1A\u81EA\u52A8\u53D1\u9001\u3002", "info");
     } else {
       var userTurn = { role: "user", content: [{ type: "text", text: input }] };
@@ -40197,23 +40344,27 @@
         messages: userMsgs,
         structuredState: optimisticStructuredState
       });
-      state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
-        status: "running",
-        messages: userMsgs,
-        structuredState: optimisticStructuredState
-      }), userMsgs);
-      updateInputHint(isInterrupting ? "\u5DF2\u4E2D\u65AD\uFF0C\u6B63\u5728\u5904\u7406\u65B0\u6D88\u606F\u2026" : "\u601D\u8003\u4E2D\u2026");
-      prepareChatBottomFollow();
-      renderChat(true);
+      if (session.id === state.selectedId) {
+        state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
+          status: "running",
+          messages: userMsgs,
+          structuredState: optimisticStructuredState
+        }), userMsgs);
+        updateInputHint(isInterrupting ? "\u5DF2\u4E2D\u65AD\uFF0C\u6B63\u5728\u5904\u7406\u65B0\u6D88\u606F\u2026" : "\u601D\u8003\u4E2D\u2026");
+        prepareChatBottomFollow();
+        renderChat(true);
+      }
       if (isInterrupting) {
         showToast("\u5DF2\u4E2D\u65AD\u4E0A\u4E00\u6761\u56DE\u590D\uFF0C\u6B63\u5728\u5904\u7406\u65B0\u6D88\u606F\u2026", "info");
       }
     }
-    if (inputBox) {
-      inputBox.value = "";
-      autoResizeInput(inputBox);
+    if (!opts.composerCaptured) {
+      if (inputBox && session.id === state.selectedId) {
+        inputBox.value = "";
+        autoResizeInput(inputBox);
+      }
+      setDraftValueForSession(session.id, "", true);
     }
-    setDraftValue("");
     var epochBeforePost = state.queueEpoch;
     var idempotencyKey = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
     return fetch("/api/structured-sessions/" + session.id + "/messages", {
@@ -40243,9 +40394,12 @@
         throw new Error(snapshot7.error);
       }
       if (snapshot7 && snapshot7.id) {
-        if (state.queueEpoch > epochBeforePost && snapshot7.queuedMessages) {
-          delete snapshot7.queuedMessages;
-        }
+        stripStaleStructuredQueueSnapshot(
+          snapshot7,
+          session.id,
+          requestQueueRevision,
+          epochBeforePost
+        );
         updateSessionSnapshot(snapshot7);
         if (snapshot7.id === state.selectedId) {
           var refreshedSession = state.sessions.find(function(s) {
@@ -40259,14 +40413,18 @@
     }).catch(function(error) {
       if (error && error.errorCode === "duplicate_idempotency_key") {
         showToast(error.message || "\u68C0\u6D4B\u5230\u91CD\u590D\u53D1\u9001\uFF0C\u5DF2\u62E6\u622A\u3002", "warning");
-        updateInputHint("Enter \u53D1\u9001 \xB7 Shift+Enter \u6362\u884C");
+        if (session.id === state.selectedId) updateInputHint("Enter \u53D1\u9001 \xB7 Shift+Enter \u6362\u884C");
         return;
       }
+      if (submitStamp && _structuredLastSubmitAt[session.id] === submitStamp) {
+        delete _structuredLastSubmitAt[session.id];
+      }
       if (isQueueing) {
-        var prevQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+        var rollbackQueue = removeOneQueuedMessage(session.id, input, optimisticQueueIndex);
+        bumpStructuredQueueMutationRevision(session.id);
         updateSessionSnapshot({
           id: session.id,
-          queuedMessages: prevQueue
+          queuedMessages: rollbackQueue
         });
         if (session.id === state.selectedId) {
           var rolledQueueSession = state.sessions.find(function(s) {
@@ -40296,8 +40454,11 @@
       var isTransientAbort = message === "Failed to fetch" || message === "NetworkError when attempting to fetch resource." || message === "Load failed" || /aborted|aborterror|networkerror|failed to fetch/i.test(message);
       if (!isTransientAbort) {
         showToast(error && error.message || "\u65E0\u6CD5\u53D1\u9001\u7ED3\u6784\u5316\u6D88\u606F\u3002", "error");
+        error.__wandToasted = true;
       }
-      updateInputHint("Enter \u53D1\u9001 \xB7 Shift+Enter \u6362\u884C");
+      error.__wandHandled = true;
+      if (session.id === state.selectedId) updateInputHint("Enter \u53D1\u9001 \xB7 Shift+Enter \u6362\u884C");
+      throw error;
     });
   }
   function updateInputHint(text5) {
@@ -40364,7 +40525,12 @@
     var atCapacity = queue.length >= QUEUE_BAR_MAX;
     host.innerHTML = renderQueueBarHtml(queue, inFlight, atCapacity);
   }
-  function rollbackQueueOptimistic(session, prevQueue) {
+  function rollbackQueueOptimistic(session, prevQueue, expectedRevision) {
+    if (typeof expectedRevision === "number" && getStructuredQueueMutationRevision(session.id) !== expectedRevision) {
+      updateQueueBar();
+      return;
+    }
+    bumpStructuredQueueMutationRevision(session.id);
     updateSessionSnapshot({ id: session.id, queuedMessages: prevQueue });
     var refreshed = state.sessions.find(function(s) {
       return s.id === session.id;
@@ -40382,6 +40548,7 @@
     if (index2 < 0 || index2 >= queue.length) return;
     var prev = queue.slice();
     var next = queue.slice(0, index2).concat(queue.slice(index2 + 1));
+    var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
     updateSessionSnapshot({ id: session.id, queuedMessages: next });
     var refreshed = state.sessions.find(function(s) {
       return s.id === session.id;
@@ -40401,7 +40568,7 @@
         });
       }
     }).catch(function(err) {
-      rollbackQueueOptimistic(session, prev);
+      rollbackQueueOptimistic(session, prev, mutationRevision);
       showToast(err && err.message || "\u5220\u9664\u6392\u961F\u6D88\u606F\u5931\u8D25\u3002", "error");
     });
   }
@@ -40413,6 +40580,7 @@
     var prev = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
     if (prev.length === 0) return;
     state.queueBarExpanded = false;
+    var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
     updateSessionSnapshot({ id: session.id, queuedMessages: [] });
     var refreshed = state.sessions.find(function(s) {
       return s.id === session.id;
@@ -40433,7 +40601,7 @@
       }
       showToast("\u5DF2\u6E05\u7A7A " + prev.length + " \u6761\u6392\u961F\u6D88\u606F\u3002", "info");
     }).catch(function(err) {
-      rollbackQueueOptimistic(session, prev);
+      rollbackQueueOptimistic(session, prev, mutationRevision);
       showToast(err && err.message || "\u6E05\u7A7A\u6392\u961F\u6D88\u606F\u5931\u8D25\u3002", "error");
     });
   }
@@ -40453,6 +40621,8 @@
     if (rest.length === 0) {
       state.queueBarExpanded = false;
     }
+    var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
+    var mutationQueueEpoch = state.queueEpoch;
     updateSessionSnapshot({ id: session.id, queuedMessages: rest });
     var idempotencyKey = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
     showToast(inFlight ? "\u5DF2\u8BF7\u6C42\u4E2D\u65AD\u5F53\u524D\u56DE\u590D\uFF0C\u7ACB\u5373\u53D1\u9001\u8FD9\u6761\u3002" : "\u5DF2\u7ACB\u5373\u53D1\u9001\u8FD9\u6761\u6D88\u606F\u3002", "info");
@@ -40472,6 +40642,12 @@
       return res.json();
     }).then(function(snapshot7) {
       if (snapshot7 && snapshot7.id) {
+        stripStaleStructuredQueueSnapshot(
+          snapshot7,
+          session.id,
+          mutationRevision,
+          mutationQueueEpoch
+        );
         updateSessionSnapshot(snapshot7);
         if (snapshot7.id === state.selectedId) {
           var refreshed = state.sessions.find(function(s) {
@@ -40485,7 +40661,7 @@
       state.queueBarPromoting = false;
     }).catch(function(err) {
       state.queueBarPromoting = false;
-      rollbackQueueOptimistic(session, prev);
+      rollbackQueueOptimistic(session, prev, mutationRevision);
       showToast(err && err.message || "\u7ACB\u5373\u53D1\u9001\u5931\u8D25\u3002", "error");
     });
   }
@@ -40628,6 +40804,7 @@
       updateQueueBar();
       return;
     }
+    var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
     updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
     updateQueueBar();
     fetch("/api/structured-sessions/" + session.id + "/queued", {
@@ -40644,7 +40821,7 @@
         });
       }
     }).catch(function(err) {
-      rollbackQueueOptimistic(session, queueSnapshot);
+      rollbackQueueOptimistic(session, queueSnapshot, mutationRevision);
       showToast(err && err.message || "\u8C03\u6574\u6392\u961F\u987A\u5E8F\u5931\u8D25\u3002", "error");
     });
   }
@@ -40768,7 +40945,7 @@
   function getTerminalSubmitChunks(session, text5) {
     return [text5, String.fromCharCode(13)];
   }
-  function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride) {
+  function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride, sessionId) {
     var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) {
       return !!chunk;
     }) : [];
@@ -40782,10 +40959,10 @@
           return new Promise(function(resolve) {
             setTimeout(resolve, delay);
           }).then(function() {
-            return queueDirectInput4(chunk, index2 === sequence.length - 1 ? shortcutKey : void 0, viewOverride);
+            return queueDirectInput4(chunk, index2 === sequence.length - 1 ? shortcutKey : void 0, viewOverride, sessionId);
           });
         }
-        return queueDirectInput4(chunk, index2 === sequence.length - 1 ? shortcutKey : void 0, viewOverride);
+        return queueDirectInput4(chunk, index2 === sequence.length - 1 ? shortcutKey : void 0, viewOverride, sessionId);
       });
     }, Promise.resolve());
   }
@@ -40798,14 +40975,6 @@
     }
     state.pendingMessages.push({ input, at: Date.now() });
   }
-  function queueOfflineTerminalChunks(chunks) {
-    var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) {
-      return !!chunk;
-    }) : [];
-    sequence.forEach(function(chunk) {
-      enqueuePendingInput(chunk);
-    });
-  }
   function _detectAndMarkClear(input) {
     if (typeof input !== "string" || !input) return;
     var stripped = input.replace(/\x1b\[200~/g, "").replace(/\x1b\[201~/g, "");
@@ -40815,41 +40984,54 @@
       }
     }
   }
-  function queueDirectInput4(input, shortcutKey, viewOverride) {
-    if (!input || !state.selectedId) return Promise.resolve();
+  function queueDirectInput4(input, shortcutKey, viewOverride, sessionId) {
+    var targetSessionId = sessionId || state.selectedId;
+    if (!input || !targetSessionId) return Promise.resolve();
     _detectAndMarkClear(input);
     state.messageQueue.push(input);
     state.inputQueue = state.inputQueue.then(function() {
-      return postInput3(input, shortcutKey, viewOverride).finally(function() {
+      return postInput3(input, shortcutKey, viewOverride, targetSessionId, !!sessionId).finally(function() {
         var idx = state.messageQueue.indexOf(input);
         if (idx > -1) state.messageQueue.splice(idx, 1);
       });
     });
     return state.inputQueue;
   }
-  function postInput3(input, shortcutKey, viewOverride) {
-    if (!state.selectedId) return Promise.resolve();
-    var requestSessionId = state.selectedId;
+  function postInput3(input, shortcutKey, viewOverride, sessionId, strictTarget) {
+    var requestSessionId = sessionId || state.selectedId;
+    if (!requestSessionId) return Promise.resolve();
     var effectiveView = viewOverride || state.currentView;
-    if (!isSelectedSessionRunning()) {
+    var requestSession = state.sessions.find(function(session) {
+      return session.id === requestSessionId;
+    });
+    var requestSessionRunning = !!requestSession && !isStructuredSession2(requestSession) && requestSession.status === "running";
+    if (!requestSessionRunning) {
+      if (strictTarget) {
+        var unavailableTarget = new Error("\u76EE\u6807\u4F1A\u8BDD\u5DF2\u505C\u6B62\uFF0C\u6D88\u606F\u672A\u53D1\u9001\u3002");
+        unavailableTarget.errorCode = requestSession ? "SESSION_NOT_RUNNING" : "SESSION_NOT_FOUND";
+        throw unavailableTarget;
+      }
       if (!state.wsConnected) {
         enqueuePendingInput(input);
         console.log("[wand] postInput: session not running, queued for reconnect", {
-          sessionId: state.selectedId,
+          sessionId: requestSessionId,
           inputLength: input.length
         });
         return Promise.resolve();
       }
       console.warn("[wand] postInput: session not running, skipping send", {
-        sessionId: state.selectedId
+        sessionId: requestSessionId
       });
       showToast("\u4F1A\u8BDD\u672A\u8FD0\u884C\uFF0C\u6B63\u5728\u7B49\u5F85\u81EA\u52A8\u6062\u590D\u540E\u91CD\u8BD5\u3002", "info");
       return Promise.resolve();
     }
     if (!state.wsConnected) {
+      if (strictTarget) {
+        throw new Error("\u7F51\u7EDC\u5DF2\u65AD\u5F00\uFF0C\u6D88\u606F\u672A\u53D1\u9001\u3002");
+      }
       enqueuePendingInput(input);
       console.log("[wand] postInput: WebSocket disconnected, queued message", {
-        sessionId: state.selectedId,
+        sessionId: requestSessionId,
         inputLength: input.length
       });
       return Promise.resolve();
@@ -41104,7 +41286,14 @@
     var sendBtn = document.getElementById("send-input-button");
     var structuredInFlight = structured && isRunning;
     if (sendBtn) {
-      sendBtn.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
+      var sessionUnavailable = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
+      var composerValue = composer ? composer.value : "";
+      var currentAttachments = getPendingAttachments(state.selectedId);
+      var composerCanSend = canSendComposer(composerValue, state.selectedId);
+      var activeSubmissions = state.selectedId && state.composerSubmissionsBySession[state.selectedId];
+      var duplicateInFlight = !!(composerCanSend && activeSubmissions && activeSubmissions[getComposerSubmissionFingerprint(composerValue, currentAttachments)]);
+      sendBtn.disabled = !composerCanSend || duplicateInFlight || sessionUnavailable;
+      sendBtn.setAttribute("aria-disabled", sendBtn.disabled ? "true" : "false");
       sendBtn.setAttribute("title", structured ? structuredInFlight ? "\u6392\u961F\u53D1\u9001\uFF08\u5F53\u524D\u56DE\u590D\u7ED3\u675F\u540E\u5904\u7406\uFF09" : "\u53D1\u9001" : isCodex ? isRunning ? "\u53D1\u9001\u7ED9 Codex" : "Codex \u4F1A\u8BDD\u5DF2\u7ED3\u675F" : !selectedSession || isRunning || canResumeOnSend ? "\u53D1\u9001" : "\u4F1A\u8BDD\u5DF2\u7ED3\u675F");
       sendBtn.classList.toggle("queue-mode", structuredInFlight);
     }
@@ -41702,7 +41891,7 @@
     var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
     if (offsetBottom <= 50) return false;
     var rect = inputBox.getBoundingClientRect();
-    return rect.bottom > vv.height - 12;
+    return rect.bottom > vv.offsetTop + vv.height - 12;
   }
   function syncInputBoxScroll(inputBox) {
     if (!inputBox) return;
@@ -45866,8 +46055,15 @@
       var sessionIds = new Set(serverSessions.map(function(s) {
         return s.id;
       }));
+      var previousSelectedId = state.selectedId;
       Object.keys(state.drafts).forEach(function(id) {
         if (!sessionIds.has(id)) delete state.drafts[id];
+      });
+      Object.keys(state.attachmentsBySession).forEach(function(id) {
+        if (!sessionIds.has(id)) {
+          discardPendingAttachments(state.attachmentsBySession[id]);
+          delete state.attachmentsBySession[id];
+        }
       });
       state.sessions = serverSessions.map(function(serverSession) {
         var localSession = state.sessions.find(function(s) {
@@ -45878,6 +46074,10 @@
       var preferredSessionId = getPreferredSessionId(state.sessions);
       if (preferredSessionId !== void 0) {
         state.selectedId = preferredSessionId;
+      }
+      if (state.selectedId !== previousSelectedId) {
+        if (state.selectedId) restoreComposerStateForSession(state.selectedId);
+        else renderAttachmentPreview();
       }
       restoreStructuredQueue();
       updateStructuredQueueCounter();
@@ -46109,6 +46309,13 @@
     });
     if (!foundSession) {
       return;
+    }
+    var previousSessionId = state.selectedId;
+    if (previousSessionId && previousSessionId !== id) {
+      var previousInput = document.getElementById("input-box");
+      if (previousInput) {
+        setDraftValueForSession(previousSessionId, previousInput.value, true);
+      }
     }
     if (state.selectedId !== id) {
       teardownTerminal();
@@ -46698,14 +46905,7 @@
         event.preventDefault();
         var inputBox = document.getElementById("input-box");
         if (inputBox) {
-          var start = inputBox.selectionStart || 0;
-          var current = inputBox.value;
-          var newValue = current.slice(0, start) + String.fromCharCode(10) + current.slice(start);
-          inputBox.value = newValue;
-          inputBox.selectionStart = start + 1;
-          inputBox.selectionEnd = start + 1;
-          setDraftValue(newValue, true);
-          autoResizeInput(inputBox);
+          replaceComposerSelection2(inputBox, String.fromCharCode(10));
         }
         return;
       }
@@ -46727,11 +46927,7 @@
       event.preventDefault();
       var inputBox = document.getElementById("input-box");
       if (inputBox) {
-        var start = inputBox.selectionStart || 0;
-        var current = inputBox.value;
-        var newValue = current.slice(0, start) + String.fromCharCode(9) + current.slice(start);
-        inputBox.value = newValue;
-        setDraftValue(newValue, true);
+        replaceComposerSelection2(inputBox, String.fromCharCode(9));
       }
       return;
     }
@@ -46825,6 +47021,7 @@
   }
   function addPendingAttachment(file) {
     if (!file) return;
+    if (!state.selectedId) return;
     if (file.size > ATTACH_MAX_SIZE) {
       showToast("\u6587\u4EF6\u8FC7\u5927\uFF08\u4E0A\u9650 10 MB\uFF09: " + file.name, "error");
       return;
@@ -46833,30 +47030,57 @@
     if (isImageType(file.type)) {
       entry.previewUrl = URL.createObjectURL(file);
     }
-    state.pendingAttachments.push(entry);
+    getPendingAttachments(state.selectedId, true).push(entry);
     renderAttachmentPreview();
   }
   function removePendingAttachment(index2) {
-    var removed = state.pendingAttachments.splice(index2, 1);
+    var items = getPendingAttachments(state.selectedId);
+    var removed = items.splice(index2, 1);
     if (removed.length && removed[0].previewUrl) {
       URL.revokeObjectURL(removed[0].previewUrl);
     }
     renderAttachmentPreview();
   }
-  function clearAttachments() {
-    state.pendingAttachments.forEach(function(a) {
+  function getPendingAttachments(sessionId, create) {
+    var id = sessionId === void 0 ? state.selectedId : sessionId;
+    if (!id) return [];
+    var items = state.attachmentsBySession[id];
+    if (!items && create) {
+      items = [];
+      state.attachmentsBySession[id] = items;
+    }
+    return items || [];
+  }
+  function takePendingAttachments(sessionId) {
+    if (!sessionId) return [];
+    var items = getPendingAttachments(sessionId);
+    state.attachmentsBySession[sessionId] = [];
+    if (sessionId === state.selectedId) renderAttachmentPreview();
+    return items.slice();
+  }
+  function restorePendingAttachments(sessionId, attachments) {
+    if (!sessionId || !attachments || !attachments.length) return;
+    var current = getPendingAttachments(sessionId);
+    var restored = attachments.slice();
+    current.forEach(function(item) {
+      if (restored.indexOf(item) < 0) restored.push(item);
+    });
+    state.attachmentsBySession[sessionId] = restored;
+    if (sessionId === state.selectedId) renderAttachmentPreview();
+  }
+  function discardPendingAttachments(attachments) {
+    (attachments || []).forEach(function(a) {
       if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     });
-    state.pendingAttachments = [];
-    renderAttachmentPreview();
   }
   function renderAttachmentPreview() {
     var bar = document.getElementById("attachment-preview");
     if (!bar) return;
-    var items = state.pendingAttachments;
+    var items = getPendingAttachments(state.selectedId);
     if (items.length === 0) {
       bar.classList.add("hidden");
       bar.innerHTML = "";
+      updateInteractiveControls3();
       return;
     }
     bar.classList.remove("hidden");
@@ -46874,11 +47098,13 @@
         removePendingAttachment(parseInt(btn.getAttribute("data-index"), 10));
       });
     });
+    updateInteractiveControls3();
   }
-  function uploadAttachments(sessionId) {
-    if (!state.pendingAttachments.length) return Promise.resolve([]);
+  function uploadAttachments(sessionId, attachments) {
+    var items = attachments || getPendingAttachments(sessionId);
+    if (!items.length) return Promise.resolve([]);
     var formData = new FormData();
-    state.pendingAttachments.forEach(function(a) {
+    items.forEach(function(a) {
       formData.append("files", a.file, a.name);
     });
     return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/upload", {
@@ -46935,25 +47161,76 @@
     }
     var inputBox = document.getElementById("input-box");
     if (inputBox) {
-      var start = inputBox.selectionStart || 0;
-      var end = inputBox.selectionEnd || 0;
-      var current = inputBox.value;
-      var newValue = current.slice(0, start) + pasted + current.slice(end);
-      inputBox.value = newValue;
-      setDraftValue(newValue);
+      replaceComposerSelection2(inputBox, pasted);
+    }
+  }
+  function getDraftValueForSession(sessionId) {
+    if (!sessionId) return "";
+    if (state.drafts[sessionId] !== void 0) {
+      return state.drafts[sessionId];
+    }
+    try {
+      var saved = localStorage.getItem("wand-draft-" + sessionId);
+      state.drafts[sessionId] = saved === null ? "" : saved;
+    } catch (e) {
+      state.drafts[sessionId] = "";
+    }
+    return state.drafts[sessionId];
+  }
+  function setDraftValueForSession(sessionId, value, skipDom) {
+    if (!sessionId) return;
+    state.drafts[sessionId] = value;
+    try {
+      localStorage.setItem("wand-draft-" + sessionId, value);
+    } catch (e) {
+    }
+    if (!skipDom && sessionId === state.selectedId) {
+      var inputBox = document.getElementById("input-box");
+      if (inputBox) {
+        inputBox.value = value;
+        autoResizeInput(inputBox);
+      }
     }
   }
   function setDraftValue(value, skipDom) {
-    if (!state.selectedId) return;
-    state.drafts[state.selectedId] = value;
-    try {
-      localStorage.setItem("wand-draft-" + state.selectedId, value);
-    } catch (e) {
+    setDraftValueForSession(state.selectedId, value, skipDom);
+  }
+  function replaceComposerSelection2(inputBox, replacement) {
+    if (!inputBox) return "";
+    var start = inputBox.selectionStart === null ? inputBox.value.length : inputBox.selectionStart;
+    var end = inputBox.selectionEnd === null ? start : inputBox.selectionEnd;
+    if (typeof inputBox.setRangeText === "function") {
+      inputBox.setRangeText(replacement, start, end, "end");
+    } else {
+      var current = inputBox.value;
+      inputBox.value = current.slice(0, start) + replacement + current.slice(end);
+      var caret = start + replacement.length;
+      inputBox.setSelectionRange(caret, caret);
     }
-    if (!skipDom) {
-      var inputBox = document.getElementById("input-box");
-      if (inputBox) inputBox.value = value;
+    setDraftValue(inputBox.value, true);
+    autoResizeInput(inputBox);
+    syncComposerHasText(inputBox);
+    return inputBox.value;
+  }
+  function restoreComposerStateForSession(sessionId) {
+    if (!sessionId || sessionId !== state.selectedId) return;
+    var inputBox = document.getElementById("input-box");
+    if (inputBox) {
+      var draft = getDraftValueForSession(sessionId);
+      state.isSyncingInputBox = true;
+      inputBox.value = draft;
+      autoResizeInput(inputBox);
+      try {
+        inputBox.setSelectionRange(draft.length, draft.length);
+      } catch (e) {
+      }
+      state.isSyncingInputBox = false;
     }
+    renderAttachmentPreview();
+  }
+  function canSendComposer(value, sessionId) {
+    var id = sessionId === void 0 ? state.selectedId : sessionId;
+    return !!String(value || "").trim() || getPendingAttachments(id).length > 0;
   }
   var promptOptimizeInFlight = false;
   function optimizePromptText() {
@@ -46963,6 +47240,7 @@
     var composer = document.querySelector(".input-composer");
     if (!inputBox) return;
     var raw = (inputBox.value || "").trim();
+    var requestSessionId = state.selectedId;
     if (!raw) {
       if (typeof showToast === "function") showToast("\u8BF7\u5148\u8F93\u5165\u8981\u4F18\u5316\u7684\u5185\u5BB9\u3002", "info");
       inputBox.focus();
@@ -46979,7 +47257,7 @@
     var prevReadOnly = inputBox.readOnly;
     inputBox.readOnly = true;
     var payload = { text: raw };
-    if (state && state.selectedId) payload.sessionId = state.selectedId;
+    if (requestSessionId) payload.sessionId = requestSessionId;
     fetch("/api/optimize-prompt", {
       method: "POST",
       credentials: "same-origin",
@@ -46993,7 +47271,14 @@
       if (!result.ok) throw new Error(result.data && result.data.error || "\u63D0\u793A\u8BCD\u4F18\u5316\u5931\u8D25\u3002");
       var optimized = result.data && result.data.optimized || "";
       if (!optimized) throw new Error("Claude \u8FD4\u56DE\u4E3A\u7A7A\u3002");
-      animateOptimizedReplace(inputBox, optimized);
+      if (requestSessionId && state.selectedId !== requestSessionId) {
+        setDraftValueForSession(requestSessionId, optimized, true);
+        if (typeof showToast === "function") {
+          showToast("\u63D0\u793A\u8BCD\u5DF2\u5199\u56DE\u539F\u4F1A\u8BDD\u8349\u7A3F\u3002", "info");
+        }
+        return;
+      }
+      animateOptimizedReplace(inputBox, optimized, requestSessionId);
     }).catch(function(error) {
       if (typeof showToast === "function") showToast(error && error.message || "\u63D0\u793A\u8BCD\u4F18\u5316\u5931\u8D25\u3002", "error");
       if (btn) {
@@ -47015,13 +47300,18 @@
       inputBox.readOnly = prevReadOnly;
     });
   }
-  function animateOptimizedReplace(inputBox, finalText) {
+  function animateOptimizedReplace(inputBox, finalText, sessionId) {
     if (!inputBox) return;
+    var targetSessionId = sessionId || state.selectedId;
+    if (targetSessionId && state.selectedId !== targetSessionId) {
+      setDraftValueForSession(targetSessionId, finalText, true);
+      return;
+    }
     var chars = Array.from(finalText);
     var total = chars.length;
     if (total === 0) {
       inputBox.value = "";
-      setDraftValue("", true);
+      setDraftValueForSession(targetSessionId, "", true);
       autoResizeInput(inputBox);
       return;
     }
@@ -47033,13 +47323,21 @@
     inputBox.value = "";
     autoResizeInput(inputBox);
     function tick() {
+      if (targetSessionId && state.selectedId !== targetSessionId) {
+        setDraftValueForSession(targetSessionId, finalText, true);
+        return;
+      }
+      if (document.getElementById("input-box") !== inputBox) {
+        setDraftValueForSession(targetSessionId, finalText, true);
+        return;
+      }
       i = Math.min(total, i + charsPerStep);
       inputBox.value = chars.slice(0, i).join("");
       autoResizeInput(inputBox);
       if (i < total) {
         setTimeout(tick, stepDelay);
       } else {
-        setDraftValue(finalText, true);
+        setDraftValueForSession(targetSessionId, finalText, true);
         try {
           inputBox.setSelectionRange(finalText.length, finalText.length);
         } catch (e) {
@@ -47054,6 +47352,7 @@
     var inputBox = el || document.getElementById("input-box");
     var hasText = !!(inputBox && inputBox.value && inputBox.value.length > 0);
     composer.classList.toggle("has-text", hasText);
+    updateInteractiveControls3();
   }
 
   // src/web-ui/browser/utils.ts

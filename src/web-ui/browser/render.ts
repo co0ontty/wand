@@ -6,7 +6,7 @@ import { renderChatEmptyState, shortCommand } from "./chat-render";
 import { attachEventListeners } from "./events";
 import { shouldShowSessionsBackdrop, isMobileLayout, refreshFileExplorer, renderFileExplorer, wandFileIcon } from "./file-browser";
 import { loadGitStatus, renderTopbarGitBadgeHtml, renderTopbarMoreMenuHtml } from "./git-commit";
-import { getSelectedSession, updateInteractiveControls } from "./input";
+import { autoResizeInput, getSelectedSession, updateInteractiveControls } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
 import { applyCurrentView, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, fetchAvailableModels, getComposerPlaceholder, getComposerTool, getSafeModeForTool, hasNativeBackToApp, hasNativeSwitchServer, loadOutput, loadSessions, login, logout, refreshAll, renderAutoApproveChip, renderClaudeSkillsPickerHtml, renderComposerConfigControlsHtml, syncComposerModeSelect, syncComposerModelSelect, toggleSidebarCollapsed, updateDrawerState, updateShellChrome } from "./session-engine";
 import { getSessionStatusClass, getSessionStatusLabel } from "./session-ui";
@@ -439,6 +439,13 @@ export function render(options?: any) {
   // Force reflow then re-enable transitions after layout settles
   void document.body.offsetHeight;
   requestAnimationFrame(function() {
+    // The React shell can reveal its stable composer host during this frame.
+    // Resize after that reveal as well as during event binding; otherwise a
+    // persisted multi-line draft may have been measured while the host still
+    // had no usable width and remain clipped at the one-line minimum.
+    if (isLoggedIn) {
+      autoResizeInput(document.getElementById("input-box"));
+    }
     document.documentElement.classList.remove("no-transition");
   });
 
@@ -774,10 +781,10 @@ export function renderAppShell() {
           // 垂直排列，一行一个液态玻璃气泡（编号 + 文本 + 立即/删除）。
           // updateQueueBar() 在 queuedMessages 非空时去掉 hidden。
           '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
-          // 输入主行：桌面端在 + 与 textarea 之间显示模式 / 模型 / 思考三个 chip；
+          // 输入主行：桌面端在 + 与 textarea 之间显示模式 / 模型 / 思考三个低噪声控件；
           // 窄屏隐藏这组三件套，统一从 + 弹层调整，保证输入区和发送键不被挤压。
-          //  · 附件收进 + 弹层；语音模式 UI 保留，等待接入 STT。
-          //  · 提示词优化按钮（✨）改成只在 textarea 有内容时显示，绝对定位浮在右侧。
+          //  · 附件和提示词优化收进 + 弹层，避免浮动按钮遮住长文本。
+          //  · 语音模式 UI 保留，等待接入 STT。
           //  · 自动批准 / 权限操作行统一搬到 textarea 上方的状态行，
           //    输入主行保持极简。
           '<div class="input-composer-row">' +
@@ -807,23 +814,12 @@ export function renderAppShell() {
                 renderComposerConfigControlsHtml(selectedSession) +
               '</div>' +
               '<div class="composer-input-wrap">' +
-                '<textarea id="input-box" class="input-textarea" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
-                // 提示词优化按钮 —— 浮在输入区右侧（在 send 按钮的「左边」，不再撞车）。
-                // 默认隐藏，CSS 只在 .input-composer.has-text 时显示。
-                '<button id="prompt-optimize-btn" class="prompt-optimize-btn" type="button" title="提示词优化（AI）" aria-label="提示词优化">' +
-                  '<svg class="prompt-optimize-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-                    '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" fill="currentColor" opacity="0.25"/>' +
-                    '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/>' +
-                    '<path d="M19 14l.7 1.9L21.6 17l-1.9.7L19 19.6l-.7-1.9L16.4 17l1.9-.7z" fill="currentColor" opacity="0.35"/>' +
-                    '<path d="M5 4l.5 1.4L7 6l-1.5.6L5 8l-.5-1.4L3 6l1.5-.6z" fill="currentColor" opacity="0.35"/>' +
-                  '</svg>' +
-                  '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
-                '</button>' +
+                '<textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
               '</div>' +
               '<div class="composer-actions-right">' +
                 // 停止按钮默认隐藏；updateInteractiveControls() 根据 computeRunningSignal
                 // 判断「真有 reply 在跑」时再露出，平时让位给主操作减少视觉噪声。
-                '<button id="stop-button" class="btn-circle btn-circle-stop hidden" title="停止">' +
+                '<button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="停止" aria-label="停止生成">' +
                   '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
                 '</button>' +
                 // 语音按钮位于输入框内部、发送按钮左侧；只在按钮自身处理长按。
@@ -831,7 +827,7 @@ export function renderAppShell() {
                   iconSvg("mic", { size: 19, strokeWidth: 2 }) +
                 '</button>' +
                 // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队点输入框上方那条气泡。
-                '<button id="send-input-button" class="btn-circle btn-circle-send" title="发送">' +
+                '<button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="发送" aria-label="发送消息">' +
                   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
                 '</button>' +
               '</div>' +
@@ -846,6 +842,11 @@ export function renderAppShell() {
             '<button class="plus-popover-item" id="plus-attach-item" type="button">' +
               iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +
               '<span class="plus-popover-label">上传附件</span>' +
+            '</button>' +
+            '<button class="plus-popover-item prompt-optimize-menu-item" id="prompt-optimize-btn" type="button" title="提示词优化（AI）">' +
+              iconSvg("edit", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon prompt-optimize-icon" }) +
+              '<span class="plus-popover-label">优化提示词</span>' +
+              '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
             '</button>' +
             '<button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' +
               iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +

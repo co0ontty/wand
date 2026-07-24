@@ -294,6 +294,8 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
       // 只绑一次的全局监听（document/window）。原本散落在 attachEventListeners 里、每次 render
       // 用匿名函数重绑会叠加泄漏。集中绑一次，handler 一律现查 DOM / 读全局 state，避免捕获
       // 每次 render 重建的局部节点导致 stale。
+      var composerInputResizeObserver: ResizeObserver | null = null;
+
       export function bindGlobalListenersOnce() {
         if (state.__globalListenersBound) return;
         state.__globalListenersBound = true;
@@ -407,6 +409,10 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
 
       export function attachEventListeners() {
         bindGlobalListenersOnce();
+        if (composerInputResizeObserver) {
+          composerInputResizeObserver.disconnect();
+          composerInputResizeObserver = null;
+        }
 
         var loginButton = document.getElementById("login-button");
         if (loginButton) {
@@ -607,6 +613,30 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
             handleInputBoxFocus({ target: inputBox! });
           });
           inputBox.addEventListener("blur", handleInputBoxBlur);
+          // Initial authenticated render can hydrate a persisted multi-line
+          // draft directly into the textarea markup. Size it once here so the
+          // first frame is not clipped before the user types another key.
+          refreshInputBoxState(inputBox);
+          // In the React shell the legacy composer host can be mounted before
+          // its final column width is available. Re-measure when that width
+          // arrives (and on later responsive width changes) so wrapped drafts
+          // never stay at the one-line height.
+          var composerInputWrap = inputBox.closest(".composer-input-wrap");
+          if (composerInputWrap && typeof ResizeObserver !== "undefined") {
+            var lastComposerInputWidth = -1;
+            composerInputResizeObserver = new ResizeObserver(function(entries) {
+              if (!inputBox!.isConnected) {
+                composerInputResizeObserver?.disconnect();
+                composerInputResizeObserver = null;
+                return;
+              }
+              var width = entries[0] ? entries[0].contentRect.width : composerInputWrap!.getBoundingClientRect().width;
+              if (width <= 0 || Math.abs(width - lastComposerInputWidth) < 0.5) return;
+              lastComposerInputWidth = width;
+              refreshInputBoxState(inputBox!);
+            });
+            composerInputResizeObserver.observe(composerInputWrap);
+          }
         }
 
         // 加号 popover & 附件上传
@@ -649,7 +679,10 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
 
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
         if (promptOptimizeBtn) {
-          promptOptimizeBtn.addEventListener("click", function() { optimizePromptText(); });
+          promptOptimizeBtn.addEventListener("click", function() {
+            closePlusPopover();
+            optimizePromptText();
+          });
         }
         var composer = document.querySelector(".input-composer");
         if (composer) {

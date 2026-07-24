@@ -8,7 +8,7 @@ import { isMobileLayout, updateFilePanelCwd } from "./file-browser";
 import { loadGitStatus } from "./git-commit";
 import { showToast, wandConfirm, wandAlert, wandPrompt, openWandDialog, showError, hideError, sendBrowserNotification, _syncWakeLock } from "./notifications";
 import { render, resetChatRenderCache, getEffectiveCwd } from "./render";
-import { applyCurrentView, buildAttachmentPrefix, clearAttachments, dismissDrawerIfOverlay, getChatModelForProvider, getComposerPlaceholder, getComposerTool, getPreferredMessages, getPreferredTool, getSafeModeForTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, loadSessions, refreshAll, selectSession, setDraftValue, shouldRequestChatFormat, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
+import { applyCurrentView, buildAttachmentPrefix, canSendComposer, discardPendingAttachments, dismissDrawerIfOverlay, getChatModelForProvider, getComposerPlaceholder, getComposerTool, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, getSafeModeForTool, getSelectedClaudeSkills, isStructuredSession, loadOutput, loadSessions, refreshAll, replaceComposerSelection, restoreComposerStateForSession, restorePendingAttachments, selectSession, setDraftValue, setDraftValueForSession, shouldRequestChatFormat, subscribeToSession, supportsClaudeSkillSelection, syncComposerHasText, takePendingAttachments, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { renderSessions, loadClaudeHistory, loadCodexHistory, ensureClaudeHistoryLoaded, ensureCodexHistoryLoaded, confirmDelete } from "./sidebar";
 import { initTerminal, maybeScheduleResyncForChunk, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, softResyncTerminal, syncTerminalBuffer } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, sendTerminalResize, syncAppViewportHeight, teardownTerminal, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
@@ -151,13 +151,23 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
         // Measure content height by temporarily setting height to minHeight
         // and reading scrollHeight. Avoid collapsing to 0 which causes layout jumps.
-        var prevOverflow = el.style.overflowY;
+        var prevInlineTransition = el.style.transition;
+        var renderedHeight = el.getBoundingClientRect().height;
         el.style.overflowY = "hidden";
+        // Height is animated in CSS. Without suspending that transition, a
+        // long draft that becomes shorter still reports the old scrollHeight
+        // during measurement and gets stuck at the cap. Measure at the real
+        // minimum, then restore the rendered height before animating toward
+        // the newly calculated target.
+        el.style.transition = "none";
         el.style.height = minHeight + "px";
         var contentHeight = el.scrollHeight;
         var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
         var shouldScrollInside = contentHeight > maxHeight;
         var needsExpandedHeight = contentHeight > minHeight + 1;
+        el.style.height = renderedHeight + "px";
+        void el.offsetHeight;
+        el.style.transition = prevInlineTransition;
         el.style.height = newHeight + "px";
         el.style.minHeight = minHeight + "px";
         el.style.overflowY = shouldScrollInside || touchDevice ? "auto" : "hidden";
@@ -175,13 +185,17 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         syncComposerHasText(el);
       }
 
-      export function isSelectedSessionRunning() {
-        if (!state.selectedId) return false;
-        var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
-        if (isStructuredSession(selectedSession)) {
-          return !!(selectedSession.structuredState && selectedSession.structuredState.inFlight);
+      export function isSessionRunning(sessionId) {
+        if (!sessionId) return false;
+        var session = state.sessions.find(function(item) { return item.id === sessionId; });
+        if (isStructuredSession(session)) {
+          return !!(session.structuredState && session.structuredState.inFlight);
         }
-        return !!selectedSession && selectedSession.status === "running";
+        return !!session && session.status === "running";
+      }
+
+      export function isSelectedSessionRunning() {
+        return isSessionRunning(state.selectedId);
       }
 
       // ── 跨会话排队 ──
@@ -245,6 +259,45 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return "";
       }
 
+      // Structured queue mutations can overlap: a slower HTTP response must
+      // never replace a newer optimistic queue. Keep a lightweight
+      // per-session revision and strip stale `queuedMessages` snapshots while
+      // still accepting the rest of the server session update.
+      export var structuredQueueMutationRevisionBySession = {};
+
+      export function getStructuredQueueMutationRevision(sessionId) {
+        return sessionId ? structuredQueueMutationRevisionBySession[sessionId] || 0 : 0;
+      }
+
+      export function bumpStructuredQueueMutationRevision(sessionId) {
+        if (!sessionId) return 0;
+        var next = getStructuredQueueMutationRevision(sessionId) + 1;
+        structuredQueueMutationRevisionBySession[sessionId] = next;
+        return next;
+      }
+
+      export function removeOneQueuedMessage(sessionId, text, preferredIndex?) {
+        var latestSession = state.sessions.find(function(item) { return item.id === sessionId; });
+        var latestQueue = latestSession && Array.isArray(latestSession.queuedMessages)
+          ? latestSession.queuedMessages.slice()
+          : [];
+        var index = typeof preferredIndex === "number"
+          && latestQueue[preferredIndex] === text
+          ? preferredIndex
+          : latestQueue.lastIndexOf(text);
+        if (index >= 0) latestQueue.splice(index, 1);
+        return latestQueue;
+      }
+
+      export function stripStaleStructuredQueueSnapshot(snapshot, sessionId, requestRevision, requestQueueEpoch) {
+        if (!snapshot || !snapshot.queuedMessages) return snapshot;
+        if (getStructuredQueueMutationRevision(sessionId) !== requestRevision
+            || state.queueEpoch > requestQueueEpoch) {
+          delete snapshot.queuedMessages;
+        }
+        return snapshot;
+      }
+
       export function continueStructuredSession(session, text) {
         var normalizedText = typeof text === "string" ? text.trim() : "";
         if (normalizedText && getLastStructuredSubmittedInput(session) === normalizedText) {
@@ -257,6 +310,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var prevQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
         var nextQueue = prevQueue.slice();
         nextQueue.push(text);
+        var queueRevision = bumpStructuredQueueMutationRevision(session.id);
+        var queueEpoch = state.queueEpoch;
         // 乐观更新目标会话的排队，让侧栏 / 已打开的该会话视图立即有反馈。
         updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
         if (session.id === state.selectedId) updateQueueBar();
@@ -282,13 +337,18 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           })
           .then(function(snapshot) {
             if (snapshot && snapshot.id) {
+              stripStaleStructuredQueueSnapshot(snapshot, session.id, queueRevision, queueEpoch);
               updateSessionSnapshot(snapshot);
               if (snapshot.id === state.selectedId) updateQueueBar();
             }
           })
           .catch(function(err) {
-            // 失败回滚乐观排队，避免 UI 上残留一条永远不会发出的排队。
-            updateSessionSnapshot({ id: session.id, queuedMessages: prevQueue });
+            // Only remove this optimistic item from the latest queue. Replacing
+            // the whole queue with prevQueue would erase newer concurrent
+            // submissions.
+            var rollbackQueue = removeOneQueuedMessage(session.id, text, prevQueue.length);
+            bumpStructuredQueueMutationRevision(session.id);
+            updateSessionSnapshot({ id: session.id, queuedMessages: rollbackQueue });
             if (session.id === state.selectedId) updateQueueBar();
             showToast((err && err.message) || "排队失败，请重试。", "error");
           });
@@ -601,15 +661,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         // Support welcome input as well as the main input box
         var welcomeInput = document.getElementById("welcome-input") as HTMLInputElement | null;
         var inputBox = document.getElementById("input-box") as HTMLInputElement | null;
-        var value = (welcomeInput && welcomeInput.value.trim())
-          ? welcomeInput.value.trim()
-          : (inputBox ? inputBox.value.trim() : "");
+        var welcomeValue = welcomeInput ? welcomeInput.value.trim() : "";
+        var inputValue = inputBox ? inputBox.value : "";
+        var value = welcomeValue || inputValue.trim();
 
         // If we have a selected ID, try to send input to it
         if (state.selectedId) {
-          if (value) {
-            sendInputFromBox(opts);
-          }
+          if (canSendComposer(inputValue, state.selectedId)) sendInputFromBox(opts);
           return;
         }
 
@@ -702,12 +760,55 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           if (!state.terminal) initTerminal();
         }
         applyCurrentView();
+        restoreComposerStateForSession(sessionId);
         focusInputBox(true);
         // Container just flipped from hidden -> visible (or geometry changed
         // because chat/terminal panels swapped). Refit now so the terminal
         // picks up the real cols/rows instead of keeping the stale ones.
         if (!structured) ensureTerminalFit("view-switch", { forceReplay: true });
         notifyLegacyUiChange("session:view");
+      }
+
+      export function getComposerSubmissionFingerprint(value, attachments) {
+        var attachmentPart = (attachments || []).map(function(item) {
+          return [item.name || "", item.size || 0, item.file && item.file.lastModified || 0].join(":");
+        }).join("|");
+        return String(value || "").trim() + "\u0000" + attachmentPart;
+      }
+
+      export function restoreFailedComposerSubmission(sessionId, value, attachments) {
+        var currentDraft = getDraftValueForSession(sessionId);
+        var restoredDraft = value;
+        if (currentDraft && currentDraft !== value) {
+          restoredDraft = value ? value + "\n" + currentDraft : currentDraft;
+        }
+        setDraftValueForSession(sessionId, restoredDraft, true);
+        restorePendingAttachments(sessionId, attachments);
+        if (sessionId === state.selectedId) {
+          var currentInput = document.getElementById("input-box") as HTMLTextAreaElement | null;
+          if (currentInput) {
+            currentInput.value = restoredDraft;
+            autoResizeInput(currentInput);
+            try {
+              currentInput.setSelectionRange(restoredDraft.length, restoredDraft.length);
+            } catch (e) { /* ignore */ }
+          }
+        }
+        updateInteractiveControls();
+      }
+
+      export function refocusComposerAfterTouchSubmit(inputBox, sessionId) {
+        if (!inputBox || !isTouchDevice()) return;
+        var refocus = function() {
+          if (state.selectedId !== sessionId || !inputBox.isConnected || inputBox.disabled) return;
+          try {
+            inputBox.focus({ preventScroll: true });
+          } catch (e) {
+            inputBox.focus();
+          }
+        };
+        refocus();
+        requestAnimationFrame(refocus);
       }
 
       export function sendInputFromBox(opts) {
@@ -719,85 +820,110 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           return Promise.resolve();
         }
 
-        var inputBox = document.getElementById("input-box") as HTMLInputElement | null;
-        var value = inputBox ? inputBox.value : "";
+        var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
         var selectedSession = getSelectedSession();
-        var hasAttachments = state.pendingAttachments.length > 0;
+        var sessionId = selectedSession && selectedSession.id || state.selectedId;
+        var selectedView = state.currentView;
+        var value = inputBox ? inputBox.value : getDraftValueForSession(sessionId);
+        var pendingAttachments = getPendingAttachments(sessionId);
+        if (!sessionId || !canSendComposer(value, sessionId)) return Promise.resolve();
 
-        if (value || hasAttachments) {
+        var fingerprint = getComposerSubmissionFingerprint(value, pendingAttachments);
+        var activeSubmissions = state.composerSubmissionsBySession[sessionId];
+        if (!activeSubmissions) {
+          activeSubmissions = {};
+          state.composerSubmissionsBySession[sessionId] = activeSubmissions;
+        }
+        var existingSubmission = activeSubmissions[fingerprint];
+        if (existingSubmission) {
+          return existingSubmission.promise || Promise.resolve();
+        }
 
-          // 「附件上传失败」的提示只能挂在 uploadAttachments 这一步上。
-          // 旧实现把整条发送链（含纯文字发送）都套进同一个外层 catch，结果
-          // 发送阶段的任何错误都被误报成「附件上传失败: …」，没附件也中招，
-          // 而 PTY 路径还会先 toast 一次真实错误 —— 叠出两条 toast。
-          var attachUpload = hasAttachments && state.selectedId
-            ? uploadAttachments(state.selectedId).catch(function(err) {
-                showToast("附件上传失败: " + ((err && err.message) || err), "error");
-                var marked: any = err instanceof Error ? err : new Error(String(err));
-                marked.__wandToasted = true;
-                throw marked;
-              })
-            : Promise.resolve([]);
+        // Capture and clear synchronously before the first await. Click and
+        // Enter therefore observe the same empty composer on a duplicate
+        // gesture, while a genuinely new draft can still be queued.
+        var capturedAttachments = takePendingAttachments(sessionId);
+        setDraftValueForSession(sessionId, "", true);
+        if (inputBox && state.selectedId === sessionId) {
+          inputBox.value = "";
+          autoResizeInput(inputBox);
+        }
+        updateInteractiveControls();
+        refocusComposerAfterTouchSubmit(inputBox, sessionId);
 
-          return attachUpload.then(function(uploadedFiles) {
+        var submission = { fingerprint: fingerprint, promise: null };
+        activeSubmissions[fingerprint] = submission;
+
+        var submissionPromise = Promise.resolve()
+          .then(function() {
+            if (!capturedAttachments.length) return [];
+            return uploadAttachments(sessionId, capturedAttachments).catch(function(err) {
+              showToast("附件上传失败: " + ((err && err.message) || err), "error");
+              var marked: any = err instanceof Error ? err : new Error(String(err));
+              marked.__wandToasted = true;
+              throw marked;
+            });
+          })
+          .then(function(uploadedFiles) {
             var prefix = buildAttachmentPrefix(uploadedFiles);
-            var finalValue = prefix + (value || (uploadedFiles.length ? "请查看附件。" : ""));
-            if (uploadedFiles.length) clearAttachments();
+            var hasText = !!value.trim();
+            var finalValue = prefix + (hasText ? value : (uploadedFiles.length ? "请查看附件。" : ""));
 
             // Clear todo progress bar at the start of a new user turn
             var todoEl = document.getElementById("todo-progress");
-            if (todoEl) todoEl.classList.add("hidden");
+            if (todoEl && sessionId === state.selectedId) todoEl.classList.add("hidden");
 
             if (isStructuredSession(selectedSession)) {
-              return postStructuredInput(finalValue, inputBox, selectedSession, { interrupt: interruptFlag });
+              return postStructuredInput(finalValue, inputBox, selectedSession, {
+                interrupt: interruptFlag,
+                composerCaptured: true,
+              });
             }
 
             var submitChunks = getTerminalSubmitChunks(selectedSession, finalValue);
-            var isOffline = !state.wsConnected;
-
-            if (isOffline) {
-              queueOfflineTerminalChunks(submitChunks);
-              if (inputBox) {
-                inputBox.value = "";
-                autoResizeInput(inputBox);
-              }
-              setDraftValue("");
-              return Promise.resolve();
+            if (state.selectedId !== sessionId) {
+              throw new Error("发送前会话已切换，原草稿已恢复。");
+            }
+            if (!state.wsConnected) {
+              throw new Error("网络已断开，消息未发送，原草稿已恢复。");
             }
 
             return ensureSessionReadyForInput(selectedSession).then(function(readySession) {
               if (!readySession) {
-                // ensureSessionReadyForInput / resumeSession 已经在失败路径里
-                // 自行 toast，这里不再重复提示，避免叠两条消息。
-                return null;
+                var unavailable: any = new Error("会话尚未准备好，消息未发送。");
+                unavailable.__wandToasted = true;
+                throw unavailable;
               }
-              var submitView = state.currentView;
-              if (readySession && readySession.provider === "codex" && state.selectedId !== readySession.id) {
-                throw new Error("Codex session changed before input send.");
+              if (state.selectedId !== sessionId) {
+                throw new Error("发送前会话已切换，原草稿已恢复。");
               }
               prepareChatBottomFollow();
-              return sendTerminalChunks(submitChunks, "enter_text", 30, submitView).then(function() {
-                if (inputBox && inputBox.value === value) {
-                  inputBox.value = "";
-                  autoResizeInput(inputBox);
-                }
-                setDraftValue("");
-              });
-            }).catch(function(err) {
-              showToast(getInputErrorMessage(err), "error");
-              if (err) err.__wandToasted = true;
-              throw err;
+              return sendTerminalChunks(submitChunks, "enter_text", 30, selectedView, readySession.id || sessionId);
             });
-          }).catch(function(err) {
-            // 兜底：只提示「还没人 toast 过」的错误（如 then 链里的同步异常），
-            // 用真实错误文案，绝不再贴「附件上传失败」标签。
-            if (!(err && err.__wandToasted)) {
+          })
+          .then(function(result) {
+            discardPendingAttachments(capturedAttachments);
+            return result;
+          })
+          .catch(function(err) {
+            restoreFailedComposerSubmission(sessionId, value, capturedAttachments);
+            if (!(err && (err.__wandToasted || err.__wandHandled))) {
               showToast(getInputErrorMessage(err), "error");
             }
-            throw err;
+          })
+          .finally(function() {
+            if (activeSubmissions[fingerprint] === submission) {
+              delete activeSubmissions[fingerprint];
+            }
+            if (Object.keys(activeSubmissions).length === 0
+                && state.composerSubmissionsBySession[sessionId] === activeSubmissions) {
+              delete state.composerSubmissionsBySession[sessionId];
+            }
+            updateInteractiveControls();
           });
-        }
-        return Promise.resolve();
+
+        submission.promise = submissionPromise;
+        return submissionPromise;
       }
 
       // 防止同一会话「快速双击 / 重复触发」。原来这是个布尔 flag，绑在 fetch 的
@@ -816,34 +942,44 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         // queue —— 后端 sendMessage(...) 会把它追加到 queuedMessages，等当前 turn
         // 结束自动 flush；想插队就点输入框上方那条气泡。
         var requestedInterrupt = !!opts.interrupt;
-        if (!state.selectedId || !input) return Promise.resolve();
+        if (!input) return Promise.resolve();
         if (!session) {
           showToast("会话不存在，请重新选择或新建会话。", "error");
-          return Promise.resolve();
+          var missingSession: any = new Error("会话不存在，请重新选择或新建会话。");
+          missingSession.__wandToasted = true;
+          return Promise.reject(missingSession);
         }
         var sessionInFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
         if (sessionInFlight && !requestedInterrupt && getLastStructuredSubmittedInput(session) === input.trim()) {
-          if (inputBox) {
-            inputBox.value = "";
-            autoResizeInput(inputBox);
+          if (!opts.composerCaptured) {
+            if (inputBox && session.id === state.selectedId) {
+              inputBox.value = "";
+              autoResizeInput(inputBox);
+            }
+            setDraftValueForSession(session.id, "", true);
           }
-          setDraftValue("");
           showToast("与上一条消息相同，已忽略，不会加入排队。", "warning");
-          updateInputHint("Enter 发送 · Shift+Enter 换行");
+          if (session.id === state.selectedId) updateInputHint("Enter 发送 · Shift+Enter 换行");
           return Promise.resolve();
         }
         // 短窗口内的连击当作重复点击丢掉；正常间隔的两次提交（哪怕第一次还在流式）
         // 都放行，让 queue / interrupt 真正生效。
         var nowTs = Date.now();
-        var lastTs = _structuredLastSubmitAt[session.id] || 0;
-        if (nowTs - lastTs < DUPLICATE_SUBMIT_WINDOW_MS) {
+        var rapidDuplicateGuardEnabled = !opts.composerCaptured;
+        var lastSubmit = _structuredLastSubmitAt[session.id];
+        var lastTs = typeof lastSubmit === "number" ? lastSubmit : lastSubmit && lastSubmit.at || 0;
+        var lastInput = typeof lastSubmit === "number" ? input : lastSubmit && lastSubmit.input;
+        if (rapidDuplicateGuardEnabled && lastInput === input && nowTs - lastTs < DUPLICATE_SUBMIT_WINDOW_MS) {
           console.log("[wand] postStructuredInput: duplicate submit (within " + DUPLICATE_SUBMIT_WINDOW_MS + "ms) ignored for session", session.id);
           return Promise.resolve();
         }
-        _structuredLastSubmitAt[session.id] = nowTs;
+        var submitStamp = rapidDuplicateGuardEnabled ? { at: nowTs, input: input } : null;
+        if (submitStamp) _structuredLastSubmitAt[session.id] = submitStamp;
 
         var isInterrupting = sessionInFlight && requestedInterrupt;
         var isQueueing = sessionInFlight && !requestedInterrupt;
+        var requestQueueRevision = getStructuredQueueMutationRevision(session.id);
+        var optimisticQueueIndex = -1;
 
         var userMsgs = stripRenderOnlyStructuredMessages(Array.isArray(session.messages) ? session.messages.slice() : []);
         var optimisticPatch;
@@ -853,17 +989,21 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           // queuedMessages 渲成 __queued 占位（带"排队中"徽章），再 push 一份
           // 真 user turn 会被去重逻辑遮蔽掉，徽章就丢了。inFlight / status 维持。
           var nextQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+          optimisticQueueIndex = nextQueue.length;
           nextQueue.push(input);
+          requestQueueRevision = bumpStructuredQueueMutationRevision(session.id);
           optimisticPatch = {
             id: session.id,
             queuedMessages: nextQueue,
           };
           updateSessionSnapshot(optimisticPatch);
-          var queueRefreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
-          state.currentMessages = buildMessagesForRender(queueRefreshed, getPreferredMessages(queueRefreshed, queueRefreshed.output, false));
-          updateInputHint("已加入排队…");
-          renderChat(true);
-          updateStructuredQueueCounter();
+          if (session.id === state.selectedId) {
+            var queueRefreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
+            state.currentMessages = buildMessagesForRender(queueRefreshed, getPreferredMessages(queueRefreshed, queueRefreshed.output, false));
+            updateInputHint("已加入排队…");
+            renderChat(true);
+            updateStructuredQueueCounter();
+          }
           // 乐观 toast：原本只在 POST 完成后才提示，Claude 流式拖太久时用户根本
           // 看不到反馈，会误判"点了没反应"。点击瞬间就给一条短提示。
           showToast(nextQueue.length > 1 ? ("已加入排队（共 " + nextQueue.length + " 条等待）") : "已加入排队，等当前回复完成会自动发送。", "info");
@@ -878,14 +1018,16 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             messages: userMsgs,
             structuredState: optimisticStructuredState,
           });
-          state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
-            status: "running",
-            messages: userMsgs,
-            structuredState: optimisticStructuredState,
-          }), userMsgs);
-          updateInputHint(isInterrupting ? "已中断，正在处理新消息…" : "思考中…");
-          prepareChatBottomFollow();
-          renderChat(true);
+          if (session.id === state.selectedId) {
+            state.currentMessages = buildMessagesForRender(Object.assign({}, session, {
+              status: "running",
+              messages: userMsgs,
+              structuredState: optimisticStructuredState,
+            }), userMsgs);
+            updateInputHint(isInterrupting ? "已中断，正在处理新消息…" : "思考中…");
+            prepareChatBottomFollow();
+            renderChat(true);
+          }
           // 中断模式：乐观给一条提示，让用户立刻知道"中断成功了"，否则跟 queue 一样会
           // 觉得"点了没反应"。原 toast 在 then() 里，等 SIGTERM/HTTP roundtrip 完才出。
           if (isInterrupting) {
@@ -893,11 +1035,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           }
         }
 
-        if (inputBox) {
-          inputBox.value = "";
-          autoResizeInput(inputBox);
+        if (!opts.composerCaptured) {
+          if (inputBox && session.id === state.selectedId) {
+            inputBox.value = "";
+            autoResizeInput(inputBox);
+          }
+          setDraftValueForSession(session.id, "", true);
         }
-        setDraftValue("");
 
         // Capture queue epoch before the POST so we can detect whether
         // a newer WS update has already refreshed the queue by the time
@@ -941,9 +1085,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             throw new Error(snapshot.error);
           }
           if (snapshot && snapshot.id) {
-            if (state.queueEpoch > epochBeforePost && snapshot.queuedMessages) {
-              delete snapshot.queuedMessages;
-            }
+            stripStaleStructuredQueueSnapshot(
+              snapshot,
+              session.id,
+              requestQueueRevision,
+              epochBeforePost,
+            );
             updateSessionSnapshot(snapshot);
             // 仅当 snapshot 仍属当前选中会话时才覆盖视图状态，否则只更新底层数据。
             if (snapshot.id === state.selectedId) {
@@ -963,17 +1110,22 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           // 这里把 user turn rollback 掉，第一次的 user 消息会从 UI 上消失。
           if (error && error.errorCode === "duplicate_idempotency_key") {
             showToast(error.message || "检测到重复发送，已拦截。", "warning");
-            updateInputHint("Enter 发送 · Shift+Enter 换行");
+            if (session.id === state.selectedId) updateInputHint("Enter 发送 · Shift+Enter 换行");
             return;
           }
 
+          if (submitStamp && _structuredLastSubmitAt[session.id] === submitStamp) {
+            delete _structuredLastSubmitAt[session.id];
+          }
+
           if (isQueueing) {
-            // Queue 模式回滚：把刚 push 的那条 queuedMessages 撤掉。inFlight / messages
-            // 都没动过，不必复位，否则会把后端真实的 inFlight=true 误改成 false。
-            var prevQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
+            // Remove only this optimistic item from the latest queue. A full
+            // prevQueue rollback can erase messages added by newer requests.
+            var rollbackQueue = removeOneQueuedMessage(session.id, input, optimisticQueueIndex);
+            bumpStructuredQueueMutationRevision(session.id);
             updateSessionSnapshot({
               id: session.id,
-              queuedMessages: prevQueue,
+              queuedMessages: rollbackQueue,
             });
             if (session.id === state.selectedId) {
               var rolledQueueSession = state.sessions.find(function(s) { return s.id === session.id; }) || session;
@@ -1006,8 +1158,11 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
             /aborted|aborterror|networkerror|failed to fetch/i.test(message);
           if (!isTransientAbort) {
             showToast((error && error.message) || "无法发送结构化消息。", "error");
+            error.__wandToasted = true;
           }
-          updateInputHint("Enter 发送 · Shift+Enter 换行");
+          error.__wandHandled = true;
+          if (session.id === state.selectedId) updateInputHint("Enter 发送 · Shift+Enter 换行");
+          throw error;
         });
       }
 
@@ -1137,7 +1292,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       // ── 单条删除 / 全部清空 / 队首插队 ──
-      export function rollbackQueueOptimistic(session, prevQueue) {
+      export function rollbackQueueOptimistic(session, prevQueue, expectedRevision?) {
+        if (typeof expectedRevision === "number"
+            && getStructuredQueueMutationRevision(session.id) !== expectedRevision) {
+          updateQueueBar();
+          return;
+        }
+        bumpStructuredQueueMutationRevision(session.id);
         updateSessionSnapshot({ id: session.id, queuedMessages: prevQueue });
         var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
@@ -1152,6 +1313,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         if (index < 0 || index >= queue.length) return;
         var prev = queue.slice();
         var next = queue.slice(0, index).concat(queue.slice(index + 1));
+        var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
         updateSessionSnapshot({ id: session.id, queuedMessages: next });
         var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
@@ -1169,7 +1331,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           }
         })
         .catch(function(err) {
-          rollbackQueueOptimistic(session, prev);
+          rollbackQueueOptimistic(session, prev, mutationRevision);
           showToast((err && err.message) || "删除排队消息失败。", "error");
         });
       }
@@ -1181,6 +1343,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         if (prev.length === 0) return;
         // 全部清空后收起列表，UX 上更干净（用户不需要盯着一条不剩的展开面板）。
         state.queueBarExpanded = false;
+        var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
         updateSessionSnapshot({ id: session.id, queuedMessages: [] });
         var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
         state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
@@ -1199,7 +1362,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           showToast("已清空 " + prev.length + " 条排队消息。", "info");
         })
         .catch(function(err) {
-          rollbackQueueOptimistic(session, prev);
+          rollbackQueueOptimistic(session, prev, mutationRevision);
           showToast((err && err.message) || "清空排队消息失败。", "error");
         });
       }
@@ -1225,6 +1388,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         if (rest.length === 0) {
           state.queueBarExpanded = false;
         }
+        var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
+        var mutationQueueEpoch = state.queueEpoch;
         updateSessionSnapshot({ id: session.id, queuedMessages: rest });
 
         var idempotencyKey = (typeof crypto !== "undefined" && crypto.randomUUID)
@@ -1250,6 +1415,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         })
         .then(function(snapshot) {
           if (snapshot && snapshot.id) {
+            stripStaleStructuredQueueSnapshot(
+              snapshot,
+              session.id,
+              mutationRevision,
+              mutationQueueEpoch,
+            );
             updateSessionSnapshot(snapshot);
             if (snapshot.id === state.selectedId) {
               var refreshed = state.sessions.find(function(s) { return s.id === snapshot.id; }) || snapshot;
@@ -1262,7 +1433,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         })
         .catch(function(err) {
           state.queueBarPromoting = false;
-          rollbackQueueOptimistic(session, prev);
+          rollbackQueueOptimistic(session, prev, mutationRevision);
           showToast((err && err.message) || "立即发送失败。", "error");
         });
       }
@@ -1407,6 +1578,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session) { updateQueueBar(); return; }
+        var mutationRevision = bumpStructuredQueueMutationRevision(session.id);
         updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
         updateQueueBar();
 
@@ -1424,7 +1596,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           }
         })
         .catch(function(err) {
-          rollbackQueueOptimistic(session, queueSnapshot);
+          rollbackQueueOptimistic(session, queueSnapshot, mutationRevision);
           showToast((err && err.message) || "调整排队顺序失败。", "error");
         });
       }
@@ -1598,7 +1770,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return [text, String.fromCharCode(13)];
       }
 
-      export function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride) {
+      export function sendTerminalChunks(chunks, shortcutKey, delayMs, viewOverride, sessionId?) {
         var sequence = Array.isArray(chunks) ? chunks.filter(function(chunk) { return !!chunk; }) : [];
         if (sequence.length === 0) {
           return Promise.resolve();
@@ -1610,10 +1782,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
               return new Promise(function(resolve) {
                 setTimeout(resolve, delay);
               }).then(function() {
-                return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined, viewOverride);
+                return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined, viewOverride, sessionId);
               });
             }
-            return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined, viewOverride);
+            return queueDirectInput(chunk, index === sequence.length - 1 ? shortcutKey : undefined, viewOverride, sessionId);
           });
         }, Promise.resolve());
       }
@@ -1654,12 +1826,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         }
       }
 
-      export function queueDirectInput(input, shortcutKey?, viewOverride?) {
-        if (!input || !state.selectedId) return Promise.resolve();
+      export function queueDirectInput(input, shortcutKey?, viewOverride?, sessionId?) {
+        var targetSessionId = sessionId || state.selectedId;
+        if (!input || !targetSessionId) return Promise.resolve();
         _detectAndMarkClear(input);
         state.messageQueue.push(input);
         state.inputQueue = state.inputQueue.then(function() {
-          return postInput(input, shortcutKey, viewOverride).finally(function() {
+          return postInput(input, shortcutKey, viewOverride, targetSessionId, !!sessionId).finally(function() {
             var idx = state.messageQueue.indexOf(input);
             if (idx > -1) state.messageQueue.splice(idx, 1);
           });
@@ -1667,8 +1840,9 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         return state.inputQueue;
       }
 
-      export function postInput(input, shortcutKey, viewOverride) {
-        if (!state.selectedId) return Promise.resolve();
+      export function postInput(input, shortcutKey, viewOverride, sessionId?, strictTarget?) {
+        var requestSessionId = sessionId || state.selectedId;
+        if (!requestSessionId) return Promise.resolve();
         // 锁定本次请求归属的 sessionId。fetch 发起后用户可能切到别的会话，
         // 后续 then 回调里直接用 state.selectedId 会误把 A 的响应应用到 B：
         //   - URL 上拼错会话（虽然 fetch 已经求值过 URL，但 markSessionStopped
@@ -1676,22 +1850,30 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         //   - response.snapshot 属于 A，被 setCurrentMessages 误覆盖到 B 视图
         // 用 requestSessionId 锁住请求方，渲染相关动作再单独判断 snapshot.id
         // === 当前 state.selectedId 才执行。
-        var requestSessionId = state.selectedId;
         var effectiveView = viewOverride || state.currentView;
+        var requestSession = state.sessions.find(function(session) { return session.id === requestSessionId; });
+        var requestSessionRunning = !!requestSession
+          && !isStructuredSession(requestSession)
+          && requestSession.status === "running";
 
         // Pre-check: don't send if session is not running
-        if (!isSelectedSessionRunning()) {
+        if (!requestSessionRunning) {
+          if (strictTarget) {
+            var unavailableTarget: any = new Error("目标会话已停止，消息未发送。");
+            unavailableTarget.errorCode = requestSession ? "SESSION_NOT_RUNNING" : "SESSION_NOT_FOUND";
+            throw unavailableTarget;
+          }
           // If WebSocket is disconnected, queue for flush on reconnect
           if (!state.wsConnected) {
             enqueuePendingInput(input);
             console.log("[wand] postInput: session not running, queued for reconnect", {
-              sessionId: state.selectedId,
+              sessionId: requestSessionId,
               inputLength: input.length
             });
             return Promise.resolve();
           }
           console.warn("[wand] postInput: session not running, skipping send", {
-            sessionId: state.selectedId
+            sessionId: requestSessionId
           });
           showToast("会话未运行，正在等待自动恢复后重试。", "info");
           return Promise.resolve();
@@ -1699,9 +1881,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
         // If WebSocket is disconnected, queue the message (no HTTP fetch while offline)
         if (!state.wsConnected) {
+          if (strictTarget) {
+            throw new Error("网络已断开，消息未发送。");
+          }
           enqueuePendingInput(input);
           console.log("[wand] postInput: WebSocket disconnected, queued message", {
-            sessionId: state.selectedId,
+            sessionId: requestSessionId,
             inputLength: input.length
           });
           return Promise.resolve();
@@ -2015,7 +2200,15 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var sendBtn = document.getElementById("send-input-button") as HTMLButtonElement | null;
         var structuredInFlight = structured && isRunning;
         if (sendBtn) {
-          sendBtn.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
+          var sessionUnavailable = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
+          var composerValue = composer ? composer.value : "";
+          var currentAttachments = getPendingAttachments(state.selectedId);
+          var composerCanSend = canSendComposer(composerValue, state.selectedId);
+          var activeSubmissions = state.selectedId && state.composerSubmissionsBySession[state.selectedId];
+          var duplicateInFlight = !!(composerCanSend && activeSubmissions
+            && activeSubmissions[getComposerSubmissionFingerprint(composerValue, currentAttachments)]);
+          sendBtn.disabled = !composerCanSend || duplicateInFlight || sessionUnavailable;
+          sendBtn.setAttribute("aria-disabled", sendBtn.disabled ? "true" : "false");
           sendBtn.setAttribute("title", structured
             ? (structuredInFlight ? "排队发送（当前回复结束后处理）" : "发送")
             : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
@@ -2919,7 +3112,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var offsetBottom = window.innerHeight - vv.height - vv.offsetTop;
         if (offsetBottom <= 50) return false;
         var rect = inputBox.getBoundingClientRect();
-        return rect.bottom > vv.height - 12;
+        return rect.bottom > vv.offsetTop + vv.height - 12;
       }
 
       export function syncInputBoxScroll(inputBox) {

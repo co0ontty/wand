@@ -132,6 +132,14 @@ export var state: AppState = {
   queueBarDrag: null,
   queueBarPromoting: false,
   drafts: {},
+  // Attachments are composer state, so they must follow the same per-session
+  // isolation as drafts. File objects cannot be persisted across reloads, but
+  // they do survive in-memory session switches.
+  attachmentsBySession: {},
+  // Active composer submissions are keyed by session and fingerprint. A
+  // second gesture for the same captured payload reuses the first submission,
+  // while a newly typed payload can still enter the structured-session queue.
+  composerSubmissionsBySession: {},
   isSyncingInputBox: false,
   loginPending: false,
   loginChecked: false,
@@ -315,7 +323,6 @@ export var state: AppState = {
   selectedCodexHistoryIds: {},
   askUserSelections: {},  // { toolUseId: { 0: [optIdx...], submitted: false } }
   queueEpoch: 0,  // Monotonic counter for queue state freshness
-  pendingAttachments: [],  // [{ file, previewUrl, name, size }]
   // Load last used working directory from localStorage
   workingDir: (function() {
     try {
@@ -326,3 +333,12 @@ export var state: AppState = {
     }
   })()
 };
+
+// Hydrate the initially selected session before the first render. Subsequent
+// sessions are loaded lazily by getDraftValueForSession().
+if (state.selectedId) {
+  try {
+    var initialDraft = localStorage.getItem("wand-draft-" + state.selectedId);
+    if (initialDraft !== null) state.drafts[state.selectedId] = initialDraft;
+  } catch (e) { /* localStorage unavailable */ }
+}

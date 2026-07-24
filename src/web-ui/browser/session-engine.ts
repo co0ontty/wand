@@ -1445,9 +1445,16 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
           .then(function(sessions) {
             var serverSessions = sessions || [];
             var sessionIds = new Set(serverSessions.map(function(s) { return s.id; }));
+            var previousSelectedId = state.selectedId;
 
             Object.keys(state.drafts).forEach(function(id) {
               if (!sessionIds.has(id)) delete state.drafts[id];
+            });
+            Object.keys(state.attachmentsBySession).forEach(function(id) {
+              if (!sessionIds.has(id)) {
+                discardPendingAttachments(state.attachmentsBySession[id]);
+                delete state.attachmentsBySession[id];
+              }
             });
 
             state.sessions = serverSessions.map(function(serverSession) {
@@ -1458,6 +1465,10 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             var preferredSessionId = getPreferredSessionId(state.sessions);
             if (preferredSessionId !== undefined) {
               state.selectedId = preferredSessionId;
+            }
+            if (state.selectedId !== previousSelectedId) {
+              if (state.selectedId) restoreComposerStateForSession(state.selectedId);
+              else renderAttachmentPreview();
             }
             restoreStructuredQueue();
             updateStructuredQueueCounter();
@@ -1751,6 +1762,13 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         var foundSession = state.sessions.find(function(item) { return item.id === id; });
         if (!foundSession) {
           return;
+        }
+        var previousSessionId = state.selectedId;
+        if (previousSessionId && previousSessionId !== id) {
+          var previousInput = document.getElementById("input-box") as HTMLTextAreaElement | null;
+          if (previousInput) {
+            setDraftValueForSession(previousSessionId, previousInput.value, true);
+          }
         }
         if (state.selectedId !== id) {
           teardownTerminal();
@@ -2428,15 +2446,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             event.preventDefault();
             var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
             if (inputBox) {
-              var start = inputBox.selectionStart || 0;
-              var current = inputBox.value;
-              var newValue = current.slice(0, start) + String.fromCharCode(10) + current.slice(start);
-              inputBox.value = newValue;
-              // Move cursor to after the inserted newline
-              inputBox.selectionStart = start + 1;
-              inputBox.selectionEnd = start + 1;
-              setDraftValue(newValue, true);
-              autoResizeInput(inputBox);
+              replaceComposerSelection(inputBox, String.fromCharCode(10));
             }
             return;
           }
@@ -2463,11 +2473,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
           event.preventDefault();
           var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           if (inputBox) {
-            var start = inputBox.selectionStart || 0;
-            var current = inputBox.value;
-            var newValue = current.slice(0, start) + String.fromCharCode(9) + current.slice(start);
-            inputBox.value = newValue;
-            setDraftValue(newValue, true);
+            replaceComposerSelection(inputBox, String.fromCharCode(9));
           }
           return;
         }
@@ -2595,6 +2601,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 
       export function addPendingAttachment(file) {
         if (!file) return;
+        if (!state.selectedId) return;
         if (file.size > ATTACH_MAX_SIZE) {
           showToast("文件过大（上限 10 MB）: " + file.name, "error");
           return;
@@ -2603,33 +2610,72 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         if (isImageType(file.type)) {
           entry.previewUrl = URL.createObjectURL(file);
         }
-        state.pendingAttachments.push(entry);
+        getPendingAttachments(state.selectedId, true).push(entry);
         renderAttachmentPreview();
       }
 
       export function removePendingAttachment(index) {
-        var removed = state.pendingAttachments.splice(index, 1);
+        var items = getPendingAttachments(state.selectedId);
+        var removed = items.splice(index, 1);
         if (removed.length && removed[0].previewUrl) {
           URL.revokeObjectURL(removed[0].previewUrl);
         }
         renderAttachmentPreview();
       }
 
-      export function clearAttachments() {
-        state.pendingAttachments.forEach(function(a) {
+      export function getPendingAttachments(sessionId?, create?) {
+        var id = sessionId === undefined ? state.selectedId : sessionId;
+        if (!id) return [];
+        var items = state.attachmentsBySession[id];
+        if (!items && create) {
+          items = [];
+          state.attachmentsBySession[id] = items;
+        }
+        return items || [];
+      }
+
+      export function takePendingAttachments(sessionId) {
+        if (!sessionId) return [];
+        var items = getPendingAttachments(sessionId);
+        state.attachmentsBySession[sessionId] = [];
+        if (sessionId === state.selectedId) renderAttachmentPreview();
+        return items.slice();
+      }
+
+      export function restorePendingAttachments(sessionId, attachments) {
+        if (!sessionId || !attachments || !attachments.length) return;
+        var current = getPendingAttachments(sessionId);
+        var restored = attachments.slice();
+        current.forEach(function(item) {
+          if (restored.indexOf(item) < 0) restored.push(item);
+        });
+        state.attachmentsBySession[sessionId] = restored;
+        if (sessionId === state.selectedId) renderAttachmentPreview();
+      }
+
+      export function discardPendingAttachments(attachments) {
+        (attachments || []).forEach(function(a) {
           if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
         });
-        state.pendingAttachments = [];
-        renderAttachmentPreview();
+      }
+
+      export function clearAttachments(sessionId?) {
+        var id = sessionId === undefined ? state.selectedId : sessionId;
+        if (!id) return;
+        var items = getPendingAttachments(id);
+        discardPendingAttachments(items);
+        state.attachmentsBySession[id] = [];
+        if (id === state.selectedId) renderAttachmentPreview();
       }
 
       export function renderAttachmentPreview() {
         var bar = document.getElementById("attachment-preview");
         if (!bar) return;
-        var items = state.pendingAttachments;
+        var items = getPendingAttachments(state.selectedId);
         if (items.length === 0) {
           bar.classList.add("hidden");
           bar.innerHTML = "";
+          updateInteractiveControls();
           return;
         }
         bar.classList.remove("hidden");
@@ -2654,12 +2700,14 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             removePendingAttachment(parseInt(btn.getAttribute("data-index"), 10));
           });
         });
+        updateInteractiveControls();
       }
 
-      export function uploadAttachments(sessionId) {
-        if (!state.pendingAttachments.length) return Promise.resolve([]);
+      export function uploadAttachments(sessionId, attachments?) {
+        var items = attachments || getPendingAttachments(sessionId);
+        if (!items.length) return Promise.resolve([]);
         var formData = new FormData();
-        state.pendingAttachments.forEach(function(a) {
+        items.forEach(function(a) {
           formData.append("files", a.file, a.name);
         });
         return fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/upload", {
@@ -2713,12 +2761,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         }
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
         if (inputBox) {
-          var start = inputBox.selectionStart || 0;
-          var end = inputBox.selectionEnd || 0;
-          var current = inputBox.value;
-          var newValue = current.slice(0, start) + pasted + current.slice(end);
-          inputBox.value = newValue;
-          setDraftValue(newValue);
+          replaceComposerSelection(inputBox, pasted);
         }
       }
 
@@ -2727,31 +2770,78 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         setDraftValue(getDraftValue() + text);
       }
 
-      export function getDraftValue() {
-        if (state.selectedId) {
-          if (state.drafts[state.selectedId] !== undefined) {
-            return state.drafts[state.selectedId];
-          }
-          // Try to load from localStorage
-          try {
-            var saved = localStorage.getItem("wand-draft-" + state.selectedId);
-            if (saved) return saved;
-          } catch (e) { /* ignore */ }
+      export function getDraftValueForSession(sessionId) {
+        if (!sessionId) return "";
+        if (state.drafts[sessionId] !== undefined) {
+          return state.drafts[sessionId];
         }
-        return "";
+        try {
+          var saved = localStorage.getItem("wand-draft-" + sessionId);
+          state.drafts[sessionId] = saved === null ? "" : saved;
+        } catch (e) {
+          state.drafts[sessionId] = "";
+        }
+        return state.drafts[sessionId];
+      }
+
+      export function getDraftValue() {
+        return getDraftValueForSession(state.selectedId);
+      }
+
+      export function setDraftValueForSession(sessionId, value, skipDom?) {
+        if (!sessionId) return;
+        state.drafts[sessionId] = value;
+        try {
+          localStorage.setItem("wand-draft-" + sessionId, value);
+        } catch (e) { /* ignore */ }
+        if (!skipDom && sessionId === state.selectedId) {
+          var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
+          if (inputBox) {
+            inputBox.value = value;
+            autoResizeInput(inputBox);
+          }
+        }
       }
 
       export function setDraftValue(value, skipDom?) {
-        if (!state.selectedId) return;
-        state.drafts[state.selectedId] = value;
-        // Persist to localStorage
-        try {
-          localStorage.setItem("wand-draft-" + state.selectedId, value);
-        } catch (e) { /* ignore */ }
-        if (!skipDom) {
-          var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
-          if (inputBox) inputBox.value = value;
+        setDraftValueForSession(state.selectedId, value, skipDom);
+      }
+
+      export function replaceComposerSelection(inputBox, replacement) {
+        if (!inputBox) return "";
+        var start = inputBox.selectionStart === null ? inputBox.value.length : inputBox.selectionStart;
+        var end = inputBox.selectionEnd === null ? start : inputBox.selectionEnd;
+        if (typeof inputBox.setRangeText === "function") {
+          inputBox.setRangeText(replacement, start, end, "end");
+        } else {
+          var current = inputBox.value;
+          inputBox.value = current.slice(0, start) + replacement + current.slice(end);
+          var caret = start + replacement.length;
+          inputBox.setSelectionRange(caret, caret);
         }
+        setDraftValue(inputBox.value, true);
+        autoResizeInput(inputBox);
+        syncComposerHasText(inputBox);
+        return inputBox.value;
+      }
+
+      export function restoreComposerStateForSession(sessionId) {
+        if (!sessionId || sessionId !== state.selectedId) return;
+        var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
+        if (inputBox) {
+          var draft = getDraftValueForSession(sessionId);
+          state.isSyncingInputBox = true;
+          inputBox.value = draft;
+          autoResizeInput(inputBox);
+          try { inputBox.setSelectionRange(draft.length, draft.length); } catch (e) { /* ignore */ }
+          state.isSyncingInputBox = false;
+        }
+        renderAttachmentPreview();
+      }
+
+      export function canSendComposer(value, sessionId?) {
+        var id = sessionId === undefined ? state.selectedId : sessionId;
+        return !!String(value || "").trim() || getPendingAttachments(id).length > 0;
       }
 
       export var promptOptimizeInFlight = false;
@@ -2762,6 +2852,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         var composer = document.querySelector(".input-composer");
         if (!inputBox) return;
         var raw = (inputBox.value || "").trim();
+        var requestSessionId = state.selectedId;
         if (!raw) {
           if (typeof showToast === "function") showToast("请先输入要优化的内容。", "info");
           inputBox.focus();
@@ -2779,7 +2870,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         inputBox.readOnly = true;
 
         var payload: any = { text: raw };
-        if (state && state.selectedId) payload.sessionId = state.selectedId;
+        if (requestSessionId) payload.sessionId = requestSessionId;
 
         fetch("/api/optimize-prompt", {
           method: "POST",
@@ -2794,7 +2885,14 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             if (!result.ok) throw new Error((result.data && result.data.error) || "提示词优化失败。");
             var optimized = (result.data && result.data.optimized) || "";
             if (!optimized) throw new Error("Claude 返回为空。");
-            animateOptimizedReplace(inputBox, optimized);
+            if (requestSessionId && state.selectedId !== requestSessionId) {
+              setDraftValueForSession(requestSessionId, optimized, true);
+              if (typeof showToast === "function") {
+                showToast("提示词已写回原会话草稿。", "info");
+              }
+              return;
+            }
+            animateOptimizedReplace(inputBox, optimized, requestSessionId);
           })
           .catch(function(error) {
             if (typeof showToast === "function") showToast((error && error.message) || "提示词优化失败。", "error");
@@ -2817,14 +2915,19 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
           });
       }
 
-      export function animateOptimizedReplace(inputBox, finalText) {
+      export function animateOptimizedReplace(inputBox, finalText, sessionId?) {
         if (!inputBox) return;
+        var targetSessionId = sessionId || state.selectedId;
+        if (targetSessionId && state.selectedId !== targetSessionId) {
+          setDraftValueForSession(targetSessionId, finalText, true);
+          return;
+        }
         // Typewriter-style fill so user sees the replacement happen
         var chars = Array.from(finalText);
         var total = chars.length;
         if (total === 0) {
           inputBox.value = "";
-          setDraftValue("", true);
+          setDraftValueForSession(targetSessionId, "", true);
           autoResizeInput(inputBox);
           return;
         }
@@ -2836,13 +2939,21 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         inputBox.value = "";
         autoResizeInput(inputBox);
         function tick() {
+          if (targetSessionId && state.selectedId !== targetSessionId) {
+            setDraftValueForSession(targetSessionId, finalText, true);
+            return;
+          }
+          if (document.getElementById("input-box") !== inputBox) {
+            setDraftValueForSession(targetSessionId, finalText, true);
+            return;
+          }
           i = Math.min(total, i + charsPerStep);
           inputBox.value = chars.slice(0, i).join("");
           autoResizeInput(inputBox);
           if (i < total) {
             setTimeout(tick, stepDelay);
           } else {
-            setDraftValue(finalText, true);
+            setDraftValueForSession(targetSessionId, finalText, true);
             try { inputBox.setSelectionRange(finalText.length, finalText.length); } catch (e) { /* ignore */ }
           }
         }
@@ -2859,6 +2970,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         var inputBox = (el || document.getElementById("input-box")) as HTMLTextAreaElement | null;
         var hasText = !!(inputBox && inputBox.value && inputBox.value.length > 0);
         composer.classList.toggle("has-text", hasText);
+        updateInteractiveControls();
       }
 
       // ─────────────────────────────────────────────────────────────────

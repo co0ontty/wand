@@ -370,7 +370,13 @@ import { renderChat } from "./websocket";
       }
 
       export function isJoystickAvailable() {
-        return !!getSelectedSession();
+        // This is a touch remote for compact/mobile layouts. Showing it on a
+        // desktop conversation competes with the composer and duplicates the
+        // keyboard controls already available there.
+        var selectedSession = getSelectedSession();
+        return !!selectedSession
+          && !isStructuredSession(selectedSession)
+          && (isMobileLayout() || document.documentElement.classList.contains("is-wand-embed-terminal"));
       }
 
       export function clampJoystickPos(pos) {
