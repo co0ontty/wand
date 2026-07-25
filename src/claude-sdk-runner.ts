@@ -30,6 +30,8 @@ export interface RunClaudePrintOptions {
   timeoutMs: number;
   /** Optional Claude model id / alias. Empty or "default" keeps Claude Code's own default. */
   model?: string;
+  /** Optional adaptive-thinking effort, aligned with the active Claude session. */
+  effort?: SdkOptions["effort"];
   /**
    * 用户偏好的回复语言（取自 config.language）。传进来时会以
    * `appendSystemPrompt` 形式灌给 Claude，保证 quick-commit / prompt-optimizer
@@ -162,6 +164,7 @@ export async function runClaudePrint(
     ...(sdkClaudeBinary ? { pathToClaudeCodeExecutable: sdkClaudeBinary } : {}),
     ...(languageDirective ? { appendSystemPrompt: languageDirective } : {}),
     ...(model && model !== "default" ? { model } : {}),
+    ...(options.effort ? { effort: options.effort } : {}),
   };
 
   // 单条 user message → AsyncGenerator，SDK 的 streaming input 协议要求。

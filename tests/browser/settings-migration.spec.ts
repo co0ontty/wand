@@ -35,6 +35,16 @@ test("Settings exposes all admin tabs, keyboard navigation, validation, and nest
   await expect(environmentDialog).toBeHidden();
   await expect(dialog).toBeVisible();
 
+  await dialog.getByRole("tab", { name: /AI 与模型/ }).click();
+  const commitSource = dialog.getByRole("group", { name: "生成方式" });
+  await expect(commitSource.getByRole("radio")).toHaveCount(2);
+  await expect(dialog.locator("#settings-commit-cli")).toHaveCount(0);
+  await expect(dialog.locator("#settings-commit-model")).toHaveCount(0);
+  await commitSource.getByRole("radio", { name: "CLI", exact: true }).check();
+  await expect(dialog.getByText("使用当前会话的 CLI 和模型；推理固定为最低档。")).toBeVisible();
+  await commitSource.getByRole("radio", { name: "直连 API", exact: true }).check();
+  await expect(dialog.getByText("自动读取各工具的 API 配置并逐个尝试；全部不可用时使用当前会话 CLI。")).toBeVisible();
+
   await dialog.getByRole("tab", { name: /安全/ }).click();
   await dialog.getByLabel("新密码").fill("123");
   await dialog.getByLabel("确认密码").fill("123");

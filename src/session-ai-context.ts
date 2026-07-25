@@ -1,5 +1,9 @@
 import { getDefaultModelForProvider } from "./config.js";
-import { systemAiProfiles } from "./system-ai.js";
+import {
+  discoverCliSystemAiConfigs,
+  mergeSystemAiConfigs,
+  systemAiProfiles,
+} from "./system-ai.js";
 import type { SessionProvider, SessionSnapshot, SystemAiConfig, WandConfig } from "./types.js";
 
 export interface SessionAiContext {
@@ -7,8 +11,6 @@ export interface SessionAiContext {
   model?: string;
   thinkingEffort: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
-  /** Direct API to try when Commit is configured to prefer its CLI. */
-  fallbackSystemAi?: SystemAiConfig;
   systemAi?: SystemAiConfig;
 }
 
@@ -114,27 +116,26 @@ export function resolveCommitAiContext(
     | "defaultQoderModel"
     | "defaultThinkingEffort"
     | "inheritEnv"
-    | "commitCli"
-    | "commitModel"
     | "commitAiSource"
     | "systemAi"
   >,
+  discoverApis: typeof discoverCliSystemAiConfigs = discoverCliSystemAiConfigs,
 ): SessionAiContext {
   const sessionContext = resolveSessionAiContext(snapshot, config);
-  const directApi = config.systemAi ?? {
-    enabled: true,
-    protocol: "openai" as const,
-    baseUrl: "",
-    apiKey: "",
-    model: "",
-  };
-  const readyDirectApi = usableSystemAi(directApi);
-  return {
+  const commitContext: SessionAiContext = {
     ...sessionContext,
-    provider: config.commitCli === "codex" || config.commitCli === "opencode" ? config.commitCli : "claude",
-    model: normalizeModel(config.commitModel),
-    ...(config.commitAiSource === "api"
-      ? { systemAi: { ...directApi, enabled: true } }
-      : readyDirectApi ? { fallbackSystemAi: readyDirectApi } : {}),
+    // Commit messages and tags are short classification/summarization tasks.
+    // Keep them on the minimum explicit provider effort instead of inheriting
+    // an expensive deep/max setting from the conversation.
+    thinkingEffort: "standard",
+  };
+  if (config.commitAiSource !== "api") return commitContext;
+  const directApi = mergeSystemAiConfigs(
+    discoverApis(commitContext.provider),
+    config.systemAi,
+  );
+  return {
+    ...commitContext,
+    ...(directApi ? { systemAi: directApi } : {}),
   };
 }

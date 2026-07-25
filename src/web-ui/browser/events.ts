@@ -348,7 +348,10 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
           closePlusPopover();
         });
         document.addEventListener("keydown", function(e) {
-          if (e.key === "Escape" && state.plusPopoverOpen) closePlusPopover();
+          if (e.key === "Escape" && state.plusPopoverOpen) {
+            e.preventDefault();
+            closePlusPopover(true);
+          }
           if (e.key === "Escape") closeClaudeSkillsPicker();
         });
 
@@ -403,7 +406,7 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
             onChatThinkingChange(value);
           }
           // 在加号 popover 内改完三件套之后顺手关掉，反馈立即由 toast + 用户消息头像左侧徽章接管。
-          if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
+          if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover(true);
         });
       }
 
@@ -648,12 +651,32 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
         if (attachBtn && plusPopover) {
           attachBtn.addEventListener("click", function(e) {
             e.stopPropagation();
-            togglePlusPopover();
+            togglePlusPopover(e.detail === 0);
+          });
+          plusPopover.addEventListener("keydown", function(e) {
+            if (e.target instanceof HTMLSelectElement) return;
+            if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+            var controls = Array.from(plusPopover!.querySelectorAll<HTMLElement>(
+              'button:not([disabled]):not(.hidden), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            )).filter(function(control) {
+              return control.getClientRects().length > 0;
+            });
+            if (!controls.length) return;
+            e.preventDefault();
+            var currentIndex = controls.indexOf(document.activeElement as HTMLElement);
+            var nextIndex = e.key === "Home"
+              ? 0
+              : e.key === "End"
+                ? controls.length - 1
+                : e.key === "ArrowUp"
+                  ? (currentIndex <= 0 ? controls.length - 1 : currentIndex - 1)
+                  : (currentIndex + 1) % controls.length;
+            controls[nextIndex]?.focus();
           });
         }
         if (plusAttachItem && fileInput) {
-          plusAttachItem.addEventListener("click", function() {
-            closePlusPopover();
+          plusAttachItem.addEventListener("click", function(e) {
+            closePlusPopover(e.detail === 0);
             fileInput!.click();
           });
         }
@@ -679,8 +702,13 @@ import { isBrowserReactShellMounted } from "./shell-runtime";
 
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
         if (promptOptimizeBtn) {
+          // Keep the textarea (and mobile keyboard) focused for pointer/touch
+          // activation. Keyboard users can still tab to and activate the
+          // button normally because this only intercepts pointer focus.
+          promptOptimizeBtn.addEventListener("pointerdown", function(e) {
+            e.preventDefault();
+          });
           promptOptimizeBtn.addEventListener("click", function() {
-            closePlusPopover();
             optimizePromptText();
           });
         }

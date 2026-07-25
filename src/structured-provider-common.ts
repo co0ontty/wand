@@ -53,7 +53,9 @@ export function thinkingEffortToSdkBudget(effort: SessionSnapshot["thinkingEffor
   return 0;
 }
 
-export function thinkingEffortToClaudeCliEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
+export function thinkingEffortToClaudeCliEffort(
+  effort: SessionSnapshot["thinkingEffort"],
+): "low" | "medium" | "max" | null {
   if (effort === "standard") return "low";
   if (effort === "deep") return "medium";
   if (effort === "max") return "max";
@@ -81,6 +83,14 @@ export function thinkingEffortToOpenCodeVariant(effort: SessionSnapshot["thinkin
 }
 
 export function thinkingEffortToGrokEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  if (!effort || effort === "off") return null;
+  if (effort === "standard") return "low";
+  if (effort === "deep") return "high";
+  if (effort === "max") return "max";
+  return effort.startsWith("codex:") ? effort.slice("codex:".length) || null : null;
+}
+
+export function thinkingEffortToQoderEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
   if (!effort || effort === "off") return null;
   if (effort === "standard") return "low";
   if (effort === "deep") return "high";

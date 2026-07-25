@@ -120,11 +120,11 @@ test("resolveSessionAiContext uses Codex default for legacy Codex sessions", () 
   assert.equal(context.model, "gpt-5.5-codex");
 });
 
-test("resolveCommitAiContext uses commit CLI and model independently from the session", () => {
+test("resolveCommitAiContext keeps the current session CLI and model but uses minimum effort", () => {
   const context = resolveCommitAiContext(session({
     provider: "claude",
     selectedModel: "claude-opus-4-6",
-    thinkingEffort: "standard",
+    thinkingEffort: "max",
   }), {
     ...config,
     commitCli: "codex",
@@ -132,25 +132,26 @@ test("resolveCommitAiContext uses commit CLI and model independently from the se
   });
 
   assert.deepEqual(context, {
-    provider: "codex",
-    model: "gpt-5.4-mini",
+    provider: "claude",
+    model: "claude-opus-4-6",
     thinkingEffort: "standard",
     inheritEnv: true,
   });
 });
 
-test("resolveCommitAiContext leaves model unset when commit model follows the CLI default", () => {
-  const context = resolveCommitAiContext(session({ provider: "codex" }), {
+test("resolveCommitAiContext ignores legacy commit CLI preferences", () => {
+  const context = resolveCommitAiContext(session({ provider: "codex", thinkingEffort: "codex:ultra" }), {
     ...config,
     commitCli: "claude",
     commitModel: "default",
   });
 
-  assert.equal(context.provider, "claude");
-  assert.equal(context.model, undefined);
+  assert.equal(context.provider, "codex");
+  assert.equal(context.model, "gpt-5.5-codex");
+  assert.equal(context.thinkingEffort, "standard");
 });
 
-test("resolveCommitAiContext keeps CLI selected and retains direct API as fallback", () => {
+test("resolveCommitAiContext uses only the current session CLI in CLI mode", () => {
   const context = resolveCommitAiContext(session({ provider: "claude" }), {
     ...config,
     commitAiSource: "cli",
@@ -164,37 +165,74 @@ test("resolveCommitAiContext keeps CLI selected and retains direct API as fallba
   });
 
   assert.equal(context.systemAi, undefined);
-  assert.deepEqual(context.fallbackSystemAi, {
-    enabled: true,
-    protocol: "anthropic",
-    baseUrl: "https://api.example.test",
-    apiKey: "secret",
-    model: "model-a",
-  });
+  assert.equal(context.thinkingEffort, "standard");
 });
 
-test("resolveCommitAiContext uses the direct API selected for commits", () => {
-  const context = resolveCommitAiContext(session({ provider: "claude" }), {
+test("resolveCommitAiContext prepends dynamically discovered APIs to the manual profile", () => {
+  const context = resolveCommitAiContext(
+    session({ provider: "codex", selectedModel: "gpt-5.6-sol" }),
+    {
+      ...config,
+      commitAiSource: "api",
+      systemAi: {
+        enabled: false,
+        protocol: "anthropic",
+        baseUrl: "https://manual.example.test",
+        apiKey: "manual-secret",
+        model: "manual-model",
+        authHeader: "x-api-key",
+      },
+    },
+    () => [{
+      enabled: true,
+      protocol: "openai",
+      baseUrl: "https://discovered.example.test/v1",
+      apiKey: "discovered-secret",
+      model: "discovered-model",
+      source: "opencode",
+    }],
+  );
+
+  assert.deepEqual(context.systemAi, {
+    enabled: true,
+    protocol: "openai",
+    baseUrl: "https://discovered.example.test/v1",
+    apiKey: "discovered-secret",
+    model: "discovered-model",
+    authHeader: "bearer",
+    source: "opencode",
+    fallbacks: [{
+      enabled: true,
+      protocol: "anthropic",
+      baseUrl: "https://manual.example.test",
+      apiKey: "manual-secret",
+      model: "manual-model",
+      authHeader: "x-api-key",
+      source: "custom",
+      fallbacks: undefined,
+    }],
+  });
+  assert.equal(context.provider, "codex");
+  assert.equal(context.model, "gpt-5.6-sol");
+  assert.equal(context.thinkingEffort, "standard");
+});
+
+test("resolveCommitAiContext falls straight through to the session CLI when no API is usable", () => {
+  const context = resolveCommitAiContext(session({ provider: "codex" }), {
     ...config,
     commitAiSource: "api",
     systemAi: {
       enabled: false,
-      protocol: "anthropic",
-      baseUrl: "https://api.example.test",
-      apiKey: "secret",
-      model: "model-a",
-      authHeader: "x-api-key",
+      protocol: "openai",
+      baseUrl: "",
+      apiKey: "",
+      model: "",
     },
-  });
+  }, () => []);
 
-  assert.deepEqual(context.systemAi, {
-    enabled: true,
-    protocol: "anthropic",
-    baseUrl: "https://api.example.test",
-    apiKey: "secret",
-    model: "model-a",
-    authHeader: "x-api-key",
-  });
+  assert.equal(context.systemAi, undefined);
+  assert.equal(context.provider, "codex");
+  assert.equal(context.thinkingEffort, "standard");
 });
 
 test("resolveSystemAiContext follows the system feature switch independently of Commit", () => {
@@ -213,5 +251,4 @@ test("resolveSystemAiContext follows the system feature switch independently of 
   assert.equal(context.provider, "claude");
   assert.equal(context.model, "claude-haiku-4-5");
   assert.equal(context.systemAi?.enabled, true);
-  assert.equal(context.fallbackSystemAi, undefined);
 });

@@ -34,7 +34,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       }
 
       export function startVoiceRecording(e) {
-        if (state.terminalInteractive || voiceState.recording) return;
+        if (state.terminalInteractive
+          || voiceState.recording
+          || (state.promptOptimizeRequest
+            && state.promptOptimizeRequest.sessionId === state.selectedId)) return;
         if (e) {
           e.preventDefault();
           voiceState.startY = (typeof e.clientY === "number") ? e.clientY : 0;
@@ -116,6 +119,8 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
       // 把识别文字填回输入框（追加在已有草稿后、不覆盖），光标停末尾。
       // 复用 setDraftValue + autoResizeInput，与提示词优化填回 textarea 同一套范式。
       export function commitVoiceTranscript(text) {
+        if (state.promptOptimizeRequest
+          && state.promptOptimizeRequest.sessionId === state.selectedId) return;
         var clean = (text || "").trim();
         if (!clean) return;
         var box = document.getElementById("input-box") as HTMLInputElement | null;
@@ -130,7 +135,7 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 
       export function autoResizeInput(el) {
         if (!el) return;
-        var minHeight = 36;
+        var minHeight = 40;
         // Respect the responsive CSS cap (mobile uses min(160px, 35dvh)) instead
         // of forcing every viewport back to the desktop 120px limit.
         var computedMaxHeight = parseFloat(window.getComputedStyle(el).maxHeight || "");
@@ -149,25 +154,18 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           syncComposerHasText(el);
           return;
         }
-        // Measure content height by temporarily setting height to minHeight
-        // and reading scrollHeight. Avoid collapsing to 0 which causes layout jumps.
-        var prevInlineTransition = el.style.transition;
-        var renderedHeight = el.getBoundingClientRect().height;
+        // Typing is a high-frequency interaction. Measure directly at the
+        // minimum height and snap to the new content height; tweening every
+        // keystroke makes the caret feel elastic and forces an extra layout.
+        var previousScrollTop = el.scrollTop;
+        var caretAtEnd = el.selectionStart === el.value.length
+          && el.selectionEnd === el.value.length;
         el.style.overflowY = "hidden";
-        // Height is animated in CSS. Without suspending that transition, a
-        // long draft that becomes shorter still reports the old scrollHeight
-        // during measurement and gets stuck at the cap. Measure at the real
-        // minimum, then restore the rendered height before animating toward
-        // the newly calculated target.
-        el.style.transition = "none";
         el.style.height = minHeight + "px";
         var contentHeight = el.scrollHeight;
         var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
         var shouldScrollInside = contentHeight > maxHeight;
         var needsExpandedHeight = contentHeight > minHeight + 1;
-        el.style.height = renderedHeight + "px";
-        void el.offsetHeight;
-        el.style.transition = prevInlineTransition;
         el.style.height = newHeight + "px";
         el.style.minHeight = minHeight + "px";
         el.style.overflowY = shouldScrollInside || touchDevice ? "auto" : "hidden";
@@ -178,7 +176,12 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         // a multi-line draft back into the compact row.
         el.closest(".input-composer")?.classList.toggle("is-expanded", needsExpandedHeight);
         if (shouldScrollInside) {
-          syncInputBoxScroll(el);
+          if (caretAtEnd) {
+            syncInputBoxScroll(el);
+          } else {
+            var maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+            el.scrollTop = Math.min(previousScrollTop, maxScrollTop);
+          }
         } else {
           el.scrollTop = 0;
         }
@@ -826,6 +829,10 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
         var selectedView = state.currentView;
         var value = inputBox ? inputBox.value : getDraftValueForSession(sessionId);
         var pendingAttachments = getPendingAttachments(sessionId);
+        if (state.promptOptimizeRequest
+          && state.promptOptimizeRequest.sessionId === sessionId) {
+          return Promise.resolve();
+        }
         if (!sessionId || !canSendComposer(value, sessionId)) return Promise.resolve();
 
         var fingerprint = getComposerSubmissionFingerprint(value, pendingAttachments);
@@ -2146,6 +2153,11 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           ? !!(selectedSession && selectedSession.structuredState && selectedSession.structuredState.inFlight)
           : !!selectedSession && selectedSession.status === "running";
         var composer = document.getElementById("input-box") as HTMLInputElement | null;
+        var composerShell = document.querySelector(".input-composer");
+        var promptOptimizeRequest = state.promptOptimizeRequest;
+        var promptOptimizeBusyForCurrent = !!(promptOptimizeRequest
+          && promptOptimizeRequest.sessionId === state.selectedId);
+        var promptOptimizeBusyAnywhere = !!promptOptimizeRequest;
         // 终端交互 toggle 现在挂在加号 popover 内。.active 保留兼容；
         // .is-on 给 popover-item 提供独立的"已开启"视觉；同时刷新 aria-pressed 与 "开/关" 文本。
         var toggles = ["terminal-interactive-toggle-top"];
@@ -2176,24 +2188,49 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           composer.placeholder = getComposerPlaceholder(selectedSession, state.terminalInteractive);
           composer.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
           composer.setAttribute("aria-disabled", composer.disabled ? "true" : "false");
-          // INPUT-3: 交互模式不再设 readOnly。readOnly 的 textarea 上 IME 根本不会
-          // 激活（compositionstart 不触发），导致中文/日文等组字输入彻底打不出。普通
-          // 字符 keydown 已由 capture 阶段的 captureTerminalInput preventDefault 拦截、
-          // 不会落进 textarea；唯独 IME 组字期间 capture 放行(isComposing)，字符临时
-          // 落入 textarea，由 compositionend 取最终文本发 PTY 后清空。
-          composer.readOnly = false;
+          // Terminal passthrough must stay editable for IME composition. Prompt
+          // optimization is the sole short-lived read-only state so the request
+          // cannot race a new edit or send half-replaced content.
+          composer.readOnly = promptOptimizeBusyForCurrent;
+          composer.setAttribute("aria-readonly", composer.readOnly ? "true" : "false");
+          composer.setAttribute("aria-busy", promptOptimizeBusyForCurrent ? "true" : "false");
           composer.classList.toggle(
             "is-terminal-passthrough",
             !!state.terminalInteractive && !document.documentElement.classList.contains("is-wand-embed-terminal"),
           );
         }
+        if (composerShell) {
+          composerShell.classList.toggle("is-optimizing", promptOptimizeBusyForCurrent);
+        }
+        var promptOptimizeBtn = document.getElementById("prompt-optimize-btn") as HTMLButtonElement | null;
+        if (promptOptimizeBtn) {
+          promptOptimizeBtn.disabled = promptOptimizeBusyAnywhere;
+          promptOptimizeBtn.classList.toggle("is-loading", promptOptimizeBusyForCurrent);
+          promptOptimizeBtn.setAttribute("aria-busy", promptOptimizeBusyForCurrent ? "true" : "false");
+          promptOptimizeBtn.setAttribute(
+            "aria-label",
+            promptOptimizeBusyForCurrent
+              ? "正在优化提示词"
+              : (promptOptimizeBusyAnywhere ? "其他会话正在优化提示词" : "优化提示词"),
+          );
+          promptOptimizeBtn.setAttribute(
+            "title",
+            promptOptimizeBusyForCurrent
+              ? "正在优化…"
+              : (promptOptimizeBusyAnywhere ? "其他会话正在优化…" : "优化提示词"),
+          );
+          var promptOptimizeLabel = promptOptimizeBtn.querySelector(".prompt-optimize-label");
+          if (promptOptimizeLabel) {
+            promptOptimizeLabel.textContent = promptOptimizeBusyForCurrent ? "优化中" : "优化";
+          }
+        }
         // 终端直通时禁用独立语音按钮；若切换过程中正在录音则立即取消。
         var voiceBtn = document.getElementById("voice-record-btn") as HTMLButtonElement | null;
         if (voiceBtn) {
-          voiceBtn.disabled = state.terminalInteractive;
+          voiceBtn.disabled = state.terminalInteractive || promptOptimizeBusyForCurrent;
           voiceBtn.setAttribute("aria-disabled", voiceBtn.disabled ? "true" : "false");
         }
-        if (state.terminalInteractive && voiceState.recording) {
+        if ((state.terminalInteractive || promptOptimizeBusyForCurrent) && voiceState.recording) {
           voiceState.recording = false;
           resetVoiceRecordingUI();
         }
@@ -2207,11 +2244,16 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
           var activeSubmissions = state.selectedId && state.composerSubmissionsBySession[state.selectedId];
           var duplicateInFlight = !!(composerCanSend && activeSubmissions
             && activeSubmissions[getComposerSubmissionFingerprint(composerValue, currentAttachments)]);
-          sendBtn.disabled = !composerCanSend || duplicateInFlight || sessionUnavailable;
+          sendBtn.disabled = promptOptimizeBusyForCurrent
+            || !composerCanSend
+            || duplicateInFlight
+            || sessionUnavailable;
           sendBtn.setAttribute("aria-disabled", sendBtn.disabled ? "true" : "false");
-          sendBtn.setAttribute("title", structured
-            ? (structuredInFlight ? "排队发送（当前回复结束后处理）" : "发送")
-            : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
+          sendBtn.setAttribute("title", promptOptimizeBusyForCurrent
+            ? "正在优化提示词"
+            : (structured
+              ? (structuredInFlight ? "排队发送（当前回复结束后处理）" : "发送")
+              : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束"))));
           sendBtn.classList.toggle("queue-mode", structuredInFlight);
         }
         // 停止按钮：仅当当前会话真"在跑"才露出（结构化 inFlight / PTY running / 等待权限阻塞）。

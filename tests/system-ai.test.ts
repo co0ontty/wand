@@ -7,7 +7,13 @@ import path from "node:path";
 import test from "node:test";
 
 import { generateCommitMessageOnly, QuickCommitError, runQuickCommitWithFallback } from "../src/git-quick-commit.js";
-import { callSystemAiText, callSystemAiTextWithFallback, discoverCliSystemAiConfig, discoverCliSystemAiConfigs } from "../src/system-ai.js";
+import {
+  callSystemAiText,
+  callSystemAiTextWithFallback,
+  discoverCliSystemAiConfig,
+  discoverCliSystemAiConfigs,
+  mergeSystemAiConfigs,
+} from "../src/system-ai.js";
 
 test("CLI discovery copies Claude API settings without mutating the source", () => {
   const home = mkdtempSync(path.join(os.tmpdir(), "wand-system-ai-"));
@@ -64,6 +70,168 @@ test("CLI discovery imports every configured API in preferred-provider order", (
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("CLI discovery skips malformed profiles without blocking later APIs", () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "wand-system-ai-invalid-"));
+  try {
+    mkdirSync(path.join(home, ".claude"));
+    writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({
+      env: { ANTHROPIC_BASE_URL: "not a URL", ANTHROPIC_AUTH_TOKEN: "bad-secret" },
+      model: "bad-model",
+    }));
+    mkdirSync(path.join(home, ".config", "opencode"), { recursive: true });
+    writeFileSync(path.join(home, ".config", "opencode", "opencode.json"), JSON.stringify({
+      model: "broken/bad-model",
+      provider: {
+        broken: { options: { baseURL: "still not a URL", apiKey: "bad-secret" } },
+        usable: {
+          options: { baseURL: "https://usable.example/v1", apiKey: "usable-secret" },
+          models: { "usable-model": {} },
+        },
+      },
+    }));
+
+    const found = discoverCliSystemAiConfigs("claude", home);
+    assert.deepEqual(found.map(({ source, baseUrl, model }) => ({ source, baseUrl, model })), [{
+      source: "opencode",
+      baseUrl: "https://usable.example/v1",
+      model: "usable-model",
+    }]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Grok discovery imports chat_completions profiles with the default first", () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "wand-system-ai-grok-"));
+  try {
+    mkdirSync(path.join(home, ".grok"));
+    writeFileSync(path.join(home, ".grok", "config.toml"), [
+      "[models]",
+      'default = "primary"',
+      "",
+      "[model.secondary]",
+      'model = "secondary-model"',
+      'base_url = "https://secondary.example/v4"',
+      "api_key = 'secondary-secret'",
+      'api_backend = "chat_completions"',
+      "",
+      "[model.unsupported]",
+      'model = "responses-model"',
+      'base_url = "https://responses.example/v1"',
+      'api_key = "responses-secret"',
+      'api_backend = "responses"',
+      "",
+      "[model.primary]",
+      'model = "primary-model"',
+      'base_url = "https://primary.example/api/coding/paas/v4"',
+      'api_key = "primary-secret"',
+      'api_backend = "chat_completions"',
+    ].join("\n"));
+
+    const found = discoverCliSystemAiConfigs("grok", home);
+    assert.deepEqual(found.map(({ source, baseUrl, model }) => ({ source, baseUrl, model })), [
+      { source: "grok", baseUrl: "https://primary.example/api/coding/paas/v4", model: "primary-model" },
+      { source: "grok", baseUrl: "https://secondary.example/v4", model: "secondary-model" },
+    ]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("system AI config merging keeps dynamic priority, flattens fallbacks, and deduplicates", () => {
+  const merged = mergeSystemAiConfigs(
+    [{
+      enabled: false,
+      protocol: "openai",
+      baseUrl: "https://dynamic.example/v1",
+      apiKey: "shared-secret",
+      model: "shared-model",
+      source: "grok",
+      fallbacks: [{
+        enabled: false,
+        protocol: "openai",
+        baseUrl: "https://dynamic-fallback.example/v1",
+        apiKey: "dynamic-fallback-secret",
+        model: "dynamic-fallback-model",
+        source: "opencode",
+      }],
+    }],
+    {
+      enabled: false,
+      protocol: "openai",
+      baseUrl: "https://dynamic.example/v1",
+      apiKey: "shared-secret",
+      model: "shared-model",
+      source: "custom",
+      fallbacks: [{
+        enabled: false,
+        protocol: "anthropic",
+        baseUrl: "https://legacy.example",
+        apiKey: "legacy-secret",
+        model: "legacy-model",
+        authHeader: "x-api-key",
+        source: "claude",
+      }],
+    },
+    undefined,
+  );
+
+  assert.ok(merged);
+  assert.equal(merged.enabled, true);
+  assert.deepEqual(
+    [merged, ...(merged.fallbacks ?? [])].map(({ enabled, source, baseUrl, model }) => ({
+      enabled, source, baseUrl, model,
+    })),
+    [
+      {
+        enabled: true,
+        source: "grok",
+        baseUrl: "https://dynamic.example/v1",
+        model: "shared-model",
+      },
+      {
+        enabled: true,
+        source: "opencode",
+        baseUrl: "https://dynamic-fallback.example/v1",
+        model: "dynamic-fallback-model",
+      },
+      {
+        enabled: true,
+        source: "claude",
+        baseUrl: "https://legacy.example",
+        model: "legacy-model",
+      },
+    ],
+  );
+});
+
+test("system AI keeps profiles that differ only by authentication header", () => {
+  const merged = mergeSystemAiConfigs(
+    {
+      enabled: true,
+      protocol: "anthropic",
+      baseUrl: "https://same.example/v1",
+      apiKey: "same-secret",
+      model: "same-model",
+      authHeader: "bearer",
+    },
+    {
+      enabled: true,
+      protocol: "anthropic",
+      baseUrl: "https://same.example/v1",
+      apiKey: "same-secret",
+      model: "same-model",
+      authHeader: "x-api-key",
+    },
+  );
+
+  assert.ok(merged);
+  assert.deepEqual(
+    [merged, ...(merged.fallbacks ?? [])].map((profile) => profile.authHeader),
+    ["bearer", "x-api-key"],
+  );
 });
 
 test("system AI tries configured APIs in order until one returns text", async () => {
@@ -129,6 +297,31 @@ test("OpenAI-compatible system AI calls the chat completions endpoint", async ()
     assert.equal(text, "generated message");
     assert.equal(receivedPath, "/v1/chat/completions");
     assert.equal(authorization, "Bearer api-secret");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("OpenAI-compatible system AI appends chat completions directly to versioned API roots", async () => {
+  let receivedPath = "";
+  const server = createServer((req, res) => {
+    receivedPath = req.url ?? "";
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ choices: [{ message: { content: "generated message" } }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const text = await callSystemAiText("prompt", {
+      enabled: true,
+      protocol: "openai",
+      baseUrl: `http://127.0.0.1:${address.port}/api/coding/paas/v4`,
+      apiKey: "api-secret",
+      model: "test-model",
+    });
+    assert.equal(text, "generated message");
+    assert.equal(receivedPath, "/api/coding/paas/v4/chat/completions");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -296,66 +489,6 @@ test("direct API quick commit falls back to the selected CLI", async () => {
 
     assert.equal(requests, 1);
     assert.equal(result.commit.message, "fix: use CLI fallback");
-    assert.equal(existsSync(marker), true);
-  } finally {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-    if (previousMarker === undefined) delete process.env.WAND_FALLBACK_MARKER;
-    else process.env.WAND_FALLBACK_MARKER = previousMarker;
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("CLI quick commit falls back to a configured direct API", async () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "wand-cli-api-fallback-"));
-  const repo = path.join(root, "repo");
-  const bin = path.join(root, "bin");
-  const marker = path.join(root, "cli-called");
-  mkdirSync(repo);
-  mkdirSync(bin);
-  writeFileSync(path.join(bin, "codex"), [
-    "#!/bin/sh",
-    ': > "$WAND_FALLBACK_MARKER"',
-    "echo 'CLI unavailable' >&2",
-    "exit 1",
-  ].join("\n"), { mode: 0o755 });
-
-  let requests = 0;
-  const server = createServer((_req, res) => {
-    requests += 1;
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ choices: [{ message: { content: "fix: use API fallback" } }] }));
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const previousPath = process.env.PATH;
-  const previousMarker = process.env.WAND_FALLBACK_MARKER;
-  process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ""}`;
-  process.env.WAND_FALLBACK_MARKER = marker;
-  try {
-    execFileSync("git", ["init", "-q"], { cwd: repo });
-    execFileSync("git", ["config", "user.email", "wand-test@example.test"], { cwd: repo });
-    execFileSync("git", ["config", "user.name", "Wand Test"], { cwd: repo });
-    writeFileSync(path.join(repo, "README.md"), "changed\n");
-
-    const address = server.address();
-    assert.ok(address && typeof address === "object");
-    const result = await runQuickCommitWithFallback({
-      cwd: repo,
-      language: "English",
-      provider: "codex",
-      fallbackSystemAi: {
-        enabled: true,
-        protocol: "openai",
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
-        apiKey: "direct-secret",
-        model: "test-model",
-      },
-      autoMessage: true,
-    });
-
-    assert.equal(requests, 1);
-    assert.equal(result.commit.message, "fix: use API fallback");
     assert.equal(existsSync(marker), true);
   } finally {
     if (previousPath === undefined) delete process.env.PATH;

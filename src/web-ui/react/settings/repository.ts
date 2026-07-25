@@ -119,7 +119,10 @@ function normalizeDistribution(value: unknown): SettingsDistribution {
 
 function normalizeSystemAi(value: unknown, includeFallbacks = true): SettingsSystemAi {
   const input = record(value);
-  const source = input.source === "claude" || input.source === "codex" || input.source === "opencode"
+  const source = input.source === "claude"
+    || input.source === "codex"
+    || input.source === "opencode"
+    || input.source === "grok"
     ? input.source
     : "custom";
   const normalized: SettingsSystemAi = {
@@ -540,7 +543,7 @@ export class HttpSettingsRepository implements SettingsRepository {
         result = normalizeModels(await post("/api/models/refresh", undefined, options.signal));
         break;
       case "systemAi.import":
-        result = await post("/api/settings/system-ai/import", { source: command.source }, options.signal);
+        result = await post("/api/settings/system-ai/import", undefined, options.signal);
         break;
       case "webUpdate.check":
         result = await request("/api/check-update", { signal: options.signal });

@@ -12961,6 +12961,10 @@
     // second gesture for the same captured payload reuses the first submission,
     // while a newly typed payload can still enter the structured-session queue.
     composerSubmissionsBySession: {},
+    // Prompt optimization is global because the backing system-AI request is
+    // shared. The session id keeps only the owning composer read-only while a
+    // response may safely finish in the background after a session switch.
+    promptOptimizeRequest: null,
     isSyncingInputBox: false,
     loginPending: false,
     loginChecked: false,
@@ -22093,7 +22097,7 @@
   }
   function normalizeSystemAi(value, includeFallbacks = true) {
     const input = record(value);
-    const source = input.source === "claude" || input.source === "codex" || input.source === "opencode" ? input.source : "custom";
+    const source = input.source === "claude" || input.source === "codex" || input.source === "opencode" || input.source === "grok" ? input.source : "custom";
     const normalized = {
       ...EMPTY_SYSTEM_AI,
       enabled: input.enabled === true,
@@ -22519,7 +22523,7 @@
           result = normalizeModels(await post("/api/models/refresh", void 0, options.signal));
           break;
         case "systemAi.import":
-          result = await post("/api/settings/system-ai/import", { source: command.source }, options.signal);
+          result = await post("/api/settings/system-ai/import", void 0, options.signal);
           break;
         case "webUpdate.check":
           result = await request("/api/check-update", { signal: options.signal });
@@ -23283,8 +23287,6 @@
       defaultOpenCodeModel: config.defaultOpenCodeModel,
       defaultGrokModel: config.defaultGrokModel,
       defaultQoderModel: config.defaultQoderModel,
-      commitCli: config.commitCli,
-      commitModel: config.commitModel,
       commitAiSource: config.commitAiSource,
       systemAi: { ...config.systemAi, apiKey: "" }
     };
@@ -23325,9 +23327,9 @@
       setPending("import");
       setStatus("");
       try {
-        const result = await repository.execute({ type: "systemAi.import", source: form.commitCli });
+        const result = await repository.execute({ type: "systemAi.import" });
         setForm((current) => ({ ...current, systemAi: { ...result.systemAi, apiKey: "" } }));
-        setStatus(`\u5DF2\u4ECE\u5168\u90E8\u5DF2\u914D\u7F6E CLI \u5BFC\u5165\u5E76\u4FDD\u5B58 ${result.count} \u4E2A API\uFF1B${form.commitCli} \u6765\u6E90\u4F18\u5148\u3002`);
+        setStatus(`\u5DF2\u4ECE\u5168\u90E8\u5DF2\u914D\u7F6E\u5DE5\u5177\u5BFC\u5165\u5E76\u4FDD\u5B58 ${result.count} \u4E2A API\u3002`);
         setTone("success");
         await refresh();
       } catch (cause) {
@@ -23338,7 +23340,7 @@
       }
     }
     async function save() {
-      const systemRequired = form.systemAi.enabled || form.commitAiSource === "api";
+      const systemRequired = form.systemAi.enabled;
       const nextErrors = {};
       const configuredFallback = (form.systemAi.fallbacks || []).some((profile) => profile.baseUrl.trim() && profile.model.trim() && (profile.apiKey.trim() || profile.hasApiKey));
       if (systemRequired && !configuredFallback) {
@@ -23376,13 +23378,12 @@
       }
     }
     const models = snapshot7.models;
-    const commitModels = form.commitCli === "codex" ? models?.codexModels || [] : form.commitCli === "opencode" ? models?.opencodeModels || [] : models?.models || [];
     const systemAiProfiles = [form.systemAi, ...form.systemAi.fallbacks || []].filter((profile) => profile.baseUrl && profile.model && (profile.apiKey || profile.hasApiKey));
     const systemAiOrder = systemAiProfiles.map((profile) => profile.source === "custom" ? "\u81EA\u5B9A\u4E49" : profile.source).join(" \u2192 ");
     return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("section", { className: "wand-settings-panel", "aria-label": "AI \u4E0E\u6A21\u578B", children: [
       /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("header", { className: "wand-settings-panel-heading", children: [
         /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("h2", { children: "AI \u4E0E\u6A21\u578B" }),
-        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("p", { children: "\u96C6\u4E2D\u7BA1\u7406\u4F1A\u8BDD\u9ED8\u8BA4\u6A21\u578B\u3001\u7CFB\u7EDF API \u548C\u5FEB\u6377\u63D0\u4EA4\u4F7F\u7528\u7684\u6A21\u578B\u3002" })
+        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("p", { children: "\u96C6\u4E2D\u7BA1\u7406\u4F1A\u8BDD\u9ED8\u8BA4\u6A21\u578B\u3001\u7CFB\u7EDF API \u548C\u5FEB\u6377\u63D0\u4EA4\u7684 AI \u6765\u6E90\u3002" })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
         SettingsSection,
@@ -23418,8 +23419,8 @@
         SettingsSection,
         {
           title: "\u7CFB\u7EDF AI API",
-          description: "\u7528\u4E8E\u63D0\u793A\u8BCD\u4F18\u5316\u3001\u4F1A\u8BDD\u6807\u9898\uFF0C\u4EE5\u53CA\u53EF\u9009\u7684\u5FEB\u6377\u63D0\u4EA4\u3002API Key \u4E0D\u4F1A\u4ECE\u670D\u52A1\u7AEF\u56DE\u4F20\u3002",
-          action: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "import", kind: "secondary", onClick: () => void importSystemAi(), children: "\u5BFC\u5165\u5168\u90E8 CLI API" }),
+          description: "\u7528\u4E8E\u63D0\u793A\u8BCD\u4F18\u5316\u3001\u4F1A\u8BDD\u6807\u9898\uFF0C\u4E5F\u4F1A\u4F5C\u4E3A\u5FEB\u6377\u63D0\u4EA4\u81EA\u52A8\u53D1\u73B0 API \u7684\u8865\u5145\u3002API Key \u4E0D\u4F1A\u4ECE\u670D\u52A1\u7AEF\u56DE\u4F20\u3002",
+          action: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "import", kind: "secondary", onClick: () => void importSystemAi(), children: "\u5BFC\u5165\u5168\u90E8\u5DE5\u5177 API" }),
           children: [
             /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
               SettingsToggle,
@@ -23477,25 +23478,7 @@
             "\u76F4\u8FDE API"
           ] })
         ] }),
-        form.commitAiSource === "api" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: systemAiProfiles.length ? "success" : "warning", children: systemAiProfiles.length ? `\u5DF2\u5C31\u7EEA ${systemAiProfiles.length} \u4E2A API\uFF1B\u5168\u90E8\u5931\u8D25\u540E\u56DE\u9000 CLI\u3002` : "\u8BF7\u5148\u8865\u5168\u4E0A\u65B9\u76F4\u8FDE API \u914D\u7F6E\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsGrid, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "Commit CLI", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
-            SettingsSelect,
-            {
-              id: "settings-commit-cli",
-              ariaLabel: "Commit \u751F\u6210 CLI",
-              value: form.commitCli,
-              options: [{ value: "claude", label: "Claude" }, { value: "codex", label: "Codex" }, { value: "opencode", label: "OpenCode" }],
-              onChange: (value) => {
-                update("commitCli", value);
-                update("commitModel", "");
-              }
-            }
-          ) }),
-          /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsField, { label: "Commit \u6A21\u578B", htmlFor: "settings-commit-model", hint: "\u7559\u7A7A\u8DDF\u968F\u6240\u9009 CLI \u9ED8\u8BA4\u503C", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-commit-model", list: "settings-commit-models", value: form.commitModel, placeholder: "\u8DDF\u968F CLI \u9ED8\u8BA4", onChange: (value) => update("commitModel", value) }),
-            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(ModelSuggestions, { id: "settings-commit-models", models: commitModels })
-          ] })
-        ] })
+        form.commitAiSource === "api" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: "success", children: "\u81EA\u52A8\u8BFB\u53D6\u5404\u5DE5\u5177\u7684 API \u914D\u7F6E\u5E76\u9010\u4E2A\u5C1D\u8BD5\uFF1B\u5168\u90E8\u4E0D\u53EF\u7528\u65F6\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD CLI\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: "success", children: "\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD\u7684 CLI \u548C\u6A21\u578B\uFF1B\u63A8\u7406\u56FA\u5B9A\u4E3A\u6700\u4F4E\u6863\u3002" })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsSaveBar, { label: "\u4FDD\u5B58 AI \u4E0E\u6A21\u578B\u914D\u7F6E", pending: pending === "save", disabled: !!pending && pending !== "save", onSave: () => void save(), status, tone })
     ] });
@@ -37829,7 +37812,10 @@
       closePlusPopover();
     });
     document.addEventListener("keydown", function(e) {
-      if (e.key === "Escape" && state.plusPopoverOpen) closePlusPopover();
+      if (e.key === "Escape" && state.plusPopoverOpen) {
+        e.preventDefault();
+        closePlusPopover(true);
+      }
       if (e.key === "Escape") closeClaudeSkillsPicker();
     });
     document.addEventListener("click", function(e) {
@@ -37880,7 +37866,7 @@
       } else if (ctrl === "thinking") {
         onChatThinkingChange(value);
       }
-      if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover();
+      if (target.closest && target.closest("#composer-plus-popover")) closePlusPopover(true);
     });
   }
   function attachEventListeners() {
@@ -38095,12 +38081,26 @@
     if (attachBtn && plusPopover) {
       attachBtn.addEventListener("click", function(e) {
         e.stopPropagation();
-        togglePlusPopover();
+        togglePlusPopover(e.detail === 0);
+      });
+      plusPopover.addEventListener("keydown", function(e) {
+        if (e.target instanceof HTMLSelectElement) return;
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+        var controls = Array.from(plusPopover.querySelectorAll(
+          'button:not([disabled]):not(.hidden), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )).filter(function(control) {
+          return control.getClientRects().length > 0;
+        });
+        if (!controls.length) return;
+        e.preventDefault();
+        var currentIndex = controls.indexOf(document.activeElement);
+        var nextIndex = e.key === "Home" ? 0 : e.key === "End" ? controls.length - 1 : e.key === "ArrowUp" ? currentIndex <= 0 ? controls.length - 1 : currentIndex - 1 : (currentIndex + 1) % controls.length;
+        controls[nextIndex]?.focus();
       });
     }
     if (plusAttachItem && fileInput) {
-      plusAttachItem.addEventListener("click", function() {
-        closePlusPopover();
+      plusAttachItem.addEventListener("click", function(e) {
+        closePlusPopover(e.detail === 0);
         fileInput.click();
       });
     }
@@ -38125,8 +38125,10 @@
     }
     var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
     if (promptOptimizeBtn) {
+      promptOptimizeBtn.addEventListener("pointerdown", function(e) {
+        e.preventDefault();
+      });
       promptOptimizeBtn.addEventListener("click", function() {
-        closePlusPopover();
         optimizePromptText();
       });
     }
@@ -38679,7 +38681,7 @@
     return '<div class="app-container"><div id="sessions-drawer-backdrop" class="drawer-backdrop' + backdropClass + '"></div><div class="main-layout' + (state.sessionsDrawerOpen ? " sidebar-open" : "") + (isAnchored ? " sidebar-pinned" : "") + collapsedCls + '"><aside id="sessions-drawer" class="sidebar' + drawerClass + (isAnchored ? " pinned" : "") + sidebarCollapsedCls + '"><div class="sidebar-header"><div class="sidebar-header-main"><div class="topbar-logo-icon">W</div><span class="sidebar-title">\u4F1A\u8BDD</span><span class="session-count" id="session-count">' + String(state.sessions.filter(function(session) {
       var source = String(session && session.sessionSource || "").toLowerCase();
       return source !== "automation" && source !== "startup";
-    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (currentDraft ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A" aria-haspopup="dialog" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" aria-label="\u6D88\u606F\u8F93\u5165" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="\u505C\u6B62" aria-label="\u505C\u6B62\u751F\u6210"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="\u53D1\u9001" aria-label="\u53D1\u9001\u6D88\u606F"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item prompt-optimize-menu-item" id="prompt-optimize-btn" type="button" title="\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09">' + iconSvg("edit", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon prompt-optimize-icon" }) + '<span class="plus-popover-label">\u4F18\u5316\u63D0\u793A\u8BCD</span><span class="prompt-optimize-spinner" aria-hidden="true"></span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
+    }).length) + '</span></div><div class="sidebar-header-actions"><div class="sidebar-header-more"><button id="sidebar-more-btn" class="btn btn-ghost btn-sm" type="button" title="\u66F4\u591A\u64CD\u4F5C"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="sidebar-header-overflow" id="sidebar-overflow-menu"><button class="overflow-item" id="sidebar-home-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>\u56DE\u5230\u9996\u9875</span></button><button class="overflow-item" id="sidebar-refresh-btn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>\u5237\u65B0\u9875\u9762</span></button></div></div><button id="sidebar-pin-btn" class="btn btn-ghost btn-sm sidebar-pin-toggle' + (state.sidebarPinned ? " pinned" : "") + '" type="button" title="' + (state.sidebarPinned ? "\u5DF2\u56FA\u5B9A\u5E38\u9A7B\uFF08\u70B9\u51FB\u89E3\u9664\u9501\u5B9A\uFF09" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-label="' + (state.sidebarPinned ? "\u89E3\u9664\u56FA\u5B9A\u5E38\u9A7B" : "\u56FA\u5B9A\u4FA7\u680F\u5E38\u9A7B") + '" aria-pressed="' + (state.sidebarPinned ? "true" : "false") + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/></svg></button><button id="sidebar-collapse-btn" class="btn btn-ghost btn-sm sidebar-collapse-toggle' + (isCollapsed ? " collapsed" : "") + '" type="button" title="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '" aria-label="' + (isCollapsed ? "\u5C55\u5F00\u4E3A\u5168\u5C3A\u5BF8" : "\u6536\u8D77\u4E3A\u7A84\u6761") + '">' + (isCollapsed ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="10 6 16 12 10 18"/><line x1="20" y1="5" x2="20" y2="19"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="14 6 8 12 14 18"/><line x1="4" y1="5" x2="4" y2="19"/></svg>') + '</button><button id="close-drawer-button" class="btn btn-ghost btn-icon sidebar-close drawer-close-btn" type="button" aria-label="\u5173\u95ED\u83DC\u5355"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button></div></div><div class="sidebar-body"><div id="sessions-panel"><div class="sessions-list" id="sessions-list">' + renderSessionsListContent() + '</div></div></div><div class="sidebar-footer"><button id="drawer-new-session-button" class="btn btn-primary btn-block"><span>+</span> \u65B0\u4F1A\u8BDD</button><div class="sidebar-footer-actions"><button id="file-panel-toggle-btn" class="btn btn-ghost btn-sm' + (state.filePanelOpen ? " active" : "") + '" type="button" title="\u67E5\u770B\u6587\u4EF6"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>\u6587\u4EF6</span></button><button id="settings-button" class="btn btn-ghost btn-sm" type="button" title="\u8BBE\u7F6E"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>\u8BBE\u7F6E</span></button>' + (hasNativeBackToApp() ? '<button id="back-to-native-button" class="btn btn-ghost btn-sm sidebar-back-to-native" type="button" title="\u8FD4\u56DE App \u539F\u751F\u754C\u9762"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="3" width="11" height="18" rx="2"/><line x1="14" y1="17" x2="17" y2="17"/><polyline points="7 8 3 12 7 16"/></svg><span>\u8FD4\u56DEApp</span></button>' : "") + (hasNativeSwitchServer() ? '<button id="switch-server-button" class="btn btn-ghost btn-sm sidebar-switch-server" type="button" title="\u5207\u6362\u670D\u52A1\u5668"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg><span>\u5207\u6362</span></button>' : "") + '<button id="logout-button" class="btn btn-ghost btn-sm sidebar-logout" type="button" title="\u9000\u51FA\u767B\u5F55"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>\u9000\u51FA</span></button></div></div></aside><main class="main-content"><div class="main-header-row"><div class="topbar-left"><button id="sessions-toggle-button" class="floating-sidebar-toggle' + (state.sessionsDrawerOpen ? " active" : "") + '" aria-label="\u5207\u6362\u4F1A\u8BDD\u4FA7\u680F" type="button"><span class="hamburger-icon"><span></span><span></span><span></span></span></button><span class="topbar-brand" aria-hidden="true">W</span></div><div class="topbar-center">' + (selectedSession ? '<span class="topbar-session-title' + (selectedSession.titleGenerating ? " title-generating" : "") + '"' + (selectedSession.titleGenerating ? ' aria-busy="true"' : "") + ' title="' + escapeHtml(selectedSession.description || selectedSession.command || "") + '">' + escapeHtml(selectedSession.title || shortCommand(selectedSession.command)) + '</span><span class="session-status-pill ' + getSessionStatusClass(selectedSession) + '" title="' + escapeHtml(getSessionStatusLabel(selectedSession)) + '"><span class="session-status-dot"></span><span class="session-status-text">' + escapeHtml(getSessionStatusLabel(selectedSession)) + '</span></span><span class="current-task hidden" id="current-task"></span>' + (selectedSession.cwd ? renderTailMarqueePath(selectedSession.cwd, "topbar-cwd", ' id="topbar-cwd" role="button" tabindex="0"') : "") : '<span class="topbar-tagline">Wand \u63A7\u5236\u53F0</span><span class="current-task hidden" id="current-task"></span>') + '</div><div class="topbar-right"><button id="topbar-file-button" class="topbar-btn square' + (state.filePanelOpen ? " active" : "") + '" type="button" aria-label="\u6587\u4EF6" title="\u67E5\u770B\u6587\u4EF6\uFF08\u53EF\u4FEE\u6539\u8DEF\u5F84\uFF09"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button><span id="topbar-git-slot" class="topbar-git-slot">' + renderTopbarGitBadgeHtml() + "</span>" + (selectedSession ? renderTopbarMoreMenuHtml(selectedSession) : "") + '</div></div><div id="file-panel-backdrop" class="file-panel-backdrop' + (state.filePanelOpen ? " open" : "") + '"></div><div id="file-side-panel" class="file-side-panel' + (state.filePanelOpen ? " open" : "") + '"><div class="file-side-panel-header"><div class="file-side-panel-title-group"><span class="file-side-panel-icon">' + wandFileIcon("folder-open", { size: 16 }) + '</span><span class="file-side-panel-title">\u6587\u4EF6</span></div><div class="file-side-panel-header-actions"><button class="file-side-panel-iconbtn" id="file-explorer-refresh" type="button" title="\u5237\u65B0" aria-label="\u5237\u65B0\u6587\u4EF6\u5217\u8868">' + wandFileIcon("refresh", { size: 15 }) + '</button><button id="file-side-panel-close" class="file-side-panel-iconbtn close" type="button" aria-label="\u5173\u95ED\u6587\u4EF6\u9762\u677F" title="\u5173\u95ED">' + wandFileIcon("x", { size: 16 }) + '</button></div></div><div class="file-side-panel-body"><div class="file-explorer-header"><button class="file-explorer-up" id="file-explorer-up" type="button" title="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55" aria-label="\u8FD4\u56DE\u4E0A\u7EA7\u76EE\u5F55">' + wandFileIcon("arrow-up", { size: 15 }) + '</button><input type="text" class="file-explorer-path" id="file-explorer-cwd" value="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" title="' + escapeHtml(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '" placeholder="\u8F93\u5165\u8DEF\u5F84\u5E76\u56DE\u8F66..." spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="\u5F53\u524D\u8DEF\u5F84\uFF0C\u53EF\u76F4\u63A5\u4FEE\u6539\u540E\u56DE\u8F66" /></div><div class="file-search-box"><span class="file-search-icon">' + wandFileIcon("search", { size: 14 }) + '</span><input type="text" id="file-search-input" class="file-search-input" placeholder="\u641C\u7D22\u5F53\u524D\u76EE\u5F55\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" /><button class="file-search-clear" id="file-search-clear" type="button" aria-label="\u6E05\u9664\u641C\u7D22" title="\u6E05\u9664">' + wandFileIcon("x", { size: 13 }) + '</button></div><div class="file-explorer" id="file-explorer">' + renderFileExplorer(selectedSession && selectedSession.cwd ? selectedSession.cwd : getConfigCwd()) + '</div></div></div><div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active"><div class="terminal-scale-overlay" aria-label="\u7EC8\u7AEF\u7F29\u653E\u63A7\u4EF6"><button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u7F29\u5C0F">\u2212</button><span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span><button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="\u653E\u5927">+</button><span class="terminal-scale-overlay-divider"></span><button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="\u5237\u65B0\u9875\u9762">\u21BB</button></div><button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? " visible" : "") + '" type="button" title="\u56DE\u5230\u5E95\u90E8" aria-label="\u56DE\u5230\u5E95\u90E8"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button></div><div id="chat-output" class="chat-container hidden"><div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div><button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="\u56DE\u5230\u6700\u65B0\u6D88\u606F" aria-label="\u56DE\u5230\u6700\u65B0\u6D88\u606F"><span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span><span class="chat-unread-bubble-count" aria-hidden="true"></span></button></div><div id="blank-chat" class="blank-chat' + (state.selectedId ? " hidden" : "") + '"><div class="blank-chat-inner"><div class="blank-chat-logo">W</div><h2 class="blank-chat-title">Wand</h2><p class="blank-chat-subtitle">\u652F\u6301\u7EC8\u7AEF PTY \u4F1A\u8BDD\u4E0E\u7ED3\u6784\u5316 chat \u4F1A\u8BDD\uFF0C\u4E24\u79CD\u6A21\u5F0F\u53EF\u5E76\u5B58\u3002</p><div class="blank-chat-tools"><button class="blank-chat-tool-btn" id="welcome-tool-claude" type="button"><span class="tool-icon">' + iconSvg("terminal", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7EC8\u7AEF\u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-codex" type="button"><span class="tool-icon tool-icon-text">\u2318</span>\u65B0\u5EFA Codex \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-opencode" type="button"><span class="tool-icon tool-icon-text">OC</span>\u65B0\u5EFA OpenCode \u4F1A\u8BDD</button><button class="blank-chat-tool-btn" id="welcome-tool-structured" type="button"><span class="tool-icon">' + iconSvg("chat", { size: 16, strokeWidth: 1.8 }) + '</span>\u65B0\u5EFA\u7ED3\u6784\u5316\u4F1A\u8BDD</button></div><div class="blank-chat-cwd-wrap"><div class="blank-chat-cwd" id="blank-chat-cwd" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" title="\u70B9\u51FB\u5207\u6362\u5DE5\u4F5C\u76EE\u5F55"><span class="blank-chat-cwd-icon">' + iconSvg("folder", { size: 13, strokeWidth: 1.8 }) + "</span>" + renderTailMarqueePath(getEffectiveCwd(), "blank-chat-cwd-path", ' id="blank-chat-cwd-path"') + '<span class="blank-chat-cwd-arrow">' + iconSvg("chevronDown", { size: 11, strokeWidth: 2 }) + '</span></div></div></div><div id="cross-session-queue-host"></div></div><div class="input-panel' + (state.selectedId ? "" : " hidden") + '"><div class="composer-top-row"><div id="todo-progress" class="todo-progress hidden"><button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="\u5C55\u5F00\u5F85\u529E\u5217\u8868"><div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div><div class="todo-progress-left"><span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0"><svg width="16" height="16" viewBox="0 0 36 36"><circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="4"/><circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="4" stroke-linecap="round"/></svg></span><span class="todo-progress-counter" id="todo-progress-counter"></span></div><div class="todo-progress-task-wrap"><span class="todo-progress-task" id="todo-progress-task"></span></div>' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</button></div><div class="todo-progress-body hidden" id="todo-progress-body"><ul class="todo-progress-list" id="todo-progress-list"></ul></div></div><div id="queue-bar-host" class="queue-bar-host" hidden></div><div class="input-composer-row"><div class="input-composer' + (String(currentDraft || "").trim() ? " has-text" : "") + '"><div class="composer-status-row" id="composer-status-row">' + renderAutoApproveChip(selectedSession) + '<span class="permission-actions hidden" id="permission-actions"><span class="permission-actions-label" id="permission-actions-label">\u7B49\u5F85\u6388\u6743</span><button id="approve-permission-btn" class="btn btn-permission btn-permission-approve" type="button">\u6279\u51C6</button><button id="deny-permission-btn" class="btn btn-permission btn-permission-deny" type="button">\u62D2\u7EDD</button></span>' + renderApprovalStatsBadge() + '</div><div class="composer-main-row"><div class="composer-actions-left"><button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="\u66F4\u591A" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' + iconSvg("plus", { size: 18, strokeWidth: 2.2 }) + '</button><input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none"></div><div class="composer-inline-config">' + renderComposerConfigControlsHtml(selectedSession) + '</div><div class="composer-input-wrap"><textarea id="input-box" class="input-textarea" aria-label="\u6D88\u606F\u8F93\u5165" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea><button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="\u4F18\u5316\u63D0\u793A\u8BCD" aria-label="\u4F18\u5316\u63D0\u793A\u8BCD">' + iconSvg("edit", { size: 13, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) + '<span class="prompt-optimize-label">\u4F18\u5316</span><span class="prompt-optimize-spinner" aria-hidden="true"></span></button></div><div class="composer-actions-right"><button id="stop-button" class="btn-circle btn-circle-stop hidden" type="button" title="\u505C\u6B62" aria-label="\u505C\u6B62\u751F\u6210"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg></button><button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-label="\u6309\u4F4F\u8BED\u97F3\u8F93\u5165" aria-pressed="false"' + (state.terminalInteractive ? " disabled" : "") + ">" + iconSvg("mic", { size: 19, strokeWidth: 2 }) + '</button><button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="\u53D1\u9001" aria-label="\u53D1\u9001\u6D88\u606F"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg></button></div></div><div id="attachment-preview" class="attachment-preview hidden"></div></div></div><div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="\u66F4\u591A\u64CD\u4F5C" aria-hidden="true"><button class="plus-popover-item" id="plus-attach-item" type="button">' + iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u4E0A\u4F20\u9644\u4EF6</span></button><button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' + iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) + '<span class="plus-popover-label">\u7EC8\u7AEF\u4EA4\u4E92</span><span class="plus-popover-toggle-state">' + (state.terminalInteractive ? "\u5F00" : "\u5173") + '</span></button><div class="plus-popover-sep" aria-hidden="true"></div><div class="plus-popover-trio-wrap">' + renderComposerConfigControlsHtml(selectedSession) + "</div></div>" + renderClaudeSkillsPickerHtml(selectedSession) + // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的 overflow:hidden）。
     // 按住录音时显示，逐字展示识别文字；松手填回输入框。默认 hidden。
     '<div class="voice-transcript-bubble hidden" id="voice-transcript-bubble" aria-live="polite"><div class="voice-transcript-text" id="voice-transcript-text"></div><div class="voice-transcript-hint" id="voice-transcript-hint"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="voice-transcript-status" id="voice-transcript-status">\u6B63\u5728\u8046\u542C\u2026\u4E0A\u6ED1\u53D6\u6D88</span></div><span class="voice-bubble-arrow" aria-hidden="true"></span></div><p id="action-error" class="error-message hidden"></p></div></main></div></div>';
   }
@@ -39546,7 +39548,7 @@
     if (bubble) bubble.classList.toggle("has-text", !!voiceState.transcript);
   }
   function startVoiceRecording(e) {
-    if (state.terminalInteractive || voiceState.recording) return;
+    if (state.terminalInteractive || voiceState.recording || state.promptOptimizeRequest && state.promptOptimizeRequest.sessionId === state.selectedId) return;
     if (e) {
       e.preventDefault();
       voiceState.startY = typeof e.clientY === "number" ? e.clientY : 0;
@@ -39618,6 +39620,7 @@
     if (bubble) bubble.classList.add("hidden");
   }
   function commitVoiceTranscript(text5) {
+    if (state.promptOptimizeRequest && state.promptOptimizeRequest.sessionId === state.selectedId) return;
     var clean = (text5 || "").trim();
     if (!clean) return;
     var box = document.getElementById("input-box");
@@ -39634,7 +39637,7 @@
   }
   function autoResizeInput(el) {
     if (!el) return;
-    var minHeight = 36;
+    var minHeight = 40;
     var computedMaxHeight = parseFloat(window.getComputedStyle(el).maxHeight || "");
     var maxHeight = Number.isFinite(computedMaxHeight) ? Math.max(minHeight, computedMaxHeight) : 120;
     var touchDevice = isTouchDevice();
@@ -39648,18 +39651,14 @@
       syncComposerHasText(el);
       return;
     }
-    var prevInlineTransition = el.style.transition;
-    var renderedHeight = el.getBoundingClientRect().height;
+    var previousScrollTop = el.scrollTop;
+    var caretAtEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
     el.style.overflowY = "hidden";
-    el.style.transition = "none";
     el.style.height = minHeight + "px";
     var contentHeight = el.scrollHeight;
     var newHeight = Math.max(minHeight, Math.min(contentHeight, maxHeight));
     var shouldScrollInside = contentHeight > maxHeight;
     var needsExpandedHeight = contentHeight > minHeight + 1;
-    el.style.height = renderedHeight + "px";
-    void el.offsetHeight;
-    el.style.transition = prevInlineTransition;
     el.style.height = newHeight + "px";
     el.style.minHeight = minHeight + "px";
     el.style.overflowY = shouldScrollInside || touchDevice ? "auto" : "hidden";
@@ -39667,7 +39666,12 @@
     el.classList.toggle("has-clipped-draft", shouldScrollInside);
     el.closest(".input-composer")?.classList.toggle("is-expanded", needsExpandedHeight);
     if (shouldScrollInside) {
-      syncInputBoxScroll(el);
+      if (caretAtEnd) {
+        syncInputBoxScroll(el);
+      } else {
+        var maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+        el.scrollTop = Math.min(previousScrollTop, maxScrollTop);
+      }
     } else {
       el.scrollTop = 0;
     }
@@ -40192,6 +40196,9 @@
     var selectedView = state.currentView;
     var value = inputBox ? inputBox.value : getDraftValueForSession(sessionId);
     var pendingAttachments = getPendingAttachments(sessionId);
+    if (state.promptOptimizeRequest && state.promptOptimizeRequest.sessionId === sessionId) {
+      return Promise.resolve();
+    }
     if (!sessionId || !canSendComposer(value, sessionId)) return Promise.resolve();
     var fingerprint = getComposerSubmissionFingerprint(value, pendingAttachments);
     var activeSubmissions = state.composerSubmissionsBySession[sessionId];
@@ -41244,6 +41251,10 @@
     var isCodex = selectedSession && selectedSession.provider === "codex";
     var isRunning = structured ? !!(selectedSession && selectedSession.structuredState && selectedSession.structuredState.inFlight) : !!selectedSession && selectedSession.status === "running";
     var composer = document.getElementById("input-box");
+    var composerShell = document.querySelector(".input-composer");
+    var promptOptimizeRequest = state.promptOptimizeRequest;
+    var promptOptimizeBusyForCurrent = !!(promptOptimizeRequest && promptOptimizeRequest.sessionId === state.selectedId);
+    var promptOptimizeBusyAnywhere = !!promptOptimizeRequest;
     var toggles = ["terminal-interactive-toggle-top"];
     toggles.forEach(function(id) {
       var toggle = document.getElementById(id);
@@ -41268,18 +41279,41 @@
       composer.placeholder = getComposerPlaceholder(selectedSession, state.terminalInteractive);
       composer.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
       composer.setAttribute("aria-disabled", composer.disabled ? "true" : "false");
-      composer.readOnly = false;
+      composer.readOnly = promptOptimizeBusyForCurrent;
+      composer.setAttribute("aria-readonly", composer.readOnly ? "true" : "false");
+      composer.setAttribute("aria-busy", promptOptimizeBusyForCurrent ? "true" : "false");
       composer.classList.toggle(
         "is-terminal-passthrough",
         !!state.terminalInteractive && !document.documentElement.classList.contains("is-wand-embed-terminal")
       );
     }
+    if (composerShell) {
+      composerShell.classList.toggle("is-optimizing", promptOptimizeBusyForCurrent);
+    }
+    var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");
+    if (promptOptimizeBtn) {
+      promptOptimizeBtn.disabled = promptOptimizeBusyAnywhere;
+      promptOptimizeBtn.classList.toggle("is-loading", promptOptimizeBusyForCurrent);
+      promptOptimizeBtn.setAttribute("aria-busy", promptOptimizeBusyForCurrent ? "true" : "false");
+      promptOptimizeBtn.setAttribute(
+        "aria-label",
+        promptOptimizeBusyForCurrent ? "\u6B63\u5728\u4F18\u5316\u63D0\u793A\u8BCD" : promptOptimizeBusyAnywhere ? "\u5176\u4ED6\u4F1A\u8BDD\u6B63\u5728\u4F18\u5316\u63D0\u793A\u8BCD" : "\u4F18\u5316\u63D0\u793A\u8BCD"
+      );
+      promptOptimizeBtn.setAttribute(
+        "title",
+        promptOptimizeBusyForCurrent ? "\u6B63\u5728\u4F18\u5316\u2026" : promptOptimizeBusyAnywhere ? "\u5176\u4ED6\u4F1A\u8BDD\u6B63\u5728\u4F18\u5316\u2026" : "\u4F18\u5316\u63D0\u793A\u8BCD"
+      );
+      var promptOptimizeLabel = promptOptimizeBtn.querySelector(".prompt-optimize-label");
+      if (promptOptimizeLabel) {
+        promptOptimizeLabel.textContent = promptOptimizeBusyForCurrent ? "\u4F18\u5316\u4E2D" : "\u4F18\u5316";
+      }
+    }
     var voiceBtn = document.getElementById("voice-record-btn");
     if (voiceBtn) {
-      voiceBtn.disabled = state.terminalInteractive;
+      voiceBtn.disabled = state.terminalInteractive || promptOptimizeBusyForCurrent;
       voiceBtn.setAttribute("aria-disabled", voiceBtn.disabled ? "true" : "false");
     }
-    if (state.terminalInteractive && voiceState.recording) {
+    if ((state.terminalInteractive || promptOptimizeBusyForCurrent) && voiceState.recording) {
       voiceState.recording = false;
       resetVoiceRecordingUI();
     }
@@ -41292,9 +41326,9 @@
       var composerCanSend = canSendComposer(composerValue, state.selectedId);
       var activeSubmissions = state.selectedId && state.composerSubmissionsBySession[state.selectedId];
       var duplicateInFlight = !!(composerCanSend && activeSubmissions && activeSubmissions[getComposerSubmissionFingerprint(composerValue, currentAttachments)]);
-      sendBtn.disabled = !composerCanSend || duplicateInFlight || sessionUnavailable;
+      sendBtn.disabled = promptOptimizeBusyForCurrent || !composerCanSend || duplicateInFlight || sessionUnavailable;
       sendBtn.setAttribute("aria-disabled", sendBtn.disabled ? "true" : "false");
-      sendBtn.setAttribute("title", structured ? structuredInFlight ? "\u6392\u961F\u53D1\u9001\uFF08\u5F53\u524D\u56DE\u590D\u7ED3\u675F\u540E\u5904\u7406\uFF09" : "\u53D1\u9001" : isCodex ? isRunning ? "\u53D1\u9001\u7ED9 Codex" : "Codex \u4F1A\u8BDD\u5DF2\u7ED3\u675F" : !selectedSession || isRunning || canResumeOnSend ? "\u53D1\u9001" : "\u4F1A\u8BDD\u5DF2\u7ED3\u675F");
+      sendBtn.setAttribute("title", promptOptimizeBusyForCurrent ? "\u6B63\u5728\u4F18\u5316\u63D0\u793A\u8BCD" : structured ? structuredInFlight ? "\u6392\u961F\u53D1\u9001\uFF08\u5F53\u524D\u56DE\u590D\u7ED3\u675F\u540E\u5904\u7406\uFF09" : "\u53D1\u9001" : isCodex ? isRunning ? "\u53D1\u9001\u7ED9 Codex" : "Codex \u4F1A\u8BDD\u5DF2\u7ED3\u675F" : !selectedSession || isRunning || canResumeOnSend ? "\u53D1\u9001" : "\u4F1A\u8BDD\u5DF2\u7ED3\u675F");
       sendBtn.classList.toggle("queue-mode", structuredInFlight);
     }
     var stopBtn = document.getElementById("stop-button");
@@ -45092,7 +45126,7 @@
     if (isStructuredSession2(session) && session.structuredState && session.structuredState.inFlight) {
       return "\u56DE\u590D\u4E2D\uFF0C\u53EF\u7EE7\u7EED\u8F93\u5165";
     }
-    return "\u6253\u5B57\u6216\u6309\u4F4F\u8BF4\u8BDD";
+    return document.documentElement.classList.contains("is-wand-app") ? "\u6253\u5B57\u6216\u6309\u4F4F\u8BF4\u8BDD" : "\u8F93\u5165\u6D88\u606F\u2026";
   }
   function getSupportedModes(tool) {
     if (tool === "codex") {
@@ -46486,21 +46520,58 @@
     updateLayoutState();
     scheduleTerminalRefitAfterPaddingTransition();
   }
-  function setPlusPopoverOpen(open) {
+  function focusFirstPlusPopoverControl(popover) {
+    var firstControl = popover && popover.querySelector(
+      'button:not([disabled]):not(.hidden), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (!firstControl) return;
+    try {
+      firstControl.focus({ preventScroll: true });
+    } catch (_) {
+      firstControl.focus();
+    }
+  }
+  function setPlusPopoverOpen(open, focusFirst4 = false) {
     var popover = document.getElementById("composer-plus-popover");
     var btn = document.getElementById("attach-btn");
     state.plusPopoverOpen = !!open;
-    if (popover) popover.classList.toggle("hidden", !open);
+    if (popover) {
+      if (open) {
+        popover.classList.toggle("is-keyboard-open", !!focusFirst4);
+      }
+      popover.classList.toggle("hidden", !open);
+      popover.setAttribute("aria-hidden", open ? "false" : "true");
+    }
     if (btn) {
       btn.classList.toggle("active", !!open);
       btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? "\u5173\u95ED\u66F4\u591A\u64CD\u4F5C" : "\u66F4\u591A\u64CD\u4F5C");
+      btn.setAttribute("title", open ? "\u5173\u95ED" : "\u66F4\u591A");
+    }
+    if (open && focusFirst4 && popover) {
+      requestAnimationFrame(function() {
+        if (state.plusPopoverOpen && popover.isConnected) {
+          focusFirstPlusPopoverControl(popover);
+        }
+      });
     }
   }
-  function togglePlusPopover() {
-    setPlusPopoverOpen(!state.plusPopoverOpen);
+  function togglePlusPopover(focusFirst4 = false) {
+    setPlusPopoverOpen(!state.plusPopoverOpen, !state.plusPopoverOpen && !!focusFirst4);
   }
-  function closePlusPopover() {
-    if (state.plusPopoverOpen) setPlusPopoverOpen(false);
+  function closePlusPopover(restoreFocus = false) {
+    if (!state.plusPopoverOpen) return;
+    var btn = document.getElementById("attach-btn");
+    var popover = document.getElementById("composer-plus-popover");
+    var shouldRestoreFocus = !!restoreFocus || !!(popover && popover.contains(document.activeElement));
+    if (shouldRestoreFocus && btn) {
+      try {
+        btn.focus({ preventScroll: true });
+      } catch (_) {
+        btn.focus();
+      }
+    }
+    setPlusPopoverOpen(false, false);
   }
   function dismissDrawerIfOverlay() {
     if (isMobileLayout() && state.sessionsDrawerOpen) {
@@ -46901,6 +46972,10 @@
       return;
     }
     if (event.key === "Enter") {
+      if (state.promptOptimizeRequest && state.promptOptimizeRequest.sessionId === state.selectedId) {
+        event.preventDefault();
+        return;
+      }
       if (event.shiftKey) {
         event.preventDefault();
         var inputBox = document.getElementById("input-box");
@@ -47088,7 +47163,7 @@
     for (var i = 0; i < items.length; i++) {
       var a = items[i];
       var thumb = a.previewUrl ? '<img src="' + escapeHtml(a.previewUrl) + '" alt="">' : '<span class="att-icon">' + iconSvg("file", { size: 13, strokeWidth: 1.7 }) + "</span>";
-      html += '<span class="attachment-pill" data-index="' + i + '">' + thumb + '<span class="att-name" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span><span class="att-size">' + formatFileSize2(a.size) + '</span><button class="att-remove" data-index="' + i + '" title="\u79FB\u9664">\xD7</button></span>';
+      html += '<span class="attachment-pill" data-index="' + i + '">' + thumb + '<span class="att-name" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span><span class="att-size">' + formatFileSize2(a.size) + '</span><button class="att-remove" data-index="' + i + '" type="button" title="\u79FB\u9664" aria-label="\u79FB\u9664\u9644\u4EF6 ' + escapeHtml(a.name) + '">\xD7</button></span>';
     }
     bar.innerHTML = html;
     bar.querySelectorAll(".att-remove").forEach(function(btn) {
@@ -47197,6 +47272,9 @@
   }
   function replaceComposerSelection2(inputBox, replacement) {
     if (!inputBox) return "";
+    if (inputBox.readOnly || state.promptOptimizeRequest && state.promptOptimizeRequest.sessionId === state.selectedId) {
+      return inputBox.value;
+    }
     var start = inputBox.selectionStart === null ? inputBox.value.length : inputBox.selectionStart;
     var end = inputBox.selectionEnd === null ? start : inputBox.selectionEnd;
     if (typeof inputBox.setRangeText === "function") {
@@ -47232,12 +47310,10 @@
     var id = sessionId === void 0 ? state.selectedId : sessionId;
     return !!String(value || "").trim() || getPendingAttachments(id).length > 0;
   }
-  var promptOptimizeInFlight = false;
   function optimizePromptText() {
-    if (promptOptimizeInFlight) return;
+    if (state.promptOptimizeRequest) return;
     var inputBox = document.getElementById("input-box");
     var btn = document.getElementById("prompt-optimize-btn");
-    var composer = document.querySelector(".input-composer");
     if (!inputBox) return;
     var raw = (inputBox.value || "").trim();
     var requestSessionId = state.selectedId;
@@ -47246,16 +47322,11 @@
       inputBox.focus();
       return;
     }
-    promptOptimizeInFlight = true;
-    if (btn) {
-      btn.classList.add("is-loading");
-      btn.disabled = true;
-      btn.setAttribute("title", "\u6B63\u5728\u4F18\u5316\u2026");
-    }
-    if (composer) composer.classList.add("is-optimizing");
-    inputBox.setAttribute("aria-busy", "true");
-    var prevReadOnly = inputBox.readOnly;
-    inputBox.readOnly = true;
+    var request2 = { sessionId: requestSessionId };
+    var focusWasOnOptimizeButton = document.activeElement === btn;
+    var shouldKeepInputFocused = document.activeElement === inputBox || focusWasOnOptimizeButton;
+    state.promptOptimizeRequest = request2;
+    updateInteractiveControls3();
     var payload = { text: raw };
     if (requestSessionId) payload.sessionId = requestSessionId;
     fetch("/api/optimize-prompt", {
@@ -47264,11 +47335,20 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     }).then(function(res) {
-      return res.json().then(function(data) {
-        return { ok: res.ok, data };
+      return res.text().then(function(body) {
+        var data = {};
+        if (body) {
+          try {
+            data = JSON.parse(body);
+          } catch (_) {
+          }
+        }
+        return { ok: res.ok, status: res.status, data };
       });
     }).then(function(result) {
-      if (!result.ok) throw new Error(result.data && result.data.error || "\u63D0\u793A\u8BCD\u4F18\u5316\u5931\u8D25\u3002");
+      if (!result.ok) {
+        throw new Error(result.data && result.data.error || "\u63D0\u793A\u8BCD\u4F18\u5316\u5931\u8D25\uFF08HTTP " + result.status + "\uFF09\u3002");
+      }
       var optimized = result.data && result.data.optimized || "";
       if (!optimized) throw new Error("Claude \u8FD4\u56DE\u4E3A\u7A7A\u3002");
       if (requestSessionId && state.selectedId !== requestSessionId) {
@@ -47278,79 +47358,56 @@
         }
         return;
       }
-      animateOptimizedReplace(inputBox, optimized, requestSessionId);
+      var currentInput = document.getElementById("input-box");
+      if (currentInput) {
+        animateOptimizedReplace(currentInput, optimized, requestSessionId);
+      }
     }).catch(function(error) {
       if (typeof showToast === "function") showToast(error && error.message || "\u63D0\u793A\u8BCD\u4F18\u5316\u5931\u8D25\u3002", "error");
-      if (btn) {
-        btn.classList.remove("is-loading");
-        btn.classList.add("is-shake");
+      var currentBtn = document.getElementById("prompt-optimize-btn");
+      if (currentBtn && state.selectedId === requestSessionId) {
+        currentBtn.classList.add("is-error");
         setTimeout(function() {
-          if (btn) btn.classList.remove("is-shake");
-        }, 400);
+          if (currentBtn.isConnected) currentBtn.classList.remove("is-error");
+        }, 800);
       }
     }).finally(function() {
-      promptOptimizeInFlight = false;
-      if (btn) {
-        btn.classList.remove("is-loading");
-        btn.disabled = false;
-        btn.setAttribute("title", "\u63D0\u793A\u8BCD\u4F18\u5316\uFF08AI\uFF09");
+      if (state.promptOptimizeRequest === request2) {
+        state.promptOptimizeRequest = null;
       }
-      if (composer) composer.classList.remove("is-optimizing");
-      inputBox.removeAttribute("aria-busy");
-      inputBox.readOnly = prevReadOnly;
+      updateInteractiveControls3();
+      if (shouldKeepInputFocused && state.selectedId === requestSessionId) {
+        var currentInput = document.getElementById("input-box");
+        if (currentInput) {
+          try {
+            currentInput.focus({ preventScroll: true });
+          } catch (_) {
+            currentInput.focus();
+          }
+        }
+      }
     });
   }
   function animateOptimizedReplace(inputBox, finalText, sessionId) {
     if (!inputBox) return;
     var targetSessionId = sessionId || state.selectedId;
+    var optimized = String(finalText || "");
+    setDraftValueForSession(targetSessionId, optimized, true);
     if (targetSessionId && state.selectedId !== targetSessionId) {
-      setDraftValueForSession(targetSessionId, finalText, true);
       return;
     }
-    var chars = Array.from(finalText);
-    var total = chars.length;
-    if (total === 0) {
-      inputBox.value = "";
-      setDraftValueForSession(targetSessionId, "", true);
-      autoResizeInput(inputBox);
-      return;
-    }
-    var totalDuration = Math.min(700, Math.max(220, total * 8));
-    var stepCount = Math.min(total, 60);
-    var charsPerStep = Math.ceil(total / stepCount);
-    var stepDelay = totalDuration / stepCount;
-    var i = 0;
-    inputBox.value = "";
+    inputBox.value = optimized;
     autoResizeInput(inputBox);
-    function tick() {
-      if (targetSessionId && state.selectedId !== targetSessionId) {
-        setDraftValueForSession(targetSessionId, finalText, true);
-        return;
-      }
-      if (document.getElementById("input-box") !== inputBox) {
-        setDraftValueForSession(targetSessionId, finalText, true);
-        return;
-      }
-      i = Math.min(total, i + charsPerStep);
-      inputBox.value = chars.slice(0, i).join("");
-      autoResizeInput(inputBox);
-      if (i < total) {
-        setTimeout(tick, stepDelay);
-      } else {
-        setDraftValueForSession(targetSessionId, finalText, true);
-        try {
-          inputBox.setSelectionRange(finalText.length, finalText.length);
-        } catch (e) {
-        }
-      }
+    try {
+      inputBox.setSelectionRange(optimized.length, optimized.length);
+    } catch (e) {
     }
-    tick();
   }
   function syncComposerHasText(el) {
     var composer = document.querySelector(".input-composer");
     if (!composer) return;
     var inputBox = el || document.getElementById("input-box");
-    var hasText = !!(inputBox && inputBox.value && inputBox.value.length > 0);
+    var hasText = !!(inputBox && String(inputBox.value || "").trim());
     composer.classList.toggle("has-text", hasText);
     updateInteractiveControls3();
   }

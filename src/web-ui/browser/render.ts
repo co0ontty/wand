@@ -783,12 +783,12 @@ export function renderAppShell() {
           '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
           // 输入主行：桌面端在 + 与 textarea 之间显示模式 / 模型 / 思考三个低噪声控件；
           // 窄屏隐藏这组三件套，统一从 + 弹层调整，保证输入区和发送键不被挤压。
-          //  · 附件和提示词优化收进 + 弹层，避免浮动按钮遮住长文本。
+          //  · 附件留在 + 弹层；提示词优化作为正文区的低噪声尾部动作。
           //  · 语音模式 UI 保留，等待接入 STT。
           //  · 自动批准 / 权限操作行统一搬到 textarea 上方的状态行，
           //    输入主行保持极简。
           '<div class="input-composer-row">' +
-          '<div class="input-composer' + (currentDraft ? ' has-text' : '') + '">' +
+          '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + '">' +
             // 顶部状态行：自动批准 / 权限审批 / 统计 —— 仅在有内容时占位，
             // 否则折叠成 0 高度。避免与下方"主输入行"挤在一行。
             '<div class="composer-status-row" id="composer-status-row">' +
@@ -804,7 +804,7 @@ export function renderAppShell() {
             '<div class="composer-main-row">' +
               '<div class="composer-actions-left">' +
                 // 加号按钮 —— 点击向上展开 popover：附件 / 终端交互 / 三件套（模式·模型·思考）
-                '<button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="更多" aria-label="更多" aria-haspopup="dialog" aria-expanded="false">' +
+                '<button id="attach-btn" class="btn-circle btn-circle-action" type="button" title="更多" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
                   iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
                 '</button>' +
                 // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
@@ -815,6 +815,11 @@ export function renderAppShell() {
               '</div>' +
               '<div class="composer-input-wrap">' +
                 '<textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
+                '<button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
+                  iconSvg("edit", { size: 13, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
+                  '<span class="prompt-optimize-label">优化</span>' +
+                  '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
+                '</button>' +
               '</div>' +
               '<div class="composer-actions-right">' +
                 // 停止按钮默认隐藏；updateInteractiveControls() 根据 computeRunningSignal
@@ -828,7 +833,7 @@ export function renderAppShell() {
                 '</button>' +
                 // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队点输入框上方那条气泡。
                 '<button id="send-input-button" class="btn-circle btn-circle-send" type="button" title="发送" aria-label="发送消息">' +
-                  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
+                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>' +
                 '</button>' +
               '</div>' +
             '</div>' +
@@ -838,15 +843,10 @@ export function renderAppShell() {
           // 加号气泡 —— 浮在 + 按钮上方（.input-composer 之外，绕开它的 overflow:hidden）。
           // 内容：附件 / 终端交互 / 三件套（模式·模型·思考）。默认 hidden，点 + 切换；
           // 点 popover 外部 / Esc / 选完任一项后自动关闭。
-          '<div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="更多操作">' +
+          '<div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="更多操作" aria-hidden="true">' +
             '<button class="plus-popover-item" id="plus-attach-item" type="button">' +
               iconSvg("paperclip", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +
               '<span class="plus-popover-label">上传附件</span>' +
-            '</button>' +
-            '<button class="plus-popover-item prompt-optimize-menu-item" id="prompt-optimize-btn" type="button" title="提示词优化（AI）">' +
-              iconSvg("edit", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon prompt-optimize-icon" }) +
-              '<span class="plus-popover-label">优化提示词</span>' +
-              '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
             '</button>' +
             '<button class="plus-popover-item' + (state.terminalInteractive ? " is-on" : "") + '" id="terminal-interactive-toggle-top" type="button" aria-pressed="' + (state.terminalInteractive ? "true" : "false") + '">' +
               iconSvg("keyboard", { size: 14, strokeWidth: 1.8, cls: "plus-popover-icon" }) +

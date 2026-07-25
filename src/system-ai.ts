@@ -32,7 +32,9 @@ export function normalizeSystemAiConfig(value: unknown, fallback?: SystemAiConfi
     apiKey: typeof raw.apiKey === "string" ? raw.apiKey.trim() : fallback?.apiKey ?? "",
     model: typeof raw.model === "string" ? raw.model.trim() : fallback?.model ?? "",
     authHeader: raw.authHeader === "x-api-key" ? "x-api-key" : "bearer",
-    source: raw.source === "claude" || raw.source === "codex" || raw.source === "opencode" ? raw.source : "custom",
+    source: raw.source === "claude" || raw.source === "codex" || raw.source === "opencode" || raw.source === "grok"
+      ? raw.source
+      : "custom",
   };
   if (Array.isArray(raw.fallbacks)) {
     normalized.fallbacks = raw.fallbacks
@@ -53,10 +55,73 @@ export function normalizeSystemAiConfig(value: unknown, fallback?: SystemAiConfi
   return normalized;
 }
 
+function tryNormalizeSystemAiConfig(value: unknown): SystemAiConfig | null {
+  try {
+    return normalizeSystemAiConfig(value);
+  } catch {
+    // A stale or partially edited tool profile must not prevent the remaining
+    // APIs—or the final current-session CLI fallback—from being tried.
+    return null;
+  }
+}
+
+function systemAiProfileKey(profile: SystemAiConfig): string {
+  return [
+    profile.protocol,
+    profile.baseUrl,
+    profile.apiKey,
+    profile.model,
+    profile.authHeader ?? "bearer",
+  ].join("\0");
+}
+
 function readJson(filePath: string): Record<string, unknown> | null {
   if (!existsSync(filePath)) return null;
   try {
     return JSON.parse(readFileSync(filePath, "utf8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function parseTomlString(raw: string): string | null {
+  const value = raw.trim();
+  if (value.startsWith('"')) {
+    const quoted = /^"(?:\\.|[^"\\])*"/.exec(value)?.[0];
+    if (!quoted) return null;
+    try {
+      const parsed = JSON.parse(quoted);
+      return typeof parsed === "string" ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  if (value.startsWith("'")) {
+    const end = value.indexOf("'", 1);
+    return end < 0 ? null : value.slice(1, end);
+  }
+  return null;
+}
+
+function readTomlStringSections(filePath: string): Map<string, Map<string, string>> | null {
+  if (!existsSync(filePath)) return null;
+  try {
+    const sections = new Map<string, Map<string, string>>();
+    let section = "";
+    sections.set(section, new Map());
+    for (const line of readFileSync(filePath, "utf8").split(/\r?\n/)) {
+      const sectionMatch = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/.exec(line);
+      if (sectionMatch) {
+        section = sectionMatch[1]!.trim();
+        if (!sections.has(section)) sections.set(section, new Map());
+        continue;
+      }
+      const assignment = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.+)$/.exec(line);
+      if (!assignment) continue;
+      const value = parseTomlString(assignment[2]!);
+      if (value !== null) sections.get(section)!.set(assignment[1]!, value);
+    }
+    return sections;
   } catch {
     return null;
   }
@@ -70,7 +135,7 @@ function discoverClaude(home: string): SystemAiConfig | null {
   const baseUrl = typeof env.ANTHROPIC_BASE_URL === "string" ? env.ANTHROPIC_BASE_URL : "https://api.anthropic.com";
   const model = typeof settings?.model === "string" ? settings.model : "";
   if (!apiKey || !model) return null;
-  return normalizeSystemAiConfig({
+  return tryNormalizeSystemAiConfig({
     enabled: true, protocol: "anthropic", baseUrl, apiKey, model,
     authHeader: typeof env.ANTHROPIC_AUTH_TOKEN === "string" ? "bearer" : "x-api-key",
     source: "claude",
@@ -94,7 +159,7 @@ function discoverOpenCode(home: string): SystemAiConfig[] {
       ? (selectedModel.includes("/") ? selectedModel.slice(selectedModel.indexOf("/") + 1) : selectedModel)
       : typeof provider?.model === "string" ? provider.model : Object.keys(models)[0] ?? "";
     if (!apiKey || !baseUrl || !configuredModel) continue;
-    found.push(normalizeSystemAiConfig({
+    const profile = tryNormalizeSystemAiConfig({
       enabled: true,
       protocol: "openai",
       baseUrl,
@@ -102,7 +167,8 @@ function discoverOpenCode(home: string): SystemAiConfig[] {
       model: configuredModel,
       authHeader: "bearer",
       source: "opencode",
-    }));
+    });
+    if (profile) found.push(profile);
   }
   return found;
 }
@@ -119,7 +185,37 @@ function discoverCodex(home: string): SystemAiConfig | null {
     baseUrl = /^(?:base_url|baseURL)\s*=\s*["']([^"']+)["']/m.exec(toml)?.[1] ?? baseUrl;
   } catch { /* optional config */ }
   if (!model) return null;
-  return normalizeSystemAiConfig({ enabled: true, protocol: "openai", baseUrl, apiKey, model, authHeader: "bearer", source: "codex" });
+  return tryNormalizeSystemAiConfig({ enabled: true, protocol: "openai", baseUrl, apiKey, model, authHeader: "bearer", source: "codex" });
+}
+
+function discoverGrok(home: string): SystemAiConfig[] {
+  const sections = readTomlStringSections(path.join(home, ".grok", "config.toml"));
+  if (!sections) return [];
+  const defaultProfile = sections.get("models")?.get("default") ?? "";
+  const modelSections = [...sections.entries()].filter(([name]) => name.startsWith("model."));
+  const orderedSections = [
+    ...modelSections.filter(([name]) => name === `model.${defaultProfile}`),
+    ...modelSections.filter(([name]) => name !== `model.${defaultProfile}`),
+  ];
+  const found: SystemAiConfig[] = [];
+  for (const [section, values] of orderedSections) {
+    if (values.get("api_backend")?.trim().toLowerCase() !== "chat_completions") continue;
+    const apiKey = values.get("api_key") ?? "";
+    const baseUrl = values.get("base_url") ?? "";
+    const model = values.get("model") ?? section.slice("model.".length);
+    if (!apiKey || !baseUrl || !model) continue;
+    const profile = tryNormalizeSystemAiConfig({
+      enabled: true,
+      protocol: "openai",
+      baseUrl,
+      apiKey,
+      model,
+      authHeader: "bearer",
+      source: "grok",
+    });
+    if (profile) found.push(profile);
+  }
+  return found;
 }
 
 /** Copy every usable direct-API profile from the user's configured CLIs. */
@@ -128,14 +224,21 @@ export function discoverCliSystemAiConfigs(preferred?: SessionProvider, home = o
     claude: (dir: string) => [discoverClaude(dir)].filter((item): item is SystemAiConfig => item !== null),
     codex: (dir: string) => [discoverCodex(dir)].filter((item): item is SystemAiConfig => item !== null),
     opencode: discoverOpenCode,
+    grok: discoverGrok,
   } as const;
-  const order: SessionProvider[] = [preferred ?? "claude", "claude", "opencode", "codex"];
+  const order: SessionProvider[] = [preferred ?? "claude", "claude", "opencode", "grok", "codex"];
   const found: SystemAiConfig[] = [];
   const seen = new Set<string>();
   for (const provider of [...new Set(order)]) {
-    if (provider === "grok" || provider === "qoder") continue;
-    for (const profile of discoverers[provider](home)) {
-      const key = [profile.protocol, profile.baseUrl, profile.apiKey, profile.model].join("\0");
+    if (provider === "qoder") continue;
+    let discovered: SystemAiConfig[];
+    try {
+      discovered = discoverers[provider](home);
+    } catch {
+      continue;
+    }
+    for (const profile of discovered) {
+      const key = systemAiProfileKey(profile);
       if (seen.has(key)) continue;
       seen.add(key);
       found.push(profile);
@@ -155,13 +258,40 @@ export function systemAiProfiles(config: SystemAiConfig | undefined, forceEnable
   const candidates = [config, ...(config.fallbacks ?? [])];
   const seen = new Set<string>();
   return candidates.flatMap((candidate) => {
-    const normalized = normalizeSystemAiConfig({ ...candidate, enabled: true, fallbacks: undefined });
+    const normalized = tryNormalizeSystemAiConfig({ ...candidate, enabled: true, fallbacks: undefined });
+    if (!normalized) return [];
     if (!normalized.baseUrl || !normalized.apiKey || !normalized.model) return [];
-    const key = [normalized.protocol, normalized.baseUrl, normalized.apiKey, normalized.model].join("\0");
+    const key = systemAiProfileKey(normalized);
     if (seen.has(key)) return [];
     seen.add(key);
     return [normalized];
   });
+}
+
+/**
+ * Flatten and combine direct-API groups in priority order. Dynamically discovered
+ * profiles can be passed first, followed by stored/legacy settings.
+ */
+export function mergeSystemAiConfigs(
+  ...groups: Array<SystemAiConfig | SystemAiConfig[] | undefined>
+): SystemAiConfig | undefined {
+  const profiles: SystemAiConfig[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const config of Array.isArray(group) ? group : group ? [group] : []) {
+      for (const profile of systemAiProfiles(config, true)) {
+        const key = systemAiProfileKey(profile);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        profiles.push({ ...profile, enabled: true, fallbacks: undefined });
+      }
+    }
+  }
+  const [primary, ...fallbacks] = profiles;
+  if (!primary) return undefined;
+  const merged: SystemAiConfig = { ...primary, enabled: true };
+  if (fallbacks.length) merged.fallbacks = fallbacks;
+  return merged;
 }
 
 function endpoint(baseUrl: string, protocol: SystemAiProtocol): string {
@@ -169,9 +299,9 @@ function endpoint(baseUrl: string, protocol: SystemAiProtocol): string {
   const pathName = url.pathname.replace(/\/+$/, "");
   const fullSuffix = protocol === "anthropic" ? "/v1/messages" : "/v1/chat/completions";
   const shortSuffix = protocol === "anthropic" ? "/messages" : "/chat/completions";
-  if (pathName.toLowerCase().endsWith(fullSuffix)) {
+  if (pathName.toLowerCase().endsWith(shortSuffix)) {
     url.pathname = pathName;
-  } else if (pathName.toLowerCase().endsWith("/v1")) {
+  } else if (/\/v\d+(?:\.\d+)?$/i.test(pathName)) {
     url.pathname = `${pathName}${shortSuffix}`;
   } else {
     url.pathname = `${pathName}${fullSuffix}`;

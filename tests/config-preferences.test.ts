@@ -57,14 +57,12 @@ test("commit CLI preference rejects unsupported commands", () => {
   );
 });
 
-test("commit direct API preferences reject incomplete and non-object profiles", () => {
+test("commit API source allows runtime discovery while system AI still rejects non-object profiles", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorage;
   const config = defaultConfig();
 
-  assert.throws(
-    () => writePreferenceToStorage(config, storage, "commitAiSource", "api"),
-    /必须先填写 API 地址、API Key 和模型/,
-  );
+  writePreferenceToStorage(config, storage, "commitAiSource", "api");
+  assert.equal(config.commitAiSource, "api");
   assert.throws(
     () => writePreferenceToStorage(config, storage, "systemAi", "not-an-object"),
     /systemAi 必须是对象/,

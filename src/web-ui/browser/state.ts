@@ -140,6 +140,10 @@ export var state: AppState = {
   // second gesture for the same captured payload reuses the first submission,
   // while a newly typed payload can still enter the structured-session queue.
   composerSubmissionsBySession: {},
+  // Prompt optimization is global because the backing system-AI request is
+  // shared. The session id keeps only the owning composer read-only while a
+  // response may safely finish in the background after a session switch.
+  promptOptimizeRequest: null,
   isSyncingInputBox: false,
   loginPending: false,
   loginChecked: false,

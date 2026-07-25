@@ -208,7 +208,7 @@ test("structured session switches never reveal or restore stale PTY chat", async
   await expect(chat).not.toContainText("PTY_STALE");
 });
 
-test("voice input uses its own hold button without hijacking textarea gestures", async ({ page }) => {
+test("web composer hides the native-only voice affordance", async ({ page }) => {
   await login(page);
 
   const input = page.locator("#input-box");
@@ -217,27 +217,12 @@ test("voice input uses its own hold button without hijacking textarea gestures",
 
   await expect(voiceButton).toBeAttached();
   await expect(voiceButton).toHaveClass(/btn-circle-voice/);
-  expect(await voiceButton.evaluate((element) => ({
-    insideComposer: !!element.closest(".input-composer"),
-    insideComposerRow: !!element.closest(".input-composer-row"),
-    beforeSend: element.nextElementSibling?.id === "send-input-button",
-  }))).toEqual({ insideComposer: true, insideComposerRow: true, beforeSend: true });
-  const hitArea = await voiceButton.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { width: Number.parseFloat(style.width), height: Number.parseFloat(style.height) };
-  });
-  expect(hitArea.width).toBeGreaterThanOrEqual(44);
-  expect(hitArea.height).toBeGreaterThanOrEqual(44);
+  await expect(page.locator("html")).not.toHaveClass(/is-wand-app/);
+  expect(await voiceButton.evaluate((element) => getComputedStyle(element).display)).toBe("none");
+  await expect(input).toHaveAttribute("placeholder", "输入消息…");
 
   await input.dispatchEvent("pointerdown", { pointerId: 11, clientY: 240 });
   await page.waitForTimeout(220);
-  await expect(transcript).toHaveClass(/hidden/);
-  await expect(voiceButton).toHaveAttribute("aria-pressed", "false");
-
-  await voiceButton.dispatchEvent("pointerdown", { pointerId: 12, clientY: 240 });
-  await expect(transcript).not.toHaveClass(/hidden/);
-  await expect(voiceButton).toHaveAttribute("aria-pressed", "true");
-  await voiceButton.dispatchEvent("pointerup", { pointerId: 12, clientY: 240 });
   await expect(transcript).toHaveClass(/hidden/);
   await expect(voiceButton).toHaveAttribute("aria-pressed", "false");
 });

@@ -176,11 +176,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
   });
 
   app.post("/api/settings/system-ai/import", requireAdmin, (req, res) => {
-    const body = (req.body ?? {}) as { source?: unknown };
-    const source = body.source === "codex" || body.source === "opencode" || body.source === "claude"
-      ? body.source
-      : config.commitCli;
-    const imported = discoverCliSystemAiConfigs(source);
+    const imported = discoverCliSystemAiConfigs();
     if (!imported.length) {
       res.status(404).json({ error: "没有在已配置的 CLI 文件中找到可直连的 API 地址、密钥和模型。" });
       return;

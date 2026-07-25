@@ -147,7 +147,7 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal(invalidSystemAi.status, 400);
     assert.match((await invalidSystemAi.json() as { error: string }).error, /systemAi 必须是对象/);
 
-    const incompleteDirectApi = await fetch(`${baseUrl}/api/settings/config`, {
+    const autoDiscoveredDirectApi = await fetch(`${baseUrl}/api/settings/config`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -155,9 +155,8 @@ test("settings validate atomically, persist without secrets, and password rotati
         systemAi: { enabled: false, baseUrl: "", apiKey: "", model: "", fallbacks: [] },
       }),
     });
-    assert.equal(incompleteDirectApi.status, 400);
-    assert.match((await incompleteDirectApi.json() as { error: string }).error, /必须先填写 API 地址、API Key 和模型/);
-    assert.equal(config.commitAiSource, "cli");
+    assert.equal(autoDiscoveredDirectApi.status, 200);
+    assert.equal(config.commitAiSource, "api");
 
     const valid = await fetch(`${baseUrl}/api/settings/config`, {
       method: "POST",

@@ -147,7 +147,7 @@ test("composer sendability and selection replacements share one state path", asy
     value: "abXYef",
     selectionStart: 4,
     selectionEnd: 4,
-    height: "36px",
+    height: "40px",
     hasText: true,
   });
   await expect(send).toBeEnabled();
@@ -176,6 +176,172 @@ test("composer sendability and selection replacements share one state path", asy
     buffer: Buffer.from("attachment"),
   });
   await expect(send).toBeEnabled();
+});
+
+test("composer more menu follows keyboard focus and returns it on close", async ({ page }) => {
+  const session = composerSession("composer-more-menu", "2026-07-24T03:30:00.000Z");
+  await routeComposerSessions(page, [session]);
+  await login(page);
+
+  const trigger = page.locator("#attach-btn");
+  const popover = page.locator("#composer-plus-popover");
+  const upload = page.locator("#plus-attach-item");
+  const mode = popover.locator('select[data-mode-control="mode"]');
+
+  await trigger.focus();
+  await trigger.press("Enter");
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  await expect(trigger).toHaveAttribute("aria-controls", "composer-plus-popover");
+  await expect(popover).toHaveAttribute("aria-hidden", "false");
+  await expect(upload).toBeFocused();
+
+  await page.keyboard.press("ArrowDown");
+  await expect(mode).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  await expect(popover).toHaveAttribute("aria-hidden", "true");
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(trigger).toBeFocused();
+});
+
+test("prompt optimizer is an inline trailing action and replaces the draft atomically", async ({ page }) => {
+  const session = composerSession("composer-prompt-optimizer", "2026-07-24T03:45:00.000Z");
+  await routeComposerSessions(page, [session]);
+
+  let requestPayload: { text?: string; sessionId?: string } | null = null;
+  let messageCount = 0;
+  let markOptimizeStarted!: () => void;
+  let releaseOptimize!: () => void;
+  const optimizeStarted = new Promise<void>((resolve) => { markOptimizeStarted = resolve; });
+  const optimizeGate = new Promise<void>((resolve) => { releaseOptimize = resolve; });
+  await page.route("**/api/optimize-prompt", async (route) => {
+    requestPayload = route.request().postDataJSON();
+    markOptimizeStarted();
+    await optimizeGate;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ optimized: "Use an atomic, testable implementation." }),
+    });
+  });
+  await page.route(`**/api/structured-sessions/${session.id}/messages`, async (route) => {
+    messageCount += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+  await login(page);
+
+  const input = page.locator("#input-box");
+  const optimize = page.locator("#prompt-optimize-btn");
+  const send = page.locator("#send-input-button");
+
+  await expect(optimize).toBeHidden();
+  expect(await optimize.evaluate((element) => element.parentElement?.classList.contains("composer-input-wrap"))).toBe(true);
+  expect(await page.locator("#composer-plus-popover #prompt-optimize-btn").count()).toBe(0);
+
+  await input.fill("   ");
+  await expect(optimize).toBeHidden();
+  await input.fill("rough prompt");
+  await expect(optimize).toBeVisible();
+  await expect(optimize).toHaveAttribute("aria-label", "优化提示词");
+
+  await input.focus();
+  await optimize.click();
+  await optimizeStarted;
+
+  await expect(input).toBeFocused();
+  await expect(input).toHaveJSProperty("readOnly", true);
+  await expect(input).toHaveValue("rough prompt");
+  await expect(optimize).toBeDisabled();
+  await expect(optimize).toHaveAttribute("aria-busy", "true");
+  await expect(send).toBeDisabled();
+
+  await input.press("Tab");
+  await input.evaluate((element) => {
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", {
+      value: {
+        items: [],
+        getData(type: string) {
+          return type === "text" ? "must not be inserted" : "";
+        },
+      },
+    });
+    element.dispatchEvent(paste);
+  });
+  await expect(input).toHaveValue("rough prompt");
+
+  await input.press("Enter");
+  await page.waitForTimeout(50);
+  expect(messageCount).toBe(0);
+  await expect(input).toHaveValue("rough prompt");
+
+  releaseOptimize();
+  await expect(input).toHaveValue("Use an atomic, testable implementation.");
+  await expect(input).toHaveJSProperty("readOnly", false);
+  await expect(optimize).toBeEnabled();
+  await expect(optimize).toHaveAttribute("aria-busy", "false");
+  await expect(input).toBeFocused();
+  expect(requestPayload).toEqual({ text: "rough prompt", sessionId: session.id });
+});
+
+test("prompt optimization writes back only to its owning session after a switch", async ({ page }) => {
+  const sessionA = composerSession("composer-prompt-owner-a", "2026-07-24T03:49:00.000Z");
+  const sessionB = composerSession("composer-prompt-owner-b", "2026-07-24T03:48:00.000Z");
+  await routeComposerSessions(page, [sessionA, sessionB]);
+
+  let markOptimizeStarted!: () => void;
+  let releaseOptimize!: () => void;
+  const optimizeStarted = new Promise<void>((resolve) => { markOptimizeStarted = resolve; });
+  const optimizeGate = new Promise<void>((resolve) => { releaseOptimize = resolve; });
+  await page.route("**/api/optimize-prompt", async (route) => {
+    markOptimizeStarted();
+    await optimizeGate;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ optimized: "optimized draft for A" }),
+    });
+  });
+  await login(page);
+
+  const input = page.locator("#input-box");
+  await input.fill("raw draft for A");
+  await page.locator("#prompt-optimize-btn").click();
+  await optimizeStarted;
+
+  await switchSession(page, sessionB.id);
+  await expect(input).toHaveJSProperty("readOnly", false);
+  await input.fill("untouched draft for B");
+  releaseOptimize();
+  await expect(input).toHaveValue("untouched draft for B");
+
+  await switchSession(page, sessionA.id);
+  await expect(input).toHaveValue("optimized draft for A");
+});
+
+test("prompt optimizer preserves the draft and recovers after a non-JSON error", async ({ page }) => {
+  const session = composerSession("composer-prompt-error", "2026-07-24T03:50:00.000Z");
+  await routeComposerSessions(page, [session]);
+  await page.route("**/api/optimize-prompt", (route) => route.fulfill({
+    status: 502,
+    contentType: "text/html",
+    body: "<h1>Bad gateway</h1>",
+  }));
+  await login(page);
+
+  const input = page.locator("#input-box");
+  const optimize = page.locator("#prompt-optimize-btn");
+  await input.fill("keep this draft");
+  await optimize.focus();
+  await optimize.press("Enter");
+
+  await expect(input).toHaveValue("keep this draft");
+  await expect(input).toHaveJSProperty("readOnly", false);
+  await expect(optimize).toBeEnabled();
+  await expect(optimize).toHaveAttribute("aria-busy", "false");
+  await expect(input).toBeFocused();
+  await expect(page.getByText("提示词优化失败（HTTP 502）。")).toBeVisible();
 });
 
 test("duplicate submission is guarded and a failed send restores draft and attachments", async ({ page }) => {
@@ -220,6 +386,7 @@ test("duplicate submission is guarded and a failed send restores draft and attac
   expect(uploadCount).toBe(1);
   await expect(input).toHaveValue("must be restored");
   await expect(attachments).toContainText("failure.txt");
+  await expect(attachments.getByRole("button", { name: "移除附件 failure.txt" })).toBeVisible();
   await expect(page.locator("#send-input-button")).toBeEnabled();
 });
 

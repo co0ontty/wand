@@ -29,7 +29,6 @@ import type {
   SettingsEnvironmentPreview,
   SettingsGeneralInput,
   SettingsModelOption,
-  SettingsProvider,
   SettingsRepository,
   SettingsSnapshot,
   SettingsWebUpdate,
@@ -544,8 +543,6 @@ function aiFromSnapshot(snapshot: SettingsSnapshot): SettingsAiInput {
     defaultOpenCodeModel: config.defaultOpenCodeModel,
     defaultGrokModel: config.defaultGrokModel,
     defaultQoderModel: config.defaultQoderModel,
-    commitCli: config.commitCli,
-    commitModel: config.commitModel,
     commitAiSource: config.commitAiSource,
     systemAi: { ...config.systemAi, apiKey: "" },
   };
@@ -597,9 +594,9 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
     setPending("import");
     setStatus("");
     try {
-      const result = await repository.execute({ type: "systemAi.import", source: form.commitCli });
+      const result = await repository.execute({ type: "systemAi.import" });
       setForm((current) => ({ ...current, systemAi: { ...result.systemAi, apiKey: "" } }));
-      setStatus(`已从全部已配置 CLI 导入并保存 ${result.count} 个 API；${form.commitCli} 来源优先。`);
+      setStatus(`已从全部已配置工具导入并保存 ${result.count} 个 API。`);
       setTone("success");
       await refresh();
     } catch (cause) {
@@ -611,7 +608,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
   }
 
   async function save() {
-    const systemRequired = form.systemAi.enabled || form.commitAiSource === "api";
+    const systemRequired = form.systemAi.enabled;
     const nextErrors: Record<string, string> = {};
     const configuredFallback = (form.systemAi.fallbacks || []).some((profile) =>
       profile.baseUrl.trim() && profile.model.trim() && (profile.apiKey.trim() || profile.hasApiKey));
@@ -649,11 +646,6 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
   }
 
   const models = snapshot.models;
-  const commitModels = form.commitCli === "codex"
-    ? models?.codexModels || []
-    : form.commitCli === "opencode"
-      ? models?.opencodeModels || []
-      : models?.models || [];
   const systemAiProfiles = [form.systemAi, ...(form.systemAi.fallbacks || [])]
     .filter((profile) => profile.baseUrl && profile.model && (profile.apiKey || profile.hasApiKey));
   const systemAiOrder = systemAiProfiles.map((profile) => profile.source === "custom" ? "自定义" : profile.source).join(" → ");
@@ -661,7 +653,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
   return (
     <section className="wand-settings-panel" aria-label="AI 与模型">
       <header className="wand-settings-panel-heading">
-        <h2>AI 与模型</h2><p>集中管理会话默认模型、系统 API 和快捷提交使用的模型。</p>
+        <h2>AI 与模型</h2><p>集中管理会话默认模型、系统 API 和快捷提交的 AI 来源。</p>
       </header>
 
       <SettingsSection
@@ -695,8 +687,8 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
 
       <SettingsSection
         title="系统 AI API"
-        description="用于提示词优化、会话标题，以及可选的快捷提交。API Key 不会从服务端回传。"
-        action={<SettingsActionButton pending={pending === "import"} kind="secondary" onClick={() => void importSystemAi()}>导入全部 CLI API</SettingsActionButton>}
+        description="用于提示词优化、会话标题，也会作为快捷提交自动发现 API 的补充。API Key 不会从服务端回传。"
+        action={<SettingsActionButton pending={pending === "import"} kind="secondary" onClick={() => void importSystemAi()}>导入全部工具 API</SettingsActionButton>}
       >
         <SettingsToggle
           label="用于系统 AI 功能"
@@ -747,25 +739,13 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot, toas
           <label><input type="radio" name="settings-commit-source" value="api" checked={form.commitAiSource === "api"} onChange={() => update("commitAiSource", "api")} />直连 API</label>
         </fieldset>
         {form.commitAiSource === "api" ? (
-          <SettingsStatus tone={systemAiProfiles.length ? "success" : "warning"}>
-            {systemAiProfiles.length ? `已就绪 ${systemAiProfiles.length} 个 API；全部失败后回退 CLI。` : "请先补全上方直连 API 配置。"}
+          <SettingsStatus tone="success">
+            自动读取各工具的 API 配置并逐个尝试；全部不可用时使用当前会话 CLI。
           </SettingsStatus>
         ) : (
-          <SettingsGrid>
-            <SettingsField label="Commit CLI">
-              <SettingsSelect
-                id="settings-commit-cli"
-                ariaLabel="Commit 生成 CLI"
-                value={form.commitCli}
-                options={[{ value: "claude", label: "Claude" }, { value: "codex", label: "Codex" }, { value: "opencode", label: "OpenCode" }]}
-                onChange={(value) => { update("commitCli", value as SettingsProvider); update("commitModel", ""); }}
-              />
-            </SettingsField>
-            <SettingsField label="Commit 模型" htmlFor="settings-commit-model" hint="留空跟随所选 CLI 默认值">
-              <SettingsTextInput id="settings-commit-model" list="settings-commit-models" value={form.commitModel} placeholder="跟随 CLI 默认" onChange={(value) => update("commitModel", value)} />
-              <ModelSuggestions id="settings-commit-models" models={commitModels} />
-            </SettingsField>
-          </SettingsGrid>
+          <SettingsStatus tone="success">
+            使用当前会话的 CLI 和模型；推理固定为最低档。
+          </SettingsStatus>
         )}
       </SettingsSection>
 

@@ -6,7 +6,7 @@ import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, SessionProvider, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
-import { normalizeSystemAiConfig, systemAiProfiles } from "./system-ai.js";
+import { normalizeSystemAiConfig } from "./system-ai.js";
 type StructuredRunnerOption = WandConfig["structuredRunner"];
 
 function isThinkingEffort(value: unknown): value is ThinkingEffort {
@@ -516,15 +516,14 @@ export function writePreferenceToStorage(
   }
 }
 
-/** Validate the cross-field contract for Commit's direct-API source. */
+/**
+ * Kept as a compatibility seam for callers that validate preference batches.
+ * Commit API profiles are discovered from the configured tools at request time,
+ * so selecting API is valid even when no manual systemAi profile is stored.
+ */
 export function validateCommitAiConfig(
-  config: Pick<WandConfig, "commitAiSource" | "systemAi">,
-): void {
-  if (config.commitAiSource !== "api") return;
-  if (!systemAiProfiles(config.systemAi, true).length) {
-    throw new Error("选择直连 API 生成 Commit 时，必须先填写 API 地址、API Key 和模型。");
-  }
-}
+  _config: Pick<WandConfig, "commitAiSource" | "systemAi">,
+): void {}
 
 function defaultCardExpandDefaults(): CardExpandDefaults {
   return {

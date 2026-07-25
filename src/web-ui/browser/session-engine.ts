@@ -216,7 +216,9 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         if (isStructuredSession(session) && session.structuredState && session.structuredState.inFlight) {
           return "回复中，可继续输入";
         }
-        return "打字或按住说话";
+        return document.documentElement.classList.contains("is-wand-app")
+          ? "打字或按住说话"
+          : "输入消息…";
       }
 
       export function getToolModeHint(tool, mode) {
@@ -1961,18 +1963,61 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
       //
       // 加号 popover：附件入口 + 终端交互开关 + 三件套，向上展开浮在 + 按钮上方。
       // 状态走 state，类切换走 DOM；外点 / Esc / 选完三件套之后自动关闭。
-      export function setPlusPopoverOpen(open) {
+      function focusFirstPlusPopoverControl(popover) {
+        var firstControl = popover && popover.querySelector(
+          'button:not([disabled]):not(.hidden), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        ) as HTMLElement | null;
+        if (!firstControl) return;
+        try {
+          firstControl.focus({ preventScroll: true });
+        } catch (_) {
+          firstControl.focus();
+        }
+      }
+
+      export function setPlusPopoverOpen(open, focusFirst = false) {
         var popover = document.getElementById("composer-plus-popover");
         var btn = document.getElementById("attach-btn");
         state.plusPopoverOpen = !!open;
-        if (popover) popover.classList.toggle("hidden", !open);
+        if (popover) {
+          if (open) {
+            popover.classList.toggle("is-keyboard-open", !!focusFirst);
+          }
+          popover.classList.toggle("hidden", !open);
+          popover.setAttribute("aria-hidden", open ? "false" : "true");
+        }
         if (btn) {
           btn.classList.toggle("active", !!open);
           btn.setAttribute("aria-expanded", open ? "true" : "false");
+          btn.setAttribute("aria-label", open ? "关闭更多操作" : "更多操作");
+          btn.setAttribute("title", open ? "关闭" : "更多");
+        }
+        if (open && focusFirst && popover) {
+          requestAnimationFrame(function() {
+            if (state.plusPopoverOpen && popover.isConnected) {
+              focusFirstPlusPopoverControl(popover);
+            }
+          });
         }
       }
-      export function togglePlusPopover() { setPlusPopoverOpen(!state.plusPopoverOpen); }
-      export function closePlusPopover() { if (state.plusPopoverOpen) setPlusPopoverOpen(false); }
+      export function togglePlusPopover(focusFirst = false) {
+        setPlusPopoverOpen(!state.plusPopoverOpen, !state.plusPopoverOpen && !!focusFirst);
+      }
+      export function closePlusPopover(restoreFocus = false) {
+        if (!state.plusPopoverOpen) return;
+        var btn = document.getElementById("attach-btn") as HTMLButtonElement | null;
+        var popover = document.getElementById("composer-plus-popover");
+        var shouldRestoreFocus = !!restoreFocus
+          || !!(popover && popover.contains(document.activeElement));
+        if (shouldRestoreFocus && btn) {
+          try {
+            btn.focus({ preventScroll: true });
+          } catch (_) {
+            btn.focus();
+          }
+        }
+        setPlusPopoverOpen(false, false);
+      }
 
       // 直接调 closeSessionsDrawer() 会在桌面把 state.sidebarPinned 置 false，
       // 进而让 .pinned/.collapsed 这两个类一起脱落，窄条整体消失 —— 这是
@@ -2442,6 +2487,11 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         }
 
         if (event.key === "Enter") {
+          if (state.promptOptimizeRequest
+            && state.promptOptimizeRequest.sessionId === state.selectedId) {
+            event.preventDefault();
+            return;
+          }
           if (event.shiftKey) {
             event.preventDefault();
             var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
@@ -2689,7 +2739,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
             thumb +
             '<span class="att-name" title="' + escapeHtml(a.name) + '">' + escapeHtml(a.name) + '</span>' +
             '<span class="att-size">' + formatFileSize(a.size) + '</span>' +
-            '<button class="att-remove" data-index="' + i + '" title="移除">×</button>' +
+            '<button class="att-remove" data-index="' + i + '" type="button" title="移除" aria-label="移除附件 ' + escapeHtml(a.name) + '">×</button>' +
             '</span>';
         }
         bar.innerHTML = html;
@@ -2809,6 +2859,11 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 
       export function replaceComposerSelection(inputBox, replacement) {
         if (!inputBox) return "";
+        if (inputBox.readOnly
+          || (state.promptOptimizeRequest
+            && state.promptOptimizeRequest.sessionId === state.selectedId)) {
+          return inputBox.value;
+        }
         var start = inputBox.selectionStart === null ? inputBox.value.length : inputBox.selectionStart;
         var end = inputBox.selectionEnd === null ? start : inputBox.selectionEnd;
         if (typeof inputBox.setRangeText === "function") {
@@ -2844,12 +2899,10 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         return !!String(value || "").trim() || getPendingAttachments(id).length > 0;
       }
 
-      export var promptOptimizeInFlight = false;
       export function optimizePromptText() {
-        if (promptOptimizeInFlight) return;
+        if (state.promptOptimizeRequest) return;
         var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
         var btn = document.getElementById("prompt-optimize-btn") as HTMLButtonElement | null;
-        var composer = document.querySelector(".input-composer");
         if (!inputBox) return;
         var raw = (inputBox.value || "").trim();
         var requestSessionId = state.selectedId;
@@ -2858,16 +2911,12 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
           inputBox.focus();
           return;
         }
-        promptOptimizeInFlight = true;
-        if (btn) {
-          btn.classList.add("is-loading");
-          btn.disabled = true;
-          btn.setAttribute("title", "正在优化…");
-        }
-        if (composer) composer.classList.add("is-optimizing");
-        inputBox.setAttribute("aria-busy", "true");
-        var prevReadOnly = inputBox.readOnly;
-        inputBox.readOnly = true;
+        var request = { sessionId: requestSessionId };
+        var focusWasOnOptimizeButton = document.activeElement === btn;
+        var shouldKeepInputFocused = document.activeElement === inputBox
+          || focusWasOnOptimizeButton;
+        state.promptOptimizeRequest = request;
+        updateInteractiveControls();
 
         var payload: any = { text: raw };
         if (requestSessionId) payload.sessionId = requestSessionId;
@@ -2879,10 +2928,19 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
           body: JSON.stringify(payload)
         })
           .then(function(res) {
-            return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+            return res.text().then(function(body) {
+              var data: any = {};
+              if (body) {
+                try { data = JSON.parse(body); } catch (_) { /* fall through to the HTTP error */ }
+              }
+              return { ok: res.ok, status: res.status, data: data };
+            });
           })
           .then(function(result) {
-            if (!result.ok) throw new Error((result.data && result.data.error) || "提示词优化失败。");
+            if (!result.ok) {
+              throw new Error((result.data && result.data.error)
+                || "提示词优化失败（HTTP " + result.status + "）。");
+            }
             var optimized = (result.data && result.data.optimized) || "";
             if (!optimized) throw new Error("Claude 返回为空。");
             if (requestSessionId && state.selectedId !== requestSessionId) {
@@ -2892,72 +2950,50 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
               }
               return;
             }
-            animateOptimizedReplace(inputBox, optimized, requestSessionId);
+            var currentInput = document.getElementById("input-box") as HTMLTextAreaElement | null;
+            if (currentInput) {
+              animateOptimizedReplace(currentInput, optimized, requestSessionId);
+            }
           })
           .catch(function(error) {
             if (typeof showToast === "function") showToast((error && error.message) || "提示词优化失败。", "error");
-            if (btn) {
-              btn.classList.remove("is-loading");
-              btn.classList.add("is-shake");
-              setTimeout(function() { if (btn) btn.classList.remove("is-shake"); }, 400);
+            var currentBtn = document.getElementById("prompt-optimize-btn");
+            if (currentBtn && state.selectedId === requestSessionId) {
+              currentBtn.classList.add("is-error");
+              setTimeout(function() {
+                if (currentBtn.isConnected) currentBtn.classList.remove("is-error");
+              }, 800);
             }
           })
           .finally(function() {
-            promptOptimizeInFlight = false;
-            if (btn) {
-              btn.classList.remove("is-loading");
-              btn.disabled = false;
-              btn.setAttribute("title", "提示词优化（AI）");
+            if (state.promptOptimizeRequest === request) {
+              state.promptOptimizeRequest = null;
             }
-            if (composer) composer.classList.remove("is-optimizing");
-            inputBox.removeAttribute("aria-busy");
-            inputBox.readOnly = prevReadOnly;
+            updateInteractiveControls();
+            if (shouldKeepInputFocused && state.selectedId === requestSessionId) {
+              var currentInput = document.getElementById("input-box") as HTMLTextAreaElement | null;
+              if (currentInput) {
+                try {
+                  currentInput.focus({ preventScroll: true });
+                } catch (_) {
+                  currentInput.focus();
+                }
+              }
+            }
           });
       }
 
       export function animateOptimizedReplace(inputBox, finalText, sessionId?) {
         if (!inputBox) return;
         var targetSessionId = sessionId || state.selectedId;
+        var optimized = String(finalText || "");
+        setDraftValueForSession(targetSessionId, optimized, true);
         if (targetSessionId && state.selectedId !== targetSessionId) {
-          setDraftValueForSession(targetSessionId, finalText, true);
           return;
         }
-        // Typewriter-style fill so user sees the replacement happen
-        var chars = Array.from(finalText);
-        var total = chars.length;
-        if (total === 0) {
-          inputBox.value = "";
-          setDraftValueForSession(targetSessionId, "", true);
-          autoResizeInput(inputBox);
-          return;
-        }
-        var totalDuration = Math.min(700, Math.max(220, total * 8));
-        var stepCount = Math.min(total, 60);
-        var charsPerStep = Math.ceil(total / stepCount);
-        var stepDelay = totalDuration / stepCount;
-        var i = 0;
-        inputBox.value = "";
+        inputBox.value = optimized;
         autoResizeInput(inputBox);
-        function tick() {
-          if (targetSessionId && state.selectedId !== targetSessionId) {
-            setDraftValueForSession(targetSessionId, finalText, true);
-            return;
-          }
-          if (document.getElementById("input-box") !== inputBox) {
-            setDraftValueForSession(targetSessionId, finalText, true);
-            return;
-          }
-          i = Math.min(total, i + charsPerStep);
-          inputBox.value = chars.slice(0, i).join("");
-          autoResizeInput(inputBox);
-          if (i < total) {
-            setTimeout(tick, stepDelay);
-          } else {
-            setDraftValueForSession(targetSessionId, finalText, true);
-            try { inputBox.setSelectionRange(finalText.length, finalText.length); } catch (e) { /* ignore */ }
-          }
-        }
-        tick();
+        try { inputBox.setSelectionRange(optimized.length, optimized.length); } catch (e) { /* ignore */ }
       }
 
       // v2: 同步 .input-composer 上的 .has-text 类 —— 决定 ghost meta 是否显示、
@@ -2968,7 +3004,7 @@ import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
         var composer = document.querySelector(".input-composer");
         if (!composer) return;
         var inputBox = (el || document.getElementById("input-box")) as HTMLTextAreaElement | null;
-        var hasText = !!(inputBox && inputBox.value && inputBox.value.length > 0);
+        var hasText = !!(inputBox && String(inputBox.value || "").trim());
         composer.classList.toggle("has-text", hasText);
         updateInteractiveControls();
       }

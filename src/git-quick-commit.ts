@@ -11,7 +11,13 @@ import {
   runGitRawAsync as runGitRawAsyncBase,
   getGitErrorMessage,
 } from "./git-utils.js";
-import { thinkingEffortToClaudeCliEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToOpenCodeVariant } from "./structured-provider-common.js";
+import {
+  thinkingEffortToClaudeCliEffort,
+  thinkingEffortToCodexReasoningEffort,
+  thinkingEffortToGrokEffort,
+  thinkingEffortToOpenCodeVariant,
+  thinkingEffortToQoderEffort,
+} from "./structured-provider-common.js";
 import {
   GitStatusFileEntry,
   GitStatusResult,
@@ -29,6 +35,10 @@ const MAX_FILE_ENTRIES = 200;
 // 30s 在 API 抖动时不够用，放宽到 60s。
 const CLAUDE_MESSAGE_TIMEOUT_MS = 60_000;
 const CODEX_MESSAGE_TIMEOUT_MS = 60_000;
+// API mode can contain several profiles. Keep each probe bounded so the whole
+// chain can still reach the current-session CLI before native clients' 180s
+// request deadline.
+const DIRECT_API_PROFILE_TIMEOUT_MS = 20_000;
 const QUICK_COMMIT_CLI_TIMEOUT_MS = 120_000;
 const MAX_DIFF_FOR_AI = 100_000;
 const GIT_MAX_BUFFER = 16 * 1024 * 1024;
@@ -467,8 +477,6 @@ interface QuickCommitOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
-  /** Direct API to try when the selected Commit source is a CLI. */
-  fallbackSystemAi?: import("./types.js").SystemAiConfig;
   systemAi?: import("./types.js").SystemAiConfig;
   autoMessage: boolean;
   customMessage?: string;
@@ -488,7 +496,6 @@ export interface QuickCommitAiOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
-  fallbackSystemAi?: import("./types.js").SystemAiConfig;
   systemAi?: import("./types.js").SystemAiConfig;
 }
 
@@ -501,9 +508,21 @@ export class QuickCommitError extends Error {
 
 // ── AI commit message generation ──
 
-async function callClaudeText(prompt: string, cwd: string, language?: string, model?: string | null): Promise<string> {
+async function callClaudeText(
+  prompt: string,
+  cwd: string,
+  language: string | undefined,
+  opts: QuickCommitAiOptions,
+): Promise<string> {
   try {
-    return await runClaudePrint(prompt, { cwd, timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS, language, model: model ?? undefined });
+    const effort = thinkingEffortToClaudeCliEffort(opts.thinkingEffort ?? "off");
+    return await runClaudePrint(prompt, {
+      cwd,
+      timeoutMs: CLAUDE_MESSAGE_TIMEOUT_MS,
+      language,
+      model: opts.model ?? undefined,
+      ...(effort ? { effort } : {}),
+    });
   } catch (error) {
     if (error instanceof ClaudeRunError) {
       // 把通用 ClaudeRunError 翻译成 quick-commit 自己的错误码 + 中文话术。
@@ -523,7 +542,12 @@ async function callClaudeText(prompt: string, cwd: string, language?: string, mo
 }
 
 function normalizeProvider(provider: SessionProvider | undefined): SessionProvider {
-  return provider === "codex" || provider === "opencode" ? provider : "claude";
+  return provider === "codex"
+    || provider === "opencode"
+    || provider === "grok"
+    || provider === "qoder"
+    ? provider
+    : "claude";
 }
 
 function stripFences(raw: string): string {
@@ -573,6 +597,76 @@ function extractOpenCodeText(stdout: string): string {
     }
   }
   return texts.join("\n").trim();
+}
+
+function extractGrokText(stdout: string): string {
+  let text = "";
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as { type?: string; data?: unknown };
+      if (parsed.type === "text" && typeof parsed.data === "string") text += parsed.data;
+    } catch {
+      // ignore diagnostics mixed into stdout
+    }
+  }
+  return text.trim();
+}
+
+function extractQoderText(stdout: string): string {
+  let resultText = "";
+  const assistantTexts: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        type?: string;
+        subtype?: string;
+        result?: unknown;
+        message?: { content?: unknown };
+      };
+      if (parsed.type === "result" && parsed.subtype === "success" && typeof parsed.result === "string") {
+        resultText = parsed.result;
+        continue;
+      }
+      if (parsed.type !== "assistant" || !Array.isArray(parsed.message?.content)) continue;
+      for (const block of parsed.message.content) {
+        if (
+          block
+          && typeof block === "object"
+          && (block as { type?: unknown }).type === "text"
+          && typeof (block as { text?: unknown }).text === "string"
+        ) {
+          assistantTexts.push((block as { text: string }).text);
+        }
+      }
+    } catch {
+      // ignore diagnostics mixed into stdout
+    }
+  }
+  return (resultText || assistantTexts.join("\n")).trim();
+}
+
+function buildGrokTextArgs(prompt: string, opts: QuickCommitAiOptions, allowTools = false): string[] {
+  const args = ["--no-auto-update", "-p", prompt, "--output-format", "streaming-json"];
+  const model = opts.model?.trim();
+  if (model && model !== "default") args.push("--model", model);
+  const effort = thinkingEffortToGrokEffort(opts.thinkingEffort ?? "off");
+  if (effort) args.push("--effort", effort);
+  if (allowTools) args.push("--always-approve");
+  return args;
+}
+
+function buildQoderTextArgs(prompt: string, opts: QuickCommitAiOptions, allowTools = false): string[] {
+  const args = ["-p", prompt, "--output-format", "stream-json", "--no-session-persistence"];
+  const model = opts.model?.trim();
+  if (model && model !== "default") args.push("--model", model);
+  const effort = thinkingEffortToQoderEffort(opts.thinkingEffort ?? "off");
+  if (effort) args.push("--reasoning-effort", effort);
+  if (allowTools) args.push("--permission-mode", "bypass_permissions");
+  return args;
 }
 
 function runCliText(
@@ -656,17 +750,41 @@ async function callOpenCodeText(prompt: string, cwd: string, opts: QuickCommitAi
   return text;
 }
 
+async function callGrokText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+  const stdout = await runCliText("grok", buildGrokTextArgs(prompt, opts), "", {
+    cwd,
+    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    inheritEnv: opts.inheritEnv,
+  });
+  const text = extractGrokText(stdout);
+  if (!text) throw new QuickCommitError("Grok 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+  return text;
+}
+
+async function callQoderText(prompt: string, cwd: string, opts: QuickCommitAiOptions): Promise<string> {
+  const stdout = await runCliText("qodercli", buildQoderTextArgs(prompt, opts), "", {
+    cwd,
+    timeoutMs: CODEX_MESSAGE_TIMEOUT_MS,
+    inheritEnv: opts.inheritEnv,
+  });
+  const text = extractQoderText(stdout);
+  if (!text) throw new QuickCommitError("Qoder 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+  return text;
+}
+
 async function callCliAiText(prompt: string, cwd: string, language: string, opts: QuickCommitAiOptions): Promise<string> {
   const provider = normalizeProvider(opts.provider);
   if (provider === "codex") {
     return callCodexText(prompt, cwd, opts);
   }
   if (provider === "opencode") return callOpenCodeText(prompt, cwd, opts);
-  return callClaudeText(prompt, cwd, language, opts.model);
+  if (provider === "grok") return callGrokText(prompt, cwd, opts);
+  if (provider === "qoder") return callQoderText(prompt, cwd, opts);
+  return callClaudeText(prompt, cwd, language, opts);
 }
 
 async function callDirectApiText(prompt: string, systemAi: import("./types.js").SystemAiConfig): Promise<string> {
-  const text = await callSystemAiTextWithFallback(prompt, systemAi);
+  const text = await callSystemAiTextWithFallback(prompt, systemAi, DIRECT_API_PROFILE_TIMEOUT_MS);
   if (!text.trim()) {
     throw new QuickCommitError("直连 API 返回了空结果。", "EMPTY_AI_MESSAGE");
   }
@@ -682,8 +800,9 @@ function aiFallbackFailed(primary: "直连 API" | "CLI", primaryError: unknown, 
 }
 
 /**
- * Run a lightweight AI request through the same source ordering used by quick
- * commit: the user's selected source first, then the reciprocal source once.
+ * Run a lightweight AI request through the selected Commit source. API mode
+ * exhausts its profile chain and then falls back once to the current-session
+ * CLI. CLI mode uses only that CLI.
  */
 export async function callConfiguredAiText(
   prompt: string,
@@ -705,18 +824,7 @@ export async function callConfiguredAiText(
     }
   }
 
-  try {
-    return await callCliAiText(prompt, cwd, language, opts);
-  } catch (cliError) {
-    if (!opts.fallbackSystemAi?.enabled) throw cliError;
-    try {
-      // The user selected the CLI first. A complete direct-API profile is only
-      // provided here as the reciprocal fallback, never as a second CLI try.
-      return await callDirectApiText(prompt, opts.fallbackSystemAi);
-    } catch (apiError) {
-      throw aiFallbackFailed("CLI", cliError, apiError);
-    }
-  }
+  return callCliAiText(prompt, cwd, language, opts);
 }
 
 async function collectStagedDiff(cwd: string): Promise<string> {
@@ -981,7 +1089,6 @@ interface TagHeadOptions {
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
   inheritEnv?: boolean;
-  fallbackSystemAi?: import("./types.js").SystemAiConfig;
   systemAi?: import("./types.js").SystemAiConfig;
   /** Explicit tag name. If empty and `autoTag` is true, ask the session provider to generate one. */
   tag?: string;
@@ -1015,7 +1122,6 @@ export async function runTagHead(opts: TagHeadOptions): Promise<TagHeadResult> {
       model: opts.model,
       thinkingEffort: opts.thinkingEffort,
       inheritEnv: opts.inheritEnv,
-      fallbackSystemAi: opts.fallbackSystemAi,
       systemAi: opts.systemAi,
     });
   }
@@ -1389,6 +1495,18 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,
     });
+  } else if (provider === "grok") {
+    await runCliText("grok", buildGrokTextArgs(prompt, opts, true), "", {
+      cwd: opts.cwd,
+      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      inheritEnv: opts.inheritEnv,
+    });
+  } else if (provider === "qoder") {
+    await runCliText("qodercli", buildQoderTextArgs(prompt, opts, true), "", {
+      cwd: opts.cwd,
+      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      inheritEnv: opts.inheritEnv,
+    });
   } else {
     const args = [
       "-p",
@@ -1458,7 +1576,6 @@ export async function runQuickCommit(opts: QuickCommitOptions): Promise<QuickCom
     model: opts.model,
     thinkingEffort: opts.thinkingEffort,
     inheritEnv: opts.inheritEnv,
-    fallbackSystemAi: opts.fallbackSystemAi,
     systemAi: opts.systemAi,
   };
 

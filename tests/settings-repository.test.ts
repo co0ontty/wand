@@ -202,8 +202,7 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
     defaultCodexModel: "gpt-5",
     defaultOpenCodeModel: "openai/gpt-5",
     defaultGrokModel: "grok-4.5",
-    commitCli: "claude" as const,
-    commitModel: "",
+    defaultQoderModel: "performance",
     commitAiSource: "api" as const,
     systemAi: {
       enabled: true,
@@ -218,6 +217,8 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
   };
   await new HttpSettingsRepository(runtime).execute({ type: "ai.save", value });
   assert.equal((submitted?.systemAi as Record<string, unknown>).apiKey, "");
+  assert.equal(Object.hasOwn(submitted ?? {}, "commitCli"), false);
+  assert.equal(Object.hasOwn(submitted ?? {}, "commitModel"), false);
   assert.equal(runtime.configs[0].systemAi.apiKey, "");
   assert.equal(runtime.configs[0].systemAi.hasApiKey, true);
 });

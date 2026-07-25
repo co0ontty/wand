@@ -94,7 +94,7 @@ export interface SettingsSystemAi {
   hasApiKey: boolean;
   model: string;
   authHeader: "bearer" | "x-api-key";
-  source: SettingsProvider | "custom";
+  source: SettingsModelProvider | "custom";
   fallbacks?: SettingsSystemAi[];
 }
 
@@ -276,8 +276,6 @@ export interface SettingsAiInput {
   defaultOpenCodeModel: string;
   defaultGrokModel: string;
   defaultQoderModel: string;
-  commitCli: SettingsProvider;
-  commitModel: string;
   commitAiSource: "cli" | "api";
   systemAi: SettingsSystemAi;
 }
@@ -338,7 +336,7 @@ export type SettingsCommand =
   | { type: "certificate.upload"; key: string; cert: string }
   | { type: "environment.load"; reveal?: boolean }
   | { type: "models.refresh" }
-  | { type: "systemAi.import"; source: SettingsProvider }
+  | { type: "systemAi.import" }
   | { type: "webUpdate.check" }
   | { type: "webUpdate.install" }
   | { type: "server.restart" }
