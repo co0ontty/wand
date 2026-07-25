@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { query as sdkQuery, type Options as SdkOptions, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query as sdkQuery, type Options as SdkOptions, type PermissionResult, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import { prepareSessionWorktree } from "./git-worktree.js";
 
@@ -255,6 +255,41 @@ function buildIncrementalStructuredPayload(
   };
 }
 
+// ── Tool-permission bridging helpers (structured / SDK path) ──
+// The PTY path infers scope/target by regex-scanning prompt text (claude-pty-bridge);
+// the SDK path gets a structured (toolName, input) pair, so the mapping is exact.
+
+function inferToolPermissionScope(toolName: string, _input: Record<string, unknown>): EscalationScope {
+  switch (toolName) {
+    case "Bash":
+    case "BashOutput":
+    case "KillShell":
+      return "run_command";
+    case "WebFetch":
+    case "WebSearch":
+      return "network";
+    case "Edit":
+    case "Write":
+    case "NotebookEdit":
+      return "write_file";
+    default:
+      return "unknown";
+  }
+}
+
+function inferToolPermissionTarget(toolName: string, input: Record<string, unknown>): string | undefined {
+  const filePath = input.file_path ?? input.notebook_path ?? input.path;
+  if (typeof filePath === "string" && filePath.length > 0) return filePath;
+  if (toolName === "Bash" && typeof input.command === "string") {
+    return input.command.length > 120 ? `${input.command.slice(0, 120)}…` : input.command;
+  }
+  return undefined;
+}
+
+function formatToolPermissionPrompt(toolName: string, target: string | undefined): string {
+  return target ? `${toolName}: ${target}` : toolName;
+}
+
 export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   private readonly pendingRunnerExecutions = new Map<string, StructuredRunnerExecution>();
@@ -265,6 +300,18 @@ export class StructuredSessionManager {
    * Only populated while an SDK call is in flight.
    */
   private readonly pendingSdkQueries = new Map<string, { interrupt(): Promise<void> }>();
+  /**
+   * Parked canUseTool resolver per session. When the Agent SDK asks for
+   * permission to run a tool (default / acceptEdits mode), we park its
+   * PermissionResult promise here, surface permission.prompt to the UI, and
+   * resolve it when the user approves/denies via the REST route. This is the
+   * SDK-path analogue of PTY's ClaudePtyBridge permission state — the answer
+   * is a resolved promise rather than text written to stdin.
+   */
+  private readonly pendingToolPermissions = new Map<string, {
+    resolve: (result: PermissionResult) => void;
+    requestId: string;
+  }>();
   private readonly interruptedWith = new Map<string, string>();
   private readonly interruptedSkills = new Map<string, string[]>();
   /**
@@ -1155,11 +1202,121 @@ export class StructuredSessionManager {
     return updated;
   }
 
+  /**
+   * Approve the current pending tool-permission request raised by the SDK
+   * canUseTool bridge. Mirrors ProcessManager.approvePermission so the shared
+   * REST route can dispatch on session kind without special-casing.
+   */
+  approvePermission(sessionId: string): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const requestId = session.pendingEscalation?.requestId;
+    if (!requestId) {
+      throw new Error("当前会话没有待处理的授权请求。");
+    }
+    const resolved = this.resolveEscalation(sessionId, requestId, "approve_once");
+    this.consumePendingToolPermission(sessionId, requestId, { behavior: "allow" });
+    return resolved;
+  }
+
+  /** Deny the current pending tool-permission request (SDK canUseTool bridge). */
+  denyPermission(sessionId: string): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    const requestId = session.pendingEscalation?.requestId;
+    if (!requestId) {
+      throw new Error("当前会话没有待处理的授权请求。");
+    }
+    const resolved = this.resolveEscalation(sessionId, requestId, "deny");
+    this.consumePendingToolPermission(sessionId, requestId, { behavior: "deny", message: "用户拒绝授权" });
+    return resolved;
+  }
+
+  /**
+   * Bridge an Agent SDK canUseTool request to the wand permission UI. Parks a
+   * PermissionResult promise, emits a permission.prompt (status event) so the
+   * frontend can render approve/deny buttons, then waits for the user's
+   * decision via approvePermission / denyPermission. Resolves as deny if the
+   * run is interrupted/aborted while waiting (signal). bypassPermissions mode
+   * never reaches here — allowDangerouslySkipPermissions short-circuits first.
+   */
+  private bridgeSdkToolPermission(
+    sessionId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<PermissionResult> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return Promise.resolve({ behavior: "deny", message: "会话已结束" });
+    }
+    const requestId = `structured-${randomUUID()}`;
+    const scope = inferToolPermissionScope(toolName, input);
+    const target = inferToolPermissionTarget(toolName, input);
+    const prompt = formatToolPermissionPrompt(toolName, target);
+
+    const updated: SessionSnapshot = {
+      ...session,
+      pendingEscalation: {
+        requestId,
+        scope,
+        runner: "json",
+        source: "tool_permission_request",
+        target,
+        reason: prompt,
+      },
+      permissionBlocked: true,
+    };
+    this.sessions.set(sessionId, updated);
+    this.storage.updateSessionRuntimeMetadata(updated);
+    this.emit({
+      type: "status",
+      sessionId,
+      data: {
+        permissionBlocked: true,
+        permissionRequest: { scope, target, prompt },
+        sessionKind: "structured",
+      },
+    });
+
+    return new Promise<PermissionResult>((resolve) => {
+      this.pendingToolPermissions.set(sessionId, { resolve, requestId });
+      // If the run is already aborted, or gets interrupted while we wait,
+      // deny so the SDK unblocks instead of hanging on a dead session.
+      if (signal.aborted) {
+        this.consumePendingToolPermission(sessionId, requestId, { behavior: "deny", message: "interrupted" });
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => this.consumePendingToolPermission(sessionId, requestId, { behavior: "deny", message: "interrupted" }),
+        { once: true },
+      );
+    });
+  }
+
+  /** Resolve a parked canUseTool promise only if it still matches this request. */
+  private consumePendingToolPermission(
+    sessionId: string,
+    requestId: string,
+    result: PermissionResult,
+  ): void {
+    const pending = this.pendingToolPermissions.get(sessionId);
+    if (!pending || pending.requestId !== requestId) return;
+    this.pendingToolPermissions.delete(sessionId);
+    pending.resolve(result);
+  }
+
   stop(id: string): SessionSnapshot {
     const session = this.requireSession(id);
     this.interruptedWith.delete(id);
     this.interruptedSkills.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
+    // Unblock any parked canUseTool promise so a stopped session doesn't leave
+    // the SDK waiting on a permission answer that will never come.
+    const pendingPerm = this.pendingToolPermissions.get(id);
+    if (pendingPerm) {
+      this.pendingToolPermissions.delete(id);
+      pendingPerm.resolve({ behavior: "deny", message: "会话已停止" });
+    }
     // Clearing activeRequestId is the generation barrier: late data/close callbacks
     // from the cancelled runner can no longer mutate this session or a replacement turn.
     // 主动停止只是取消「当前回合」，结构化会话本身并没有结束——置为 idle 而非 stopped。
@@ -2112,6 +2269,12 @@ export class StructuredSessionManager {
       ...(permPolicy.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
       ...(permPolicy.allowedTools ? { allowedTools: permPolicy.allowedTools } : {}),
       ...(isManaged ? { disallowedTools: ["AskUserQuestion"] } : {}),
+      // Bridge SDK tool-permission requests to the wand UI. bypassPermissions
+      // never reaches here (allowDangerouslySkipPermissions short-circuits
+      // first); for default/acceptEdits we surface the prompt instead of
+      // letting the tool fail silently with "Review ... before running".
+      canUseTool: (toolName, input, opts) =>
+        this.bridgeSdkToolPermission(sessionId, toolName, input, opts.signal),
       skills,
       thinking: sdkThinking,
       includePartialMessages: true,

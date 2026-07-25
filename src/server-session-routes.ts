@@ -1405,7 +1405,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/approve-permission", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.status(400).json({ error: "结构化会话不需要终端权限操作。" });
+        res.json(structured.approvePermission(req.params.id));
         return;
       }
       const snapshot = sessions.get(req.params.id);
@@ -1422,7 +1422,7 @@ export function registerSessionRoutes(
   app.post("/api/sessions/:id/deny-permission", (req, res) => {
     try {
       if (sessions.ownerOf(req.params.id) === "structured") {
-        res.status(400).json({ error: "结构化会话不需要终端权限操作。" });
+        res.json(structured.denyPermission(req.params.id));
         return;
       }
       const snapshot = sessions.get(req.params.id);
