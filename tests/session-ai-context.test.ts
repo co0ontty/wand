@@ -168,13 +168,14 @@ test("resolveCommitAiContext uses only the current session CLI in CLI mode", () 
   assert.equal(context.thinkingEffort, "standard");
 });
 
-test("resolveCommitAiContext prepends dynamically discovered APIs to the manual profile", () => {
+test("resolveCommitAiContext prefers the preset route order and appends discovered APIs", () => {
   const context = resolveCommitAiContext(
     session({ provider: "codex", selectedModel: "gpt-5.6-sol" }),
     {
       ...config,
       commitAiSource: "api",
       systemAi: {
+        id: "preset-route",
         enabled: false,
         protocol: "anthropic",
         baseUrl: "https://manual.example.test",
@@ -184,6 +185,7 @@ test("resolveCommitAiContext prepends dynamically discovered APIs to the manual 
       },
     },
     () => [{
+      id: "discovered-route",
       enabled: true,
       protocol: "openai",
       baseUrl: "https://discovered.example.test/v1",
@@ -194,21 +196,23 @@ test("resolveCommitAiContext prepends dynamically discovered APIs to the manual 
   );
 
   assert.deepEqual(context.systemAi, {
+    id: "preset-route",
     enabled: true,
-    protocol: "openai",
-    baseUrl: "https://discovered.example.test/v1",
-    apiKey: "discovered-secret",
-    model: "discovered-model",
-    authHeader: "bearer",
-    source: "opencode",
+    protocol: "anthropic",
+    baseUrl: "https://manual.example.test",
+    apiKey: "manual-secret",
+    model: "manual-model",
+    authHeader: "x-api-key",
+    source: "custom",
     fallbacks: [{
+      id: "discovered-route",
       enabled: true,
-      protocol: "anthropic",
-      baseUrl: "https://manual.example.test",
-      apiKey: "manual-secret",
-      model: "manual-model",
-      authHeader: "x-api-key",
-      source: "custom",
+      protocol: "openai",
+      baseUrl: "https://discovered.example.test/v1",
+      apiKey: "discovered-secret",
+      model: "discovered-model",
+      authHeader: "bearer",
+      source: "opencode",
       fallbacks: undefined,
     }],
   });

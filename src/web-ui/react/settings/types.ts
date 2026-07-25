@@ -86,16 +86,27 @@ export type SettingsExecutionMode =
   | "managed";
 
 export interface SettingsSystemAi {
+  id: string;
   enabled: boolean;
   protocol: "openai" | "anthropic";
   baseUrl: string;
   /** The server always returns an empty string here. A non-empty save value rotates the key. */
   apiKey: string;
+  /** Explicitly clears a saved key; an empty apiKey alone retains it. */
+  clearApiKey?: boolean;
   hasApiKey: boolean;
   model: string;
   authHeader: "bearer" | "x-api-key";
-  source: SettingsModelProvider | "custom";
+  source: Exclude<SettingsModelProvider, "qoder"> | "custom";
   fallbacks?: SettingsSystemAi[];
+}
+
+export interface SettingsSystemAiTestResult {
+  ok: true;
+  source: SettingsSystemAi["source"];
+  requestedModel: string;
+  reasoningEffort: "low" | "disabled";
+  latencyMs: number;
 }
 
 export interface SettingsConfig {
@@ -329,6 +340,7 @@ export interface SettingsNotificationTestResult {
 }
 
 export type SettingsCommand =
+  | { type: "admin.login"; password: string }
   | { type: "general.save"; value: SettingsGeneralInput }
   | { type: "ai.save"; value: SettingsAiInput }
   | { type: "display.save"; value: SettingsCardDefaults }
@@ -337,6 +349,7 @@ export type SettingsCommand =
   | { type: "environment.load"; reveal?: boolean }
   | { type: "models.refresh" }
   | { type: "systemAi.import" }
+  | { type: "systemAi.test"; route: SettingsSystemAi }
   | { type: "webUpdate.check" }
   | { type: "webUpdate.install" }
   | { type: "server.restart" }
@@ -356,6 +369,7 @@ export type SettingsCommand =
   | { type: "notification.preferences.set"; value: Partial<Pick<SettingsNotificationPreferences, "sound" | "volume" | "bubble">> }
   | { type: "notification.sound.preview" }
   | { type: "notification.permission.request" }
+  | { type: "notification.settings.open" }
   | { type: "notification.test"; delayMs?: number }
   | { type: "notification.nativeSound.set"; sound: string }
   | { type: "notification.nativeSound.preview"; sound: string }
@@ -363,6 +377,7 @@ export type SettingsCommand =
   | { type: "appIcon.set"; icon: "shorthair" | "garfield" };
 
 interface SettingsCommandResultMap {
+  "admin.login": { ok: boolean };
   "general.save": SettingsSaveResult;
   "ai.save": SettingsSaveResult;
   "display.save": SettingsSaveResult;
@@ -371,6 +386,7 @@ interface SettingsCommandResultMap {
   "environment.load": SettingsEnvironmentPreview;
   "models.refresh": SettingsModelCatalog;
   "systemAi.import": { ok: boolean; count: number; systemAi: SettingsSystemAi };
+  "systemAi.test": SettingsSystemAiTestResult;
   "webUpdate.check": SettingsWebUpdate;
   "webUpdate.install": SettingsWebUpdateInstallResult;
   "server.restart": { ok: boolean; message: string };
@@ -384,6 +400,7 @@ interface SettingsCommandResultMap {
   "notification.preferences.set": SettingsNotificationPreferences;
   "notification.sound.preview": { played: boolean };
   "notification.permission.request": { permission: SettingsNotificationPermission };
+  "notification.settings.open": { opened: boolean; native: boolean };
   "notification.test": SettingsNotificationTestResult;
   "notification.nativeSound.set": { sound: string };
   "notification.nativeSound.preview": { played: boolean };

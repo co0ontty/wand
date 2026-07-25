@@ -153,6 +153,8 @@ export type SystemAiProtocol = "openai" | "anthropic";
 export type SystemAiAuthHeader = "bearer" | "x-api-key";
 
 export interface SystemAiConfig {
+  /** 设置页路由的稳定标识，用于重排后安全地关联已保存密钥。 */
+  id?: string;
   enabled: boolean;
   protocol: SystemAiProtocol;
   baseUrl: string;

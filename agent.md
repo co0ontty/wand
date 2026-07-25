@@ -193,6 +193,42 @@ cd android
 adb install -r -d app/build/outputs/apk/debug/app-debug.apk
 ```
 
+For any task that changes Android code or configuration, build and publish a
+new Beta APK after the targeted validation unless the user explicitly asks to
+skip the build or only change code. Run the build from `android/`:
+
+```bash
+SKIP_INSTALL=1 APK_DIST_DIR="$HOME/.wand/android" ./debug.sh
+```
+
+This builds and publishes without installing or launching the app. Only install
+or launch it when the user explicitly requests that.
+
+The global Wand service uses `~/.wand/config.json`. Its Android distribution
+settings should keep `android.apkDir` as the relative path `android` and
+`android.currentApkFile` as an empty string, allowing the server to select the
+newest version in `~/.wand/android/`.
+
+Beta distribution files must be named
+`wand-vX.Y.Z-debug.MMDDHHMM.apk`, where `X.Y.Z` comes from the latest `v*`
+Android repository tag and `MMDDHHMM` is the local build time. The APK's
+`versionName` must be `X.Y.Z-debug.MMDDHHMM`. Never publish the unversioned
+`app-debug.apk` directly. Preserve the build script's update of
+`~/.wand/android/.last-debug-version`.
+
+An Android-changing task is complete only after verifying all of the following:
+
+1. The Gradle build succeeded.
+2. `android/app/build/outputs/apk/debug/output-metadata.json` contains the
+   expected `versionName`.
+3. The versioned APK exists in `~/.wand/android/`; report its size and SHA-256.
+4. Read the current port from `~/.wand/config.json`, then request
+   `/api/android-apk-update?currentVersion=0.0.0&channel=beta` and confirm that
+   `latestVersion` and `fileName` match the new APK.
+
+The server scans the APK directory when handling the update request, so a
+service restart is normally unnecessary.
+
 macOS and iOS builds are version-argument driven:
 
 ```bash

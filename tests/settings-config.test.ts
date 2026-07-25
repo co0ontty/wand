@@ -4,9 +4,116 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import test from "node:test";
+import { createServer } from "node:http";
 
 import { defaultConfig } from "../src/config.js";
 import { startServer } from "../src/server.js";
+
+test("system AI route test calls the submitted model with the saved route key", async () => {
+  process.env.WAND_TEST_MODE = "1";
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-settings-system-ai-test-"));
+  let receivedAuthorization = "";
+  let receivedBody: {
+    model?: string;
+    reasoning_effort?: string;
+    messages?: Array<{ content?: string }>;
+  } = {};
+  const provider = createServer((req, res) => {
+    receivedAuthorization = req.headers.authorization ?? "";
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk.toString(); });
+    req.on("end", () => {
+      receivedBody = JSON.parse(raw) as typeof receivedBody;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ choices: [{ message: { content: "WAND_API_OK" } }] }));
+    });
+  });
+  await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  const providerAddress = provider.address();
+  assert.ok(providerAddress && typeof providerAddress === "object");
+
+  const configPath = path.join(dir, "config.json");
+  const config = {
+    ...defaultConfig(),
+    host: "127.0.0.1",
+    port: 0,
+    https: false,
+    password: "test-password",
+    appSecret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    startupCommands: [],
+    defaultCodexModel: "different-default-model",
+  };
+  const handle = await startServer(config, configPath);
+  try {
+    const baseUrl = handle.urls[0]!.url;
+    const login = await fetch(`${baseUrl}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "test-password", client: "browser-extension" }),
+    });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.getSetCookie().map((value) => value.split(";", 1)[0]).join("; ");
+    const headers = { Cookie: cookie, "Content-Type": "application/json" };
+    const routeBaseUrl = `http://127.0.0.1:${providerAddress.port}/v1`;
+
+    const save = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        systemAi: {
+          id: "route-spark",
+          enabled: true,
+          protocol: "openai",
+          baseUrl: routeBaseUrl,
+          apiKey: "saved-route-secret",
+          model: "stored-model",
+          authHeader: "bearer",
+          source: "codex",
+        },
+      }),
+    });
+    assert.equal(save.status, 200);
+
+    const probe = await fetch(`${baseUrl}/api/settings/system-ai/test`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        route: {
+          id: "route-spark",
+          enabled: true,
+          protocol: "openai",
+          baseUrl: routeBaseUrl,
+          apiKey: "",
+          hasApiKey: true,
+          model: "gpt-5.3-codex-spark",
+          authHeader: "bearer",
+          source: "codex",
+        },
+      }),
+    });
+    assert.equal(probe.status, 200);
+    const probeBody = await probe.json() as {
+      ok?: boolean;
+      source?: string;
+      requestedModel?: string;
+      reasoningEffort?: string;
+      latencyMs?: number;
+    };
+    assert.equal(probeBody.ok, true);
+    assert.equal(probeBody.source, "codex");
+    assert.equal(probeBody.requestedModel, "gpt-5.3-codex-spark");
+    assert.equal(probeBody.reasoningEffort, "low");
+    assert.equal(typeof probeBody.latencyMs, "number");
+    assert.equal(receivedAuthorization, "Bearer saved-route-secret");
+    assert.equal(receivedBody.model, "gpt-5.3-codex-spark");
+    assert.equal(receivedBody.reasoning_effort, "low");
+    assert.match(receivedBody.messages?.[0]?.content ?? "", /WAND_API_OK/);
+  } finally {
+    await handle.close();
+    await new Promise<void>((resolve, reject) => provider.close((error) => error ? reject(error) : resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("settings validate atomically, persist without secrets, and password rotation revokes tokens", async () => {
   process.env.WAND_TEST_MODE = "1";
@@ -69,7 +176,17 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal(importedResponse.status, 200);
     const importedBody = await importedResponse.json() as {
       count?: number;
-      systemAi?: { enabled?: boolean; apiKey?: string; hasApiKey?: boolean; fallbacks?: Array<{ apiKey?: string; hasApiKey?: boolean }> };
+      systemAi?: Record<string, unknown> & {
+        id?: string;
+        enabled?: boolean;
+        apiKey?: string;
+        hasApiKey?: boolean;
+        fallbacks?: Array<Record<string, unknown> & {
+          id?: string;
+          apiKey?: string;
+          hasApiKey?: boolean;
+        }>;
+      };
     };
     assert.equal(importedBody.count, 2);
     assert.equal(importedBody.systemAi?.enabled, false);
@@ -81,6 +198,103 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal(config.systemAi?.apiKey, "imported-system-ai-secret");
     assert.equal(config.systemAi?.fallbacks?.[0]?.apiKey, "imported-opencode-secret");
     assert.equal(config.commitAiSource, "cli");
+
+    const importedPrimary = importedBody.systemAi!;
+    const importedFallback = importedPrimary.fallbacks![0]!;
+    assert.equal(typeof importedPrimary.id, "string");
+    assert.equal(typeof importedFallback.id, "string");
+    writeFileSync(path.join(importHome, ".claude", "settings.json"), JSON.stringify({
+      env: {
+        ANTHROPIC_BASE_URL: "https://proxy.example.test",
+        ANTHROPIC_AUTH_TOKEN: "rotated-system-ai-secret",
+      },
+      model: "imported-model",
+    }));
+    const homeBeforeCredentialRefresh = process.env.HOME;
+    process.env.HOME = importHome;
+    let refreshedImport: Response | undefined;
+    try {
+      refreshedImport = await fetch(`${baseUrl}/api/settings/system-ai/import`, {
+        method: "POST",
+        headers,
+      });
+    } finally {
+      if (homeBeforeCredentialRefresh === undefined) delete process.env.HOME;
+      else process.env.HOME = homeBeforeCredentialRefresh;
+    }
+    assert.equal(refreshedImport?.status, 200);
+    assert.equal(config.systemAi?.id, importedPrimary.id);
+    assert.equal(config.systemAi?.apiKey, "rotated-system-ai-secret");
+    assert.equal(config.systemAi?.fallbacks?.length, 1);
+    assert.equal(config.systemAi?.fallbacks?.[0]?.id, importedFallback.id);
+
+    const { fallbacks: _nestedFallbacks, ...primaryRoute } = importedPrimary;
+    const reorderedRoutes = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        systemAi: {
+          ...importedFallback,
+          enabled: true,
+          apiKey: "",
+          fallbacks: [{
+            ...primaryRoute,
+            enabled: true,
+            apiKey: "",
+          }],
+        },
+      }),
+    });
+    assert.equal(reorderedRoutes.status, 200);
+    assert.equal(config.systemAi?.id, importedFallback.id);
+    assert.equal(config.systemAi?.apiKey, "imported-opencode-secret");
+    assert.equal(config.systemAi?.fallbacks?.[0]?.id, importedPrimary.id);
+    assert.equal(config.systemAi?.fallbacks?.[0]?.apiKey, "rotated-system-ai-secret");
+
+    const duplicateRouteIds = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        systemAi: {
+          ...importedFallback,
+          enabled: true,
+          apiKey: "",
+          fallbacks: [{
+            ...primaryRoute,
+            id: importedFallback.id,
+            enabled: true,
+            apiKey: "",
+          }],
+        },
+      }),
+    });
+    assert.equal(duplicateRouteIds.status, 400);
+    assert.match((await duplicateRouteIds.json() as { error: string }).error, /路由 ID 不能重复/);
+    assert.equal(config.systemAi?.apiKey, "imported-opencode-secret");
+    assert.equal(config.systemAi?.fallbacks?.[0]?.apiKey, "rotated-system-ai-secret");
+
+    const clearedRouteKey = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        systemAi: {
+          ...importedFallback,
+          enabled: true,
+          apiKey: "",
+          clearApiKey: true,
+          fallbacks: [{
+            ...primaryRoute,
+            enabled: true,
+            apiKey: "",
+          }],
+        },
+      }),
+    });
+    assert.equal(clearedRouteKey.status, 200);
+    assert.equal(config.systemAi?.enabled, true);
+    assert.equal(config.systemAi?.id, importedFallback.id);
+    assert.equal(config.systemAi?.apiKey, "");
+    assert.equal(config.systemAi?.fallbacks?.[0]?.apiKey, "rotated-system-ai-secret");
 
     const connectedLogin = await fetch(`${baseUrl}/api/login`, {
       method: "POST",

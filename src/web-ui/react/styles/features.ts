@@ -174,6 +174,57 @@ export const settingsAndQuickCommitStyles = String.raw`
   font-size: var(--font-size-sm);
 }
 
+.wand-settings-app-access {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px 18px;
+  margin: 12px 18px 0;
+  border: 1px solid color-mix(in srgb, var(--warning) 58%, var(--border-subtle));
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--warning-muted) 76%, var(--bg-elevated));
+}
+
+.wand-settings-app-access-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.wand-settings-app-access-copy strong {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.wand-settings-app-access-copy span {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+}
+
+.wand-settings-app-access-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.wand-settings-app-access-form .wand-settings-field {
+  gap: 4px;
+}
+
+.wand-settings-app-access-form .wand-settings-field > label {
+  font-size: var(--font-size-xs);
+}
+
+.wand-settings-app-access > .wand-settings-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 7px 9px;
+  font-size: var(--font-size-xs);
+}
+
 .wand-settings-tabs {
   display: grid;
   grid-template-columns: 246px minmax(0, 1fr);
@@ -318,6 +369,90 @@ export const settingsAndQuickCommitStyles = String.raw`
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
+
+.wand-settings-route-toolbar,
+.wand-settings-route-heading,
+.wand-settings-route-identity,
+.wand-settings-route-actions {
+  display: flex;
+  align-items: center;
+}
+
+.wand-settings-route-toolbar,
+.wand-settings-route-heading {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.wand-settings-route-toolbar > div,
+.wand-settings-route-identity > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wand-settings-route-toolbar strong,
+.wand-settings-route-identity strong {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.wand-settings-route-toolbar span,
+.wand-settings-route-identity span {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.wand-settings-route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wand-settings-route {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-elevated));
+}
+
+.wand-settings-route-heading {
+  margin-bottom: 13px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 10px;
+}
+
+.wand-settings-route-identity { gap: 10px; min-width: 0; }
+
+.wand-settings-route-rank {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-default));
+  border-radius: 9px;
+  color: var(--accent-active) !important;
+  background: var(--accent-muted);
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-bold);
+}
+
+.wand-settings-route-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.wand-settings-route-actions .wand-ui-button:last-child { color: var(--danger); }
+.wand-settings-route-test { margin-top: 12px; }
+.wand-settings-clear-key { align-self: flex-start; color: var(--danger); }
+.wand-settings-route .wand-settings-field:last-child { grid-column: 1 / -1; }
 
 .wand-settings-field {
   display: flex;
@@ -2114,6 +2249,9 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   .wand-settings-overview { gap: 10px; margin: 8px 12px 0; padding: 11px; }
   .wand-settings-overview-copy > div:first-child span { display: none; }
   .wand-settings-overview > code { align-self: flex-start; }
+  .wand-settings-app-access { grid-template-columns: minmax(0, 1fr); margin: 8px 12px 0; }
+  .wand-settings-app-access-form { grid-template-columns: minmax(0, 1fr); }
+  .wand-settings-app-access-form > .wand-ui-button { width: 100%; }
 
   .wand-settings-tabs {
     display: grid;
@@ -2156,6 +2294,12 @@ export const sessionPickerAndWorktreeStyles = String.raw`
   .wand-settings-section-heading { padding: 14px; }
   .wand-settings-section-body { padding: 14px; }
   .wand-settings-grid, .wand-settings-file-grid, .wand-settings-env-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .wand-settings-route .wand-settings-field:last-child { grid-column: auto; }
+  .wand-settings-route-toolbar, .wand-settings-route-heading { align-items: flex-start; }
+  .wand-settings-route-toolbar { flex-direction: column; }
+  .wand-settings-route-toolbar > .wand-ui-button { width: 100%; }
+  .wand-settings-route-heading { flex-direction: column; }
+  .wand-settings-route-actions { width: 100%; justify-content: flex-end; }
   .wand-settings-section-heading { flex-direction: column; }
   .wand-settings-section-action { width: 100%; }
   .wand-settings-section-action .wand-ui-button { width: 100%; }

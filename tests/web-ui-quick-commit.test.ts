@@ -329,6 +329,8 @@ test("quick-commit controller owns one contextual overlay lifecycle", () => {
 
   assert.equal(quickCommitController.open({ sessionId: "  session-1  " }), true);
   assert.deepEqual(quickCommitStore.getSnapshot().context, { sessionId: "session-1" });
+  const firstRevision = quickCommitStore.getSnapshot().revision;
+  assert.equal(quickCommitController.isCurrentLifecycle(firstRevision, "session-1"), true);
   quickCommitStore.getRuntime()?.onRepositoryChanged("session-1");
   quickCommitStore.getRuntime()?.toast("done", "success");
   quickCommitController.setDismissable(false);
@@ -337,14 +339,23 @@ test("quick-commit controller owns one contextual overlay lifecycle", () => {
   assert.equal(quickCommitController.isOpen(), true);
   quickCommitController.setDismissable(true);
   assert.equal(quickCommitController.closeTopmost(), true);
+  assert.equal(quickCommitController.isCurrentLifecycle(firstRevision, "session-1"), false);
+  assert.equal(quickCommitController.open({ sessionId: "session-1" }), true);
+  const reopenedRevision = quickCommitStore.getSnapshot().revision;
+  assert.notEqual(reopenedRevision, firstRevision);
+  assert.equal(quickCommitController.isCurrentLifecycle(firstRevision, "session-1"), false);
+  assert.equal(quickCommitController.isCurrentLifecycle(reopenedRevision, "session-1"), true);
+  assert.equal(quickCommitController.closeTopmost(), true);
   assert.equal(quickCommitController.closeIfOpen(), false);
   assert.deepEqual(events, [
     "open:session-1",
     "changed:session-1",
     "success:done",
     "close:session-1",
+    "open:session-1",
+    "close:session-1",
   ]);
-  assert.equal(revisions.length, 4);
+  assert.equal(revisions.length, 6);
   assert.equal(revisions[1], revisions[0], "busy state must not replay open initialization");
   assert.equal(revisions[2], revisions[0], "restoring dismissal must keep the lifecycle revision");
 

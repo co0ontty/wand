@@ -13,6 +13,7 @@ export interface WandQuickCommitController {
   closeIfOpen(): boolean;
   closeTopmost(): boolean;
   isOpen(): boolean;
+  isCurrentLifecycle(revision: number, sessionId: string): boolean;
   setDismissable(dismissable: boolean): void;
 }
 
@@ -70,6 +71,12 @@ export const quickCommitController: WandQuickCommitController = {
 
   isOpen(): boolean {
     return snapshot.open;
+  },
+
+  isCurrentLifecycle(revision, sessionId): boolean {
+    return snapshot.open
+      && snapshot.revision === revision
+      && snapshot.context?.sessionId === sessionId;
   },
 
   setDismissable(dismissable): void {

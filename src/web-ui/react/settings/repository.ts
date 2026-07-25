@@ -51,6 +51,7 @@ const EMPTY_DISTRIBUTION: SettingsDistribution = {
 };
 
 const EMPTY_SYSTEM_AI: SettingsSystemAi = {
+  id: "",
   enabled: false,
   protocol: "openai",
   baseUrl: "",
@@ -127,6 +128,7 @@ function normalizeSystemAi(value: unknown, includeFallbacks = true): SettingsSys
     : "custom";
   const normalized: SettingsSystemAi = {
     ...EMPTY_SYSTEM_AI,
+    id: stringValue(input.id),
     enabled: input.enabled === true,
     protocol: input.protocol === "anthropic" ? "anthropic" : "openai",
     baseUrl: stringValue(input.baseUrl),
@@ -313,16 +315,18 @@ function notificationSnapshot(): SettingsNotificationPreferences {
   let nativeSounds: Array<{ id: string; name: string }> = [];
   let nativeSound: string | null = null;
   let hapticsEnabled: boolean | null = null;
+  let sound = storedBoolean("wand-notif-sound", true);
   try {
     if (bridge?.getAvailableSounds) nativeSounds = JSON.parse(bridge.getAvailableSounds()) as Array<{ id: string; name: string }>;
     if (bridge?.getNotificationSound) nativeSound = bridge.getNotificationSound();
+    if (bridge?.isNotificationSoundEnabled) sound = bridge.isNotificationSoundEnabled();
     if (bridge?.isHapticEnabled) hapticsEnabled = bridge.isHapticEnabled();
   } catch { /* malformed native payload falls back to browser preferences */ }
   const volume = bridge?.getNotificationVolume
     ? (() => { try { return bridge.getNotificationVolume(); } catch { return storedNumber("wand-notif-volume", 80); } })()
     : storedNumber("wand-notif-volume", 80);
   return {
-    sound: storedBoolean("wand-notif-sound", true),
+    sound,
     volume: Math.max(0, Math.min(100, volume)),
     bubble: storedBoolean("wand-notif-bubble", true),
     permission: notificationPermission(bridge),
@@ -405,6 +409,9 @@ function updateNotificationPreference(value: Partial<Pick<SettingsNotificationPr
     if (typeof value.bubble === "boolean") window.localStorage.setItem("wand-notif-bubble", String(value.bubble));
     if (typeof value.volume === "number") window.localStorage.setItem("wand-notif-volume", String(value.volume));
   } catch { /* storage may be unavailable */ }
+  if (typeof value.sound === "boolean" && bridge?.setNotificationSoundEnabled) {
+    try { bridge.setNotificationSoundEnabled(value.sound); } catch { /* noop */ }
+  }
   if (typeof value.volume === "number" && bridge?.setNotificationVolume) {
     try { bridge.setNotificationVolume(value.volume); } catch { /* noop */ }
   }
@@ -437,17 +444,26 @@ async function requestPermission(): Promise<SettingsNotificationPermission> {
   if (bridge?.requestPermission) {
     return new Promise((resolve) => {
       let settled = false;
+      let timeout = 0;
+      let onResume = () => {};
       const finish = (permission: SettingsNotificationPermission) => {
         if (settled) return;
         settled = true;
-        window.clearTimeout(timeout);
+        if (timeout) window.clearTimeout(timeout);
+        if (typeof window.removeEventListener === "function") {
+          window.removeEventListener("wand-android-resume", onResume);
+        }
         delete window._onNativePermissionResult;
         resolve(permission);
       };
-      const timeout = window.setTimeout(() => finish(notificationPermission(bridge)), 3000);
+      onResume = () => finish(notificationPermission(bridge));
+      timeout = window.setTimeout(() => finish(notificationPermission(bridge)), 120_000);
       window._onNativePermissionResult = (result: string) => {
         finish(result === "granted" || result === "denied" ? result : "default");
       };
+      if (typeof window.addEventListener === "function") {
+        window.addEventListener("wand-android-resume", onResume);
+      }
       try { bridge.requestPermission(); } catch { finish(notificationPermission(bridge)); }
     });
   }
@@ -507,6 +523,9 @@ export class HttpSettingsRepository implements SettingsRepository {
   async execute<C extends SettingsCommand>(command: C, options: SettingsExecuteOptions = {}): Promise<SettingsCommandResult<C>> {
     let result: unknown;
     switch (command.type) {
+      case "admin.login":
+        result = await post("/api/login", { password: command.password }, options.signal);
+        break;
       case "general.save":
         result = await post("/api/settings/config", command.value, options.signal);
         this.runtime.configSaved(normalizeConfig(record(result).config));
@@ -545,6 +564,9 @@ export class HttpSettingsRepository implements SettingsRepository {
       case "systemAi.import":
         result = await post("/api/settings/system-ai/import", undefined, options.signal);
         break;
+      case "systemAi.test":
+        result = await post("/api/settings/system-ai/test", { route: command.route }, options.signal);
+        break;
       case "webUpdate.check":
         result = await request("/api/check-update", { signal: options.signal });
         break;
@@ -578,7 +600,10 @@ export class HttpSettingsRepository implements SettingsRepository {
       }
       case "distribution.download": {
         const bridge = nativeBridge();
-        if (bridge?.downloadUpdate) {
+        const platform = platformSnapshot();
+        const nativeInstall = (command.kind === "apk" && platform.kind === "android")
+          || (command.kind === "dmg" && platform.kind === "macos");
+        if (nativeInstall && bridge?.downloadUpdate) {
           bridge.downloadUpdate(command.url, command.fileName, command.source);
           result = { started: true, native: true };
         } else if (command.source === "local") {
@@ -600,8 +625,11 @@ export class HttpSettingsRepository implements SettingsRepository {
       }
       case "clipboard.copy": {
         const bridge = nativeBridge();
-        if (bridge?.copyToClipboard) bridge.copyToClipboard(command.text);
-        else await navigator.clipboard.writeText(command.text);
+        if (bridge?.copyToClipboard) {
+          if (bridge.copyToClipboard(command.text) !== "ok") throw new Error("复制到系统剪贴板失败。");
+        } else {
+          await navigator.clipboard.writeText(command.text);
+        }
         result = { copied: true };
         break;
       }
@@ -615,6 +643,16 @@ export class HttpSettingsRepository implements SettingsRepository {
       case "notification.permission.request":
         result = { permission: await requestPermission() };
         break;
+      case "notification.settings.open": {
+        const bridge = nativeBridge();
+        if (bridge?.openNotificationSettings) {
+          bridge.openNotificationSettings();
+          result = { opened: true, native: true };
+        } else {
+          result = { opened: false, native: false };
+        }
+        break;
+      }
       case "notification.test": {
         if (command.delayMs) await new Promise<void>((resolve) => window.setTimeout(resolve, command.delayMs));
         const prefs = notificationSnapshot();

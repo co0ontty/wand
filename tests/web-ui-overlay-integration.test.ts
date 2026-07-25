@@ -85,7 +85,7 @@ test("native back honors generic confirmation, file preview, and non-dismissable
   assert.ok(restart >= 0 && genericDialog > restart && filePreview > genericDialog);
 });
 
-test("busy business controllers consume native back without bypassing Host dismissability", () => {
+test("native back blocks guarded workflows while quick commit remains dismissable in the background", () => {
   const notifications = source("src/web-ui/browser/notifications.ts");
   const start = notifications.indexOf("handleNativeBack = function");
   const end = notifications.indexOf("// ── Notification Sound", start);
@@ -97,12 +97,19 @@ test("busy business controllers consume native back without bypassing Host dismi
 
   for (const feature of ["new-session", "folder-picker", "quick-commit", "worktree-merge"]) {
     const controller = source(`src/web-ui/react/${feature}/controller.ts`);
-    const host = source(`src/web-ui/react/${feature}/host.tsx`);
     assert.match(controller, /if \(!snapshot\.open \|\| !snapshot\.dismissable\) return false;/);
     assert.match(controller, /if \(snapshot\.dismissable\) this\.close\(\);\s+return true;/);
+  }
+
+  for (const feature of ["new-session", "folder-picker", "worktree-merge"]) {
+    const host = source(`src/web-ui/react/${feature}/host.tsx`);
     assert.match(host, /Controller\.setDismissable\(false\)/);
     assert.match(host, /Controller\.setDismissable\(true\)/);
   }
+
+  const quickCommitHost = source("src/web-ui/react/quick-commit/host.tsx");
+  assert.doesNotMatch(quickCommitHost, /quickCommitController\.setDismissable\(/);
+  assert.match(quickCommitHost, /quickCommitController\.isCurrentLifecycle\(/);
 });
 
 test("legacy stylesheet no longer owns migrated business overlays", () => {

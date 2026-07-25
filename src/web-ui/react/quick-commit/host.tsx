@@ -186,8 +186,6 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     setOutcome(null);
     setLoading(true);
     setGenerating(false);
-    setSubmitting(false);
-    setPushing(false);
     setError("");
     setPushError("");
     void repository.loadStatus(context.sessionId, { signal: abort.signal })
@@ -256,12 +254,16 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   async function submit(event?: FormEvent<HTMLFormElement>): Promise<void> {
     event?.preventDefault();
     if (!context || !status || !canCommit) return;
+    const operationSessionId = context.sessionId;
+    const operationRevision = quickCommitStore.getSnapshot().revision;
+    const ownsCurrentSurface = () =>
+      quickCommitController.isCurrentLifecycle(operationRevision, operationSessionId);
     setSubmitting(true);
     setError("");
     setPushError("");
     try {
       const response = await repository.commit(
-        context.sessionId,
+        operationSessionId,
         buildQuickCommitInput(form, action, includeSubmodule),
       );
       if (!response.ok) throw new Error("快捷提交失败。");
@@ -278,21 +280,21 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
           selectedMeta.push ? `${summary}，已推送。` : `${summary}。`,
           "success",
         );
-        void reloadStatus(context.sessionId);
-        quickCommitController.close();
+        void reloadStatus(operationSessionId);
+        if (ownsCurrentSurface()) quickCommitController.close();
         return;
       }
-      setOutcome(nextOutcome);
+      if (ownsCurrentSurface()) setOutcome(nextOutcome);
       if (response.pushError) {
-        setPushError(response.pushError);
+        if (ownsCurrentSurface()) setPushError(response.pushError);
         quickCommitStore.getRuntime()?.toast(`${summary}；push 失败：${response.pushError}`, "error");
       } else {
         quickCommitStore.getRuntime()?.toast(`${summary}。`, "success");
       }
-      await reloadStatus(context.sessionId);
+      await reloadStatus(operationSessionId);
     } catch (commitError) {
       const message = presentError(commitError, "快捷提交失败。");
-      setError(message);
+      if (ownsCurrentSurface()) setError(message);
       quickCommitStore.getRuntime()?.toast(message, "error");
     } finally {
       setSubmitting(false);
@@ -301,10 +303,14 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
 
   async function pushAndClose(): Promise<void> {
     if (!context || !outcome || pushing) return;
+    const operationSessionId = context.sessionId;
+    const operationRevision = quickCommitStore.getSnapshot().revision;
+    const ownsCurrentSurface = () =>
+      quickCommitController.isCurrentLifecycle(operationRevision, operationSessionId);
     setPushing(true);
     setPushError("");
     try {
-      const response = await repository.push(context.sessionId, {
+      const response = await repository.push(operationSessionId, {
         pushCommits: true,
         pushTags: !!outcome.tagName,
         submodule: outcome.includeSubmodule,
@@ -312,7 +318,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       });
       if (!response.ok || response.error) {
         const message = response.error || "推送失败。";
-        setPushError(message);
+        if (ownsCurrentSurface()) setPushError(message);
         quickCommitStore.getRuntime()?.toast(`推送失败：${message}`, "error");
         return;
       }
@@ -320,11 +326,11 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         .filter(Boolean)
         .join(" 和 ") || "（无内容）";
       quickCommitStore.getRuntime()?.toast(`已推送 ${pushed}`, "success");
-      void reloadStatus(context.sessionId);
-      quickCommitController.close();
+      void reloadStatus(operationSessionId);
+      if (ownsCurrentSurface()) quickCommitController.close();
     } catch (pushFailure) {
       const message = presentError(pushFailure, "推送失败。");
-      setPushError(message);
+      if (ownsCurrentSurface()) setPushError(message);
       quickCommitStore.getRuntime()?.toast(message, "error");
     } finally {
       setPushing(false);

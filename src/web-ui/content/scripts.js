@@ -22039,6 +22039,7 @@
     github: null
   };
   var EMPTY_SYSTEM_AI = {
+    id: "",
     enabled: false,
     protocol: "openai",
     baseUrl: "",
@@ -22100,6 +22101,7 @@
     const source = input.source === "claude" || input.source === "codex" || input.source === "opencode" || input.source === "grok" ? input.source : "custom";
     const normalized = {
       ...EMPTY_SYSTEM_AI,
+      id: stringValue(input.id),
       enabled: input.enabled === true,
       protocol: input.protocol === "anthropic" ? "anthropic" : "openai",
       baseUrl: stringValue(input.baseUrl),
@@ -22280,9 +22282,11 @@
     let nativeSounds = [];
     let nativeSound = null;
     let hapticsEnabled = null;
+    let sound = storedBoolean("wand-notif-sound", true);
     try {
       if (bridge?.getAvailableSounds) nativeSounds = JSON.parse(bridge.getAvailableSounds());
       if (bridge?.getNotificationSound) nativeSound = bridge.getNotificationSound();
+      if (bridge?.isNotificationSoundEnabled) sound = bridge.isNotificationSoundEnabled();
       if (bridge?.isHapticEnabled) hapticsEnabled = bridge.isHapticEnabled();
     } catch {
     }
@@ -22294,7 +22298,7 @@
       }
     })() : storedNumber("wand-notif-volume", 80);
     return {
-      sound: storedBoolean("wand-notif-sound", true),
+      sound,
       volume: Math.max(0, Math.min(100, volume)),
       bubble: storedBoolean("wand-notif-bubble", true),
       permission: notificationPermission(bridge),
@@ -22375,6 +22379,12 @@
       if (typeof value.volume === "number") window.localStorage.setItem("wand-notif-volume", String(value.volume));
     } catch {
     }
+    if (typeof value.sound === "boolean" && bridge?.setNotificationSoundEnabled) {
+      try {
+        bridge.setNotificationSoundEnabled(value.sound);
+      } catch {
+      }
+    }
     if (typeof value.volume === "number" && bridge?.setNotificationVolume) {
       try {
         bridge.setNotificationVolume(value.volume);
@@ -22415,17 +22425,27 @@
     if (bridge?.requestPermission) {
       return new Promise((resolve) => {
         let settled = false;
+        let timeout = 0;
+        let onResume = () => {
+        };
         const finish = (permission) => {
           if (settled) return;
           settled = true;
-          window.clearTimeout(timeout);
+          if (timeout) window.clearTimeout(timeout);
+          if (typeof window.removeEventListener === "function") {
+            window.removeEventListener("wand-android-resume", onResume);
+          }
           delete window._onNativePermissionResult;
           resolve(permission);
         };
-        const timeout = window.setTimeout(() => finish(notificationPermission(bridge)), 3e3);
+        onResume = () => finish(notificationPermission(bridge));
+        timeout = window.setTimeout(() => finish(notificationPermission(bridge)), 12e4);
         window._onNativePermissionResult = (result) => {
           finish(result === "granted" || result === "denied" ? result : "default");
         };
+        if (typeof window.addEventListener === "function") {
+          window.addEventListener("wand-android-resume", onResume);
+        }
         try {
           bridge.requestPermission();
         } catch {
@@ -22487,6 +22507,9 @@
     async execute(command, options = {}) {
       let result;
       switch (command.type) {
+        case "admin.login":
+          result = await post("/api/login", { password: command.password }, options.signal);
+          break;
         case "general.save":
           result = await post("/api/settings/config", command.value, options.signal);
           this.runtime.configSaved(normalizeConfig(record(result).config));
@@ -22525,6 +22548,9 @@
         case "systemAi.import":
           result = await post("/api/settings/system-ai/import", void 0, options.signal);
           break;
+        case "systemAi.test":
+          result = await post("/api/settings/system-ai/test", { route: command.route }, options.signal);
+          break;
         case "webUpdate.check":
           result = await request("/api/check-update", { signal: options.signal });
           break;
@@ -22558,7 +22584,9 @@
         }
         case "distribution.download": {
           const bridge = nativeBridge();
-          if (bridge?.downloadUpdate) {
+          const platform2 = platformSnapshot();
+          const nativeInstall = command.kind === "apk" && platform2.kind === "android" || command.kind === "dmg" && platform2.kind === "macos";
+          if (nativeInstall && bridge?.downloadUpdate) {
             bridge.downloadUpdate(command.url, command.fileName, command.source);
             result = { started: true, native: true };
           } else if (command.source === "local") {
@@ -22580,8 +22608,11 @@
         }
         case "clipboard.copy": {
           const bridge = nativeBridge();
-          if (bridge?.copyToClipboard) bridge.copyToClipboard(command.text);
-          else await navigator.clipboard.writeText(command.text);
+          if (bridge?.copyToClipboard) {
+            if (bridge.copyToClipboard(command.text) !== "ok") throw new Error("\u590D\u5236\u5230\u7CFB\u7EDF\u526A\u8D34\u677F\u5931\u8D25\u3002");
+          } else {
+            await navigator.clipboard.writeText(command.text);
+          }
           result = { copied: true };
           break;
         }
@@ -22595,6 +22626,16 @@
         case "notification.permission.request":
           result = { permission: await requestPermission() };
           break;
+        case "notification.settings.open": {
+          const bridge = nativeBridge();
+          if (bridge?.openNotificationSettings) {
+            bridge.openNotificationSettings();
+            result = { opened: true, native: true };
+          } else {
+            result = { opened: false, native: false };
+          }
+          break;
+        }
         case "notification.test": {
           if (command.delayMs) await new Promise((resolve) => window.setTimeout(resolve, command.delayMs));
           const prefs = notificationSnapshot();
@@ -23049,20 +23090,20 @@
               ")"
             ] }) : null
           ] })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(DistributionSection, { kind: "apk", title: "Android App", distribution: about.androidApk, currentVersion: snapshot7.platform.kind === "android" ? snapshot7.platform.appVersion : null, repository, toast }),
-        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(DistributionSection, { kind: "dmg", title: "macOS App", distribution: about.macosDmg, currentVersion: snapshot7.platform.kind === "macos" ? snapshot7.platform.appVersion : null, repository, toast }),
-        /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsSection, { title: "App \u8FDE\u63A5\u7801", description: "\u7C98\u8D34\u6216\u626B\u7801\u540E\u53EF\u8FDE\u63A5\u5F53\u524D\u670D\u52A1\uFF1B\u4FEE\u6539\u5BC6\u7801\u540E\u4F1A\u5931\u6548\u3002", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("code", { className: "wand-settings-connect-code", "aria-label": "App \u8FDE\u63A5\u7801", children: snapshot7.connectCode?.code || "\u6682\u4E0D\u53EF\u7528" }),
-          /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { className: "wand-settings-button-row", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { disabled: !snapshot7.connectCode?.code, kind: "secondary", onClick: async () => {
-              await repository.execute({ type: "clipboard.copy", text: snapshot7.connectCode.code });
-              toast("\u8FDE\u63A5\u7801\u5DF2\u590D\u5236", "success");
-            }, children: "\u590D\u5236\u8FDE\u63A5\u7801" }),
-            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { disabled: !snapshot7.connectCode?.code, kind: "secondary", onClick: () => settingsStore.setNested("qr"), children: "\u653E\u5927\u8FDE\u63A5\u4E8C\u7EF4\u7801" })
-          ] })
         ] })
       ] }) : null,
+      snapshot7.platform.kind === "browser" || snapshot7.platform.kind === "android" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(DistributionSection, { kind: "apk", title: "Android App", distribution: about.androidApk, currentVersion: snapshot7.platform.kind === "android" ? snapshot7.platform.appVersion : null, repository, toast }) : null,
+      snapshot7.platform.kind === "browser" || snapshot7.platform.kind === "macos" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(DistributionSection, { kind: "dmg", title: "macOS App", distribution: about.macosDmg, currentVersion: snapshot7.platform.kind === "macos" ? snapshot7.platform.appVersion : null, repository, toast }) : null,
+      snapshot7.access === "admin" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(import_jsx_runtime28.Fragment, { children: /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsSection, { title: "App \u8FDE\u63A5\u7801", description: "\u7C98\u8D34\u6216\u626B\u7801\u540E\u53EF\u8FDE\u63A5\u5F53\u524D\u670D\u52A1\uFF1B\u4FEE\u6539\u5BC6\u7801\u540E\u4F1A\u5931\u6548\u3002", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("code", { className: "wand-settings-connect-code", "aria-label": "App \u8FDE\u63A5\u7801", children: snapshot7.connectCode?.code || "\u6682\u4E0D\u53EF\u7528" }),
+        /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { className: "wand-settings-button-row", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { disabled: !snapshot7.connectCode?.code, kind: "secondary", onClick: async () => {
+            await repository.execute({ type: "clipboard.copy", text: snapshot7.connectCode.code });
+            toast("\u8FDE\u63A5\u7801\u5DF2\u590D\u5236", "success");
+          }, children: "\u590D\u5236\u8FDE\u63A5\u7801" }),
+          /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { disabled: !snapshot7.connectCode?.code, kind: "secondary", onClick: () => settingsStore.setNested("qr"), children: "\u653E\u5927\u8FDE\u63A5\u4E8C\u7EF4\u7801" })
+        ] })
+      ] }) }) : null,
       status ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone, children: status }) : null,
       /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(ConnectCodeDialog, { code: snapshot7.connectCode?.code || "" })
     ] });
@@ -23262,25 +23303,19 @@
         /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "\u9ED8\u8BA4\u5DE5\u4F5C\u76EE\u5F55", htmlFor: "settings-default-cwd", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-default-cwd", value: form.defaultCwd, placeholder: "/home/user", onChange: (value) => update("defaultCwd", value) }) }),
         /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "Shell", htmlFor: "settings-shell", error: errors.shell, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-shell", value: form.shell, invalid: !!errors.shell, placeholder: "/bin/bash", onChange: (value) => update("shell", value) }) })
       ] }) }),
-      snapshot7.platform.canSetAppIcon ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsSection, { title: "\u5E94\u7528\u56FE\u6807", description: "\u8FD4\u56DE\u7CFB\u7EDF\u684C\u9762\u540E\u751F\u6548\u3002", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("div", { className: "wand-settings-button-row", role: "group", "aria-label": "\u5E94\u7528\u56FE\u6807", children: ["shorthair", "garfield"].map((icon) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
-        WandButton,
-        {
-          kind: snapshot7.platform.appIcon === icon ? "primary" : "secondary",
-          "aria-pressed": snapshot7.platform.appIcon === icon,
-          onClick: async () => {
-            await repository.execute({ type: "appIcon.set", icon });
-            toast("\u56FE\u6807\u5DF2\u5207\u6362\uFF0C\u8FD4\u56DE\u684C\u9762\u540E\u751F\u6548", "success");
-          },
-          children: icon === "shorthair" ? "\u8D5B\u535A\u864E\u599E" : "\u52E4\u52B3\u521D\u4E8C"
-        },
-        icon
-      )) }) }) : null,
       /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsSaveBar, { label: "\u4FDD\u5B58\u57FA\u672C\u914D\u7F6E", pending, onSave: () => void save(), status, tone }),
       /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(EnvironmentDialog, { repository })
     ] });
   }
   function aiFromSnapshot(snapshot7) {
     const config = snapshot7.config;
+    const withClientId = (profile) => ({
+      ...profile,
+      id: profile.id || createSystemAiRouteId(),
+      apiKey: "",
+      fallbacks: void 0
+    });
+    const primary = withClientId(config.systemAi);
     return {
       defaultModel: config.defaultModel,
       defaultCodexModel: config.defaultCodexModel,
@@ -23288,11 +23323,88 @@
       defaultGrokModel: config.defaultGrokModel,
       defaultQoderModel: config.defaultQoderModel,
       commitAiSource: config.commitAiSource,
-      systemAi: { ...config.systemAi, apiKey: "" }
+      systemAi: {
+        ...primary,
+        enabled: config.systemAi.enabled,
+        fallbacks: (config.systemAi.fallbacks || []).map(withClientId)
+      }
     };
   }
   function ModelSuggestions({ id, models }) {
     return /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("datalist", { id, children: models.map((model) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("option", { value: model.id, children: model.label || model.id }, model.id)) });
+  }
+  function createSystemAiRouteId() {
+    if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+    return `route-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+  function withoutSystemAiFallbacks(profile) {
+    const { fallbacks: _fallbacks, ...route } = profile;
+    return route;
+  }
+  function systemAiRoutes(systemAi) {
+    return [
+      withoutSystemAiFallbacks(systemAi),
+      ...(systemAi.fallbacks || []).map(withoutSystemAiFallbacks)
+    ];
+  }
+  function packSystemAiRoutes(systemAi, routes) {
+    const [primary, ...fallbacks] = routes;
+    const first = primary || {
+      id: createSystemAiRouteId(),
+      enabled: systemAi.enabled,
+      protocol: "openai",
+      baseUrl: "",
+      apiKey: "",
+      hasApiKey: false,
+      model: "",
+      authHeader: "bearer",
+      source: "custom"
+    };
+    return {
+      ...withoutSystemAiFallbacks(first),
+      enabled: systemAi.enabled,
+      fallbacks: fallbacks.map((route) => ({
+        ...withoutSystemAiFallbacks(route),
+        enabled: true
+      }))
+    };
+  }
+  var SYSTEM_AI_SOURCE_LABELS = {
+    claude: "Claude",
+    codex: "Codex",
+    opencode: "OpenCode",
+    grok: "Grok",
+    custom: "\u81EA\u5B9A\u4E49"
+  };
+  function routeModelOptions(route, models) {
+    if (!models) return [];
+    const groups = [
+      { source: "claude", label: "Claude", options: models.models },
+      { source: "codex", label: "Codex", options: models.codexModels },
+      { source: "opencode", label: "OpenCode", options: models.opencodeModels },
+      { source: "grok", label: "Grok", options: models.grokModels }
+    ];
+    const ordered = [
+      ...groups.filter((group) => group.source === route.source),
+      ...groups.filter((group) => group.source !== route.source)
+    ];
+    const seen = /* @__PURE__ */ new Set();
+    return ordered.flatMap((group) => group.options.flatMap((option) => {
+      if (seen.has(option.id)) return [];
+      seen.add(option.id);
+      return [{
+        ...option,
+        label: `${group.label} \xB7 ${option.label || option.id}`
+      }];
+    }));
+  }
+  function routeIsEmpty(route) {
+    return !route.baseUrl.trim() && !route.model.trim() && !route.apiKey.trim() && !route.hasApiKey;
+  }
+  function routeIsComplete(route) {
+    return Boolean(
+      route.baseUrl.trim() && route.model.trim() && (route.apiKey.trim() || route.hasApiKey)
+    );
   }
   function AiSettingsTab({ snapshot: snapshot7, repository, refresh, setSnapshot, toast }) {
     const [form, setForm] = (0, import_react7.useState)(() => aiFromSnapshot(snapshot7));
@@ -23300,13 +23412,98 @@
     const [status, setStatus] = (0, import_react7.useState)("");
     const [tone, setTone] = (0, import_react7.useState)("info");
     const [errors, setErrors] = (0, import_react7.useState)({});
-    (0, import_react7.useEffect)(() => setForm(aiFromSnapshot(snapshot7)), [snapshot7]);
+    const [routeTests, setRouteTests] = (0, import_react7.useState)({});
+    (0, import_react7.useEffect)(() => setForm(aiFromSnapshot(snapshot7)), [snapshot7.config]);
     function update(key, value) {
       setForm((current) => ({ ...current, [key]: value }));
     }
-    function updateSystem(key, value) {
-      setForm((current) => ({ ...current, systemAi: { ...current.systemAi, [key]: value, ...key === "apiKey" ? { source: "custom" } : {} } }));
-      setErrors((current) => ({ ...current, [key]: "" }));
+    function updateSystemEnabled(enabled) {
+      setForm((current) => ({
+        ...current,
+        systemAi: { ...current.systemAi, enabled }
+      }));
+    }
+    function changeSystemAiRoutes(transform) {
+      setForm((current) => ({
+        ...current,
+        systemAi: packSystemAiRoutes(
+          current.systemAi,
+          transform(systemAiRoutes(current.systemAi))
+        )
+      }));
+    }
+    function updateSystemRoute(index2, key, value) {
+      changeSystemAiRoutes((routes) => routes.map((route2, routeIndex) => routeIndex === index2 ? { ...route2, [key]: value } : route2));
+      const route = systemAiRoutes(form.systemAi)[index2];
+      if (route) {
+        setErrors((current) => ({ ...current, [`${route.id}.${String(key)}`]: "" }));
+        setRouteTests((current) => {
+          const next = { ...current };
+          delete next[route.id];
+          return next;
+        });
+      }
+    }
+    function updateSystemRouteKey(index2, apiKey) {
+      changeSystemAiRoutes((routes) => routes.map((route2, routeIndex) => routeIndex === index2 ? { ...route2, apiKey, clearApiKey: false } : route2));
+      const route = systemAiRoutes(form.systemAi)[index2];
+      if (route) {
+        setErrors((current) => ({ ...current, [`${route.id}.apiKey`]: "" }));
+        setRouteTests((current) => {
+          const next = { ...current };
+          delete next[route.id];
+          return next;
+        });
+      }
+    }
+    function clearSystemRouteKey(index2) {
+      const currentRoutes = systemAiRoutes(form.systemAi);
+      const clearingLastUsableRoute = routeIsComplete(currentRoutes[index2]) && currentRoutes.filter(routeIsComplete).length === 1;
+      changeSystemAiRoutes((routes) => routes.map((route, routeIndex) => routeIndex === index2 ? { ...route, apiKey: "", hasApiKey: false, clearApiKey: true } : route));
+      const clearedRoute = currentRoutes[index2];
+      if (clearedRoute) {
+        setRouteTests((current) => {
+          const next = { ...current };
+          delete next[clearedRoute.id];
+          return next;
+        });
+      }
+      if (clearingLastUsableRoute) updateSystemEnabled(false);
+    }
+    function moveSystemRoute(index2, delta) {
+      changeSystemAiRoutes((routes) => {
+        const destination = index2 + delta;
+        if (destination < 0 || destination >= routes.length) return routes;
+        const next = [...routes];
+        [next[index2], next[destination]] = [next[destination], next[index2]];
+        return next;
+      });
+    }
+    function addSystemRoute() {
+      changeSystemAiRoutes((routes) => [...routes, {
+        id: createSystemAiRouteId(),
+        enabled: true,
+        protocol: "openai",
+        baseUrl: "",
+        apiKey: "",
+        hasApiKey: false,
+        model: "",
+        authHeader: "bearer",
+        source: "custom"
+      }]);
+    }
+    function removeSystemRoute(index2) {
+      const removingLastRoute = systemAiRoutes(form.systemAi).length === 1;
+      changeSystemAiRoutes((routes) => routes.length > 1 ? routes.filter((_route, routeIndex) => routeIndex !== index2) : routes.map((route) => ({
+        ...route,
+        id: createSystemAiRouteId(),
+        baseUrl: "",
+        apiKey: "",
+        hasApiKey: false,
+        model: "",
+        source: "custom"
+      })));
+      if (removingLastRoute) updateSystemEnabled(false);
     }
     async function refreshModels() {
       setPending("models");
@@ -23339,33 +23536,84 @@
         setPending("");
       }
     }
+    async function testSystemRoute(index2) {
+      const route = systemAiRoutes(form.systemAi)[index2];
+      if (!route) return;
+      const pendingKey = `test:${route.id}`;
+      if (!routeIsComplete(route)) {
+        setRouteTests((current) => ({
+          ...current,
+          [route.id]: { tone: "error", message: "\u8BF7\u5148\u586B\u5199\u5B8C\u6574\u7684 API \u5730\u5740\u3001API Key \u548C\u6A21\u578B\u3002" }
+        }));
+        return;
+      }
+      setPending(pendingKey);
+      setRouteTests((current) => ({
+        ...current,
+        [route.id]: { tone: "info", message: `\u6B63\u5728\u7528 ${route.model} \u53D1\u51FA\u771F\u5B9E\u7CFB\u7EDF API \u8BF7\u6C42\u2026` }
+      }));
+      try {
+        const result = await repository.execute({
+          type: "systemAi.test",
+          route: withoutSystemAiFallbacks(route)
+        });
+        setRouteTests((current) => ({
+          ...current,
+          [route.id]: {
+            tone: "success",
+            message: `${result.requestedModel} \u8C03\u7528\u6210\u529F\uFF0C${result.latencyMs} ms${result.reasoningEffort === "low" ? "\uFF0C\u6700\u4F4E\u63A8\u7406" : "\uFF0C\u672A\u542F\u7528\u6269\u5C55\u63A8\u7406"}\u3002`
+          }
+        }));
+      } catch (cause) {
+        setRouteTests((current) => ({
+          ...current,
+          [route.id]: { tone: "error", message: messageOf(cause, `${route.model} \u8C03\u7528\u5931\u8D25\u3002`) }
+        }));
+      } finally {
+        setPending("");
+      }
+    }
     async function save() {
-      const systemRequired = form.systemAi.enabled;
       const nextErrors = {};
-      const configuredFallback = (form.systemAi.fallbacks || []).some((profile) => profile.baseUrl.trim() && profile.model.trim() && (profile.apiKey.trim() || profile.hasApiKey));
-      if (systemRequired && !configuredFallback) {
-        if (!form.systemAi.baseUrl.trim()) nextErrors.baseUrl = "\u8BF7\u8F93\u5165 API \u5730\u5740\u3002";
+      const allRoutes = systemAiRoutes(form.systemAi);
+      const nonEmptyRoutes = allRoutes.filter((route) => !routeIsEmpty(route));
+      const routes = nonEmptyRoutes.length ? nonEmptyRoutes : [allRoutes[0]];
+      const configuredRoutes = routes.filter(routeIsComplete);
+      routes.forEach((route, index2) => {
+        const shouldValidate = !routeIsEmpty(route) || form.systemAi.enabled && configuredRoutes.length === 0 && index2 === 0;
+        if (!shouldValidate) return;
+        if (!route.baseUrl.trim()) nextErrors[`${route.id}.baseUrl`] = "\u8BF7\u8F93\u5165 API \u5730\u5740\u3002";
         else {
           try {
-            const url = new URL(form.systemAi.baseUrl);
-            if (url.protocol !== "http:" && url.protocol !== "https:") nextErrors.baseUrl = "API \u5730\u5740\u5FC5\u987B\u4F7F\u7528 http(s)\u3002";
+            const url = new URL(route.baseUrl);
+            if (url.protocol !== "http:" && url.protocol !== "https:") {
+              nextErrors[`${route.id}.baseUrl`] = "API \u5730\u5740\u5FC5\u987B\u4F7F\u7528 http(s)\u3002";
+            }
           } catch {
-            nextErrors.baseUrl = "\u8BF7\u8F93\u5165\u6709\u6548\u7684 API \u5730\u5740\u3002";
+            nextErrors[`${route.id}.baseUrl`] = "\u8BF7\u8F93\u5165\u6709\u6548\u7684 API \u5730\u5740\u3002";
           }
         }
-        if (!form.systemAi.model.trim()) nextErrors.model = "\u8BF7\u8F93\u5165\u7CFB\u7EDF AI \u6A21\u578B\u3002";
-        if (!form.systemAi.apiKey.trim() && !form.systemAi.hasApiKey) nextErrors.apiKey = "\u8BF7\u8F93\u5165 API Key\u3002";
-      }
+        if (!route.model.trim()) nextErrors[`${route.id}.model`] = "\u8BF7\u8F93\u5165\u6A21\u578B\u3002";
+        if (!route.apiKey.trim() && !route.hasApiKey && !route.clearApiKey) {
+          nextErrors[`${route.id}.apiKey`] = "\u8BF7\u8F93\u5165 API Key\u3002";
+        }
+      });
       setErrors(nextErrors);
       if (Object.keys(nextErrors).length) {
-        setStatus("\u76F4\u8FDE API \u914D\u7F6E\u5C1A\u672A\u5B8C\u6574\u3002");
+        setStatus("\u6A21\u578B\u8DEF\u7531\u4E2D\u6709\u672A\u5B8C\u6210\u7684\u7EBF\u8DEF\u3002");
         setTone("error");
         return;
       }
       setPending("save");
       setStatus("");
       try {
-        const result = await repository.execute({ type: "ai.save", value: form });
+        const result = await repository.execute({
+          type: "ai.save",
+          value: {
+            ...form,
+            systemAi: packSystemAiRoutes(form.systemAi, routes)
+          }
+        });
         setStatus(result.restartRequired ? "AI \u914D\u7F6E\u5DF2\u4FDD\u5B58\uFF1B\u90E8\u5206\u90E8\u7F72\u53D8\u5316\u7B49\u5F85\u91CD\u542F\u3002" : "AI \u4E0E\u6A21\u578B\u914D\u7F6E\u5DF2\u4FDD\u5B58\u3002");
         setTone(result.restartRequired ? "warning" : "success");
         await refresh();
@@ -23378,12 +23626,13 @@
       }
     }
     const models = snapshot7.models;
-    const systemAiProfiles = [form.systemAi, ...form.systemAi.fallbacks || []].filter((profile) => profile.baseUrl && profile.model && (profile.apiKey || profile.hasApiKey));
-    const systemAiOrder = systemAiProfiles.map((profile) => profile.source === "custom" ? "\u81EA\u5B9A\u4E49" : profile.source).join(" \u2192 ");
+    const systemAiProfiles = systemAiRoutes(form.systemAi);
+    const configuredSystemAiProfiles = systemAiProfiles.filter(routeIsComplete);
+    const systemAiOrder = configuredSystemAiProfiles.map((profile) => `${SYSTEM_AI_SOURCE_LABELS[profile.source]} \xB7 ${profile.model}`).join(" \u2192 ");
     return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("section", { className: "wand-settings-panel", "aria-label": "AI \u4E0E\u6A21\u578B", children: [
       /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("header", { className: "wand-settings-panel-heading", children: [
         /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("h2", { children: "AI \u4E0E\u6A21\u578B" }),
-        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("p", { children: "\u96C6\u4E2D\u7BA1\u7406\u4F1A\u8BDD\u9ED8\u8BA4\u6A21\u578B\u3001\u7CFB\u7EDF API \u548C\u5FEB\u6377\u63D0\u4EA4\u7684 AI \u6765\u6E90\u3002" })
+        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("p", { children: "\u96C6\u4E2D\u7BA1\u7406\u4F1A\u8BDD\u9ED8\u8BA4\u6A21\u578B\u3001\u7CFB\u7EDF API \u8DEF\u7531\u548C\u5FEB\u6377\u63D0\u4EA4\u7684 AI \u6765\u6E90\u3002" })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
         SettingsSection,
@@ -23418,51 +23667,123 @@
       /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(
         SettingsSection,
         {
-          title: "\u7CFB\u7EDF AI API",
-          description: "\u7528\u4E8E\u63D0\u793A\u8BCD\u4F18\u5316\u3001\u4F1A\u8BDD\u6807\u9898\uFF0C\u4E5F\u4F1A\u4F5C\u4E3A\u5FEB\u6377\u63D0\u4EA4\u81EA\u52A8\u53D1\u73B0 API \u7684\u8865\u5145\u3002API Key \u4E0D\u4F1A\u4ECE\u670D\u52A1\u7AEF\u56DE\u4F20\u3002",
+          title: "\u7CFB\u7EDF AI \u6A21\u578B\u8DEF\u7531",
+          description: "\u50CF\u4E2D\u8F6C\u7AD9\u4E00\u6837\u7BA1\u7406\u76F4\u8FDE API \u4E0E\u6A21\u578B\uFF1B\u5217\u8868\u4ECE\u4E0A\u5230\u4E0B\u5C31\u662F\u8C03\u7528\u987A\u5E8F\u3002API Key \u53EA\u4FDD\u5B58\u5728\u670D\u52A1\u7AEF\u3002",
           action: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "import", kind: "secondary", onClick: () => void importSystemAi(), children: "\u5BFC\u5165\u5168\u90E8\u5DE5\u5177 API" }),
           children: [
             /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
               SettingsToggle,
               {
                 label: "\u7528\u4E8E\u7CFB\u7EDF AI \u529F\u80FD",
-                description: "\u542F\u7528\u63D0\u793A\u8BCD\u4F18\u5316\u548C\u4F1A\u8BDD\u6807\u9898\u751F\u6210\u3002",
+                description: "\u542F\u7528\u63D0\u793A\u8BCD\u4F18\u5316\u548C\u4F1A\u8BDD\u6807\u9898\u751F\u6210\uFF1BCommit \u9009\u62E9 API \u65F6\u4ECD\u4F1A\u4F7F\u7528\u4E0B\u65B9\u8DEF\u7531\u3002",
                 checked: form.systemAi.enabled,
-                onCheckedChange: (checked) => updateSystem("enabled", checked)
+                onCheckedChange: updateSystemEnabled
               }
             ),
-            systemAiProfiles.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsStatus, { tone: "success", children: [
+            configuredSystemAiProfiles.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsStatus, { tone: "success", children: [
               "\u5DF2\u914D\u7F6E ",
-              systemAiProfiles.length,
-              " \u4E2A API\uFF0C\u5C06\u6309 ",
-              systemAiOrder || "\u5F53\u524D\u5217\u8868",
-              " \u4F9D\u6B21\u5C1D\u8BD5\uFF1B\u5168\u90E8\u4E0D\u53EF\u7528\u65F6\u56DE\u9000 CLI\u3002"
+              configuredSystemAiProfiles.length,
+              " \u6761\u7EBF\u8DEF\uFF1A",
+              systemAiOrder,
+              "\u3002\u8BF7\u6C42\u4F1A\u4F9D\u6B21\u5C1D\u8BD5\uFF0C\u6210\u529F\u540E\u505C\u6B62\u3002"
             ] }) : null,
-            /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsGrid, { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "\u63A5\u53E3\u683C\u5F0F", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
-                SettingsSelect,
-                {
-                  id: "settings-system-ai-protocol",
-                  ariaLabel: "\u7CFB\u7EDF AI \u63A5\u53E3\u683C\u5F0F",
-                  value: form.systemAi.protocol,
-                  options: [{ value: "openai", label: "OpenAI-compatible" }, { value: "anthropic", label: "Anthropic-compatible" }],
-                  onChange: (value) => updateSystem("protocol", value)
-                }
-              ) }),
-              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "\u8BA4\u8BC1\u65B9\u5F0F", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
-                SettingsSelect,
-                {
-                  id: "settings-system-ai-auth",
-                  ariaLabel: "\u7CFB\u7EDF AI \u8BA4\u8BC1\u65B9\u5F0F",
-                  value: form.systemAi.authHeader,
-                  options: [{ value: "bearer", label: "Bearer Token" }, { value: "x-api-key", label: "x-api-key" }],
-                  onChange: (value) => updateSystem("authHeader", value)
-                }
-              ) }),
-              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "API \u5730\u5740", htmlFor: "settings-system-ai-url", error: errors.baseUrl, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-system-ai-url", type: "url", value: form.systemAi.baseUrl, invalid: !!errors.baseUrl, placeholder: "https://api.example.com", onChange: (value) => updateSystem("baseUrl", value) }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "\u6A21\u578B", htmlFor: "settings-system-ai-model", error: errors.model, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-system-ai-model", value: form.systemAi.model, invalid: !!errors.model, placeholder: "\u4F8B\u5982 gpt-5.5", onChange: (value) => updateSystem("model", value) }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "API Key", htmlFor: "settings-system-ai-key", error: errors.apiKey, hint: form.systemAi.hasApiKey ? "\u5DF2\u4FDD\u5B58\uFF1B\u7559\u7A7A\u4F1A\u4FDD\u7559\u73B0\u6709\u5BC6\u94A5\u3002" : "\u4EC5\u4FDD\u5B58\u5728\u670D\u52A1\u7AEF\u3002", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: "settings-system-ai-key", type: "password", autoComplete: "new-password", value: form.systemAi.apiKey, invalid: !!errors.apiKey, placeholder: form.systemAi.hasApiKey ? "\u5DF2\u4FDD\u5B58\uFF1B\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8" : "\u8F93\u5165 API Key", onChange: (value) => updateSystem("apiKey", value) }) })
-            ] })
+            /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { className: "wand-settings-route-toolbar", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { children: [
+                /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("strong", { children: "\u8C03\u7528\u987A\u5E8F" }),
+                /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("span", { children: "\u53EF\u8F93\u5165\u63A5\u53E3\u652F\u6301\u7684\u4EFB\u610F\u6A21\u578B ID\uFF1B\u5DF2\u5BFC\u5165\u7EBF\u8DEF\u4F1A\u63D0\u4F9B\u672C\u673A\u53D1\u73B0\u7684\u6A21\u578B\u5EFA\u8BAE\u3002" })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { size: "small", kind: "secondary", onClick: addSystemRoute, children: "\u6DFB\u52A0\u7EBF\u8DEF" })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("ol", { className: "wand-settings-route-list", "aria-label": "\u7CFB\u7EDF AI API \u8C03\u7528\u987A\u5E8F", children: systemAiProfiles.map((route, index2) => {
+              const routeErrors = {
+                baseUrl: errors[`${route.id}.baseUrl`],
+                model: errors[`${route.id}.model`],
+                apiKey: errors[`${route.id}.apiKey`]
+              };
+              const modelOptions = routeModelOptions(route, models);
+              const inputPrefix = `settings-system-ai-${index2}`;
+              return /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("li", { className: "wand-settings-route", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("header", { className: "wand-settings-route-heading", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { className: "wand-settings-route-identity", children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("span", { className: "wand-settings-route-rank", "aria-label": `\u4F18\u5148\u7EA7 ${index2 + 1}`, children: String(index2 + 1).padStart(2, "0") }),
+                    /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("strong", { children: index2 === 0 ? "\u9996\u9009\u7EBF\u8DEF" : `\u5907\u7528\u7EBF\u8DEF ${index2}` }),
+                      /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("span", { children: [
+                        SYSTEM_AI_SOURCE_LABELS[route.source],
+                        " \xB7 ",
+                        route.model || "\u5C1A\u672A\u9009\u62E9\u6A21\u578B"
+                      ] })
+                    ] })
+                  ] }),
+                  /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { className: "wand-settings-route-actions", role: "group", "aria-label": `\u7EBF\u8DEF ${index2 + 1} \u64CD\u4F5C`, children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+                      SettingsActionButton,
+                      {
+                        size: "small",
+                        kind: "secondary",
+                        pending: pending === `test:${route.id}`,
+                        disabled: !!pending && pending !== `test:${route.id}`,
+                        onClick: () => void testSystemRoute(index2),
+                        children: "\u6D4B\u8BD5\u7EBF\u8DEF"
+                      }
+                    ),
+                    /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { size: "small", kind: "ghost", disabled: index2 === 0, "aria-label": `\u4E0A\u79FB\u7EBF\u8DEF ${index2 + 1}`, onClick: () => moveSystemRoute(index2, -1), children: "\u4E0A\u79FB" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { size: "small", kind: "ghost", disabled: index2 === systemAiProfiles.length - 1, "aria-label": `\u4E0B\u79FB\u7EBF\u8DEF ${index2 + 1}`, onClick: () => moveSystemRoute(index2, 1), children: "\u4E0B\u79FB" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { size: "small", kind: "ghost", "aria-label": `\u5220\u9664\u7EBF\u8DEF ${index2 + 1}`, onClick: () => removeSystemRoute(index2), children: "\u5220\u9664" })
+                  ] })
+                ] }),
+                /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(SettingsGrid, { children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "\u63A5\u53E3\u683C\u5F0F", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+                    SettingsSelect,
+                    {
+                      id: `${inputPrefix}-protocol`,
+                      ariaLabel: `\u7EBF\u8DEF ${index2 + 1} \u63A5\u53E3\u683C\u5F0F`,
+                      value: route.protocol,
+                      options: [{ value: "openai", label: "OpenAI-compatible" }, { value: "anthropic", label: "Anthropic-compatible" }],
+                      onChange: (value) => updateSystemRoute(index2, "protocol", value)
+                    }
+                  ) }),
+                  /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "\u8BA4\u8BC1\u65B9\u5F0F", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+                    SettingsSelect,
+                    {
+                      id: `${inputPrefix}-auth`,
+                      ariaLabel: `\u7EBF\u8DEF ${index2 + 1} \u8BA4\u8BC1\u65B9\u5F0F`,
+                      value: route.authHeader,
+                      options: [{ value: "bearer", label: "Bearer Token" }, { value: "x-api-key", label: "x-api-key" }],
+                      onChange: (value) => updateSystemRoute(index2, "authHeader", value)
+                    }
+                  ) }),
+                  /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsField, { label: "API \u5730\u5740", htmlFor: `${inputPrefix}-url`, error: routeErrors.baseUrl, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: `${inputPrefix}-url`, type: "url", value: route.baseUrl, invalid: !!routeErrors.baseUrl, placeholder: "https://api.example.com", onChange: (value) => updateSystemRoute(index2, "baseUrl", value) }) }),
+                  /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(
+                    SettingsField,
+                    {
+                      label: "\u6A21\u578B",
+                      htmlFor: `${inputPrefix}-model`,
+                      error: routeErrors.model,
+                      hint: modelOptions.length ? `${modelOptions.length} \u4E2A\u672C\u673A\u6A21\u578B\u5EFA\u8BAE\uFF1B\u63A5\u53E3\u662F\u5426\u652F\u6301\u4EE5\u7EBF\u8DEF\u6D4B\u8BD5\u4E3A\u51C6\u3002` : "\u4F7F\u7528\u63A5\u53E3\u5B9E\u9645\u652F\u6301\u7684\u6A21\u578B ID\u3002",
+                      children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: `${inputPrefix}-model`, list: `${inputPrefix}-models`, value: route.model, invalid: !!routeErrors.model, placeholder: "\u4F8B\u5982 gpt-5.5", onChange: (value) => updateSystemRoute(index2, "model", value) }),
+                        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(ModelSuggestions, { id: `${inputPrefix}-models`, models: modelOptions })
+                      ]
+                    }
+                  ),
+                  /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)(
+                    SettingsField,
+                    {
+                      label: "API Key",
+                      htmlFor: `${inputPrefix}-key`,
+                      error: routeErrors.apiKey,
+                      hint: route.clearApiKey ? "\u4FDD\u5B58\u540E\u4F1A\u6E05\u9664\u6B64\u7EBF\u8DEF\u7684\u5BC6\u94A5\uFF1B\u8F93\u5165\u65B0\u503C\u53EF\u64A4\u9500\u3002" : route.hasApiKey ? "\u5DF2\u4FDD\u5B58\uFF1B\u7559\u7A7A\u4F1A\u6309\u7EBF\u8DEF ID \u4FDD\u7559\u73B0\u6709\u5BC6\u94A5\u3002" : "\u4EC5\u4FDD\u5B58\u5728\u670D\u52A1\u7AEF\u3002",
+                      children: [
+                        /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsTextInput, { id: `${inputPrefix}-key`, type: "password", autoComplete: "new-password", value: route.apiKey, invalid: !!routeErrors.apiKey, placeholder: route.hasApiKey ? "\u5DF2\u4FDD\u5B58\uFF1B\u7559\u7A7A\u4FDD\u6301\u4E0D\u53D8" : "\u8F93\u5165 API Key", onChange: (value) => updateSystemRouteKey(index2, value) }),
+                        route.hasApiKey ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { className: "wand-settings-clear-key", size: "small", kind: "ghost", onClick: () => clearSystemRouteKey(index2), children: "\u6E05\u9664\u5DF2\u4FDD\u5B58\u5BC6\u94A5" }) : null
+                      ]
+                    }
+                  )
+                ] }),
+                routeTests[route.id] ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("div", { className: "wand-settings-route-test", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: routeTests[route.id].tone, children: routeTests[route.id].message }) }) : null
+              ] }, route.id);
+            }) })
           ]
         }
       ),
@@ -23478,7 +23799,7 @@
             "\u76F4\u8FDE API"
           ] })
         ] }),
-        form.commitAiSource === "api" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: "success", children: "\u81EA\u52A8\u8BFB\u53D6\u5404\u5DE5\u5177\u7684 API \u914D\u7F6E\u5E76\u9010\u4E2A\u5C1D\u8BD5\uFF1B\u5168\u90E8\u4E0D\u53EF\u7528\u65F6\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD CLI\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: "success", children: "\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD\u7684 CLI \u548C\u6A21\u578B\uFF1B\u63A8\u7406\u56FA\u5B9A\u4E3A\u6700\u4F4E\u6863\u3002" })
+        form.commitAiSource === "api" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: "success", children: "\u5148\u6309\u4E0A\u65B9\u9884\u8BBE\u987A\u5E8F\u4EE5\u6700\u4F4E\u63A8\u7406\u8C03\u7528\uFF0C\u518D\u8FFD\u52A0\u81EA\u52A8\u53D1\u73B0\u4F46\u5C1A\u672A\u5217\u51FA\u7684\u5DE5\u5177 API\uFF1B\u5168\u90E8\u4E0D\u53EF\u7528\u65F6\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD CLI\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsStatus, { tone: "success", children: "\u4F7F\u7528\u5F53\u524D\u4F1A\u8BDD\u7684 CLI \u548C\u6A21\u578B\uFF1B\u63A8\u7406\u56FA\u5B9A\u4E3A\u6700\u4F4E\u6863\u3002" })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsSaveBar, { label: "\u4FDD\u5B58 AI \u4E0E\u6A21\u578B\u914D\u7F6E", pending: pending === "save", disabled: !!pending && pending !== "save", onSave: () => void save(), status, tone })
     ] });
@@ -23600,16 +23921,41 @@
           })
         }
       ) }) : null,
+      snapshot7.platform.canSetAppIcon ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsSection, { title: "\u5E94\u7528\u56FE\u6807", description: "\u5207\u6362 Wand \u7684\u684C\u9762\u56FE\u6807\uFF0C\u8FD4\u56DE\u7CFB\u7EDF\u684C\u9762\u540E\u751F\u6548\u3002", children: /* @__PURE__ */ (0, import_jsx_runtime28.jsx)("div", { className: "wand-settings-button-row", role: "group", "aria-label": "\u5E94\u7528\u56FE\u6807", children: ["shorthair", "garfield"].map((icon) => /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+        WandButton,
+        {
+          kind: snapshot7.platform.appIcon === icon ? "primary" : "secondary",
+          "aria-pressed": snapshot7.platform.appIcon === icon,
+          onClick: async () => {
+            await repository.execute({ type: "appIcon.set", icon });
+            setSnapshot((current) => current ? {
+              ...current,
+              platform: { ...current.platform, appIcon: icon }
+            } : current);
+            toast("\u56FE\u6807\u5DF2\u5207\u6362\uFF0C\u8FD4\u56DE\u684C\u9762\u540E\u751F\u6548", "success");
+          },
+          children: icon === "shorthair" ? "\u8D5B\u535A\u864E\u599E" : "\u52E4\u52B3\u521D\u4E8C"
+        },
+        icon
+      )) }) }) : null,
       /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsSection, { title: "\u7CFB\u7EDF\u901A\u77E5", description: `\u6388\u6743\u72B6\u6001\uFF1A${permissionLabel}`, children: /* @__PURE__ */ (0, import_jsx_runtime28.jsxs)("div", { className: "wand-settings-button-row", children: [
         preferences.permission !== "granted" && preferences.permission !== "unsupported" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "permission", kind: "primary", onClick: () => void run2("permission", async () => {
           const result = await repository.execute({ type: "notification.permission.request" });
           setPreferences((current) => ({ ...current, permission: result.permission }));
           return result.permission === "granted" ? "\u7CFB\u7EDF\u901A\u77E5\u5DF2\u6388\u6743\u3002" : "\u7CFB\u7EDF\u901A\u77E5\u5C1A\u672A\u6388\u6743\u3002";
         }), children: "\u8BF7\u6C42\u901A\u77E5\u6743\u9650" }) : null,
-        preferences.permission === "denied" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(WandButton, { kind: "secondary", onClick: () => {
-          setStatus("\u8BF7\u5728\u6D4F\u89C8\u5668\u5730\u5740\u680F\u5DE6\u4FA7\u7684\u7F51\u7AD9\u8BBE\u7F6E\u6216\u7CFB\u7EDF\u8BBE\u7F6E\u4E2D\uFF0C\u5C06\u901A\u77E5\u6539\u4E3A\u5141\u8BB8\u540E\u5237\u65B0\u9875\u9762\u3002");
-          setTone("warning");
-        }, children: "\u5982\u4F55\u91CD\u7F6E\u6743\u9650" }) : null,
+        preferences.permission === "denied" ? /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(
+          SettingsActionButton,
+          {
+            pending: pending === "notification-settings",
+            kind: "secondary",
+            onClick: () => void run2("notification-settings", async () => {
+              const result = await repository.execute({ type: "notification.settings.open" });
+              return result.native ? "\u5DF2\u6253\u5F00 Wand \u7684\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E\uFF1B\u4FEE\u6539\u540E\u8FD4\u56DE\u6B64\u9875\u5373\u53EF\u3002" : "\u8BF7\u5728\u6D4F\u89C8\u5668\u7684\u7F51\u7AD9\u6743\u9650\u8BBE\u7F6E\u4E2D\u5141\u8BB8\u901A\u77E5\uFF0C\u7136\u540E\u5237\u65B0\u9875\u9762\u3002";
+            }),
+            children: snapshot7.platform.kind === "android" ? "\u6253\u5F00\u7CFB\u7EDF\u901A\u77E5\u8BBE\u7F6E" : "\u5982\u4F55\u91CD\u7F6E\u6743\u9650"
+          }
+        ) : null,
         /* @__PURE__ */ (0, import_jsx_runtime28.jsx)(SettingsActionButton, { pending: pending === "test", kind: "secondary", onClick: () => void run2("test", async () => {
           const result = await repository.execute({ type: "notification.test" });
           toast("\u6D4B\u8BD5\u901A\u77E5", "info");
@@ -23799,7 +24145,7 @@
   var import_jsx_runtime29 = __toESM(require_jsx_runtime(), 1);
   var TAB_LABELS = {
     general: { title: "\u57FA\u672C\u914D\u7F6E", description: "\u8FDE\u63A5\u3001\u6A21\u5F0F\u4E0E\u8FD0\u884C\u73AF\u5883" },
-    ai: { title: "AI \u4E0E\u6A21\u578B", description: "\u9ED8\u8BA4\u6A21\u578B\u3001\u7CFB\u7EDF API \u4E0E Commit" },
+    ai: { title: "AI \u4E0E\u6A21\u578B", description: "\u9ED8\u8BA4\u6A21\u578B\u3001API \u8DEF\u7531\u4E0E Commit" },
     notifications: { title: "\u901A\u77E5", description: "\u63D0\u793A\u97F3\u4E0E\u7CFB\u7EDF\u901A\u77E5" },
     display: { title: "\u663E\u793A", description: "\u5361\u7247\u9ED8\u8BA4\u5C55\u5F00\u884C\u4E3A" },
     security: { title: "\u5B89\u5168", description: "\u5BC6\u7801\u4E0E\u8BC1\u4E66" },
@@ -23813,6 +24159,10 @@
     "display",
     "security",
     "presets",
+    "about"
+  ];
+  var CONNECTED_APP_TAB_ORDER = [
+    "notifications",
     "about"
   ];
   var PLATFORM_LABELS = {
@@ -23840,6 +24190,70 @@
         "v",
         version.replace(/^v/, "")
       ] })
+    ] });
+  }
+  function ConnectedAppAccess({
+    repository,
+    onAuthenticated
+  }) {
+    const [password, setPassword] = (0, import_react8.useState)("");
+    const [pending, setPending] = (0, import_react8.useState)(false);
+    const [error, setError] = (0, import_react8.useState)("");
+    async function authenticate() {
+      if (!password) {
+        setError("\u8BF7\u8F93\u5165\u7BA1\u7406\u5458\u5BC6\u7801\u3002");
+        return;
+      }
+      setPending(true);
+      setError("");
+      try {
+        await repository.execute({ type: "admin.login", password });
+        const snapshot7 = await repository.load();
+        if (snapshot7.access !== "admin") throw new Error("\u767B\u5F55\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u4F1A\u8BDD\u4ECD\u6CA1\u6709\u7BA1\u7406\u6743\u9650\u3002");
+        setPassword("");
+        onAuthenticated(snapshot7);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "\u7BA1\u7406\u5458\u767B\u5F55\u5931\u8D25\u3002");
+      } finally {
+        setPending(false);
+      }
+    }
+    return /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)("section", { className: "wand-settings-app-access", "aria-label": "App \u8FDE\u63A5\u6743\u9650", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)("div", { className: "wand-settings-app-access-copy", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("strong", { children: "\u8BBE\u5907\u529F\u80FD\u5DF2\u53EF\u7528" }),
+        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("span", { children: "\u901A\u77E5\u3001\u89E6\u611F\u3001\u5E94\u7528\u56FE\u6807\u548C\u5BA2\u6237\u7AEF\u4E0B\u8F7D\u65E0\u9700\u7BA1\u7406\u6743\u9650\u3002\u8981\u4FEE\u6539\u670D\u52A1\u914D\u7F6E\uFF0C\u8BF7\u4F7F\u7528\u7BA1\u7406\u5458\u5BC6\u7801\u767B\u5F55\u6B64\u7F51\u9875\u3002" })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(
+        "form",
+        {
+          className: "wand-settings-app-access-form",
+          onSubmit: (event) => {
+            event.preventDefault();
+            void authenticate();
+          },
+          children: [
+            /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("input", { type: "text", name: "username", autoComplete: "username", value: "wand", readOnly: true, hidden: true }),
+            /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(SettingsField, { label: "\u7BA1\u7406\u5458\u5BC6\u7801", htmlFor: "settings-admin-password", error, children: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+              SettingsTextInput,
+              {
+                id: "settings-admin-password",
+                type: "password",
+                autoComplete: "current-password",
+                value: password,
+                disabled: pending,
+                invalid: !!error,
+                placeholder: "\u8F93\u5165\u5BC6\u7801\u89E3\u9501\u5B8C\u6574\u8BBE\u7F6E",
+                onChange: (value) => {
+                  setPassword(value);
+                  setError("");
+                }
+              }
+            ) }),
+            /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(WandButton, { type: "submit", kind: "primary", disabled: pending, children: pending ? "\u767B\u5F55\u4E2D\u2026" : "\u767B\u5F55\u7BA1\u7406\u8BBE\u7F6E" })
+          ]
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(SettingsStatus, { tone: "warning", children: "\u4FEE\u6539 Host\u3001\u7AEF\u53E3\u6216 HTTPS \u53EF\u80FD\u4E2D\u65AD\u5F53\u524D App \u8FDE\u63A5\uFF1B\u4FEE\u6539\u5BC6\u7801\u4F1A\u4F7F\u73B0\u6709\u8FDE\u63A5\u7801\u5931\u6548\u3002" })
     ] });
   }
   function SettingsHost({
@@ -23889,7 +24303,7 @@
         presets: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(PresetSettingsTab, { ...props }),
         about: /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(AboutSettingsTab, { ...props })
       };
-      const order = snapshot7.access === "admin" ? ADMIN_TAB_ORDER : ["about"];
+      const order = snapshot7.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
       return order.map((value) => ({
         value,
         label: /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)("span", { className: "wand-settings-tab-label", children: [
@@ -23899,6 +24313,7 @@
         content: contentByTab[value]
       }));
     }, [refresh, repository, showRestart2, snapshot7, toast]);
+    const selectedTab = snapshot7?.access === "admin" ? controller.tab : controller.tab === "about" ? "about" : "notifications";
     return /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
       WandDialogSurface,
       {
@@ -23920,13 +24335,23 @@
           /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(WandButton, { kind: "primary", onClick: () => void load(), children: "\u91CD\u8BD5\u52A0\u8F7D\u8BBE\u7F6E" })
         ] }) : snapshot7 ? /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(import_jsx_runtime29.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(SettingsOverview, { snapshot: snapshot7 }),
-          snapshot7.access === "read-only" ? /* @__PURE__ */ (0, import_jsx_runtime29.jsx)("div", { className: "wand-settings-readonly", role: "note", children: "\u5F53\u524D\u662F App \u8FDE\u63A5\u4F1A\u8BDD\uFF0C\u4EC5\u5C55\u793A\u7248\u672C\u4E0E\u5BA2\u6237\u7AEF\u4E0B\u8F7D\u4FE1\u606F\u3002\u7BA1\u7406\u8BBE\u7F6E\u9700\u8981\u7BA1\u7406\u5458\u767B\u5F55\u3002" }) : null,
+          snapshot7.access === "read-only" ? /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
+            ConnectedAppAccess,
+            {
+              repository,
+              onAuthenticated: (next) => {
+                setLoadError("");
+                setSnapshot(next);
+                settingsStore.setTab("general");
+              }
+            }
+          ) : null,
           /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(
             WandTabs,
             {
               className: "wand-settings-tabs",
               ariaLabel: "\u8BBE\u7F6E\u5206\u7EC4",
-              value: snapshot7.access === "read-only" ? "about" : controller.tab,
+              value: selectedTab,
               tabs,
               onValueChange: (value) => settingsStore.setTab(value)
             }
@@ -25073,6 +25498,9 @@
     isOpen() {
       return snapshot5.open;
     },
+    isCurrentLifecycle(revision, sessionId) {
+      return snapshot5.open && snapshot5.revision === revision && snapshot5.context?.sessionId === sessionId;
+    },
     setDismissable(dismissable) {
       publishDismissable3(dismissable);
     }
@@ -25439,8 +25867,6 @@
       setOutcome(null);
       setLoading(true);
       setGenerating(false);
-      setSubmitting(false);
-      setPushing(false);
       setError("");
       setPushError("");
       void repository.loadStatus(context.sessionId, { signal: abort.signal }).then((loaded) => {
@@ -25500,12 +25926,15 @@
     async function submit(event) {
       event?.preventDefault();
       if (!context || !status || !canCommit) return;
+      const operationSessionId = context.sessionId;
+      const operationRevision = quickCommitStore.getSnapshot().revision;
+      const ownsCurrentSurface = () => quickCommitController.isCurrentLifecycle(operationRevision, operationSessionId);
       setSubmitting(true);
       setError("");
       setPushError("");
       try {
         const response = await repository.commit(
-          context.sessionId,
+          operationSessionId,
           buildQuickCommitInput(form, action, includeSubmodule)
         );
         if (!response.ok) throw new Error("\u5FEB\u6377\u63D0\u4EA4\u5931\u8D25\u3002");
@@ -25522,21 +25951,21 @@
             selectedMeta.push ? `${summary}\uFF0C\u5DF2\u63A8\u9001\u3002` : `${summary}\u3002`,
             "success"
           );
-          void reloadStatus(context.sessionId);
-          quickCommitController.close();
+          void reloadStatus(operationSessionId);
+          if (ownsCurrentSurface()) quickCommitController.close();
           return;
         }
-        setOutcome(nextOutcome);
+        if (ownsCurrentSurface()) setOutcome(nextOutcome);
         if (response.pushError) {
-          setPushError(response.pushError);
+          if (ownsCurrentSurface()) setPushError(response.pushError);
           quickCommitStore.getRuntime()?.toast(`${summary}\uFF1Bpush \u5931\u8D25\uFF1A${response.pushError}`, "error");
         } else {
           quickCommitStore.getRuntime()?.toast(`${summary}\u3002`, "success");
         }
-        await reloadStatus(context.sessionId);
+        await reloadStatus(operationSessionId);
       } catch (commitError) {
         const message = presentError3(commitError, "\u5FEB\u6377\u63D0\u4EA4\u5931\u8D25\u3002");
-        setError(message);
+        if (ownsCurrentSurface()) setError(message);
         quickCommitStore.getRuntime()?.toast(message, "error");
       } finally {
         setSubmitting(false);
@@ -25544,10 +25973,13 @@
     }
     async function pushAndClose() {
       if (!context || !outcome || pushing) return;
+      const operationSessionId = context.sessionId;
+      const operationRevision = quickCommitStore.getSnapshot().revision;
+      const ownsCurrentSurface = () => quickCommitController.isCurrentLifecycle(operationRevision, operationSessionId);
       setPushing(true);
       setPushError("");
       try {
-        const response = await repository.push(context.sessionId, {
+        const response = await repository.push(operationSessionId, {
           pushCommits: true,
           pushTags: !!outcome.tagName,
           submodule: outcome.includeSubmodule,
@@ -25555,17 +25987,17 @@
         });
         if (!response.ok || response.error) {
           const message = response.error || "\u63A8\u9001\u5931\u8D25\u3002";
-          setPushError(message);
+          if (ownsCurrentSurface()) setPushError(message);
           quickCommitStore.getRuntime()?.toast(`\u63A8\u9001\u5931\u8D25\uFF1A${message}`, "error");
           return;
         }
         const pushed = [response.pushedCommits ? "commits" : "", response.pushedTags ? "tags" : ""].filter(Boolean).join(" \u548C ") || "\uFF08\u65E0\u5185\u5BB9\uFF09";
         quickCommitStore.getRuntime()?.toast(`\u5DF2\u63A8\u9001 ${pushed}`, "success");
-        void reloadStatus(context.sessionId);
-        quickCommitController.close();
+        void reloadStatus(operationSessionId);
+        if (ownsCurrentSurface()) quickCommitController.close();
       } catch (pushFailure) {
         const message = presentError3(pushFailure, "\u63A8\u9001\u5931\u8D25\u3002");
-        setPushError(message);
+        if (ownsCurrentSurface()) setPushError(message);
         quickCommitStore.getRuntime()?.toast(message, "error");
       } finally {
         setPushing(false);
@@ -27295,6 +27727,10 @@
       return result.dismissed === false && result.action === true;
     },
     async copyText(text5) {
+      if (typeof WandNative !== "undefined" && typeof WandNative.copyToClipboard === "function") {
+        if (WandNative.copyToClipboard(text5) !== "ok") throw new Error("\u590D\u5236\u5230\u7CFB\u7EDF\u526A\u8D34\u677F\u5931\u8D25\u3002");
+        return;
+      }
       if (!globalThis.navigator?.clipboard?.writeText) throw new Error("\u5F53\u524D\u73AF\u5883\u65E0\u6CD5\u8BBF\u95EE\u526A\u8D34\u677F\u3002");
       await globalThis.navigator.clipboard.writeText(text5);
     },
@@ -29097,6 +29533,57 @@
   font-size: var(--font-size-sm);
 }
 
+.wand-settings-app-access {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px 18px;
+  margin: 12px 18px 0;
+  border: 1px solid color-mix(in srgb, var(--warning) 58%, var(--border-subtle));
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--warning-muted) 76%, var(--bg-elevated));
+}
+
+.wand-settings-app-access-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.wand-settings-app-access-copy strong {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.wand-settings-app-access-copy span {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+}
+
+.wand-settings-app-access-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.wand-settings-app-access-form .wand-settings-field {
+  gap: 4px;
+}
+
+.wand-settings-app-access-form .wand-settings-field > label {
+  font-size: var(--font-size-xs);
+}
+
+.wand-settings-app-access > .wand-settings-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 7px 9px;
+  font-size: var(--font-size-xs);
+}
+
 .wand-settings-tabs {
   display: grid;
   grid-template-columns: 246px minmax(0, 1fr);
@@ -29241,6 +29728,90 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
+
+.wand-settings-route-toolbar,
+.wand-settings-route-heading,
+.wand-settings-route-identity,
+.wand-settings-route-actions {
+  display: flex;
+  align-items: center;
+}
+
+.wand-settings-route-toolbar,
+.wand-settings-route-heading {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.wand-settings-route-toolbar > div,
+.wand-settings-route-identity > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wand-settings-route-toolbar strong,
+.wand-settings-route-identity strong {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.wand-settings-route-toolbar span,
+.wand-settings-route-identity span {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.wand-settings-route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wand-settings-route {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-elevated));
+}
+
+.wand-settings-route-heading {
+  margin-bottom: 13px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 10px;
+}
+
+.wand-settings-route-identity { gap: 10px; min-width: 0; }
+
+.wand-settings-route-rank {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-default));
+  border-radius: 9px;
+  color: var(--accent-active) !important;
+  background: var(--accent-muted);
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-bold);
+}
+
+.wand-settings-route-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.wand-settings-route-actions .wand-ui-button:last-child { color: var(--danger); }
+.wand-settings-route-test { margin-top: 12px; }
+.wand-settings-clear-key { align-self: flex-start; color: var(--danger); }
+.wand-settings-route .wand-settings-field:last-child { grid-column: 1 / -1; }
 
 .wand-settings-field {
   display: flex;
@@ -31035,6 +31606,9 @@
   .wand-settings-overview { gap: 10px; margin: 8px 12px 0; padding: 11px; }
   .wand-settings-overview-copy > div:first-child span { display: none; }
   .wand-settings-overview > code { align-self: flex-start; }
+  .wand-settings-app-access { grid-template-columns: minmax(0, 1fr); margin: 8px 12px 0; }
+  .wand-settings-app-access-form { grid-template-columns: minmax(0, 1fr); }
+  .wand-settings-app-access-form > .wand-ui-button { width: 100%; }
 
   .wand-settings-tabs {
     display: grid;
@@ -31077,6 +31651,12 @@
   .wand-settings-section-heading { padding: 14px; }
   .wand-settings-section-body { padding: 14px; }
   .wand-settings-grid, .wand-settings-file-grid, .wand-settings-env-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .wand-settings-route .wand-settings-field:last-child { grid-column: auto; }
+  .wand-settings-route-toolbar, .wand-settings-route-heading { align-items: flex-start; }
+  .wand-settings-route-toolbar { flex-direction: column; }
+  .wand-settings-route-toolbar > .wand-ui-button { width: 100%; }
+  .wand-settings-route-heading { flex-direction: column; }
+  .wand-settings-route-actions { width: 100%; justify-content: flex-end; }
   .wand-settings-section-heading { flex-direction: column; }
   .wand-settings-section-action { width: 100%; }
   .wand-settings-section-action .wand-ui-button { width: 100%; }

@@ -46,6 +46,7 @@ function config(overrides: Record<string, unknown> = {}): Record<string, unknown
     commitModel: "",
     commitAiSource: "cli",
     systemAi: {
+      id: "route-primary",
       enabled: true,
       protocol: "openai",
       baseUrl: "https://api.example.test",
@@ -190,6 +191,23 @@ test("abort and JSON HTTP errors propagate without being converted to read-only"
   await assert.rejects(repository.load(), /settings exploded/);
 });
 
+test("admin login uses the password endpoint without changing connected-app scopes client-side", async () => {
+  let submitted: Record<string, unknown> | null = null;
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "/api/login");
+    submitted = JSON.parse(String(init?.body));
+    return json({ ok: true, principal: { kind: "browser-admin", scopes: ["admin"] } });
+  };
+
+  const result = await new HttpSettingsRepository(new RuntimeSpy()).execute({
+    type: "admin.login",
+    password: "admin-secret",
+  });
+
+  assert.deepEqual(submitted, { password: "admin-secret" });
+  assert.deepEqual(result, { ok: true, principal: { kind: "browser-admin", scopes: ["admin"] } });
+});
+
 test("AI save preserves the empty-key sentinel and emits only a redacted runtime config", async () => {
   let submitted: Record<string, unknown> | null = null;
   const runtime = new RuntimeSpy();
@@ -205,6 +223,7 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
     defaultQoderModel: "performance",
     commitAiSource: "api" as const,
     systemAi: {
+      id: "route-primary",
       enabled: true,
       protocol: "openai" as const,
       baseUrl: "https://api.example.test",
@@ -213,14 +232,68 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
       model: "gpt-test",
       authHeader: "bearer" as const,
       source: "custom" as const,
+      fallbacks: [{
+        id: "route-fallback",
+        enabled: true,
+        protocol: "anthropic" as const,
+        baseUrl: "https://fallback.example.test",
+        apiKey: "",
+        hasApiKey: true,
+        model: "fallback-model",
+        authHeader: "x-api-key" as const,
+        source: "claude" as const,
+      }],
     },
   };
   await new HttpSettingsRepository(runtime).execute({ type: "ai.save", value });
   assert.equal((submitted?.systemAi as Record<string, unknown>).apiKey, "");
+  assert.equal((submitted?.systemAi as Record<string, unknown>).id, "route-primary");
+  assert.deepEqual(
+    ((submitted?.systemAi as Record<string, unknown>).fallbacks as Array<Record<string, unknown>>)
+      .map((profile) => profile.id),
+    ["route-fallback"],
+  );
   assert.equal(Object.hasOwn(submitted ?? {}, "commitCli"), false);
   assert.equal(Object.hasOwn(submitted ?? {}, "commitModel"), false);
   assert.equal(runtime.configs[0].systemAi.apiKey, "");
   assert.equal(runtime.configs[0].systemAi.hasApiKey, true);
+});
+
+test("system AI test submits exactly one route without saving it", async () => {
+  let requestUrl = "";
+  let submitted: Record<string, unknown> | null = null;
+  globalThis.fetch = async (input, init) => {
+    requestUrl = String(input);
+    submitted = JSON.parse(String(init?.body));
+    return json({
+      ok: true,
+      source: "codex",
+      requestedModel: "gpt-5.3-codex-spark",
+      reasoningEffort: "low",
+      latencyMs: 25,
+    });
+  };
+  const route = {
+    id: "route-spark",
+    enabled: true,
+    protocol: "openai" as const,
+    baseUrl: "https://api.example.test/v1",
+    apiKey: "",
+    hasApiKey: true,
+    model: "gpt-5.3-codex-spark",
+    authHeader: "bearer" as const,
+    source: "codex" as const,
+  };
+
+  const result = await new HttpSettingsRepository(new RuntimeSpy()).execute({
+    type: "systemAi.test",
+    route,
+  });
+
+  assert.equal(requestUrl, "/api/settings/system-ai/test");
+  assert.deepEqual(submitted, { route });
+  assert.equal(result.requestedModel, "gpt-5.3-codex-spark");
+  assert.equal(result.reasoningEffort, "low");
 });
 
 test("notification preference commands synchronize the injected runtime adapter", async () => {
@@ -233,6 +306,27 @@ test("notification preference commands synchronize the injected runtime adapter"
   assert.equal(result.volume, 35);
   assert.equal(runtime.notifications.length, 1);
   assert.deepEqual(runtime.notifications[0], result);
+});
+
+test("native notification sound preference persists through the Android bridge", async () => {
+  let enabled = true;
+  Object.defineProperty(globalThis, "WandNative", {
+    configurable: true,
+    value: {
+      isNotificationSoundEnabled: () => enabled,
+      setNotificationSoundEnabled: (next: boolean) => { enabled = next; },
+    },
+  });
+
+  const runtime = new RuntimeSpy();
+  const result = await new HttpSettingsRepository(runtime).execute({
+    type: "notification.preferences.set",
+    value: { sound: false },
+  });
+
+  assert.equal(enabled, false);
+  assert.equal(result.sound, false);
+  assert.equal(runtime.notifications[0].sound, false);
 });
 
 test("native notification permission resolves through the WebView callback and cleans it up", async () => {
@@ -254,6 +348,48 @@ test("native notification permission resolves through the WebView callback and c
 
   assert.deepEqual(result, { permission: "granted" });
   assert.equal(window._onNativePermissionResult, undefined);
+});
+
+test("native notification settings and platform-matched installers use their bridges", async () => {
+  const downloads: string[] = [];
+  let openedSettings = 0;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      userAgent: "Mozilla/5.0 WandApp/4.24.0 WandPlatform/Android",
+      clipboard: { writeText: async () => undefined },
+    },
+  });
+  Object.defineProperty(globalThis, "WandNative", {
+    configurable: true,
+    value: {
+      openNotificationSettings: () => { openedSettings += 1; },
+      downloadUpdate: (url: string) => { downloads.push(url); },
+    },
+  });
+
+  const repository = new HttpSettingsRepository(new RuntimeSpy());
+  assert.deepEqual(
+    await repository.execute({ type: "notification.settings.open" }),
+    { opened: true, native: true },
+  );
+  await repository.execute({
+    type: "distribution.download",
+    kind: "apk",
+    source: "github",
+    url: "https://example.test/wand.apk",
+    fileName: "wand.apk",
+  });
+  await repository.execute({
+    type: "distribution.download",
+    kind: "dmg",
+    source: "github",
+    url: "https://example.test/wand.dmg",
+    fileName: "wand.dmg",
+  });
+
+  assert.equal(openedSettings, 1);
+  assert.deepEqual(downloads, ["https://example.test/wand.apk"]);
 });
 
 test("MemorySettingsRepository records semantic commands without browser side effects", async () => {

@@ -32,6 +32,7 @@ export interface WandNativeInterface {
   stopKeepAlive(): void;
   getPermission(): string;
   requestPermission(): void;
+  openNotificationSettings?(): void;
   updateSessionProgress(sessionId: string, data: string): void;
   clearSessionProgress(sessionId: string): void;
   copyToClipboard(text: string): string;
@@ -39,7 +40,9 @@ export interface WandNativeInterface {
   getAppIcon(): string;
   setAppIcon(name: string): void;
   getNotificationSound(): string;
+  isNotificationSoundEnabled?(): boolean;
   setNotificationSound(sound: string): void;
+  setNotificationSoundEnabled?(enabled: boolean): void;
   getNotificationVolume(): number;
   setNotificationVolume(volume: number): void;
   getAvailableSounds(): string;

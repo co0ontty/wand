@@ -131,8 +131,8 @@ export function resolveCommitAiContext(
   };
   if (config.commitAiSource !== "api") return commitContext;
   const directApi = mergeSystemAiConfigs(
-    discoverApis(commitContext.provider),
     config.systemAi,
+    discoverApis(commitContext.provider),
   );
   return {
     ...commitContext,

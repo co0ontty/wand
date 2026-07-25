@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
 import type { SessionProvider, SystemAiConfig, SystemAiProtocol } from "./types.js";
 
 const SYSTEM_AI_TIMEOUT_MS = 60_000;
+const SYSTEM_AI_ROUTE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
 export class SystemAiError extends Error {
   constructor(message: string, public readonly code: string) {
@@ -26,6 +28,9 @@ export function normalizeSystemAiConfig(value: unknown, fallback?: SystemAiConfi
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("系统 AI API 地址必须使用 http 或 https。");
   }
   const normalized: SystemAiConfig = {
+    id: typeof raw.id === "string" && SYSTEM_AI_ROUTE_ID_PATTERN.test(raw.id.trim())
+      ? raw.id.trim()
+      : fallback?.id ?? randomUUID(),
     enabled: raw.enabled === true,
     protocol,
     baseUrl,
@@ -38,9 +43,15 @@ export function normalizeSystemAiConfig(value: unknown, fallback?: SystemAiConfi
   };
   if (Array.isArray(raw.fallbacks)) {
     normalized.fallbacks = raw.fallbacks
-      .map((item, index) => {
+      .map((item) => {
         try {
-          const itemFallback = fallback?.fallbacks?.[index];
+          const itemId = item && typeof item === "object" && !Array.isArray(item)
+            && typeof (item as Partial<SystemAiConfig>).id === "string"
+            ? (item as Partial<SystemAiConfig>).id!.trim()
+            : "";
+          const itemFallback = itemId
+            ? fallback?.fallbacks?.find((profile) => profile.id === itemId)
+            : undefined;
           const profile = normalizeSystemAiConfig(item, itemFallback);
           delete profile.fallbacks;
           return profile;
@@ -66,6 +77,10 @@ function tryNormalizeSystemAiConfig(value: unknown): SystemAiConfig | null {
 }
 
 function systemAiProfileKey(profile: SystemAiConfig): string {
+  // Credential is intentionally part of runtime dedupe: if a stored key is
+  // stale but a tool config has already rotated it, the discovered route must
+  // remain available later in the same fallback chain. Import handles that
+  // case separately by refreshing the stored route in place.
   return [
     profile.protocol,
     profile.baseUrl,
@@ -269,8 +284,8 @@ export function systemAiProfiles(config: SystemAiConfig | undefined, forceEnable
 }
 
 /**
- * Flatten and combine direct-API groups in priority order. Dynamically discovered
- * profiles can be passed first, followed by stored/legacy settings.
+ * Flatten and combine direct-API groups in caller-defined priority order.
+ * Later groups are appended after earlier groups and duplicate routes are skipped.
  */
 export function mergeSystemAiConfigs(
   ...groups: Array<SystemAiConfig | SystemAiConfig[] | undefined>
@@ -320,11 +335,20 @@ export async function callSystemAiText(prompt: string, config: SystemAiConfig, t
     if (normalized.authHeader === "x-api-key") headers["x-api-key"] = normalized.apiKey;
     else headers.authorization = `Bearer ${normalized.apiKey}`;
   } else {
-    headers.authorization = `Bearer ${normalized.apiKey}`;
+    if (normalized.authHeader === "x-api-key") headers["x-api-key"] = normalized.apiKey;
+    else headers.authorization = `Bearer ${normalized.apiKey}`;
   }
   const body = normalized.protocol === "anthropic"
     ? { model: normalized.model, max_tokens: 2048, messages: [{ role: "user", content: prompt }] }
-    : { model: normalized.model, messages: [{ role: "user", content: prompt }], stream: false };
+    : {
+      model: normalized.model,
+      // Quick system tasks should not silently inherit a model's expensive
+      // default reasoning level. Settings probes a route with this same
+      // payload, so an incompatible endpoint fails visibly before it is used.
+      reasoning_effort: "low",
+      messages: [{ role: "user", content: prompt }],
+      stream: false,
+    };
   let response: Response;
   try {
     response = await fetch(endpoint(normalized.baseUrl, normalized.protocol), {

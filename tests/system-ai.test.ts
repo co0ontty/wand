@@ -24,7 +24,9 @@ test("CLI discovery copies Claude API settings without mutating the source", () 
       model: "custom-model",
     }));
     const found = discoverCliSystemAiConfig("claude", home);
-    assert.deepEqual(found, {
+    assert.ok(found?.id);
+    assert.deepEqual({ ...found, id: undefined }, {
+      id: undefined,
       enabled: true,
       protocol: "anthropic",
       baseUrl: "https://proxy.example",
@@ -140,7 +142,7 @@ test("Grok discovery imports chat_completions profiles with the default first", 
   }
 });
 
-test("system AI config merging keeps dynamic priority, flattens fallbacks, and deduplicates", () => {
+test("system AI config merging keeps caller priority, flattens fallbacks, and deduplicates", () => {
   const merged = mergeSystemAiConfigs(
     [{
       enabled: false,
@@ -234,17 +236,24 @@ test("system AI keeps profiles that differ only by authentication header", () =>
   );
 });
 
-test("system AI tries configured APIs in order until one returns text", async () => {
-  const requests: string[] = [];
+test("system AI tries configured APIs in order with each route's exact model", async () => {
+  const requests: Array<{ authorization: string; model: string }> = [];
   const server = createServer((req, res) => {
-    requests.push(`${req.headers.authorization}:${req.url}`);
-    res.setHeader("content-type", "application/json");
-    if (req.headers.authorization === "Bearer first-secret") {
-      res.statusCode = 503;
-      res.end(JSON.stringify({ error: "unavailable" }));
-      return;
-    }
-    res.end(JSON.stringify({ choices: [{ message: { content: "second API result" } }] }));
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk.toString(); });
+    req.on("end", () => {
+      requests.push({
+        authorization: req.headers.authorization ?? "",
+        model: (JSON.parse(raw) as { model?: string }).model ?? "",
+      });
+      res.setHeader("content-type", "application/json");
+      if (req.headers.authorization === "Bearer first-secret") {
+        res.statusCode = 503;
+        res.end(JSON.stringify({ error: "unavailable" }));
+        return;
+      }
+      res.end(JSON.stringify({ choices: [{ message: { content: "second API result" } }] }));
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -268,7 +277,10 @@ test("system AI tries configured APIs in order until one returns text", async ()
       }],
     });
     assert.equal(text, "second API result");
-    assert.deepEqual(requests.map((request) => request.split(":", 1)[0]), ["Bearer first-secret", "Bearer second-secret"]);
+    assert.deepEqual(requests, [
+      { authorization: "Bearer first-secret", model: "first-model" },
+      { authorization: "Bearer second-secret", model: "second-model" },
+    ]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -277,11 +289,22 @@ test("system AI tries configured APIs in order until one returns text", async ()
 test("OpenAI-compatible system AI calls the chat completions endpoint", async () => {
   let receivedPath = "";
   let authorization = "";
+  let receivedBody: {
+    model?: string;
+    reasoning_effort?: string;
+    stream?: boolean;
+    messages?: Array<{ role?: string; content?: string }>;
+  } = {};
   const server = createServer((req, res) => {
     receivedPath = req.url ?? "";
     authorization = req.headers.authorization ?? "";
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ choices: [{ message: { content: "generated message" } }] }));
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk.toString(); });
+    req.on("end", () => {
+      receivedBody = JSON.parse(raw) as typeof receivedBody;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ choices: [{ message: { content: "generated message" } }] }));
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -292,11 +315,15 @@ test("OpenAI-compatible system AI calls the chat completions endpoint", async ()
       protocol: "openai",
       baseUrl: `http://127.0.0.1:${address.port}/v1`,
       apiKey: "api-secret",
-      model: "test-model",
+      model: "gpt-5.3-codex-spark",
     });
     assert.equal(text, "generated message");
     assert.equal(receivedPath, "/v1/chat/completions");
     assert.equal(authorization, "Bearer api-secret");
+    assert.equal(receivedBody.model, "gpt-5.3-codex-spark", "configured route model must be sent verbatim");
+    assert.equal(receivedBody.reasoning_effort, "low");
+    assert.equal(receivedBody.stream, false);
+    assert.deepEqual(receivedBody.messages, [{ role: "user", content: "prompt" }]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -322,6 +349,35 @@ test("OpenAI-compatible system AI appends chat completions directly to versioned
     });
     assert.equal(text, "generated message");
     assert.equal(receivedPath, "/api/coding/paas/v4/chat/completions");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("OpenAI-compatible system AI preserves x-api-key authentication", async () => {
+  let apiKey = "";
+  let authorization = "";
+  const server = createServer((req, res) => {
+    apiKey = String(req.headers["x-api-key"] ?? "");
+    authorization = req.headers.authorization ?? "";
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ choices: [{ message: { content: "generated message" } }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const text = await callSystemAiText("prompt", {
+      enabled: true,
+      protocol: "openai",
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      apiKey: "openai-secret",
+      model: "test-model",
+      authHeader: "x-api-key",
+    });
+    assert.equal(text, "generated message");
+    assert.equal(apiKey, "openai-secret");
+    assert.equal(authorization, "");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -450,15 +506,27 @@ test("direct API quick commit falls back to the selected CLI", async () => {
   mkdirSync(bin);
   writeFileSync(path.join(bin, "codex"), [
     "#!/bin/sh",
-    ': > "$WAND_FALLBACK_MARKER"',
+    'printf "%s\\n" "$@" > "$WAND_FALLBACK_MARKER"',
     "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"fix: use CLI fallback\"}}'",
   ].join("\n"), { mode: 0o755 });
 
-  let requests = 0;
-  const server = createServer((_req, res) => {
-    requests += 1;
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ choices: [{ message: { content: "" } }] }));
+  const requests: Array<{ authorization: string; model: string }> = [];
+  const server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk.toString(); });
+    req.on("end", () => {
+      requests.push({
+        authorization: req.headers.authorization ?? "",
+        model: (JSON.parse(raw) as { model?: string }).model ?? "",
+      });
+      res.setHeader("content-type", "application/json");
+      if (req.headers.authorization === "Bearer first-secret") {
+        res.statusCode = 503;
+        res.end(JSON.stringify({ error: "first unavailable" }));
+        return;
+      }
+      res.end(JSON.stringify({ choices: [{ message: { content: "" } }] }));
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const previousPath = process.env.PATH;
@@ -477,19 +545,34 @@ test("direct API quick commit falls back to the selected CLI", async () => {
       cwd: repo,
       language: "English",
       provider: "codex",
+      model: "current-session-model",
+      thinkingEffort: "standard",
       systemAi: {
         enabled: true,
         protocol: "openai",
         baseUrl: `http://127.0.0.1:${address.port}/v1`,
-        apiKey: "direct-secret",
-        model: "test-model",
+        apiKey: "first-secret",
+        model: "gpt-5.3-codex-spark",
+        fallbacks: [{
+          enabled: true,
+          protocol: "openai",
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          apiKey: "second-secret",
+          model: "second-api-model",
+        }],
       },
       autoMessage: true,
     });
 
-    assert.equal(requests, 1);
+    assert.deepEqual(requests, [
+      { authorization: "Bearer first-secret", model: "gpt-5.3-codex-spark" },
+      { authorization: "Bearer second-secret", model: "second-api-model" },
+    ]);
     assert.equal(result.commit.message, "fix: use CLI fallback");
     assert.equal(existsSync(marker), true);
+    const cliArgs = readFileSync(marker, "utf8");
+    assert.match(cliArgs, /--model\ncurrent-session-model\n/);
+    assert.match(cliArgs, /-c\nmodel_reasoning_effort=low\n/);
   } finally {
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;

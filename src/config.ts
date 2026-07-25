@@ -6,7 +6,7 @@ import process from "node:process";
 import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, MacosDmgConfig, SessionProvider, StructuredChatPersonaConfig, ThinkingEffort, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
-import { normalizeSystemAiConfig } from "./system-ai.js";
+import { normalizeSystemAiConfig, systemAiProfiles } from "./system-ai.js";
 type StructuredRunnerOption = WandConfig["structuredRunner"];
 
 function isThinkingEffort(value: unknown): value is ThinkingEffort {
@@ -91,6 +91,7 @@ export const defaultConfig = (): WandConfig => ({
   commitModel: "",
   commitAiSource: "cli",
   systemAi: {
+    id: crypto.randomUUID(),
     enabled: false,
     protocol: "openai",
     baseUrl: "",
@@ -470,8 +471,8 @@ export function writePreferenceToStorage(
         throw new Error("systemAi 必须是对象。");
       }
       const normalized = normalizeSystemAiConfig(value, config.systemAi ?? defaultConfig().systemAi);
-      if (normalized.enabled && (!normalized.baseUrl || !normalized.apiKey || !normalized.model)) {
-        throw new Error("启用系统 AI API 时，地址、API Key 和模型不能为空。");
+      if (normalized.enabled && !systemAiProfiles(normalized, true).length) {
+        throw new Error("启用系统 AI API 时，至少需要一条地址、API Key 和模型完整的路由。");
       }
       if (!options.deferCommitAiValidation) {
         validateCommitAiConfig({ ...config, systemAi: normalized });

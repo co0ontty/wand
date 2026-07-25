@@ -83,6 +83,12 @@ test("Android WebView preserves its half of the web/native protocol", () => {
     "wand-ime-state",
     'appendQueryParameter("session", sessionId)',
     'WandPlatform/Android',
+    "webView.canGoBack()",
+    "onShowFileChooser",
+    "onCreateWindow",
+    "onPermissionRequest",
+    "setDownloadListener",
+    "openNotificationSettings",
   ]);
 });
 

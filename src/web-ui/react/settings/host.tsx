@@ -13,6 +13,7 @@ import {
   PresetSettingsTab,
   SecuritySettingsTab,
 } from "./tabs";
+import { SettingsField, SettingsStatus, SettingsTextInput } from "./fields";
 import type { SettingsRepository, SettingsSnapshot, SettingsTab } from "./types";
 
 export interface SettingsHostProps {
@@ -22,7 +23,7 @@ export interface SettingsHostProps {
 
 const TAB_LABELS: Record<SettingsTab, { title: string; description: string }> = {
   general: { title: "基本配置", description: "连接、模式与运行环境" },
-  ai: { title: "AI 与模型", description: "默认模型、系统 API 与 Commit" },
+  ai: { title: "AI 与模型", description: "默认模型、API 路由与 Commit" },
   notifications: { title: "通知", description: "提示音与系统通知" },
   display: { title: "显示", description: "卡片默认展开行为" },
   security: { title: "安全", description: "密码与证书" },
@@ -37,6 +38,11 @@ const ADMIN_TAB_ORDER: SettingsTab[] = [
   "display",
   "security",
   "presets",
+  "about",
+];
+
+const CONNECTED_APP_TAB_ORDER: SettingsTab[] = [
+  "notifications",
   "about",
 ];
 
@@ -67,6 +73,77 @@ function SettingsOverview({ snapshot }: { snapshot: SettingsSnapshot }) {
         </div>
       </div>
       <code>v{version.replace(/^v/, "")}</code>
+    </section>
+  );
+}
+
+function ConnectedAppAccess({
+  repository,
+  onAuthenticated,
+}: {
+  repository: SettingsRepository;
+  onAuthenticated(snapshot: SettingsSnapshot): void;
+}) {
+  const [password, setPassword] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+
+  async function authenticate() {
+    if (!password) {
+      setError("请输入管理员密码。");
+      return;
+    }
+    setPending(true);
+    setError("");
+    try {
+      await repository.execute({ type: "admin.login", password });
+      const snapshot = await repository.load();
+      if (snapshot.access !== "admin") throw new Error("登录成功，但当前会话仍没有管理权限。");
+      setPassword("");
+      onAuthenticated(snapshot);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "管理员登录失败。");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section className="wand-settings-app-access" aria-label="App 连接权限">
+      <div className="wand-settings-app-access-copy">
+        <strong>设备功能已可用</strong>
+        <span>通知、触感、应用图标和客户端下载无需管理权限。要修改服务配置，请使用管理员密码登录此网页。</span>
+      </div>
+      <form
+        className="wand-settings-app-access-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void authenticate();
+        }}
+      >
+        <input type="text" name="username" autoComplete="username" value="wand" readOnly hidden />
+        <SettingsField label="管理员密码" htmlFor="settings-admin-password" error={error}>
+          <SettingsTextInput
+            id="settings-admin-password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            disabled={pending}
+            invalid={!!error}
+            placeholder="输入密码解锁完整设置"
+            onChange={(value) => {
+              setPassword(value);
+              setError("");
+            }}
+          />
+        </SettingsField>
+        <WandButton type="submit" kind="primary" disabled={pending}>
+          {pending ? "登录中…" : "登录管理设置"}
+        </WandButton>
+      </form>
+      <SettingsStatus tone="warning">
+        修改 Host、端口或 HTTPS 可能中断当前 App 连接；修改密码会使现有连接码失效。
+      </SettingsStatus>
     </section>
   );
 }
@@ -121,7 +198,7 @@ export function SettingsHost({
       presets: <PresetSettingsTab {...props} />,
       about: <AboutSettingsTab {...props} />,
     };
-    const order = snapshot.access === "admin" ? ADMIN_TAB_ORDER : ["about" as const];
+    const order = snapshot.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
     return order.map((value) => ({
       value,
       label: (
@@ -133,6 +210,12 @@ export function SettingsHost({
       content: contentByTab[value],
     }));
   }, [refresh, repository, showRestart, snapshot, toast]);
+
+  const selectedTab = snapshot?.access === "admin"
+    ? controller.tab
+    : controller.tab === "about"
+      ? "about"
+      : "notifications";
 
   return (
     <WandDialogSurface
@@ -159,14 +242,19 @@ export function SettingsHost({
             <>
               <SettingsOverview snapshot={snapshot} />
               {snapshot.access === "read-only" ? (
-                <div className="wand-settings-readonly" role="note">
-                  当前是 App 连接会话，仅展示版本与客户端下载信息。管理设置需要管理员登录。
-                </div>
+                <ConnectedAppAccess
+                  repository={repository}
+                  onAuthenticated={(next) => {
+                    setLoadError("");
+                    setSnapshot(next);
+                    settingsStore.setTab("general");
+                  }}
+                />
               ) : null}
               <WandTabs
                 className="wand-settings-tabs"
                 ariaLabel="设置分组"
-                value={snapshot.access === "read-only" ? "about" : controller.tab}
+                value={selectedTab}
                 tabs={tabs}
                 onValueChange={(value) => settingsStore.setTab(value as SettingsTab)}
               />
