@@ -1,0 +1,9 @@
+[submodule "android"]
+	path = android
+	url = https://github.com/co0ontty/wand-android.git
+[submodule "macos"]
+	path = macos
+	url = https://github.com/co0ontty/wand-macos.git
+[submodule "ios"]
+	path = ios
+	url = https://github.com/co0ontty/wand-ios.git

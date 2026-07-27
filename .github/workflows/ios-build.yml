@@ -1,0 +1,246 @@
+name: iOS IPA Build
+
+# 云端生成未签名 IPA（不需要本地 Mac；iOS submodule 未变化时复用上一版）。两种触发：
+#   1) 手动 workflow_dispatch：日常出包用这个，产物作为 Actions artifact 下载，
+#      不打 tag、不发 release，不会触发 npm/android/macos 的正式发布。
+#   2) push tag v*：对称其它平台，把 IPA 一并上传到对应 GitHub Release（不动 release body）。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（如 1.16.0），仅用于文件名与版本字段"
+        required: false
+        default: "0.0.0-dev"
+      publish_release:
+        description: "上传到已有的 v<version> Release（同版本 IPA 已存在时自动跳过）"
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-ios:
+    # 钉 macos-26：默认 Xcode 26.x（iOS 26 SDK）。Liquid Glass 等 iOS 26 系统外观
+    # 只对「用 iOS 26 SDK 链接」的 App 生效——macos-latest 在 2026-06 迁移期前
+    # 仍是 macOS 15 + Xcode 16.4（iOS 18 SDK），编出来的包会被系统按旧外观渲染。
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # release tag 可能比客户端仓库的 push 早几秒可见。主仓库与子模块
+          # 分开 checkout，避免短暂竞态直接终止整个 IPA workflow。
+          submodules: false
+          fetch-depth: 0
+
+      - name: Checkout iOS submodule
+        run: |
+          set -euo pipefail
+          git submodule sync -- ios
+          for attempt in 1 2 3 4 5; do
+            if git submodule update --init --force -- ios; then
+              exit 0
+            fi
+            delay=$((attempt * 15))
+            echo "ios submodule checkout failed; retrying in ${delay}s..."
+            sleep "$delay"
+          done
+          git submodule status -- ios
+          exit 1
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          BUILD_STAMP="$(TZ=Asia/Shanghai date +%Y%m%d%H%M)"
+          if [[ "$VERSION" == *+* ]]; then
+            ASSET_VERSION="${VERSION}.${BUILD_STAMP}"
+          else
+            ASSET_VERSION="${VERSION}+${BUILD_STAMP}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_stamp=$BUILD_STAMP" >> "$GITHUB_OUTPUT"
+          echo "asset_version=$ASSET_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      # 如果相邻两个主仓库 tag 指向同一个 iOS gitlink，客户端代码没有变化。
+      # 这种发布直接复用上一版 Release 的 IPA；若上一版因历史故障没有 IPA，
+      # 则安全回退到正常构建，避免连续多个版本都缺少下载资产。
+      - name: Reuse previous IPA when iOS is unchanged
+        id: reuse_ipa
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          echo "reused=false" >> "$GITHUB_OUTPUT"
+
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)"
+          if [[ -z "$PREVIOUS_TAG" ]]; then
+            echo "No previous tag; building IPA."
+            exit 0
+          fi
+
+          CURRENT_IOS="$(git rev-parse "${CURRENT_TAG}:ios")"
+          PREVIOUS_IOS="$(git rev-parse "${PREVIOUS_TAG}:ios")"
+          if [[ "$CURRENT_IOS" != "$PREVIOUS_IOS" ]]; then
+            echo "iOS submodule changed (${PREVIOUS_IOS:0:12} -> ${CURRENT_IOS:0:12}); building IPA."
+            exit 0
+          fi
+
+          PREVIOUS_ASSET="$(
+            gh release view "$PREVIOUS_TAG" --repo "$GITHUB_REPOSITORY" --json assets 2>/dev/null \
+              | jq -r '[.assets[] | select(.name | endswith(".ipa"))] | sort_by(.createdAt) | last | .name // empty'
+          )"
+          if [[ -z "$PREVIOUS_ASSET" ]]; then
+            echo "iOS is unchanged, but $PREVIOUS_TAG has no IPA to reuse; building a fresh IPA."
+            exit 0
+          fi
+
+          mkdir -p ios/dist
+          gh release download "$PREVIOUS_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$PREVIOUS_ASSET" \
+            --dir ios/dist
+          echo "reused=true" >> "$GITHUB_OUTPUT"
+          echo "Reused $PREVIOUS_ASSET from $PREVIOUS_TAG."
+
+      # 先编译新增的协议测试 target，避免 IPA 构建绕过 WandTests。
+      # target + simulator SDK 路径即使镜像没有 runtime 也能完成编译/链接；
+      # 资源目录与协议测试无关，排除它以避免 actool 强制要求 runtime。
+      - name: Build iOS tests
+        if: steps.reuse_ipa.outputs.reused != 'true'
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -project Wand.xcodeproj \
+            -target WandTests \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            EXCLUDED_SOURCE_FILE_NAMES=Assets.xcassets \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Run iOS tests when a simulator is available
+        if: steps.reuse_ipa.outputs.reused != 'true'
+        # Simulator runtimes on hosted macOS images occasionally stall during
+        # boot/test discovery. The compile-only test target above remains a
+        # required gate; bound this additional runtime check so it cannot block
+        # IPA production indefinitely.
+        timeout-minutes: 8
+        continue-on-error: true
+        working-directory: ios
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/{print $2; exit}')"
+          if [[ -z "$DEVICE_ID" ]]; then
+            echo "No available iPhone simulator runtime; WandTests were compiled but cannot run on this image."
+            exit 0
+          fi
+          xcrun simctl boot "$DEVICE_ID" 2>/dev/null || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          xcodebuild \
+            -project Wand.xcodeproj \
+            -scheme Wand \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath build/test-dd \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            test
+
+      - name: Build unsigned IPA
+        if: steps.reuse_ipa.outputs.reused != 'true'
+        working-directory: ios
+        env:
+          WAND_BUILD_STAMP: ${{ steps.version.outputs.build_stamp }}
+        run: |
+          chmod +x build.sh
+          chmod +x scripts/generate-icons.swift
+          ./build.sh "${{ steps.version.outputs.version }}"
+
+      - name: Stamp IPA filename
+        if: steps.reuse_ipa.outputs.reused != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ASSET_VERSION: ${{ steps.version.outputs.asset_version }}
+        run: |
+          mv "ios/dist/wand-v${VERSION}.ipa" "ios/dist/wand-v${ASSET_VERSION}.ipa"
+
+      - name: Resolve IPA asset
+        id: ipa_asset
+        run: |
+          set -euo pipefail
+          ASSET="$(find ios/dist -maxdepth 1 -type f -name '*.ipa' -print -quit)"
+          if [[ -z "$ASSET" ]]; then
+            echo "No IPA asset found." >&2
+            exit 1
+          fi
+          echo "path=$ASSET" >> "$GITHUB_OUTPUT"
+
+      # 手动触发 / 任何情况下都上传为 artifact，方便直接在 Actions run 页面下载。
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wand-ios-ipa-${{ steps.version.outputs.asset_version }}
+          path: ${{ steps.ipa_asset.outputs.path }}
+          if-no-files-found: error
+
+      # GitHub Release 是本地 gh 触发和 tag CI 共用的发布账本：同一个基础版本
+      # 已有 IPA 时保留本次 artifact 供验证，但不重复提交 Release asset。
+      - name: Check whether this IPA is already published
+        id: release_asset
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.release_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets 2>/dev/null \
+            | jq -e 'any(.assets[].name; endswith(".ipa"))' > exists.txt; then
+            EXISTS="$(<exists.txt)"
+          else
+            # Release notes workflow may not have created the tag's Release yet.
+            EXISTS=false
+          fi
+          echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
+          if [[ "$EXISTS" == true ]]; then
+            echo "IPA for v${VERSION} already exists on $TAG; skipping duplicate Release upload."
+          fi
+
+      # Tag push always publishes. A local `gh workflow run` can opt in with
+      # publish_release=true. Release body remains owned by release-notes.yml.
+      # Retry covers the short interval before that workflow creates the Release.
+      - name: Upload IPA to GitHub Release
+        if: (startsWith(github.ref, 'refs/tags/') || inputs.publish_release) && steps.release_asset.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: ${{ steps.ipa_asset.outputs.path }}
+          TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber; then
+              exit 0
+            fi
+            delay=$((attempt * 20))
+            echo "Release upload failed (attempt ${attempt}/5); retrying in ${delay}s..." >&2
+            sleep "$delay"
+          done
+          echo "Release upload failed after 5 attempts." >&2
+          exit 1

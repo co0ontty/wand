@@ -1,0 +1,292 @@
+import { state } from "./state";
+import { iconSvg, t } from "./i18n";
+import { isStructuredSession } from "./session-engine";
+
+// isStructuredSession 定义在尚未迁移的代码区域，这里声明供本模块使用。
+// 后续迁移该函数时，改为从对应模块 import。
+
+// ── Structured session status bar (in-flight timer) ──
+state._statusBarTimerId = null;
+state._statusBarStartTime = 0;
+export var _runningIndicatorsTimerId: any = null;
+export var _runningIndicatorsStartTime = 0;
+
+// 计算会话整体的"在跑"信号，统一驱动顶部进度条/徽章计时/气泡呼吸条。
+export function computeRunningSignal(session: any) {
+  if (!session) return { active: false };
+  if (session.archived) return { active: false };
+  var permBlocked = !!session.permissionBlocked;
+  var inFlight = !!(isStructuredSession(session)
+    && session.structuredState && session.structuredState.inFlight);
+  var ptyRunning = !isStructuredSession(session) && session.status === "running";
+  return {
+    active: inFlight || ptyRunning || permBlocked,
+    inFlight: inFlight,
+    ptyRunning: ptyRunning,
+    permissionBlocked: permBlocked,
+  };
+}
+
+export function formatElapsedShort(ms: number) {
+  var s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return s + "s";
+  var m = Math.floor(s / 60);
+  var rs = s % 60;
+  if (m < 60) return m + "m" + (rs ? " " + rs + "s" : "");
+  var h = Math.floor(m / 60);
+  var rm = m % 60;
+  return h + "h" + (rm ? " " + rm + "m" : "");
+}
+
+// 集中刷新：顶部进度条 + 顶部徽章计时 + 助手气泡左侧呼吸条。
+export function updateRunningIndicators(session: any) {
+  var sig = computeRunningSignal(session);
+  var headerRow = document.querySelector(".main-header-row");
+  var pill = headerRow ? headerRow.querySelector(".session-status-pill") : null;
+  var chatMessages = document.querySelector(".chat-messages");
+
+  // A. 顶部进度条
+  if (headerRow) {
+    headerRow.classList.toggle("is-running", sig.active);
+    headerRow.classList.toggle("is-permission-blocked", sig.permissionBlocked);
+  }
+
+  // B. 顶部徽章计时（仅 inFlight 显示，PTY running 不强制显示）
+  if (pill) {
+    var elapsedEl = pill.querySelector(".session-status-elapsed");
+    if (sig.inFlight) {
+      if (!_runningIndicatorsStartTime) {
+        // 优先复用 renderStructuredStatusBar 已记录的真实起点
+        _runningIndicatorsStartTime = state._statusBarStartTime > 0 ? state._statusBarStartTime : Date.now();
+      }
+      var label = formatElapsedShort(Date.now() - _runningIndicatorsStartTime);
+      if (!elapsedEl) {
+        elapsedEl = document.createElement("span");
+        elapsedEl.className = "session-status-elapsed";
+        pill.appendChild(elapsedEl);
+      }
+      elapsedEl.textContent = label;
+    } else {
+      _runningIndicatorsStartTime = 0;
+      if (elapsedEl) elapsedEl.remove();
+    }
+  }
+
+  // 维持每秒一次的刷新心跳，让 elapsed 数字持续滚动
+  if (sig.active) {
+    if (!_runningIndicatorsTimerId) {
+      _runningIndicatorsTimerId = setInterval(function() {
+        var sel = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
+        updateRunningIndicators(sel);
+      }, 1000);
+    }
+  } else if (_runningIndicatorsTimerId) {
+    clearInterval(_runningIndicatorsTimerId);
+    _runningIndicatorsTimerId = null;
+  }
+}
+
+export function renderStructuredStatusBar(chatMessages: any, session: any) {
+  // 先驱动跨视图的运行指示器（顶部进度条/徽章计时/气泡呼吸条）
+  updateRunningIndicators(session);
+
+  // Status bar now lives in .composer-top-row alongside the todo-progress collapse bar
+  var topRow = document.querySelector(".composer-top-row");
+  var existing = document.querySelector(".structured-status-bar");
+  var composer = document.querySelector(".input-composer");
+  if (!session || !isStructuredSession(session)) {
+    if (existing) existing.remove();
+    if (composer) composer.classList.remove("in-flight");
+    clearInterval(state._statusBarTimerId);
+    state._statusBarTimerId = null;
+    return;
+  }
+
+  var isInFlight = session.structuredState && session.structuredState.inFlight;
+
+  if (isInFlight) {
+    // Start timer if not already running
+    if (!state._statusBarTimerId) {
+      state._statusBarStartTime = Date.now();
+    }
+
+    // Add glow to input composer
+    if (composer) composer.classList.add("in-flight");
+
+    if (!existing && topRow) {
+      var bar = document.createElement("div");
+      bar.className = "structured-status-bar";
+      bar.innerHTML =
+        '<span class="status-bar-dot"></span>' +
+        '<span class="status-bar-label">回复中</span>' +
+        '<span class="status-bar-timer">0.0s</span>';
+      // Append as last child of the top row so it sits to the right of the todo bar
+      topRow.appendChild(bar);
+      existing = bar;
+    } else if (existing && existing.classList.contains("completed")) {
+      // Was completed, now in-flight again — reset
+      existing.classList.remove("completed");
+      (existing as HTMLElement).style.animation = "none";
+      existing.querySelector(".status-bar-label")!.textContent = "回复中";
+      var dot = existing.querySelector(".status-bar-dot") as HTMLElement;
+      if (dot) dot.style.display = "";
+      state._statusBarStartTime = Date.now();
+    }
+
+    // Start interval to update timer
+    if (!state._statusBarTimerId) {
+      state._statusBarTimerId = setInterval(function() {
+        var bar = document.querySelector(".structured-status-bar:not(.completed)");
+        if (!bar) { clearInterval(state._statusBarTimerId); state._statusBarTimerId = null; return; }
+        var elapsed = ((Date.now() - state._statusBarStartTime) / 1000).toFixed(1);
+        var timerEl = bar.querySelector(".status-bar-timer");
+        if (timerEl) timerEl.textContent = elapsed + "s";
+      }, 100);
+    }
+  } else {
+    // Not in-flight: show completion or remove
+    clearInterval(state._statusBarTimerId);
+    state._statusBarTimerId = null;
+
+    // Remove glow from input composer
+    if (composer) composer.classList.remove("in-flight");
+
+    if (existing && !existing.classList.contains("completed")) {
+      // Just finished — transition to completed state
+      var elapsed = state._statusBarStartTime ? ((Date.now() - state._statusBarStartTime) / 1000).toFixed(1) : "0.0";
+      existing.classList.add("completed");
+      existing.querySelector(".status-bar-label")!.textContent = "完成";
+      existing.querySelector(".status-bar-timer")!.textContent = elapsed + "s";
+      var dot = existing.querySelector(".status-bar-dot") as HTMLElement;
+      if (dot) dot.style.display = "none";
+      state._statusBarStartTime = 0;
+      // Remove after animation ends
+      setTimeout(function() {
+        if (existing!.parentNode) existing!.remove();
+      }, 3000);
+    }
+  }
+}
+
+export function escapeHtml(value: any) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export function renderTailMarqueePath(value: any, className: string, attrs?: string) {
+  var text = String(value || "");
+  var separator = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
+  var prefix = separator >= 0 ? text.slice(0, separator + 1) : "";
+  var leaf = separator >= 0 ? text.slice(separator + 1) : text;
+  return '<span class="' + className + ' tail-marquee-path" title="' + escapeHtml(text) + '"' + (attrs || "") + '>' +
+    '<span class="tail-marquee-path-inner"><span class="tail-marquee-prefix">' + escapeHtml(prefix) + '</span>' +
+      '<span class="tail-marquee-leaf">' + escapeHtml(leaf) + '</span></span>' +
+  '</span>';
+}
+
+// 是否是浏览器可内联渲染的图片路径。和服务端 IMAGE_EXTS（src/server.ts）
+// 保持一致：Read 工具读到这些后缀时，聊天里直出缩略图预览。
+var IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|heic|heif)$/i;
+
+export function isImagePath(value: any) {
+  if (typeof value !== "string") return false;
+  // 去掉可能的 ?query / #hash 再判后缀
+  var clean = value.trim().split(/[?#]/)[0];
+  return IMAGE_PATH_RE.test(clean);
+}
+
+// ── Path display scroll helpers ──
+//
+// 长路径展示的几个小元素（topbar-cwd / file-explorer-cwd /
+// blank-chat-cwd-path）都有一个老问题：内容比可视宽度长时被 CSS
+// `text-overflow: ellipsis` 截掉，用户看不见最后一段目录名；topbar 那条
+// 还用过 `direction: rtl` hack 来"优先显示尾段"，副作用是首字符 "/" 也被
+// 吃掉，导致显示文本跟实际 data-path / value 字符串对不上。
+//
+// 这里把统一行为抽成几个小工具：
+//   1) scrollPathElementToEnd —— 横向 overflow 容器，scrollLeft 推到末尾；
+//      对 tail-marquee-path 则测量溢出量并交给 CSS transform 跑马灯
+//   2) scrollInputToEnd —— input 元素专用，setSelectionRange 把光标放末尾
+//      再补一刀 scrollLeft，兼容各浏览器
+//
+// 调用方更新 path 后调一次即可。
+
+export function scrollPathElementToEnd(el: any) {
+  if (!el) return;
+  // 容器可能刚被 setHTML 进来，等浏览器把布局跑完再算 scrollWidth
+  var apply = function() {
+    try {
+      var inner = el.firstElementChild && el.firstElementChild.classList && el.firstElementChild.classList.contains("tail-marquee-path-inner")
+        ? el.firstElementChild
+        : null;
+      if (inner) {
+        var overflow = Math.max(0, inner.scrollWidth - el.clientWidth);
+        el.classList.toggle("is-overflowing", overflow > 1);
+        el.style.setProperty("--tail-marquee-shift", overflow + "px");
+        var travelSeconds = Math.max(4.8, overflow / 18);
+        el.style.setProperty("--tail-marquee-duration", Math.max(6.8, travelSeconds / 0.68) + "s");
+        return;
+      }
+      if (el.scrollWidth > el.clientWidth) {
+        el.scrollLeft = el.scrollWidth;
+      }
+    } catch (e) { /* read-only scroll container 等 */ }
+  };
+  apply();
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(apply);
+  }
+}
+
+export function refreshTailMarqueePaths(root?: any) {
+  var scope = root || document;
+  if (!scope || typeof scope.querySelectorAll !== "function") return;
+  scope.querySelectorAll(".tail-marquee-path").forEach(function(el: any) {
+    scrollPathElementToEnd(el);
+  });
+}
+
+export function setTailMarqueePathText(el: any, value: any) {
+  if (!el) return;
+  var text = String(value || "");
+  var inner = el.querySelector && el.querySelector(".tail-marquee-path-inner");
+  if (inner) {
+    var separator = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
+    var prefix = separator >= 0 ? text.slice(0, separator + 1) : "";
+    var leaf = separator >= 0 ? text.slice(separator + 1) : text;
+    inner.textContent = "";
+    var prefixEl = document.createElement("span");
+    prefixEl.className = "tail-marquee-prefix";
+    prefixEl.textContent = prefix;
+    var leafEl = document.createElement("span");
+    leafEl.className = "tail-marquee-leaf";
+    leafEl.textContent = leaf;
+    inner.append(prefixEl, leafEl);
+  }
+  else el.textContent = text;
+  if (el.setAttribute) el.setAttribute("title", text);
+  scrollPathElementToEnd(el);
+}
+
+export function scrollInputToEnd(input: any) {
+  if (!input) return;
+  var apply = function() {
+    try {
+      if (typeof input.setSelectionRange === "function" && input.value != null) {
+        var len = input.value.length;
+        try { input.setSelectionRange(len, len); } catch (e) { /* type=email/number 等会抛 */ }
+      }
+      if (input.scrollWidth > input.clientWidth) {
+        input.scrollLeft = input.scrollWidth;
+      }
+    } catch (e) { /* defensive */ }
+  };
+  apply();
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(apply);
+  }
+}

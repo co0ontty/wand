@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Wand Passwords</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>Wand Passwords</h1>
+        <p id="statusText">Locked</p>
+      </div>
+      <div class="top-actions">
+        <button id="siteToggleButton" class="icon-button" type="button" title="Toggle this site">Site</button>
+        <button id="optionsButton" class="icon-button" type="button" title="Options">Settings</button>
+      </div>
+    </header>
+
+    <section id="lockedView" class="locked">
+      <p>Sign in to Wand to use autofill and save passwords.</p>
+      <button id="openOptionsButton" class="primary" type="button">Open Options</button>
+    </section>
+
+    <section id="mainView" class="hidden">
+      <div class="search-row">
+        <input id="searchInput" type="search" placeholder="Search logins, cards, identities" autocomplete="off" />
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-view="suggestions" type="button">Suggestions</button>
+        <button class="tab" data-view="generator" type="button">Generator</button>
+        <button class="tab" data-view="new" type="button">New</button>
+        <button class="tab" data-view="security" type="button">Security</button>
+      </div>
+
+      <section id="suggestionsView" class="view active">
+        <div id="itemsList" class="items"></div>
+      </section>
+
+      <section id="generatorView" class="view">
+        <label class="field">
+          <span>Length</span>
+          <input id="passwordLength" type="number" min="8" max="80" value="24" />
+        </label>
+        <label class="check"><input id="passwordDigits" type="checkbox" checked /> Digits</label>
+        <label class="check"><input id="passwordSymbols" type="checkbox" checked /> Symbols</label>
+        <div class="generated">
+          <input id="generatedPassword" type="text" readonly />
+          <button id="copyGeneratedButton" type="button">Copy</button>
+        </div>
+        <button id="generateButton" class="primary" type="button">Generate</button>
+      </section>
+
+      <section id="newView" class="view">
+        <label class="field">
+          <span>Type</span>
+          <select id="newType">
+            <option value="login">Login</option>
+            <option value="credit_card">Credit Card</option>
+            <option value="identity">Identity</option>
+            <option value="secure_note">Secure Note</option>
+            <option value="passkey">Passkey Metadata</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Title</span>
+          <input id="newTitle" type="text" />
+        </label>
+        <label class="field new-login">
+          <span>Username</span>
+          <input id="newUsername" type="text" autocomplete="username" />
+        </label>
+        <label class="field new-login">
+          <span>Password</span>
+          <input id="newPassword" type="password" autocomplete="new-password" />
+        </label>
+        <label class="field new-login">
+          <span>TOTP secret</span>
+          <input id="newTotp" type="text" />
+        </label>
+        <div id="typeFields"></div>
+        <label class="field">
+          <span>Notes</span>
+          <textarea id="newNotes" rows="3"></textarea>
+        </label>
+        <button id="saveNewButton" class="primary" type="button">Save Item</button>
+      </section>
+
+      <section id="securityView" class="view">
+        <div id="securityReport" class="report"></div>
+      </section>
+    </section>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

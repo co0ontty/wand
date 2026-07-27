@@ -1,0 +1,143 @@
+name: macOS DMG Release
+
+# 两种触发（对称 ios-build.yml）：
+#   1) push tag v*：正式发版，DMG 上传到对应 GitHub Release（不动 release body）。
+#   2) 手动 workflow_dispatch：日常出包/验证用，产物作为 Actions artifact 下载，不发 release。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（如 1.16.0），仅用于文件名与版本字段"
+        required: false
+        default: "0.0.0-dev"
+      publish_release:
+        description: "上传到已有的 v<version> Release（同版本 DMG 已存在时自动跳过）"
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    # 钉 macos-26：默认 Xcode 26.x（macOS 26 SDK）。同 ios-build.yml——
+    # Liquid Glass 只对用 26 SDK 链接的 App 生效，macos-latest 迁移完成前还是 Xcode 16.4。
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Checkout macOS submodule
+        run: |
+          set -euo pipefail
+          git submodule sync -- macos
+          for attempt in 1 2 3 4 5; do
+            if git submodule update --init --force -- macos; then
+              exit 0
+            fi
+            delay=$((attempt * 15))
+            echo "macos submodule checkout failed; retrying in ${delay}s..."
+            sleep "$delay"
+          done
+          git submodule status -- macos
+          exit 1
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/}" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          BUILD_STAMP="$(TZ=Asia/Shanghai date +%Y%m%d%H%M)"
+          if [[ "$VERSION" == *+* ]]; then
+            ASSET_VERSION="${VERSION}.${BUILD_STAMP}"
+          else
+            ASSET_VERSION="${VERSION}+${BUILD_STAMP}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_stamp=$BUILD_STAMP" >> "$GITHUB_OUTPUT"
+          echo "asset_version=$ASSET_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build DMG
+        working-directory: macos
+        env:
+          WAND_BUILD_STAMP: ${{ steps.version.outputs.build_stamp }}
+        run: |
+          chmod +x build.sh
+          chmod +x scripts/generate-icons.swift
+          ./build.sh "${{ steps.version.outputs.version }}"
+
+      - name: Stamp DMG filename
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ASSET_VERSION: ${{ steps.version.outputs.asset_version }}
+        run: |
+          mv "macos/dist/wand-v${VERSION}.dmg" "macos/dist/wand-v${ASSET_VERSION}.dmg"
+
+      # 手动触发 / 任何情况下都上传为 artifact，方便直接在 Actions run 页面下载。
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wand-macos-dmg-${{ steps.version.outputs.asset_version }}
+          path: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
+          if-no-files-found: error
+
+      # GitHub Release 是本地 gh 触发和 tag CI 共用的发布账本：同一个基础版本
+      # 已有 DMG 时保留本次 artifact 供验证，但不重复提交 Release asset。
+      - name: Check whether this DMG is already published
+        id: release_asset
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.release_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets 2>/dev/null \
+            | jq -e --arg legacy "wand-v${VERSION}.dmg" --arg stamped "wand-v${VERSION}+" \
+              'any(.assets[].name; . == $legacy or startswith($stamped))' > exists.txt; then
+            EXISTS="$(<exists.txt)"
+          else
+            # Release notes workflow may not have created the tag's Release yet.
+            EXISTS=false
+          fi
+          echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
+          if [[ "$EXISTS" == true ]]; then
+            echo "DMG for v${VERSION} already exists on $TAG; skipping duplicate Release upload."
+          fi
+
+      # Tag push always publishes. A local `gh workflow run` can opt in with
+      # publish_release=true. Release body remains owned by release-notes.yml.
+      # Retry covers the short interval before that workflow creates the Release.
+      - name: Upload DMG to GitHub Release
+        if: (startsWith(github.ref, 'refs/tags/') || inputs.publish_release) && steps.release_asset.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: macos/dist/wand-v${{ steps.version.outputs.asset_version }}.dmg
+          TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber; then
+              exit 0
+            fi
+            delay=$((attempt * 20))
+            echo "Release upload failed (attempt ${attempt}/5); retrying in ${delay}s..." >&2
+            sleep "$delay"
+          done
+          echo "Release upload failed after 5 attempts." >&2
+          exit 1

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Wand Passwords Options</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main class="page">
+    <section class="panel">
+      <header>
+        <h1>Wand Passwords</h1>
+        <p>Connect this browser extension to your Wand server.</p>
+      </header>
+      <label class="field">
+        <span>Server URL</span>
+        <input id="baseUrl" type="url" value="https://home.huniu.fun:8183" autocomplete="url" />
+      </label>
+      <label class="field">
+        <span>Wand password</span>
+        <input id="password" type="password" autocomplete="current-password" />
+      </label>
+      <label class="check">
+        <input id="passkeyProxyEnabled" type="checkbox" checked />
+        Enable passkey proxy
+      </label>
+      <div class="actions">
+        <button id="loginButton" class="primary" type="button">Sign In</button>
+        <button id="testButton" type="button">Test</button>
+        <button id="lockButton" type="button">Lock</button>
+      </div>
+      <p id="status" class="status"></p>
+      <p id="passkeyStatus" class="status"></p>
+    </section>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
